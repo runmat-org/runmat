@@ -41,7 +41,10 @@ fn knnsearch_documented_floating_gpu_fallback_preserves_explicit_residency() {
         let output = block_on(knnsearch_builtin(
             Value::GpuTensor(handle),
             tensor(vec![1.0, 4.0], 2, 1),
-            vec![Value::from("NSMethod"), Value::from("exhaustive")],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("NSMethod"),
+                Value::from("exhaustive"),
+            ]),
         ))
         .expect("documented resident knnsearch");
         assert!(matches!(output, Value::GpuTensor(_)));
@@ -56,7 +59,7 @@ fn knnsearch_requested_outputs_preserve_padding_and_distinct_resident_allocation
         let output = block_on(knnsearch_builtin(
             tensor(vec![0.0, 2.0], 2, 1),
             tensor(vec![1.0], 1, 1),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .unwrap();
         assert!(matches!(output, Value::OutputList(values) if values.is_empty()));
@@ -67,7 +70,7 @@ fn knnsearch_requested_outputs_preserve_padding_and_distinct_resident_allocation
         let output = block_on(knnsearch_builtin(
             tensor(vec![0.0, 2.0], 2, 1),
             tensor(vec![1.0], 1, 1),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .unwrap();
         let Value::OutputList(values) = output else {
@@ -89,7 +92,10 @@ fn knnsearch_requested_outputs_preserve_padding_and_distinct_resident_allocation
         let output = block_on(knnsearch_builtin(
             Value::GpuTensor(source.clone()),
             tensor(vec![1.0], 1, 1),
-            vec![Value::from("NSMethod"), Value::from("exhaustive")],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("NSMethod"),
+                Value::from("exhaustive"),
+            ]),
         ))
         .expect("resident outputs");
         let Value::OutputList(values) = output else {
@@ -123,7 +129,10 @@ fn knnsearch_wgpu_fallback_enforces_explicit_residency_contract() {
     let result = block_on(knnsearch_builtin(
         Value::GpuTensor(handle.clone()),
         tensor(vec![1.0, 4.0], 2, 1),
-        vec![Value::from("NSMethod"), Value::from("exhaustive")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("NSMethod"),
+            Value::from("exhaustive"),
+        ]),
     ));
     let Value::GpuTensor(output) = result.expect("documented WGPU knnsearch") else {
         panic!("expected resident output");
@@ -216,7 +225,7 @@ fn euclidean_and_minkowski_keep_representable_large_distances_finite() {
         block_on(knnsearch_builtin(
             tensor(vec![1.0e200, 2.0e200], 2, 1),
             tensor(vec![0.0], 1, 1),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .unwrap(),
     );
@@ -361,7 +370,10 @@ fn knnsearch_returns_indices_then_distances() {
     let out = block_on(knnsearch_builtin(
         x,
         y,
-        vec![Value::from("K"), Value::Num(2.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("K"),
+            Value::Num(2.0),
+        ]),
     ))
     .unwrap();
     let Value::OutputList(values) = out else {
@@ -382,12 +394,12 @@ fn knnsearch_supports_metrics_and_ties() {
     let out = block_on(knnsearch_builtin(
         x.clone(),
         y.clone(),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("Distance"),
             Value::from("cityblock"),
             Value::from("K"),
             Value::Num(2.0),
-        ],
+        ]),
     ))
     .unwrap();
     let idx = tensor_out(out);
@@ -397,19 +409,19 @@ fn knnsearch_supports_metrics_and_ties() {
     let out = block_on(knnsearch_builtin(
         x,
         y,
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("K"),
             Value::Num(2.0),
             Value::from("IncludeTies"),
             Value::Bool(true),
-        ],
+        ]),
     ))
     .unwrap();
     let Value::Cell(cells) = out else {
         panic!("expected cell output");
     };
     assert_eq!(cells.shape, vec![1, 1]);
-    let Value::Tensor(tied) = &cells.data[0] else {
+    let Value::Tensor(tied) = &cells.data()[0] else {
         panic!("expected tensor in cell");
     };
     assert_eq!(tied.shape(), &[1, 3]);
@@ -421,18 +433,18 @@ fn knnsearch_ties_require_equal_distances_including_infinity() {
     let inf = block_on(knnsearch_builtin(
         tensor(vec![f64::INFINITY; 3], 3, 1),
         tensor(vec![0.0], 1, 1),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("K"),
             Value::Num(1.0),
             Value::from("IncludeTies"),
             Value::Bool(true),
-        ],
+        ]),
     ))
     .expect("infinite distances remain exact ties");
     let Value::Cell(cells) = inf else {
         panic!("expected tied-neighbor cells");
     };
-    let Value::Tensor(indices) = &cells.data[0] else {
+    let Value::Tensor(indices) = &cells.data()[0] else {
         panic!("expected index tensor");
     };
     assert_eq!(indices.materialize_f64(), vec![1.0, 2.0, 3.0]);
@@ -440,18 +452,18 @@ fn knnsearch_ties_require_equal_distances_including_infinity() {
     let near = block_on(knnsearch_builtin(
         tensor(vec![1.0, 1.0 + 5.0e-13], 2, 1),
         tensor(vec![0.0], 1, 1),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("K"),
             Value::Num(1.0),
             Value::from("IncludeTies"),
             Value::Bool(true),
-        ],
+        ]),
     ))
     .expect("near but unequal distances are not ties");
     let Value::Cell(cells) = near else {
         panic!("expected tied-neighbor cells");
     };
-    let Value::Tensor(indices) = &cells.data[0] else {
+    let Value::Tensor(indices) = &cells.data()[0] else {
         panic!("expected index tensor");
     };
     assert_eq!(indices.materialize_f64(), vec![1.0]);
@@ -463,7 +475,7 @@ fn knnsearch_options_read_typed_integer_storage_exactly() {
     let out = block_on(knnsearch_builtin(
         poisoned_int_tensor(IntegerStorage::I16(vec![0, 2, 5, 0, 0, 0]), 3, 2),
         poisoned_int_tensor(IntegerStorage::I16(vec![1, 4, 0, 0]), 2, 2),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("K"),
             cleared_int_tensor(IntegerStorage::U16(vec![2]), 1, 1),
             Value::from("IncludeTies"),
@@ -474,7 +486,7 @@ fn knnsearch_options_read_typed_integer_storage_exactly() {
             cleared_int_tensor(IntegerStorage::U32(vec![16]), 1, 1),
             Value::from("BucketSize"),
             cleared_int_tensor(IntegerStorage::U32(vec![8]), 1, 1),
-        ],
+        ]),
     ))
     .unwrap();
     let idx = tensor_out(out);
@@ -488,7 +500,7 @@ fn knnsearch_integer_data_and_controls_are_mode_gated() {
     let error = block_on(knnsearch_builtin(
         poisoned_int_tensor(IntegerStorage::I16(vec![0, 1]), 2, 1),
         tensor(vec![0.0], 1, 1),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect_err("strict mode rejects typed observation data");
     assert_eq!(
@@ -505,12 +517,12 @@ fn knnsearch_runmat_floating_integer_controls_require_exact_double_values() {
     let error = block_on(knnsearch_builtin(
         tensor(vec![0.0, 1.0], 2, 1),
         tensor(vec![0.0], 1, 1),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("Distance"),
             Value::from("minkowski"),
             Value::from("P"),
             poisoned_int_tensor(IntegerStorage::U64(vec![9_007_199_254_740_993]), 1, 1),
-        ],
+        ]),
     ))
     .expect_err("wide integer P cannot cross the floating boundary");
     assert!(error.message().contains("exactly representable as double"));
@@ -522,7 +534,10 @@ fn knnsearch_handles_nan_rows_empty_queries_and_option_validation() {
     let out = block_on(knnsearch_builtin(
         tensor(vec![0.0, f64::NAN, 2.0], 3, 1),
         tensor(vec![1.0], 1, 1),
-        vec![Value::from("K"), Value::Num(2.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("K"),
+            Value::Num(2.0),
+        ]),
     ))
     .unwrap();
     let Value::OutputList(values) = out else {
@@ -540,7 +555,10 @@ fn knnsearch_handles_nan_rows_empty_queries_and_option_validation() {
     let out = block_on(knnsearch_builtin(
         tensor(vec![0.0, 2.0], 2, 1),
         tensor(Vec::new(), 0, 1),
-        vec![Value::from("K"), Value::Num(1.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("K"),
+            Value::Num(1.0),
+        ]),
     ))
     .unwrap();
     let Value::OutputList(values) = out else {
@@ -552,14 +570,14 @@ fn knnsearch_handles_nan_rows_empty_queries_and_option_validation() {
     let out = block_on(knnsearch_builtin(
         tensor(vec![0.0, 2.0, -2.0], 3, 1),
         tensor(vec![0.0], 1, 1),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("K"),
             Value::Num(2.0),
             Value::from("IncludeTies"),
             Value::Bool(true),
             Value::from("SortIndices"),
             Value::Bool(false),
-        ],
+        ]),
     ))
     .unwrap();
     assert!(matches!(out, Value::OutputList(values) if matches!(&values[0], Value::Cell(_))));
@@ -567,12 +585,12 @@ fn knnsearch_handles_nan_rows_empty_queries_and_option_validation() {
     let err = block_on(knnsearch_builtin(
         tensor(vec![1.0, 0.0], 2, 1),
         tensor(vec![1.0], 1, 1),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("Distance"),
             Value::from("cosine"),
             Value::from("NSMethod"),
             Value::from("kdtree"),
-        ],
+        ]),
     ))
     .expect_err("kdtree should reject cosine distance");
     assert!(err.to_string().contains("NSMethod='kdtree'"));
@@ -592,7 +610,13 @@ fn squareform_converts_both_directions() {
         1,
         6,
     );
-    let matrix = tensor_out(block_on(squareform_builtin(vector, Vec::new())).unwrap());
+    let matrix = tensor_out(
+        block_on(squareform_builtin(
+            vector,
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap(),
+    );
     assert_eq!(matrix.shape(), &[4, 4]);
     assert_eq!(
         matrix.materialize_f64(),
@@ -616,8 +640,13 @@ fn squareform_converts_both_directions() {
         ]
     );
 
-    let vector =
-        tensor_out(block_on(squareform_builtin(Value::Tensor(matrix), Vec::new())).unwrap());
+    let vector = tensor_out(
+        block_on(squareform_builtin(
+            Value::Tensor(matrix),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap(),
+    );
     assert_eq!(vector.shape(), &[1, 6]);
     assert_eq!(
         vector.materialize_f64(),
@@ -636,7 +665,13 @@ fn squareform_converts_both_directions() {
 fn squareform_reads_typed_integer_storage_exactly() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let vector = cleared_int_tensor(IntegerStorage::U8(vec![5, 4, 2]), 1, 3);
-    let matrix = tensor_out(block_on(squareform_builtin(vector, Vec::new())).unwrap());
+    let matrix = tensor_out(
+        block_on(squareform_builtin(
+            vector,
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap(),
+    );
     assert_eq!(matrix.shape(), &[3, 3]);
     assert_eq!(matrix.numeric_dtype(), NumericDType::U8);
     assert_eq!(
@@ -645,7 +680,13 @@ fn squareform_reads_typed_integer_storage_exactly() {
     );
 
     let matrix = poisoned_int_tensor(IntegerStorage::U8(vec![0, 5, 4, 5, 0, 2, 4, 2, 0]), 3, 3);
-    let vector = tensor_out(block_on(squareform_builtin(matrix, Vec::new())).unwrap());
+    let vector = tensor_out(
+        block_on(squareform_builtin(
+            matrix,
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap(),
+    );
     assert_eq!(vector.shape(), &[1, 3]);
     assert_eq!(vector.numeric_dtype(), NumericDType::U8);
     assert_eq!(vector.materialize_f64(), vec![5.0, 4.0, 2.0]);
@@ -655,7 +696,11 @@ fn squareform_reads_typed_integer_storage_exactly() {
 fn squareform_preserves_logical_class_in_both_directions() {
     let input =
         Value::LogicalArray(runmat_value::LogicalArray::new(vec![1, 0, 1], vec![1, 3]).unwrap());
-    let matrix = block_on(squareform_builtin(input, Vec::new())).unwrap();
+    let matrix = block_on(squareform_builtin(
+        input,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap();
     let Value::LogicalArray(matrix) = matrix else {
         panic!("logical vector must produce a logical matrix");
     };
@@ -664,7 +709,7 @@ fn squareform_preserves_logical_class_in_both_directions() {
 
     let vector = block_on(squareform_builtin(
         Value::LogicalArray(matrix),
-        vec![Value::from("tovector")],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("tovector")]),
     ))
     .unwrap();
     let Value::LogicalArray(vector) = vector else {
@@ -675,18 +720,24 @@ fn squareform_preserves_logical_class_in_both_directions() {
 
     let bad_diagonal =
         Value::LogicalArray(runmat_value::LogicalArray::new(vec![1, 0, 0, 0], vec![2, 2]).unwrap());
-    assert!(block_on(squareform_builtin(bad_diagonal, Vec::new()))
-        .unwrap_err()
-        .message()
-        .contains("diagonal"));
+    assert!(block_on(squareform_builtin(
+        bad_diagonal,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new())
+    ))
+    .unwrap_err()
+    .message()
+    .contains("diagonal"));
 }
 
 #[test]
 fn squareform_gates_typed_integer_extension_in_strict_mode() {
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
     let vector = cleared_int_tensor(IntegerStorage::U8(vec![5, 4, 2]), 1, 3);
-    let error = block_on(squareform_builtin(vector, Vec::new()))
-        .expect_err("typed-integer squareform must be gated in strict mode");
+    let error = block_on(squareform_builtin(
+        vector,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect_err("typed-integer squareform must be gated in strict mode");
     assert_eq!(
         error.identifier(),
         Some("RunMat:compatibility:SquareformIntegerInputExtension")
@@ -736,7 +787,10 @@ fn knn_preflights_options_and_geometry_before_provider_access() {
     let bad_option = block_on(knnsearch_builtin(
         x.clone(),
         y.clone(),
-        vec![Value::from("not-an-option"), Value::Num(1.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("not-an-option"),
+            Value::Num(1.0),
+        ]),
     ))
     .unwrap_err();
     assert!(bad_option.message().contains("unsupported option"));
@@ -744,12 +798,12 @@ fn knn_preflights_options_and_geometry_before_provider_access() {
     let bad_metric_control = block_on(knnsearch_builtin(
         x.clone(),
         y.clone(),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("Distance"),
             Value::from("euclidean"),
             Value::from("P"),
             Value::Num(2.0),
-        ],
+        ]),
     ))
     .unwrap_err();
     assert!(bad_metric_control.message().contains("must match"));
@@ -757,7 +811,10 @@ fn knn_preflights_options_and_geometry_before_provider_access() {
     let bad_k = block_on(knnsearch_builtin(
         x.clone(),
         y.clone(),
-        vec![Value::from("K"), Value::Num(4.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("K"),
+            Value::Num(4.0),
+        ]),
     ))
     .unwrap_err();
     assert!(bad_k.message().contains("K must be <="));
@@ -765,12 +822,12 @@ fn knn_preflights_options_and_geometry_before_provider_access() {
     let bad_scale = block_on(knnsearch_builtin(
         x.clone(),
         y.clone(),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("Distance"),
             Value::from("seuclidean"),
             Value::from("Scale"),
             tensor(vec![1.0, 2.0], 1, 2),
-        ],
+        ]),
     ))
     .unwrap_err();
     assert!(bad_scale.message().contains("parameter shape"));
@@ -778,7 +835,7 @@ fn knn_preflights_options_and_geometry_before_provider_access() {
     let bad_columns = block_on(knnsearch_builtin(
         x,
         tensor(vec![1.0, 2.0], 1, 2),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap_err();
     assert!(bad_columns.message().contains("same number of columns"));
@@ -795,7 +852,7 @@ fn knn_rejects_complex_resident_observations_from_physical_type() {
         let error = block_on(knnsearch_builtin(
             Value::GpuTensor(resident),
             tensor(vec![0.0], 1, 1),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect_err("complex storage must be rejected before host gather");
         assert!(error.message().contains("real numeric or logical storage"));
@@ -807,7 +864,10 @@ fn knn_preserves_legacy_near_integer_floating_count() {
     let output = block_on(knnsearch_builtin(
         tensor(vec![0.0, 2.0], 2, 1),
         tensor(vec![0.5], 1, 1),
-        vec![Value::from("K"), Value::Num(1.0 + 5.0e-13)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("K"),
+            Value::Num(1.0 + 5.0e-13),
+        ]),
     ))
     .expect("legacy floating-count tolerance");
     assert_eq!(tensor_out(output).shape(), &[1, 1]);

@@ -18,7 +18,7 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
     use runmat_accelerate_api::HostTensorView;
-    use runmat_value::{CellArray, CharArray, LogicalArray, StringArray, StructValue, Tensor};
+    use runmat_value::{CellArray, CharArray, LogicalArray, StringArray, Tensor};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -39,7 +39,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_values_report_false() {
-        let scalar = Value::String("RunMat".to_string());
+        let scalar = Value::String("RunMat".to_string().into());
         let array = Value::StringArray(
             StringArray::new(vec!["a".to_string(), "b".to_string()], vec![1, 2]).expect("strings"),
         );
@@ -73,9 +73,9 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_value_reports_false() {
-        let mut st = StructValue::new();
+        let mut st = runmat_value::UnboundedStructValueBuilder::new();
         st.insert("field", Value::Num(1.0));
-        let result = ischar_builtin(Value::Struct(st)).expect("ischar");
+        let result = ischar_builtin(Value::Struct(st.finish())).expect("ischar");
         assert_eq!(result, Value::Bool(false));
     }
 

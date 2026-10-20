@@ -74,25 +74,25 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 async fn writematrix_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     data: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     let mut cooperation = TabularCooperation::new(runtime.as_ref(), BUILTIN_NAME);
     if rest.is_empty() {
         return Err(writematrix_error(&WRITEMATRIX_ERROR_ARG_CONFIG));
     }
-    preflight_extensions(&data, &rest)?;
+    preflight_extensions(&data, rest.view())?;
     preflight_data(&data)?;
     let path = resolve_path(&rest[0])?;
-    let options_args = &rest[1..];
+    let options_args = rest.range(1..)?;
     if !options_args.len().is_multiple_of(2) {
         return Err(writematrix_error(&WRITEMATRIX_ERROR_ARG_CONFIG));
     }
-    preflight_host_options(options_args)?;
+    preflight_host_options(options_args.view())?;
     let host_options = if options_args
         .iter()
         .all(|value| !matches!(value, Value::GpuTensor(_)))
     {
-        Some(parse_options(options_args)?)
+        Some(parse_options(options_args.view())?)
     } else {
         None
     };
@@ -113,28 +113,37 @@ async fn writematrix_builtin(
     let options = match host_options {
         Some(options) => options,
         None => {
-            let mut gathered_options = Vec::with_capacity(options_args.len());
-            for value in options_args {
-                gathered_options.push(
-                    await_io(
+            let gather = options_args.try_map_preserving_roots_async(
+                options_args.len(),
+                runtime.as_ref(),
+                async |index| {
+                    let value = await_io(
                         runtime.as_ref(),
                         BUILTIN_NAME,
-                        gather_if_needed_async(value),
+                        gather_if_needed_async(&options_args[index]),
                     )
                     .await?
-                    .map_err(map_control_flow)?,
-                );
-                cooperation.completed(0).await?;
-            }
-            parse_options(&gathered_options)?
+                    .map_err(map_control_flow)?;
+                    cooperation.completed(0).await?;
+                    Ok(value)
+                },
+            );
+            let gathered_options = match runtime.as_ref() {
+                Some(runtime) => runtime.scope(gather).await?,
+                None => gather.await?,
+            };
+            parse_options(gathered_options.view())?
         }
     };
-    let gathered = await_io(
+    let gather_data = await_io(
         runtime.as_ref(),
         BUILTIN_NAME,
         gather_if_needed_async(&data),
-    )
-    .await?
+    );
+    let gathered = match runtime.as_ref() {
+        Some(runtime) => runtime.scope(gather_data).await?,
+        None => gather_data.await?,
+    }
     .map_err(map_control_flow)?;
     cooperation.completed(0).await?;
     let matrix = MatrixData::from_value(gathered)?;
@@ -248,13 +257,13 @@ impl MatrixData {
                 Ok(MatrixData::Text {
                     rows,
                     cols,
-                    data: sa.data,
+                    data: sa.data().iter().map(|text| text.as_str().to_owned()).collect(),
                 })
             }
             Value::String(s) => Ok(MatrixData::Text {
                 rows: 1,
                 cols: 1,
-                data: vec![s],
+                data: vec![s.into_string_unbounded()],
             }),
             Value::CharArray(_) => Err(writematrix_error_with(
                 &WRITEMATRIX_ERROR_DATA,

@@ -35,7 +35,7 @@ fn admission(runtime: Option<&RuntimeContext>, error: HostAllocationError) -> Ru
 async fn dlqr_builtin(
     runtime: Option<RuntimeContext>,
     a: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let out_count = crate::output_count::current_output_count();
     let requested = out_count.unwrap_or(1);
@@ -108,7 +108,11 @@ mod tests {
         let outputs = block_on(dlqr_builtin(
             None,
             Value::Num(1.0),
-            vec![Value::Num(1.0), Value::Num(1.0), Value::Num(1.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(1.0),
+                Value::Num(1.0),
+                Value::Num(1.0),
+            ]),
         ))
         .expect("standard DARE");
         let Value::OutputList(values) = outputs else {

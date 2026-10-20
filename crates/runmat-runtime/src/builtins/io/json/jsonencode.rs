@@ -82,7 +82,7 @@ enum JsonValue {
     Null,
     Bool(bool),
     Number(JsonNumber),
-    String(String),
+    String(runmat_value::Utf8Text),
     Array(Vec<JsonValue>),
     Object(Vec<(String, JsonValue)>),
 }
@@ -96,26 +96,35 @@ enum JsonNumber {
 
 #[runtime_builtin(
     name = "jsonencode",
+    context = true,
     binding_variant = "default",
     builtin_path = "crate::builtins::io::json::jsonencode"
 )]
-async fn jsonencode_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let layout = prepare_option_layout(&rest)?;
-    preflight_jsonencode_extensions(&value, &rest, &layout)?;
-    let host_value = gather_if_needed_async(&value)
-        .await
-        .map_err(jsonencode_flow_with_context)?;
-    let mut gathered_args = Vec::with_capacity(rest.len());
-    for value in &rest {
-        gathered_args.push(
-            gather_if_needed_async(value)
-                .await
-                .map_err(jsonencode_flow_with_context)?,
-        );
+async fn jsonencode_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    let layout = prepare_option_layout(rest.view())?;
+    preflight_jsonencode_extensions(&value, rest.view(), &layout)?;
+    let gather = gather_if_needed_async(&value);
+    let host_value = match runtime.as_ref() {
+        Some(runtime) => runtime.scope(gather).await,
+        None => gather.await,
     }
+    .map_err(jsonencode_flow_with_context)?;
+    let gather = rest.try_map_preserving_roots_async(rest.len(), runtime.as_ref(), async |index| {
+        gather_if_needed_async(&rest[index])
+            .await
+            .map_err(jsonencode_flow_with_context)
+    });
+    let gathered_args = match runtime.as_ref() {
+        Some(runtime) => runtime.scope(gather).await?,
+        None => gather.await?,
+    };
 
-    preflight_option_extensions(&layout, &gathered_args)?;
-    let options = parse_options(&layout, &gathered_args)?;
+    preflight_option_extensions(&layout, gathered_args.view())?;
+    let options = parse_options(&layout, gathered_args.view())?;
     let json_value = value_to_json(&host_value, &options)?;
     let json_string = render_json(&json_value, &options);
 

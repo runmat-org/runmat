@@ -10,11 +10,11 @@ fn getfield_direct_resident_integer_field_preserves_handle_without_provider_acce
         )
         .expect("authentic unregistered allocation")
         .handle;
-    let mut st = StructValue::new();
+    let mut st = runmat_value::UnboundedStructValueBuilder::new();
     st.fields
         .insert("values".to_string(), Value::GpuTensor(handle.clone()));
 
-    let result = run_getfield(Value::Struct(st), vec![Value::from("values")])
+    let result = run_getfield(Value::Struct(st.finish()), vec![Value::from("values")])
         .expect("direct resident field");
     assert_eq!(result.value(), &Value::GpuTensor(handle.clone()));
     let weak = handle.downgrade();
@@ -38,14 +38,14 @@ fn getfield_strict_indexed_resident_field_rejects_before_provider_access() {
         )
         .expect("authentic unregistered allocation")
         .handle;
-    let mut st = StructValue::new();
+    let mut st = runmat_value::UnboundedStructValueBuilder::new();
     st.fields
         .insert("values".to_string(), Value::GpuTensor(handle));
     let selector = CellArray::new_with_shape(vec![Value::Int(IntValue::I32(1))], vec![1, 1])
         .expect("selector");
 
     let error = run_getfield(
-        Value::Struct(st),
+        Value::Struct(st.finish()),
         vec![Value::from("values"), Value::Cell(selector)],
     )
     .expect_err("strict indexed resident access");
@@ -86,13 +86,18 @@ async fn getfield_gpu_tensor_indexing_case() {
     };
     let handle = provider.upload(&view).expect("upload");
 
-    let mut st = StructValue::new();
+    let mut st = runmat_value::UnboundedStructValueBuilder::new();
     st.fields
         .insert("values".to_string(), Value::GpuTensor(handle.clone()));
+    let st = st.finish();
 
-    let direct = getfield_builtin(None, Value::Struct(st.clone()), vec![Value::from("values")])
-        .await
-        .expect("direct gpu field");
+    let direct = getfield_builtin(
+        None,
+        Value::Struct(st.clone()),
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("values")]),
+    )
+    .await
+    .expect("direct gpu field");
     match direct.value() {
         Value::GpuTensor(out) => assert!(out.shares_allocation_with(&handle)),
         other => panic!("expected gpu tensor, got {other:?}"),
@@ -102,7 +107,10 @@ async fn getfield_gpu_tensor_indexing_case() {
     let indexed = getfield_builtin(
         None,
         Value::Struct(st),
-        vec![Value::from("values"), Value::Cell(idx_cell)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("values"),
+            Value::Cell(idx_cell),
+        ]),
     )
     .await
     .expect("gpu indexed field");

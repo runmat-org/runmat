@@ -81,10 +81,16 @@ fn fgets_typed_single_and_resident_roles_are_independently_gated() {
 #[test]
 fn fgets_nchar_rejects_nonfinite_fractional_negative_and_out_of_range_doubles() {
     for invalid in [f64::INFINITY, f64::NEG_INFINITY, f64::NAN, -1.0, 1.5] {
-        assert!(futures::executor::block_on(parse_nchar(&[Value::Num(invalid)])).is_err());
+        assert!(futures::executor::block_on(parse_nchar(
+            crate::call::FunctionArgumentView::from_slice(&[Value::Num(invalid)])
+        ))
+        .is_err());
     }
     let out_of_range = usize::MAX as f64 + 1.0;
-    assert!(futures::executor::block_on(parse_nchar(&[Value::Num(out_of_range)])).is_err());
+    assert!(futures::executor::block_on(parse_nchar(
+        crate::call::FunctionArgumentView::from_slice(&[Value::Num(out_of_range)])
+    ))
+    .is_err());
 }
 
 #[test]
@@ -100,19 +106,28 @@ fn typed_fid_and_nchar_parsers_preserve_integer_bounds() {
         .expect("typed fid tensor");
     assert!(parse_fid(&Value::Tensor(fid_too_large)).is_err());
 
-    let nchar = futures::executor::block_on(parse_nchar(&[Value::Int(IntValue::U16(64))])).unwrap();
+    let nchar = futures::executor::block_on(parse_nchar(
+        crate::call::FunctionArgumentView::from_slice(&[Value::Int(IntValue::U16(64))]),
+    ))
+    .unwrap();
     assert_eq!(nchar, Some(64));
     let nchar_tensor =
         Tensor::new_integer(IntegerStorage::U16(vec![64]), vec![1, 1]).expect("typed nchar tensor");
-    let nchar_from_tensor =
-        futures::executor::block_on(parse_nchar(&[Value::Tensor(nchar_tensor)])).unwrap();
+    let nchar_from_tensor = futures::executor::block_on(parse_nchar(
+        crate::call::FunctionArgumentView::from_slice(&[Value::Tensor(nchar_tensor)]),
+    ))
+    .unwrap();
     assert_eq!(nchar_from_tensor, Some(64));
     let negative_nchar_tensor =
         Tensor::new_integer(IntegerStorage::I8(vec![-1]), vec![1, 1]).expect("typed nchar tensor");
-    assert!(
-        futures::executor::block_on(parse_nchar(&[Value::Tensor(negative_nchar_tensor)])).is_err()
-    );
-    assert!(futures::executor::block_on(parse_nchar(&[Value::Int(IntValue::I8(-1))])).is_err());
+    assert!(futures::executor::block_on(parse_nchar(
+        crate::call::FunctionArgumentView::from_slice(&[Value::Tensor(negative_nchar_tensor)])
+    ))
+    .is_err());
+    assert!(futures::executor::block_on(parse_nchar(
+        crate::call::FunctionArgumentView::from_slice(&[Value::Int(IntValue::I8(-1))])
+    ))
+    .is_err());
 }
 
 #[test]
@@ -133,7 +148,10 @@ fn fgets_typed_scalar_parameters_ignore_poisoned_f64_mirrors() {
         let value = Value::Tensor(tensor);
         assert_eq!(parse_fid(&value).unwrap(), 7);
         assert_eq!(
-            futures::executor::block_on(parse_nchar(&[value])).unwrap(),
+            futures::executor::block_on(parse_nchar(
+                crate::call::FunctionArgumentView::from_slice(&[value])
+            ))
+            .unwrap(),
             Some(7)
         );
     }

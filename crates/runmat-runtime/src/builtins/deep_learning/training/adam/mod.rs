@@ -23,10 +23,12 @@ use provider::*;
 #[runtime_builtin(
     name = "adamupdate",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::deep_learning::training"
 )]
 pub(in crate::builtins::deep_learning) async fn adamupdate_builtin(
-    args: Vec<Value>,
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     if args
         .iter()
@@ -57,13 +59,16 @@ pub(in crate::builtins::deep_learning) async fn adamupdate_builtin(
         .iter()
         .any(crate::builtins::common::validation::value_contains_explicit_gpu);
     if has_gpu_input {
-        preflight_adam_host_operands(&args)?;
+        preflight_adam_host_operands(args.view())?;
     }
     let options = if has_gpu_input {
-        match try_adamupdate_gpu(&args)? {
+        match try_adamupdate_gpu(args.view())? {
             Some(eval) => return eval.output(),
             None if has_explicit_gpu_input => return Err(explicit_gpu_fallback_error()),
-            None => AdamUpdateArgs::parse(gather_args(args).await?)?,
+            None => {
+                let gathered = gather_args(args, runtime.as_ref()).await?;
+                AdamUpdateArgs::parse(gathered)?
+            }
         }
     } else if has_explicit_gpu_input {
         return Err(explicit_gpu_fallback_error());
@@ -100,7 +105,7 @@ fn explicit_gpu_fallback_error() -> crate::RuntimeError {
 /// provider-owned operand. The ordinary host parser remains the authority for
 /// materialized data; this admission uses it only for host operands and its
 /// existing scalar-control decoders.
-fn preflight_adam_host_operands(args: &[Value]) -> BuiltinResult<()> {
+fn preflight_adam_host_operands(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<()> {
     if !(5..=9).contains(&args.len()) {
         return Err(deep_learning_error(
             "adamupdate",

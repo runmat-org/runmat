@@ -17,7 +17,7 @@ use runmat_builtins::{
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{CellArray, CharArray, StringArray, Value};
+use runmat_value::{CellArray, CharArray, StringArray, Utf8Text, Value};
 
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
@@ -842,7 +842,7 @@ impl SplitOptions {
 }
 
 struct TextMatrix {
-    data: Vec<String>,
+    data: Vec<Utf8Text>,
     rows: usize,
     cols: usize,
 }
@@ -855,11 +855,16 @@ impl TextMatrix {
                 rows: 1,
                 cols: 1,
             }),
-            Value::StringArray(array) => Ok(Self {
-                data: array.data,
-                rows: array.rows,
-                cols: array.cols,
-            }),
+            Value::StringArray(array) => {
+                let rows = array.rows;
+                let cols = array.cols;
+                let (owner, _shape, _rows, _cols) = array.into_parts();
+                let data = match owner.try_into_owned() {
+                    Ok(values) => values.into_iter().collect(),
+                    Err(data) => data.iter().cloned().collect(),
+                };
+                Ok(Self { data, rows, cols })
+            }
             Value::CharArray(array) => Self::from_char_array(array),
             Value::Cell(cell) => Self::from_cell_array(cell),
             _ => Err(split_error(&SPLIT_ERROR_INVALID_INPUT)),
@@ -867,9 +872,7 @@ impl TextMatrix {
     }
 
     fn from_char_array(array: CharArray) -> BuiltinResult<Self> {
-        let CharArray {
-            data, rows, cols, ..
-        } = array;
+        let (data, _, rows, cols) = array.into_parts();
         if rows == 0 {
             return Ok(Self {
                 data: Vec::new(),
@@ -879,7 +882,7 @@ impl TextMatrix {
         }
         let mut strings = Vec::with_capacity(rows);
         for row in 0..rows {
-            strings.push(char_row_to_string_slice(&data, cols, row));
+            strings.push(char_row_to_string_slice(&data, cols, row).into());
         }
         Ok(Self {
             data: strings,
@@ -889,9 +892,7 @@ impl TextMatrix {
     }
 
     fn from_cell_array(cell: CellArray) -> BuiltinResult<Self> {
-        let CellArray {
-            data, rows, cols, ..
-        } = cell;
+        let (data, _, rows, cols) = cell.into_parts();
         let mut strings = Vec::with_capacity(data.len());
         for col in 0..cols {
             for row in 0..rows {
@@ -899,7 +900,8 @@ impl TextMatrix {
                 let value_ref: &Value = &data[idx];
                 strings.push(
                     cell_element_to_string(value_ref)
-                        .ok_or_else(|| split_error(&SPLIT_ERROR_CELL_ELEMENT))?,
+                        .ok_or_else(|| split_error(&SPLIT_ERROR_CELL_ELEMENT))?
+                        .into(),
                 );
             }
         }
@@ -1262,21 +1264,25 @@ fn advance_whitespace(text: &str, mut start: usize) -> usize {
 
 fn extract_delimiters(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(text) => Ok(vec![text.clone()]),
-        Value::StringArray(array) => Ok(array.data.clone()),
+        Value::String(text) => Ok(vec![text.as_str().to_owned()]),
+        Value::StringArray(array) => Ok(array
+            .data()
+            .iter()
+            .map(|text| text.as_str().to_owned())
+            .collect()),
         Value::CharArray(array) => {
             if array.rows == 0 {
                 return Ok(Vec::new());
             }
             let mut entries = Vec::with_capacity(array.rows);
             for row in 0..array.rows {
-                entries.push(char_row_to_string_slice(&array.data, array.cols, row));
+                entries.push(char_row_to_string_slice(array.data(), array.cols, row));
             }
             Ok(entries)
         }
         Value::Cell(cell) => {
-            let mut entries = Vec::with_capacity(cell.data.len());
-            for element in &cell.data {
+            let mut entries = Vec::with_capacity(cell.data().len());
+            for element in cell.data() {
                 entries.push(
                     cell_element_to_string(element)
                         .ok_or_else(|| split_error(&SPLIT_ERROR_CELL_ELEMENT))?,
@@ -1290,13 +1296,15 @@ fn extract_delimiters(value: &Value) -> BuiltinResult<Vec<String>> {
 
 fn cell_element_to_string(value: &Value) -> Option<String> {
     match value {
-        Value::String(text) => Some(text.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
+        Value::String(text) => Some(text.as_str().to_owned()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Some(array.data()[0].as_str().to_owned())
+        }
         Value::CharArray(array) if array.rows <= 1 => {
             if array.rows == 0 {
                 Some(String::new())
             } else {
-                Some(char_row_to_string_slice(&array.data, array.cols, 0))
+                Some(char_row_to_string_slice(array.data(), array.cols, 0))
             }
         }
         _ => None,
@@ -1305,16 +1313,18 @@ fn cell_element_to_string(value: &Value) -> Option<String> {
 
 fn value_to_scalar_string(value: &Value) -> Option<String> {
     match value {
-        Value::String(text) => Some(text.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
+        Value::String(text) => Some(text.as_str().to_owned()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Some(array.data()[0].as_str().to_owned())
+        }
         Value::CharArray(array) if array.rows <= 1 => {
             if array.rows == 0 {
                 Some(String::new())
             } else {
-                Some(char_row_to_string_slice(&array.data, array.cols, 0))
+                Some(char_row_to_string_slice(array.data(), array.cols, 0))
             }
         }
-        Value::Cell(cell) if cell.data.len() == 1 => cell_element_to_string(&cell.data[0]),
+        Value::Cell(cell) if cell.data().len() == 1 => cell_element_to_string(&cell.data()[0]),
         _ => None,
     }
 }
@@ -1408,19 +1418,19 @@ fn builtin_error_with_descriptor(
     builder.build()
 }
 
-fn extract_strsplit_subject(value: Value) -> BuiltinResult<(StrsplitInputKind, String)> {
+fn extract_strsplit_subject(value: Value) -> BuiltinResult<(StrsplitInputKind, Utf8Text)> {
     match value {
         Value::String(text) => Ok((StrsplitInputKind::String, text)),
-        Value::StringArray(array) if array.data.len() == 1 => {
-            Ok((StrsplitInputKind::String, array.data[0].clone()))
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok((StrsplitInputKind::String, array.data()[0].clone()))
         }
         Value::CharArray(array) if array.rows <= 1 => {
             if array.rows == 0 {
-                Ok((StrsplitInputKind::Char, String::new()))
+                Ok((StrsplitInputKind::Char, String::new().into()))
             } else {
                 Ok((
                     StrsplitInputKind::Char,
-                    char_row_to_string_slice(&array.data, array.cols, 0),
+                    char_row_to_string_slice(array.data(), array.cols, 0).into(),
                 ))
             }
         }
@@ -1493,7 +1503,7 @@ fn make_strsplit_output(tokens: Vec<String>, kind: StrsplitInputKind) -> Builtin
             Ok(Value::StringArray(array))
         }
         StrsplitInputKind::Char => {
-            let values: Vec<Value> = tokens.into_iter().map(Value::String).collect();
+            let values: Vec<Value> = tokens.into_iter().map(Value::string).collect();
             let len = values.len();
             make_cell(values, 1, len).map_err(|err| {
                 strsplit_error_with_message(format!("strsplit: {err}"), &STRSPLIT_ERROR_INTERNAL)
@@ -1710,13 +1720,13 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_string_whitespace_default() {
-        let input = Value::String("RunMat Accelerate Planner".to_string());
+        let input = Value::String("RunMat Accelerate Planner".to_string().into());
         let result = split_builtin(input, Vec::new()).expect("split");
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![3, 1]);
                 assert_eq!(
-                    array.data,
+                    array.data(),
                     vec![
                         "RunMat".to_string(),
                         "Accelerate".to_string(),
@@ -1731,14 +1741,14 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_string_custom_delimiter() {
-        let input = Value::String("alpha,beta,gamma".to_string());
-        let args = vec![Value::String(",".to_string())];
+        let input = Value::String("alpha,beta,gamma".to_string().into());
+        let args = vec![Value::String(",".to_string().into())];
         let result = split_builtin(input, args).expect("split");
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![3, 1]);
                 assert_eq!(
-                    array.data,
+                    array.data(),
                     vec!["alpha".to_string(), "beta".to_string(), "gamma".to_string()]
                 );
             }
@@ -1750,12 +1760,12 @@ pub(crate) mod tests {
     #[test]
     fn split_include_delimiters_true() {
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let input = Value::String("A+B-C".to_string());
+        let input = Value::String("A+B-C".to_string().into());
         let args = vec![
             Value::StringArray(
                 StringArray::new(vec!["+".to_string(), "-".to_string()], vec![1, 2]).unwrap(),
             ),
-            Value::String("IncludeDelimiters".to_string()),
+            Value::String("IncludeDelimiters".to_string().into()),
             Value::Bool(true),
         ];
         let result = split_builtin(input, args).expect("split");
@@ -1763,7 +1773,7 @@ pub(crate) mod tests {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![5, 1]);
                 assert_eq!(
-                    array.data,
+                    array.data(),
                     vec![
                         "A".to_string(),
                         "+".to_string(),
@@ -1781,9 +1791,9 @@ pub(crate) mod tests {
     #[test]
     fn split_include_delimiters_whitespace_collapse_default() {
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let input = Value::String("A  B".to_string());
+        let input = Value::String("A  B".to_string().into());
         let args = vec![
-            Value::String("IncludeDelimiters".to_string()),
+            Value::String("IncludeDelimiters".to_string().into()),
             Value::Bool(true),
         ];
         let result = split_builtin(input, args).expect("split");
@@ -1791,7 +1801,7 @@ pub(crate) mod tests {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![3, 1]);
                 assert_eq!(
-                    array.data,
+                    array.data(),
                     vec!["A".to_string(), "  ".to_string(), "B".to_string()]
                 );
             }
@@ -1803,12 +1813,12 @@ pub(crate) mod tests {
     #[test]
     fn split_patterns_include_delimiters_collapse_true() {
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let input = Value::String("a,,b".to_string());
+        let input = Value::String("a,,b".to_string().into());
         let args = vec![
-            Value::String(",".to_string()),
-            Value::String("IncludeDelimiters".to_string()),
+            Value::String(",".to_string().into()),
+            Value::String("IncludeDelimiters".to_string().into()),
             Value::Bool(true),
-            Value::String("CollapseDelimiters".to_string()),
+            Value::String("CollapseDelimiters".to_string().into()),
             Value::Bool(true),
         ];
         let result = split_builtin(input, args).expect("split");
@@ -1816,7 +1826,7 @@ pub(crate) mod tests {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![3, 1]);
                 assert_eq!(
-                    array.data,
+                    array.data(),
                     vec!["a".to_string(), ",,".to_string(), "b".to_string()]
                 );
             }
@@ -1828,10 +1838,10 @@ pub(crate) mod tests {
     #[test]
     fn split_collapse_false_preserves_empty_segments() {
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let input = Value::String("one,,three,".to_string());
+        let input = Value::String("one,,three,".to_string().into());
         let args = vec![
-            Value::String(",".to_string()),
-            Value::String("CollapseDelimiters".to_string()),
+            Value::String(",".to_string().into()),
+            Value::String("CollapseDelimiters".to_string().into()),
             Value::Bool(false),
         ];
         let result = split_builtin(input, args).expect("split");
@@ -1839,7 +1849,7 @@ pub(crate) mod tests {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![4, 1]);
                 assert_eq!(
-                    array.data,
+                    array.data(),
                     vec![
                         "one".to_string(),
                         "".to_string(),
@@ -1869,7 +1879,7 @@ pub(crate) mod tests {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![2, 2]);
                 assert_eq!(
-                    array.data,
+                    array.data(),
                     vec![
                         "GPU".to_string(),
                         "VM".to_string(),
@@ -1898,7 +1908,7 @@ pub(crate) mod tests {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![2, 2, 2]);
                 assert_eq!(
-                    array.data,
+                    array.data(),
                     vec![
                         "RunMat".to_string(),
                         "VM".to_string(),
@@ -1919,16 +1929,17 @@ pub(crate) mod tests {
     #[test]
     fn split_cell_array_outputs_string_array() {
         let values = vec![
-            Value::String("RunMat Snapshot".to_string()),
-            Value::String("Fusion Planner".to_string()),
+            Value::String("RunMat Snapshot".to_string().into()),
+            Value::String("Fusion Planner".to_string().into()),
         ];
         let cell = crate::make_cell(values, 2, 1).expect("cell");
-        let result = split_builtin(cell, vec![Value::String(" ".to_string())]).expect("split");
+        let result =
+            split_builtin(cell, vec![Value::String(" ".to_string().into())]).expect("split");
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![2, 2]);
                 assert_eq!(
-                    array.data,
+                    array.data(),
                     vec![
                         "RunMat".to_string(),
                         "Fusion".to_string(),
@@ -1945,10 +1956,10 @@ pub(crate) mod tests {
     #[test]
     fn split_cell_array_multiple_columns() {
         let values = vec![
-            Value::String("alpha beta".to_string()),
-            Value::String("gamma".to_string()),
-            Value::String("delta epsilon".to_string()),
-            Value::String("<missing>".to_string()),
+            Value::String("alpha beta".to_string().into()),
+            Value::String("gamma".to_string().into()),
+            Value::String("delta epsilon".to_string().into()),
+            Value::String("<missing>".to_string().into()),
         ];
         let cell = crate::make_cell(values, 2, 2).expect("cell");
         let result = split_builtin(cell, Vec::new()).expect("split");
@@ -1956,7 +1967,7 @@ pub(crate) mod tests {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![2, 2, 2]);
                 assert_eq!(
-                    array.data,
+                    array.data(),
                     vec![
                         "alpha".to_string(),
                         "delta".to_string(),
@@ -1976,12 +1987,12 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_missing_string_propagates() {
-        let input = Value::String("<missing>".to_string());
+        let input = Value::String("<missing>".to_string().into());
         let result = split_builtin(input, Vec::new()).expect("split");
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![1, 1]);
-                assert_eq!(array.data, vec!["<missing>".to_string()]);
+                assert_eq!(array.data(), vec!["<missing>".to_string()]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -1990,8 +2001,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_invalid_name_value_pair_errors() {
-        let input = Value::String("abc".to_string());
-        let args = vec![Value::String("CollapseDelimiters".to_string())];
+        let input = Value::String("abc".to_string().into());
+        let args = vec![Value::String("CollapseDelimiters".to_string().into())];
         let err = split_builtin(input, args).unwrap_err();
         assert!(err.to_string().contains("name-value"));
     }
@@ -2006,8 +2017,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn split_invalid_delimiter_type_errors() {
-        let err =
-            split_builtin(Value::String("abc".to_string()), vec![Value::Num(1.0)]).unwrap_err();
+        let err = split_builtin(
+            Value::String("abc".to_string().into()),
+            vec![Value::Num(1.0)],
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("delimiter input"));
     }
 
@@ -2015,8 +2029,8 @@ pub(crate) mod tests {
     #[test]
     fn split_empty_delimiter_errors() {
         let err = split_builtin(
-            Value::String("abc".to_string()),
-            vec![Value::String(String::new())],
+            Value::String("abc".to_string().into()),
+            vec![Value::String(String::new().into())],
         )
         .unwrap_err();
         assert!(err.to_string().contains("at least one character"));
@@ -2026,9 +2040,9 @@ pub(crate) mod tests {
     #[test]
     fn split_unknown_name_argument_errors() {
         let err = split_builtin(
-            Value::String("abc".to_string()),
+            Value::String("abc".to_string().into()),
             vec![
-                Value::String("UnknownOption".to_string()),
+                Value::String("UnknownOption".to_string().into()),
                 Value::Bool(true),
             ],
         )
@@ -2042,15 +2056,15 @@ pub(crate) mod tests {
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let logical = LogicalArray::new(vec![1u8], vec![1]).unwrap();
         let args = vec![
-            Value::String(",".to_string()),
-            Value::String("CollapseDelimiters".to_string()),
+            Value::String(",".to_string().into()),
+            Value::String("CollapseDelimiters".to_string().into()),
             Value::LogicalArray(logical),
         ];
-        let result = split_builtin(Value::String("a,,b".to_string()), args).expect("split");
+        let result = split_builtin(Value::String("a,,b".to_string().into()), args).expect("split");
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![2, 1]);
-                assert_eq!(array.data, vec!["a".to_string(), "b".to_string()]);
+                assert_eq!(array.data(), vec!["a".to_string(), "b".to_string()]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -2062,16 +2076,16 @@ pub(crate) mod tests {
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
         let args = vec![
-            Value::String(",".to_string()),
-            Value::String("IncludeDelimiters".to_string()),
+            Value::String(",".to_string().into()),
+            Value::String("IncludeDelimiters".to_string().into()),
             Value::Tensor(tensor),
         ];
-        let result = split_builtin(Value::String("a,b".to_string()), args).expect("split");
+        let result = split_builtin(Value::String("a,b".to_string().into()), args).expect("split");
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![3, 1]);
                 assert_eq!(
-                    array.data,
+                    array.data(),
                     vec!["a".to_string(), ",".to_string(), "b".to_string()]
                 );
             }
@@ -2083,7 +2097,7 @@ pub(crate) mod tests {
     #[test]
     fn split_cell_array_mixed_inputs() {
         let values = vec![
-            Value::String("alpha beta".to_string()),
+            Value::String("alpha beta".to_string().into()),
             Value::CharArray(CharArray::new("gamma".chars().collect(), 1, 5).unwrap()),
         ];
         let cell = Value::Cell(CellArray::new(values, 1, 2).expect("cell array construction"));
@@ -2092,7 +2106,7 @@ pub(crate) mod tests {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![1, 2, 2]);
                 assert_eq!(
-                    array.data,
+                    array.data(),
                     vec![
                         "alpha".to_string(),
                         "gamma".to_string(),
@@ -2138,7 +2152,7 @@ pub(crate) mod tests {
             };
             assert_eq!(result.shape, vec![2, 3]);
             assert_eq!(
-                result.data,
+                result.data(),
                 vec!["Mary", "Butler", "Diana", "Lee", "James", "King"]
             );
         }
@@ -2208,7 +2222,7 @@ pub(crate) mod tests {
             let Value::StringArray(array) = output else {
                 panic!("expected empty string array")
             };
-            assert!(array.data.is_empty());
+            assert!(array.data().is_empty());
             assert_eq!(array.shape, vec![0, 1]);
         }
     }
@@ -2231,9 +2245,9 @@ pub(crate) mod tests {
             panic!("expected string matches")
         };
         assert_eq!(parts.shape, vec![1, 3]);
-        assert_eq!(parts.data, vec!["a", "b", "c"]);
+        assert_eq!(parts.data(), vec!["a", "b", "c"]);
         assert_eq!(matches.shape, vec![1, 2]);
-        assert_eq!(matches.data, vec![",", ","]);
+        assert_eq!(matches.data(), vec![",", ","]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -2245,7 +2259,7 @@ pub(crate) mod tests {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![1, 3]);
                 assert_eq!(
-                    array.data,
+                    array.data(),
                     vec!["one".to_string(), "two".to_string(), "three".to_string()]
                 );
             }
@@ -2262,8 +2276,8 @@ pub(crate) mod tests {
             Value::Cell(cell) => {
                 assert_eq!(cell.rows, 1);
                 assert_eq!(cell.cols, 2);
-                assert_eq!(&cell.data[0], &Value::String("a".into()));
-                assert_eq!(&cell.data[1], &Value::String("b".into()));
+                assert_eq!(&cell.data()[0], &Value::String("a".into()));
+                assert_eq!(&cell.data()[1], &Value::String("b".into()));
             }
             other => panic!("expected cell output, got {other:?}"),
         }
@@ -2284,7 +2298,7 @@ pub(crate) mod tests {
                 match &values[0] {
                     Value::StringArray(array) => {
                         assert_eq!(
-                            array.data,
+                            array.data(),
                             vec!["a".to_string(), "b".to_string(), "".to_string()]
                         );
                     }
@@ -2292,7 +2306,7 @@ pub(crate) mod tests {
                 }
                 match &values[1] {
                     Value::StringArray(array) => {
-                        assert_eq!(array.data, vec![",,".to_string(), ",".to_string()]);
+                        assert_eq!(array.data(), vec![",,".to_string(), ",".to_string()]);
                     }
                     other => panic!("expected second output string array, got {other:?}"),
                 }
@@ -2319,7 +2333,7 @@ pub(crate) mod tests {
                 match &values[0] {
                     Value::StringArray(array) => {
                         assert_eq!(
-                            array.data,
+                            array.data(),
                             vec!["1.21".to_string(), "1.985".to_string(), "".to_string()]
                         );
                     }
@@ -2327,7 +2341,7 @@ pub(crate) mod tests {
                 }
                 match &values[1] {
                     Value::StringArray(array) => {
-                        assert_eq!(array.data, vec!["m/s ".to_string(), " m/s".to_string()]);
+                        assert_eq!(array.data(), vec!["m/s ".to_string(), " m/s".to_string()]);
                     }
                     other => panic!("expected matches output string array, got {other:?}"),
                 }
@@ -2351,7 +2365,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(array) => {
                 assert_eq!(
-                    array.data,
+                    array.data(),
                     vec!["a".to_string(), "".to_string(), "b".to_string()]
                 );
             }

@@ -5,10 +5,11 @@ mod controls;
 pub(in crate::builtins::table) use controls::ParquetReadOptions;
 
 pub(in crate::builtins::table) async fn read_parquet_table(
+    runtime: Option<&crate::context::RuntimeContext>,
     path: &Path,
     options: &ParquetReadOptions,
 ) -> BuiltinResult<Value> {
-    read_parquet_table_impl(path, options).await
+    read_parquet_table_impl(runtime, path, options).await
 }
 
 pub(in crate::builtins::table) async fn parquet_file_info(path: &Path) -> BuiltinResult<Value> {
@@ -17,6 +18,7 @@ pub(in crate::builtins::table) async fn parquet_file_info(path: &Path) -> Builti
 
 #[cfg(target_arch = "wasm32")]
 async fn read_parquet_table_impl(
+    _runtime: Option<&crate::context::RuntimeContext>,
     _path: &Path,
     _options: &ParquetReadOptions,
 ) -> BuiltinResult<Value> {
@@ -36,6 +38,7 @@ async fn parquet_file_info_impl(_path: &Path) -> BuiltinResult<Value> {
 
 #[cfg(not(target_arch = "wasm32"))]
 async fn read_parquet_table_impl(
+    runtime: Option<&crate::context::RuntimeContext>,
     path: &Path,
     options: &ParquetReadOptions,
 ) -> BuiltinResult<Value> {
@@ -109,7 +112,7 @@ async fn read_parquet_table_impl(
 
     let values = columns
         .into_iter()
-        .map(ParquetColumnBuilder::into_value)
+        .map(|column| column.into_value(runtime))
         .collect::<BuiltinResult<Vec<_>>>()?;
     return table_from_columns_with_properties(selected_names, values, None);
 
@@ -367,10 +370,10 @@ async fn parquet_file_info_impl(path: &Path) -> BuiltinResult<Value> {
     let row_group_count = metadata.num_row_groups();
     let column_count = schema_descr.num_columns();
 
-    let mut info = StructValue::new();
+    let mut info = runmat_value::UnboundedStructValueBuilder::new();
     info.insert(
         "Filename",
-        Value::String(path.to_string_lossy().to_string()),
+        Value::string(path.to_string_lossy().to_string()),
     );
     info.insert("FileSize", Value::Num(file_size));
     info.insert("NumRows", Value::Num(file_metadata.num_rows() as f64));
@@ -397,7 +400,7 @@ async fn parquet_file_info_impl(path: &Path) -> BuiltinResult<Value> {
     info.insert("Version", Value::Num(file_metadata.version() as f64));
     info.insert(
         "CreatedBy",
-        Value::String(file_metadata.created_by().unwrap_or("").to_string()),
+        Value::string(file_metadata.created_by().unwrap_or("").to_string()),
     );
     info.insert("RowGroups", parquet_row_group_info(metadata)?);
     info.insert(
@@ -408,21 +411,24 @@ async fn parquet_file_info_impl(path: &Path) -> BuiltinResult<Value> {
         "Encoding",
         parquet_column_property(metadata, encoding_label)?,
     );
-    return Ok(Value::Struct(info));
+    return Ok(Value::Struct(info.finish()));
 
     fn parquet_row_group_info(
         metadata: &::parquet::file::metadata::ParquetMetaData,
     ) -> BuiltinResult<Value> {
-        let mut row_groups = StructValue::new();
+        let mut row_groups = runmat_value::UnboundedStructValueBuilder::new();
         for idx in 0..metadata.num_row_groups() {
             let group = metadata.row_group(idx);
-            let mut fields = StructValue::new();
+            let mut fields = runmat_value::UnboundedStructValueBuilder::new();
             fields.insert("NumRows", Value::Num(group.num_rows() as f64));
             fields.insert("TotalByteSize", Value::Num(group.total_byte_size() as f64));
             fields.insert("NumColumns", Value::Num(group.num_columns() as f64));
-            row_groups.insert(format!("RowGroup{}", idx + 1), Value::Struct(fields));
+            row_groups.insert(
+                format!("RowGroup{}", idx + 1),
+                Value::Struct(fields.finish()),
+            );
         }
-        Ok(Value::Struct(row_groups))
+        Ok(Value::Struct(row_groups.finish()))
     }
 
     fn parquet_column_property(
@@ -572,7 +578,7 @@ impl ParquetColumnBuilder {
         }
     }
 
-    fn into_value(self) -> BuiltinResult<Value> {
+    fn into_value(self, runtime: Option<&crate::context::RuntimeContext>) -> BuiltinResult<Value> {
         match self {
             Self::Number { values } => Tensor::new(values.clone(), vec![values.len(), 1])
                 .map(Value::Tensor)
@@ -593,6 +599,7 @@ impl ParquetColumnBuilder {
                 let tensor = Tensor::new(values.clone(), vec![values.len(), 1])
                     .map_err(|err| invalid_variable(format!("parquetread: {err}")))?;
                 crate::builtins::datetime::datetime_object_from_serial_tensor(
+                    runtime,
                     tensor,
                     "yyyy-MM-dd HH:mm:ss",
                 )

@@ -60,7 +60,7 @@ fn text_error_with_source(
 )]
 pub async fn text_builtin(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<f64> {
     crate::output_count::validate_fixed_outputs(
         &TEXT_DESCRIPTOR,
@@ -90,10 +90,10 @@ pub async fn text_builtin(
     {
         super::op_common::text::DeferredAxesArguments {
             target: None,
-            rest: args.as_slice(),
+            rest: args.view(),
         }
     } else {
-        super::op_common::text::split_axes_target_deferred(BUILTIN_NAME, &args)
+        super::op_common::text::split_axes_target_deferred(BUILTIN_NAME, args.view())
             .map_err(map_text_invalid_argument)?
     };
     if rest.len() != args.len()
@@ -114,8 +114,8 @@ pub async fn text_builtin(
     }
     let mut cooperation = runtime.as_ref().map(|context| context.cpu_cooperation());
     let (z, text_idx) = if let Some(text) = value_as_text_string(&rest[2]) {
-        let style =
-            parse_text_style_pairs(BUILTIN_NAME, &rest[3..]).map_err(map_text_invalid_argument)?;
+        let style = parse_text_style_pairs(BUILTIN_NAME, rest.range(3..)?)
+            .map_err(map_text_invalid_argument)?;
         validate_coordinate(&rest[0], "x")?;
         validate_coordinate(&rest[1], "y")?;
         let (position, source) =
@@ -149,7 +149,7 @@ pub async fn text_builtin(
     let text = value_as_text_string(&rest[text_idx]).ok_or_else(|| {
         text_error_with_detail(&TEXT_ERROR_INVALID_ARGUMENT, "label must be text")
     })?;
-    let style = parse_text_style_pairs(BUILTIN_NAME, &rest[text_idx + 1..])
+    let style = parse_text_style_pairs(BUILTIN_NAME, rest.range(text_idx + 1..)?)
         .map_err(map_text_invalid_argument)?;
     validate_coordinate(&rest[0], "x")?;
     validate_coordinate(&rest[1], "y")?;
@@ -337,7 +337,10 @@ mod tests {
     use std::error::Error;
 
     fn text_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
-        futures::executor::block_on(super::text_builtin(None, args))
+        futures::executor::block_on(super::text_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
 
     fn setup() -> PlotTestLockGuard {
@@ -527,11 +530,11 @@ mod tests {
                 .unwrap();
             let handle = futures::executor::block_on(super::text_builtin(
                 None,
-                vec![
+                crate::builtins::common::test_support::builtin_arguments(vec![
                     Value::GpuTensor(x.clone()),
                     Value::GpuTensor(y.clone()),
                     Value::String("resident".into()),
-                ],
+                ]),
             ))
             .expect("explicit resident coordinates");
             let position = Tensor::try_from(
@@ -562,7 +565,11 @@ mod tests {
                 .len();
             let error = futures::executor::block_on(super::text_builtin(
                 None,
-                vec![Value::GpuTensor(x), Value::Num(3.0), Value::Num(4.0)],
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::GpuTensor(x),
+                    Value::Num(3.0),
+                    Value::Num(4.0),
+                ]),
             ))
             .expect_err("text label is required");
             assert_eq!(error.identifier(), TEXT_ERROR_INVALID_ARGUMENT.identifier);
@@ -592,11 +599,11 @@ mod tests {
                 .len();
             let error = futures::executor::block_on(super::text_builtin(
                 Some(runtime),
-                vec![
+                crate::builtins::common::test_support::builtin_arguments(vec![
                     Value::GpuTensor(x),
                     Value::Num(3.0),
                     Value::String("cancelled".into()),
-                ],
+                ]),
             ))
             .expect_err("cancelled materialization must not publish a text annotation");
             assert!(matches!(
@@ -617,7 +624,10 @@ mod tests {
 #[cfg(test)]
 mod output_contract_tests {
     fn text_builtin(args: Vec<runmat_value::Value>) -> crate::BuiltinResult<f64> {
-        futures::executor::block_on(super::text_builtin(None, args))
+        futures::executor::block_on(super::text_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
 
     #[test]

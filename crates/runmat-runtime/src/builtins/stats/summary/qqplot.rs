@@ -12,7 +12,7 @@ use runmat_macros::runtime_builtin;
 use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::tensor;
-use crate::builtins::plotting::op_common::{apply_axes_target, split_leading_axes_handle};
+use crate::builtins::plotting::op_common::{apply_axes_target, split_leading_axes_arguments};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const NAME: &str = "qqplot";
@@ -87,10 +87,10 @@ struct QqplotEvaluation {
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::summary::qqplot"
 )]
-pub(crate) async fn qqplot_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let (target, args) = split_leading_axes_handle(args, NAME)
+pub(crate) async fn qqplot_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let (target, args) = split_leading_axes_arguments(args, NAME)
         .map_err(|err| invalid_with_source(format!("qqplot: {err}"), err))?;
-    admission::admit_host_visible(&args)?;
+    admission::admit_host_visible(args.view())?;
     let eval = parse_args(args).await?;
     if eval.series.is_empty() {
         return Err(invalid("qqplot: input contains no finite samples"));
@@ -112,7 +112,8 @@ pub(crate) async fn qqplot_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         .map_err(|err| internal(format!("qqplot: {err}")))
 }
 
-async fn parse_args(args: Vec<Value>) -> BuiltinResult<QqplotEvaluation> {
+async fn parse_args(args: crate::call::BuiltinArguments) -> BuiltinResult<QqplotEvaluation> {
+    let _argument_sources = args.fork();
     match args.len() {
         0 => Err(invalid("qqplot: sample input is required")),
         1 => {

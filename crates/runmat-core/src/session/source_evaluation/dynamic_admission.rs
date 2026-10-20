@@ -26,12 +26,13 @@ use super::{
 
 #[path = "dynamic_admission/static_import.rs"]
 mod static_import;
+pub(crate) use static_import::SelectedStaticTarget;
 use static_import::{
     selected_pending_closure_imports_with_preselected_and_linked,
     selected_static_imports_with_preselected_and_linked, static_capture_with_linked,
 };
 pub(in crate::session) use static_import::{
-    selected_static_imports, static_capture, SelectedStaticTarget,
+    selected_static_imports, selected_static_imports_with_preselected, static_capture,
 };
 
 #[derive(Clone)]
@@ -228,15 +229,14 @@ impl DynamicEvalProductAdmission for CoreDynamicEvalAdmission {
         )
         .map_err(invalid)?;
         let serialize = |interop| {
-            if unit.bytecode().instructions.is_empty() {
-                unit.portable_envelope_for_current_definition_with_interop(
-                    &original_ids,
-                    ProgramSourceId(0),
-                    interop,
-                )
-            } else {
-                unit.portable_envelope_for_with_interop(None, interop)
-            }
+            unit.portable_primary_source_envelope(
+                &original_ids,
+                unit.source_map()
+                    .entries()
+                    .first()
+                    .map(|entry| entry.source_id),
+                interop,
+            )
         };
         let inferred = serialize(runmat_types::InteropManifest::empty()).map_err(invalid)?;
         #[cfg(not(target_arch = "wasm32"))]
@@ -441,7 +441,7 @@ impl DynamicEvalProductAdmission for CoreDynamicEvalAdmission {
                 super::SelectedGraphSource {
                     unit: Rc::clone(&unit),
                     primary_source: Some(ProgramSourceId(0)),
-                    already_published: Some(Arc::clone(&canonical_v3)),
+                    code: super::SelectedGraphCodeSource::PublishedBytes(Arc::clone(&canonical_v3)),
                 },
                 &selected_runtime,
                 active.clone(),
@@ -616,7 +616,11 @@ impl DynamicEvalProductAdmission for CoreDynamicEvalAdmission {
             }
             let mut fingerprint = runmat_execution::DigestStream::new();
             fingerprint.update(b"runmat-pending-linked-native-basis-v1\0");
-            fingerprint.update(source.target.selected_product().bytes());
+            let selected_product = source
+                .target
+                .selected_product()
+                .ok_or_else(|| invalid("late linked source has no selected deployment product"))?;
+            fingerprint.update(selected_product.bytes());
             fingerprint.update(source.target.native_ir().bytes());
             fingerprint.update(source.target.native_function().bytes());
             selected_basis.push((source.alias, fingerprint.finish()));

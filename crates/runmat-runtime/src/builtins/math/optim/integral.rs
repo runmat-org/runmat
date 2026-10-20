@@ -129,7 +129,7 @@ async fn integral_builtin_registered(
     function: Value,
     a: Value,
     b: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     integral_in_runtime(runtime.as_ref(), function, a, b, rest).await
 }
@@ -141,7 +141,14 @@ async fn integral_builtin(
     b: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    integral_in_runtime(None, function, a, b, rest).await
+    integral_in_runtime(
+        None,
+        function,
+        a,
+        b,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    )
+    .await
 }
 
 async fn integral_in_runtime(
@@ -149,7 +156,7 @@ async fn integral_in_runtime(
     function: Value,
     a: Value,
     b: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let mut cooperation = QuadratureCooperation::new(QuadratureIdentity::Integral, runtime);
     integral_with_cooperation(function, a, b, rest, &mut cooperation).await
@@ -159,7 +166,7 @@ async fn integral_with_cooperation(
     function: Value,
     a: Value,
     b: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
     cooperation: &mut QuadratureCooperation,
 ) -> BuiltinResult<Value> {
     cooperation.completed(0).await?;
@@ -170,7 +177,7 @@ async fn integral_with_cooperation(
         ));
     }
     preflight_integral_bound_extensions(&a, &b)?;
-    let admitted_options = admit_option_headers(&rest)?;
+    let admitted_options = admit_option_headers(rest.view())?;
     preflight_integral_option_extensions(&admitted_options)?;
     crate::call::admission::admit_feval_target(&function)?;
     for (label, value) in [("lower bound", &a), ("upper bound", &b)] {
@@ -347,8 +354,10 @@ fn authenticate_integral_residents(
     Ok(())
 }
 
-fn admit_option_headers(rest: &[Value]) -> BuiltinResult<Vec<(IntegralOptionName, &Value)>> {
-    if let [Value::Struct(fields)] = rest {
+fn admit_option_headers(
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Vec<(IntegralOptionName, &Value)>> {
+    if let Some(Value::Struct(fields)) = rest.first().filter(|_| rest.len() == 1) {
         let mut admitted = Vec::new();
         admitted
             .try_reserve_exact(fields.fields.len())
@@ -372,8 +381,10 @@ fn admit_option_headers(rest: &[Value]) -> BuiltinResult<Vec<(IntegralOptionName
         .map_err(|source| {
             integral_error_with_detail(&INTEGRAL_ERROR_INVALID_ARGUMENT, source.to_string())
         })?;
-    for pair in rest.chunks_exact(2) {
-        admitted.push((option_name(&pair[0])?, &pair[1]));
+    for index in (0..rest.len()).step_by(2) {
+        let name = rest.get(index).expect("bounded integral option name");
+        let value = rest.get(index + 1).expect("bounded integral option value");
+        admitted.push((option_name(name)?, value));
     }
     Ok(admitted)
 }
@@ -381,9 +392,9 @@ fn admit_option_headers(rest: &[Value]) -> BuiltinResult<Vec<(IntegralOptionName
 fn option_name(value: &Value) -> BuiltinResult<IntegralOptionName> {
     let text = match value {
         Value::String(s) => s.as_str(),
-        Value::StringArray(sa) if sa.data.len() == 1 => sa.data[0].as_str(),
+        Value::StringArray(sa) if sa.data().len() == 1 => sa.data()[0].as_str(),
         Value::CharArray(chars) if chars.rows == 1 => {
-            return decode_option_name(&chars.data.iter().collect::<String>());
+            return decode_option_name(&chars.data().iter().collect::<String>());
         }
         other => Err(integral_error_with_detail(
             &INTEGRAL_ERROR_INVALID_ARGUMENT,
@@ -2037,7 +2048,7 @@ mod tests {
             Value::FunctionHandle("sin".into()),
             Value::Num(0.0),
             Value::Num(1.0),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect_err("cancelled invocation");
         assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
@@ -2077,7 +2088,10 @@ mod tests {
                 Value::FunctionHandle("__integral_array_opposite_constants".into()),
                 Value::Num(0.0),
                 Value::Num(1.0),
-                vec![Value::from("ArrayValued"), Value::Bool(true)],
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::from("ArrayValued"),
+                    Value::Bool(true),
+                ]),
                 &mut cooperation,
             ));
             let waker = noop_waker();

@@ -9,15 +9,19 @@ pub(super) fn free_boundary_value(dt: Value) -> BuiltinResult<Value> {
     edges_tensor(&edges)
 }
 
-pub(super) async fn nearest_neighbor_value(dt: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn nearest_neighbor_value(
+    dt: Value,
+    rest: crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<Value> {
     let object = require_delaunay_object(&dt)?;
     let object_integer_coordinates = object_coordinates_are_typed_integer(object);
     let points = object_points(object)?;
-    ensure_resident_coordinate_values(&rest)?;
-    preflight::query(&rest, "nearestNeighbor")?;
-    let gathered = gather_values(rest).await?;
+    ensure_resident_coordinate_values(rest.view())?;
+    preflight::query(rest.view(), "nearestNeighbor")?;
+    let gathered = gather_values(rest, runtime).await?;
     let query_integer_coordinates = gathered.iter().any(is_typed_integer_numeric_value);
-    let queries = parse_query_points(gathered, "nearestNeighbor")?;
+    let queries = parse_query_points(gathered.view(), "nearestNeighbor")?;
     ensure_coordinate_extension(object_integer_coordinates || query_integer_coordinates)?;
     let indices = nearest_neighbor_indices(&points, &queries)
         .into_iter()
@@ -28,17 +32,21 @@ pub(super) async fn nearest_neighbor_value(dt: Value, rest: Vec<Value>) -> Built
         .map_err(invalid)
 }
 
-pub(super) async fn point_location_value(dt: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn point_location_value(
+    dt: Value,
+    rest: crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<Value> {
     let object = require_delaunay_object(&dt)?;
     let object_integer_coordinates = object_coordinates_are_typed_integer(object);
     let object_integer_topology = object_topology_is_typed_integer(object);
     let points = object_points(object)?;
     let triangles = object_triangles(object, Some(points.len()))?;
-    ensure_resident_coordinate_values(&rest)?;
-    preflight::query(&rest, "pointLocation")?;
-    let gathered = gather_values(rest).await?;
+    ensure_resident_coordinate_values(rest.view())?;
+    preflight::query(rest.view(), "pointLocation")?;
+    let gathered = gather_values(rest, runtime).await?;
     let query_integer_coordinates = gathered.iter().any(is_typed_integer_numeric_value);
-    let queries = parse_query_points(gathered, "pointLocation")?;
+    let queries = parse_query_points(gathered.view(), "pointLocation")?;
     ensure_coordinate_extension(object_integer_coordinates || query_integer_coordinates)?;
     ensure_topology_extension(object_integer_topology)?;
     let locations = point_locations(&points, &triangles, &queries);
@@ -73,9 +81,9 @@ pub(super) fn require_delaunay_object(value: &Value) -> BuiltinResult<&ObjectIns
 
 pub(super) fn object_points(object: &ObjectInstance) -> BuiltinResult<Vec<[f64; 2]>> {
     let value = object
-        .properties
+        .properties()
         .get(POINTS_PROPERTY)
-        .or_else(|| object.properties.get(LEGACY_POINTS_PROPERTY))
+        .or_else(|| object.properties().get(LEGACY_POINTS_PROPERTY))
         .ok_or_else(|| invalid("DelaunayTri object is missing point coordinates"))?;
     matrix_points(value, DELAUNAY_TRI_CLASS.display_name())
 }
@@ -85,20 +93,20 @@ pub(super) fn object_triangles(
     point_count: Option<usize>,
 ) -> BuiltinResult<Vec<[usize; 3]>> {
     let value = object
-        .properties
+        .properties()
         .get(CONNECTIVITY_PROPERTY)
-        .or_else(|| object.properties.get(LEGACY_CONNECTIVITY_PROPERTY))
+        .or_else(|| object.properties().get(LEGACY_CONNECTIVITY_PROPERTY))
         .ok_or_else(|| invalid("DelaunayTri object is missing connectivity"))?;
     connectivity_from_value(value, point_count)
 }
 
 pub(super) fn parse_query_points(
-    args: Vec<Value>,
+    args: crate::call::FunctionArgumentView<'_>,
     builtin: &'static str,
 ) -> BuiltinResult<Vec<[f64; 2]>> {
-    match args.as_slice() {
-        [q] => matrix_points(q, builtin),
-        [x, y] => vector_points(x, y, builtin),
+    match args.len() {
+        1 => matrix_points(&args[0], builtin),
+        2 => vector_points(&args[0], &args[1], builtin),
         _ => Err(invalid(format!(
             "{builtin}: expected query matrix or x,y vectors"
         ))),

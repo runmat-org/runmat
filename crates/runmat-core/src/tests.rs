@@ -1,5 +1,8 @@
 use crate::*;
 #[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/runtime_contract_transfers.rs"]
+mod runtime_contract_transfers;
+#[cfg(not(target_arch = "wasm32"))]
 #[path = "tests/executable_roots.rs"]
 mod executable_roots;
 #[path = "tests/portable_entrypoint.rs"]
@@ -220,7 +223,7 @@ impl runmat_runtime::execution::RuntimeExecutionServices for InProcessMultiLabEx
 
     fn claim_next_task_result(
         &self,
-        tasks: &[runmat_execution::TaskHandle],
+        tasks: &[runmat_value::SharedTaskHandle],
     ) -> Result<runmat_execution::TaskResultClaim, runmat_runtime::execution::ExecutionServiceError>
     {
         runmat_runtime::execution::RuntimeExecutionServices::claim_next_task_result(
@@ -251,7 +254,7 @@ impl runmat_runtime::execution::RuntimeExecutionServices for InProcessMultiLabEx
 
     fn complete_future(
         &self,
-        future: &runmat_execution::FutureHandle,
+        future: runmat_runtime::execution::FutureCompletionRef<'_>,
         result: Result<
             runmat_runtime::execution::RootedValueSequence,
             runmat_runtime::execution::ExecutionServiceError,
@@ -588,12 +591,12 @@ fn execute_text_request_enforces_function_arguments_size_and_class() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "sid",
-        &runmat_value::Value::String("RunMat:ArgumentValidationSize".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationSize".to_string().into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "tid",
-        &runmat_value::Value::String("RunMat:ArgumentValidationClass".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationClass".to_string().into())
     ));
 }
 
@@ -641,7 +644,7 @@ fn execute_text_request_enforces_arguments_must_be_finite_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "fid",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
     ));
 }
 
@@ -661,7 +664,7 @@ fn execute_text_request_treats_single_token_arguments_constraint_as_class_name()
     assert!(outcome_has_named_upsert(
         &outcome,
         "cid",
-        &runmat_value::Value::String("RunMat:ArgumentValidationClass".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationClass".to_string().into())
     ));
 }
 
@@ -693,7 +696,7 @@ fn execute_text_request_must_be_finite_accepts_char_and_logical() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "zid",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
     ));
 }
 
@@ -731,7 +734,7 @@ fn execute_text_request_enforces_arguments_must_be_text_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "tid",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
     ));
 }
 
@@ -764,12 +767,12 @@ fn execute_text_request_enforces_arguments_must_be_nonempty_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "eid1",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "eid2",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
     ));
 }
 
@@ -801,7 +804,7 @@ fn execute_text_request_enforces_arguments_must_be_scalar_or_empty_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "eid",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
     ));
 }
 
@@ -833,7 +836,7 @@ fn execute_text_request_enforces_arguments_must_be_real_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "eid",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
     ));
 }
 
@@ -865,7 +868,7 @@ fn execute_text_request_enforces_arguments_must_be_integer_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "eid",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
     ));
 }
 
@@ -892,12 +895,12 @@ fn execute_text_request_enforces_arguments_must_be_positive_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "eid0",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "eidn",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
     ));
 }
 
@@ -929,7 +932,7 @@ fn execute_text_request_enforces_arguments_must_be_nonnegative_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "eidn",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
     ));
 }
 
@@ -955,7 +958,7 @@ fn execute_text_request_enforces_arguments_must_be_nonzero_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "eid0",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
     ));
 }
 
@@ -987,7 +990,7 @@ fn execute_text_request_enforces_arguments_must_be_nonpositive_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "eidp",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
     ));
 }
 
@@ -1014,12 +1017,12 @@ fn execute_text_request_enforces_arguments_must_be_negative_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "eid0",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "eidp",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
     ));
 }
 
@@ -1051,7 +1054,7 @@ fn execute_text_request_enforces_arguments_must_be_greater_than_or_equal_validat
     assert!(outcome_has_named_upsert(
         &outcome,
         "eidn",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
     ));
 }
 
@@ -1077,7 +1080,7 @@ fn execute_text_request_enforces_arguments_must_be_less_than_or_equal_validator(
     assert!(outcome_has_named_upsert(
         &outcome,
         "eid",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
     ));
 }
 
@@ -1103,7 +1106,7 @@ fn execute_text_request_arguments_validator_threshold_supports_unary_minus_liter
     assert!(outcome_has_named_upsert(
         &outcome,
         "eid",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
     ));
 }
 
@@ -1142,12 +1145,12 @@ fn execute_text_request_enforces_arguments_must_be_greater_than_and_less_than_va
     assert!(outcome_has_named_upsert(
         &outcome,
         "e1",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "e2",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
     ));
 }
 
@@ -1741,7 +1744,7 @@ fn execute_path_request_supports_mfilename_name_and_fullpath() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "full",
-        &runmat_value::Value::String(expected_full.to_string_lossy().to_string())
+        &runmat_value::Value::String(expected_full.to_string_lossy().to_string().into())
     ));
 }
 
@@ -1783,7 +1786,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "outside",
-        &runmat_value::Value::String(String::new())
+        &runmat_value::Value::String(String::new().into())
     ));
 }
 
@@ -4880,7 +4883,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "cls",
-        &runmat_value::Value::String("B".to_string())
+        &runmat_value::Value::String("B".to_string().into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
@@ -6164,7 +6167,7 @@ total = c.amount;
                 outcome_has_named_upsert(
                     &outcome,
                     "t",
-                    &runmat_value::Value::String("Vec2".to_string())
+                    &runmat_value::Value::String("Vec2".to_string().into())
                 ),
                 "class() should preserve source class identity"
             );
@@ -6242,7 +6245,7 @@ ux = u.x;
         outcome_has_named_upsert(
             &outcome,
             "t",
-            &runmat_value::Value::String("pkg.Vec2".to_string())
+            &runmat_value::Value::String("pkg.Vec2".to_string().into())
         ),
         "class() should preserve qualified source class identity"
     );
@@ -6963,7 +6966,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_value::Value::String("RunMat:MethodPrivate".to_string())
+        &runmat_value::Value::String("RunMat:MethodPrivate".to_string().into())
     ));
 }
 
@@ -7023,7 +7026,7 @@ end
             assert!(outcome_has_named_upsert(
                 &outcome,
                 "id",
-                &runmat_value::Value::String("RunMat:MethodPrivate".to_string())
+                &runmat_value::Value::String("RunMat:MethodPrivate".to_string().into())
             ));
         })
         .expect("spawn protected-getmethod-subclass test thread")
@@ -7146,7 +7149,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_value::Value::String("RunMat:MethodPrivate".to_string())
+        &runmat_value::Value::String("RunMat:MethodPrivate".to_string().into())
     ));
 }
 
@@ -7185,7 +7188,7 @@ p = Vec2(3, 4); c = class(p); m = p.magnitude(); ok = isa(p, 'Vec2');
     assert!(outcome_has_named_upsert(
         &outcome,
         "c",
-        &runmat_value::Value::String("Vec2".to_string())
+        &runmat_value::Value::String("Vec2".to_string().into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
@@ -7217,7 +7220,7 @@ fn execute_path_request_supports_new_object_builtin_for_registered_classes() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "c",
-        &runmat_value::Value::String("Point".to_string())
+        &runmat_value::Value::String("Point".to_string().into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
@@ -7738,7 +7741,7 @@ roots = ["."]
         outcome_has_named_upsert(
             &outcome,
             "direct_eid",
-            &runmat_value::Value::String("RunMat:UndefinedFunction".to_string())
+            &runmat_value::Value::String("RunMat:UndefinedFunction".to_string().into())
         ),
         "sibling source should not resolve parent private helper directly; upserts={:?}, diagnostics={:?}",
         outcome.workspace_delta.upserts,
@@ -7748,7 +7751,7 @@ roots = ["."]
         outcome_has_named_upsert(
             &outcome,
             "dyn_eid",
-            &runmat_value::Value::String("RunMat:UndefinedFunction".to_string())
+            &runmat_value::Value::String("RunMat:UndefinedFunction".to_string().into())
         ),
         "sibling source should not resolve parent private helper through str2func/feval; upserts={:?}, diagnostics={:?}",
         outcome.workspace_delta.upserts,
@@ -7800,7 +7803,7 @@ roots = ["."]
         outcome_has_named_upsert(
             &sibling_outcome,
             "eid",
-            &runmat_value::Value::String("RunMat:UndefinedFunction".to_string())
+            &runmat_value::Value::String("RunMat:UndefinedFunction".to_string().into())
         ),
         "sibling source should not resolve private helper through session registry; upserts={:?}, diagnostics={:?}",
         sibling_outcome.workspace_delta.upserts,
@@ -8271,7 +8274,7 @@ roots = ["."]
             outcome_has_named_upsert(
                 &outcome,
                 "leak_eid",
-                &runmat_value::Value::String("RunMat:UndefinedFunction".to_string())
+                &runmat_value::Value::String("RunMat:UndefinedFunction".to_string().into())
             ),
             "root caller should not resolve package private helper directly; upserts={:?}, diagnostics={:?}",
             outcome.workspace_delta.upserts,
@@ -8693,7 +8696,7 @@ fn execute_path_request_resolves_sibling_function_with_arguments_block_validatio
         outcome_has_named_upsert(
             &outcome,
             "eid",
-            &runmat_value::Value::String("RunMat:ArgumentValidationClass".to_string())
+            &runmat_value::Value::String("RunMat:ArgumentValidationClass".to_string().into())
         ),
         "typed sibling function should enforce arguments class validation; upserts={:?}",
         outcome.workspace_delta.upserts
@@ -8740,7 +8743,7 @@ roots = ["."]
         outcome_has_named_upsert(
             &outcome,
             "sid",
-            &runmat_value::Value::String("RunMat:ArgumentValidationSize".to_string())
+            &runmat_value::Value::String("RunMat:ArgumentValidationSize".to_string().into())
         ),
         "package typed function should enforce size validation; upserts={:?}",
         outcome.workspace_delta.upserts
@@ -8749,7 +8752,7 @@ roots = ["."]
         outcome_has_named_upsert(
             &outcome,
             "fid",
-            &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string())
+            &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
         ),
         "package typed function should enforce mustBeFinite validation; upserts={:?}",
         outcome.workspace_delta.upserts
@@ -10205,7 +10208,7 @@ fn dynamic_workspace_evalc_returns_empty_capture_for_silent_source() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "captured",
-        &runmat_value::Value::String(String::new())
+        &runmat_value::Value::String(String::new().into())
     ));
 
     let outcome = execute_text_request(&mut session, "silent_x").expect("read workspace");
@@ -10272,11 +10275,11 @@ fn runtests_runs_script_test_file_and_restores_workspace() {
     };
     assert!(obj.is_class(runmat_runtime::testing::TEST_RESULT_CLASS));
     assert_eq!(
-        obj.properties.get("Passed"),
+        obj.properties().get("Passed"),
         Some(&runmat_value::Value::Bool(true))
     );
     assert_eq!(
-        obj.properties.get("Failed"),
+        obj.properties().get("Failed"),
         Some(&runmat_value::Value::Bool(false))
     );
     assert!(outcome_has_named_upsert(
@@ -10313,14 +10316,18 @@ fn runtests_records_failing_script_test_as_result() {
         panic!("expected scalar TestResult object, got {results:?}");
     };
     assert_eq!(
-        obj.properties.get("Passed"),
+        obj.properties().get("Passed"),
         Some(&runmat_value::Value::Bool(false))
     );
     assert_eq!(
-        obj.properties.get("Failed"),
+        obj.properties().get("Failed"),
         Some(&runmat_value::Value::Bool(true))
     );
-    let details = obj.properties.get("Details").expect("details").to_string();
+    let details = obj
+        .properties()
+        .get("Details")
+        .expect("details")
+        .to_string();
     assert!(details.contains("boom"), "details were {details:?}");
 }
 
@@ -10355,7 +10362,7 @@ fn runtests_discovers_subfolder_tests_when_requested() {
             panic!("expected TestResult object, got {value:?}");
         };
         assert_eq!(
-            obj.properties.get("Passed"),
+            obj.properties().get("Passed"),
             Some(&runmat_value::Value::Bool(true))
         );
     }
@@ -10384,7 +10391,7 @@ fn runtests_no_arg_discovers_current_folder_without_recursing() {
         panic!("expected only root TestResult object, got {results:?}");
     };
     assert_eq!(
-        obj.properties.get("Passed"),
+        obj.properties().get("Passed"),
         Some(&runmat_value::Value::Bool(true))
     );
 }
@@ -10411,11 +10418,11 @@ fn runtests_basefolder_constrains_relative_target_resolution() {
         panic!("expected suite TestResult object, got {results:?}");
     };
     assert_eq!(
-        obj.properties.get("Passed"),
+        obj.properties().get("Passed"),
         Some(&runmat_value::Value::Bool(true))
     );
     let test_file = obj
-        .properties
+        .properties()
         .get("TestFile")
         .expect("test file")
         .to_string();
@@ -10482,7 +10489,7 @@ end
             panic!("expected TestResult object, got {value:?}");
         };
         assert_eq!(
-            obj.properties.get("Passed"),
+            obj.properties().get("Passed"),
             Some(&runmat_value::Value::Bool(true))
         );
     }
@@ -10527,7 +10534,7 @@ end
         panic!("expected selected scalar TestSuite, got {suite:?}");
     };
     assert_eq!(
-        suite.properties.get("ProcedureName"),
+        suite.properties().get("ProcedureName"),
         Some(&runmat_value::Value::String("testBeta".into()))
     );
     let results =
@@ -10536,7 +10543,7 @@ end
         panic!("expected selected scalar TestResult, got {results:?}");
     };
     assert_eq!(
-        result.properties.get("Passed"),
+        result.properties().get("Passed"),
         Some(&runmat_value::Value::Bool(true))
     );
 }
@@ -11329,7 +11336,7 @@ fn addpath_makes_function_callable_in_same_execution() {
     ));
     let located = outcome_named_upsert_value(&outcome, "located")
         .and_then(|value| match value {
-            runmat_value::Value::String(value) => Some(value.clone()),
+            runmat_value::Value::String(value) => Some(value.to_string()),
             runmat_value::Value::CharArray(value) => value.row_string(),
             _ => None,
         })
@@ -13767,7 +13774,7 @@ fn session_function_handle_uses_semantic_registry() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "name",
-        &runmat_value::Value::String("inc".to_string())
+        &runmat_value::Value::String("inc".to_string().into())
     ));
 }
 
@@ -13809,7 +13816,7 @@ fn function_handle_name_value_arguments_execute_as_name_value_pairs() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "first_name",
-        &runmat_value::Value::String("Name".to_string())
+        &runmat_value::Value::String("Name".to_string().into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
@@ -13819,12 +13826,12 @@ fn function_handle_name_value_arguments_execute_as_name_value_pairs() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "second_name",
-        &runmat_value::Value::String("Mode".to_string())
+        &runmat_value::Value::String("Mode".to_string().into())
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "second_value",
-        &runmat_value::Value::String("fast".to_string())
+        &runmat_value::Value::String("fast".to_string().into())
     ));
 }
 
@@ -14448,9 +14455,11 @@ fn generic_native_entry_publication_reuses_exact_units_and_invalidates_only_depe
         .functions()
         .resolve_name("nativeCacheCaller")
         .expect("published function identity");
-    let analysis_function = runmat_types::ProgramFunctionId(
-        u32::try_from(published_function.0).expect("portable function identity"),
-    );
+    let analysis_function = first_unit
+        .functions()
+        .get(published_function)
+        .unwrap()
+        .portable_function;
     assert!(first_unit.mir().bodies.contains_key(&published_function));
     assert!(first_unit.analysis().function(analysis_function).is_some());
     assert!(first_unit
@@ -14513,7 +14522,7 @@ fn generic_native_entry_publication_reuses_exact_units_and_invalidates_only_depe
         .contains("executable entrypoint identity disagrees"));
     let invocation = ProcedureInvocation {
         target: ProcedureTarget::Function("nativeCacheCaller".into()),
-        arguments: vec![runmat_value::Value::Num(2.0)],
+        arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Num(2.0)]),
         requested_outputs: 1,
     };
     let first = block_on(session.invoke_executable(
@@ -14661,7 +14670,7 @@ fn portable_entrypoint_rejects_matching_function_id_from_another_revision() {
     assert!(
         error
             .to_string()
-            .contains("executable entrypoint lies outside its admitted revision"),
+            .contains("executable entrypoint identity disagrees with its admitted function body: original origin is absent"),
         "{error}"
     );
 }
@@ -15214,9 +15223,7 @@ fn distributed_builtin_mapping_retains_partition_facts_in_the_compiled_unit() {
         .expect("mappedDistributed identity");
     let analysis = unit
         .analysis()
-        .function(runmat_types::ProgramFunctionId(
-            u32::try_from(function.0).expect("portable function identity"),
-        ))
+        .function(unit.functions().get(function).unwrap().portable_function)
         .expect("mappedDistributed analysis");
     let runmat_types::ValueKindFact::Distributed(distributed) = &analysis.outputs[0].kind else {
         panic!("mapped output must remain a distributed fact");
@@ -15245,11 +15252,11 @@ fn codistributor_factory_and_codistributed_inspection_use_canonical_runtime_valu
     let variables = session.get_variables().unwrap();
     assert!(matches!(
         variables.get("defaultCodist"),
-        Some(runmat_value::Value::Object(object)) if object.class_name.is(runmat_types::StaticClassIdentity::new("codistributor1d"))
+        Some(runmat_value::Value::Object(object)) if object.class_name().is(runmat_types::StaticClassIdentity::new("codistributor1d"))
     ));
     assert!(matches!(
         variables.get("blockCodist"),
-        Some(runmat_value::Value::Object(object)) if object.class_name.is(runmat_types::StaticClassIdentity::new("codistributor2dbc"))
+        Some(runmat_value::Value::Object(object)) if object.class_name().is(runmat_types::StaticClassIdentity::new("codistributor2dbc"))
     ));
     assert_eq!(
         variables.get("defaultComplete"),
@@ -15299,7 +15306,7 @@ fn compatible_codistributed_client_construction_preserves_exact_indices() {
     );
     assert!(matches!(
         variables.get("codist"),
-        Some(runmat_value::Value::Object(object)) if object.class_name.is(runmat_types::StaticClassIdentity::new("codistributor1d"))
+        Some(runmat_value::Value::Object(object)) if object.class_name().is(runmat_types::StaticClassIdentity::new("codistributor1d"))
     ));
 }
 
@@ -15309,7 +15316,7 @@ fn cooperative_codistributed_build_keeps_partition_payloads_worker_owned() {
     session.install_execution_services(std::rc::Rc::new(InProcessMultiLabExecutionService::new(2)));
     execute_text_request(
         &mut session,
-        "pool = parpool(2); spmd(2); if spmdIndex() == 1; local = uint64([1, 2]); else; local = uint64([3, 4]); end; codist = codistributor1d(uint32(2), uint64([2, 2]), uint64([1, 4])); value = codistributed.build(local, codist); part = getLocalPart(value); indices = globalIndices(value, uint32(2)); end; assembled = gather(value); part1 = part{1}; part2 = part{2}; indices1 = indices{1}; indices2 = indices{2};",
+        "pool = parpool(2); spmd(2); if spmdIndex() == 1; local = uint64([1, 2]); onlyFirst = uint64([9, 10]); else; local = uint64([3, 4]); end; codist = codistributor1d(uint32(2), uint64([2, 2]), uint64([1, 4])); value = codistributed.build(local, codist); part = getLocalPart(value); indices = globalIndices(value, uint32(2)); end; assembled = gather(value); part1 = part{1}; part2 = part{2}; firstPartial = onlyFirst{1}; indices1 = indices{1}; indices2 = indices{2};",
     )
     .expect("build a codistributed value from worker-local partitions");
     let variables = session.get_variables().unwrap();
@@ -15327,7 +15334,11 @@ fn cooperative_codistributed_build_keeps_partition_payloads_worker_owned() {
             .unwrap()
         ))
     );
-    for (name, values) in [("part1", vec![1, 2]), ("part2", vec![3, 4])] {
+    for (name, values) in [
+        ("part1", vec![1, 2]),
+        ("part2", vec![3, 4]),
+        ("firstPartial", vec![9, 10]),
+    ] {
         assert_eq!(
             variables.get(name),
             Some(&runmat_value::Value::Tensor(
@@ -15618,11 +15629,30 @@ fn distributed_builtin_policy_rejects_unclassified_operations() {
         &mut session,
         "distributedSource = distributed([1, 2]); unsupported = full(distributedSource);",
     )
-    .expect("execution returns a structured diagnostic");
+    .expect("executable code retains the runtime placement guard");
     assert!(outcome
         .diagnostics
         .iter()
         .any(|diagnostic| { diagnostic.code == "RunMat:parallel:DistributedBuiltinUnsupported" }));
+
+    // Direct session-owned calls still require the runtime placement guard
+    // when there is no statically analyzed input fact.
+    execute_text_request(&mut session, "distributedSource = distributed([1, 2]);")
+        .expect("construct the distributed input");
+    let variables = session.get_variables().expect("session variables");
+    let argument = variables
+        .get("distributedSource")
+        .expect("distributed input");
+    let error = block_on(runmat_runtime::dispatcher::call_builtin_async_in_context(
+        session.runtime_context(),
+        "full",
+        std::slice::from_ref(argument),
+    ))
+    .expect_err("dynamic distributed inputs retain the runtime placement guard");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:parallel:DistributedBuiltinUnsupported")
+    );
 }
 
 #[test]
@@ -15694,7 +15724,7 @@ fn generic_native_deoptimizes_at_the_exact_parfor_boundary() {
         .expect("compile native parfor unit");
         let invocation = ProcedureInvocation {
             target: ProcedureTarget::Function("nativeParfor".into()),
-            arguments: vec![runmat_value::Value::Num(4.0)],
+            arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Num(4.0)]),
             requested_outputs: 2,
         };
         let established = block_on(session.invoke_executable(
@@ -15743,7 +15773,7 @@ fn parallel_pool_and_future_surface_uses_the_session_execution_service() {
     assert!(matches!(
         variables.get("future"),
         Some(runmat_value::Value::Object(object))
-            if object.class_name == runmat_runtime::parallel::future::FEVAL_FUTURE_CLASS
+            if object.class_name().is(runmat_runtime::parallel::future::FEVAL_FUTURE_CLASS)
     ));
     assert_eq!(
         variables.get("answer"),
@@ -15942,7 +15972,7 @@ fn parfeval_on_all_returns_one_aggregate_future() {
     assert!(matches!(
         variables.get("future"),
         Some(runmat_value::Value::Object(object))
-            if object.class_name == runmat_runtime::parallel::future::FEVAL_ON_ALL_FUTURE_CLASS
+            if object.class_name().is(runmat_runtime::parallel::future::FEVAL_ON_ALL_FUTURE_CLASS)
     ));
     assert_eq!(
         variables.get("answerCount"),
@@ -15970,7 +16000,7 @@ fn fetch_outputs_can_return_nonuniform_future_arrays_as_cells() {
     };
     assert_eq!(answers.shape, vec![2, 1]);
     assert_eq!(
-        answers.data,
+        answers.data(),
         vec![
             runmat_value::Value::Num(5.0),
             runmat_value::Value::Num(10.0)
@@ -16046,7 +16076,7 @@ fn deterministic_native_tiering_has_bounded_warmup_and_stable_steady_state() {
             &unit,
             ProcedureInvocation {
                 target: ProcedureTarget::Function("nativeTier".into()),
-                arguments: vec![runmat_value::Value::Num(4.0)],
+                arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Num(4.0)]),
                 requested_outputs: 1,
             },
             &InvocationControl::default(),
@@ -16293,7 +16323,7 @@ fn background_native_tiering_publishes_once_without_blocking_the_hot_invocation(
     .expect("compile background tiering fixture");
     let invocation = ProcedureInvocation {
         target: ProcedureTarget::Function("backgroundTier".into()),
-        arguments: vec![runmat_value::Value::Num(6.0)],
+        arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Num(6.0)]),
         requested_outputs: 1,
     };
 
@@ -16347,7 +16377,7 @@ fn specialized_native_tiering_publishes_and_executes_only_its_exact_profile() {
             &unit,
             ProcedureInvocation {
                 target: ProcedureTarget::Function("specializedTier".into()),
-                arguments: vec![value],
+                arguments: crate::ProcedureArguments::Source(vec![value]),
                 requested_outputs: 1,
             },
             &InvocationControl::default(),
@@ -16403,7 +16433,9 @@ fn specialized_native_tiering_executes_eligible_numeric_regions_through_shared_p
             &unit,
             ProcedureInvocation {
                 target: ProcedureTarget::Function("vectorRegion".into()),
-                arguments: vec![runmat_value::Value::Tensor(input.clone())],
+                arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Tensor(
+                    input.clone(),
+                )]),
                 requested_outputs: 1,
             },
             &InvocationControl::default(),
@@ -16457,7 +16489,9 @@ fn specialized_numeric_regions_fall_back_without_changing_unsupported_storage() 
             &unit,
             ProcedureInvocation {
                 target: ProcedureTarget::Function("vectorRegionFallback".into()),
-                arguments: vec![runmat_value::Value::Tensor(input.clone())],
+                arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Tensor(
+                    input.clone(),
+                )]),
                 requested_outputs: 1,
             },
             &InvocationControl::default(),
@@ -16496,7 +16530,7 @@ fn native_tiering_records_exact_loop_header_backedges() {
     .expect("compile loop feedback fixture");
     let invocation = ProcedureInvocation {
         target: ProcedureTarget::Function("loopTier".into()),
-        arguments: Vec::new(),
+        arguments: crate::ProcedureArguments::Source(Vec::new()),
         requested_outputs: 1,
     };
     for _ in 0..2 {
@@ -16544,7 +16578,7 @@ fn forced_generic_native_executable_lane_matches_values_outputs_and_nested_calls
     let unit = block_on(session.compile_executable_unit(source, None)).expect("compile unit");
     let invocation = ProcedureInvocation {
         target: ProcedureTarget::Function("nativeCore".into()),
-        arguments: vec![runmat_value::Value::Num(5.0)],
+        arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Num(5.0)]),
         requested_outputs: 2,
     };
     let established = block_on(session.invoke_executable(
@@ -16571,7 +16605,7 @@ fn forced_generic_native_executable_lane_matches_values_outputs_and_nested_calls
     for requested_outputs in [0, 1] {
         let invocation = ProcedureInvocation {
             target: ProcedureTarget::Function("nativeCore".into()),
-            arguments: vec![runmat_value::Value::Num(5.0)],
+            arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Num(5.0)]),
             requested_outputs,
         };
         let established = block_on(session.invoke_executable(
@@ -16622,7 +16656,7 @@ fn forced_generic_native_executable_lane_matches_session_state_across_calls() {
     ] {
         let invocation = ProcedureInvocation {
             target: ProcedureTarget::Function("nativeState".into()),
-            arguments: vec![runmat_value::Value::Num(delta)],
+            arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Num(delta)]),
             requested_outputs: 2,
         };
         let established = block_on(established_session.invoke_executable(
@@ -16658,7 +16692,7 @@ fn forced_generic_native_executable_lane_matches_cell_argument_expansion() {
         RunMatSession::with_options(false, false).expect("native session init");
     let invocation = ProcedureInvocation {
         target: ProcedureTarget::Function("nativeExpansion".into()),
-        arguments: Vec::new(),
+        arguments: crate::ProcedureArguments::Source(Vec::new()),
         requested_outputs: 1,
     };
     let established = block_on(established_session.invoke_executable(
@@ -16692,7 +16726,7 @@ fn forced_native_caller_preserves_inputname_variable_and_expression_facts() {
         &unit,
         ProcedureInvocation {
             target: ProcedureTarget::Function("nativeInputname".into()),
-            arguments: vec![runmat_value::Value::Num(7.0)],
+            arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Num(7.0)]),
             requested_outputs: 6,
         },
         &InvocationControl::default().force_generic_native(),
@@ -16738,7 +16772,7 @@ fn forced_native_caller_preserves_inputname_through_cold_and_warm_file_load() {
         .expect("compile cold-load native caller");
     let invocation = ProcedureInvocation {
         target: ProcedureTarget::Function("nativeColdInputname".into()),
-        arguments: vec![runmat_value::Value::Num(7.0)],
+        arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Num(7.0)]),
         requested_outputs: 2,
     };
     let expected = [
@@ -16793,7 +16827,7 @@ fn forced_generic_native_executable_lane_matches_defaults_validation_and_entry_c
     ] {
         let invocation = ProcedureInvocation {
             target: ProcedureTarget::Function("nativeFunctionAbi".into()),
-            arguments,
+            arguments: crate::ProcedureArguments::Source(arguments),
             requested_outputs: 3,
         };
         let established = block_on(established_session.invoke_executable(
@@ -16814,7 +16848,7 @@ fn forced_generic_native_executable_lane_matches_defaults_validation_and_entry_c
 
     let invalid = ProcedureInvocation {
         target: ProcedureTarget::Function("nativeFunctionAbi".into()),
-        arguments: vec![runmat_value::Value::Num(-1.0)],
+        arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Num(-1.0)]),
         requested_outputs: 1,
     };
     let established = block_on(established_session.invoke_executable(
@@ -16852,7 +16886,10 @@ fn forced_generic_native_executable_lane_matches_varargin_and_varargout() {
         RunMatSession::with_options(false, false).expect("native session init");
     let invocation = ProcedureInvocation {
         target: ProcedureTarget::Function("nativeVariadicAbi".into()),
-        arguments: vec![runmat_value::Value::Num(4.0), runmat_value::Value::Num(9.0)],
+        arguments: crate::ProcedureArguments::Source(vec![
+            runmat_value::Value::Num(4.0),
+            runmat_value::Value::Num(9.0),
+        ]),
         requested_outputs: 3,
     };
     let established = block_on(established_session.invoke_executable(
@@ -16926,7 +16963,7 @@ fn forced_generic_native_matches_prepared_cell_sequence_assignment() {
     ] {
         let invocation = ProcedureInvocation {
             target: ProcedureTarget::Function("nativeSequenceAssign".into()),
-            arguments: vec![input],
+            arguments: crate::ProcedureArguments::Source(vec![input]),
             requested_outputs: 2,
         };
         let established = block_on(established_session.invoke_executable(
@@ -16945,7 +16982,7 @@ fn forced_generic_native_matches_prepared_cell_sequence_assignment() {
         let [runmat_value::Value::Cell(cell), members] = native.as_slice() else {
             panic!("expected cell and structure outputs, got {native:?}");
         };
-        assert_eq!(cell.data, expected);
+        assert_eq!(cell.data(), expected);
         let member_values = match members {
             runmat_value::Value::Struct(value) => value
                 .fields
@@ -16979,7 +17016,7 @@ fn forced_generic_native_executable_lane_matches_console_effects_exactly_once() 
         RunMatSession::with_options(false, false).expect("native session init");
     let invocation = ProcedureInvocation {
         target: ProcedureTarget::Function("nativeConsole".into()),
-        arguments: vec![runmat_value::Value::Num(7.0)],
+        arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Num(7.0)]),
         requested_outputs: 1,
     };
 
@@ -17054,7 +17091,7 @@ fn forced_generic_native_executable_lane_matches_runtime_cancellation() {
         .cancel(runmat_execution::CancellationReason::User);
     let invocation = ProcedureInvocation {
         target: ProcedureTarget::Function("nativeCancel".into()),
-        arguments: vec![runmat_value::Value::Num(2.0)],
+        arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Num(2.0)]),
         requested_outputs: 1,
     };
     let established = block_on(established_session.invoke_executable(
@@ -17091,7 +17128,7 @@ fn forced_generic_native_executable_lane_preserves_error_identity_and_source_spa
     let unit = block_on(session.compile_executable_unit(source, None)).expect("compile unit");
     let invocation = ProcedureInvocation {
         target: ProcedureTarget::Function("nativeBounds".into()),
-        arguments: Vec::new(),
+        arguments: crate::ProcedureArguments::Source(Vec::new()),
         requested_outputs: 1,
     };
     let established = block_on(session.invoke_executable(
@@ -17133,7 +17170,7 @@ fn forced_generic_native_executable_lane_matches_structured_try_catch_transfer()
     let unit = block_on(session.compile_executable_unit(source, None)).expect("compile unit");
     let no_error = ProcedureInvocation {
         target: ProcedureTarget::Function("nativeTryOk".into()),
-        arguments: vec![runmat_value::Value::Num(4.0)],
+        arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Num(4.0)]),
         requested_outputs: 1,
     };
     let established_no_error =
@@ -17150,7 +17187,7 @@ fn forced_generic_native_executable_lane_matches_structured_try_catch_transfer()
 
     let invocation = ProcedureInvocation {
         target: ProcedureTarget::Function("nativeTry".into()),
-        arguments: vec![runmat_value::Value::Num(-1.0)],
+        arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Num(-1.0)]),
         requested_outputs: 2,
     };
     let established = block_on(session.invoke_executable(
@@ -17176,7 +17213,7 @@ fn forced_generic_native_executable_lane_matches_structured_try_catch_transfer()
 
     let nested = ProcedureInvocation {
         target: ProcedureTarget::Function("nativeNestedTry".into()),
-        arguments: Vec::new(),
+        arguments: crate::ProcedureArguments::Source(Vec::new()),
         requested_outputs: 2,
     };
     let established_nested =
@@ -17212,7 +17249,7 @@ fn forced_generic_native_executable_lane_matches_structured_try_catch_transfer()
     ] {
         let nested_control = ProcedureInvocation {
             target: ProcedureTarget::Function("nativeNestedControl".into()),
-            arguments: vec![runmat_value::Value::Num(argument)],
+            arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Num(argument)]),
             requested_outputs: 2,
         };
         let established = block_on(session.invoke_executable(
@@ -17245,7 +17282,7 @@ fn forced_generic_native_rethrow_shorthand_preserves_lexical_catch() {
     let unit = block_on(session.compile_executable_unit(source, None)).expect("compile unit");
     let invocation = ProcedureInvocation {
         target: ProcedureTarget::Function("nativeRethrow".into()),
-        arguments: Vec::new(),
+        arguments: crate::ProcedureArguments::Source(Vec::new()),
         requested_outputs: 1,
     };
     let established = block_on(session.invoke_executable(
@@ -17282,7 +17319,7 @@ fn forced_generic_native_executable_lane_matches_async_suspension_resume() {
     for function in ["nativeAwait", "nativeSpawnAwait"] {
         let invocation = ProcedureInvocation {
             target: ProcedureTarget::Function(function.into()),
-            arguments: vec![runmat_value::Value::Num(4.0)],
+            arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Num(4.0)]),
             requested_outputs: 1,
         };
         let established = block_on(session.invoke_executable(
@@ -17303,12 +17340,12 @@ fn forced_generic_native_executable_lane_matches_async_suspension_resume() {
 
     let reset = ProcedureInvocation {
         target: ProcedureTarget::Function("resetAsyncCount".into()),
-        arguments: Vec::new(),
+        arguments: crate::ProcedureArguments::Source(Vec::new()),
         requested_outputs: 0,
     };
     let no_replay = ProcedureInvocation {
         target: ProcedureTarget::Function("nativeNoReplay".into()),
-        arguments: vec![runmat_value::Value::Num(4.0)],
+        arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Num(4.0)]),
         requested_outputs: 2,
     };
     block_on(session.invoke_executable(&unit, reset.clone(), &InvocationControl::default()))
@@ -17335,7 +17372,7 @@ fn forced_generic_native_executable_lane_matches_async_suspension_resume() {
 
     let caught = ProcedureInvocation {
         target: ProcedureTarget::Function("nativeAwaitCatch".into()),
-        arguments: Vec::new(),
+        arguments: crate::ProcedureArguments::Source(Vec::new()),
         requested_outputs: 2,
     };
     let established =
@@ -17407,7 +17444,7 @@ end
         block_on(session.compile_executable_unit(source, None)).expect("compile capture unit");
     let invocation = ProcedureInvocation {
         target: ProcedureTarget::Function("nativeCaptures".into()),
-        arguments: vec![runmat_value::Value::Num(4.0)],
+        arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Num(4.0)]),
         requested_outputs: 7,
     };
     let established = block_on(session.invoke_executable(

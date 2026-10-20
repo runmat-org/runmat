@@ -94,6 +94,7 @@ mod run;
 mod s1_compiled_call_tests;
 pub(crate) mod semantic_definition;
 mod source_evaluation;
+pub(crate) use source_evaluation::{bind_function_resolvers, SelectedStaticTarget};
 mod source_scope;
 pub use source_evaluation::SelectedNativeSourceEvaluator;
 #[cfg(not(target_arch = "wasm32"))]

@@ -4,6 +4,7 @@ use super::super::error;
 
 pub(super) fn parse(parse_error: CallableParseError) -> crate::RuntimeError {
     match parse_error {
+        CallableParseError::Runtime(error) => error,
         CallableParseError::EmptyText => {
             error::invalid("cellfun: expected function handle or builtin name, got empty string")
         }

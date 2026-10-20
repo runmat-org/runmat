@@ -1,6 +1,6 @@
 //! One projection of canonical MIR class declarations into Native IR.
 
-use runmat_types::{ClassIdentity, ClassMethodRole, ProgramFunctionId};
+use runmat_types::{ClassIdentity, ClassMethodRole};
 
 use crate::{
     NativeClassDeclaration, NativeClassMethod, NativeClassProperty, NativeCodegenError,
@@ -70,17 +70,9 @@ pub(super) fn lower(
             .methods
             .iter()
             .map(|method| {
-                let function = u32::try_from(method.function.0)
-                    .map(ProgramFunctionId)
-                    .map_err(|_| {
-                        NativeCodegenError::new(
-                            "native.lowering.class_method",
-                            "class method identity exceeds Native IR",
-                        )
-                    })?;
                 Ok(NativeClassMethod {
                     name: method.name.clone(),
-                    function,
+                    function: method.function,
                     is_static: method.is_static,
                     attributes: method.attributes.clone(),
                 })
@@ -108,17 +100,9 @@ pub(super) fn lower(
                     "constructor metadata disagrees with its class declaration",
                 ));
             }
-            let function = u32::try_from(method.function.0)
-                .map(ProgramFunctionId)
-                .map_err(|_| {
-                    NativeCodegenError::new(
-                        "native.lowering.class_constructor",
-                        "constructor function identity exceeds Native IR",
-                    )
-                })?;
             if constructor
                 .replace(NativeConstructorMethod {
-                    function,
+                    function: method.function,
                     access: method.attributes.access,
                 })
                 .is_some()

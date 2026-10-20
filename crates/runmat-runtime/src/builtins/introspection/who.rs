@@ -18,8 +18,8 @@ use crate::{build_runtime_error, make_cell, RuntimeError};
     binding_variant = "default",
     builtin_path = "crate::builtins::introspection::who"
 )]
-async fn who_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let request = parse_request(&args, WorkspaceQueryOwner::Who)?;
+async fn who_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
+    let request = parse_request(args.view(), WorkspaceQueryOwner::Who)?;
 
     let file_entries = match &request.source {
         WorkspaceQuerySource::File(path) => Some(read_mat_file_for_builtin(path, "who").await?),
@@ -63,7 +63,7 @@ async fn who_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 
     let mut cells = Vec::with_capacity(names.len());
     for name in names.into_iter() {
-        cells.push(Value::String(name));
+        cells.push(Value::string(name));
     }
     let rows = cells.len();
     make_cell(cells, rows, 1).map_err(|err| build_runtime_error(err).with_builtin("who").build())
@@ -87,18 +87,20 @@ pub(crate) mod tests {
     use tempfile::tempdir;
 
     fn who_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::who_builtin(args))
+        block_on(super::who_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
 
     fn names_from_value(value: Value) -> Vec<String> {
         match value {
             Value::Cell(cell) => cell
-                .data
+                .data()
                 .iter()
                 .map(|value| match value {
-                    Value::String(s) => s.clone(),
+                    Value::String(s) => s.to_string(),
                     Value::CharArray(ca) if ca.rows == 1 => ca
-                        .data
+                        .data()
                         .iter()
                         .collect::<String>()
                         .trim_end_matches([' ', '\0'])
@@ -106,8 +108,8 @@ pub(crate) mod tests {
                     other => panic!("expected string entry, got {other:?}"),
                 })
                 .collect(),
-            Value::String(s) => vec![s],
-            Value::StringArray(sa) => sa.data,
+            Value::String(s) => vec![s.to_string()],
+            Value::StringArray(sa) => sa.data().iter().map(ToString::to_string).collect(),
             Value::CharArray(ca) => char_array_rows_as_strings(&ca),
             other => panic!("expected cell array result, got {other:?}"),
         }
@@ -364,7 +366,7 @@ pub(crate) mod tests {
             Value::Cell(cell) => {
                 assert_eq!(cell.rows, 0);
                 assert_eq!(cell.cols, 1);
-                assert!(cell.data.is_empty());
+                assert!(cell.data().is_empty());
             }
             other => panic!("expected cell array, got {other:?}"),
         }

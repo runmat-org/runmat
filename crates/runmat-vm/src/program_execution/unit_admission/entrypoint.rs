@@ -17,6 +17,7 @@ pub(super) enum AdmittedEntrypoint {
 pub(super) fn admit(
     envelope: &runmat_execution::ExecutableUnitEnvelope,
     mir: &runmat_mir::MirAssembly,
+    analysis: &runmat_mir::analysis::AnalysisStore,
     bytecode: &crate::Bytecode,
     registry: &crate::FunctionRegistry,
     layout: &crate::VmAssemblyLayout,
@@ -33,7 +34,9 @@ pub(super) fn admit(
         }
         runmat_execution::ValidatedExecutableEntrypoint::Script(function) => {
             Ok(AdmittedEntrypoint::Script {
-                origin: script_origin(envelope, mir, bytecode, layout, source_map, function)?,
+                origin: script_origin(
+                    envelope, mir, analysis, bytecode, layout, source_map, function,
+                )?,
             })
         }
         runmat_execution::ValidatedExecutableEntrypoint::DeclarationOnly(class) => {
@@ -48,18 +51,28 @@ fn function_origin(
     portable_function: runmat_types::ProgramFunctionId,
 ) -> Result<AdmittedEntrypoint, ExecutableUnitAdmissionError> {
     let identity = &envelope.manifest.identity;
-    let local_function = registry.resolve_name(&identity.entrypoint).ok_or_else(|| {
-        source_binding("executable entrypoint is absent from its admitted function registry")
+    let expected = expected_origin(envelope, portable_function)?;
+    let mut matches = registry
+        .functions
+        .iter()
+        .filter(|(_, body)| body.binding_origin == Some(expected));
+    let (local_function, function) = matches.next().ok_or_else(|| {
+        source_binding("executable entrypoint identity disagrees with its admitted function body: original origin is absent")
     })?;
-    let function = registry.get(local_function).ok_or_else(|| {
-        source_binding("executable entrypoint is absent from its admitted function registry")
-    })?;
-    if function.portable_function != portable_function {
+    if matches.next().is_some() {
+        return Err(source_binding(
+            "executable entrypoint origin has ambiguous admitted bodies",
+        ));
+    }
+    let local_function = *local_function;
+    if function.function != local_function
+        || function.portable_function != portable_function
+        || function.display_name != identity.entrypoint
+    {
         return Err(source_binding(
             "executable entrypoint identity disagrees with its admitted function body",
         ));
     }
-    let expected = expected_origin(envelope, portable_function)?;
     if function.binding_origin != Some(expected) {
         return Err(source_binding(
             "executable entrypoint lies outside its admitted revision",
@@ -74,6 +87,7 @@ fn function_origin(
 fn script_origin(
     envelope: &runmat_execution::ExecutableUnitEnvelope,
     mir: &runmat_mir::MirAssembly,
+    analysis: &runmat_mir::analysis::AnalysisStore,
     bytecode: &crate::Bytecode,
     layout: &crate::VmAssemblyLayout,
     source_map: &runmat_execution::ExecutableSourceMapV2,
@@ -85,10 +99,26 @@ fn script_origin(
             "script executable has a non-script entrypoint name",
         ));
     }
-    let function = runmat_hir::FunctionId(
-        usize::try_from(portable_function.0)
-            .map_err(|_| source_binding("script entrypoint identity exceeds this host"))?,
-    );
+    let mut matches = analysis
+        .functions
+        .iter()
+        .filter(|facts| facts.function == portable_function);
+    let facts = matches
+        .next()
+        .ok_or_else(|| source_binding("script entrypoint has no admitted analysis owner"))?;
+    if matches.next().is_some() {
+        return Err(source_binding(
+            "script entrypoint has ambiguous analysis owners",
+        ));
+    }
+    let Some(runmat_types::CallableIdentity::BoundFunction(function)) =
+        facts.callable.identity.as_ref()
+    else {
+        return Err(source_binding(
+            "script analysis has no exact local self binding",
+        ));
+    };
+    let function = *function;
     let metadata = mir.functions.get(&function).ok_or_else(|| {
         source_binding("script entrypoint is absent from its admitted MIR metadata")
     })?;

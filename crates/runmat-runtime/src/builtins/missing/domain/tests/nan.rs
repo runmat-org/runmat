@@ -9,16 +9,21 @@ async fn nansum_builtin(
     value: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    nansum_owned(None, observation, value, rest)
-        .await
-        .map(|owned| owned.value().clone())
+    nansum_owned(
+        None,
+        observation,
+        value,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    )
+    .await
+    .map(|owned| owned.value().clone())
 }
 
 #[test]
 fn nanmean_alias_uses_omitnan() {
     let result = block_on(nanmean_builtin(
         tensor(vec![1.0, f64::NAN, 3.0], vec![1, 3]),
-        vec![Value::from("all")],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("all")]),
     ))
     .unwrap();
     assert!(matches!(result, Value::Num(n) if (n - 2.0).abs() < 1e-12));
@@ -29,14 +34,20 @@ fn nanmean_alias_imposes_omission_without_synthetic_argument() {
     let input = tensor(vec![1.0, f64::NAN, 3.0], vec![1, 3]);
     let result = block_on(nanmean_builtin(
         input.clone(),
-        vec![Value::from("all"), Value::from("includenan")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("all"),
+            Value::from("includenan"),
+        ]),
     ))
     .expect("legacy alias retains its omission policy");
     assert!(matches!(result, Value::Num(value) if (value - 2.0).abs() < 1e-12));
 
     let ordinary = block_on(crate::builtins::math::reduction::mean::mean_builtin(
         input,
-        vec![Value::from("all"), Value::from("includenan")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("all"),
+            Value::from("includenan"),
+        ]),
     ))
     .expect("ordinary mean honors the explicit inclusion policy");
     assert!(matches!(ordinary, Value::Num(value) if value.is_nan()));
@@ -53,22 +64,42 @@ fn nan_aliases_impose_typed_omission_after_owner_controls() {
         ),
         (
             "nanmedian",
-            |value, rest| block_on(nanmedian_builtin(value, rest)),
+            |value, rest| {
+                block_on(nanmedian_builtin(
+                    value,
+                    crate::builtins::common::test_support::builtin_arguments(rest),
+                ))
+            },
             2.0,
         ),
         (
             "nanstd",
-            |value, rest| block_on(nanstd_builtin(value, rest)),
+            |value, rest| {
+                block_on(nanstd_builtin(
+                    value,
+                    crate::builtins::common::test_support::builtin_arguments(rest),
+                ))
+            },
             2.0_f64.sqrt(),
         ),
         (
             "nanvar",
-            |value, rest| block_on(nanvar_builtin(value, rest)),
+            |value, rest| {
+                block_on(nanvar_builtin(
+                    value,
+                    crate::builtins::common::test_support::builtin_arguments(rest),
+                ))
+            },
             2.0,
         ),
         (
             "nanmin",
-            |value, rest| block_on(nanmin_builtin(value, rest)),
+            |value, rest| {
+                block_on(nanmin_builtin(
+                    value,
+                    crate::builtins::common::test_support::builtin_arguments(rest),
+                ))
+            },
             1.0,
         ),
     ];
@@ -101,7 +132,12 @@ fn legacy_nan_reductions_gate_typed_integer_data_by_compatibility_mode() {
     );
     let cases: [LegacyNanCase; 4] = [
         (
-            |value, rest| block_on(nanmean_builtin(value, rest)),
+            |value, rest| {
+                block_on(nanmean_builtin(
+                    value,
+                    crate::builtins::common::test_support::builtin_arguments(rest),
+                ))
+            },
             "nanmean",
             "RunMat:compatibility:NanmeanTypedIntegerInputExtension",
         ),
@@ -111,12 +147,22 @@ fn legacy_nan_reductions_gate_typed_integer_data_by_compatibility_mode() {
             "RunMat:compatibility:NansumTypedIntegerInputExtension",
         ),
         (
-            |value, rest| block_on(nanmin_builtin(value, rest)),
+            |value, rest| {
+                block_on(nanmin_builtin(
+                    value,
+                    crate::builtins::common::test_support::builtin_arguments(rest),
+                ))
+            },
             "nanmin",
             "RunMat:compatibility:NanminTypedIntegerInputExtension",
         ),
         (
-            |value, rest| block_on(nanmedian_builtin(value, rest)),
+            |value, rest| {
+                block_on(nanmedian_builtin(
+                    value,
+                    crate::builtins::common::test_support::builtin_arguments(rest),
+                ))
+            },
             "nanmedian",
             "RunMat:compatibility:NanmedianTypedIntegerInputExtension",
         ),
@@ -144,8 +190,11 @@ fn legacy_nan_reductions_gate_typed_integer_dimensions() {
         || Value::Tensor(Tensor::new(Vec::<f64>::new(), vec![0, 0]).expect("empty placeholder"));
 
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-    let error = block_on(nanmean_builtin(floating(), vec![dimension()]))
-        .expect_err("strict nanmean typed-integer dimension");
+    let error = block_on(nanmean_builtin(
+        floating(),
+        crate::builtins::common::test_support::builtin_arguments(vec![dimension()]),
+    ))
+    .expect_err("strict nanmean typed-integer dimension");
     assert_eq!(
         error.identifier(),
         Some("RunMat:compatibility:NanmeanTypedIntegerInputExtension")
@@ -156,14 +205,20 @@ fn legacy_nan_reductions_gate_typed_integer_dimensions() {
         error.identifier(),
         Some("RunMat:compatibility:NansumTypedIntegerInputExtension")
     );
-    let error = block_on(nanmedian_builtin(floating(), vec![dimension()]))
-        .expect_err("strict nanmedian typed-integer dimension");
+    let error = block_on(nanmedian_builtin(
+        floating(),
+        crate::builtins::common::test_support::builtin_arguments(vec![dimension()]),
+    ))
+    .expect_err("strict nanmedian typed-integer dimension");
     assert_eq!(
         error.identifier(),
         Some("RunMat:compatibility:NanmedianTypedIntegerInputExtension")
     );
-    let error = block_on(nanmin_builtin(floating(), vec![placeholder(), dimension()]))
-        .expect_err("strict nanmin typed-integer dimension");
+    let error = block_on(nanmin_builtin(
+        floating(),
+        crate::builtins::common::test_support::builtin_arguments(vec![placeholder(), dimension()]),
+    ))
+    .expect_err("strict nanmin typed-integer dimension");
     assert_eq!(
         error.identifier(),
         Some("RunMat:compatibility:NanminTypedIntegerInputExtension")
@@ -176,13 +231,17 @@ fn legacy_nan_std_var_reject_integer_data_and_gate_integer_controls() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(enabled);
         let error = block_on(nanstd_builtin(
             Value::Int(IntValue::I16(7)),
-            vec![Value::Int(IntValue::U8(1))],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(
+                IntValue::U8(1),
+            )]),
         ))
         .expect_err("nanstd integer data");
         assert!(error.message().contains("integer data inputs"));
         let error = block_on(nanvar_builtin(
             Value::Int(IntValue::I16(7)),
-            vec![Value::Int(IntValue::U8(1))],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(
+                IntValue::U8(1),
+            )]),
         ))
         .expect_err("nanvar integer data");
         assert!(error.message().contains("integer data inputs"));
@@ -193,7 +252,9 @@ fn legacy_nan_std_var_reject_integer_data_and_gate_integer_controls() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = block_on(nanstd_builtin(
             floating(),
-            vec![Value::Int(IntValue::U8(1))],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(
+                IntValue::U8(1),
+            )]),
         ))
         .expect_err("nanstd strict typed-integer control");
         assert_eq!(
@@ -202,7 +263,9 @@ fn legacy_nan_std_var_reject_integer_data_and_gate_integer_controls() {
         );
         let error = block_on(nanvar_builtin(
             floating(),
-            vec![Value::Int(IntValue::U8(1))],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(
+                IntValue::U8(1),
+            )]),
         ))
         .expect_err("nanvar strict typed-integer control");
         assert_eq!(
@@ -214,12 +277,16 @@ fn legacy_nan_std_var_reject_integer_data_and_gate_integer_controls() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         block_on(nanstd_builtin(
             floating(),
-            vec![Value::Int(IntValue::U8(1))],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(
+                IntValue::U8(1),
+            )]),
         ))
         .expect("nanstd RunMat typed-integer control");
         block_on(nanvar_builtin(
             floating(),
-            vec![Value::Int(IntValue::U8(1))],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(
+                IntValue::U8(1),
+            )]),
         ))
         .expect("nanvar RunMat typed-integer control");
     }
@@ -240,7 +307,7 @@ fn legacy_nan_integer_policy_inspects_resident_dtype_before_dispatch() {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
             let error = block_on(nanmean_builtin(
                 Value::GpuTensor(handle.clone()),
-                Vec::new(),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
             ))
             .expect_err("strict resident nanmean");
             assert_eq!(
@@ -248,8 +315,11 @@ fn legacy_nan_integer_policy_inspects_resident_dtype_before_dispatch() {
                 Some("RunMat:compatibility:NanmeanTypedIntegerInputExtension")
             );
 
-            let error = block_on(nanstd_builtin(Value::GpuTensor(handle.clone()), Vec::new()))
-                .expect_err("resident nanstd integer data");
+            let error = block_on(nanstd_builtin(
+                Value::GpuTensor(handle.clone()),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+            ))
+            .expect_err("resident nanstd integer data");
             assert!(error.message().contains("integer data inputs"));
         }
 
@@ -279,7 +349,12 @@ fn legacy_nan_integer_extensions_preserve_declared_residency() {
         let cases: [ResidentNanCase; 2] = [
             (
                 "nanmean",
-                |value, rest| block_on(nanmean_builtin(value, rest)),
+                |value, rest| {
+                    block_on(nanmean_builtin(
+                        value,
+                        crate::builtins::common::test_support::builtin_arguments(rest),
+                    ))
+                },
                 vec![2.0, 6.0],
             ),
             (
@@ -311,8 +386,11 @@ fn legacy_nan_integer_extensions_preserve_declared_residency() {
                 shape: &[2, 2],
             })
             .expect("integer upload");
-        let result = block_on(nanmedian_builtin(Value::GpuTensor(handle), Vec::new()))
-            .expect("resident integer nanmedian");
+        let result = block_on(nanmedian_builtin(
+            Value::GpuTensor(handle),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect("resident integer nanmedian");
         assert!(matches!(result, Value::GpuTensor(_)));
         let gathered = test_support::gather(result).expect("gather median");
         assert_eq!(
@@ -326,7 +404,10 @@ fn legacy_nan_integer_extensions_preserve_declared_residency() {
 fn nanmin_supports_pairwise_form() {
     let result = block_on(nanmin_builtin(
         tensor(vec![f64::NAN, 4.0, 3.0], vec![1, 3]),
-        vec![tensor(vec![2.0, f64::NAN, 5.0], vec![1, 3])],
+        crate::builtins::common::test_support::builtin_arguments(vec![tensor(
+            vec![2.0, f64::NAN, 5.0],
+            vec![1, 3],
+        )]),
     ))
     .unwrap();
     assert!(matches!(result, Value::Tensor(t) if t.materialize_f64() == vec![2.0, 4.0, 3.0]));
@@ -337,14 +418,20 @@ fn nanmin_supports_pairwise_form() {
 fn nanmin_pairwise_preserves_rank_zero_scalarization_and_rank_one_broadcast_shape() {
     let scalar = block_on(nanmin_builtin(
         tensor(vec![f64::NAN], Vec::new()),
-        vec![tensor(vec![2.0], Vec::new())],
+        crate::builtins::common::test_support::builtin_arguments(vec![tensor(
+            vec![2.0],
+            Vec::new(),
+        )]),
     ))
     .expect("rank-zero pairwise nanmin");
     assert!(matches!(scalar, Value::Num(value) if value == 2.0));
 
     let vector = block_on(nanmin_builtin(
         tensor(vec![f64::NAN], Vec::new()),
-        vec![tensor(vec![2.0, 1.0], vec![2])],
+        crate::builtins::common::test_support::builtin_arguments(vec![tensor(
+            vec![2.0, 1.0],
+            vec![2],
+        )]),
     ))
     .expect("rank-zero scalar broadcasts over rank-one input");
     assert!(matches!(
@@ -360,8 +447,14 @@ fn nanmin_empty_placeholder_selects_reduction_not_pairwise() {
     let placeholder = Value::Tensor(
         Tensor::new(Vec::<f64>::new(), vec![0, 0]).expect("empty reduction placeholder"),
     );
-    let result = block_on(nanmin_builtin(input, vec![placeholder, Value::Num(2.0)]))
-        .expect("nanmin(A, [], dim) should reduce along dim");
+    let result = block_on(nanmin_builtin(
+        input,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            placeholder,
+            Value::Num(2.0),
+        ]),
+    ))
+    .expect("nanmin(A, [], dim) should reduce along dim");
     assert!(matches!(
         result,
         Value::Tensor(tensor)
@@ -373,7 +466,7 @@ fn nanmin_empty_placeholder_selects_reduction_not_pairwise() {
 fn nanmin_all_option_routes_to_reduction() {
     let result = block_on(nanmin_builtin(
         tensor(vec![f64::NAN, 5.0, 2.0, 9.0], vec![2, 2]),
-        vec![Value::from("all")],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("all")]),
     ))
     .expect("nanmin(A, 'all') should reduce rather than compare pairwise");
     assert!(matches!(result, Value::Num(number) if number == 2.0));
@@ -387,8 +480,14 @@ fn nanmin_reduction_returns_indices_but_pairwise_has_one_output() {
         let placeholder = Value::Tensor(
             Tensor::new(Vec::<f64>::new(), vec![0, 0]).expect("empty reduction placeholder"),
         );
-        let result = block_on(nanmin_builtin(input, vec![placeholder, Value::Num(2.0)]))
-            .expect("two-output reduction");
+        let result = block_on(nanmin_builtin(
+            input,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                placeholder,
+                Value::Num(2.0),
+            ]),
+        ))
+        .expect("two-output reduction");
         let Value::OutputList(outputs) = result else {
             panic!("expected values and indices");
         };
@@ -404,7 +503,10 @@ fn nanmin_reduction_returns_indices_but_pairwise_has_one_output() {
         let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let error = block_on(nanmin_builtin(
             tensor(vec![1.0, 2.0], vec![1, 2]),
-            vec![tensor(vec![2.0, 1.0], vec![1, 2])],
+            crate::builtins::common::test_support::builtin_arguments(vec![tensor(
+                vec![2.0, 1.0],
+                vec![1, 2],
+            )]),
         ))
         .expect_err("pairwise form has only one output");
         assert_eq!(error.identifier(), Some("RunMat:missing:InvalidArgument"));
@@ -417,7 +519,11 @@ fn nanmin_pairwise_reads_typed_integer_storage_exactly() {
     let left = Tensor::new_integer(IntegerStorage::U16(vec![9, 4, 3]), vec![1, 3]).unwrap();
     let right = tensor(vec![2.0, f64::NAN, 5.0], vec![1, 3]);
 
-    let result = block_on(nanmin_builtin(Value::Tensor(left), vec![right])).unwrap();
+    let result = block_on(nanmin_builtin(
+        Value::Tensor(left),
+        crate::builtins::common::test_support::builtin_arguments(vec![right]),
+    ))
+    .unwrap();
 
     assert!(
         matches!(result, Value::Tensor(tensor) if tensor.materialize_f64() == vec![2.0, 4.0, 3.0])
@@ -426,7 +532,11 @@ fn nanmin_pairwise_reads_typed_integer_storage_exactly() {
     let left = tensor(vec![9.0, 4.0, 3.0], vec![1, 3]);
     let right = Tensor::new_integer(IntegerStorage::U8(vec![5]), vec![1, 1]).unwrap();
 
-    let result = block_on(nanmin_builtin(left, vec![Value::Tensor(right)])).unwrap();
+    let result = block_on(nanmin_builtin(
+        left,
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(right)]),
+    ))
+    .unwrap();
 
     assert!(
         matches!(result, Value::Tensor(tensor) if tensor.materialize_f64() == vec![5.0, 4.0, 3.0])
@@ -449,7 +559,7 @@ fn nanmin_pairwise_preserves_exact_wide_same_class_integers() {
 
     let result = block_on(nanmin_builtin(
         Value::Tensor(left),
-        vec![Value::Tensor(right)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(right)]),
     ))
     .unwrap();
     let Value::Tensor(tensor) = result else {
@@ -466,7 +576,9 @@ fn nanmin_pairwise_never_falls_back_to_lossy_wide_integer_comparison() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let mixed_classes = block_on(nanmin_builtin(
         Value::Int(IntValue::U64(u64::MAX)),
-        vec![Value::Int(IntValue::I64(-1))],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(IntValue::I64(
+            -1,
+        ))]),
     ))
     .expect_err("mismatched integer classes cannot be widened through double");
     assert_eq!(
@@ -478,8 +590,11 @@ fn nanmin_pairwise_never_falls_back_to_lossy_wide_integer_comparison() {
     let wide = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
         .expect("wide integer tensor");
     let floating = tensor(vec![0.0, 1.0], vec![1, 2]);
-    let mixed_array = block_on(nanmin_builtin(Value::Tensor(wide), vec![floating]))
-        .expect_err("inexact wide integer cannot enter floating-array fallback");
+    let mixed_array = block_on(nanmin_builtin(
+        Value::Tensor(wide),
+        crate::builtins::common::test_support::builtin_arguments(vec![floating]),
+    ))
+    .expect_err("inexact wide integer cannot enter floating-array fallback");
     assert_eq!(
         mixed_array.identifier(),
         Some("RunMat:missing:InvalidArgument")
@@ -494,7 +609,7 @@ fn nanmin_pairwise_uses_omit_nan_for_exact_integer_and_nan_scalar() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let result = block_on(nanmin_builtin(
         Value::Int(IntValue::U64(u64::MAX)),
-        vec![Value::Num(f64::NAN)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(f64::NAN)]),
     ))
     .expect("NaN should select the exact integer operand");
     assert_eq!(result, Value::Int(IntValue::U64(u64::MAX)));
@@ -509,7 +624,7 @@ fn nanmin_pairwise_propagates_exact_integer_shape_failure() {
         Tensor::new_integer(IntegerStorage::U64(vec![3, 4, 5]), vec![3, 1]).expect("integer right");
     let error = block_on(nanmin_builtin(
         Value::Tensor(left),
-        vec![Value::Tensor(right)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(right)]),
     ))
     .expect_err("incompatible exact integer shapes");
     assert_eq!(error.identifier(), Some("RunMat:missing:InvalidArgument"));

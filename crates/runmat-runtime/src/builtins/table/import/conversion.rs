@@ -25,27 +25,28 @@ pub(in crate::builtins::table) fn import_cell_value(
     options: &ReadTableOptions,
 ) -> Value {
     match cell {
-        ImportCell::Empty => Value::String(String::new()),
+        ImportCell::Empty => Value::string(String::new()),
         ImportCell::Text(text) => {
             let token = unquote(text.trim()).trim();
             if options.is_missing(token) {
-                Value::String(String::new())
+                Value::string(String::new())
             } else if let Some(value) = parse_logical(token) {
                 Value::Bool(value)
             } else if let Some(value) = parse_numeric(token) {
                 Value::Num(value)
             } else {
-                Value::String(token.to_string())
+                Value::string(token.to_string())
             }
         }
         ImportCell::Number(value) => Value::Num(value),
         ImportCell::Logical(value) => Value::Bool(value),
         ImportCell::DateTime(serial) => Value::Num(serial),
-        ImportCell::Error(text) => Value::String(text),
+        ImportCell::Error(text) => Value::string(text),
     }
 }
 
 pub(in crate::builtins::table) fn import_rows_to_table(
+    runtime: Option<&crate::context::RuntimeContext>,
     mut rows: Vec<Vec<ImportCell>>,
     options: &ReadTableOptions,
 ) -> BuiltinResult<Value> {
@@ -97,7 +98,7 @@ pub(in crate::builtins::table) fn import_rows_to_table(
             .and_then(|types| types.get(col))
             .copied();
         let values = prepare_variable_cells(values, options, col, requested_type)?;
-        columns.push(import_column(values, options, requested_type)?);
+        columns.push(import_column(runtime, values, options, requested_type)?);
     }
     table_from_columns_with_properties(names, columns, row_names)
 }
@@ -172,20 +173,21 @@ pub(in crate::builtins::table) fn should_read_variable_names(
 }
 
 pub(in crate::builtins::table) fn import_column(
+    runtime: Option<&crate::context::RuntimeContext>,
     values: Vec<ImportCell>,
     options: &ReadTableOptions,
     requested_type: Option<ImportVariableType>,
 ) -> BuiltinResult<Value> {
     match requested_type.unwrap_or(ImportVariableType::Auto) {
-        ImportVariableType::Auto => infer_import_column(values, options),
+        ImportVariableType::Auto => infer_import_column(runtime, values, options),
         ImportVariableType::Numeric(dtype) => import_numeric_column(values, options, dtype),
         ImportVariableType::Integer(target) => import_integer_column(values, options, target),
         ImportVariableType::Logical => import_logical_column(values, options),
         ImportVariableType::Text(kind) => import_text_column(values, options, kind),
         ImportVariableType::CellStr => import_cellstr_column(values, options),
         ImportVariableType::Categorical => import_categorical_column(values, options),
-        ImportVariableType::Datetime => import_datetime_column(values, options),
-        ImportVariableType::Duration => import_duration_column(values, options),
+        ImportVariableType::Datetime => import_datetime_column(runtime, values, options),
+        ImportVariableType::Duration => import_duration_column(runtime, values, options),
     }
 }
 
@@ -443,6 +445,7 @@ pub(in crate::builtins::table) fn import_categorical_column(
 }
 
 pub(in crate::builtins::table) fn import_datetime_column(
+    runtime: Option<&crate::context::RuntimeContext>,
     values: Vec<ImportCell>,
     options: &ReadTableOptions,
 ) -> BuiltinResult<Value> {
@@ -459,7 +462,11 @@ pub(in crate::builtins::table) fn import_datetime_column(
     if matches!(options.datetime_type, DatetimeImportType::ExcelDatenum) {
         Ok(Value::Tensor(tensor))
     } else {
-        crate::builtins::datetime::datetime_object_from_serial_tensor(tensor, "yyyy-MM-dd HH:mm:ss")
+        crate::builtins::datetime::datetime_object_from_serial_tensor(
+            runtime,
+            tensor,
+            "yyyy-MM-dd HH:mm:ss",
+        )
     }
 }
 
@@ -495,6 +502,7 @@ pub(in crate::builtins::table) fn datetime_serial_from_import_cell(
 }
 
 pub(in crate::builtins::table) fn import_duration_column(
+    runtime: Option<&crate::context::RuntimeContext>,
     values: Vec<ImportCell>,
     options: &ReadTableOptions,
 ) -> BuiltinResult<Value> {
@@ -505,6 +513,7 @@ pub(in crate::builtins::table) fn import_duration_column(
     let tensor = Tensor::new(days, vec![values.len(), 1])
         .map_err(|err| invalid_variable(format!("readtable: {err}")))?;
     crate::builtins::duration::duration_object_from_days_tensor(
+        runtime,
         tensor,
         crate::builtins::duration::DEFAULT_DURATION_FORMAT,
     )
@@ -538,6 +547,7 @@ pub(in crate::builtins::table) fn duration_days_from_import_cell(
 }
 
 pub(in crate::builtins::table) fn infer_import_column(
+    runtime: Option<&crate::context::RuntimeContext>,
     values: Vec<ImportCell>,
     options: &ReadTableOptions,
 ) -> BuiltinResult<Value> {
@@ -630,6 +640,7 @@ pub(in crate::builtins::table) fn infer_import_column(
                 return Ok(Value::Tensor(tensor));
             }
             return crate::builtins::datetime::datetime_object_from_serial_tensor(
+                runtime,
                 tensor,
                 "yyyy-MM-dd HH:mm:ss",
             );

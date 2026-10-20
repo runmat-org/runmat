@@ -1,7 +1,7 @@
 use std::{rc::Rc, sync::Arc};
 
 use runmat_native_executor::execute::{NativeWorkspaceInput, RootedNativeExecution};
-use runmat_types::ProgramFunctionId;
+use runmat_types::FunctionId;
 use runmat_value::{Value, ValueSequence};
 
 mod bound;
@@ -21,7 +21,7 @@ mod tests;
 pub async fn invoke(
     executor: Rc<runmat_native_executor::NativeExecutor>,
     program: &runmat_native_codegen::aot::AotProgramManifest,
-    function: ProgramFunctionId,
+    function: FunctionId,
     arguments: Vec<Value>,
     requested_outputs: usize,
     runtime: runmat_runtime::context::RuntimeContext,
@@ -39,7 +39,7 @@ pub async fn invoke(
     let execution =
         runmat_runtime::context::run_native_continuation(&runtime, placement, roots, async move {
             let _active =
-                runmat_runtime::user_functions::push_active_semantic_function(function.0 as usize)?;
+                runmat_runtime::user_functions::push_active_semantic_function(function.0)?;
             executor
                 .invoke_async(function, arguments, requested_outputs, selected)
                 .await
@@ -53,7 +53,7 @@ pub async fn invoke(
 pub async fn invoke_workspace(
     executor: Rc<runmat_native_executor::NativeExecutor>,
     program: &runmat_native_codegen::aot::AotProgramManifest,
-    function: ProgramFunctionId,
+    function: FunctionId,
     workspace: NativeWorkspaceInput,
     requested_outputs: usize,
     runtime: runmat_runtime::context::RuntimeContext,
@@ -71,13 +71,56 @@ pub async fn invoke_workspace(
     let execution =
         runmat_runtime::context::run_native_continuation(&runtime, placement, roots, async move {
             let _active =
-                runmat_runtime::user_functions::push_active_semantic_function(function.0 as usize)?;
+                runmat_runtime::user_functions::push_active_semantic_function(function.0)?;
             executor
                 .invoke_workspace_async(function, workspace, requested_outputs, selected)
                 .await
                 .map_err(native_executor_error)
         })
         .await;
+    drop(guards);
+    execution
+}
+
+/// Direct rooted entry keeps the decoder's original argument owner and roots
+/// through native admission, execution, and any queued continuation.
+pub async fn invoke_rooted(
+    executor: Rc<runmat_native_executor::NativeExecutor>,
+    program: &runmat_native_codegen::aot::AotProgramManifest,
+    function: FunctionId,
+    arguments: runmat_runtime::execution::RootedValues,
+    requested_outputs: usize,
+    runtime: runmat_runtime::context::RuntimeContext,
+) -> Result<RootedNativeExecution, runmat_runtime::RuntimeError> {
+    let runtime = install_acceleration_services(runtime);
+    let (runtime, placement) = runtime.native_invocation_context();
+    let guards = ProgramInvocationGuards::install(Rc::clone(&executor), program, &runtime)
+        .map_err(|error| *error)?;
+    class_registration::install(&executor, &runtime).map_err(|error| *error)?;
+    let runtime =
+        super_constructor::bind_selected(&executor, function, runtime).map_err(|error| *error)?;
+    let selected = runtime.clone();
+    let arguments = runmat_runtime::call::RootedFunctionArguments::ordinary(arguments);
+    let execution = runmat_runtime::context::run_rooted_function_native_continuation(
+        &runtime,
+        placement,
+        arguments,
+        move |arguments| async move {
+            let _active =
+                runmat_runtime::user_functions::push_active_semantic_function(function.0)?;
+            executor
+                .invoke_rooted_function_arguments_async(
+                    function,
+                    arguments,
+                    requested_outputs,
+                    selected,
+                    None,
+                )
+                .await
+                .map_err(native_executor_error)
+        },
+    )
+    .await;
     drop(guards);
     execution
 }
@@ -114,8 +157,7 @@ impl ProgramInvocationGuards {
             .map(|function| {
                 let source_ordinal = usize::try_from(function.source.0)
                     .map_err(|_| native_error("program source ordinal exceeds host indexing"))?;
-                let function_id = usize::try_from(function.function.0)
-                    .map_err(|_| native_error("program function ordinal exceeds host indexing"))?;
+                let function_id = function.function.0;
                 let source_id = runtime
                     .admitted_program_source_id(function.source)
                     .map_err(source_admission_error)?
@@ -139,7 +181,7 @@ impl ProgramInvocationGuards {
                     binding_origin: Some(
                         runmat_execution::FunctionBindingOrigin::from_revision(
                             &program.executable.program,
-                            function.function,
+                            function.portable_function,
                         )
                         .map_err(native_error)?,
                     ),
@@ -165,6 +207,12 @@ impl ProgramInvocationGuards {
         let semantic_native_functions = native_functions.clone();
         let semantic = runmat_runtime::user_functions::install_local_semantic_function_invoker(
             Rc::new(move |selected, function, arguments, requested_outputs| {
+                let lexical_environment = arguments.callable().and_then(|callable| {
+                    let Value::Closure(closure) = callable.value() else {
+                        return None;
+                    };
+                    closure.lexical_environment.clone()
+                });
                 let executor = Rc::clone(&semantic_executor);
                 let same_owner = selected.as_ref().is_none_or(|context| {
                     context.local_identity() == semantic_runtime.local_identity()
@@ -186,31 +234,22 @@ impl ProgramInvocationGuards {
                     semantic_runtime.clone()
                 };
                 let runtime = isolated_runtime(runtime);
-                let arguments = arguments.to_vec();
-                let argument_roots =
-                    runmat_runtime::execution::RootedValueLease::for_values(arguments.iter())
-                        .map_err(|error| error.into_runtime_error());
                 let previous = previous_semantic.clone();
                 let native_functions = Arc::clone(&semantic_native_functions);
                 Box::pin(async move {
-                    let _argument_roots = argument_roots?;
                     if !same_owner {
                         return Err(native_error(
                             "semantic callback selected another standalone runtime owner",
                         ));
                     }
-                    let Ok(function) = u32::try_from(function).map(ProgramFunctionId) else {
-                        return Err(native_error(
-                            "semantic function identity exceeds native schema",
-                        ));
-                    };
+                    let function = FunctionId(function);
                     if !native_functions.contains(&function) {
                         if let Some(previous) = previous {
                             return runtime
                                 .scope(previous(
                                     Some(runtime.clone()),
-                                    function.0 as usize,
-                                    &arguments,
+                                    function.0,
+                                    arguments,
                                     requested_outputs,
                                 ))
                                 .await;
@@ -220,13 +259,13 @@ impl ProgramInvocationGuards {
                             function.0
                         )));
                     }
-                    invoke_native_values_legacy(
+                    invoke_native_values(
                         Rc::clone(&executor),
                         function,
                         arguments,
                         requested_outputs,
                         runtime,
-                        None,
+                        lexical_environment,
                     )
                     .await
                 })
@@ -324,11 +363,7 @@ impl ProgramInvocationGuards {
                             "lexical callback selected another standalone runtime owner",
                         ));
                     }
-                    let Ok(function) = u32::try_from(call.function).map(ProgramFunctionId) else {
-                        return Err(native_error(
-                            "lexical function identity exceeds native schema",
-                        ));
-                    };
+                    let function = FunctionId(call.function);
                     if !native_functions.contains(&function) {
                         if let Some(previous) = previous {
                             return runtime.scope(previous(Some(runtime.clone()), call)).await;
@@ -360,7 +395,7 @@ impl ProgramInvocationGuards {
                         roots,
                         async move {
                             let _active = runmat_runtime::user_functions::push_active_semantic_function(
-                                function.0 as usize,
+                                function.0,
                             )?;
                             let _environment_roots = environment_roots;
                             executor
@@ -426,11 +461,11 @@ impl ProgramInvocationGuards {
                     .unwrap_or_default();
                 let selected = scoped.or_else(|| {
                     name_selection::select(&resolver_program, caller, name)
-                        .map(|function| function.0 as usize)
+                        .map(|function| function.0)
                 });
                 if let Some(function) = selected {
                     let own_source = own_scoped
-                        .filter(|selected| selected.0 as usize == function)
+                        .filter(|selected| selected.0 == function)
                         .and_then(|_| source_facts.get(&function).cloned());
                     let previous = (scoped.is_some() && own_source.is_none())
                         .then(|| {
@@ -510,7 +545,7 @@ impl ProgramInvocationGuards {
                 } else {
                     Some(
                         runmat_runtime::user_functions::ScopedSemanticNameTarget::Published(
-                            runmat_types::FunctionId(selected.0 as usize),
+                            selected,
                         ),
                     )
                 }
@@ -541,7 +576,7 @@ fn isolated_runtime(
 
 async fn invoke_native_values(
     executor: Rc<runmat_native_executor::NativeExecutor>,
-    function: ProgramFunctionId,
+    function: FunctionId,
     arguments: runmat_runtime::call::RootedFunctionArguments,
     requested_outputs: usize,
     runtime: runmat_runtime::context::RuntimeContext,
@@ -573,7 +608,7 @@ async fn invoke_native_values(
         arguments,
         move |arguments| async move {
             let _active =
-                runmat_runtime::user_functions::push_active_semantic_function(function.0 as usize)?;
+                runmat_runtime::user_functions::push_active_semantic_function(function.0)?;
             let _environment_roots = environment_roots;
             executor
                 .invoke_rooted_function_arguments_async(
@@ -588,60 +623,6 @@ async fn invoke_native_values(
         },
     )
     .await?;
-    execution.try_map_owned(
-        |execution| normalize_outputs(execution.outputs, requested_outputs).map_err(|error| *error),
-        |error| error.into_runtime_error(),
-    )
-}
-
-/// Borrowed semantic-invoker compatibility entry. Its flattened capture
-/// prefix has no selected callable generation; keep the original ABI until
-/// that producer transports typed capture ownership.
-async fn invoke_native_values_legacy(
-    executor: Rc<runmat_native_executor::NativeExecutor>,
-    function: ProgramFunctionId,
-    arguments: Vec<Value>,
-    requested_outputs: usize,
-    runtime: runmat_runtime::context::RuntimeContext,
-    lexical_environment: Option<runmat_value::LexicalEnvironment>,
-) -> Result<runmat_runtime::execution::RootedValueSequence, runmat_runtime::RuntimeError> {
-    let roots = runmat_runtime::execution::RootedValueLease::for_values(arguments.iter())
-        .map_err(|error| error.into_runtime_error())?;
-    let environment_roots = lexical_environment
-        .as_ref()
-        .map(runmat_runtime::call::lexical::root_environment)
-        .transpose()?;
-    let runtime =
-        super_constructor::bind_selected(&executor, function, runtime).map_err(|error| *error)?;
-    let (captures, arguments) = executor
-        .split_flattened_capture_arguments(function, arguments)
-        .map_err(native_executor_error)?;
-    let (runtime, placement) = runtime.native_invocation_context();
-    let selected = runtime.clone();
-    let execution =
-        runmat_runtime::context::run_native_continuation(&runtime, placement, roots, async move {
-            let _active =
-                runmat_runtime::user_functions::push_active_semantic_function(function.0 as usize)?;
-            let _environment_roots = environment_roots;
-            executor
-                .invoke_request_async_in_environment(
-                    runmat_native_executor::NativeInvocationRequest {
-                        function,
-                        captures,
-                        arguments,
-                        requested_outputs,
-                        runtime: selected,
-                        deoptimization:
-                            runmat_native_executor::deopt::DeoptimizationPolicy::default(),
-                        osr_target: None,
-                        workspace: None,
-                    },
-                    lexical_environment,
-                )
-                .await
-                .map_err(native_executor_error)
-        })
-        .await?;
     execution.try_map_owned(
         |execution| normalize_outputs(execution.outputs, requested_outputs).map_err(|error| *error),
         |error| error.into_runtime_error(),

@@ -7,7 +7,9 @@ use std::convert::TryFrom;
 use std::path::{Path, PathBuf};
 
 fn run(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    futures::executor::block_on(execute::run(args))
+    futures::executor::block_on(execute::run(
+        crate::builtins::common::test_support::builtin_arguments(args),
+    ))
 }
 
 fn text(value: &Value) -> String {
@@ -35,7 +37,7 @@ fn accepts_character_string_and_string_array_scalar_folders() {
     let folder = "relative_tempname";
     let values = [
         Value::CharArray(CharArray::new_row(folder)),
-        Value::String(folder.to_owned()),
+        Value::String(folder.to_owned().into()),
         Value::StringArray(StringArray::new(vec![folder.to_owned()], vec![1, 1]).expect("array")),
     ];
     for value in values {

@@ -2,7 +2,7 @@
 
 use std::convert::TryFrom;
 
-use runmat_value::{CellArray, CharArray, LogicalArray, StringArray, Value};
+use runmat_value::{CellArray, CharArray, LogicalArray, StringArray, Utf8Text, Value};
 
 use crate::builtins::common::tensor;
 use crate::builtins::strings::common::{char_row_to_string, is_missing_string};
@@ -18,7 +18,7 @@ pub(crate) struct TextCollection {
 #[derive(Clone)]
 pub(crate) enum TextElement {
     Missing,
-    Text(String),
+    Text(Utf8Text),
 }
 
 impl TextCollection {
@@ -67,16 +67,19 @@ impl TextCollection {
     }
 
     fn from_string_array(array: StringArray) -> Self {
-        let StringArray { data, shape, .. } = array;
-        let elements = data.into_iter().map(make_text_element).collect::<Vec<_>>();
+        let (data, shape, _, _) = array.into_parts();
+        let elements = match data.try_into_owned() {
+            Ok(values) => values.into_iter().map(make_text_element).collect(),
+            Err(data) => data.iter().cloned().map(make_text_element).collect(),
+        };
         Self {
             elements,
-            shape,
+            shape: shape.to_vec(),
             is_cell: false,
         }
     }
 
-    fn from_string_scalar(text: String) -> Self {
+    fn from_string_scalar(text: Utf8Text) -> Self {
         Self {
             elements: vec![make_text_element(text)],
             shape: vec![1, 1],
@@ -95,14 +98,14 @@ impl TextCollection {
         if array.rows == 1 {
             let text = char_row_to_string(&array, 0);
             return Self {
-                elements: vec![TextElement::Text(text)],
+                elements: vec![TextElement::Text(text.into())],
                 shape: vec![1, 1],
                 is_cell: false,
             };
         }
         let mut elements = Vec::with_capacity(array.rows);
         for row in 0..array.rows {
-            elements.push(TextElement::Text(char_row_to_string(&array, row)));
+            elements.push(TextElement::Text(char_row_to_string(&array, row).into()));
         }
         Self {
             elements,
@@ -112,9 +115,7 @@ impl TextCollection {
     }
 
     fn from_cell_array(fn_name: &str, cell: CellArray) -> BuiltinResult<Self> {
-        let CellArray {
-            data, rows, cols, ..
-        } = cell;
+        let (data, _, rows, cols) = cell.into_parts();
         let mut elements = Vec::with_capacity(rows * cols);
         for col in 0..cols {
             for row in 0..rows {
@@ -142,7 +143,10 @@ impl TextCollection {
     }
 }
 
-pub(crate) fn parse_ignore_case(fn_name: &str, rest: &[Value]) -> BuiltinResult<bool> {
+pub(crate) fn parse_ignore_case(
+    fn_name: &str,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<bool> {
     if rest.is_empty() {
         return Ok(false);
     }
@@ -172,7 +176,7 @@ pub(crate) fn parse_ignore_case(fn_name: &str, rest: &[Value]) -> BuiltinResult<
     }
 
     let mut ignore_case = None;
-    for pair in rest.chunks(2) {
+    for pair in rest.chunks_exact(2) {
         let name = value_to_owned_string(&pair[0]).ok_or_else(|| {
             text_error(
                 fn_name,
@@ -295,7 +299,7 @@ pub(crate) fn logical_result(
     }
 }
 
-fn make_text_element(text: String) -> TextElement {
+fn make_text_element(text: Utf8Text) -> TextElement {
     if is_missing_string(&text) {
         TextElement::Missing
     } else {
@@ -306,12 +310,12 @@ fn make_text_element(text: String) -> TextElement {
 fn cell_value_to_text(fn_name: &str, value: &Value) -> BuiltinResult<TextElement> {
     match value {
         Value::String(text) => Ok(make_text_element(text.clone())),
-        Value::StringArray(array) if array.data.len() == 1 => {
-            Ok(make_text_element(array.data[0].clone()))
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(make_text_element(array.data()[0].clone()))
         }
-        Value::CharArray(array) if array.rows == 0 => Ok(TextElement::Text(String::new())),
+        Value::CharArray(array) if array.rows == 0 => Ok(TextElement::Text(String::new().into())),
         Value::CharArray(array) if array.rows == 1 => {
-            Ok(TextElement::Text(char_row_to_string(array, 0)))
+            Ok(TextElement::Text(char_row_to_string(array, 0).into()))
         }
         _ => Err(text_error(
             fn_name,

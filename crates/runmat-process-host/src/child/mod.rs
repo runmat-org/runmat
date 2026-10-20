@@ -1,4 +1,6 @@
 mod lifecycle;
+#[cfg(unix)]
+mod exit_observation;
 mod limits;
 mod process_tree;
 mod retirement;

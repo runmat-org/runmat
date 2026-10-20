@@ -19,14 +19,19 @@ pub use constructor::{
     call_portable_prepared_constructor_sequence_in_context,
     call_portable_prepared_constructor_sequence_with_argument_count_in_context,
     call_prepared_constructor_sequence_in_context,
-    call_prepared_constructor_sequence_with_argument_count_in_context, PreparedConstructorInvoke,
+    call_prepared_constructor_sequence_with_argument_count_in_context,
+    call_rooted_bound_constructor_sequence_in_context, PreparedConstructorInvoke,
 };
 use constructor::{ConstructorArguments, ConstructorInvocationTarget};
 #[path = "dispatcher/owned_gather.rs"]
 mod owned_gather;
+#[path = "dispatcher/cell_alias.rs"]
+mod cell_alias;
+use crate::execution::structure::replacement as structure_alias;
 #[path = "dispatcher/owned_gpu.rs"]
 mod owned_gpu;
 mod provenance;
+mod constructor_normalization;
 #[path = "dispatcher/workspace_effect.rs"]
 mod workspace_effect;
 
@@ -153,21 +158,29 @@ pub fn value_contains_gpu(value: &Value) -> bool {
 /// Convert GPU-resident values to host tensors when an acceleration provider exists.
 /// Non-GPU inputs are passed through unchanged.
 pub async fn gather_if_needed_async(value: &Value) -> Result<Value, RuntimeError> {
-    let mut values = gather_values_async(std::slice::from_ref(value)).await?;
-    Ok(values.remove(0))
+    try_visit_gathered_gpu_handles(value, &mut |_| {})?;
+    gather_if_needed_async_impl(value).await
 }
 
-/// Admit the complete argument set before any provider download. Resident
-/// descriptor and view facts are immutable on current handles.
-pub(crate) async fn gather_values_async(values: &[Value]) -> Result<Vec<Value>, RuntimeError> {
-    for value in values {
-        try_visit_gathered_gpu_handles(value, &mut |_| {})?;
+/// Preserve the admitted argument owner when no transfer is necessary. A
+/// resident batch gets one admitted final slot collection, with the original
+/// roots retained across every download and successor publication.
+pub(crate) async fn gather_builtin_arguments_async(
+    values: crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> Result<crate::call::BuiltinArguments, RuntimeError> {
+    let mut resident = false;
+    for value in &values {
+        try_visit_gathered_gpu_handles(value, &mut |_| resident = true)?;
     }
-    let mut output = Vec::with_capacity(values.len());
-    for value in values {
-        output.push(gather_if_needed_async_impl(value).await?);
+    if !resident {
+        return Ok(values);
     }
-    Ok(output)
+    values
+        .try_map_preserving_roots_async(values.len(), runtime, async |index| {
+            gather_if_needed_async_impl(&values[index]).await
+        })
+        .await
 }
 
 fn gather_if_needed_async_impl<'a>(
@@ -233,63 +246,110 @@ fn gather_if_needed_async_impl<'a>(
                 })
             }
             Value::Cell(ca) => {
-                let mut gathered = Vec::with_capacity(ca.data.len());
-                for ptr in &ca.data {
+                let mut gathered = Vec::with_capacity(ca.data().len());
+                for ptr in ca.data() {
                     gathered.push(gather_if_needed_async_impl(ptr).await?);
                 }
-                make_cell_with_shape(gathered, ca.shape.clone()).map_err(|err| {
+                make_cell_with_shape(gathered, ca.shape().to_vec()).map_err(|err| {
                     build_runtime_error(format!("gather: {err}"))
                         .with_identifier("RunMat:gather:CellShapeError")
                         .build()
                 })
             }
             Value::Struct(sv) => {
-                let mut gathered = sv.clone();
-                for value in gathered.fields.values_mut() {
-                    let updated = gather_if_needed_async_impl(value).await?;
-                    *value = updated;
+                if !sv.fields.values().any(owned_gpu::has_transformable_gpu) {
+                    return Ok(Value::Struct(sv.clone()));
+                }
+                let context = crate::context::legacy::active();
+                let prepared = structure_alias::record(sv, context.as_ref())?;
+                let _roots = prepared.1;
+                let mut gathered = prepared.0;
+                for value in gathered
+                    .fields
+                    .try_values_mut_unique()
+                    .expect("new admitted map is unique")
+                {
+                    *value =
+                        owned_gather::gather_if_needed_owned_async(value.clone(), None).await?;
                 }
                 Ok(Value::Struct(gathered))
             }
             Value::StructArray(array) => {
-                let gathered = array
-                    .clone()
-                    .try_map_values_async(|value| async move {
-                        gather_if_needed_async_impl(&value).await
-                    })
-                    .await?;
+                if !array
+                    .column_owners()
+                    .any(|(_, values)| values.iter().any(owned_gpu::has_transformable_gpu))
+                {
+                    return Ok(Value::StructArray(array.clone()));
+                }
+                let context = crate::context::legacy::active();
+                let prepared = structure_alias::array(array, context.as_ref())?;
+                let _roots = prepared.1;
+                let mut gathered = prepared.0;
+                for name in array.field_names() {
+                    for value in gathered
+                        .try_column_mut_unique(name)
+                        .expect("new admitted column is unique")
+                    {
+                        *value =
+                            owned_gather::gather_if_needed_owned_async(value.clone(), None).await?;
+                    }
+                }
                 Ok(Value::StructArray(gathered))
             }
             Value::Object(obj) => {
-                let mut cloned = obj.clone();
-                for value in cloned.properties.values_mut() {
-                    *value = gather_if_needed_async_impl(value).await?;
+                if !obj
+                    .properties()
+                    .values()
+                    .any(owned_gpu::has_transformable_gpu)
+                {
+                    return Ok(Value::Object(obj.clone()));
+                }
+                let context = crate::context::legacy::active();
+                let prepared =
+                    crate::execution::object::replacement::copy_generation(obj, context.as_ref())?;
+                let _roots = prepared.1;
+                let mut cloned = prepared.0;
+                for (name, value) in obj.properties() {
+                    let gathered = gather_if_needed_async_impl(value).await?;
+                    cloned
+                        .try_replace_property_unique(name, gathered)
+                        .map_err(|_| {
+                            crate::runtime_error::semantic_error(
+                                "RunMat:gather:Object",
+                                "private object destination lost its unique property slot",
+                            )
+                        })?;
                 }
                 Ok(Value::Object(cloned))
             }
             Value::ObjectArray(array) => {
-                // No elements can require materialization. In particular keep
-                // the exact selected/unselected class products retained after
-                // an array became empty; a fresh constructor cannot recover
-                // those owners from its class name.
-                if array.is_empty() {
+                if !array.data().iter().any(owned_gpu::has_transformable_gpu) {
                     return Ok(Value::ObjectArray(array.clone()));
                 }
-                let mut gathered = Vec::with_capacity(array.len());
-                for value in array.data() {
-                    gathered.push(gather_if_needed_async_impl(value).await?);
+                let context = crate::context::legacy::active();
+                let prepared =
+                    crate::execution::object_array::copy_source(array, context.as_ref())?
+                        .into_value_and_lease();
+                let _roots = prepared.1;
+                let Value::ObjectArray(mut gathered) = prepared.0 else {
+                    unreachable!("canonical object array output")
+                };
+                for index in 0..gathered.len() {
+                    let child = owned_gather::gather_if_needed_owned_async(
+                        gathered.data()[index].clone(),
+                        None,
+                    )
+                    .await?;
+                    gathered
+                        .try_replace_linear_unique(index, child)
+                        .map_err(|_| {
+                            crate::runtime_error::semantic_error(
+                                "ObjectArrayConstruction",
+                                "gather changed object-array class or storage kind",
+                            )
+                        })?;
                 }
-                let array = runmat_value::ObjectArray::new(
-                    array.class_name().clone(),
-                    gathered,
-                    array.shape().to_vec(),
-                )
-                .map_err(|error| {
-                    build_runtime_error(format!("gather: {error}"))
-                        .with_identifier("RunMat:gather:ObjectArrayShapeError")
-                        .build()
-                })?;
-                Ok(Value::ObjectArray(array))
+                Ok(Value::ObjectArray(gathered))
             }
             Value::Closure(closure) => {
                 runmat_value::validate_no_transient_sequence(value).map_err(|_| {
@@ -305,10 +365,12 @@ fn gather_if_needed_async_impl<'a>(
                 {
                     return Ok(Value::Closure(closure.clone()));
                 }
-                let mut cloned = closure.clone().into_data();
-                for value in &mut cloned.captures {
-                    *value = gather_if_needed_async_impl(value).await?;
+                let mut captures = Vec::with_capacity(closure.captures.len());
+                for value in &closure.captures {
+                    captures.push(gather_if_needed_async_impl(value).await?);
                 }
+                let mut cloned = closure.clone().into_data();
+                cloned.captures = runmat_value::OutputListStorage::shared_unbounded(captures);
                 Ok(Value::Closure(runmat_value::Closure::from_data(cloned)))
             }
             Value::OutputList(_) => Err(crate::runtime_error::semantic_error(
@@ -404,18 +466,6 @@ impl<'a> ResolvedBuiltinName<'a> {
 }
 
 #[async_recursion::async_recursion(?Send)]
-async fn call_builtin_async_impl(
-    name: &str,
-    args: &[Value],
-    output_count: Option<usize>,
-    context: Option<crate::context::RuntimeContext>,
-) -> Result<crate::execution::RootedValue, RuntimeError> {
-    call_builtin_sequence_async_impl(name, args, output_count, context, None)
-        .await
-        .and_then(crate::call::arguments::project_rooted_legacy_builtin_value_abi)
-}
-
-#[async_recursion::async_recursion(?Send)]
 async fn call_builtin_sequence_async_impl(
     name: &str,
     args: &[Value],
@@ -445,49 +495,97 @@ async fn try_call_builtin_sequence_async_impl(
     context: Option<crate::context::RuntimeContext>,
     observation: Option<std::rc::Rc<direct_call_observation::CallObservation>>,
 ) -> Result<Option<crate::execution::RootedValueSequence>, RuntimeError> {
+    let args = crate::call::BuiltinArguments::from_borrowed(args, context.as_ref())?;
+    try_call_retained_builtin_sequence_async(name, args, output_count, context, observation).await
+}
+
+/// Dispatch the original argument owner through the same selection policies as
+/// embedding calls. Captures and routing prefixes remain logical segments.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RetainedDispatchPolicy {
+    Normal,
+    RegisteredOnly,
+}
+
+async fn try_call_retained_builtin_sequence_async(
+    name: &str,
+    args: crate::call::BuiltinArguments,
+    output_count: Option<usize>,
+    context: Option<crate::context::RuntimeContext>,
+    observation: Option<std::rc::Rc<direct_call_observation::CallObservation>>,
+) -> Result<Option<crate::execution::RootedValueSequence>, RuntimeError> {
+    try_call_retained_builtin_sequence_with_policy(
+        name,
+        args,
+        output_count,
+        context,
+        observation,
+        RetainedDispatchPolicy::Normal,
+    )
+    .await
+}
+
+#[async_recursion::async_recursion(?Send)]
+async fn try_call_retained_builtin_sequence_with_policy(
+    name: &str,
+    args: crate::call::BuiltinArguments,
+    output_count: Option<usize>,
+    context: Option<crate::context::RuntimeContext>,
+    observation: Option<std::rc::Rc<direct_call_observation::CallObservation>>,
+    policy: RetainedDispatchPolicy,
+) -> Result<Option<crate::execution::RootedValueSequence>, RuntimeError> {
     ensure_wasm_builtins_registered();
 
     let resolved_name = ResolvedBuiltinName::resolve(name);
     let name = resolved_name.canonical;
 
     let _output_guard = crate::output_count::push_output_count(output_count)?;
-    if let Some(result) =
-        try_distributed_builtin(name, args, output_count, context.as_ref()).await?
-    {
+    let distributed = if policy == RetainedDispatchPolicy::Normal {
+        try_distributed_builtin(name, &args, output_count, context.as_ref()).await?
+    } else {
+        None
+    };
+    if let Some(result) = distributed {
         return Ok(Some(result));
     }
     let registered = selection::select_registered_builtin(name, context.as_ref())?;
     if registered.is_none() {
-        if let Some(result) =
-            try_call_registered_instance_method_sequence(name, args, output_count, context.as_ref())
-                .await?
-        {
-            return compatibility_checked_builtin_sequence(name, args, result).map(Some);
+        if policy == RetainedDispatchPolicy::RegisteredOnly {
+            return Ok(None);
         }
         if let Some(result) =
-            try_call_registered_static_method(name, args, output_count, context.as_ref()).await?
+            try_call_retained_instance_method_sequence(name, &args, output_count, context.as_ref())
+                .await?
         {
-            return compatibility_checked_builtin_sequence(name, args, result).map(Some);
+            return compatibility_checked_builtin_sequence(name, args.view(), result).map(Some);
+        }
+        if let Some(result) =
+            try_call_registered_static_method(name, &args, output_count, context.as_ref()).await?
+        {
+            return compatibility_checked_builtin_sequence(name, args.view(), result).map(Some);
         }
         // Fallback: treat as class constructor if class is registered.
         if crate::class_registry::registered_constructor_identity(name).is_some() {
             let result =
-                call_registered_class_constructor(name, args, output_count, context.as_ref())
+                call_retained_class_constructor(name, args.fork(), output_count, context.as_ref())
                     .await?;
             let sequence = result.try_map_owned(
                 crate::call::arguments::adapt_legacy_builtin_result,
                 |error| error.into_runtime_error(),
             )?;
-            return compatibility_checked_builtin_sequence(name, args, sequence).map(Some);
+            return compatibility_checked_builtin_sequence(name, args.view(), sequence).map(Some);
         }
         return Ok(None);
     }
 
-    if let Some(result) =
-        try_call_registered_instance_method_sequence(name, args, output_count, context.as_ref())
+    let instance = if policy == RetainedDispatchPolicy::Normal {
+        try_call_retained_instance_method_sequence(name, &args, output_count, context.as_ref())
             .await?
-    {
-        return compatibility_checked_builtin_sequence(name, args, result).map(Some);
+    } else {
+        None
+    };
+    if let Some(result) = instance {
+        return compatibility_checked_builtin_sequence(name, args.view(), result).map(Some);
     }
 
     let selection::SelectedRegisteredBuiltin {
@@ -495,18 +593,19 @@ async fn try_call_builtin_sequence_async_impl(
         implementation,
         authority,
     } = registered.expect("nonempty builtin authority has a selected implementation");
-    let prepared = preparation::prepare_selected(origin, name, args, context.as_ref()).await?;
+    let prepared =
+        preparation::prepare_retained_selected(origin, name, args.fork(), context.as_ref()).await?;
     // Explicit Requested gather adaptation stays within this one implementation.
-    let result = selected_execution::execute(
+    let result = selected_execution::execute_retained(
         implementation,
-        prepared.as_deref().unwrap_or(args),
+        prepared,
         context,
         output_count,
         observation.as_deref(),
         authority,
     )
     .await?;
-    compatibility_checked_builtin_sequence(name, args, result).map(Some)
+    compatibility_checked_builtin_sequence(name, args.view(), result).map(Some)
 }
 
 pub(crate) async fn try_call_builtin_sequence_async_with_outputs(
@@ -515,6 +614,53 @@ pub(crate) async fn try_call_builtin_sequence_async_with_outputs(
     output_count: usize,
     context: Option<&crate::context::RuntimeContext>,
 ) -> Result<Option<crate::execution::RootedValueSequence>, RuntimeError> {
+    let args = crate::call::BuiltinArguments::from_borrowed(args, context)?;
+    try_call_retained_builtin_sequence_with_outputs(name, args, output_count, context).await
+}
+
+pub(crate) async fn try_call_retained_builtin_sequence_with_outputs(
+    name: &str,
+    args: crate::call::BuiltinArguments,
+    output_count: usize,
+    context: Option<&crate::context::RuntimeContext>,
+) -> Result<Option<crate::execution::RootedValueSequence>, RuntimeError> {
+    try_call_retained_builtin_sequence_with_outputs_policy(
+        name,
+        args,
+        output_count,
+        context,
+        RetainedDispatchPolicy::Normal,
+    )
+    .await
+}
+
+/// Explicit registered-builtin bypass: no semantic, method, distributed or
+/// constructor selection. Preparation, execution, compatibility and effect
+/// observation remain the same canonical pipeline as normal dispatch.
+pub(crate) async fn call_retained_registered_builtin_sequence_with_outputs(
+    name: &str,
+    args: crate::call::BuiltinArguments,
+    output_count: usize,
+    context: Option<&crate::context::RuntimeContext>,
+) -> Result<crate::execution::RootedValueSequence, RuntimeError> {
+    try_call_retained_builtin_sequence_with_outputs_policy(
+        name,
+        args,
+        output_count,
+        context,
+        RetainedDispatchPolicy::RegisteredOnly,
+    )
+    .await?
+    .ok_or_else(|| undefined_builtin_error(name))
+}
+
+async fn try_call_retained_builtin_sequence_with_outputs_policy(
+    name: &str,
+    args: crate::call::BuiltinArguments,
+    output_count: usize,
+    context: Option<&crate::context::RuntimeContext>,
+    policy: RetainedDispatchPolicy,
+) -> Result<Option<crate::execution::RootedValueSequence>, RuntimeError> {
     let fence = workspace_effect::PostCallWorkspaceEffectFence::capture(context);
     let observation =
         direct_call_observation::CallObservation::capture(context).map(std::rc::Rc::new);
@@ -522,17 +668,26 @@ pub(crate) async fn try_call_builtin_sequence_async_with_outputs(
     let result = match &context {
         Some(context) => {
             context
-                .scope(try_call_builtin_sequence_async_impl(
+                .scope(try_call_retained_builtin_sequence_with_policy(
                     name,
                     args,
                     Some(output_count),
                     Some(context.clone()),
                     observation.clone(),
+                    policy,
                 ))
                 .await
         }
         None => {
-            try_call_builtin_sequence_async_impl(name, args, Some(output_count), None, None).await
+            try_call_retained_builtin_sequence_with_policy(
+                name,
+                args,
+                Some(output_count),
+                None,
+                None,
+                policy,
+            )
+            .await
         }
     };
     let (result, outcome) = fence.finish_optional_owned_sequence_observed(result);
@@ -555,7 +710,7 @@ pub async fn try_call_builtin_sequence_async_with_outputs_in_context(
 
 async fn try_distributed_builtin(
     name: &str,
-    args: &[Value],
+    args: &crate::call::BuiltinArguments,
     output_count: Option<usize>,
     runtime: Option<&crate::context::RuntimeContext>,
 ) -> Result<Option<crate::execution::RootedValueSequence>, RuntimeError> {
@@ -581,39 +736,36 @@ async fn try_distributed_builtin(
         runmat_builtins::BuiltinDistributedPolicy::InspectHandles => Ok(None),
         runmat_builtins::BuiltinDistributedPolicy::MaterializeArguments => {
             let (context, service) = distributed_service(name, runtime)?;
-            let mut materialized = crate::execution::RootedValuesBuilder::with_capacity(args.len());
-            for argument in args {
-                if let Value::Distributed(handle) = argument {
-                    crate::parallel::lease::validate_distributed(&context, handle)?;
-                    service
-                        .materialize((**handle).clone())
-                        .await?
-                        .with_owned(|value| {
-                            materialized
-                                .push(value)
-                                .map_err(|error| error.into_runtime_error())
-                        })?;
-                } else {
-                    materialized
-                        .push(argument.clone())
-                        .map_err(|error| error.into_runtime_error())?;
-                }
-            }
-            materialized
-                .finish()
-                .map_err(|error| error.into_runtime_error())?
-                .with_owned_output_storage_async(|materialized| async move {
-                    call_builtin_sequence_async_impl(
-                        name,
-                        &materialized,
-                        output_count,
-                        Some(context),
-                        None,
-                    )
-                    .await
-                    .map(Some)
+            let materialized = args
+                .try_map_mixed_async(args.len(), Some(&context), |index| {
+                    let argument = &args[index];
+                    let context = &context;
+                    let service = &service;
+                    async move {
+                        if let Value::Distributed(handle) = argument {
+                            crate::parallel::lease::validate_distributed(context, handle)?;
+                            service
+                                .materialize(handle.clone())
+                                .await
+                                .map(crate::execution::ArgumentProjection::Rooted)
+                        } else {
+                            Ok(crate::execution::ArgumentProjection::Source(
+                                argument.clone(),
+                            ))
+                        }
+                    }
                 })
-                .await
+                .await?;
+            try_call_retained_builtin_sequence_async(
+                name,
+                materialized,
+                output_count,
+                Some(context),
+                None,
+            )
+            .await?
+            .ok_or_else(|| undefined_builtin_error(name))
+            .map(Some)
         }
         runmat_builtins::BuiltinDistributedPolicy::MapUnary
         | runmat_builtins::BuiltinDistributedPolicy::MapUnaryConstrained(_)
@@ -626,7 +778,7 @@ async fn try_distributed_builtin(
                 }
             }
             let requested_outputs = output_count.unwrap_or(1);
-            let literals = distributed_literal_context(args);
+            let literals = distributed_literal_context(args.view());
             let inference = runmat_builtins::infer_partition_local_call(
                 entry,
                 &runmat_types::CallRequest {
@@ -657,7 +809,7 @@ async fn try_distributed_builtin(
             let result = service
                 .invoke(crate::context::RuntimeDistributedCallRequest {
                     builtin: runmat_types::BuiltinId(name.into()),
-                    arguments: args.to_vec(),
+                    arguments: args.fork(),
                     literals,
                     requested_outputs,
                     outputs: inference.outputs,
@@ -678,16 +830,20 @@ async fn try_distributed_builtin(
     }
 }
 
-fn distributed_literal_context(args: &[Value]) -> runmat_types::LiteralContext {
+fn distributed_literal_context(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> runmat_types::LiteralContext {
     runmat_types::LiteralContext::new(
         args.iter()
             .map(|value| match value {
-                Value::String(value) => runmat_types::LiteralValue::String(value.clone()),
-                Value::StringArray(value) if value.data.len() == 1 => {
-                    runmat_types::LiteralValue::String(value.data[0].clone())
+                Value::String(value) => {
+                    runmat_types::LiteralValue::String(value.as_str().to_owned())
+                }
+                Value::StringArray(value) if value.data().len() == 1 => {
+                    runmat_types::LiteralValue::String(value.data()[0].as_str().to_owned())
                 }
                 Value::CharArray(value) if value.rows == 1 => {
-                    runmat_types::LiteralValue::Character(value.data.iter().collect())
+                    runmat_types::LiteralValue::Character(value.data().iter().collect())
                 }
                 _ => runmat_types::LiteralValue::Unknown,
             })
@@ -741,7 +897,7 @@ pub(crate) fn compatibility_checked_builtin_result(
 
 fn compatibility_checked_builtin_sequence(
     name: &str,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     result: crate::execution::RootedValueSequence,
 ) -> Result<crate::execution::RootedValueSequence, RuntimeError> {
     let explicit = explicit_gpu_provenance(args)?;
@@ -761,10 +917,15 @@ fn compatibility_checked_builtin_sequence(
 }
 
 fn propagate_gpu_provenance(args: &[Value], result: &mut Value) -> Result<(), RuntimeError> {
-    provenance::project(result, explicit_gpu_provenance(args)?)
+    provenance::project(
+        result,
+        explicit_gpu_provenance(crate::call::FunctionArgumentView::from_slice(args))?,
+    )
 }
 
-fn explicit_gpu_provenance(args: &[Value]) -> Result<bool, RuntimeError> {
+fn explicit_gpu_provenance(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> Result<bool, RuntimeError> {
     let mut explicit = false;
     for arg in args {
         try_visit_gpu_handles(arg, &mut |handle| {
@@ -813,7 +974,7 @@ fn visit_gpu_handles_inner(
     match value {
         Value::GpuTensor(handle) => visitor(handle),
         Value::Cell(cell) => cell
-            .data
+            .data()
             .iter()
             .try_for_each(|value| visit_gpu_handles_inner(value, visitor, seen, traversal))?,
         Value::Struct(value) => value
@@ -830,7 +991,7 @@ fn visit_gpu_handles_inner(
             result?;
         }
         Value::Object(value) => value
-            .properties
+            .properties()
             .values()
             .try_for_each(|value| visit_gpu_handles_inner(value, visitor, seen, traversal))?,
         Value::ObjectArray(array) => array
@@ -901,7 +1062,17 @@ async fn try_call_registered_instance_method_sequence(
     output_count: Option<usize>,
     context: Option<&crate::context::RuntimeContext>,
 ) -> Result<Option<crate::execution::RootedValueSequence>, RuntimeError> {
-    let Some(selected) = selection::select_instance_method(method_name, args)? else {
+    let args = crate::call::BuiltinArguments::from_borrowed(args, context)?;
+    try_call_retained_instance_method_sequence(method_name, &args, output_count, context).await
+}
+
+async fn try_call_retained_instance_method_sequence(
+    method_name: &str,
+    args: &crate::call::BuiltinArguments,
+    output_count: Option<usize>,
+    context: Option<&crate::context::RuntimeContext>,
+) -> Result<Option<crate::execution::RootedValueSequence>, RuntimeError> {
+    let Some(selected) = selection::select_instance_method(method_name, args.view())? else {
         return Ok(None);
     };
     let receiver = args.first().expect("instance method has a receiver");
@@ -911,13 +1082,13 @@ async fn try_call_registered_instance_method_sequence(
                 let requested = output_count.unwrap_or(1);
                 let invoked = match context {
                     Some(runtime) => {
-                        crate::user_functions::try_call_bound_function_in_context(
-                            runtime, binding, args, requested,
+                        crate::user_functions::try_call_rooted_bound_function_with_environment_in_context(
+                            runtime, binding, args.fork().into_supplied_function_arguments(context)?, requested, None,
                         )
                         .await
                     }
                     None => {
-                        crate::user_functions::try_call_bound_function(binding, args, requested)
+                        crate::user_functions::try_call_rooted_bound_function(binding, args.fork().into_supplied_function_arguments(context)?, requested)
                             .await
                     }
                 };
@@ -927,34 +1098,50 @@ async fn try_call_registered_instance_method_sequence(
                         "registered instance method has no bound executor",
                     )
                 })?;
-                return finalize_instance_method_result(&selected.method, receiver, result)
-                    .map(Some);
+                return finalize_instance_method_result(
+                    context,
+                    &selected.method,
+                    receiver,
+                    result,
+                )
+                .map(Some);
             }
             selection::InstanceMethodRoute::SemanticName(name) => {
-                if let Some(result) =
-                    crate::user_functions::try_call_semantic_function_by_name_in_context(
+                if let std::ops::ControlFlow::Break(result) =
+                    crate::user_functions::try_call_rooted_semantic_name_in_context(
                         context,
                         &name,
-                        args,
+                        args.fork().into_supplied_function_arguments(context)?,
                         output_count.unwrap_or(1),
                     )
                     .await
                 {
-                    return finalize_instance_method_result(&selected.method, receiver, result)
-                        .map(Some);
+                    return finalize_instance_method_result(
+                        context,
+                        &selected.method,
+                        receiver,
+                        result,
+                    )
+                    .map(Some);
                 }
             }
             selection::InstanceMethodRoute::BuiltinName(name) => {
-                let result = call_builtin_sequence_async_impl(
+                let result = try_call_retained_builtin_sequence_async(
                     &name,
-                    args,
+                    args.fork(),
                     output_count,
                     context.cloned(),
                     None,
                 )
-                .await;
-                return finalize_instance_method_result(&selected.method, receiver, result)
-                    .map(Some);
+                .await
+                .and_then(|result| result.ok_or_else(|| undefined_builtin_error(&name)));
+                return finalize_instance_method_result(
+                    context,
+                    &selected.method,
+                    receiver,
+                    result,
+                )
+                .map(Some);
             }
         }
     }
@@ -962,6 +1149,7 @@ async fn try_call_registered_instance_method_sequence(
 }
 
 fn finalize_instance_method_result(
+    context: Option<&crate::context::RuntimeContext>,
     method_name: &runmat_types::MethodName,
     receiver: &Value,
     result: Result<crate::execution::RootedValueSequence, RuntimeError>,
@@ -971,7 +1159,7 @@ fn finalize_instance_method_result(
         runmat_types::StaticMethodName::new("delete");
     if DELETE_METHOD.is(method_name) {
         if let Value::HandleObject(handle) = receiver {
-            if !crate::set_handle_valid(handle, false) {
+            if !crate::object::handle_validity::set(context, handle, false)? {
                 return Err(build_runtime_error(format!(
                     "delete: failed to invalidate handle object '{}' after its destructor completed",
                     handle.class_name
@@ -1074,7 +1262,7 @@ pub fn observe_registered_static_method(
 
 async fn try_call_registered_static_method(
     qualified_name: &str,
-    args: &[Value],
+    args: &crate::call::BuiltinArguments,
     output_count: Option<usize>,
     context: Option<&crate::context::RuntimeContext>,
 ) -> Result<Option<crate::execution::RootedValueSequence>, RuntimeError> {
@@ -1082,25 +1270,39 @@ async fn try_call_registered_static_method(
         return Ok(None);
     };
     let method = resolved.registration.declaration;
-    let adapted = method.implicit_class_argument.as_ref().map(|class| {
-        let mut values = Vec::with_capacity(args.len() + 1);
-        values.extend_from_slice(args);
-        values.push(Value::String(class.display_name().to_owned()));
-        values
-    });
-    let args = adapted.as_deref().unwrap_or(args);
+    let args = if let Some(class) = method.implicit_class_argument.as_ref() {
+        let text = crate::call::argument_text::copy_str(class.display_name(), context)?;
+        let inserted =
+            crate::execution::RootedValue::in_optional_context(Value::String(text), context)?;
+        match context {
+            Some(context) => args
+                .fork()
+                .try_insert_in_context(args.len(), inserted, context)?,
+            // Context-free embedding has no managed allocation authority.
+            None => crate::execution::RootedValues::new(
+                args.iter()
+                    .cloned()
+                    .chain(std::iter::once(inserted.value().clone()))
+                    .collect(),
+            )
+            .map(crate::call::BuiltinArguments::from)
+            .map_err(|error| error.into_runtime_error())?,
+        }
+    } else {
+        args.fork()
+    };
     match resolved.target {
         RegisteredStaticMethodTarget::Bound(binding) => {
             let requested = output_count.unwrap_or(1);
             let invoked = match context {
                 Some(runtime) => {
-                    crate::user_functions::try_call_bound_function_in_context(
-                        runtime, binding, args, requested,
+                    crate::user_functions::try_call_rooted_bound_function_with_environment_in_context(
+                        runtime, binding, args.into_supplied_function_arguments(context)?, requested, None,
                     )
                     .await
                 }
                 None => {
-                    crate::user_functions::try_call_bound_function(binding, args, requested).await
+                    crate::user_functions::try_call_rooted_bound_function(binding, args.into_supplied_function_arguments(context)?, requested).await
                 }
             };
             invoked
@@ -1113,26 +1315,42 @@ async fn try_call_registered_static_method(
                 .map(Some)
         }
         RegisteredStaticMethodTarget::Semantic(function) => {
-            crate::user_functions::try_call_semantic_function_in_context(
+            crate::user_functions::try_call_rooted_semantic_function_in_context(
                 context,
                 function,
-                args,
+                args.into_supplied_function_arguments(context)?,
                 output_count.unwrap_or(1),
             )
             .await
             .transpose()
         }
         RegisteredStaticMethodTarget::Builtin(name) => {
-            call_builtin_sequence_async_impl(&name.0, args, output_count, context.cloned(), None)
-                .await
-                .map(Some)
+            try_call_retained_builtin_sequence_async(
+                &name.0,
+                args,
+                output_count,
+                context.cloned(),
+                None,
+            )
+            .await
         }
     }
 }
 
+#[cfg(test)]
 async fn call_registered_class_constructor(
     class_name: &str,
     args: &[Value],
+    output_count: Option<usize>,
+    context: Option<&crate::context::RuntimeContext>,
+) -> Result<crate::execution::RootedValue, RuntimeError> {
+    let args = crate::call::BuiltinArguments::from_borrowed(args, context)?;
+    call_retained_class_constructor(class_name, args, output_count, context).await
+}
+
+async fn call_retained_class_constructor(
+    class_name: &str,
+    args: crate::call::BuiltinArguments,
     output_count: Option<usize>,
     context: Option<&crate::context::RuntimeContext>,
 ) -> Result<crate::execution::RootedValue, RuntimeError> {
@@ -1143,7 +1361,7 @@ async fn call_registered_class_constructor(
     })?;
     call_class_constructor(
         class_identity,
-        ConstructorArguments::Borrowed(args),
+        ConstructorArguments::Retained(args),
         output_count,
         context,
         ConstructorInvocationTarget::Registered,
@@ -1258,11 +1476,12 @@ async fn call_class_constructor(
                             .with_identifier("RunMat:ConstructorOwnerInvalid")
                             .build()
                     })?;
-                    let result = crate::user_functions::try_call_bound_function_in_context(
+                    let result = crate::user_functions::try_call_rooted_bound_function_with_environment_in_context(
                         selected,
                         binding,
-                        args.borrowed()?,
+                        args.retained(context)?.into_supplied_function_arguments(context)?,
                         requested_outputs,
+                        None,
                     )
                     .await
                     .ok_or_else(|| {
@@ -1298,11 +1517,12 @@ async fn call_class_constructor(
                             .with_identifier("RunMat:ConstructorOwnerInvalid")
                             .build()
                         })?;
-                        let result = crate::user_functions::try_call_bound_function_in_context(
+                        let result = crate::user_functions::try_call_rooted_bound_function_with_environment_in_context(
                             selected,
                             bound,
-                            args.borrowed()?,
+                            args.retained(context)?.into_supplied_function_arguments(context)?,
                             requested_outputs,
+                            None,
                         )
                         .await
                         .ok_or_else(|| {
@@ -1314,11 +1534,11 @@ async fn call_class_constructor(
                     }
                 }
             }
-            if let Some(result) =
-                crate::user_functions::try_call_semantic_function_by_name_in_context(
+            if let std::ops::ControlFlow::Break(result) =
+                crate::user_functions::try_call_rooted_semantic_name_in_context(
                     context,
                     &ctor.function_name,
-                    args.borrowed()?,
+                    args.retained(context)?.into_supplied_function_arguments(context)?,
                     requested_outputs,
                 )
                 .await
@@ -1330,20 +1550,22 @@ async fn call_class_constructor(
             if runmat_builtins::builtin_name_is_known(&ctor.function_name)
                 && ctor.function_name != class_identity.display_name()
             {
-                let result = call_builtin_async_impl(
+                let result = try_call_retained_builtin_sequence_async(
                     &ctor.function_name,
-                    args.borrowed()?,
+                    args.retained(context)?,
                     output_count,
                     context.cloned(),
+                    None,
                 )
-                .await?;
+                .await?.ok_or_else(|| undefined_builtin_error(&ctor.function_name))?;
+                let result = resolve_single_sequence(result)?;
                 return Ok::<Option<crate::execution::RootedValue>, RuntimeError>(Some(result));
             }
-            if let Some(result) =
-                crate::user_functions::try_call_semantic_function_by_name_in_context(
+            if let std::ops::ControlFlow::Break(result) =
+                crate::user_functions::try_call_rooted_semantic_name_in_context(
                     context,
                     &owner_qualified,
-                    args.borrowed()?,
+                    args.retained(context)?.into_supplied_function_arguments(context)?,
                     requested_outputs,
                 )
                 .await
@@ -1355,13 +1577,15 @@ async fn call_class_constructor(
             if runmat_builtins::builtin_name_is_known(&owner_qualified)
                 && owner_qualified != class_identity.display_name()
             {
-                let result = call_builtin_async_impl(
+                let result = try_call_retained_builtin_sequence_async(
                     &owner_qualified,
-                    args.borrowed()?,
+                    args.retained(context)?,
                     output_count,
                     context.cloned(),
+                    None,
                 )
-                .await?;
+                .await?.ok_or_else(|| undefined_builtin_error(&owner_qualified))?;
+                let result = resolve_single_sequence(result)?;
                 return Ok::<Option<crate::execution::RootedValue>, RuntimeError>(Some(result));
             }
             Ok::<Option<crate::execution::RootedValue>, RuntimeError>(None)
@@ -1370,77 +1594,14 @@ async fn call_class_constructor(
     let Some(result) = constructor_result else {
         return Ok(default_object);
     };
-    result.try_map_owned(
-        |result| {
-            normalize_constructor_result(default_object.value().clone(), result, requested_outputs)
-        },
-        |error| error.into_runtime_error(),
-    )
-}
-
-fn normalize_constructor_result(
-    default_object: Value,
-    result: Value,
-    requested_outputs: usize,
-) -> Result<Value, RuntimeError> {
-    if requested_outputs != 1 {
-        return Ok(result);
-    }
-    match result {
-        Value::Struct(struct_value) => match default_object {
-            Value::Object(mut object) => {
-                for (field, value) in struct_value.fields {
-                    object.properties.insert(field, value);
-                }
-                Ok(Value::Object(object))
-            }
-            Value::HandleObject(handle) => {
-                enum ConstructorMergeStatus {
-                    Merged,
-                    InvalidHandle,
-                    NonObject,
-                }
-
-                let merged = runmat_gc::gc_with_value_mut(&handle.target, |target| {
-                    if let Value::Object(object) = target {
-                        if !crate::object_handle_flag_valid(object) {
-                            return ConstructorMergeStatus::InvalidHandle;
-                        }
-                        for (field, value) in struct_value.fields {
-                            runmat_gc::gc_record_handle_write(&handle.target, &value);
-                            object.properties.insert(field, value);
-                        }
-                        ConstructorMergeStatus::Merged
-                    } else {
-                        ConstructorMergeStatus::NonObject
-                    }
-                })
-                .map_err(|e| {
-                    build_runtime_error(format!("constructor result handle target invalid: {e}"))
-                        .build()
-                })?;
-                match merged {
-                    ConstructorMergeStatus::Merged => {}
-                    ConstructorMergeStatus::InvalidHandle => {
-                        return Err(build_runtime_error(
-                            "constructor result handle target is invalid",
-                        )
-                        .build());
-                    }
-                    ConstructorMergeStatus::NonObject => {
-                        return Err(build_runtime_error(
-                            "constructor result handle target is not an object",
-                        )
-                        .build());
-                    }
-                }
-                Ok(Value::HandleObject(handle))
-            }
-            _ => Ok(Value::Struct(struct_value)),
-        },
-        Value::Object(_) | Value::HandleObject(_) => Ok(result),
-        _ => Ok(default_object),
-    }
+    result.with_owned(|result| {
+        constructor_normalization::normalize(
+            context,
+            default_object.value().clone(),
+            result,
+            requested_outputs,
+        )
+    })
 }
 
 /// Direct embedding call with no session binding authority. Entering a
@@ -1453,6 +1614,22 @@ pub async fn call_builtin_async(
     crate::context::check_active_host()?;
     let result = call_builtin_sequence_async(name, args)
         .await
+        .and_then(crate::call::arguments::project_rooted_legacy_builtin_value_abi);
+    crate::context::check_active_host()?;
+    result
+}
+
+/// Internal forwarding keeps the original logical argument owner and selected
+/// session authority instead of passing through borrowed embedding ingress.
+pub(crate) async fn call_retained_builtin_async(
+    name: &str,
+    args: crate::call::BuiltinArguments,
+    context: Option<&crate::context::RuntimeContext>,
+) -> Result<crate::execution::RootedValue, RuntimeError> {
+    crate::context::check_active_host()?;
+    let result = try_call_retained_builtin_sequence_async(name, args, None, context.cloned(), None)
+        .await
+        .and_then(|result| result.ok_or_else(|| undefined_builtin_error(name)))
         .and_then(crate::call::arguments::project_rooted_legacy_builtin_value_abi);
     crate::context::check_active_host()?;
     result
@@ -1496,18 +1673,46 @@ pub async fn call_builtin_async_with_outputs_in_context(
     output_count: usize,
 ) -> Result<crate::execution::RootedValue, RuntimeError> {
     crate::context::check_active_host()?;
-    let result = call_builtin_sequence_async_with_outputs_in_context(context, name, args, output_count)
-        .await
-        .and_then(crate::call::arguments::project_rooted_legacy_builtin_value_abi);
+    let result =
+        call_builtin_sequence_async_with_outputs_in_context(context, name, args, output_count)
+            .await
+            .and_then(crate::call::arguments::project_rooted_legacy_builtin_value_abi);
     crate::context::check_active_host()?;
     result
 }
 
 /// Invoke the implementation already selected for this invocation. Re-resolving
 /// a scoped service here would invalidate operand-domain batching admission.
+#[cfg(test)]
 pub(crate) async fn call_selected_builtin_async_with_outputs(
     binding: crate::builtin::RuntimeBuiltinBinding,
     args: &[Value],
+    output_count: usize,
+    context: Option<crate::context::RuntimeContext>,
+) -> Result<crate::execution::RootedValueSequence, RuntimeError> {
+    call_selected_builtin_with_arguments(
+        binding,
+        |runtime| crate::call::BuiltinArguments::from_borrowed(args, runtime),
+        output_count,
+        context,
+    )
+    .await
+}
+
+pub(crate) async fn call_selected_retained_builtin_async_with_outputs(
+    binding: crate::builtin::RuntimeBuiltinBinding,
+    args: crate::call::BuiltinArguments,
+    output_count: usize,
+    context: Option<crate::context::RuntimeContext>,
+) -> Result<crate::execution::RootedValueSequence, RuntimeError> {
+    call_selected_builtin_with_arguments(binding, move |_| Ok(args), output_count, context).await
+}
+
+pub(crate) async fn call_selected_builtin_with_arguments(
+    binding: crate::builtin::RuntimeBuiltinBinding,
+    ingress: impl FnOnce(
+        Option<&crate::context::RuntimeContext>,
+    ) -> Result<crate::call::BuiltinArguments, RuntimeError>,
     output_count: usize,
     context: Option<crate::context::RuntimeContext>,
 ) -> Result<crate::execution::RootedValueSequence, RuntimeError> {
@@ -1518,27 +1723,28 @@ pub(crate) async fn call_selected_builtin_async_with_outputs(
     let inner_observation = observation.clone();
     let scoped_context = context.clone();
     let result = async move {
+        let args = ingress(context.as_ref())?;
         let name = binding.identity.builtin.name;
         let _output_guard = crate::output_count::push_output_count(Some(output_count))?;
         if let Some(result) =
-            try_distributed_builtin(name, args, Some(output_count), context.as_ref()).await?
+            try_distributed_builtin(name, &args, Some(output_count), context.as_ref()).await?
         {
             return Ok(result);
         }
-        if let Some(result) = try_call_registered_instance_method_sequence(
+        if let Some(result) = try_call_retained_instance_method_sequence(
             name,
-            args,
+            &args,
             Some(output_count),
             context.as_ref(),
         )
         .await?
         {
-            return compatibility_checked_builtin_sequence(name, args, result);
+            return compatibility_checked_builtin_sequence(name, args.view(), result);
         }
-        let prepared = preparation::prepare_selected(
+        let prepared = preparation::prepare_retained_selected(
             SelectedBindingOrigin::CanonicalOrScoped,
             name,
-            args,
+            args.fork(),
             context.as_ref(),
         )
         .await?;
@@ -1561,16 +1767,16 @@ pub(crate) async fn call_selected_builtin_async_with_outputs(
                     })
             }
         });
-        let result = selected_execution::execute(
+        let result = selected_execution::execute_retained(
             SelectedImplementation::Canonical(binding),
-            prepared.as_deref().unwrap_or(args),
+            prepared,
             context,
             Some(output_count),
             inner_observation.as_deref(),
             authority,
         )
         .await?;
-        compatibility_checked_builtin_sequence(name, args, result)
+        compatibility_checked_builtin_sequence(name, args.view(), result)
     };
     let result = match scoped_context {
         Some(context) => context.scope(result).await,
@@ -1583,14 +1789,22 @@ pub(crate) async fn call_selected_builtin_async_with_outputs(
     result
 }
 
+#[cfg(test)]
 fn should_retry_with_gpu_gather(err: &RuntimeError, args: &[Value]) -> bool {
-    if !args.iter().any(value_contains_gpu) {
+    should_retry_with_gpu_gather_values(err, args.iter())
+}
+
+fn should_retry_with_gpu_gather_values<'a>(
+    err: &RuntimeError,
+    args: impl Iterator<Item = &'a Value> + Clone,
+) -> bool {
+    if !args.clone().any(value_contains_gpu) {
         return false;
     }
     if error_chain_has_gpu_gather_retry(err, crate::GpuGatherRetry::Never) {
         return false;
     }
-    if args.iter().any(value_contains_explicit_gpu) {
+    if args.clone().any(value_contains_explicit_gpu) {
         return false;
     }
     // Compatibility errors are policy decisions. Retain this source-chain
@@ -1607,14 +1821,14 @@ fn should_retry_with_gpu_gather(err: &RuntimeError, args: &[Value]) -> bool {
 pub fn value_contains_explicit_gpu(value: &Value) -> bool {
     match value {
         Value::GpuTensor(handle) => runmat_accelerate_api::handle_is_explicit(handle),
-        Value::Cell(cell) => cell.data.iter().any(value_contains_explicit_gpu),
+        Value::Cell(cell) => cell.data().iter().any(value_contains_explicit_gpu),
         Value::Struct(value) => value.fields.values().any(value_contains_explicit_gpu),
         Value::StructArray(array) => {
             let mut found = false;
             array.for_each_value(|value| found |= value_contains_explicit_gpu(value));
             found
         }
-        Value::Object(value) => value.properties.values().any(value_contains_explicit_gpu),
+        Value::Object(value) => value.properties().values().any(value_contains_explicit_gpu),
         Value::Closure(value) => value.captures.iter().any(value_contains_explicit_gpu),
         Value::OutputList(values) => values.iter().any(value_contains_explicit_gpu),
         _ => false,
@@ -1650,24 +1864,6 @@ fn error_chain_has_identifier_prefix(err: &RuntimeError, prefix: &str) -> bool {
     false
 }
 
-async fn gather_args_for_retry_async(args: &[Value]) -> Result<Option<Vec<Value>>, RuntimeError> {
-    let mut gathered_any = false;
-    let mut gathered_args = Vec::with_capacity(args.len());
-    for arg in args {
-        if value_contains_gpu(arg) {
-            gathered_args.push(gather_if_needed_async(arg).await?);
-            gathered_any = true;
-        } else {
-            gathered_args.push(arg.clone());
-        }
-    }
-    if gathered_any {
-        Ok(Some(gathered_args))
-    } else {
-        Ok(None)
-    }
-}
-
 #[cfg(test)]
 mod gpu_visit_tests;
 #[cfg(test)]
@@ -1680,7 +1876,7 @@ mod tests {
     use futures::executor::block_on;
     use runmat_accelerate_api::{GpuTensorHandle, ThreadProviderGuard};
     use runmat_types::MemberAccess;
-    use runmat_value::{Closure, StructValue, Value};
+    use runmat_value::{Closure, Value};
     use runmat_value::{IntegerStorage, Tensor};
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -1732,6 +1928,7 @@ mod tests {
             vec![Value::Num(1.0), Value::Num(2.0)],
         ] {
             let output = super::finalize_instance_method_result(
+                None,
                 &method,
                 &receiver,
                 crate::execution::RootedValueSequence::new(
@@ -1748,6 +1945,7 @@ mod tests {
         }
         assert_eq!(
             super::finalize_instance_method_result(
+                None,
                 &method,
                 &receiver,
                 crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(3.0)),
@@ -2107,7 +2305,7 @@ mod tests {
             binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
-            captures: vec![Value::GpuTensor(gpu_fixture(vec![1]))],
+            captures: vec![Value::GpuTensor(gpu_fixture(vec![1]))].into(),
         }));
         assert!(value_contains_gpu(&value));
     }
@@ -2144,7 +2342,7 @@ mod tests {
             binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
-            captures: vec![Value::GpuTensor(gpu_fixture(vec![1]))],
+            captures: vec![Value::GpuTensor(gpu_fixture(vec![1]))].into(),
         }));
         let err = futures::executor::block_on(gather_if_needed_async(&value))
             .expect_err("missing provider should fail closure-captured gather");
@@ -2188,11 +2386,11 @@ mod tests {
             std::sync::Arc::new(move |function, _args, requested_outputs| {
                 assert_eq!(function, 10101);
                 assert_eq!(requested_outputs, 1);
-                let mut sv = StructValue::new();
+                let mut sv = runmat_value::UnboundedStructValueBuilder::new();
                 sv.fields.insert("x".to_string(), Value::Num(12.0));
                 Box::pin(async move {
                     crate::user_functions::test_support::rooted_single_value_sequence(
-                        Value::Struct(sv),
+                        Value::Struct(sv.finish()),
                     )
                 })
             }),
@@ -2233,8 +2431,8 @@ mod tests {
         let Value::Object(obj) = out.value() else {
             panic!("expected object from constructor dispatch");
         };
-        assert_eq!(obj.class_name.display_name(), child_name);
-        assert_eq!(obj.properties.get("x"), Some(&Value::Num(12.0)));
+        assert_eq!(obj.class_name().display_name(), child_name);
+        assert_eq!(obj.properties().get("x"), Some(&Value::Num(12.0)));
     }
 
     #[test]
@@ -2293,7 +2491,7 @@ mod tests {
         let Value::Object(obj) = out.value() else {
             panic!("expected object result");
         };
-        assert_eq!(obj.class_name.display_name(), public_class_name);
+        assert_eq!(obj.class_name().display_name(), public_class_name);
     }
 
     #[test]
@@ -2360,7 +2558,7 @@ mod tests {
         for requested_outputs in [0, 2] {
             let out = block_on(super::try_call_registered_static_method(
                 &format!("{class_name}.zero"),
-                &[],
+                &crate::builtins::common::test_support::builtin_arguments(Vec::new()),
                 Some(requested_outputs),
                 None,
             ))
@@ -2391,12 +2589,12 @@ mod tests {
             function: runmat_types::ProgramFunctionId(42),
         };
         let binding = runmat_value::BoundFunctionBinding {
-            function: 42,
+            function: 142,
             authority: runmat_value::BoundFunctionAuthority::Portable { origin },
         };
         let instance_method = runmat_types::MethodName::from("advance");
         let instance_binding = runmat_value::BoundFunctionBinding {
-            function: 43,
+            function: 143,
             authority: runmat_value::BoundFunctionAuthority::Portable {
                 origin: runmat_execution::FunctionBindingOrigin {
                     program: origin.program,
@@ -2414,6 +2612,29 @@ mod tests {
             implicit_class_argument: None,
             role: runmat_types::ClassMethodRole::Ordinary,
         };
+        let catalog = crate::user_functions::install_source_function_catalog(Some(
+            std::sync::Arc::new(vec![
+                crate::user_functions::SourceFunctionInfo {
+                    source_id: runmat_types::SourceId(1),
+                    name: "unpublished_method_body".into(),
+                    function: binding.function,
+                    role: runmat_types::FunctionSourceRole::Method,
+                    binding_origin: Some(origin),
+                    source_file: None,
+                    definition_owners: None,
+                },
+                crate::user_functions::SourceFunctionInfo {
+                    source_id: runmat_types::SourceId(1),
+                    name: "unpublished_instance_body".into(),
+                    function: instance_binding.function,
+                    role: runmat_types::FunctionSourceRole::Method,
+                    binding_origin: instance_binding.authority.portable_origin(),
+                    source_file: None,
+                    definition_owners: None,
+                },
+            ]),
+        ))
+        .expect("install exact method source catalog");
         crate::class_registry::register_checked_classes(vec![
             crate::class_registry::CheckedClassRegistration {
                 class: crate::class_registry::RuntimeClass {
@@ -2464,7 +2685,7 @@ mod tests {
         assert_eq!(loaded.binding.as_ref(), Some(&binding));
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let Value::Closure(handle) = crate::builtins::introspection::getmethod::dispatch_getmethod(
-            Value::ClassRef(class.clone()),
+            Value::ClassRef(class.clone().into()),
             "build".into(),
         )
         .expect("getmethod closure") else {
@@ -2473,9 +2694,9 @@ mod tests {
         assert_eq!(handle.binding.as_ref(), Some(&binding));
         let selected = super::selection::select_instance_method(
             "advance",
-            &[Value::Object(runmat_value::ObjectInstance::new(
-                class.clone(),
-            ))],
+            crate::call::FunctionArgumentView::from_slice(&[Value::Object(
+                runmat_value::ObjectInstance::new(class.clone()),
+            )]),
         )
         .expect("registered instance selection")
         .expect("instance method declaration");
@@ -2484,5 +2705,40 @@ mod tests {
             [super::selection::InstanceMethodRoute::Bound(selected)]
                 if selected == &instance_binding
         ));
+        let declaration = crate::class_registry::get_class(&class).expect("registered declaration");
+        let registration = |binding| crate::class_registry::CheckedClassRegistration {
+            class: declaration.clone(),
+            method_bindings: HashMap::from([(method.clone(), binding)]),
+            is_sealed: false,
+            is_abstract: false,
+            enumerations: Vec::new(),
+        };
+        let generation = crate::class_registry::class_registry_generation();
+        for forged in [
+            runmat_value::BoundFunctionBinding::portable(42, origin),
+            runmat_value::BoundFunctionBinding::portable(
+                binding.function,
+                runmat_execution::FunctionBindingOrigin {
+                    program: runmat_execution::Digest::sha256("foreign method program"),
+                    function: origin.function,
+                },
+            ),
+        ] {
+            let error = crate::class_registry::register_checked_classes(vec![registration(forged)])
+                .expect_err("matching name or portable ordinal is not method authority");
+            assert_eq!(error.identifier(), Some("RunMat:ClassMethodBinding"));
+            assert_eq!(
+                crate::class_registry::class_registry_generation(),
+                generation
+            );
+        }
+        drop(catalog);
+        let error = crate::class_registry::register_checked_classes(vec![registration(binding)])
+            .expect_err("a portable method binding requires its original source issuance");
+        assert_eq!(error.identifier(), Some("RunMat:ClassMethodBinding"));
+        assert_eq!(
+            crate::class_registry::class_registry_generation(),
+            generation
+        );
     }
 }

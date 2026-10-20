@@ -50,7 +50,11 @@ fn variadic_controls_are_parsed_once_and_only_data_reaches_service() {
             Some(&context),
             config,
             data(),
-            vec![empty(), Value::Num(2.0), empty()],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                empty(),
+                Value::Num(2.0),
+                empty(),
+            ]),
         ))
         .unwrap();
         let Value::LogicalArray(array) = result.value() else {
@@ -61,7 +65,11 @@ fn variadic_controls_are_parsed_once_and_only_data_reaches_service() {
             Some(&context),
             config,
             data(),
-            vec![empty(), Value::Num(0.0), empty()]
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                empty(),
+                Value::Num(0.0),
+                empty()
+            ])
         ))
         .is_err());
     }
@@ -97,7 +105,7 @@ fn exact_any_route_skips_preparation_for_default_and_explicit_omit_nan() {
                 Some(&context),
                 config,
                 Value::Tensor(tensor),
-                options.clone(),
+                crate::builtins::common::test_support::builtin_arguments(options.clone()),
             ))
             .unwrap();
             assert!(matches!(result.value(), Value::Bool(value) if *value == expected));
@@ -120,7 +128,11 @@ fn include_nan_any_remains_provider_eligible_after_option_admission() {
         Some(&context),
         &super::super::super::any::CONFIG,
         Value::Tensor(Tensor::new(vec![f64::NAN], vec![1, 1]).unwrap()),
-        vec![empty(), Value::String("includenan".into()), empty()],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            empty(),
+            Value::String("includenan".into()),
+            empty(),
+        ]),
     ))
     .unwrap();
     assert!(matches!(result.value(), Value::Bool(true)));
@@ -141,7 +153,7 @@ fn absent_explicit_context_is_passthrough_even_with_ambient_service() {
         None,
         &super::super::super::all::CONFIG,
         value,
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("passthrough reduction");
     assert!(matches!(result.value(), Value::Bool(false)));

@@ -233,8 +233,7 @@ impl WorkingRefinement {
                 let change = batch.commit_prepared(cancellation)?;
                 state.rebase_committed(change);
                 self.probe_before_repair = true;
-                let (shape_violations, refinement_violations) =
-                    state.quality().violation_counts();
+                let (shape_violations, refinement_violations) = state.quality().violation_counts();
                 tracing::info!(
                     attempts,
                     rejected,

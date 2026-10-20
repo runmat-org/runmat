@@ -42,12 +42,12 @@ fn metadata_sizes(value: &Value, function: &'static str, label: &str) -> Builtin
 }
 
 async fn admitted_layer_options(
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
     function: &'static str,
 ) -> BuiltinResult<std::collections::BTreeMap<DeepLearningLayerOption, Value>> {
     let kind = DeepLearningLayerKind::from_constructor(function)
         .expect("layer constructor must have a catalog identity");
-    let mut options = super::layer_helpers::parse_layer_options(&rest, kind, function)?;
+    let mut options = super::layer_helpers::parse_layer_options(rest.view(), kind, function)?;
     for (option, value) in &mut options {
         if super::layer_helpers::options::requires_host_control(*option) {
             *value = gather_if_needed_async(value).await?;
@@ -71,7 +71,10 @@ fn declared_constructor_default(
     }
 }
 
-fn preflight_layer_options(rest: &[Value], function: &'static str) -> BuiltinResult<()> {
+fn preflight_layer_options(
+    rest: crate::call::FunctionArgumentView<'_>,
+    function: &'static str,
+) -> BuiltinResult<()> {
     let kind = DeepLearningLayerKind::from_constructor(function)
         .expect("layer constructor must have a catalog identity");
     super::layer_helpers::parse_layer_options(rest, kind, function).map(|_| ())
@@ -98,11 +101,13 @@ fn is_numeric_scalar(value: &Value) -> bool {
 #[runtime_builtin(
     name = "fullyConnectedLayer",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::deep_learning::layers"
 )]
 pub(super) async fn fully_connected_layer_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     output_size: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     super::errors::admit_single_output(
         "fullyConnectedLayer",
@@ -116,11 +121,29 @@ pub(super) async fn fully_connected_layer_builtin(
                 runmat_builtins::DeepLearningDenseOperationDimension::from_name(&text).is_some()
             })
     }) {
-        let dimension = options.remove(0);
-        options.splice(
-            0..0,
-            [Value::String("OperationDimension".into()), dimension],
-        );
+        let dimension = options.pop_front().expect("validated argument prefix");
+        let source = options.into_function_arguments();
+        let operation = Value::String(crate::call::argument_text::copy_str(
+            "OperationDimension",
+            runtime.as_ref(),
+        )?);
+        options = crate::execution::RootedValues::transform_arguments(
+            &source,
+            source.len() + 2,
+            None,
+            runtime.as_ref(),
+            |index| {
+                Ok(match index {
+                    0 => operation.clone(),
+                    1 => dimension.clone(),
+                    index => source
+                        .get(index - 2)
+                        .expect("fully connected option argument")
+                        .clone(),
+                })
+            },
+        )?
+        .into();
     }
     layer_object(
         FULLY_CONNECTED_LAYER_CLASS,
@@ -138,7 +161,7 @@ pub(super) async fn fully_connected_layer_builtin(
 )]
 pub(super) async fn feature_input_layer_builtin(
     input_size: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     super::errors::admit_single_output("featureInputLayer", &runmat_builtins::LAYER_INVALID_INPUT)?;
     let input_size = metadata_sizes(&input_size, "featureInputLayer", "inputSize")?;
@@ -171,7 +194,7 @@ pub(super) async fn feature_input_layer_builtin(
 )]
 pub(super) async fn sequence_input_layer_builtin(
     input_size: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     super::errors::admit_single_output(
         "sequenceInputLayer",
@@ -199,7 +222,9 @@ pub(super) async fn sequence_input_layer_builtin(
     binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::layers"
 )]
-pub(super) async fn relu_layer_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn relu_layer_builtin(
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     super::errors::admit_single_output("reluLayer", &runmat_builtins::LAYER_INVALID_INPUT)?;
     layer_object(
         RELU_LAYER_CLASS,
@@ -215,16 +240,19 @@ pub(super) async fn relu_layer_builtin(rest: Vec<Value>) -> BuiltinResult<Value>
     binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::layers"
 )]
-pub(super) async fn elu_layer_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn elu_layer_builtin(rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     super::errors::admit_single_output("eluLayer", &runmat_builtins::LAYER_INVALID_INPUT)?;
     let mut args = rest;
     let leading_alpha = args.first().is_some_and(is_numeric_scalar);
     if leading_alpha {
-        preflight_layer_options(&args[1..], "eluLayer")?;
+        preflight_layer_options(
+            args.view().range(1..).expect("ELU option suffix"),
+            "eluLayer",
+        )?;
     }
     let alpha = if args.first().is_some_and(is_numeric_scalar) {
         numeric_scalar(
-            &gather_if_needed_async(&args.remove(0)).await?,
+            &gather_if_needed_async(&args.pop_front().expect("validated argument prefix")).await?,
             "eluLayer",
             "alpha",
         )?
@@ -245,7 +273,9 @@ pub(super) async fn elu_layer_builtin(rest: Vec<Value>) -> BuiltinResult<Value> 
     binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::layers"
 )]
-pub(super) async fn softmax_layer_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn softmax_layer_builtin(
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     super::errors::admit_single_output("softmaxLayer", &runmat_builtins::LAYER_INVALID_INPUT)?;
     layer_object(
         SOFTMAX_LAYER_CLASS,
@@ -261,7 +291,9 @@ pub(super) async fn softmax_layer_builtin(rest: Vec<Value>) -> BuiltinResult<Val
     binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::layers"
 )]
-pub(super) async fn classification_layer_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn classification_layer_builtin(
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     super::errors::admit_single_output(
         "classificationLayer",
         &runmat_builtins::LAYER_INVALID_INPUT,
@@ -280,7 +312,9 @@ pub(super) async fn classification_layer_builtin(rest: Vec<Value>) -> BuiltinRes
     binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::layers"
 )]
-pub(super) async fn regression_layer_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn regression_layer_builtin(
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     super::errors::admit_single_output("regressionLayer", &runmat_builtins::LAYER_INVALID_INPUT)?;
     layer_object(
         REGRESSION_OUTPUT_LAYER_CLASS,
@@ -296,7 +330,9 @@ pub(super) async fn regression_layer_builtin(rest: Vec<Value>) -> BuiltinResult<
     binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::layers"
 )]
-pub(super) async fn layer_normalization_layer_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn layer_normalization_layer_builtin(
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     super::errors::admit_single_output(
         "layerNormalizationLayer",
         &runmat_builtins::LAYER_INVALID_INPUT,
@@ -316,7 +352,7 @@ pub(super) async fn layer_normalization_layer_builtin(rest: Vec<Value>) -> Built
     builtin_path = "crate::builtins::deep_learning::layers"
 )]
 pub(super) async fn global_average_pooling_1d_layer_builtin(
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     super::errors::admit_single_output(
         "globalAveragePooling1dLayer",
@@ -338,7 +374,7 @@ pub(super) async fn global_average_pooling_1d_layer_builtin(
 )]
 pub(super) async fn lstm_layer_builtin(
     num_hidden_units: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     super::errors::admit_single_output("lstmLayer", &runmat_builtins::LAYER_INVALID_INPUT)?;
     recurrent_layer(
@@ -358,7 +394,7 @@ pub(super) async fn lstm_layer_builtin(
 )]
 pub(super) async fn bilstm_layer_builtin(
     num_hidden_units: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     super::errors::admit_single_output("bilstmLayer", &runmat_builtins::LAYER_INVALID_INPUT)?;
     recurrent_layer(
@@ -376,7 +412,7 @@ pub(super) async fn recurrent_layer(
     kind: DeepLearningLayerKind,
     type_name: &str,
     num_hidden_units: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let units = metadata_size(&num_hidden_units, function, "numHiddenUnits")?;
     layer_object(
@@ -402,7 +438,7 @@ pub(super) async fn recurrent_layer(
 pub(super) async fn convolution_1d_layer_builtin(
     filter_size: Value,
     num_filters: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     super::errors::admit_single_output(
         "convolution1dLayer",

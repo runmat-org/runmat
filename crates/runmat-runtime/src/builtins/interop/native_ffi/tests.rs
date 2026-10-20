@@ -41,35 +41,49 @@ mod native {
         let (runtime, calls) = recording_context();
         let invalid = Value::output_list(Vec::new());
         let results = [
-            futures::executor::block_on(loadlibrary_builtin(Some(runtime.clone()), None, vec![])),
-            futures::executor::block_on(calllib_builtin(Some(runtime.clone()), None, vec![])),
+            futures::executor::block_on(loadlibrary_builtin(
+                Some(runtime.clone()),
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![]),
+            )),
+            futures::executor::block_on(calllib_builtin(
+                Some(runtime.clone()),
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![]),
+            )),
             futures::executor::block_on(libfunctions_builtin(
                 Some(runtime.clone()),
                 None,
-                vec![Value::String("fixture".into()), Value::String("bad".into())],
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::String("fixture".into()),
+                    Value::String("bad".into()),
+                ]),
             )),
             futures::executor::block_on(libpointer_builtin(
                 Some(runtime.clone()),
                 None,
-                vec![
+                crate::builtins::common::test_support::builtin_arguments(vec![
                     Value::String("int32Ptr".into()),
                     Value::Num(1.0),
                     Value::Num(2.0),
-                ],
+                ]),
             )),
             futures::executor::block_on(libstruct_builtin(
                 Some(runtime.clone()),
                 None,
-                vec![Value::String("fixture_record".into()), Value::Num(1.0)],
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::String("fixture_record".into()),
+                    Value::Num(1.0),
+                ]),
             )),
             futures::executor::block_on(setdatatype_builtin(
                 Some(runtime.clone()),
                 None,
-                vec![
+                crate::builtins::common::test_support::builtin_arguments(vec![
                     Value::Num(1.0),
                     Value::String("int32Ptr".into()),
                     Value::Num(1.0),
-                ],
+                ]),
             )),
             futures::executor::block_on(unloadlibrary_builtin(
                 Some(runtime.clone()),
@@ -106,10 +120,10 @@ mod native {
             futures::executor::block_on(loadlibrary_builtin(
                 Some(runtime.clone()),
                 Some(3),
-                vec![
+                crate::builtins::common::test_support::builtin_arguments(vec![
                     Value::String("fixture".into()),
                     Value::String("fixture.h".into()),
-                ],
+                ]),
             )),
             futures::executor::block_on(unloadlibrary_builtin(
                 Some(runtime.clone()),
@@ -124,22 +138,30 @@ mod native {
             futures::executor::block_on(libfunctions_builtin(
                 Some(runtime.clone()),
                 Some(2),
-                vec![Value::String("fixture".into())],
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                    "fixture".into(),
+                )]),
             )),
-            futures::executor::block_on(libpointer_builtin(Some(runtime.clone()), Some(2), vec![])),
+            futures::executor::block_on(libpointer_builtin(
+                Some(runtime.clone()),
+                Some(2),
+                crate::builtins::common::test_support::builtin_arguments(vec![]),
+            )),
             futures::executor::block_on(libstruct_builtin(
                 Some(runtime.clone()),
                 Some(2),
-                vec![Value::String("fixture_record".into())],
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                    "fixture_record".into(),
+                )]),
             )),
             futures::executor::block_on(setdatatype_builtin(
                 Some(runtime),
                 Some(1),
-                vec![
+                crate::builtins::common::test_support::builtin_arguments(vec![
                     Value::Num(1.0),
                     Value::String("int32Ptr".into()),
                     Value::Num(1.0),
-                ],
+                ]),
             )),
         ];
         for result in checks {
@@ -156,10 +178,10 @@ mod native {
         let _ = futures::executor::block_on(calllib_builtin(
             Some(runtime),
             Some(3),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::String("fixture".into()),
                 Value::String("fixture_add".into()),
-            ],
+            ]),
         ));
         assert_eq!(
             calls.get(),

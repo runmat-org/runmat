@@ -67,11 +67,10 @@ pub(super) fn evaluate_tensor(
 
 fn evaluate_characters(operation: ExponentialOperation, chars: CharArray) -> BuiltinResult<Value> {
     let values = chars
-        .data
-        .into_iter()
+        .iter_column_major()
         .map(|value| operation.apply_f64(value as u32 as f64))
         .collect();
-    Tensor::new(values, vec![chars.rows, chars.cols])
+    Tensor::new(values, chars.shape)
         .map(Value::Tensor)
         .map_err(|error| super::errors::internal(operation, error))
 }

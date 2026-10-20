@@ -13,9 +13,13 @@ const DIRECTION_FIELDS: &[&str] = &["components"];
 #[runtime_builtin(
     name = "fea.Direction.vector",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::fea::constraints::support::direction"
 )]
-pub async fn direction_vector_builtin(components: Value) -> BuiltinResult<Value> {
+pub async fn direction_vector_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    components: Value,
+) -> BuiltinResult<Value> {
     crate::builtins::fea::constraints::fixed_outputs(
         &runmat_builtins::FEA_DIRECTION_VECTOR_DESCRIPTOR,
         "fea.Direction.vector",
@@ -33,7 +37,7 @@ pub async fn direction_vector_builtin(components: Value) -> BuiltinResult<Value>
             "direction components must form a nonzero vector",
         ));
     }
-    direction_to_value(components.map(|value| value / norm))
+    direction_to_value(runtime.as_ref(), components.map(|value| value / norm))
 }
 
 pub(crate) fn direction_from_value(
@@ -48,16 +52,16 @@ pub(crate) fn direction_from_value(
         ));
     };
     if !object
-        .class_name
+        .class_name()
         .is(runmat_builtins::fea_contract::model_types::classes::FEA_DIRECTION_CLASS)
     {
         return Err(builtin_error(
             builtin,
             &ERROR_INPUT,
-            format!("expected {DIRECTION_CLASS}, got {}", object.class_name),
+            format!("expected {DIRECTION_CLASS}, got {}", object.class_name()),
         ));
     }
-    let components = object.properties.get("components").ok_or_else(|| {
+    let components = object.properties().get("components").ok_or_else(|| {
         builtin_error(
             builtin,
             &ERROR_INPUT,
@@ -67,7 +71,10 @@ pub(crate) fn direction_from_value(
     finite_numeric_vector3(builtin, components, "direction")
 }
 
-fn direction_to_value(components: [f64; 3]) -> BuiltinResult<Value> {
+fn direction_to_value(
+    runtime: Option<&crate::context::RuntimeContext>,
+    components: [f64; 3],
+) -> BuiltinResult<Value> {
     ensure_direction_class_registered();
     let tensor = Tensor::new(components.to_vec(), vec![1, 3]).map_err(|error| {
         builtin_error(
@@ -76,11 +83,13 @@ fn direction_to_value(components: [f64; 3]) -> BuiltinResult<Value> {
             format!("failed to store direction: {error}"),
         )
     })?;
-    let mut object = ObjectInstance::new(DIRECTION_CLASS);
-    object
-        .properties
-        .insert("components".into(), Value::Tensor(tensor));
-    Ok(Value::Object(object))
+    let fields = [("components", Value::Tensor(tensor))];
+    let object = crate::execution::object::construct_object_from_borrowed_fields(
+        runtime,
+        DIRECTION_CLASS,
+        fields.iter().map(|(name, value)| (*name, value)),
+    )?;
+    Ok(object.into_value_and_lease().0)
 }
 
 pub(super) fn ensure_direction_class_registered() {
@@ -110,7 +119,7 @@ pub(super) fn ensure_direction_class_registered() {
 }
 
 fn validate_direction_object(object: &ObjectInstance) -> Result<(), String> {
-    let Some(value) = object.properties.get("components") else {
+    let Some(value) = object.properties().get("components") else {
         return Err("fea.Direction.components is required".into());
     };
     let components = finite_numeric_vector3("fea.Direction", value, "components")

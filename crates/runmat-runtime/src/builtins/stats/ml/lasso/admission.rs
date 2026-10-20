@@ -9,16 +9,18 @@ pub(super) fn is_typed_integer(value: &Value) -> bool {
 pub(super) fn contains_explicit_gpu(value: &Value) -> bool {
     match value {
         Value::GpuTensor(handle) => runmat_accelerate_api::handle_is_explicit(handle),
-        Value::Cell(cell) => cell.data.iter().any(contains_explicit_gpu),
+        Value::Cell(cell) => cell.data().iter().any(contains_explicit_gpu),
         Value::Struct(value) => value.fields.values().any(contains_explicit_gpu),
-        Value::Object(value) => value.properties.values().any(contains_explicit_gpu),
+        Value::Object(value) => value.properties().values().any(contains_explicit_gpu),
         Value::Closure(value) => value.captures.iter().any(contains_explicit_gpu),
         Value::OutputList(values) => values.iter().any(contains_explicit_gpu),
         _ => false,
     }
 }
 
-pub(super) fn admit_options(rest: Vec<Value>) -> BuiltinResult<Vec<OptionInput>> {
+pub(super) fn admit_options(
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Vec<OptionInput>> {
     if !rest.len().is_multiple_of(2) {
         return Err(invalid_argument(
             "lasso: name-value options must be supplied in pairs",

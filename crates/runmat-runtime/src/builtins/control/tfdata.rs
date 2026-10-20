@@ -22,7 +22,7 @@ fn argument_error(message: impl Into<String>) -> RuntimeError {
 async fn tfdata_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     model: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let vector = rest.len() == 1
         && crate::builtins::common::tensor::value_to_string(&rest[0])
@@ -36,11 +36,11 @@ async fn tfdata_builtin(
             if vector {
                 return Err(argument_error("'v' requires a scalar SISO model"));
             }
-            let index = model_array_index(&array, &rest).await?;
+            let index = model_array_index(&array, rest.view()).await?;
             array
-                .into_data()
-                .into_iter()
-                .nth(index)
+                .data()
+                .get(index)
+                .cloned()
                 .ok_or_else(|| argument_error("model array index is out of range"))?
         }
         Value::ObjectArray(array) => {
@@ -152,7 +152,10 @@ fn publish_values(
     }
 }
 
-async fn model_array_index(array: &ObjectArray, indices: &[Value]) -> BuiltinResult<usize> {
+async fn model_array_index(
+    array: &ObjectArray,
+    indices: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<usize> {
     let dimensions = array.shape();
     if indices.len() != 1 && indices.len() != dimensions.len() {
         return Err(argument_error(
@@ -225,7 +228,7 @@ async fn model_array_data(
     let mut denominators = Vec::new();
     let mut system_extent = None;
     let mut sample_time = None;
-    for model in array.into_data() {
+    for model in array.data().iter().cloned() {
         let (num, den, ts, rows, cols) = scalar_model_data(model, false, runtime).await?;
         if let Some((expected_rows, expected_cols)) = system_extent {
             if (rows, cols) != (expected_rows, expected_cols) {
@@ -264,7 +267,7 @@ async fn model_array_data(
 
 fn definitely_non_siso_ss(object: &ObjectInstance) -> bool {
     let shape = |property: &str| -> Option<&[usize]> {
-        match object.properties.get(property)? {
+        match object.properties().get(property)? {
             Value::Tensor(tensor) => Some(tensor.shape()),
             Value::ComplexTensor(tensor) => Some(tensor.shape()),
             Value::GpuTensor(handle) => Some(handle.shape()),
@@ -296,19 +299,19 @@ mod tests {
         let matrix = |shape: Vec<usize>| {
             Value::Tensor(Tensor::new(vec![0.0; shape.iter().product()], shape).unwrap())
         };
-        model.properties.insert("B".into(), matrix(vec![2, 1]));
-        model.properties.insert("C".into(), matrix(vec![1, 2]));
+        model.replace_property_unbounded("B".into(), matrix(vec![2, 1]));
+        model.replace_property_unbounded("C".into(), matrix(vec![1, 2]));
         assert!(!definitely_non_siso_ss(&model));
 
-        model.properties.insert("B".into(), matrix(vec![2, 2]));
+        model.replace_property_unbounded("B".into(), matrix(vec![2, 2]));
         assert!(definitely_non_siso_ss(&model));
-        model.properties.insert("B".into(), matrix(vec![2, 1]));
-        model.properties.insert("C".into(), matrix(vec![2, 2]));
+        model.replace_property_unbounded("B".into(), matrix(vec![2, 1]));
+        model.replace_property_unbounded("C".into(), matrix(vec![2, 2]));
         assert!(definitely_non_siso_ss(&model));
-        model.properties.insert("C".into(), matrix(vec![0, 2]));
+        model.replace_property_unbounded("C".into(), matrix(vec![0, 2]));
         assert!(definitely_non_siso_ss(&model));
-        model.properties.insert("C".into(), matrix(vec![1, 0]));
-        model.properties.insert("B".into(), matrix(vec![0, 0]));
+        model.replace_property_unbounded("C".into(), matrix(vec![1, 0]));
+        model.replace_property_unbounded("B".into(), matrix(vec![0, 0]));
         assert!(definitely_non_siso_ss(&model));
     }
 
@@ -319,13 +322,17 @@ mod tests {
             .collect();
         let array = ObjectArray::from_objects(TF_CLASS.to_owned(), objects, vec![2, 2]).unwrap();
         assert_eq!(
-            block_on(model_array_index(&array, &[Value::Num(3.0)])).unwrap(),
+            block_on(model_array_index(
+                &array,
+                crate::call::FunctionArgumentView::from_slice(&[Value::Num(3.0)])
+            ))
+            .unwrap(),
             2
         );
         assert_eq!(
             block_on(model_array_index(
                 &array,
-                &[Value::Num(2.0), Value::Num(1.0)]
+                crate::call::FunctionArgumentView::from_slice(&[Value::Num(2.0), Value::Num(1.0)])
             ))
             .unwrap(),
             1
@@ -333,7 +340,7 @@ mod tests {
         assert_eq!(
             block_on(model_array_index(
                 &array,
-                &[Value::Num(1.0), Value::Num(2.0)]
+                crate::call::FunctionArgumentView::from_slice(&[Value::Num(1.0), Value::Num(2.0)])
             ))
             .unwrap(),
             2

@@ -9,11 +9,45 @@ use crate::RuntimeError;
 pub type RuntimeBuiltinFuture = Pin<
     Box<dyn Future<Output = Result<crate::execution::RootedValueSequence, RuntimeError>> + 'static>,
 >;
-/// One admitted builtin call. The arguments are borrowed only until the
-/// implementation constructs its owned future; the session authority is an
-/// inexpensive `Rc`-backed clone that may be retained across suspension.
+/// Borrowed embedding ingress or an already-rooted language invocation.
+/// The latter transfers its original segmented owners into the continuation.
+pub enum BuiltinInvocationArguments<'a> {
+    Borrowed(&'a [Value]),
+    Retained(crate::call::BuiltinArguments),
+}
+
+impl BuiltinInvocationArguments<'_> {
+    pub fn len(&self) -> usize {
+        match self {
+            Self::Borrowed(values) => values.len(),
+            Self::Retained(values) => values.len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn get(&self, index: usize) -> Option<&Value> {
+        match self {
+            Self::Borrowed(values) => values.get(index),
+            Self::Retained(values) => values.get(index),
+        }
+    }
+}
+
+impl std::ops::Index<usize> for BuiltinInvocationArguments<'_> {
+    type Output = Value;
+
+    fn index(&self, index: usize) -> &Value {
+        self.get(index)
+            .expect("builtin argument index is in bounds")
+    }
+}
+
+/// Invocation controls and original argument ownership for one builtin call.
 pub struct RuntimeBuiltinInvocation<'a> {
-    pub args: &'a [Value],
+    pub args: BuiltinInvocationArguments<'a>,
     pub context: Option<RuntimeContext>,
     pub requested_outputs: Option<usize>,
     pub(crate) call_observation:
@@ -27,11 +61,42 @@ impl<'a> RuntimeBuiltinInvocation<'a> {
         requested_outputs: Option<usize>,
     ) -> Self {
         Self {
-            args,
+            args: BuiltinInvocationArguments::Borrowed(args),
             context,
             requested_outputs,
             call_observation: None,
         }
+    }
+
+    /// Retain a language invocation without materializing or retracing its
+    /// captured, routing or supplied argument segments.
+    pub fn retained(
+        args: crate::call::BuiltinArguments,
+        context: Option<RuntimeContext>,
+        requested_outputs: Option<usize>,
+    ) -> RuntimeBuiltinInvocation<'static> {
+        RuntimeBuiltinInvocation {
+            args: BuiltinInvocationArguments::Retained(args),
+            context,
+            requested_outputs,
+            call_observation: None,
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn into_continuation_input(self) -> Result<BuiltinContinuationInput, RuntimeError> {
+        let args = match self.args {
+            BuiltinInvocationArguments::Retained(args) => args,
+            BuiltinInvocationArguments::Borrowed(values) => {
+                crate::call::BuiltinArguments::from_borrowed(values, self.context.as_ref())?
+            }
+        };
+        Ok(BuiltinContinuationInput {
+            args,
+            context: self.context,
+            requested_outputs: self.requested_outputs,
+            call_observation: self.call_observation,
+        })
     }
 
     pub(crate) fn with_call_observation(
@@ -56,25 +121,11 @@ pub type RuntimeBuiltinImplementation =
 /// generated canonical continuation. This is not a second value transport.
 #[doc(hidden)]
 pub struct BuiltinContinuationInput {
-    pub args: crate::execution::RootedValues,
+    pub args: crate::call::BuiltinArguments,
     pub context: Option<RuntimeContext>,
     pub requested_outputs: Option<usize>,
     pub(crate) call_observation:
         Option<crate::dispatcher::direct_call_observation::CallAdmissionSink>,
-}
-
-impl BuiltinContinuationInput {
-    pub fn new(
-        args: crate::execution::RootedValues,
-        invocation: RuntimeBuiltinInvocation<'_>,
-    ) -> Self {
-        Self {
-            args,
-            context: invocation.context,
-            requested_outputs: invocation.requested_outputs,
-            call_observation: invocation.call_observation,
-        }
-    }
 }
 
 pub type RuntimeBuiltinContinuationLayout = fn() -> Result<u64, HostAllocationError>;

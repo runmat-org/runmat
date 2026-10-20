@@ -9,6 +9,8 @@ use std::sync::Weak;
 
 mod view;
 mod identity;
+mod authority;
+pub(in crate::context) use authority::HostEffectStageAuthority;
 use identity::request_identity;
 use view::StageReservationView;
 
@@ -319,7 +321,7 @@ impl Drop for PendingStageRetirement {
 /// Retains the original filesystem owner, authority, and pre-scan reservation
 /// across suspension. Only the matching complete call can consume it.
 pub struct HostEffectStagePermit {
-    runtime: RuntimeContext,
+    authority: HostEffectStageAuthority,
     cancellation: runmat_execution::cancellation::CancellationToken,
     identity: Digest,
     filesystem: Arc<dyn runmat_filesystem::FsProvider>,
@@ -409,8 +411,8 @@ impl HostEffectStagePermit {
             return Err(HostEffectAllocationError::Revoked);
         }
         if !self
-            .cancellation
-            .same_generation(&self.runtime.cancellation())
+            .authority
+            .original_cancellation_is_live(&self.cancellation)
         {
             return Err(HostEffectAllocationError::InvalidInvocation);
         }
@@ -448,8 +450,8 @@ impl HostEffectStagePermit {
             return Err(HostEffectAllocationError::Revoked);
         }
         if !self
-            .cancellation
-            .same_generation(&self.runtime.cancellation())
+            .authority
+            .original_cancellation_is_live(&self.cancellation)
         {
             return Err(HostEffectAllocationError::InvalidInvocation);
         }
@@ -481,8 +483,8 @@ impl HostEffectStagePermit {
     ) -> Result<(), HostEffectAllocationError> {
         if !self.active_epoch.load(Ordering::Acquire)
             || !self
-                .cancellation
-                .same_generation(&self.runtime.cancellation())
+                .authority
+                .original_cancellation_is_live(&self.cancellation)
         {
             return Err(HostEffectAllocationError::InvalidInvocation);
         }
@@ -567,11 +569,9 @@ impl HostEffectStagePermit {
         if self.session_generation_owner.load(Ordering::Acquire) != self.session_generation {
             return Err(stale_resource());
         }
-        let parallel_owner = self
-            .runtime
-            .service_ports()
-            .parallel()
-            .and_then(|parallel| parallel.managed_host_effect_ledger())
+        let parallel = self.authority.parallel().ok_or_else(stale_resource)?;
+        let parallel_owner = parallel
+            .managed_host_effect_ledger()
             .ok_or_else(stale_resource)?;
         let reserved_owner = self
             .reservation
@@ -580,17 +580,13 @@ impl HostEffectStagePermit {
         let snapshot = parallel_owner.snapshot();
         if !parallel_owner.same_owner(&reserved_owner)
             || !snapshot.current
-            || self
-                .runtime
-                .service_ports()
-                .parallel()
-                .is_none_or(|parallel| parallel.placement_resources().epoch != snapshot.epoch)
+            || parallel.placement_resources().epoch != snapshot.epoch
         {
             return Err(stale_resource());
         }
         if !self
-            .cancellation
-            .same_generation(&self.runtime.cancellation())
+            .authority
+            .original_cancellation_is_live(&self.cancellation)
         {
             return Err(invalid_stage(
                 "staged invocation cancellation generation changed",
@@ -607,15 +603,7 @@ impl HostEffectStagePermit {
 
     fn validate_runtime(&self, runtime: &RuntimeContext) -> BuiltinResult<()> {
         self.checkpoint()?;
-        if self.runtime.local_identity() != runtime.local_identity()
-            || !self
-                .runtime
-                .service_ports()
-                .same_host_effect_owners(runtime.service_ports())
-            || !std::rc::Rc::ptr_eq(self.runtime.execution(), runtime.execution())
-            || self.runtime.program_revision() != runtime.program_revision()
-            || !self.cancellation.same_generation(&runtime.cancellation())
-        {
+        if !self.authority.matches_runtime(runtime, &self.cancellation) {
             return Err(invalid_stage("final call uses a different runtime session"));
         }
         if runtime.is_cancelled() {
@@ -786,7 +774,7 @@ pub fn try_admit_host_effect_stage(
         .unwrap_or_else(|| Arc::new(AtomicBool::new(true)));
     let permit = HostEffectStagePermit {
         cancellation: runtime.cancellation(),
-        runtime: runtime.clone(),
+        authority: runtime.capture_host_effect_stage_authority(),
         identity: request_identity(&request),
         filesystem: request.filesystem.clone(),
         authority_revision: admission.evidence.authority_revision,

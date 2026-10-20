@@ -11,13 +11,13 @@ use runmat_value::Value;
     binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::directory_listing::ls"
 )]
-async fn ls_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn ls_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &runmat_builtins::LS_DESCRIPTOR,
         &runmat_builtins::LS_ERROR_TOO_MANY_OUTPUTS,
         "ls",
     )?;
-    let input = input::Input::parse(&args)?;
+    let input = input::Input::parse(args.view())?;
     let rows = query::execute(input).await?;
     if output::should_emit_stdout() {
         output::emit(&rows)?;

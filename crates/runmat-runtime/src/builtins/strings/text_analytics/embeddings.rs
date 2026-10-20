@@ -21,6 +21,16 @@ use runmat_builtins::{
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
     BuiltinSignatureDescriptor, ResolveContext, Type,
 };
+pub use runmat_builtins::{
+    FASTTEXT_WORD_EMBEDDING_DESCRIPTOR, READ_WORD_EMBEDDING_DESCRIPTOR,
+    READ_WORD_EMBEDDING_INTEGER_AUDIT, TRAIN_WORD_EMBEDDING_DESCRIPTOR,
+    TRAIN_WORD_EMBEDDING_EXTENSIONS, TRAIN_WORD_EMBEDDING_INTEGER_CAPABILITIES,
+};
+use runmat_builtins::{
+    FASTTEXT_WORD_EMBEDDING_ERROR_INVALID_INPUT, READ_WORD_EMBEDDING_ERROR_INVALID_INPUT,
+    READ_WORD_EMBEDDING_ERROR_IO, TRAIN_WORD_EMBEDDING_ERROR_INVALID_INPUT,
+    TRAIN_WORD_EMBEDDING_INTEGER_CONTROL_EXTENSION as TRAIN_INTEGER_CONTROL_EXTENSION,
+};
 use runmat_filesystem::File;
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, CharArray, ObjectInstance, StringArray, Tensor, Value};
@@ -46,14 +56,6 @@ const MAX_DOC2SEQUENCE_DENSE_VALUES: usize = 50_000_000;
 
 static WORD_EMBEDDING_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
     crate::class_registry::ClassRegistration::new(WORD_EMBEDDING_CLASS);
-
-const OUT_EMBEDDING: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "emb",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Word embedding compatibility object.",
-}];
 
 const OUT_MATRIX: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "M",
@@ -97,16 +99,6 @@ const OUT_SEQUENCES: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
 }];
 
 const OUT_NONE: [BuiltinParamDescriptor; 0] = [];
-const NO_INPUTS: [BuiltinParamDescriptor; 0] = [];
-
-const IN_FILENAME: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "filename",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "UTF-8 word2vec/GloVe text file or zip file containing one.",
-}];
-
 const IN_EMBEDDING_FILENAME: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "emb",
@@ -121,31 +113,6 @@ const IN_EMBEDDING_FILENAME: [BuiltinParamDescriptor; 2] = [
         arity: BuiltinParamArity::Required,
         default: None,
         description: "Target UTF-8 word2vec text file.",
-    },
-];
-
-const IN_TRAIN_SOURCE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "source",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "UTF-8 text filename or tokenizedDocument object.",
-}];
-
-const IN_TRAIN_SOURCE_REST: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "source",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "UTF-8 text filename or tokenizedDocument object.",
-    },
-    BuiltinParamDescriptor {
-        name: "NameValue",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name-value options controlling local deterministic embedding training.",
     },
 ];
 
@@ -279,13 +246,6 @@ const IN_MAP_DOCUMENTS_REST: [BuiltinParamDescriptor; 3] = [
     },
 ];
 
-const ERROR_READ_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.READWORDEMBEDDING.INVALID_INPUT",
-    identifier: Some("RunMat:readWordEmbedding:InvalidInput"),
-    when: "Inputs do not match a supported readWordEmbedding form.",
-    message: "readWordEmbedding received invalid input",
-};
-
 const ERROR_WRITE_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.WRITEWORDEMBEDDING.INVALID_INPUT",
     identifier: Some("RunMat:writeWordEmbedding:InvalidInput"),
@@ -307,32 +267,11 @@ const ERROR_VEC2WORD_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescrip
     message: "vec2word received invalid input",
 };
 
-const ERROR_TRAIN_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TRAINWORDEMBEDDING.INVALID_INPUT",
-    identifier: Some("RunMat:trainWordEmbedding:InvalidInput"),
-    when: "Inputs do not match a supported trainWordEmbedding form.",
-    message: "trainWordEmbedding received invalid input",
-};
-
-const ERROR_FASTTEXT_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FASTTEXTWORDEMBEDDING.INVALID_INPUT",
-    identifier: Some("RunMat:fastTextWordEmbedding:InvalidInput"),
-    when: "Inputs do not match the supported fastTextWordEmbedding form.",
-    message: "fastTextWordEmbedding received invalid input",
-};
-
 const ERROR_DOC2SEQUENCE_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.DOC2SEQUENCE.INVALID_INPUT",
     identifier: Some("RunMat:doc2sequence:InvalidInput"),
     when: "Inputs do not match a supported doc2sequence form.",
     message: "doc2sequence received invalid input",
-};
-
-const ERROR_READ_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.READWORDEMBEDDING.IO",
-    identifier: Some("RunMat:readWordEmbedding:IOError"),
-    when: "The requested word embedding file cannot be read.",
-    message: "Unable to read word embedding file",
 };
 
 const ERROR_WRITE_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -349,35 +288,14 @@ const ERROR_WORD_EMBEDDING_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorD
     message: "wordEmbedding received invalid input",
 };
 
-const FASTTEXT_ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_FASTTEXT_INVALID_INPUT];
-const READ_ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_READ_INVALID_INPUT, ERROR_READ_IO];
 const WRITE_ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_WRITE_INVALID_INPUT, ERROR_WRITE_IO];
 const WORD2VEC_ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_WORD2VEC_INVALID_INPUT];
 const VEC2WORD_ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_VEC2WORD_INVALID_INPUT];
-const TRAIN_ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_TRAIN_INVALID_INPUT];
 const DOC2SEQUENCE_ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_DOC2SEQUENCE_INVALID_INPUT];
 
 fn any_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Unknown
 }
-
-pub const READ_WORD_EMBEDDING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &[BuiltinSignatureDescriptor {
-        label: "emb = readWordEmbedding(filename)",
-        inputs: &IN_FILENAME,
-        outputs: &OUT_EMBEDDING,
-    }],
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &READ_ERRORS,
-};
-
-pub const READ_WORD_EMBEDDING_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "readWordEmbedding accepts a host string scalar, character vector, or one-cell character-vector filename and returns a wordEmbedding object. Numeric, logical, symbolic, and provider-resident filename values reject before gather, provider access, or filesystem access.",
-    };
 
 pub const WRITE_WORD_EMBEDDING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &[BuiltinSignatureDescriptor {
@@ -395,17 +313,6 @@ pub const WRITE_WORD_EMBEDDING_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
         canonical_builtin: None,
         notes: "writeWordEmbedding accepts a wordEmbedding object and a host text filename. Numeric and resident filename values are invalid and reject before provider or filesystem access; numeric vector properties inside the embedding object are model data, not public numeric inputs.",
     };
-
-pub const FASTTEXT_WORD_EMBEDDING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &[BuiltinSignatureDescriptor {
-        label: "emb = fastTextWordEmbedding",
-        inputs: &NO_INPUTS,
-        outputs: &OUT_EMBEDDING,
-    }],
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &FASTTEXT_ERRORS,
-};
 
 pub const WORD2VEC_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &[
@@ -562,109 +469,35 @@ pub const DOC2SEQUENCE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor
         notes: "Length is an exact positive structural control; PaddingValue crosses explicitly to RunMat's current host floating sequence storage. doc2sequence has no documented GPU-array capability.",
     }];
 
-pub const TRAIN_WORD_EMBEDDING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &[
-        BuiltinSignatureDescriptor {
-            label: "emb = trainWordEmbedding(filename)",
-            inputs: &IN_TRAIN_SOURCE,
-            outputs: &OUT_EMBEDDING,
-        },
-        BuiltinSignatureDescriptor {
-            label: "emb = trainWordEmbedding(documents)",
-            inputs: &IN_TRAIN_SOURCE,
-            outputs: &OUT_EMBEDDING,
-        },
-        BuiltinSignatureDescriptor {
-            label: "emb = trainWordEmbedding(___, Name, Value)",
-            inputs: &IN_TRAIN_SOURCE_REST,
-            outputs: &OUT_EMBEDDING,
-        },
-    ],
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &TRAIN_ERRORS,
-};
-
-const TRAIN_INTEGER_CONTROL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "train-word-embedding-native-integer-controls",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "trainWordEmbedding accepts native integer option values",
-    error_identifier: Some("RunMat:compatibility:TrainWordEmbeddingIntegerControlExtension"),
-};
-pub const TRAIN_WORD_EMBEDDING_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
-    [TRAIN_INTEGER_CONTROL_EXTENSION];
-
-const TRAIN_INTEGER_CONTROL_INPUTS: [BuiltinIntegerInputCapability; 10] = [
-    train_integer_control("Dimension"),
-    train_integer_control("Window"),
-    train_integer_control("DiscardFactor"),
-    train_integer_control("NumNegativeSamples"),
-    train_integer_control("NumEpochs"),
-    train_integer_control("MinCount"),
-    train_integer_control("NGramRange"),
-    train_integer_control("InitialLearnRate"),
-    train_integer_control("UpdateRate"),
-    train_integer_control("Verbose"),
-];
-const fn train_integer_control(name: &'static str) -> BuiltinIntegerInputCapability {
-    BuiltinIntegerInputCapability {
-        name,
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The public option is integer-valued numeric data without a documented native-integer class surface; native integer storage is admitted only in RunMat mode and validated exactly for its role.",
-    }
-}
-pub const TRAIN_WORD_EMBEDDING_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "emb = trainWordEmbedding(source, Name, native_integer_value, ...)",
-        inputs: &TRAIN_INTEGER_CONTROL_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Counts, sizes, ranges, and boolean controls decode exactly in every supported integer class. Floating training-rate options require exact binary64 representation. Automatic residency gathers transparently; explicit gpuArray option intent is unsupported.",
-    }];
-
 #[runtime_builtin(
     name = "fastTextWordEmbedding",
-    category = "strings/text_analytics",
-    summary = "Return a bundled fastText-style word embedding compatibility model.",
-    keywords = "fastTextWordEmbedding,wordEmbedding,text analytics,fastText,pretrained",
-    accel = "sink",
-    type_resolver(any_type),
-    descriptor(
-        crate::builtins::strings::text_analytics::embeddings::FASTTEXT_WORD_EMBEDDING_DESCRIPTOR
-    ),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::strings::text_analytics::embeddings"
 )]
-async fn fast_text_word_embedding_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn fast_text_word_embedding_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if !args.is_empty() {
         return Err(embedding_error(
             "fastTextWordEmbedding",
             "fastTextWordEmbedding: expected no input arguments",
         ));
     }
-    embedding_object(compact_fast_text_embedding())
+    embedding_object_in_context(runtime.as_ref(), compact_fast_text_embedding())
 }
 
 #[runtime_builtin(
     name = "readWordEmbedding",
-    category = "strings/text_analytics",
-    summary = "Read word embedding models from UTF-8 text or zip files.",
-    keywords = "readWordEmbedding,wordEmbedding,text analytics,word2vec,GloVe",
-    accel = "sink",
-    type_resolver(any_type),
-    descriptor(
-        crate::builtins::strings::text_analytics::embeddings::READ_WORD_EMBEDDING_DESCRIPTOR
-    ),
-    integer_audit(
-        crate::builtins::strings::text_analytics::embeddings::READ_WORD_EMBEDDING_INTEGER_AUDIT
-    ),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::strings::text_analytics::embeddings"
 )]
-async fn read_word_embedding_builtin(filename: Value) -> BuiltinResult<Value> {
+async fn read_word_embedding_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    filename: Value,
+) -> BuiltinResult<Value> {
     if contains_numeric_or_resident_text_input(&filename) {
         return Err(embedding_error(
             "readWordEmbedding",
@@ -688,7 +521,10 @@ async fn read_word_embedding_builtin(filename: Value) -> BuiltinResult<Value> {
             )
         })?
     };
-    embedding_object(parse_embedding_text(&text, "readWordEmbedding")?)
+    embedding_object_in_context(
+        runtime.as_ref(),
+        parse_embedding_text(&text, "readWordEmbedding")?,
+    )
 }
 
 #[runtime_builtin(
@@ -753,26 +589,17 @@ async fn write_word_embedding_builtin(emb: Value, filename: Value) -> BuiltinRes
 
 #[runtime_builtin(
     name = "trainWordEmbedding",
-    category = "strings/text_analytics",
-    summary = "Train a local word embedding compatibility model.",
-    keywords = "trainWordEmbedding,wordEmbedding,text analytics,training",
-    accel = "sink",
-    type_resolver(any_type),
-    descriptor(
-        crate::builtins::strings::text_analytics::embeddings::TRAIN_WORD_EMBEDDING_DESCRIPTOR
-    ),
-    extensions(
-        crate::builtins::strings::text_analytics::embeddings::TRAIN_WORD_EMBEDDING_EXTENSIONS
-    ),
-    integer_capabilities(
-        crate::builtins::strings::text_analytics::embeddings::TRAIN_WORD_EMBEDDING_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::strings::text_analytics::embeddings"
 )]
-async fn train_word_embedding_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn train_word_embedding_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     ensure_train_word_embedding_input_policy(&args)?;
-    let gathered = gather_args(args, "trainWordEmbedding").await?;
-    let (source, options) = parse_train_word_embedding_args(gathered)?;
+    let gathered = gather_builtin_arguments("trainWordEmbedding", &args, runtime.as_ref()).await?;
+    let (source, options) = parse_train_word_embedding_args(&gathered)?;
     let documents = match source {
         TrainSource::Documents(documents) => documents,
         TrainSource::Filename(filename) => {
@@ -786,10 +613,12 @@ async fn train_word_embedding_builtin(args: Vec<Value>) -> BuiltinResult<Value> 
             documents_from_training_text(&text)
         }
     };
-    embedding_object(train_embedding_model(documents, options)?)
+    embedding_object_in_context(runtime.as_ref(), train_embedding_model(documents, options)?)
 }
 
-fn ensure_train_word_embedding_input_policy(args: &[Value]) -> BuiltinResult<()> {
+fn ensure_train_word_embedding_input_policy(
+    args: &crate::call::BuiltinArguments,
+) -> BuiltinResult<()> {
     if let Some(source) = args.first() {
         if crate::value_contains_gpu(source) {
             return Err(embedding_error(
@@ -855,7 +684,7 @@ async fn doc2sequence_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             "doc2sequence",
             format!(
                 "doc2sequence: expected wordEmbedding or wordEncoding object, got {}",
-                sequence_object.class_name
+                sequence_object.class_name()
             ),
         ))
     }
@@ -1033,6 +862,19 @@ async fn gather_args(args: Vec<Value>, fn_name: &str) -> BuiltinResult<Vec<Value
         })?);
     }
     Ok(out)
+}
+
+async fn gather_builtin_arguments(
+    fn_name: &'static str,
+    args: &crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    args.try_map_preserving_roots_async(args.len(), runtime, |index| async move {
+        gather_if_needed_async(&args[index]).await.map_err(|err| {
+            embedding_error(fn_name, format!("{fn_name}: failed to gather input: {err}"))
+        })
+    })
+    .await
 }
 
 async fn read_limited_file_bytes(path: &Path, fn_name: &str) -> BuiltinResult<Vec<u8>> {
@@ -1350,7 +1192,7 @@ fn write_embedding_text(
 
 fn embedding_filename_text(value: &Value, fn_name: &str) -> BuiltinResult<String> {
     match value {
-        Value::Cell(cell) if cell.data.len() == 1 => match &cell.data[0] {
+        Value::Cell(cell) if cell.data().len() == 1 => match &cell.data()[0] {
             Value::CharArray(array) if array.rows == 0 => Ok(String::new()),
             Value::CharArray(array) if array.rows == 1 => Ok(char_row_to_string(array)),
             other => Err(embedding_error(
@@ -1362,7 +1204,7 @@ fn embedding_filename_text(value: &Value, fn_name: &str) -> BuiltinResult<String
             fn_name,
             format!(
                 "{fn_name}: filename cell array must be 1-by-1, got {} elements",
-                cell.data.len()
+                cell.data().len()
             ),
         )),
         _ => scalar_text(value, fn_name),
@@ -1376,27 +1218,39 @@ struct EmbeddingModel {
     dimension: usize,
 }
 
-fn embedding_object(model: EmbeddingModel) -> BuiltinResult<Value> {
+fn embedding_object_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    model: EmbeddingModel,
+) -> BuiltinResult<Value> {
     ensure_word_embedding_class_registered();
-    let mut object = ObjectInstance::new(WORD_EMBEDDING_CLASS.to_string());
-    object
-        .properties
-        .insert("Dimension".to_string(), Value::Num(model.dimension as f64));
-    object.properties.insert(
-        "Vocabulary".to_string(),
-        Value::StringArray(
-            StringArray::new(model.vocabulary.clone(), vec![1, model.vocabulary.len()])
-                .map_err(|err| embedding_error("wordEmbedding", err))?,
+    let fields = [
+        ("Dimension", Value::Num(model.dimension as f64)),
+        (
+            "Vocabulary",
+            Value::StringArray(
+                StringArray::new(model.vocabulary.clone(), vec![1, model.vocabulary.len()])
+                    .map_err(|err| embedding_error("wordEmbedding", err))?,
+            ),
         ),
-    );
-    object.properties.insert(
-        VECTOR_PROPERTY.to_string(),
-        Value::Tensor(
-            Tensor::new(model.vectors, vec![model.vocabulary.len(), model.dimension])
-                .map_err(|err| embedding_error("wordEmbedding", err))?,
+        (
+            VECTOR_PROPERTY,
+            Value::Tensor(
+                Tensor::new(model.vectors, vec![model.vocabulary.len(), model.dimension])
+                    .map_err(|err| embedding_error("wordEmbedding", err))?,
+            ),
         ),
-    );
-    Ok(Value::Object(object))
+    ];
+    let object = crate::execution::object::construct_object_from_borrowed_fields(
+        runtime,
+        WORD_EMBEDDING_CLASS.display_name(),
+        fields.iter().map(|(name, value)| (*name, value)),
+    )?;
+    Ok(object.into_value_and_lease().0)
+}
+
+#[cfg(test)]
+fn embedding_object(model: EmbeddingModel) -> BuiltinResult<Value> {
+    embedding_object_in_context(None, model)
 }
 
 fn embedding_from_object(object: &ObjectInstance, fn_name: &str) -> BuiltinResult<EmbeddingModel> {
@@ -1405,12 +1259,16 @@ fn embedding_from_object(object: &ObjectInstance, fn_name: &str) -> BuiltinResul
             fn_name,
             format!(
                 "{fn_name}: expected wordEmbedding object, got {}",
-                object.class_name
+                object.class_name()
             ),
         ));
     }
-    let vocabulary = match object.properties.get("Vocabulary") {
-        Some(Value::StringArray(array)) => array.data.clone(),
+    let vocabulary: Vec<String> = match object.properties().get("Vocabulary") {
+        Some(Value::StringArray(array)) => array
+            .data()
+            .iter()
+            .map(|text| text.as_str().to_owned())
+            .collect(),
         other => {
             return Err(embedding_error(
                 fn_name,
@@ -1421,11 +1279,11 @@ fn embedding_from_object(object: &ObjectInstance, fn_name: &str) -> BuiltinResul
         }
     };
     let dimension = object
-        .properties
+        .properties()
         .get("Dimension")
         .and_then(positive_dimension)
         .ok_or_else(|| {
-            let value = object.properties.get("Dimension");
+            let value = object.properties().get("Dimension");
             embedding_error(
                 fn_name,
                 format!(
@@ -1433,7 +1291,7 @@ fn embedding_from_object(object: &ObjectInstance, fn_name: &str) -> BuiltinResul
                 ),
             )
         })?;
-    let vectors = match object.properties.get(VECTOR_PROPERTY) {
+    let vectors = match object.properties().get(VECTOR_PROPERTY) {
         Some(Value::Tensor(tensor))
             if embedding_matrix_dimensions(tensor) == (vocabulary.len(), dimension) =>
         {
@@ -1614,13 +1472,16 @@ fn ensure_word_embedding_class_registered() {
         for name in ["Dimension", "Vocabulary", VECTOR_PROPERTY] {
             properties.insert(name.into(), property_def(name));
         }
-        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: WORD_EMBEDDING_CLASS.into(),
-            parent: None,
-            properties,
-            methods: HashMap::new(),
-            events: Default::default(),
-        });
+        crate::class_registry::register_builtin_class(
+            WORD_EMBEDDING_CLASS,
+            crate::class_registry::RuntimeClass {
+                name: WORD_EMBEDDING_CLASS.into(),
+                parent: None,
+                properties,
+                methods: HashMap::new(),
+                events: Default::default(),
+            },
+        );
     });
 }
 
@@ -1692,7 +1553,7 @@ impl Default for TrainWordEmbeddingOptions {
 }
 
 fn parse_train_word_embedding_args(
-    args: Vec<Value>,
+    args: &crate::call::BuiltinArguments,
 ) -> BuiltinResult<(TrainSource, TrainWordEmbeddingOptions)> {
     if args.is_empty() {
         return Err(embedding_error(
@@ -1818,7 +1679,7 @@ fn train_source_from_value(value: &Value) -> BuiltinResult<TrainSource> {
 
 fn train_filename_from_value(value: &Value) -> BuiltinResult<String> {
     match value {
-        Value::Cell(cell) if cell.data.len() == 1 => train_filename_from_value(&cell.data[0]),
+        Value::Cell(cell) if cell.data().len() == 1 => train_filename_from_value(&cell.data()[0]),
         other => {
             let filename = scalar_text(other, "trainWordEmbedding")
                 .map_err(|err| embedding_error("trainWordEmbedding", err.to_string()))?;
@@ -2389,7 +2250,7 @@ fn parse_doc2sequence_args(
                 "doc2sequence",
                 format!(
                     "doc2sequence: expected tokenizedDocument object, got {}",
-                    object.class_name
+                    object.class_name()
                 ),
             ));
         }
@@ -2700,26 +2561,26 @@ fn dense_doc2sequence_limit_error(fn_name: &str) -> crate::RuntimeError {
 
 fn words_from_value(value: &Value, fn_name: &str) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(text) => Ok(vec![text.clone()]),
-        Value::StringArray(array) => Ok(array.data.clone()),
+        Value::String(text) => Ok(vec![text.as_str().to_owned()]),
+        Value::StringArray(array) => Ok(array.data().iter().map(|text| text.as_str().to_owned()).collect()),
         Value::CharArray(array) if array.rows <= 1 => Ok(vec![char_row_to_string(array)]),
         Value::CharArray(array) => {
             let mut words = Vec::with_capacity(array.rows);
             for row in 0..array.rows {
                 let mut text = String::with_capacity(array.cols);
                 for col in 0..array.cols {
-                    text.push(array.data[row + col * array.rows]);
+                    text.push(array.data()[row + col * array.rows]);
                 }
                 words.push(text.trim_end().to_string());
             }
             Ok(words)
         }
         Value::Cell(cell) => cell
-            .data
+            .data()
             .iter()
             .map(|item| match item {
-                Value::String(text) => Ok(text.clone()),
-                Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+                Value::String(text) => Ok(text.as_str().to_owned()),
+                Value::StringArray(array) if array.data().len() == 1 => Ok(array.data()[0].as_str().to_owned()),
                 Value::CharArray(array) if array.rows <= 1 => Ok(char_row_to_string(array)),
                 other => Err(embedding_error(
                     fn_name,
@@ -2793,7 +2654,7 @@ fn compare_scores(left: f64, right: f64) -> Ordering {
 }
 
 fn char_row_to_string(array: &CharArray) -> String {
-    array.data.iter().collect()
+    array.data().iter().collect()
 }
 
 fn parse_bool_scalar(value: &Value, fn_name: &str) -> BuiltinResult<bool> {
@@ -2898,10 +2759,10 @@ fn looks_like_zip(bytes: &[u8]) -> bool {
 
 fn embedding_error(fn_name: &str, message: impl Into<String>) -> crate::RuntimeError {
     let descriptor = match fn_name {
-        "fastTextWordEmbedding" => ERROR_FASTTEXT_INVALID_INPUT,
-        "readWordEmbedding" => ERROR_READ_INVALID_INPUT,
+        "fastTextWordEmbedding" => FASTTEXT_WORD_EMBEDDING_ERROR_INVALID_INPUT,
+        "readWordEmbedding" => READ_WORD_EMBEDDING_ERROR_INVALID_INPUT,
         "writeWordEmbedding" => ERROR_WRITE_INVALID_INPUT,
-        "trainWordEmbedding" => ERROR_TRAIN_INVALID_INPUT,
+        "trainWordEmbedding" => TRAIN_WORD_EMBEDDING_ERROR_INVALID_INPUT,
         "doc2sequence" => ERROR_DOC2SEQUENCE_INVALID_INPUT,
         "word2vec" => ERROR_WORD2VEC_INVALID_INPUT,
         "vec2word" => ERROR_VEC2WORD_INVALID_INPUT,
@@ -2920,7 +2781,7 @@ fn embedding_error_with_source(
     source: impl crate::runtime_error::RuntimeErrorSourceBound,
 ) -> crate::RuntimeError {
     let descriptor = match fn_name {
-        "readWordEmbedding" => ERROR_READ_IO,
+        "readWordEmbedding" => READ_WORD_EMBEDDING_ERROR_IO,
         "writeWordEmbedding" => ERROR_WRITE_IO,
         _ => ERROR_WORD_EMBEDDING_INVALID_INPUT,
     };
@@ -2943,6 +2804,10 @@ mod tests {
     use std::io::Write;
     use tempfile::tempdir;
 
+    fn builtin_args(values: Vec<Value>) -> crate::call::BuiltinArguments {
+        crate::call::BuiltinArguments::from_borrowed(&values, None).expect("test arguments")
+    }
+
     fn poisoned_integer_scalar(storage: IntegerStorage) -> Value {
         let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer tensor");
         Value::Tensor(tensor)
@@ -2955,17 +2820,15 @@ mod tests {
     #[test]
     fn embedding_object_reader_reads_typed_integer_storage_exactly() {
         let mut object = ObjectInstance::new(WORD_EMBEDDING_CLASS.to_string());
-        object.properties.insert(
+        object.replace_property_unbounded(
             "Vocabulary".to_string(),
             Value::StringArray(
                 StringArray::new(vec!["alpha".to_string(), "beta".to_string()], vec![1, 2])
                     .unwrap(),
             ),
         );
-        object
-            .properties
-            .insert("Dimension".to_string(), Value::Num(2.0));
-        object.properties.insert(
+        object.replace_property_unbounded("Dimension".to_string(), Value::Num(2.0));
+        object.replace_property_unbounded(
             VECTOR_PROPERTY.to_string(),
             Value::Tensor(poisoned_integer_tensor(
                 IntegerStorage::I16(vec![1, 2, 3, 4]),
@@ -3046,13 +2909,9 @@ mod tests {
         let rows = values.len();
         let documents = CellArray::new(values, rows, 1).unwrap();
         let mut object = ObjectInstance::new(TOKENIZED_DOCUMENT_CLASS.to_string());
-        object
-            .properties
-            .insert("Documents".to_string(), Value::Cell(documents));
-        object
-            .properties
-            .insert("NumDocuments".to_string(), Value::Num(rows as f64));
-        object.properties.insert(
+        object.replace_property_unbounded("Documents".to_string(), Value::Cell(documents));
+        object.replace_property_unbounded("NumDocuments".to_string(), Value::Num(rows as f64));
+        object.replace_property_unbounded(
             "Shape".to_string(),
             Value::Tensor(Tensor::new(vec![rows as f64, 1.0], vec![1, 2]).unwrap()),
         );
@@ -3064,14 +2923,15 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("emb.vec");
         std::fs::write(&path, "3 2\nred 1 0\nblue 0 1\ngreen 0.5 0.5\n").unwrap();
-        let value = read_word_embedding_builtin(Value::from(path.to_string_lossy().to_string()))
-            .await
-            .unwrap();
+        let value =
+            read_word_embedding_builtin(None, Value::from(path.to_string_lossy().to_string()))
+                .await
+                .unwrap();
         let Value::Object(object) = value else {
             panic!("expected object");
         };
         assert!(object.is_class(WORD_EMBEDDING_CLASS));
-        assert_eq!(object.properties.get("Dimension"), Some(&Value::Num(2.0)));
+        assert_eq!(object.properties().get("Dimension"), Some(&Value::Num(2.0)));
     }
 
     #[test]
@@ -3085,7 +2945,7 @@ mod tests {
             panic!("expected wordEmbedding object");
         };
 
-        object.properties.insert(
+        object.replace_property_unbounded(
             "Dimension".to_string(),
             Value::Int(runmat_value::IntValue::U16(2)),
         );
@@ -3096,7 +2956,7 @@ mod tests {
             Value::Num(usize::MAX as f64 + 1.0),
             Value::Int(runmat_value::IntValue::I8(-1)),
         ] {
-            object.properties.insert("Dimension".to_string(), value);
+            object.replace_property_unbounded("Dimension".to_string(), value);
             assert!(embedding_from_object(&object, "test").is_err());
         }
     }
@@ -3116,9 +2976,10 @@ mod tests {
         zip.write_all(b"2 2\nleft 1 0\nright 0 1\n").unwrap();
         zip.finish().unwrap();
 
-        let value = read_word_embedding_builtin(Value::from(path.to_string_lossy().to_string()))
-            .await
-            .unwrap();
+        let value =
+            read_word_embedding_builtin(None, Value::from(path.to_string_lossy().to_string()))
+                .await
+                .unwrap();
         let Value::Object(object) = value else {
             panic!("expected object");
         };
@@ -3143,7 +3004,7 @@ mod tests {
             .unwrap(),
         );
 
-        let value = read_word_embedding_builtin(filename).await.unwrap();
+        let value = read_word_embedding_builtin(None, filename).await.unwrap();
         let Value::Object(object) = value else {
             panic!("expected object");
         };
@@ -3178,9 +3039,12 @@ mod tests {
         let contents = std::fs::read_to_string(&path).unwrap();
         assert_eq!(contents, "2 2\nalpha 1 2.5\nbeta 3 4.25\n");
 
-        let value = read_word_embedding_builtin(Value::String(path.to_string_lossy().to_string()))
-            .await
-            .unwrap();
+        let value = read_word_embedding_builtin(
+            None,
+            Value::String(path.to_string_lossy().to_string().into()),
+        )
+        .await
+        .unwrap();
         let Value::Object(object) = value else {
             panic!("expected object");
         };
@@ -3193,7 +3057,13 @@ mod tests {
     #[tokio::test]
     async fn write_word_embedding_rejects_bad_inputs_and_vectors() {
         let dir = tempdir().unwrap();
-        let path = Value::String(dir.path().join("bad.vec").to_string_lossy().to_string());
+        let path = Value::String(
+            dir.path()
+                .join("bad.vec")
+                .to_string_lossy()
+                .to_string()
+                .into(),
+        );
         let err =
             write_word_embedding_builtin(Value::String("not an embedding".into()), path.clone())
                 .await
@@ -3204,14 +3074,12 @@ mod tests {
         );
 
         let mut object = ObjectInstance::new(WORD_EMBEDDING_CLASS.to_string());
-        object
-            .properties
-            .insert("Dimension".to_string(), Value::Num(1.0));
-        object.properties.insert(
+        object.replace_property_unbounded("Dimension".to_string(), Value::Num(1.0));
+        object.replace_property_unbounded(
             "Vocabulary".to_string(),
             Value::StringArray(StringArray::new(vec!["bad word".into()], vec![1, 1]).unwrap()),
         );
-        object.properties.insert(
+        object.replace_property_unbounded(
             VECTOR_PROPERTY.to_string(),
             Value::Tensor(Tensor::new(vec![f64::NAN], vec![1, 1]).unwrap()),
         );
@@ -3235,7 +3103,8 @@ mod tests {
                 .join("missing")
                 .join("parent.vec")
                 .to_string_lossy()
-                .to_string(),
+                .to_string()
+                .into(),
         );
         let err = write_word_embedding_builtin(valid, missing_parent)
             .await
@@ -3248,12 +3117,17 @@ mod tests {
 
     #[tokio::test]
     async fn fast_text_word_embedding_returns_compact_300d_model() {
-        let value = fast_text_word_embedding_builtin(vec![]).await.unwrap();
+        let value = fast_text_word_embedding_builtin(None, builtin_args(vec![]))
+            .await
+            .unwrap();
         let Value::Object(object) = value else {
             panic!("expected wordEmbedding object");
         };
         assert!(object.is_class(WORD_EMBEDDING_CLASS));
-        assert_eq!(object.properties.get("Dimension"), Some(&Value::Num(300.0)));
+        assert_eq!(
+            object.properties().get("Dimension"),
+            Some(&Value::Num(300.0))
+        );
 
         let italy = word2vec_builtin(vec![
             Value::Object(object.clone()),
@@ -3298,9 +3172,9 @@ mod tests {
         let Value::StringArray(words) = &outputs[0] else {
             panic!("expected nearest words");
         };
-        assert_eq!(words.data, vec!["France"]);
+        assert_eq!(words.data(), vec!["France"]);
 
-        let err = fast_text_word_embedding_builtin(vec![Value::Num(1.0)])
+        let err = fast_text_word_embedding_builtin(None, builtin_args(vec![Value::Num(1.0)]))
             .await
             .unwrap_err();
         assert!(err.to_string().contains("expected no input"), "{err}");
@@ -3311,19 +3185,22 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("training.txt");
         std::fs::write(&path, "alpha beta alpha\nbeta gamma alpha\n").unwrap();
-        let value = train_word_embedding_builtin(vec![
-            Value::from(path.to_string_lossy().to_string()),
-            Value::String("Dimension".into()),
-            Value::Num(8.0),
-            Value::String("Window".into()),
-            Value::Num(1.0),
-            Value::String("MinCount".into()),
-            Value::Num(1.0),
-            Value::String("NGramRange".into()),
-            Value::Tensor(Tensor::new(vec![0.0, 0.0], vec![1, 2]).unwrap()),
-            Value::String("Verbose".into()),
-            Value::Bool(false),
-        ])
+        let value = train_word_embedding_builtin(
+            None,
+            builtin_args(vec![
+                Value::from(path.to_string_lossy().to_string()),
+                Value::String("Dimension".into()),
+                Value::Num(8.0),
+                Value::String("Window".into()),
+                Value::Num(1.0),
+                Value::String("MinCount".into()),
+                Value::Num(1.0),
+                Value::String("NGramRange".into()),
+                Value::Tensor(Tensor::new(vec![0.0, 0.0], vec![1, 2]).unwrap()),
+                Value::String("Verbose".into()),
+                Value::Bool(false),
+            ]),
+        )
         .await
         .unwrap();
         let Value::Object(object) = value else {
@@ -3352,17 +3229,20 @@ mod tests {
     async fn train_word_embedding_trains_from_tokenized_document_object() {
         let object = tokenized_document_object(vec![vec!["red", "blue"], vec!["red", "green"]]);
 
-        let value = train_word_embedding_builtin(vec![
-            Value::Object(object),
-            Value::String("Dimension".into()),
-            Value::Num(6.0),
-            Value::String("MinCount".into()),
-            Value::Num(1.0),
-            Value::String("Model".into()),
-            Value::String("cbow".into()),
-            Value::String("LossFunction".into()),
-            Value::String("softmax".into()),
-        ])
+        let value = train_word_embedding_builtin(
+            None,
+            builtin_args(vec![
+                Value::Object(object),
+                Value::String("Dimension".into()),
+                Value::Num(6.0),
+                Value::String("MinCount".into()),
+                Value::Num(1.0),
+                Value::String("Model".into()),
+                Value::String("cbow".into()),
+                Value::String("LossFunction".into()),
+                Value::String("softmax".into()),
+            ]),
+        )
         .await
         .unwrap();
         let Value::Object(object) = value else {
@@ -3393,13 +3273,13 @@ mod tests {
         assert_eq!(cell.rows, 2);
         assert_eq!(cell.cols, 1);
 
-        let Value::Tensor(first) = &cell.data[0] else {
+        let Value::Tensor(first) = &cell.data()[0] else {
             panic!("expected first tensor");
         };
         assert_eq!(first.shape(), [2, 2]);
         assert_eq!(first.materialize_f64(), vec![1.0, 10.0, 2.0, 20.0]);
 
-        let Value::Tensor(second) = &cell.data[1] else {
+        let Value::Tensor(second) = &cell.data()[1] else {
             panic!("expected second tensor");
         };
         assert_eq!(second.shape(), [2, 2]);
@@ -3436,7 +3316,7 @@ mod tests {
         let Value::Cell(cell) = result else {
             panic!("expected cell array");
         };
-        let Value::Tensor(first) = &cell.data[0] else {
+        let Value::Tensor(first) = &cell.data()[0] else {
             panic!("expected first tensor");
         };
         assert_eq!(first.shape(), [2, 3]);
@@ -3445,7 +3325,7 @@ mod tests {
         assert!(first.materialize_f64()[3].is_nan());
         assert_eq!(first.materialize_f64()[4..6], [-5.0, -5.0]);
 
-        let Value::Tensor(second) = &cell.data[1] else {
+        let Value::Tensor(second) = &cell.data()[1] else {
             panic!("expected second tensor");
         };
         assert_eq!(
@@ -3480,13 +3360,13 @@ mod tests {
         let Value::Cell(cell) = result else {
             panic!("expected cell array");
         };
-        let Value::Tensor(first) = &cell.data[0] else {
+        let Value::Tensor(first) = &cell.data()[0] else {
             panic!("expected first tensor");
         };
         assert_eq!(first.shape(), [2, 2]);
         assert_eq!(first.materialize_f64(), vec![1.0, 11.0, 2.0, 22.0]);
 
-        let Value::Tensor(second) = &cell.data[1] else {
+        let Value::Tensor(second) = &cell.data()[1] else {
             panic!("expected second tensor");
         };
         assert_eq!(second.shape(), [2, 1]);
@@ -3502,16 +3382,14 @@ mod tests {
         };
         let mut documents_object =
             tokenized_document_object(vec![vec!["alpha", "missing", "beta"], vec!["beta"]]);
-        documents_object.properties.insert(
+        documents_object.replace_property_unbounded(
             "Shape".to_string(),
             Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
         );
         let documents = Value::Object(documents_object);
         let mut word_encoding = ObjectInstance::new(WORD_ENCODING_CLASS.to_string());
-        word_encoding
-            .properties
-            .insert("NumWords".to_string(), Value::Num(2.0));
-        word_encoding.properties.insert(
+        word_encoding.replace_property_unbounded("NumWords".to_string(), Value::Num(2.0));
+        word_encoding.replace_property_unbounded(
             "Vocabulary".to_string(),
             Value::StringArray(
                 StringArray::new(vec!["alpha".into(), "beta".into()], vec![1, 2]).unwrap(),
@@ -3535,14 +3413,14 @@ mod tests {
         assert_eq!(cell.shape, vec![1, 2]);
         assert_eq!(cell.rows, 1);
         assert_eq!(cell.cols, 2);
-        let Value::Tensor(first) = &cell.data[0] else {
+        let Value::Tensor(first) = &cell.data()[0] else {
             panic!("expected first tensor");
         };
         assert_eq!(first.shape(), [1, 4]);
         assert_eq!(first.materialize_f64()[0], 1.0);
         assert!(first.materialize_f64()[1].is_nan());
         assert_eq!(first.materialize_f64()[2..4], [2.0, 0.0]);
-        let Value::Tensor(second) = &cell.data[1] else {
+        let Value::Tensor(second) = &cell.data()[1] else {
             panic!("expected second tensor");
         };
         assert_eq!(second.shape(), [1, 4]);
@@ -3571,10 +3449,8 @@ mod tests {
     #[tokio::test]
     async fn doc2sequence_word_encoding_supports_left_none_and_shortest_length() {
         let mut word_encoding = ObjectInstance::new(WORD_ENCODING_CLASS.to_string());
-        word_encoding
-            .properties
-            .insert("NumWords".to_string(), Value::Num(3.0));
-        word_encoding.properties.insert(
+        word_encoding.replace_property_unbounded("NumWords".to_string(), Value::Num(3.0));
+        word_encoding.replace_property_unbounded(
             "Vocabulary".to_string(),
             Value::StringArray(
                 StringArray::new(
@@ -3598,12 +3474,12 @@ mod tests {
         let Value::Cell(left) = left else {
             panic!("expected cell array");
         };
-        let Value::Tensor(first) = &left.data[0] else {
+        let Value::Tensor(first) = &left.data()[0] else {
             panic!("expected first tensor");
         };
         assert_eq!(first.shape(), [1, 3]);
         assert_eq!(first.materialize_f64(), vec![1.0, 2.0, 3.0]);
-        let Value::Tensor(second) = &left.data[1] else {
+        let Value::Tensor(second) = &left.data()[1] else {
             panic!("expected second tensor");
         };
         assert_eq!(second.shape(), [1, 3]);
@@ -3620,7 +3496,7 @@ mod tests {
         let Value::Cell(none) = none else {
             panic!("expected cell array");
         };
-        let Value::Tensor(second) = &none.data[1] else {
+        let Value::Tensor(second) = &none.data()[1] else {
             panic!("expected second tensor");
         };
         assert_eq!(second.shape(), [1, 1]);
@@ -3637,12 +3513,12 @@ mod tests {
         let Value::Cell(shortest) = shortest else {
             panic!("expected cell array");
         };
-        let Value::Tensor(first) = &shortest.data[0] else {
+        let Value::Tensor(first) = &shortest.data()[0] else {
             panic!("expected first tensor");
         };
         assert_eq!(first.shape(), [1, 1]);
         assert_eq!(first.materialize_f64(), vec![1.0]);
-        let Value::Tensor(second) = &shortest.data[1] else {
+        let Value::Tensor(second) = &shortest.data()[1] else {
             panic!("expected second tensor");
         };
         assert_eq!(second.shape(), [1, 1]);
@@ -3673,7 +3549,7 @@ mod tests {
         let Value::Cell(cell) = result else {
             panic!("expected cell array");
         };
-        let Value::Tensor(sequence) = &cell.data[0] else {
+        let Value::Tensor(sequence) = &cell.data()[0] else {
             panic!("expected tensor");
         };
         assert_eq!(sequence.shape(), [2, 2]);
@@ -3728,7 +3604,7 @@ mod tests {
                     shape: &[1, 2],
                 })
                 .expect("upload resident embedding vectors");
-            embedding.properties.insert(
+            embedding.replace_property_unbounded(
                 VECTOR_PROPERTY.to_string(),
                 Value::GpuTensor(vectors.clone()),
             );
@@ -3753,13 +3629,16 @@ mod tests {
 
     #[tokio::test]
     async fn train_word_embedding_honors_min_count_and_option_validation() {
-        let err = train_word_embedding_builtin(vec![
-            Value::String("missing.txt".into()),
-            Value::String("LossFunction".into()),
-            Value::String("hs".into()),
-            Value::String("NumNegativeSamples".into()),
-            Value::Num(3.0),
-        ])
+        let err = train_word_embedding_builtin(
+            None,
+            builtin_args(vec![
+                Value::String("missing.txt".into()),
+                Value::String("LossFunction".into()),
+                Value::String("hs".into()),
+                Value::String("NumNegativeSamples".into()),
+                Value::Num(3.0),
+            ]),
+        )
         .await
         .unwrap_err();
         assert!(err.to_string().contains("NumNegativeSamples"), "{err}");
@@ -3767,13 +3646,16 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("training.txt");
         std::fs::write(&path, "solo once\n").unwrap();
-        let err = train_word_embedding_builtin(vec![
-            Value::from(path.to_string_lossy().to_string()),
-            Value::String("MinCount".into()),
-            Value::Num(2.0),
-            Value::String("Verbose".into()),
-            Value::Num(0.0),
-        ])
+        let err = train_word_embedding_builtin(
+            None,
+            builtin_args(vec![
+                Value::from(path.to_string_lossy().to_string()),
+                Value::String("MinCount".into()),
+                Value::Num(2.0),
+                Value::String("Verbose".into()),
+                Value::Num(0.0),
+            ]),
+        )
         .await
         .unwrap_err();
         assert!(err.to_string().contains("no vocabulary words"), "{err}");
@@ -3781,11 +3663,11 @@ mod tests {
 
     #[test]
     fn train_word_embedding_native_integer_controls_are_gated_and_exact() {
-        let args = vec![
+        let args = crate::builtins::common::test_support::builtin_arguments(vec![
             Value::String("training.txt".into()),
             Value::String("Dimension".into()),
             Value::Int(runmat_value::IntValue::U16(32)),
-        ];
+        ]);
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = ensure_train_word_embedding_input_policy(&args).unwrap_err();
         assert_eq!(
@@ -3796,7 +3678,7 @@ mod tests {
 
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         ensure_train_word_embedding_input_policy(&args).unwrap();
-        let (_, options) = parse_train_word_embedding_args(args).unwrap();
+        let (_, options) = parse_train_word_embedding_args(&args).unwrap();
         assert_eq!(options.dimension, 32);
 
         let range =
@@ -3902,8 +3784,8 @@ mod tests {
         let Value::StringArray(words) = &outputs[0] else {
             panic!("expected words");
         };
-        assert_eq!(words.data[0], "mix");
-        assert_eq!(words.data.len(), 2);
+        assert_eq!(words.data()[0], "mix");
+        assert_eq!(words.data().len(), 2);
         let Value::Tensor(dist) = &outputs[1] else {
             panic!("expected distances");
         };
@@ -3922,7 +3804,7 @@ mod tests {
             .unwrap() else {
                 panic!("embedding object")
             };
-            object.properties.insert(
+            object.replace_property_unbounded(
                 VECTOR_PROPERTY.to_string(),
                 Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![2]).unwrap()),
             );
@@ -3941,7 +3823,7 @@ mod tests {
         let Value::StringArray(words) = &outputs[0] else {
             panic!("nearest words")
         };
-        assert_eq!(words.data, vec!["east"]);
+        assert_eq!(words.data(), vec!["east"]);
 
         let error = vec2word_builtin(vec![
             embedding(),

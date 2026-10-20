@@ -4,14 +4,15 @@ use super::*;
 async fn fitclinear_logistic_returns_fitinfo_and_probability_scores() {
     let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let value = fitclinear_builtin(
+        None,
         tensor(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             tensor(vec![0.0, 0.0, 1.0, 1.0], vec![4, 1]),
             Value::String("Learner".into()),
             Value::String("logistic".into()),
             Value::String("Lambda".into()),
             Value::Num(0.0),
-        ],
+        ]),
     )
     .await
     .unwrap();
@@ -34,7 +35,7 @@ async fn fitclinear_logistic_returns_fitinfo_and_probability_scores() {
     let outputs = predict_classification_linear_object(
         object,
         tensor(vec![0.2, 2.8], vec![2, 1]),
-        Vec::new(),
+        crate::call::FunctionArgumentView::from_slice(&[]),
     )
     .unwrap();
     match &outputs[1] {
@@ -49,24 +50,23 @@ async fn fitclinear_logistic_returns_fitinfo_and_probability_scores() {
 #[tokio::test]
 async fn fitclinear_observations_in_columns_and_text_classnames() {
     let model = fitclinear_builtin(
+        None,
         tensor(vec![0.0, 1.0, 2.0, 3.0], vec![1, 4]),
-        vec![
-            Value::StringArray(StringArray {
-                data: vec!["low".into(), "low".into(), "high".into(), "high".into()],
-                shape: vec![4, 1],
-                rows: 4,
-                cols: 1,
-            }),
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::StringArray(
+                StringArray::new(
+                    vec!["low".into(), "low".into(), "high".into(), "high".into()],
+                    vec![4, 1],
+                )
+                .unwrap(),
+            ),
             Value::String("ObservationsIn".into()),
             Value::String("columns".into()),
             Value::String("ClassNames".into()),
-            Value::StringArray(StringArray {
-                data: vec!["low".into(), "high".into()],
-                shape: vec![2, 1],
-                rows: 2,
-                cols: 1,
-            }),
-        ],
+            Value::StringArray(
+                StringArray::new(vec!["low".into(), "high".into()], vec![2, 1]).unwrap(),
+            ),
+        ]),
     )
     .await
     .unwrap();
@@ -76,14 +76,14 @@ async fn fitclinear_observations_in_columns_and_text_classnames() {
             _ => panic!("expected object"),
         },
         tensor(vec![0.2, 2.8], vec![1, 2]),
-        vec![
+        crate::call::FunctionArgumentView::from_slice(&[
             Value::String("ObservationsIn".into()),
             Value::String("columns".into()),
-        ],
+        ]),
     )
     .unwrap();
     match &outputs[0] {
-        Value::StringArray(labels) => assert_eq!(labels.data, vec!["low", "high"]),
+        Value::StringArray(labels) => assert_eq!(labels.data(), vec!["low", "high"]),
         other => panic!("expected string labels, got {other:?}"),
     }
 }
@@ -91,8 +91,12 @@ async fn fitclinear_observations_in_columns_and_text_classnames() {
 #[tokio::test]
 async fn fitclinear_rejects_multiclass_response() {
     let err = fitclinear_builtin(
+        None,
         tensor(vec![0.0, 1.0, 2.0], vec![3, 1]),
-        vec![tensor(vec![0.0, 1.0, 2.0], vec![3, 1])],
+        crate::builtins::common::test_support::builtin_arguments(vec![tensor(
+            vec![0.0, 1.0, 2.0],
+            vec![3, 1],
+        )]),
     )
     .await
     .unwrap_err();
@@ -110,19 +114,20 @@ async fn fitclinear_table_external_y_honors_response_name() {
     )
     .unwrap();
     let model = fitclinear_builtin(
+        None,
         table,
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             tensor(vec![0.0, 0.0, 1.0, 1.0], vec![4, 1]),
             Value::String("ResponseName".into()),
             Value::String("Outcome".into()),
-        ],
+        ]),
     )
     .await
     .unwrap();
     match model {
         Value::Object(object) => {
             assert_eq!(
-                object.properties.get("ResponseName"),
+                object.properties().get("ResponseName"),
                 Some(&Value::String("Outcome".into()))
             );
         }

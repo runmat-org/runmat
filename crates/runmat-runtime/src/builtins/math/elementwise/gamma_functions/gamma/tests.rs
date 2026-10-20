@@ -9,7 +9,10 @@ use runmat_value::{
 };
 
 fn call(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    block_on(gamma_builtin(value, rest))
+    block_on(gamma_builtin(
+        value,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    ))
 }
 
 fn approx_eq(actual: f64, expected: f64, tolerance: f64) {

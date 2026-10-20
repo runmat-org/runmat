@@ -47,7 +47,10 @@ pub(super) struct Options {
     pub(super) typed_integer_control: bool,
 }
 
-pub(super) async fn parse(kind: ReductionKind, args: Vec<Value>) -> BuiltinResult<Options> {
+pub(super) async fn parse(
+    kind: ReductionKind,
+    args: &crate::call::BuiltinArguments,
+) -> BuiltinResult<Options> {
     let mut axes = None;
     let mut missing = None;
     let mut weights = None;
@@ -135,6 +138,10 @@ fn invalid_source(kind: ReductionKind, message: &str, source: String) -> Runtime
 #[cfg(test)]
 mod tests {
     use super::*;
+    async fn parse(kind: ReductionKind, args: Vec<Value>) -> BuiltinResult<Options> {
+        let retained = crate::call::BuiltinArguments::from_borrowed(&args, None)?;
+        super::parse(kind, &retained).await
+    }
     use futures::executor::block_on;
 
     #[test]

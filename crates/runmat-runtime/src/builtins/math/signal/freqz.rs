@@ -103,20 +103,26 @@ async fn freqz_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     b: Value,
     a: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    evaluate_in_runtime(runtime.as_ref(), b, a, &rest).await
+    evaluate_in_runtime(runtime.as_ref(), b, a, rest.view()).await
 }
 
 pub async fn evaluate(b: Value, a: Value, rest: &[Value]) -> BuiltinResult<Value> {
-    evaluate_in_runtime(None, b, a, rest).await
+    evaluate_in_runtime(
+        None,
+        b,
+        a,
+        crate::call::FunctionArgumentView::from_slice(rest),
+    )
+    .await
 }
 
 async fn evaluate_in_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
     b: Value,
     a: Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<Value> {
     let mut cooperation = SignalCooperation::new(runtime, BUILTIN_NAME);
     evaluate_with_cooperation(b, a, rest, &mut cooperation).await
@@ -125,7 +131,7 @@ async fn evaluate_in_runtime(
 async fn evaluate_with_cooperation(
     b: Value,
     a: Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<Value> {
     cooperation.completed(0).await?;
@@ -305,7 +311,11 @@ fn ensure_extension_if(
     Ok(())
 }
 
-fn ensure_input_extensions(b: &Value, a: &Value, rest: &[Value]) -> BuiltinResult<()> {
+fn ensure_input_extensions(
+    b: &Value,
+    a: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     for coefficient in [b, a] {
         ensure_extension_if(
             is_typed_integer_value(coefficient),
@@ -345,7 +355,9 @@ async fn gather_freqz_value(value: Value) -> BuiltinResult<Value> {
     }
 }
 
-async fn gather_freqz_values(values: &[Value]) -> BuiltinResult<Vec<Value>> {
+async fn gather_freqz_values(
+    values: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Vec<Value>> {
     let mut gathered = Vec::with_capacity(values.len());
     for value in values {
         gathered.push(gather_freqz_value(value.clone()).await?);
@@ -604,7 +616,7 @@ mod tests {
         let error = block_on(evaluate_with_cooperation(
             Value::Num(1.0),
             Value::Num(1.0),
-            &[Value::Num(SIGNAL_WORK_CHUNK as f64)],
+            crate::call::FunctionArgumentView::from_slice(&[Value::Num(SIGNAL_WORK_CHUNK as f64)]),
             &mut cooperation,
         ))
         .expect_err("cancelled response must not publish graphics");

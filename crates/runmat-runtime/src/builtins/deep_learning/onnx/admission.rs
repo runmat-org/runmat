@@ -1,4 +1,5 @@
 use super::*;
+use crate::builtins::deep_learning::arguments::DeepLearningObjectEdit as _;
 
 #[derive(Debug)]
 pub(super) struct AdmittedExport {
@@ -10,14 +11,16 @@ pub(super) struct AdmittedExport {
 
 /// Validate every host-decidable input before acquiring any provider-owned data.
 /// Only the option values and learnables consumed by the exporter are downloaded.
-pub(super) async fn admit_export_call(mut args: Vec<Value>) -> BuiltinResult<AdmittedExport> {
+pub(super) async fn admit_export_call(
+    mut args: crate::call::BuiltinArguments,
+) -> BuiltinResult<AdmittedExport> {
     if args.len() < 2 {
         return Err(deep_learning_error(
             EXPORT_ONNX,
             "exportONNXNetwork: expected network and filename",
         ));
     }
-    let option_args = args.split_off(2);
+    let option_args = args.range(2..)?;
     let network = require_network_object(&args[0])?;
     let filename = scalar_text(&args[1], EXPORT_ONNX)?;
     if filename.is_empty() {
@@ -55,30 +58,31 @@ pub(super) async fn admit_export_call(mut args: Vec<Value>) -> BuiltinResult<Adm
     let options = parse_export_options(options_map)?;
     // The model metadata stays with the owned object; move its consumed Layers
     // collection into preparation instead of copying every learned parameter.
-    let Value::Object(mut network) = args.remove(0) else {
+    let Value::Object(mut network) = args.pop_front().expect("validated argument prefix") else {
         unreachable!("network identity was admitted above")
     };
     let layers_value = network
-        .properties
-        .remove("Layers")
+        .remove_dl_property("Layers")?
         .expect("nonempty Layers collection was admitted above");
-    let layers = model::layers_from_network_value(layers_value, EXPORT_ONNX)?;
-    let mut prepared = Vec::with_capacity(layers.len());
-    for layer in layers {
+    let prepared_layers = model::layers_from_network_value(layers_value, EXPORT_ONNX)?;
+    let _layer_roots = prepared_layers.1;
+    let layers = prepared_layers.0;
+    let mut prepared = Vec::with_capacity(layers.data().len());
+    for layer in layers.data().iter().cloned() {
         let Value::Object(mut object) = layer else {
             unreachable!("preflight_layers verified object identity")
         };
         if matches!(
-            ForwardLayerKind::from_identity(&object.class_name),
+            ForwardLayerKind::from_identity(object.class_name()),
             Some(ForwardLayerKind::FullyConnected)
         ) {
             for property in ["Weights", "Bias"] {
                 let value = object
-                    .properties
-                    .remove(property)
+                    .property(property)
+                    .cloned()
                     .expect("preflight verified learnable property");
                 let gathered = gather_learnable(value).await?;
-                object.properties.insert(property.to_string(), gathered);
+                object.replace_dl_property(property, gathered)?;
             }
         }
         prepared.push(Value::Object(object));
@@ -128,7 +132,7 @@ fn preflight_layers(
                 "exportONNXNetwork: network layers must be layer objects",
             ));
         };
-        match ForwardLayerKind::from_identity(&layer.class_name) {
+        match ForwardLayerKind::from_identity(layer.class_name()) {
             Some(ForwardLayerKind::FeatureInput) if index == 0 => {
                 current_features = Some(model::feature_input_width(layer, EXPORT_ONNX)?);
             }
@@ -144,7 +148,7 @@ fn preflight_layers(
                 )?);
             }
             Some(ForwardLayerKind::Elu) if index > 0 => {
-                if let Some(value) = layer.properties.get("Alpha") {
+                if let Some(value) = layer.properties().get("Alpha") {
                     super::super::numeric_scalar(value, EXPORT_ONNX, "Alpha")?;
                 }
             }
@@ -167,7 +171,7 @@ fn preflight_layers(
                     EXPORT_ONNX,
                     format!(
                         "exportONNXNetwork: layer type '{}' has no supported ONNX lowering",
-                        layer.class_name
+                        layer.class_name()
                     ),
                 ))
             }
@@ -176,13 +180,13 @@ fn preflight_layers(
                     EXPORT_ONNX,
                     format!(
                         "exportONNXNetwork: layer type '{}' is not supported for RunMat forward execution",
-                        layer.class_name
+                        layer.class_name()
                     ),
                 ))
             }
         }
     }
-    if !matches!(layers.first(), Some(Value::Object(first)) if first.class_name.is(super::super::FEATURE_INPUT_LAYER_CLASS))
+    if !matches!(layers.first(), Some(Value::Object(first)) if first.class_name().is(super::super::FEATURE_INPUT_LAYER_CLASS))
     {
         return Err(deep_learning_error(
             EXPORT_ONNX,
@@ -194,12 +198,12 @@ fn preflight_layers(
 
 async fn gather_learnable(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::Object(mut object) if object.class_name.is(super::DLARRAY_CLASS) => {
-            let data = object.properties.remove("Data").ok_or_else(|| {
+        Value::Object(mut object) if object.class_name().is(super::DLARRAY_CLASS) => {
+            let data = object.property("Data").cloned().ok_or_else(|| {
                 deep_learning_error(EXPORT_ONNX, "exportONNXNetwork: dlarray is missing Data")
             })?;
             let gathered = gather_owned_data(data).await?;
-            object.properties.insert("Data".to_string(), gathered);
+            object.replace_dl_property("Data", gathered)?;
             Ok(Value::Object(object))
         }
         other => gather_owned_data(other).await,
@@ -238,7 +242,8 @@ mod tests {
                 ("InputSize", Value::Num(2.0)),
                 ("Name", Value::String("input".into())),
             ],
-        );
+        )
+        .expect("fixture object");
         let dense = super::super::super::object(
             runmat_builtins::FULLY_CONNECTED_LAYER_CLASS.display_name(),
             [
@@ -250,7 +255,8 @@ mod tests {
                 ),
                 ("Name", Value::String("dense".into())),
             ],
-        );
+        )
+        .expect("fixture object");
         super::super::super::object(
             model::DLNETWORK_CLASS.display_name(),
             [(
@@ -258,6 +264,7 @@ mod tests {
                 Value::Cell(CellArray::new(vec![input, dense], 2, 1).unwrap()),
             )],
         )
+        .expect("fixture object")
     }
 
     #[test]
@@ -271,10 +278,12 @@ mod tests {
                 .unwrap();
             let net = network(Value::GpuTensor(weights), Value::Num(0.0));
             provider.reset_telemetry();
-            let error = futures::executor::block_on(admit_export_call(vec![
-                net,
-                Value::String("unused.onnx".into()),
-            ]))
+            let error = futures::executor::block_on(admit_export_call(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    net,
+                    Value::String("unused.onnx".into()),
+                ]),
+            ))
             .unwrap_err();
             assert!(error.message.contains("OutputSize"));
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
@@ -299,12 +308,14 @@ mod tests {
                     .unwrap();
                 let net = network(Value::GpuTensor(weights.clone()), Value::Num(1.0));
                 provider.reset_telemetry();
-                let error = futures::executor::block_on(admit_export_call(vec![
-                    net,
-                    Value::String("unused.onnx".into()),
-                    Value::String(option.into()),
-                    Value::GpuTensor(control.clone()),
-                ]))
+                let error = futures::executor::block_on(admit_export_call(
+                    crate::builtins::common::test_support::builtin_arguments(vec![
+                        net,
+                        Value::String("unused.onnx".into()),
+                        Value::String(option.into()),
+                        Value::GpuTensor(control.clone()),
+                    ]),
+                ))
                 .unwrap_err();
                 assert!(
                     error.message.contains("scalar storage"),
@@ -337,12 +348,14 @@ mod tests {
                 })
                 .unwrap();
             provider.reset_telemetry();
-            let error = futures::executor::block_on(admit_export_call(vec![
-                network(Value::GpuTensor(weights.clone()), Value::Num(1.0)),
-                Value::String("unused.onnx".into()),
-                Value::String("InputNames".into()),
-                Value::GpuTensor(name.clone()),
-            ]))
+            let error = futures::executor::block_on(admit_export_call(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    network(Value::GpuTensor(weights.clone()), Value::Num(1.0)),
+                    Value::String("unused.onnx".into()),
+                    Value::String("InputNames".into()),
+                    Value::GpuTensor(name.clone()),
+                ]),
+            ))
             .unwrap_err();
             assert!(error.message.contains("InputNames"), "{error}");
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
@@ -372,12 +385,14 @@ mod tests {
                 ),
             ] {
                 provider.reset_telemetry();
-                let error = futures::executor::block_on(admit_export_call(vec![
-                    network(Value::GpuTensor(weights.clone()), Value::Num(1.0)),
-                    Value::String("unused.onnx".into()),
-                    Value::String(name.into()),
-                    value,
-                ]))
+                let error = futures::executor::block_on(admit_export_call(
+                    crate::builtins::common::test_support::builtin_arguments(vec![
+                        network(Value::GpuTensor(weights.clone()), Value::Num(1.0)),
+                        Value::String("unused.onnx".into()),
+                        Value::String(name.into()),
+                        value,
+                    ]),
+                ))
                 .unwrap_err();
                 assert!(
                     error.message.contains(name)
@@ -392,14 +407,16 @@ mod tests {
 
     #[test]
     fn public_option_names_fold_case_and_duplicate_values_before_typed_admission() {
-        let parsed = parse_option_inputs(vec![
-            Value::String("OpsetVersion".into()),
-            Value::Num(13.0),
-            Value::String("OPSETVERSION".into()),
-            Value::Num(14.0),
-            Value::String("InputNames".into()),
-            Value::String("input".into()),
-        ])
+        let parsed = parse_option_inputs(crate::builtins::common::test_support::builtin_arguments(
+            vec![
+                Value::String("OpsetVersion".into()),
+                Value::Num(13.0),
+                Value::String("OPSETVERSION".into()),
+                Value::Num(14.0),
+                Value::String("InputNames".into()),
+                Value::String("input".into()),
+            ],
+        ))
         .unwrap();
         assert_eq!(parsed.len(), 2);
         assert_eq!(parsed[0].key, Some(ExportOnnxOptionKey::InputNames));
@@ -441,14 +458,16 @@ mod tests {
             let mut net = network(Value::GpuTensor(weights), Value::Num(1.0));
             if let Value::Object(object) = &mut net {
                 object
-                    .properties
-                    .insert("State".into(), Value::GpuTensor(unrelated));
+                    .replace_dl_property("State", Value::GpuTensor(unrelated))
+                    .expect("fixture property");
             }
             provider.reset_telemetry();
-            let admitted = futures::executor::block_on(admit_export_call(vec![
-                net,
-                Value::String("unused.onnx".into()),
-            ]))
+            let admitted = futures::executor::block_on(admit_export_call(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    net,
+                    Value::String("unused.onnx".into()),
+                ]),
+            ))
             .unwrap();
             let graph =
                 graph::build_export_graph(&admitted.network, &admitted.layers, &admitted.options)
@@ -464,12 +483,14 @@ mod tests {
         let weights = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap());
         let opset =
             Value::Tensor(Tensor::new_integer(IntegerStorage::U16(vec![14]), vec![1, 1]).unwrap());
-        let error = futures::executor::block_on(admit_export_call(vec![
-            network(weights, Value::Num(1.0)),
-            Value::String("unused.onnx".into()),
-            Value::String("OpsetVersion".into()),
-            opset,
-        ]))
+        let error = futures::executor::block_on(admit_export_call(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                network(weights, Value::Num(1.0)),
+                Value::String("unused.onnx".into()),
+                Value::String("OpsetVersion".into()),
+                opset,
+            ]),
+        ))
         .unwrap_err();
         assert_eq!(
             error.identifier(),

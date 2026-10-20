@@ -6,6 +6,7 @@ pub(crate) mod figure_actions;
 pub(crate) mod handles;
 pub(crate) mod limits;
 pub(crate) mod line_inputs;
+pub(crate) mod mode_object;
 pub(crate) mod polar;
 pub(crate) mod surface_composite;
 pub(crate) mod surface_inputs;

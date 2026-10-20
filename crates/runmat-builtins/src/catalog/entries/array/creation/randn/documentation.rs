@@ -51,7 +51,7 @@ BuiltinDocumentationLink { label: "range", target: BuiltinDocumentationLinkTarge
 BuiltinDocumentationLink { label: "true", target: BuiltinDocumentationLinkTarget::Documentation("./true") },
 BuiltinDocumentationLink { label: "zeros", target: BuiltinDocumentationLinkTarget::Documentation("./zeros") }],
     media: &[],
-    evidence: BuiltinDocumentationEvidence { implementation: &[BuiltinDocumentationLink { label: "`crates/runmat-runtime/src/builtins/array/creation/randn.rs`", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/randn.rs") }], verification: &[], notes: &[] },
+    evidence: BuiltinDocumentationEvidence { implementation: &[BuiltinDocumentationLink { label: "`crates/runmat-runtime/src/builtins/array/creation/randn.rs`", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/randn.rs") }], verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Retained randn verification", location: "builtins::array::creation::randn::tests::randn_gpu_like_roundtrip" }, BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Retained randn verification", location: "builtins::array::creation::randn::tests" }, ], notes: &[] },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Stable),
 };

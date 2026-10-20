@@ -105,8 +105,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::solve::linsolve"
 )]
-async fn linsolve_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let eval = evaluate_args(lhs, rhs, &rest).await?;
+async fn linsolve_builtin(
+    lhs: Value,
+    rhs: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let eval = evaluate_args(lhs, rhs, rest.view()).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Value::output_list(Vec::new()));
@@ -243,7 +247,7 @@ impl From<&ProviderLinsolveOptions> for SolveOptions {
     }
 }
 
-fn options_from_rest(rest: &[Value]) -> BuiltinResult<SolveOptions> {
+fn options_from_rest(rest: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<SolveOptions> {
     match rest.len() {
         0 => Ok(SolveOptions::default()),
         1 => parse_options(&rest[0]),
@@ -252,7 +256,11 @@ fn options_from_rest(rest: &[Value]) -> BuiltinResult<SolveOptions> {
 }
 
 /// Public helper for the VM multi-output surface.
-pub async fn evaluate_args(lhs: Value, rhs: Value, rest: &[Value]) -> BuiltinResult<LinsolveEval> {
+pub async fn evaluate_args(
+    lhs: Value,
+    rhs: Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<LinsolveEval> {
     let options = options_from_rest(rest)?;
     ensure_linsolve_extensions(&lhs, &rhs).await?;
     crate::builtins::common::validation::reject_typed_complex_integer(&lhs, NAME)?;
@@ -1247,7 +1255,7 @@ pub(crate) mod tests {
     use super::*;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_value::{CharArray, IntegerStorage, NumericStorage, StructValue};
+    use runmat_value::{CharArray, IntegerStorage, NumericStorage};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
     }
@@ -1268,7 +1276,11 @@ pub(crate) mod tests {
 
     fn evaluate_args(a: Value, b: Value, rest: &[Value]) -> Result<LinsolveEval, RuntimeError> {
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-        block_on(super::evaluate_args(a, b, rest))
+        block_on(super::evaluate_args(
+            a,
+            b,
+            crate::call::FunctionArgumentView::from_slice(rest),
+        ))
     }
 
     #[test]
@@ -1301,7 +1313,9 @@ pub(crate) mod tests {
 
     fn linsolve_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-        block_on(super::linsolve_builtin(lhs, rhs, rest))
+        let rest = crate::execution::RootedValues::new(rest)
+            .map_err(|error| error.into_runtime_error())?;
+        block_on(super::linsolve_builtin(lhs, rhs, rest.into()))
     }
 
     #[test]
@@ -1311,7 +1325,9 @@ pub(crate) mod tests {
         let error = block_on(super::linsolve_builtin(
             Value::Tensor(lhs),
             Value::Num(1.0),
-            Vec::new(),
+            crate::execution::RootedValues::new(Vec::new())
+                .expect("ordinary source arguments")
+                .into(),
         ))
         .expect_err("integer linsolve is a RunMat extension");
         assert_eq!(
@@ -1324,11 +1340,13 @@ pub(crate) mod tests {
     fn linsolve_option_extensions_are_independently_gated() {
         let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
 
-        let mut integer_option = StructValue::new();
+        let mut integer_option = runmat_value::UnboundedStructValueBuilder::new();
         integer_option
             .fields
             .insert("LT".to_string(), Value::Int(IntValue::I8(1)));
-        let error = match options_from_rest(&[Value::Struct(integer_option)]) {
+        let error = match options_from_rest(crate::call::FunctionArgumentView::from_slice(&[
+            Value::Struct(integer_option.finish()),
+        ])) {
             Err(error) => error,
             Ok(_) => panic!("typed structural option must be gated"),
         };
@@ -1337,11 +1355,13 @@ pub(crate) mod tests {
             LINSOLVE_INTEGER_OPTION_EXTENSION.error_identifier
         );
 
-        let mut text_transa = StructValue::new();
+        let mut text_transa = runmat_value::UnboundedStructValueBuilder::new();
         text_transa
             .fields
             .insert("TRANSA".to_string(), Value::from("T"));
-        let error = match options_from_rest(&[Value::Struct(text_transa)]) {
+        let error = match options_from_rest(crate::call::FunctionArgumentView::from_slice(&[
+            Value::Struct(text_transa.finish()),
+        ])) {
             Err(error) => error,
             Ok(_) => panic!("text TRANSA must be gated"),
         };
@@ -1350,9 +1370,11 @@ pub(crate) mod tests {
             LINSOLVE_TEXT_TRANSA_EXTENSION.error_identifier
         );
 
-        let mut rcond = StructValue::new();
+        let mut rcond = runmat_value::UnboundedStructValueBuilder::new();
         rcond.fields.insert("RCOND".to_string(), Value::Num(0.1));
-        let error = match options_from_rest(&[Value::Struct(rcond)]) {
+        let error = match options_from_rest(crate::call::FunctionArgumentView::from_slice(&[
+            Value::Struct(rcond.finish()),
+        ])) {
             Err(error) => error,
             Ok(_) => panic!("RCOND must be gated"),
         };
@@ -1365,11 +1387,14 @@ pub(crate) mod tests {
     #[test]
     fn linsolve_documented_logical_transa_does_not_require_extension() {
         let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
-        let mut options = StructValue::new();
+        let mut options = runmat_value::UnboundedStructValueBuilder::new();
         options
             .fields
             .insert("TRANSA".to_string(), Value::Bool(true));
-        let parsed = options_from_rest(&[Value::Struct(options)]).expect("logical TRANSA");
+        let parsed = options_from_rest(crate::call::FunctionArgumentView::from_slice(&[
+            Value::Struct(options.finish()),
+        ]))
+        .expect("logical TRANSA");
         assert!(parsed.transposed);
         assert!(parsed.conjugate);
     }
@@ -1467,12 +1492,12 @@ pub(crate) mod tests {
 
         let lower = Tensor::from_f32(vec![2.0, 1.0, 0.0, 3.0], vec![2, 2]).unwrap();
         let rhs = Tensor::from_f32(vec![2.0, 7.0], vec![2, 1]).unwrap();
-        let mut options = StructValue::new();
+        let mut options = runmat_value::UnboundedStructValueBuilder::new();
         options.fields.insert("LT".to_string(), Value::Bool(true));
         let result = linsolve_builtin(
             Value::Tensor(lower),
             Value::Tensor(rhs),
-            vec![Value::Struct(options)],
+            vec![Value::Struct(options.finish())],
         )
         .expect("lower triangular linsolve");
         let tensor = test_support::gather(result).expect("gather");
@@ -1587,7 +1612,7 @@ pub(crate) mod tests {
         .expect("integer lhs");
         let b = Tensor::new_integer(IntegerStorage::I16(vec![5, 14, 23]), vec![3, 1])
             .expect("integer rhs");
-        let mut opts = StructValue::new();
+        let mut opts = runmat_value::UnboundedStructValueBuilder::new();
         opts.fields.insert("LT".to_string(), Value::Bool(true));
         opts.fields.insert(
             "TRANSA".to_string(),
@@ -1597,7 +1622,7 @@ pub(crate) mod tests {
         let result = linsolve_builtin(
             Value::Tensor(a),
             Value::Tensor(b),
-            vec![Value::Struct(opts)],
+            vec![Value::Struct(opts.finish())],
         )
         .expect("linsolve");
         let tensor = test_support::gather(result).expect("gather");
@@ -1636,12 +1661,12 @@ pub(crate) mod tests {
         )
         .unwrap();
         let b = Tensor::new(vec![9.0, 1.0, 19.0], vec![3, 1]).unwrap();
-        let mut opts = StructValue::new();
+        let mut opts = runmat_value::UnboundedStructValueBuilder::new();
         opts.fields.insert("LT".to_string(), Value::Bool(true));
         let result = linsolve_builtin(
             Value::Tensor(a),
             Value::Tensor(b),
-            vec![Value::Struct(opts)],
+            vec![Value::Struct(opts.finish())],
         )
         .expect("linsolve");
         let tensor = test_support::gather(result).expect("gather");
@@ -1662,7 +1687,7 @@ pub(crate) mod tests {
         )
         .unwrap();
         let b = Tensor::new(vec![5.0, 14.0, 23.0], vec![3, 1]).unwrap();
-        let mut opts = StructValue::new();
+        let mut opts = runmat_value::UnboundedStructValueBuilder::new();
         opts.fields.insert("LT".to_string(), Value::Bool(true));
         opts.fields.insert(
             "TRANSA".to_string(),
@@ -1672,7 +1697,7 @@ pub(crate) mod tests {
         let result = linsolve_builtin(
             Value::Tensor(a.clone()),
             Value::Tensor(b.clone()),
-            vec![Value::Struct(opts)],
+            vec![Value::Struct(opts.finish())],
         )
         .expect("linsolve");
         let tensor = test_support::gather(result).expect("gather");
@@ -1742,7 +1767,7 @@ pub(crate) mod tests {
         .unwrap();
         let b = ComplexTensor::new(vec![(1.0, -1.0), (2.0, 0.5)], vec![2, 1]).unwrap();
 
-        let mut opts = StructValue::new();
+        let mut opts = runmat_value::UnboundedStructValueBuilder::new();
         opts.fields.insert(
             "TRANSA".to_string(),
             Value::CharArray(CharArray::new_row("C")),
@@ -1750,7 +1775,7 @@ pub(crate) mod tests {
         let result = linsolve_builtin(
             Value::ComplexTensor(a.clone()),
             Value::ComplexTensor(b.clone()),
-            vec![Value::Struct(opts)],
+            vec![Value::Struct(opts.finish())],
         )
         .expect("linsolve");
         let Value::ComplexTensor(out) = result else {
@@ -1793,13 +1818,13 @@ pub(crate) mod tests {
         clear_accel_provider_state();
         let a = Tensor::new(vec![1.0, 1.0, 1.0, 1.0 + 1e-12], vec![2, 2]).unwrap();
         let b = Tensor::new(vec![2.0, 2.0 + 1e-12], vec![2, 1]).unwrap();
-        let mut opts = StructValue::new();
+        let mut opts = runmat_value::UnboundedStructValueBuilder::new();
         opts.fields.insert("RCOND".to_string(), Value::Num(1e-3));
         let err = unwrap_error(
             linsolve_builtin(
                 Value::Tensor(a),
                 Value::Tensor(b),
-                vec![Value::Struct(opts)],
+                vec![Value::Struct(opts.finish())],
             )
             .expect_err("singular matrix must fail"),
         );
@@ -1819,14 +1844,14 @@ pub(crate) mod tests {
         let b = Tensor::new(vec![2.0, 7.0], vec![2, 1]).unwrap();
         let upper = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
         let rcond = Tensor::new_integer(IntegerStorage::U8(vec![0]), vec![1, 1]).unwrap();
-        let mut opts = StructValue::new();
+        let mut opts = runmat_value::UnboundedStructValueBuilder::new();
         opts.fields.insert("UT".to_string(), Value::Tensor(upper));
         opts.fields
             .insert("RCOND".to_string(), Value::Tensor(rcond));
         let result = linsolve_builtin(
             Value::Tensor(a),
             Value::Tensor(b),
-            vec![Value::Struct(opts)],
+            vec![Value::Struct(opts.finish())],
         )
         .expect("linsolve");
         let Value::Tensor(out) = result else {
@@ -1841,13 +1866,13 @@ pub(crate) mod tests {
     fn linsolve_unknown_option_identifier() {
         let a = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
         let b = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let mut opts = StructValue::new();
+        let mut opts = runmat_value::UnboundedStructValueBuilder::new();
         opts.fields.insert("UNKNOWN".to_string(), Value::Bool(true));
         let err = unwrap_error(
             linsolve_builtin(
                 Value::Tensor(a),
                 Value::Tensor(b),
-                vec![Value::Struct(opts)],
+                vec![Value::Struct(opts.finish())],
             )
             .expect_err("unknown option should fail"),
         );
@@ -2348,14 +2373,14 @@ pub(crate) mod tests {
 
         let a = Tensor::new(vec![3.0, 1.0, 2.0, 4.0], vec![2, 2]).unwrap();
         let b = Tensor::new(vec![7.0, 8.0], vec![2, 1]).unwrap();
-        let mut cpu_opts = StructValue::new();
+        let mut cpu_opts = runmat_value::UnboundedStructValueBuilder::new();
         cpu_opts
             .fields
             .insert("RCOND".to_string(), Value::Num(0.05));
         let cpu = linsolve_builtin(
             Value::Tensor(a.clone()),
             Value::Tensor(b.clone()),
-            vec![Value::Struct(cpu_opts)],
+            vec![Value::Struct(cpu_opts.finish())],
         )
         .expect("cpu linsolve");
         let cpu_tensor = test_support::gather(cpu).expect("cpu gather");
@@ -2376,14 +2401,14 @@ pub(crate) mod tests {
 
         let _output_guard =
             crate::output_count::push_output_count(Some(1)).expect("output-count scope");
-        let mut gpu_opts = StructValue::new();
+        let mut gpu_opts = runmat_value::UnboundedStructValueBuilder::new();
         gpu_opts
             .fields
             .insert("RCOND".to_string(), Value::Num(0.05));
         let gpu_value = linsolve_builtin(
             Value::GpuTensor(ha.clone()),
             Value::GpuTensor(hb.clone()),
-            vec![Value::Struct(gpu_opts)],
+            vec![Value::Struct(gpu_opts.finish())],
         )
         .expect("gpu square linsolve");
         let gpu_solution = match gpu_value {
@@ -2493,14 +2518,14 @@ pub(crate) mod tests {
         let a = Tensor::new(vec![4.0, 1.0, 1.0, 3.0], vec![2, 2]).unwrap();
         let b = Tensor::new(vec![7.0, 8.0], vec![2, 1]).unwrap();
 
-        let mut cpu_opts = StructValue::new();
+        let mut cpu_opts = runmat_value::UnboundedStructValueBuilder::new();
         cpu_opts
             .fields
             .insert("POSDEF".to_string(), Value::Bool(true));
         let cpu = linsolve_builtin(
             Value::Tensor(a.clone()),
             Value::Tensor(b.clone()),
-            vec![Value::Struct(cpu_opts)],
+            vec![Value::Struct(cpu_opts.finish())],
         )
         .expect("cpu linsolve");
         let cpu_tensor = test_support::gather(cpu).expect("cpu gather");
@@ -2529,14 +2554,14 @@ pub(crate) mod tests {
 
         let _output_guard =
             crate::output_count::push_output_count(Some(2)).expect("output-count scope");
-        let mut gpu_opts = StructValue::new();
+        let mut gpu_opts = runmat_value::UnboundedStructValueBuilder::new();
         gpu_opts
             .fields
             .insert("POSDEF".to_string(), Value::Bool(true));
         let gpu_value = linsolve_builtin(
             Value::GpuTensor(ha.clone()),
             Value::GpuTensor(hb.clone()),
-            vec![Value::Struct(gpu_opts)],
+            vec![Value::Struct(gpu_opts.finish())],
         )
         .expect("gpu posdef linsolve");
         let outputs = match gpu_value {
@@ -2592,7 +2617,7 @@ pub(crate) mod tests {
         let a = Tensor::new(vec![6.0, 2.0, 2.0, 5.0], vec![2, 2]).unwrap();
         let b = Tensor::new(vec![8.0, 9.0], vec![2, 1]).unwrap();
 
-        let mut cpu_opts = StructValue::new();
+        let mut cpu_opts = runmat_value::UnboundedStructValueBuilder::new();
         cpu_opts
             .fields
             .insert("POSDEF".to_string(), Value::Bool(true));
@@ -2603,7 +2628,7 @@ pub(crate) mod tests {
         let cpu = linsolve_builtin(
             Value::Tensor(a.clone()),
             Value::Tensor(b.clone()),
-            vec![Value::Struct(cpu_opts)],
+            vec![Value::Struct(cpu_opts.finish())],
         )
         .expect("cpu linsolve");
         let cpu_tensor = test_support::gather(cpu).expect("cpu gather");
@@ -2624,7 +2649,7 @@ pub(crate) mod tests {
 
         let _output_guard =
             crate::output_count::push_output_count(Some(1)).expect("output-count scope");
-        let mut gpu_opts = StructValue::new();
+        let mut gpu_opts = runmat_value::UnboundedStructValueBuilder::new();
         gpu_opts
             .fields
             .insert("POSDEF".to_string(), Value::Bool(true));
@@ -2635,7 +2660,7 @@ pub(crate) mod tests {
         let gpu_value = linsolve_builtin(
             Value::GpuTensor(ha.clone()),
             Value::GpuTensor(hb.clone()),
-            vec![Value::Struct(gpu_opts)],
+            vec![Value::Struct(gpu_opts.finish())],
         )
         .expect("gpu transposed posdef linsolve");
         let gpu_solution = match gpu_value {
@@ -2678,12 +2703,12 @@ pub(crate) mod tests {
         let a = Tensor::new(vec![5.0, 2.0, 2.0, 6.0], vec![2, 2]).unwrap();
         let b = Tensor::new(vec![9.0, 8.0], vec![2, 1]).unwrap();
 
-        let mut cpu_opts = StructValue::new();
+        let mut cpu_opts = runmat_value::UnboundedStructValueBuilder::new();
         cpu_opts.fields.insert("SYM".to_string(), Value::Bool(true));
         let cpu = linsolve_builtin(
             Value::Tensor(a.clone()),
             Value::Tensor(b.clone()),
-            vec![Value::Struct(cpu_opts)],
+            vec![Value::Struct(cpu_opts.finish())],
         )
         .expect("cpu linsolve");
         let cpu_tensor = test_support::gather(cpu).expect("cpu gather");
@@ -2704,12 +2729,12 @@ pub(crate) mod tests {
 
         let _output_guard =
             crate::output_count::push_output_count(Some(1)).expect("output-count scope");
-        let mut gpu_opts = StructValue::new();
+        let mut gpu_opts = runmat_value::UnboundedStructValueBuilder::new();
         gpu_opts.fields.insert("SYM".to_string(), Value::Bool(true));
         let gpu_value = linsolve_builtin(
             Value::GpuTensor(ha.clone()),
             Value::GpuTensor(hb.clone()),
-            vec![Value::Struct(gpu_opts)],
+            vec![Value::Struct(gpu_opts.finish())],
         )
         .expect("gpu symmetric linsolve");
         let gpu_solution = match gpu_value {
@@ -2750,7 +2775,7 @@ pub(crate) mod tests {
         let a = Tensor::new(vec![3.0, 1.0, 2.0, 4.0], vec![2, 2]).unwrap();
         let b = Tensor::new(vec![5.0, 14.0], vec![2, 1]).unwrap();
 
-        let mut cpu_opts = StructValue::new();
+        let mut cpu_opts = runmat_value::UnboundedStructValueBuilder::new();
         cpu_opts.fields.insert(
             "TRANSA".to_string(),
             Value::CharArray(CharArray::new_row("T")),
@@ -2758,7 +2783,7 @@ pub(crate) mod tests {
         let cpu = linsolve_builtin(
             Value::Tensor(a.clone()),
             Value::Tensor(b.clone()),
-            vec![Value::Struct(cpu_opts)],
+            vec![Value::Struct(cpu_opts.finish())],
         )
         .expect("cpu linsolve");
         let cpu_tensor = test_support::gather(cpu).expect("cpu gather");
@@ -2779,7 +2804,7 @@ pub(crate) mod tests {
 
         let _output_guard =
             crate::output_count::push_output_count(Some(1)).expect("output-count scope");
-        let mut gpu_opts = StructValue::new();
+        let mut gpu_opts = runmat_value::UnboundedStructValueBuilder::new();
         gpu_opts.fields.insert(
             "TRANSA".to_string(),
             Value::CharArray(CharArray::new_row("T")),
@@ -2787,7 +2812,7 @@ pub(crate) mod tests {
         let gpu_value = linsolve_builtin(
             Value::GpuTensor(ha.clone()),
             Value::GpuTensor(hb.clone()),
-            vec![Value::Struct(gpu_opts)],
+            vec![Value::Struct(gpu_opts.finish())],
         )
         .expect("gpu transposed square linsolve");
         let gpu_solution = match gpu_value {
@@ -2828,7 +2853,7 @@ pub(crate) mod tests {
 
         let a = Tensor::new(vec![3.0, 1.0, 2.0, 4.0], vec![2, 2]).unwrap();
         let b = Tensor::new(vec![5.0, 14.0], vec![2, 1]).unwrap();
-        let mut cpu_opts = StructValue::new();
+        let mut cpu_opts = runmat_value::UnboundedStructValueBuilder::new();
         cpu_opts.fields.insert(
             "TRANSA".to_string(),
             Value::CharArray(CharArray::new_row("C")),
@@ -2836,7 +2861,7 @@ pub(crate) mod tests {
         let cpu = linsolve_builtin(
             Value::Tensor(a.clone()),
             Value::Tensor(b.clone()),
-            vec![Value::Struct(cpu_opts)],
+            vec![Value::Struct(cpu_opts.finish())],
         )
         .expect("cpu linsolve");
         let cpu_tensor = test_support::gather(cpu).expect("cpu gather");
@@ -2857,7 +2882,7 @@ pub(crate) mod tests {
 
         let _output_guard =
             crate::output_count::push_output_count(Some(1)).expect("output-count scope");
-        let mut gpu_opts = StructValue::new();
+        let mut gpu_opts = runmat_value::UnboundedStructValueBuilder::new();
         gpu_opts.fields.insert(
             "TRANSA".to_string(),
             Value::CharArray(CharArray::new_row("C")),
@@ -2865,7 +2890,7 @@ pub(crate) mod tests {
         let gpu_value = linsolve_builtin(
             Value::GpuTensor(ha.clone()),
             Value::GpuTensor(hb.clone()),
-            vec![Value::Struct(gpu_opts)],
+            vec![Value::Struct(gpu_opts.finish())],
         )
         .expect("gpu conjugate square linsolve");
         let gpu_solution = match gpu_value {
@@ -2907,7 +2932,7 @@ pub(crate) mod tests {
         let a = Tensor::new(vec![1.0, 0.0, 0.0, 1.0, 1.0, 1.0], vec![2, 3]).unwrap();
         let b = Tensor::new(vec![1.0, 2.0, 2.0], vec![3, 1]).unwrap();
 
-        let mut cpu_opts = StructValue::new();
+        let mut cpu_opts = runmat_value::UnboundedStructValueBuilder::new();
         cpu_opts.fields.insert(
             "TRANSA".to_string(),
             Value::CharArray(CharArray::new_row("T")),
@@ -2918,7 +2943,7 @@ pub(crate) mod tests {
         let cpu = linsolve_builtin(
             Value::Tensor(a.clone()),
             Value::Tensor(b.clone()),
-            vec![Value::Struct(cpu_opts)],
+            vec![Value::Struct(cpu_opts.finish())],
         )
         .expect("cpu linsolve");
         let cpu_tensor = test_support::gather(cpu).expect("cpu gather");
@@ -2939,7 +2964,7 @@ pub(crate) mod tests {
 
         let _output_guard =
             crate::output_count::push_output_count(Some(1)).expect("output-count scope");
-        let mut gpu_opts = StructValue::new();
+        let mut gpu_opts = runmat_value::UnboundedStructValueBuilder::new();
         gpu_opts.fields.insert(
             "TRANSA".to_string(),
             Value::CharArray(CharArray::new_row("T")),
@@ -2950,7 +2975,7 @@ pub(crate) mod tests {
         let gpu_value = linsolve_builtin(
             Value::GpuTensor(ha.clone()),
             Value::GpuTensor(hb.clone()),
-            vec![Value::Struct(gpu_opts)],
+            vec![Value::Struct(gpu_opts.finish())],
         )
         .expect("gpu transposed rectangular linsolve");
         let gpu_solution = match gpu_value {
@@ -2993,9 +3018,9 @@ pub(crate) mod tests {
         let b = Tensor::new(vec![9.0, 1.0, 19.0], vec![3, 1]).unwrap();
 
         let cpu = linsolve_builtin(Value::Tensor(a.clone()), Value::Tensor(b.clone()), {
-            let mut opts = StructValue::new();
+            let mut opts = runmat_value::UnboundedStructValueBuilder::new();
             opts.fields.insert("LT".to_string(), Value::Bool(true));
-            vec![Value::Struct(opts)]
+            vec![Value::Struct(opts.finish())]
         })
         .expect("cpu linsolve");
         let cpu_tensor = test_support::gather(cpu).expect("cpu gather");
@@ -3016,12 +3041,12 @@ pub(crate) mod tests {
 
         let _output_guard =
             crate::output_count::push_output_count(Some(1)).expect("output-count scope");
-        let mut opts = StructValue::new();
+        let mut opts = runmat_value::UnboundedStructValueBuilder::new();
         opts.fields.insert("LT".to_string(), Value::Bool(true));
         let gpu_value = linsolve_builtin(
             Value::GpuTensor(ha.clone()),
             Value::GpuTensor(hb.clone()),
-            vec![Value::Struct(opts)],
+            vec![Value::Struct(opts.finish())],
         )
         .expect("gpu triangular linsolve");
         let gpu_solution = match gpu_value {
@@ -3063,7 +3088,7 @@ pub(crate) mod tests {
         .unwrap();
         let b = Tensor::new(vec![5.0, 14.0, 23.0], vec![3, 1]).unwrap();
 
-        let mut cpu_opts = StructValue::new();
+        let mut cpu_opts = runmat_value::UnboundedStructValueBuilder::new();
         cpu_opts.fields.insert("LT".to_string(), Value::Bool(true));
         cpu_opts.fields.insert(
             "TRANSA".to_string(),
@@ -3072,7 +3097,7 @@ pub(crate) mod tests {
         let cpu = linsolve_builtin(
             Value::Tensor(a.clone()),
             Value::Tensor(b.clone()),
-            vec![Value::Struct(cpu_opts)],
+            vec![Value::Struct(cpu_opts.finish())],
         )
         .expect("cpu linsolve");
         let cpu_tensor = test_support::gather(cpu).expect("cpu gather");
@@ -3093,7 +3118,7 @@ pub(crate) mod tests {
 
         let _output_guard =
             crate::output_count::push_output_count(Some(1)).expect("output-count scope");
-        let mut gpu_opts = StructValue::new();
+        let mut gpu_opts = runmat_value::UnboundedStructValueBuilder::new();
         gpu_opts.fields.insert("LT".to_string(), Value::Bool(true));
         gpu_opts.fields.insert(
             "TRANSA".to_string(),
@@ -3102,7 +3127,7 @@ pub(crate) mod tests {
         let gpu_value = linsolve_builtin(
             Value::GpuTensor(ha.clone()),
             Value::GpuTensor(hb.clone()),
-            vec![Value::Struct(gpu_opts)],
+            vec![Value::Struct(gpu_opts.finish())],
         )
         .expect("gpu transposed triangular linsolve");
         let gpu_solution = match gpu_value {

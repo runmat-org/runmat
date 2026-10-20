@@ -53,6 +53,7 @@ pub fn prepare_named_callable_descriptor(
     let identity = &executable.manifest.identity;
     if &identity.program != admission.program_revision
         || identity.root_package != admission.callable.owner_identity
+        || identity.entrypoint != admission.callable.qualified_name
         || identity.entrypoint_kind != ExecutableEntrypointKind::Function
         || identity.entrypoint_function != Some(admission.function)
         || identity.source_digest != admission.executable_source_digest
@@ -69,21 +70,24 @@ pub fn prepare_named_callable_descriptor(
             "portable executable omits admitted callable capabilities",
         ));
     }
+    let entrypoint = identity.entrypoint.clone();
+    let interop = executable.manifest.interop.clone();
+    let accelerators = runmat_execution::resource::accelerator_requirements_for_capabilities(
+        &executable.manifest.capabilities,
+    )?;
     let executable_bytes = executable.canonical_bytes()?;
-    // The typed callable selects the function; the recipe names the unit's own
-    // entrypoint, which artifact admission checks against the unit identity.
     let recipe = ProgramBuildRecipe {
         schema_version: PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
         program_revision: admission.program_revision.clone(),
-        entrypoint: identity.entrypoint.clone(),
+        entrypoint,
         outputs: OutputContract {
             requested_outputs: 1,
             owned_work: None,
         },
         execution_mode: purpose.execution_mode().into(),
         target: ProgramTarget::portable(ANALYSIS_CALLABLE_TARGET_PROFILE),
-        interop: runmat_types::InteropManifest::empty(),
-        accelerators: Vec::new(),
+        interop,
+        accelerators,
         features: BTreeSet::new(),
         compile_options: BTreeSet::new(),
         source_objects: Vec::new(),

@@ -193,7 +193,8 @@ pub async fn storage(
     binding_variant = "default",
     builtin_path = "crate::builtins::fea::observations::storage"
 )]
-pub async fn cost(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn cost(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     const NAME: &str = "fea.ObservationCost.new";
     study_outputs(&FEA_OBSERVATION_COST_NEW_DESCRIPTOR, NAME)?;
     if args.len() != 5 {

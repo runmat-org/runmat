@@ -60,7 +60,7 @@ fn visit_gpu_handles(
 ) -> Result<(), RuntimeError> {
     match value {
         Value::GpuTensor(handle) => operation(handle),
-        Value::Cell(cell) => visit_values(&cell.data, operation, visited_handles),
+        Value::Cell(cell) => visit_values(cell.data(), operation, visited_handles),
         Value::Struct(value) => {
             for value in value.fields.values() {
                 visit_gpu_handles(value, operation, visited_handles)?;
@@ -77,7 +77,7 @@ fn visit_gpu_handles(
             result
         }
         Value::Object(value) => {
-            for value in value.properties.values() {
+            for value in value.properties().values() {
                 visit_gpu_handles(value, operation, visited_handles)?;
             }
             Ok(())
@@ -143,7 +143,7 @@ mod tests {
         AccelDownloadFuture, AccelProvider, HostTensorView, SpawnHandleConcurrency,
         ThreadProviderGuard,
     };
-    use runmat_value::{CellArray, HandleRef, StructArray, StructValue};
+    use runmat_value::{CellArray, HandleRef, StructArray};
 
     struct CaptureProvider {
         owner: runmat_accelerate_api::test_support::TestAllocationOwner,
@@ -241,7 +241,7 @@ mod tests {
                 binding: None,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
-                captures: vec![Value::output_list(Vec::new())],
+                captures: vec![Value::output_list(Vec::new())].into(),
             },
         ));
         let error = validate_spawn_capture(&closure).expect_err("transient closure must fail");
@@ -270,7 +270,7 @@ mod tests {
                 binding: None,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
-                captures: vec![gpu(&reject_provider().owner)],
+                captures: vec![gpu(&reject_provider().owner)].into(),
             },
         ));
         assert_eq!(
@@ -278,11 +278,11 @@ mod tests {
             Some("RunMat:SpawnGpuHandleUnsupported")
         );
 
-        let mut payload = StructValue::new();
+        let mut payload = runmat_value::UnboundedStructValueBuilder::new();
         payload
             .fields
             .insert("nested".into(), gpu(&reject_provider().owner));
-        let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc payload");
+        let target = runmat_gc::gc_allocate(Value::Struct(payload.finish())).expect("gc payload");
         let object = Value::HandleObject(HandleRef {
             class_name: "Payload".into(),
             target,
@@ -298,10 +298,10 @@ mod tests {
     fn spawn_capture_recurses_through_nd_structure_arrays() {
         let _guard = ThreadProviderGuard::set(Some(reject_provider()));
         let element = |payload: Value, nested: Value| {
-            let mut value = StructValue::new();
+            let mut value = runmat_value::UnboundedStructValueBuilder::new();
             value.insert("payload", payload);
             value.insert("nested", nested);
-            value
+            value.finish()
         };
         let array = StructArray::with_fields(
             vec!["payload".into(), "nested".into()],

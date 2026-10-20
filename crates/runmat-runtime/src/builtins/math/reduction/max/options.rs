@@ -44,14 +44,16 @@ pub(super) struct ElementwiseArgs {
     pub(super) comparison: ComparisonMethod,
 }
 
-pub(super) async fn parse_call(rest: &[Value]) -> BuiltinResult<ParsedCall> {
+pub(super) async fn parse_call(
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<ParsedCall> {
     if rest.is_empty() {
         return Ok(ParsedCall::Reduction(ReductionArgs::default()));
     }
 
     let first = &rest[0];
     if !is_empty_placeholder(first) {
-        let (nan_mode, comparison) = parse_elementwise_options(&rest[1..])?;
+        let (nan_mode, comparison) = parse_elementwise_options(rest.range(1..)?)?;
         return Ok(ParsedCall::Elementwise(ElementwiseArgs {
             other: first.clone(),
             nan_mode,
@@ -60,7 +62,7 @@ pub(super) async fn parse_call(rest: &[Value]) -> BuiltinResult<ParsedCall> {
     }
 
     let mut args = ReductionArgs::default();
-    parse_reduction_options(&mut args, &rest[1..]).await?;
+    parse_reduction_options(&mut args, rest.range(1..)?).await?;
     Ok(ParsedCall::Reduction(args))
 }
 
@@ -80,7 +82,7 @@ pub(super) fn debug_value_kind(value: &Value) -> &'static str {
         Value::String(_) => "String",
         Value::CharArray(_) => "CharArray",
         Value::StringArray(sa) => {
-            if sa.data.is_empty() {
+            if sa.data().is_empty() {
                 "StringArray(empty)"
             } else {
                 "StringArray"
@@ -94,7 +96,7 @@ pub(super) fn debug_value_kind(value: &Value) -> &'static str {
             }
         }
         Value::Cell(c) => {
-            if c.data.is_empty() {
+            if c.data().is_empty() {
                 "Cell(empty)"
             } else {
                 "Cell"
@@ -108,9 +110,9 @@ pub(super) fn is_empty_placeholder(value: &Value) -> bool {
     match value {
         Value::Tensor(t) => tensor_len(t) == 0,
         Value::LogicalArray(l) => l.data.is_empty(),
-        Value::StringArray(sa) => sa.data.is_empty(),
-        Value::CharArray(ca) => ca.data.is_empty(),
-        Value::Cell(cell) => cell.data.is_empty(),
+        Value::StringArray(sa) => sa.data().is_empty(),
+        Value::CharArray(ca) => ca.data().is_empty(),
+        Value::Cell(cell) => cell.data().is_empty(),
         Value::String(s) => s.is_empty(),
         _ => false,
     }
@@ -120,7 +122,10 @@ fn tensor_len(tensor: &Tensor) -> usize {
     tensor::tensor_element_len(tensor)
 }
 
-async fn parse_reduction_options(args: &mut ReductionArgs, rest: &[Value]) -> BuiltinResult<()> {
+async fn parse_reduction_options(
+    args: &mut ReductionArgs,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     let mut idx = 0usize;
     let mut selection_set = !matches!(args.selection, DimSelection::Auto);
     while idx < rest.len() {
@@ -172,7 +177,9 @@ async fn parse_reduction_options(args: &mut ReductionArgs, rest: &[Value]) -> Bu
     Ok(())
 }
 
-fn parse_elementwise_options(rest: &[Value]) -> BuiltinResult<(ReductionNaN, ComparisonMethod)> {
+fn parse_elementwise_options(
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<(ReductionNaN, ComparisonMethod)> {
     let mut nan_mode = ReductionNaN::Include;
     let mut comparison = ComparisonMethod::Auto;
     let mut idx = 0usize;

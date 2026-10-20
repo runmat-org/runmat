@@ -1,5 +1,9 @@
 use super::*;
 
+#[cfg(test)]
+#[path = "args/retained_tests.rs"]
+mod retained_tests;
+
 pub(in crate::builtins::table) async fn gather_values(
     values: &[Value],
 ) -> BuiltinResult<Vec<Value>> {
@@ -12,6 +16,34 @@ pub(in crate::builtins::table) async fn gather_values(
         );
     }
     Ok(out)
+}
+
+pub(in crate::builtins::table) async fn gather_retained_values(
+    arguments: &crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    let project = |index| async move {
+        gather_if_needed_async(&arguments[index])
+            .await
+            .map_err(map_control_flow)
+    };
+    let gather = arguments.try_map_preserving_roots_async(arguments.len(), runtime, project);
+    match runtime {
+        Some(runtime) => runtime.scope(gather).await,
+        None => gather.await,
+    }
+}
+
+pub(in crate::builtins::table) async fn gather_retained_value(
+    value: &Value,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<Value> {
+    let gather = gather_if_needed_async(value);
+    match runtime {
+        Some(runtime) => runtime.scope(gather).await,
+        None => gather.await,
+    }
+    .map_err(map_control_flow)
 }
 
 #[derive(Default)]
@@ -71,7 +103,7 @@ pub(in crate::builtins::table) fn is_table_constructor_option(name: &str) -> boo
 }
 
 pub(in crate::builtins::table) fn parse_table_options(
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     context: &str,
 ) -> BuiltinResult<TableConstructorOptions> {
     let mut options = TableConstructorOptions::default();
@@ -98,7 +130,7 @@ pub(in crate::builtins::table) fn parse_table_options(
 }
 
 pub(in crate::builtins::table) fn parse_array2table_options(
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<Array2TableOptions> {
     let mut options = Array2TableOptions::default();
     let mut idx = 0usize;
@@ -126,7 +158,7 @@ pub(in crate::builtins::table) fn parse_array2table_options(
 }
 
 pub(in crate::builtins::table) fn parse_struct2table_options(
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<Struct2TableOptions> {
     let mut table = TableConstructorOptions::default();
     let mut as_array = false;
@@ -155,7 +187,7 @@ pub(in crate::builtins::table) fn parse_struct2table_options(
 }
 
 pub(in crate::builtins::table) fn parse_table2struct_to_scalar(
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<bool> {
     let mut to_scalar = false;
     let mut idx = 0usize;
@@ -178,33 +210,63 @@ pub(in crate::builtins::table) fn parse_table2struct_to_scalar(
     Ok(to_scalar)
 }
 
-pub(in crate::builtins::table) fn split_readtimetable_options(
-    args: &[Value],
-) -> BuiltinResult<(Vec<Value>, Vec<Value>)> {
-    let mut readtable_args = Vec::new();
-    let mut timetable_args = Vec::new();
-    let mut idx = 0usize;
-    while idx < args.len() {
-        if idx + 1 >= args.len() {
-            return Err(invalid_argument(
-                "readtimetable: name-value options must be provided in pairs",
-            ));
-        }
-        let name = scalar_text(&args[idx], "readtimetable option")?;
-        if name.eq_ignore_ascii_case(ROW_TIMES) {
-            timetable_args.push(args[idx].clone());
-            timetable_args.push(args[idx + 1].clone());
-        } else {
-            readtable_args.push(args[idx].clone());
-            readtable_args.push(args[idx + 1].clone());
-        }
-        idx += 2;
+pub(in crate::builtins::table) async fn split_readtimetable_options(
+    args: &crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<(crate::call::BuiltinArguments, crate::call::BuiltinArguments)> {
+    if !args.len().is_multiple_of(2) {
+        return Err(invalid_argument(
+            "readtimetable: name-value options must be provided in pairs",
+        ));
     }
-    Ok((readtable_args, timetable_args))
+    let mut readtable_count = 0usize;
+    for pair in args.chunks_exact(2) {
+        let name = scalar_text(&pair[0], "readtimetable option")?;
+        if !name.eq_ignore_ascii_case(ROW_TIMES) {
+            readtable_count += 2;
+        }
+    }
+    // Partition only the final headers. Each phase scans the immutable source
+    // once, preserving pair order without an index scratch or per-pair owner.
+    let mut cursor = 0usize;
+    let mut value_slot = false;
+    let mut selecting_table = true;
+    let partitioned = args
+        .try_map_preserving_roots_async(args.len(), runtime, |output| {
+            if output == readtable_count {
+                cursor = 0;
+                value_slot = false;
+                selecting_table = false;
+            }
+            let result = if value_slot {
+                let value = args[cursor + 1].clone();
+                cursor += 2;
+                value_slot = false;
+                Ok(value)
+            } else {
+                loop {
+                    let name = match scalar_text(&args[cursor], "readtimetable option") {
+                        Ok(name) => name,
+                        Err(error) => break Err(error),
+                    };
+                    if name.eq_ignore_ascii_case(ROW_TIMES) != selecting_table {
+                        value_slot = true;
+                        break Ok(args[cursor].clone());
+                    }
+                    cursor += 2;
+                }
+            };
+            std::future::ready(result)
+        })
+        .await?;
+    Ok((
+        partitioned.range(..readtable_count)?,
+        partitioned.into_range(readtable_count..)?,
+    ))
 }
 
 pub(in crate::builtins::table) fn parse_named_option<'a>(
-    args: &'a [Value],
+    args: crate::call::FunctionArgumentView<'a>,
     name: &str,
 ) -> Option<&'a Value> {
     let mut idx = 0usize;
@@ -248,7 +310,7 @@ pub(in crate::builtins::table) fn parse_bool_option(
 }
 
 pub(in crate::builtins::table) fn parse_named_text_option(
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     name: &str,
     default: &str,
     context: &str,

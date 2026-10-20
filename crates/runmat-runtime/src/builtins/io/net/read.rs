@@ -54,9 +54,9 @@ fn read_flow(error: &'static BuiltinErrorDescriptor, message: impl AsRef<str>) -
 pub(super) async fn read_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     client: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
-    let known = preflight_known_arguments(&rest)?;
+    let known = preflight_known_arguments(rest.view())?;
     let authority = super::receiver::authority(&client, runmat_builtins::TCPCLIENT_CLASS)
         .ok_or_else(|| {
             read_flow(
@@ -138,7 +138,10 @@ use decode::{bytes_to_value, ByteOrder};
 #[path = "read/codec_tests.rs"]
 mod codec_tests;
 
-async fn parse_arguments(rest: Vec<Value>, known: KnownReadControls) -> BuiltinResult<ReadOptions> {
+async fn parse_arguments(
+    rest: crate::call::BuiltinArguments,
+    known: KnownReadControls,
+) -> BuiltinResult<ReadOptions> {
     match rest.len() {
         0 => Ok(ReadOptions {
             mode: ReadMode::Available,
@@ -177,7 +180,9 @@ struct KnownReadControls {
     datatype: Option<DataType>,
 }
 
-fn preflight_known_arguments(rest: &[Value]) -> BuiltinResult<KnownReadControls> {
+fn preflight_known_arguments(
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<KnownReadControls> {
     if rest.len() > 2 {
         return Err(read_error(&READ_ERROR_INVALID_INPUT));
     }

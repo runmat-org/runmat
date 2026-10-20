@@ -46,7 +46,7 @@ impl<'a> Executor<'a> {
         self.service
             .create(contract, input, scheme, pool)
             .await
-            .map(|handle| Value::Distributed(Box::new(handle)))
+            .map(|handle| Value::Distributed(handle.into()))
     }
 
     pub(super) async fn codistributed(
@@ -262,7 +262,7 @@ impl<'a> Executor<'a> {
         self.service
             .build_worker(contract, local_part, global_shape, scheme, layouts, context)
             .await
-            .map(|handle| Value::Distributed(Box::new(handle)))
+            .map(|handle| Value::Distributed(handle.into()))
     }
 }
 
@@ -295,7 +295,7 @@ async fn create_client_value(
     pool: runmat_execution::PoolSnapshot,
 ) -> Result<Value, RuntimeError> {
     let input = if let Value::Distributed(handle) = input {
-        service.materialize(*handle).await?
+        service.materialize(handle).await?
     } else {
         RootedValue::new(input).map_err(|error| error.into_runtime_error())?
     };
@@ -309,7 +309,7 @@ async fn create_client_value(
     service
         .create(contract, (*input).clone(), scheme, pool)
         .await
-        .map(|handle| Value::Distributed(Box::new(handle)))
+        .map(|handle| Value::Distributed(handle.into()))
 }
 
 async fn create_worker_value(
@@ -328,7 +328,7 @@ async fn create_worker_value(
     service
         .create_worker(contract, input, scheme, context)
         .await
-        .map(|handle| Value::Distributed(Box::new(handle)))
+        .map(|handle| Value::Distributed(handle.into()))
 }
 
 fn require_worker_coordination(

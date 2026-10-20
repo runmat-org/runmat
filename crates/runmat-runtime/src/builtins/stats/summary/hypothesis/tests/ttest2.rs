@@ -4,7 +4,14 @@ fn ttest2_equal_variance_vector_outputs_match_reference_values() {
     let x = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap());
     let y = Value::Tensor(Tensor::new(vec![2.0, 4.0, 6.0, 8.0], vec![4, 1]).unwrap());
     let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
-    let outputs = output_list(block_on(ttest2_builtin(x, y, Vec::new())).unwrap());
+    let outputs = output_list(
+        block_on(ttest2_builtin(
+            x,
+            y,
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap(),
+    );
     assert_eq!(outputs[0], Value::Bool(false));
     assert_close(
         match outputs[1] {
@@ -55,14 +62,14 @@ fn ttest2_unequal_variance_tail_and_nan_omission() {
         block_on(ttest2_builtin(
             x,
             y,
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::from("Vartype"),
                 Value::from("unequal"),
                 Value::from("Tail"),
                 Value::from("left"),
                 Value::from("Alpha"),
                 Value::Num(0.01),
-            ],
+            ]),
         ))
         .unwrap(),
     );
@@ -97,7 +104,14 @@ fn ttest2_matrix_dim_outputs_shape_and_invalid_samples() {
     let y = Value::Tensor(Tensor::new(vec![1.0, 1.0, 1.0, 4.0, 5.0, 6.0], vec![3, 2]).unwrap());
     {
         let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
-        let outputs = output_list(block_on(ttest2_builtin(x, y, Vec::new())).unwrap());
+        let outputs = output_list(
+            block_on(ttest2_builtin(
+                x,
+                y,
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+            ))
+            .unwrap(),
+        );
         match &outputs[0] {
             Value::LogicalArray(h) => assert_eq!(h.shape, vec![1, 2]),
             other => panic!("expected h logical array, got {other:?}"),
@@ -113,7 +127,10 @@ fn ttest2_matrix_dim_outputs_shape_and_invalid_samples() {
     let out = block_on(ttest2_builtin(
         row_x,
         row_y,
-        vec![Value::from("Dim"), Value::Num(2.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("Dim"),
+            Value::Num(2.0),
+        ]),
     ))
     .unwrap();
     match out {
@@ -126,13 +143,21 @@ fn ttest2_matrix_dim_outputs_shape_and_invalid_samples() {
 fn ttest2_rejects_bad_options_and_shapes() {
     let x = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap());
     let y = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap());
-    let err = block_on(ttest2_builtin(x, y, Vec::new())).unwrap_err();
+    let err = block_on(ttest2_builtin(
+        x,
+        y,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap_err();
     assert!(err.message.contains("same size"));
 
     let err = block_on(ttest2_builtin(
         Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
         Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
-        vec![Value::from("Tail"), Value::from("sideways")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("Tail"),
+            Value::from("sideways"),
+        ]),
     ))
     .unwrap_err();
     assert!(err.message.contains("Tail"));
@@ -154,7 +179,10 @@ fn ttest2_host_invalid_controls_precede_sample_provider_access() {
     let error = block_on(ttest2_builtin(
         resident,
         y,
-        vec![Value::from("Tail"), Value::from("sideways")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("Tail"),
+            Value::from("sideways"),
+        ]),
     ))
     .expect_err("host-invalid Tail must be rejected before sample gather");
     assert!(error.message.contains("unsupported Tail"), "{error}");
@@ -177,8 +205,12 @@ fn ttest2_sample_provider_failure_preserves_nested_cause() {
             .handle,
     );
     let y = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap());
-    let error = block_on(ttest2_builtin(resident, y, Vec::new()))
-        .expect_err("unregistered resident sample must fail at provider access");
+    let error = block_on(ttest2_builtin(
+        resident,
+        y,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect_err("unregistered resident sample must fail at provider access");
     assert_eq!(
         error.identifier.as_deref(),
         Some("RunMat:ttest2:InvalidArgument")
@@ -194,13 +226,21 @@ fn ttest2_rejects_too_many_outputs_and_huge_dim() {
     let x = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap());
     let y = Value::Tensor(Tensor::new(vec![1.0, 2.0, 4.0], vec![3, 1]).unwrap());
     let _guard = crate::output_count::push_output_count(Some(5)).expect("output-count scope");
-    let err = block_on(ttest2_builtin(x, y, Vec::new())).unwrap_err();
+    let err = block_on(ttest2_builtin(
+        x,
+        y,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap_err();
     assert!(err.message.contains("too many output arguments"));
 
     let err = block_on(ttest2_builtin(
         Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
         Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
-        vec![Value::from("Dim"), Value::Num(1.0e20)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("Dim"),
+            Value::Num(1.0e20),
+        ]),
     ))
     .unwrap_err();
     assert!(err.message.contains("Dim"));
@@ -214,10 +254,10 @@ fn ttest2_numeric_options_read_typed_integer_storage_exactly() {
     let out = block_on(ttest2_builtin(
         x,
         y,
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("Dim"),
             poisoned_integer_scalar(IntegerStorage::U64(vec![1])),
-        ],
+        ]),
     ))
     .unwrap();
     assert_eq!(out, Value::Bool(false));
@@ -227,10 +267,10 @@ fn ttest2_numeric_options_read_typed_integer_storage_exactly() {
     let err = block_on(ttest2_builtin(
         x,
         y,
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("Alpha"),
             poisoned_integer_scalar(IntegerStorage::I64(vec![1])),
-        ],
+        ]),
     ))
     .unwrap_err();
     assert!(err.message.contains("Alpha"));
@@ -241,7 +281,12 @@ fn ttest2_sample_values_read_typed_integer_storage_exactly() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     let x = poisoned_integer_tensor(IntegerStorage::I16(vec![1, 2, 3, 4]), vec![4, 1]);
     let y = poisoned_integer_tensor(IntegerStorage::U16(vec![1, 2, 4, 8]), vec![4, 1]);
-    let out = block_on(ttest2_builtin(x, y, Vec::new())).unwrap();
+    let out = block_on(ttest2_builtin(
+        x,
+        y,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap();
     assert_eq!(out, Value::Bool(false));
 }
 
@@ -279,7 +324,14 @@ fn ttest2_empty_and_nd_outputs_preserve_shapes() {
     let empty_x = Value::Tensor(Tensor::new(Vec::new(), vec![3, 0]).unwrap());
     let empty_y = Value::Tensor(Tensor::new(Vec::new(), vec![3, 0]).unwrap());
     let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
-    let outputs = output_list(block_on(ttest2_builtin(empty_x, empty_y, Vec::new())).unwrap());
+    let outputs = output_list(
+        block_on(ttest2_builtin(
+            empty_x,
+            empty_y,
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap(),
+    );
     match &outputs[0] {
         Value::LogicalArray(h) => assert_eq!(h.shape, vec![1, 0]),
         other => panic!("expected empty h logical array, got {other:?}"),
@@ -304,7 +356,14 @@ fn ttest2_empty_and_nd_outputs_preserve_shapes() {
         .unwrap(),
     );
     let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
-    let outputs = output_list(block_on(ttest2_builtin(x, y, Vec::new())).unwrap());
+    let outputs = output_list(
+        block_on(ttest2_builtin(
+            x,
+            y,
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap(),
+    );
     match &outputs[2] {
         Value::Tensor(ci) => assert_eq!(ci.shape(), &[2, 1, 4]),
         other => panic!("expected nd ci tensor, got {other:?}"),

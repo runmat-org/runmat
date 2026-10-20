@@ -65,7 +65,7 @@ fn which_flow(err: RuntimeError) -> RuntimeError {
     binding_variant = "default",
     builtin_path = "crate::builtins::introspection::which"
 )]
-async fn which_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn which_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     if args.is_empty() {
         return Err(which_error(&WHICH_ERROR_ARG_COUNT_MIN));
     }
@@ -327,9 +327,11 @@ async fn canonical_path(path: &Path) -> String {
 
 fn value_to_string_scalar(value: &Value) -> Option<String> {
     match value {
-        Value::String(text) => Some(text.clone()),
-        Value::CharArray(array) if array.rows == 1 => Some(array.data.iter().collect()),
-        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
+        Value::String(text) => Some(text.as_str().to_owned()),
+        Value::CharArray(array) if array.rows == 1 => Some(array.data().iter().collect()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Some(array.data()[0].as_str().to_owned())
+        }
         _ => None,
     }
 }

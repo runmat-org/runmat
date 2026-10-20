@@ -1,4 +1,7 @@
-use runmat_value::{CellArray, IntValue, LogicalArray, NumericStorage, StringArray, Tensor, Value};
+use runmat_value::{
+    CellArray, ExactArrayStorage, IntValue, LogicalArray, NumericStorage, StringArray, Tensor,
+    Utf8Text, Value,
+};
 
 use crate::BuiltinResult;
 
@@ -7,7 +10,7 @@ use super::{error, plan::Repetition};
 pub(super) enum CombinationColumn {
     Numeric(NumericStorage),
     Logical(Vec<u8>),
-    String(Vec<String>),
+    String(ExactArrayStorage<Utf8Text>),
     Cell(Vec<Value>),
 }
 
@@ -21,15 +24,17 @@ impl CombinationColumn {
             Value::Num(value) => Self::Numeric(NumericStorage::F64(vec![value])),
             Value::Bool(value) => Self::Logical(vec![u8::from(value)]),
             Value::LogicalArray(array) => Self::Logical(array.data.to_vec()),
-            Value::String(value) => Self::String(vec![value]),
-            Value::StringArray(array) => Self::String(array.data),
-            Value::CharArray(array) if array.rows == 1 => Self::String(
-                array
-                    .data
-                    .into_iter()
-                    .map(|value| value.to_string())
-                    .collect(),
-            ),
+            Value::String(value) => Self::String(ExactArrayStorage::unbounded(vec![value])),
+            Value::StringArray(array) => Self::String(array.into_parts().0),
+            Value::CharArray(array) if array.rows == 1 => {
+                Self::String(ExactArrayStorage::unbounded(
+                    array
+                        .data()
+                        .iter()
+                        .map(|value| Utf8Text::new(value.to_string()))
+                        .collect(),
+                ))
+            }
             Value::Cell(array) => Self::Cell(array.into_column_major().map_err(error::internal)?),
             other => Self::Cell(vec![other]),
         })
@@ -52,11 +57,12 @@ impl CombinationColumn {
                     .map(Value::LogicalArray)
                     .map_err(error::internal)
             }
-            Self::String(values) => {
-                StringArray::new(repeat_values(&values, repetition, rows), vec![rows, 1])
-                    .map(Value::StringArray)
-                    .map_err(error::internal)
-            }
+            Self::String(values) => StringArray::from_texts_unbounded(
+                repeat_values(&values, repetition, rows),
+                vec![rows, 1],
+            )
+            .map(Value::StringArray)
+            .map_err(error::internal),
             Self::Cell(values) => CellArray::new(repeat_values(&values, repetition, rows), rows, 1)
                 .map(Value::Cell)
                 .map_err(error::internal),

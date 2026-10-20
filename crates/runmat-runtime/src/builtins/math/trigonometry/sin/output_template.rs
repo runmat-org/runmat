@@ -7,7 +7,9 @@ pub(super) enum OutputTemplate {
     Like(Value),
 }
 
-pub(super) fn parse_output_template(args: &[Value]) -> BuiltinResult<OutputTemplate> {
+pub(super) fn parse_output_template(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<OutputTemplate> {
     match args.len() {
         0 => Ok(OutputTemplate::Default),
         1 => {

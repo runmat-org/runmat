@@ -130,12 +130,12 @@ impl PreparedAxesTarget {
 pub(crate) fn prepare_axes_call<'a>(
     runtime: Option<&RuntimeContext>,
     builtin: &'static str,
-    args: &'a [Value],
-) -> BuiltinResult<(PreparedAxesTarget, &'a [Value])> {
+    args: crate::call::FunctionArgumentView<'a>,
+) -> BuiltinResult<(PreparedAxesTarget, crate::call::FunctionArgumentView<'a>)> {
     if let Some(first) = args.first() {
         if let Some(prepared) = prepare_graphics_target(runtime, builtin, first)? {
             if matches!(prepared.handle(), PlotHandle::Axes(_, _)) {
-                return Ok((prepared.into_axes(builtin)?, &args[1..]));
+                return Ok((prepared.into_axes(builtin)?, args.range(1..)?));
             }
         }
     }

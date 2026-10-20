@@ -2,9 +2,10 @@
 use crate::builtins::common::tensor;
 use crate::builtins::control::ss::ss_builtin;
 use crate::builtins::control::tf_model::{
-    control_error, gather_ss_properties, scalar_complex, scalar_f64, TfModel, TfOptions, SS_CLASS,
-    TF_CLASS,
+    control_error, gather_ss_property_values, scalar_complex, scalar_f64, TfModel, TfOptions,
+    SS_CLASS, TF_CLASS,
 };
+use crate::context::RuntimeContext;
 use crate::{BuiltinResult, RuntimeError};
 use nalgebra::DMatrix;
 use runmat_value::{CellArray, CharArray, ObjectInstance, Tensor, Value};
@@ -75,6 +76,7 @@ impl SeriesModel {
     }
 
     pub(crate) async fn compose(
+        runtime: &RuntimeContext,
         first: Self,
         second: Self,
         channels: Option<(&[usize], &[usize])>,
@@ -84,16 +86,19 @@ impl SeriesModel {
         // and then rejected by the ordinary port-count equality check.
         match (first, second, channels) {
             (Self::Gain(gain), Self::Ss(system), None) => {
-                system.scale_gain(gain, true)?.into_value().await
+                system.scale_gain(gain, true)?.into_value(runtime).await
             }
             (Self::Ss(system), Self::Gain(gain), None) => {
-                system.scale_gain(gain, false)?.into_value().await
+                system.scale_gain(gain, false)?.into_value(runtime).await
             }
-            (first, second, channels) => Self::compose_models(first, second, channels).await,
+            (first, second, channels) => {
+                Self::compose_models(runtime, first, second, channels).await
+            }
         }
     }
 
     async fn compose_models(
+        runtime: &RuntimeContext,
         first: Self,
         second: Self,
         channels: Option<(&[usize], &[usize])>,
@@ -109,12 +114,16 @@ impl SeriesModel {
             (first, second) => {
                 let first = first.into_state_space()?;
                 let second = second.into_state_space()?;
-                first.compose(&second, channels)?.into_value().await
+                first.compose(&second, channels)?.into_value(runtime).await
             }
         }
     }
 
-    pub(crate) async fn compose_by_name(first: Self, second: Self) -> BuiltinResult<Value> {
+    pub(crate) async fn compose_by_name(
+        runtime: &RuntimeContext,
+        first: Self,
+        second: Self,
+    ) -> BuiltinResult<Value> {
         let (first, second) = Self::materialize_gains(first, second)?;
         let first = first.into_state_space()?;
         let second = second.into_state_space()?;
@@ -153,7 +162,7 @@ impl SeriesModel {
         }
         first
             .compose(&second, Some((&outputs, &inputs)))?
-            .into_value()
+            .into_value(runtime)
             .await
     }
 
@@ -221,41 +230,31 @@ impl RealStateSpace {
 
     async fn from_object(object: ObjectInstance) -> BuiltinResult<Self> {
         for name in ["InputDelay", "OutputDelay"] {
-            if let Some(value) = object.properties.get(name) {
+            if let Some(value) = object.properties().get(name) {
                 if !matches!(value, Value::GpuTensor(_)) && !zero_delay(value, name)? {
                     return Err(unsupported("series does not support nonzero model delays"));
                 }
             }
         }
-        let object = gather_ss_properties(object, &REQUIRED, NAME).await?;
-        for name in ["InputDelay", "OutputDelay"] {
-            let value = object
-                .properties
-                .get(name)
-                .expect("required property gathered");
+        let [a, b, c, d, sample_time, input_delay, output_delay, input_names, output_names] =
+            gather_ss_property_values(&object, REQUIRED, NAME).await?;
+        for (name, value) in [("InputDelay", &input_delay), ("OutputDelay", &output_delay)] {
             if !zero_delay(value, name)? {
                 return Err(unsupported("series does not support nonzero model delays"));
             }
         }
-        let a = matrix(&object, "A")?;
-        let b = matrix(&object, "B")?;
-        let c = matrix(&object, "C")?;
-        let d = matrix(&object, "D")?;
-        let input_names = names(&object, "InputName", b.ncols())?;
-        let output_names = names(&object, "OutputName", c.nrows())?;
+        let a = matrix_value(&a, "A")?;
+        let b = matrix_value(&b, "B")?;
+        let c = matrix_value(&c, "C")?;
+        let d = matrix_value(&d, "D")?;
+        let input_names = names_value(&input_names, "InputName", b.ncols())?;
+        let output_names = names_value(&output_names, "OutputName", c.nrows())?;
         let model = Self {
             a,
             b,
             c,
             d,
-            sample_time: scalar_f64(
-                object
-                    .properties
-                    .get("Ts")
-                    .expect("required property gathered"),
-                "Ts",
-                NAME,
-            )?,
+            sample_time: scalar_f64(&sample_time, "Ts", NAME)?,
             input_names,
             output_names,
         };
@@ -388,22 +387,35 @@ impl RealStateSpace {
         })
     }
 
-    async fn into_value(self) -> BuiltinResult<Value> {
+    async fn into_value(self, runtime: &RuntimeContext) -> BuiltinResult<Value> {
+        let sample_time = [Value::Num(self.sample_time)];
+        let arguments = crate::call::BuiltinArguments::from_borrowed(&sample_time, Some(runtime))?;
         let mut model = ss_builtin(
-            matrix_value(self.a)?,
-            matrix_value(self.b)?,
-            matrix_value(self.c)?,
-            matrix_value(self.d)?,
-            vec![Value::Num(self.sample_time)],
+            Some(runtime.clone()),
+            matrix_output_value(self.a)?,
+            matrix_output_value(self.b)?,
+            matrix_output_value(self.c)?,
+            matrix_output_value(self.d)?,
+            arguments,
         )
         .await?;
         if let Value::Object(object) = &mut model {
-            object
-                .properties
-                .insert("InputName".into(), name_cells(self.input_names)?);
-            object
-                .properties
-                .insert("OutputName".into(), name_cells(self.output_names)?);
+            let input_names = name_cells(self.input_names)?;
+            let output_names = name_cells(self.output_names)?;
+            crate::execution::object::replacement::replace_properties(
+                Some(runtime),
+                object,
+                [("InputName", &input_names), ("OutputName", &output_names)].into_iter(),
+                |message, source| {
+                    crate::context::host_allocation::host_allocation_runtime_error(
+                        Some(runtime),
+                        "RunMat:series:Allocation",
+                        message,
+                        source,
+                    )
+                },
+                invalid,
+            )?;
         }
         Ok(model)
     }
@@ -418,11 +430,7 @@ fn zero_delay(value: &Value, name: &str) -> BuiltinResult<bool> {
     }
 }
 
-fn matrix(object: &ObjectInstance, name: &str) -> BuiltinResult<DMatrix<f64>> {
-    let value = object
-        .properties
-        .get(name)
-        .ok_or_else(|| invalid(format!("missing {name}")))?;
+fn matrix_value(value: &Value, name: &str) -> BuiltinResult<DMatrix<f64>> {
     match value {
         Value::Tensor(tensor)
             if tensor.shape().len() <= 2 && tensor.integer_storage().is_none() =>
@@ -443,7 +451,7 @@ fn matrix(object: &ObjectInstance, name: &str) -> BuiltinResult<DMatrix<f64>> {
     }
 }
 
-fn matrix_value(matrix: DMatrix<f64>) -> BuiltinResult<Value> {
+fn matrix_output_value(matrix: DMatrix<f64>) -> BuiltinResult<Value> {
     Tensor::new(
         matrix.as_slice().to_vec(),
         vec![matrix.nrows(), matrix.ncols()],
@@ -452,13 +460,23 @@ fn matrix_value(matrix: DMatrix<f64>) -> BuiltinResult<Value> {
     .map_err(|error| control_error(NAME, "RunMat:series:Internal", error))
 }
 
+#[cfg(test)]
 fn names(object: &ObjectInstance, property: &str, expected: usize) -> BuiltinResult<Vec<String>> {
-    let names = match object.properties.get(property) {
-        Some(Value::Cell(cells))
-            if cells.shape.len() <= 2 && (cells.rows == 1 || cells.cols == 1) =>
-        {
+    names_value(
+        object
+            .properties()
+            .get(property)
+            .ok_or_else(|| invalid(format!("missing {property}")))?,
+        property,
+        expected,
+    )
+}
+
+fn names_value(value: &Value, property: &str, expected: usize) -> BuiltinResult<Vec<String>> {
+    let names = match value {
+        Value::Cell(cells) if cells.shape.len() <= 2 && (cells.rows == 1 || cells.cols == 1) => {
             cells
-                .data
+                .data()
                 .iter()
                 .map(|value| {
                     tensor::value_to_string(value).ok_or_else(|| {
@@ -467,10 +485,10 @@ fn names(object: &ObjectInstance, property: &str, expected: usize) -> BuiltinRes
                 })
                 .collect::<BuiltinResult<Vec<_>>>()?
         }
-        Some(Value::StringArray(strings))
+        Value::StringArray(strings)
             if strings.shape.len() <= 2 && (strings.rows == 1 || strings.cols == 1) =>
         {
-            strings.data.clone()
+            strings.data().iter().map(ToString::to_string).collect()
         }
         _ => {
             return Err(invalid(format!(

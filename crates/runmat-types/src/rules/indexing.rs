@@ -10,6 +10,13 @@ pub fn infer_index_sequence(
     selectors: &[IndexSelectorFact],
     context: IndexResultContext,
 ) -> SequenceFactInference {
+    if let (ValueKindFact::Composite(composite), IndexKind::Brace) = (&base.kind, kind) {
+        let result = composite_contents(composite, selectors);
+        return SequenceFactInference {
+            sequence: ValueSequenceFact::single(result.fact),
+            diagnostics: result.diagnostics,
+        };
+    }
     if let Some(diagnostic) = selector_bounds_diagnostic(&base.shape, selectors, context) {
         return SequenceFactInference {
             sequence: ValueSequenceFact::dynamic(),
@@ -46,6 +53,9 @@ pub fn infer_index(
     selectors: &[IndexSelectorFact],
     context: IndexResultContext,
 ) -> FactInference {
+    if let (ValueKindFact::Composite(composite), IndexKind::Brace) = (&base.kind, kind) {
+        return composite_contents(composite, selectors);
+    }
     if let Some(diagnostic) = selector_bounds_diagnostic(&base.shape, selectors, context) {
         return FactInference {
             fact: ValueFact::unknown(DynamicReason::ConflictingControlFlow),
@@ -118,6 +128,34 @@ pub fn infer_index(
     result.view = crate::ViewFact::ReadOnlyView;
     result.alias = crate::AliasFact::Shared;
     FactInference::exact(result)
+}
+
+fn composite_contents(
+    composite: &crate::CompositeFact,
+    selectors: &[IndexSelectorFact],
+) -> FactInference {
+    let valid = match selectors {
+        [IndexSelectorFact::KnownOneBasedIndex(index)] => {
+            *index > 0 && usize::try_from(composite.labs.0).is_ok_and(|labs| *index <= labs)
+        }
+        [IndexSelectorFact::Numeric(value) | IndexSelectorFact::Logical(value)] => {
+            value.shape.element_count().is_none_or(|count| count == 1)
+        }
+        [IndexSelectorFact::Scalar | IndexSelectorFact::Unknown | IndexSelectorFact::End { .. }] => {
+            true
+        }
+        _ => false,
+    };
+    if valid {
+        return FactInference::exact((*composite.value).clone());
+    }
+    FactInference {
+        fact: ValueFact::unknown(DynamicReason::UnsupportedRepresentation),
+        diagnostics: vec![crate::InferenceDiagnostic::error(
+            "RM-TYPE-COMPOSITE-INDEX",
+            "Composite brace indexing requires one scalar lab index within the SPMD gang",
+        )],
+    }
 }
 
 fn dynamic_reason(fact: &ValueFact) -> DynamicReason {

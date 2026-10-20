@@ -63,9 +63,9 @@ fn lab2rgb_map_error(err: RuntimeError, fallback: &'static BuiltinErrorDescripto
 async fn lab2rgb_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     lab: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<crate::execution::RootedValue> {
-    let output_type = parse_output_type(&rest)?;
+    let output_type = parse_output_type(rest.view())?;
     crate::output_count::validate_fixed_outputs(
         &LAB2RGB_DESCRIPTOR,
         &LAB2RGB_ERROR_TOO_MANY_OUTPUTS,
@@ -262,7 +262,9 @@ async fn lab2rgb_execute(
         .map_err(|err| lab2rgb_map_error(err.into_runtime_error(), &LAB2RGB_ERROR_INTERNAL))
 }
 
-fn parse_output_type(rest: &[Value]) -> BuiltinResult<Option<LabOutputType>> {
+fn parse_output_type(
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Option<LabOutputType>> {
     if rest.len() > 2 {
         return Err(lab2rgb_error(&LAB2RGB_ERROR_TOO_MANY_INPUTS));
     }

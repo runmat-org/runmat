@@ -411,7 +411,9 @@ async fn dispatch_name_handle(meta: DispatchMeta<'_>, state: DispatchState<'_>) 
             };
             let selected = runmat_runtime::user_functions::try_load_and_call_dynamic_function(
                 name.clone(),
-                Vec::new(),
+                runmat_runtime::call::RootedFunctionArguments::ordinary(
+                    runmat_runtime::execution::RootedValues::in_context(Vec::new(), &runtime)?,
+                ),
                 1,
                 phase,
                 None,
@@ -481,7 +483,19 @@ fn suspend_parallel<'a>(
     meta: DispatchMeta<'a>,
     state: DispatchState<'a>,
 ) -> SuspendedDispatchFuture<'a> {
-    Box::pin(dispatch_parallel(meta, state))
+    parallel::dispatch(
+        meta.instr,
+        state.stack,
+        state.vars,
+        state.pc,
+        state.sequence_register,
+        parallel::ParallelDispatchContext {
+            bytecode: meta.bytecode,
+            execution: state.context,
+            function_registry: meta.function_registry,
+            current_function_name: meta.current_function_name,
+        },
+    )
 }
 
 #[inline(never)]
@@ -539,24 +553,6 @@ fn suspend_aggregate<'a>(
     state: DispatchState<'a>,
 ) -> SuspendedDispatchFuture<'a> {
     Box::pin(dispatch_aggregate(meta, state))
-}
-
-async fn dispatch_parallel(meta: DispatchMeta<'_>, state: DispatchState<'_>) -> DispatchResult {
-    let handled = parallel::dispatch(
-        meta.instr,
-        state.stack,
-        state.vars,
-        state.pc,
-        state.sequence_register,
-        parallel::ParallelDispatchContext {
-            bytecode: meta.bytecode,
-            execution: state.context,
-            function_registry: meta.function_registry,
-            current_function_name: meta.current_function_name,
-        },
-    )
-    .await?;
-    Ok(handled)
 }
 
 async fn dispatch_prepared_output(

@@ -111,10 +111,10 @@ fn intermediate_brace_read_requires_exactly_one_cell_value() {
             Some("RunMat:CommaSeparatedListRequiresSingleValue")
         );
     }
-    let mut member = StructValue::new();
+    let mut member = runmat_value::UnboundedStructValueBuilder::new();
     member.insert("payload", Value::Num(7.0));
-    let single =
-        CellArray::new_with_shape(vec![Value::Struct(member)], vec![1, 1]).expect("single cell");
+    let single = CellArray::new_with_shape(vec![Value::Struct(member.finish())], vec![1, 1])
+        .expect("single cell");
     assert_eq!(read(path, Value::Cell(single)), Value::Num(7.0));
 }
 
@@ -344,7 +344,7 @@ fn composite_brace_read_uses_exact_selected_runtime_lease_and_lab_selector() {
     ] {
         let error = block_on(read_subscript_path_sequence_with_access_in_context(
             &runtime,
-            Value::Composite(Box::new(handle.clone())),
+            Value::Composite(Box::new(handle.clone()).into()),
             brace_path(selector.into()),
             SubscriptReadRequest::require_single(ObjectAccessContext::default()),
         ))
@@ -355,15 +355,18 @@ fn composite_brace_read_uses_exact_selected_runtime_lease_and_lab_selector() {
 
 #[test]
 fn typed_dotted_invoke_distinguishes_callable_member_from_member_indexing() {
-    let mut callable = StructValue::new();
+    let mut callable = runmat_value::UnboundedStructValueBuilder::new();
     callable.insert("operation", Value::FunctionHandle("sqrt".into()));
     let path = ObjectSubscriptPath::new(
         ObjectSubscript::dotted_invoke("operation", vec![Value::Num(9.0)]).to_vec(),
     )
     .expect("dotted invoke path");
-    assert_eq!(read(path, Value::Struct(callable)), Value::Num(3.0));
+    assert_eq!(
+        read(path, Value::Struct(callable.finish())),
+        Value::Num(3.0)
+    );
 
-    let mut indexed = StructValue::new();
+    let mut indexed = runmat_value::UnboundedStructValueBuilder::new();
     indexed.insert(
         "samples",
         Value::Tensor(Tensor::new(vec![10.0, 20.0], vec![1, 2]).expect("tensor")),
@@ -372,7 +375,10 @@ fn typed_dotted_invoke_distinguishes_callable_member_from_member_indexing() {
         ObjectSubscript::dotted_invoke("samples", vec![Value::Num(2.0)]).to_vec(),
     )
     .expect("dotted invoke path");
-    assert_eq!(read(path, Value::Struct(indexed)), Value::Num(20.0));
+    assert_eq!(
+        read(path, Value::Struct(indexed.finish())),
+        Value::Num(20.0)
+    );
 }
 
 #[test]
@@ -554,7 +560,7 @@ fn ordinary_adjacent_member_and_parentheses_are_not_method_provenance() {
 
 #[test]
 fn dotted_property_colon_is_an_index_selector_not_a_call_argument() {
-    let mut indexed = StructValue::new();
+    let mut indexed = runmat_value::UnboundedStructValueBuilder::new();
     indexed.insert(
         "samples",
         Value::Tensor(Tensor::new(vec![10.0, 20.0, 30.0, 40.0], vec![2, 2]).unwrap()),
@@ -568,7 +574,7 @@ fn dotted_property_colon_is_an_index_selector_not_a_call_argument() {
     )
     .unwrap();
     assert_eq!(
-        read(path, Value::Struct(indexed)),
+        read(path, Value::Struct(indexed.finish())),
         Value::Tensor(Tensor::new(vec![10.0, 20.0, 30.0, 40.0], vec![4, 1]).unwrap())
     );
 }
@@ -580,7 +586,7 @@ fn resolved_callable_still_rejects_a_standalone_colon_argument() {
     ));
     context.set_error_namespace("RunMat");
     let _scope = crate::context::RuntimeContextGuard::enter(context);
-    let mut callable = StructValue::new();
+    let mut callable = runmat_value::UnboundedStructValueBuilder::new();
     callable.insert("operation", Value::FunctionHandle("sqrt".into()));
     let path = ObjectSubscriptPath::new(
         ObjectSubscript::dotted_invoke_components(
@@ -591,7 +597,7 @@ fn resolved_callable_still_rejects_a_standalone_colon_argument() {
     )
     .unwrap();
     let error = block_on(read_subscript_path_with_access(
-        Value::Struct(callable),
+        Value::Struct(callable.finish()),
         path,
         ObjectAccessContext::default(),
     ))

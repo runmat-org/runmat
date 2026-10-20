@@ -89,10 +89,10 @@ pub(super) fn require_step_class(
 macro_rules! step_builtin {
     ($function:ident, $descriptor:ident, $name:literal, $class:expr, $build:expr) => {
         #[runtime_builtin(
-                            name = $name,
-                            binding_variant = "default",
-                            builtin_path = "crate::builtins::fea::steps"
-                        )]
+                                            name = $name,
+                                            binding_variant = "default",
+                                            builtin_path = "crate::builtins::fea::steps"
+                                        )]
         pub async fn $function(id: Value) -> BuiltinResult<Value> {
             crate::builtins::fea::constraints::fixed_outputs(&runmat_builtins::$descriptor, $name)?;
             let id = scalar_string(&id, $name, &ERROR_INPUT)?;
@@ -376,12 +376,14 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let geometry = load_stl_fixture(&tmp.path().join("part.stl"), 1.0);
         let step = block_on(structural_static_builtin(step_id("static"))).unwrap();
-        let model = create_model_object_from_args(vec![
-            Value::String("model".into()),
-            geometry.clone(),
-            Value::String("Steps".into()),
-            step.clone(),
-        ])
+        let model = create_model_object_from_args(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("model".into()),
+                geometry.clone(),
+                Value::String("Steps".into()),
+                step.clone(),
+            ]),
+        )
         .expect("concrete step should compose");
         let model: AnalysisModel = object_payload(MODEL_NAME, &model, FEA_MODEL_CLASS).unwrap();
         assert_eq!(model.sequence.steps.len(), 1);
@@ -390,13 +392,18 @@ mod tests {
         let Value::Object(mut mislabeled) = step else {
             unreachable!("step constructor returned an object")
         };
-        mislabeled.class_name = FEA_THERMAL_STEP_CLASS.into();
-        let error = create_model_object_from_args(vec![
-            Value::String("mislabeled".into()),
-            geometry,
-            Value::String("Steps".into()),
-            Value::Object(mislabeled),
-        ])
+        mislabeled = crate::builtins::common::test_support::reclassify_object_unbounded(
+            &mislabeled,
+            FEA_THERMAL_STEP_CLASS,
+        );
+        let error = create_model_object_from_args(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("mislabeled".into()),
+                geometry,
+                Value::String("Steps".into()),
+                Value::Object(mislabeled),
+            ]),
+        )
         .expect_err("family-mismatched class must reject");
         assert!(error.message().contains("procedure step belongs to"));
     }
@@ -417,15 +424,17 @@ mod tests {
             (FEA_CONJUGATE_HEAT_TRANSFER_STEP_CLASS, "steadyState"),
             (FEA_FLUID_STRUCTURE_STEP_CLASS, "transient"),
         ] {
-            let (registered, owner) =
-                crate::builtins::fea::test_support::lookup_method(class_name, method)
-                    .unwrap_or_else(|| panic!("missing {class_name}.{method}"));
+            let (registered, owner) = crate::class_registry::lookup_method(
+                &runmat_types::ClassIdentity::from(class_name),
+                &runmat_types::MethodName::from(method),
+            )
+            .unwrap_or_else(|| panic!("missing {class_name}.{method}"));
             assert_eq!(owner.display_name(), class_name);
             assert!(registered.is_static);
         }
-        assert!(crate::builtins::fea::test_support::lookup_method(
-            FEA_THERMAL_STEP_CLASS,
-            "static"
+        assert!(crate::class_registry::lookup_method(
+            &runmat_types::ClassIdentity::from(FEA_THERMAL_STEP_CLASS),
+            &runmat_types::MethodName::from("static")
         )
         .is_none());
     }

@@ -16,6 +16,44 @@ fn map_cell_shape_error(context: &str, err: impl std::fmt::Display) -> RuntimeEr
     mex("ShapeMismatch", format!("{context}: {err}"))
 }
 
+fn writable_cell(
+    mut cell: CellArray,
+    context: Option<&crate::context::RuntimeContext>,
+) -> Result<(CellArray, Option<crate::execution::RootedValueLease>), RuntimeError> {
+    if cell.data_owner().is_unique() {
+        return Ok((cell, None));
+    }
+    if !cell.data_owner().is_exact() {
+        cell.make_data_unique_unbounded()
+            .map_err(|error| map_cell_shape_error("cell write owner", error))?;
+        return Ok((cell, None));
+    }
+    let (cell, roots) = crate::execution::structure::replacement::cell(&cell, context)?;
+    Ok((cell, Some(roots)))
+}
+
+fn writable_cell_data(cell: &mut CellArray) -> Result<&mut [Value], RuntimeError> {
+    cell.try_data_mut_unique().ok_or_else(|| {
+        mex(
+            "RunMat:Cell:SharedOwner",
+            "cell replacement owner is unexpectedly shared",
+        )
+    })
+}
+
+fn borrowed_cell<'a>(
+    context: Option<&crate::context::RuntimeContext>,
+    shape: &[usize],
+    values: impl Iterator<Item = &'a Value> + Clone,
+) -> Result<(CellArray, crate::execution::RootedValueLease), RuntimeError> {
+    let rooted = crate::execution::structure::cell::from_borrowed_values(context, shape, values)?;
+    let (value, roots) = rooted.into_value_and_lease();
+    let Value::Cell(cell) = value else {
+        unreachable!("cell constructor returned a non-cell value")
+    };
+    Ok((cell, roots))
+}
+
 fn empty_numeric_cell_value() -> Result<Value, RuntimeError> {
     Tensor::new(Vec::new(), vec![0, 0])
         .map(Value::Tensor)
@@ -195,7 +233,10 @@ pub fn index_cell_value(ca: &CellArray, indices: &[usize]) -> Result<Value, Runt
     match indices.len() {
         1 => {
             let i = indices[0];
-            Ok(ca.data[row_major_pos_from_linear(ca, i)?].clone())
+            if i == 0 {
+                return Err(mex("CellIndexOutOfBounds", "Cell index out of bounds"));
+            }
+            Ok(ca.data()[row_major_pos_from_linear(ca, i)?].clone())
         }
         0 => Err(mex(
             "UnsupportedCellIndexCount",
@@ -203,7 +244,7 @@ pub fn index_cell_value(ca: &CellArray, indices: &[usize]) -> Result<Value, Runt
         )),
         _ => {
             let linear = linear_index_from_subscripts(ca, indices)?;
-            Ok(ca.data[row_major_pos_from_linear(ca, linear)?].clone())
+            Ok(ca.data()[row_major_pos_from_linear(ca, linear)?].clone())
         }
     }
 }
@@ -215,7 +256,7 @@ pub fn expand_cell_values(
 ) -> Result<Vec<Value>, RuntimeError> {
     let mut values: Vec<Value> = Vec::new();
     if indices.is_empty() {
-        for idx in 1..=ca.data.len() {
+        for idx in 1..=ca.data().len() {
             values.push(index_cell_value(ca, &[idx])?);
         }
     } else {
@@ -231,7 +272,7 @@ pub fn expand_cell_values(
 }
 
 pub fn expand_all_cell_values(ca: &CellArray) -> Result<Vec<Value>, RuntimeError> {
-    (1..=ca.data.len())
+    (1..=ca.data().len())
         .map(|idx| index_cell_value(ca, &[idx]))
         .collect()
 }
@@ -244,7 +285,7 @@ pub fn gather_cell_paren_linear_indices(
     let mut handles = Vec::with_capacity(indices.len());
     for &idx in indices {
         let pos = row_major_pos_from_linear(ca, idx)?;
-        handles.push(ca.data[pos].clone());
+        handles.push(ca.data()[pos].clone());
     }
     let shape = if output_shape.is_empty() {
         vec![1, handles.len().max(1)]
@@ -267,7 +308,7 @@ pub fn expand_cell_indices(ca: &CellArray, indices: &[Value]) -> Result<Vec<Valu
         1 => match &indices[0] {
             value if is_colon_selector(value) => expand_all_cell_values(ca),
             Value::Num(n) => {
-                if let Some(idx) = resolve_cell_end_relative_index(*n, ca.data.len())? {
+                if let Some(idx) = resolve_cell_end_relative_index(*n, ca.data().len())? {
                     return Ok(vec![index_cell_value(ca, &[idx])?]);
                 }
                 if n.is_nan() {
@@ -282,7 +323,7 @@ pub fn expand_cell_indices(ca: &CellArray, indices: &[Value]) -> Result<Vec<Valu
             }
             Value::Tensor(t) => {
                 if tensor_element_len(t) == 1 && t.shape().iter().product::<usize>() == 1 {
-                    let idx = parse_cell_index_value_for_len(&indices[0], ca.data.len())?;
+                    let idx = parse_cell_index_value_for_len(&indices[0], ca.data().len())?;
                     return Ok(vec![index_cell_value(ca, &[idx])?]);
                 }
                 (0..t.len())
@@ -303,7 +344,20 @@ pub fn expand_cell_indices(ca: &CellArray, indices: &[Value]) -> Result<Vec<Valu
 }
 
 pub fn assign_cell_value<OnWrite>(
-    mut ca: CellArray,
+    ca: CellArray,
+    indices: &[usize],
+    rhs: Value,
+    on_write: OnWrite,
+) -> Result<Value, RuntimeError>
+where
+    OnWrite: FnMut(&Value, &Value),
+{
+    assign_cell_value_in_context(None, ca, indices, rhs, on_write)
+}
+
+pub fn assign_cell_value_in_context<OnWrite>(
+    context: Option<&crate::context::RuntimeContext>,
+    ca: CellArray,
     indices: &[usize],
     rhs: Value,
     mut on_write: OnWrite,
@@ -314,39 +368,36 @@ where
     match indices.len() {
         1 => {
             let i = indices[0];
-            let old_len = ca.data.len();
-            if i > old_len {
-                if !(ca.data.is_empty() || ca.rows <= 1 || ca.cols <= 1) {
+            let old_len = ca.data().len();
+            let (mut ca, _roots) = if i > old_len {
+                if !(ca.data().is_empty() || ca.rows <= 1 || ca.cols <= 1) {
                     return Err(mex(
                         "UnsupportedCellGrowth",
                         "Cell growth via linear brace assignment is only supported for vectors",
                     ));
                 }
-                while ca.data.len() < i {
-                    ca.data.push(empty_numeric_cell_value()?);
-                }
-                let len = ca.data.len();
-                if old_len == 0 {
+                let filler = empty_numeric_cell_value()?;
+                let shape = if old_len == 0 {
                     // MATLAB linear growth from empty cell shapes (for example `0x5` or `5x0`)
                     // normalizes to a row vector.
-                    ca.rows = 1;
-                    ca.cols = len;
-                    ca.shape = vec![1, len];
+                    vec![1, i]
                 } else if ca.rows <= 1 {
-                    ca.rows = 1;
-                    ca.cols = len;
-                    ca.shape = vec![1, len];
+                    vec![1, i]
                 } else {
-                    ca.rows = len;
-                    ca.cols = 1;
-                    ca.shape = vec![len, 1];
-                }
-            }
+                    vec![i, 1]
+                };
+                let old = ca.data();
+                let values = (0..i).map(|position| old.get(position).unwrap_or(&filler));
+                let (cell, roots) = borrowed_cell(context, &shape, values)?;
+                (cell, Some(roots))
+            } else {
+                writable_cell(ca, context)?
+            };
             let pos = row_major_pos_from_linear(&ca, i)?;
-            if let Some(oldv) = ca.data.get(pos) {
+            if let Some(oldv) = ca.data().get(pos) {
                 on_write(oldv, &rhs);
             }
-            ca.data[pos] = rhs;
+            writable_cell_data(&mut ca)?[pos] = rhs;
             Ok(Value::Cell(ca))
         }
         2 => {
@@ -358,10 +409,9 @@ where
                     "Cell subscript out of bounds",
                 ));
             }
-            if i > ca.rows || j > ca.cols {
-                let old_rows = ca.rows;
+            let (mut ca, _roots) = if i > ca.rows || j > ca.cols {
                 let old_cols = ca.cols;
-                let new_rows = old_rows.max(i);
+                let new_rows = ca.rows.max(i);
                 let new_cols = old_cols.max(j);
                 let total = new_rows.checked_mul(new_cols).ok_or_else(|| {
                     mex(
@@ -369,27 +419,28 @@ where
                         "Cell array expansion exceeds supported size",
                     )
                 })?;
-                let mut grown = Vec::with_capacity(total);
-                for _ in 0..total {
-                    grown.push(empty_numeric_cell_value()?);
-                }
-                for row in 0..old_rows {
-                    for col in 0..old_cols {
-                        let old_lin = row * old_cols + col;
-                        let new_lin = row * new_cols + col;
-                        grown[new_lin] = ca.data[old_lin].clone();
+                let filler = empty_numeric_cell_value()?;
+                let old = ca.data();
+                let old_rows = ca.rows;
+                let values = (0..total).map(|linear| {
+                    let row = linear / new_cols;
+                    let column = linear % new_cols;
+                    if row < old_rows && column < old_cols {
+                        &old[row * old_cols + column]
+                    } else {
+                        &filler
                     }
-                }
-                ca.data = grown;
-                ca.rows = new_rows;
-                ca.cols = new_cols;
-                ca.shape = vec![new_rows, new_cols];
-            }
+                });
+                let (cell, roots) = borrowed_cell(context, &[new_rows, new_cols], values)?;
+                (cell, Some(roots))
+            } else {
+                writable_cell(ca, context)?
+            };
             let lin = (i - 1) * ca.cols + (j - 1);
-            if let Some(oldv) = ca.data.get(lin) {
+            if let Some(oldv) = ca.data().get(lin) {
                 on_write(oldv, &rhs);
             }
-            ca.data[lin] = rhs;
+            writable_cell_data(&mut ca)?[lin] = rhs;
             Ok(Value::Cell(ca))
         }
         0 => Err(mex(
@@ -399,17 +450,31 @@ where
         _ => {
             let linear = linear_index_from_subscripts(&ca, indices)?;
             let position = row_major_pos_from_linear(&ca, linear)?;
-            if let Some(old_value) = ca.data.get(position) {
+            let (mut ca, _roots) = writable_cell(ca, context)?;
+            if let Some(old_value) = ca.data().get(position) {
                 on_write(old_value, &rhs);
             }
-            ca.data[position] = rhs;
+            writable_cell_data(&mut ca)?[position] = rhs;
             Ok(Value::Cell(ca))
         }
     }
 }
 
 pub fn assign_cell_value_multi<OnWrite>(
-    mut ca: CellArray,
+    ca: CellArray,
+    positions: &[usize],
+    rhs_values: &[Value],
+    on_write: OnWrite,
+) -> Result<Value, RuntimeError>
+where
+    OnWrite: FnMut(&Value, &Value),
+{
+    assign_cell_value_multi_in_context(None, ca, positions, rhs_values, on_write)
+}
+
+pub fn assign_cell_value_multi_in_context<OnWrite>(
+    context: Option<&crate::context::RuntimeContext>,
+    ca: CellArray,
     positions: &[usize],
     rhs_values: &[Value],
     mut on_write: OnWrite,
@@ -426,39 +491,43 @@ where
             "Cell brace assignment target count does not match source value count",
         ));
     }
-    let old_len = ca.data.len();
-    if let Some(max_pos) = positions.iter().copied().max() {
+    if positions.contains(&0) {
+        return Err(mex("CellIndexOutOfBounds", "Cell index out of bounds"));
+    }
+    let old_len = ca.data().len();
+    let (mut ca, _roots) = if let Some(max_pos) = positions.iter().copied().max() {
         if max_pos > old_len {
-            if !(ca.data.is_empty() || ca.rows <= 1 || ca.cols <= 1) {
+            if !(ca.data().is_empty() || ca.rows <= 1 || ca.cols <= 1) {
                 return Err(mex(
                     "UnsupportedCellGrowth",
                     "Cell growth via linear brace assignment is only supported for vectors",
                 ));
             }
-            while ca.data.len() < max_pos {
-                ca.data.push(empty_numeric_cell_value()?);
-            }
-            let len = ca.data.len();
-            if old_len == 0 || ca.rows <= 1 {
-                ca.rows = 1;
-                ca.cols = len;
-                ca.shape = vec![1, len];
+            let shape = if old_len == 0 || ca.rows <= 1 {
+                vec![1, max_pos]
             } else {
-                ca.rows = len;
-                ca.cols = 1;
-                ca.shape = vec![len, 1];
-            }
+                vec![max_pos, 1]
+            };
+            let filler = empty_numeric_cell_value()?;
+            let old = ca.data();
+            let values = (0..max_pos).map(|position| old.get(position).unwrap_or(&filler));
+            let (cell, roots) = borrowed_cell(context, &shape, values)?;
+            (cell, Some(roots))
+        } else {
+            writable_cell(ca, context)?
         }
-    }
+    } else {
+        writable_cell(ca, context)?
+    };
     for (position, rhs) in positions.iter().zip(rhs_values.iter()) {
-        if *position == 0 || *position > ca.data.len() {
+        if *position == 0 || *position > ca.data().len() {
             return Err(mex("CellIndexOutOfBounds", "Cell index out of bounds"));
         }
         let pos = row_major_pos_from_linear(&ca, *position)?;
-        if let Some(oldv) = ca.data.get(pos) {
+        if let Some(oldv) = ca.data().get(pos) {
             on_write(oldv, rhs);
         }
-        ca.data[pos] = rhs.clone();
+        writable_cell_data(&mut ca)?[pos] = rhs.clone();
     }
     Ok(Value::Cell(ca))
 }
@@ -474,8 +543,16 @@ pub fn resolve_cell_assignment_positions(
     parse_cell_index_values_for_assignment(&indices[0])
 }
 
-pub fn delete_cell_linear(mut ca: CellArray, idx: usize) -> Result<Value, RuntimeError> {
-    let total = ca.data.len();
+pub fn delete_cell_linear(ca: CellArray, idx: usize) -> Result<Value, RuntimeError> {
+    delete_cell_linear_in_context(None, ca, idx)
+}
+
+pub fn delete_cell_linear_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    ca: CellArray,
+    idx: usize,
+) -> Result<Value, RuntimeError> {
+    let total = ca.data().len();
     if idx == 0 || idx > total {
         return Err(mex("CellIndexOutOfBounds", "Cell index out of bounds"));
     }
@@ -485,8 +562,7 @@ pub fn delete_cell_linear(mut ca: CellArray, idx: usize) -> Result<Value, Runtim
             "Linear cell deletion is only supported for vectors",
         ));
     }
-    ca.data.remove(idx - 1);
-    let len = ca.data.len();
+    let len = ca.data().len() - 1;
     let shape = if len == 0 {
         vec![0, 0]
     } else if ca.rows == 1 {
@@ -494,13 +570,28 @@ pub fn delete_cell_linear(mut ca: CellArray, idx: usize) -> Result<Value, Runtim
     } else {
         vec![len, 1]
     };
-    Ok(Value::Cell(
-        CellArray::new_with_shape(ca.data, shape)
-            .map_err(|e| map_cell_shape_error("cell deletion error", e))?,
-    ))
+    let position = idx - 1;
+    let values = ca
+        .data()
+        .iter()
+        .enumerate()
+        .filter(move |(index, _)| *index != position)
+        .map(|(_, value)| value);
+    let (cell, _roots) = borrowed_cell(context, &shape, values)?;
+    Ok(Value::Cell(cell))
 }
 
 pub fn assign_cell_paren_with_policy(
+    ca: CellArray,
+    indices: &[usize],
+    rhs: &Value,
+    delete: bool,
+) -> Result<Value, RuntimeError> {
+    assign_cell_paren_with_policy_in_context(None, ca, indices, rhs, delete)
+}
+
+pub fn assign_cell_paren_with_policy_in_context(
+    context: Option<&crate::context::RuntimeContext>,
     ca: CellArray,
     indices: &[usize],
     rhs: &Value,
@@ -519,10 +610,10 @@ pub fn assign_cell_paren_with_policy(
                 "Cell deletion requires empty RHS",
             ));
         }
-        return delete_cell_linear(ca, indices[0]);
+        return delete_cell_linear_in_context(context, ca, indices[0]);
     }
     if let Value::Cell(rhs_cell) = rhs {
-        return assign_cell_paren_from_cell(ca, indices, rhs_cell);
+        return assign_cell_paren_from_cell(context, ca, indices, rhs_cell);
     }
     Err(mex(
         "UnsupportedCellParenAssignment",
@@ -531,7 +622,17 @@ pub fn assign_cell_paren_with_policy(
 }
 
 pub fn assign_cell_paren_linear_indices_with_policy(
-    mut ca: CellArray,
+    ca: CellArray,
+    indices: &[usize],
+    rhs: &Value,
+    delete: bool,
+) -> Result<Value, RuntimeError> {
+    assign_cell_paren_linear_indices_with_policy_in_context(None, ca, indices, rhs, delete)
+}
+
+pub fn assign_cell_paren_linear_indices_with_policy_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    ca: CellArray,
     indices: &[usize],
     rhs: &Value,
     delete: bool,
@@ -555,10 +656,7 @@ pub fn assign_cell_paren_linear_indices_with_policy(
             .collect::<Result<Vec<_>, _>>()?;
         positions.sort_unstable();
         positions.dedup();
-        for pos in positions.into_iter().rev() {
-            ca.data.remove(pos);
-        }
-        let len = ca.data.len();
+        let len = ca.data().len() - positions.len();
         let shape = if len == 0 {
             vec![0, 0]
         } else if ca.rows == 1 {
@@ -566,10 +664,14 @@ pub fn assign_cell_paren_linear_indices_with_policy(
         } else {
             vec![len, 1]
         };
-        return Ok(Value::Cell(
-            CellArray::new_with_shape(ca.data, shape)
-                .map_err(|e| map_cell_shape_error("cell deletion error", e))?,
-        ));
+        let values = ca
+            .data()
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| positions.binary_search(index).is_err())
+            .map(|(_, value)| value);
+        let (cell, _roots) = borrowed_cell(context, &shape, values)?;
+        return Ok(Value::Cell(cell));
     }
     let Value::Cell(rhs_cell) = rhs else {
         return Err(mex(
@@ -577,36 +679,41 @@ pub fn assign_cell_paren_linear_indices_with_policy(
             "Cell paren assignment requires a cell RHS",
         ));
     };
-    if rhs_cell.data.len() != indices.len() && rhs_cell.data.len() != 1 {
+    if rhs_cell.data().len() != indices.len() && rhs_cell.data().len() != 1 {
         return Err(mex(
             "UnsupportedCellParenAssignment",
             "Cell RHS must be scalar or match assignment size",
         ));
     }
+    for &idx in indices {
+        row_major_pos_from_linear(&ca, idx)?;
+    }
+    let (mut ca, _roots) = writable_cell(ca, context)?;
     for (k, &idx) in indices.iter().enumerate() {
         let pos = row_major_pos_from_linear(&ca, idx)?;
-        let rhs_pos = if rhs_cell.data.len() == 1 { 0 } else { k };
-        let newv = rhs_cell.data[rhs_pos].clone();
-        if let Some(oldv) = ca.data.get(pos) {
+        let rhs_pos = if rhs_cell.data().len() == 1 { 0 } else { k };
+        let newv = rhs_cell.data()[rhs_pos].clone();
+        if let Some(oldv) = ca.data().get(pos) {
             runmat_gc::gc_record_write(oldv, &newv);
         }
-        ca.data[pos] = newv;
+        writable_cell_data(&mut ca)?[pos] = newv;
     }
     Ok(Value::Cell(ca))
 }
 
 fn assign_cell_paren_from_cell(
-    mut ca: CellArray,
+    context: Option<&crate::context::RuntimeContext>,
+    ca: CellArray,
     indices: &[usize],
     rhs: &CellArray,
 ) -> Result<Value, RuntimeError> {
-    if rhs.data.len() != 1 {
+    if rhs.data().len() != 1 {
         return Err(mex(
             "UnsupportedCellParenAssignment",
             "Only scalar cell paren assignment is supported",
         ));
     }
-    let newv = rhs.data[0].clone();
+    let newv = rhs.data()[0].clone();
     let lin = match indices.len() {
         1 => {
             let i = indices[0];
@@ -634,10 +741,11 @@ fn assign_cell_paren_from_cell(
             row_major_pos_from_linear(&ca, linear)?
         }
     };
-    if let Some(oldv) = ca.data.get(lin) {
+    let (mut ca, _roots) = writable_cell(ca, context)?;
+    if let Some(oldv) = ca.data().get(lin) {
         runmat_gc::gc_record_write(oldv, &newv);
     }
-    ca.data[lin] = newv;
+    writable_cell_data(&mut ca)?[lin] = newv;
     Ok(Value::Cell(ca))
 }
 
@@ -663,7 +771,7 @@ mod tests {
         else {
             panic!("expected cell after deletion");
         };
-        assert_eq!(result.data, vec![Value::Num(20.0)]);
+        assert_eq!(result.data(), &[Value::Num(20.0)]);
         let vector_rhs = Value::Tensor(Tensor::new(vec![7.0], vec![1]).unwrap());
         let error =
             super::assign_cell_paren_with_policy(cell(), &[1], &vector_rhs, true).unwrap_err();
@@ -691,7 +799,7 @@ mod tests {
         let Value::Cell(cell) = result else {
             panic!("expected cell result");
         };
-        assert_eq!(cell.data[2], Value::Num(42.0));
+        assert_eq!(cell.data()[2], Value::Num(42.0));
     }
 
     #[test]

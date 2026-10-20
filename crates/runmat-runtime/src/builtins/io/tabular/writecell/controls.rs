@@ -2,7 +2,9 @@ use super::*;
 
 /// Reject all malformed host-known pairs before any resident option is read.
 /// A resident name or value is deliberately left for the ordinary parser.
-pub(super) fn preflight_host_options(args: &[Value]) -> BuiltinResult<()> {
+pub(super) fn preflight_host_options(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     for pair in args.chunks_exact(2) {
         if matches!(&pair[0], Value::GpuTensor(_)) {
             continue;
@@ -20,7 +22,7 @@ pub(super) fn preflight_host_options(args: &[Value]) -> BuiltinResult<()> {
 pub(super) async fn parse_options(
     runtime: Option<&crate::context::RuntimeContext>,
     cooperation: &mut TabularCooperation<'_>,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<WriteCellOptions> {
     if args.is_empty() {
         return Ok(WriteCellOptions::default());

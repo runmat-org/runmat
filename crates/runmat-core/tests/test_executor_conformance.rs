@@ -34,7 +34,7 @@ async fn execute_portable_envelope(
     let recipe = runmat_execution_artifact::ProgramBuildRecipe {
         schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
         program_revision: envelope.manifest.identity.program.clone(),
-        entrypoint: function.0.to_string(),
+        entrypoint: envelope.manifest.identity.entrypoint.clone(),
         outputs: runmat_execution::OutputContract {
             requested_outputs: 1,
             owned_work: None,
@@ -53,11 +53,13 @@ async fn execute_portable_envelope(
     };
     let artifact = runmat_execution_artifact::ProgramArtifact::materialize(
         &recipe,
-        runmat_execution_artifact::ExecutableForm::ExecutableUnitV3,
+        runmat_execution_artifact::ExecutableForm::ExecutableUnitV4,
         envelope.canonical_bytes().unwrap(),
     )
     .unwrap();
     runmat_vm::execute_program_request(runmat_execution_artifact::ProgramExecutionRequest {
+        console: None,
+        environment: runmat_execution::EnvironmentSnapshot::default(),
         schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         recipe,
         artifact,

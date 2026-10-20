@@ -295,9 +295,9 @@ pub(crate) fn checked_constructor_integer_dimension(
 pub(crate) fn keyword_of(value: &Value) -> Option<String> {
     match value {
         Value::String(s) => Some(s.to_ascii_lowercase()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].to_ascii_lowercase()),
+        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].to_ascii_lowercase()),
         Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data.iter().collect();
+            let text: String = ca.data().iter().collect();
             Some(text.to_ascii_lowercase())
         }
         _ => None,
@@ -336,8 +336,8 @@ pub(crate) fn shape_from_value(value: &Value, label: &str) -> Result<Vec<usize>,
         Value::ComplexTensor(t) => Ok(t.shape().to_vec()),
         Value::LogicalArray(l) => Ok(l.shape.to_vec()),
         Value::GpuTensor(h) => Ok(h.shape().to_vec()),
-        Value::CharArray(ca) => Ok(ca.shape.clone()),
-        Value::Cell(cell) => Ok(cell.shape.clone()),
+        Value::CharArray(ca) => Ok(ca.shape().to_vec()),
+        Value::Cell(cell) => Ok(cell.shape().to_vec()),
         Value::Num(_)
         | Value::Int(_)
         | Value::Bool(_)

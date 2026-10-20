@@ -1104,11 +1104,11 @@ fn sample_string_axis(
     indices: &[usize],
     _name: &str,
 ) -> BuiltinResult<Value> {
-    let shape = normalize_shape(array.shape.clone());
+    let shape = normalize_shape(array.shape().to_vec());
     let mut out_shape = shape.clone();
     out_shape[axis] = indices.len();
     let out_len = tensor::element_count(&out_shape);
-    let mut out = vec![String::new(); out_len];
+    let mut out = vec![runmat_value::Utf8Text::default(); out_len];
     let pre: usize = shape[..axis].iter().product();
     let axis_len = shape[axis];
     let post: usize = shape[axis + 1..].iter().product();
@@ -1117,18 +1117,14 @@ fn sample_string_axis(
             for (dst_axis, src_axis) in indices.iter().enumerate() {
                 let src = prefix + src_axis * pre + suffix * pre * axis_len;
                 let dst = prefix + dst_axis * pre + suffix * pre * indices.len();
-                out[dst] = array.data[src].clone();
+                out[dst] = array.data()[src].clone();
             }
         }
     }
-    let rows = *out_shape.first().unwrap_or(&1);
-    let cols = *out_shape.get(1).unwrap_or(&1);
-    Ok(Value::StringArray(StringArray {
-        data: out,
-        shape: out_shape,
-        rows,
-        cols,
-    }))
+    Ok(Value::StringArray(
+        StringArray::from_texts_unbounded(out, out_shape)
+            .map_err(|err| sampling_error(_name, format!("{_name}: {err}")))?,
+    ))
 }
 
 fn sample_char_axis(
@@ -1150,7 +1146,7 @@ fn sample_char_axis(
             for (dst_axis, src_axis) in indices.iter().enumerate() {
                 let src = prefix + src_axis * pre + suffix * pre * axis_len;
                 let dst = prefix + dst_axis * pre + suffix * pre * indices.len();
-                out[dst] = array.data[src];
+                out[dst] = array.data()[src];
             }
         }
     }
@@ -1165,7 +1161,7 @@ fn sample_cell_axis(
     indices: &[usize],
     name: &str,
 ) -> BuiltinResult<Value> {
-    let shape = normalize_shape(array.shape.clone());
+    let shape = normalize_shape(array.shape().to_vec());
     let mut out_shape = shape.clone();
     out_shape[axis] = indices.len();
     let out_len = tensor::element_count(&out_shape);
@@ -1192,7 +1188,7 @@ fn sample_cell_axis(
             .zip(source_strides.iter())
             .map(|(coord, stride)| coord * stride)
             .sum::<usize>();
-        out[output_linear] = array.data[source_linear].clone();
+        out[output_linear] = array.data()[source_linear].clone();
     }
     CellArray::new_with_shape(out, out_shape)
         .map(Value::Cell)
@@ -1243,12 +1239,8 @@ fn sample_value_axis(
             name,
         ),
         Value::String(value) => sample_string_axis(
-            &StringArray {
-                data: vec![value],
-                shape: vec![1, 1],
-                rows: 1,
-                cols: 1,
-            },
+            &StringArray::from_texts_unbounded(vec![value], vec![1, 1])
+                .map_err(|err| sampling_error(name, format!("{name}: {err}")))?,
             axis,
             indices,
             name,
@@ -1267,9 +1259,9 @@ fn shape_of_sampled_value(value: &Value) -> BuiltinResult<Vec<usize>> {
     match value {
         Value::Tensor(t) => Ok(normalize_shape(t.shape().to_vec())),
         Value::LogicalArray(a) => Ok(normalize_shape(a.shape.to_vec())),
-        Value::StringArray(a) => Ok(normalize_shape(a.shape.clone())),
+        Value::StringArray(a) => Ok(normalize_shape(a.shape().to_vec())),
         Value::CharArray(a) => Ok(vec![a.rows, a.cols]),
-        Value::Cell(a) => Ok(normalize_shape(a.shape.clone())),
+        Value::Cell(a) => Ok(normalize_shape(a.shape().to_vec())),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::String(_) => Ok(vec![1, 1]),
         other => Err(sampling_error(
             "datasample",
@@ -2129,10 +2121,10 @@ fn is_empty_function(value: &Value) -> bool {
     match value {
         Value::Tensor(t) => tensor::tensor_element_len(t) == 0,
         Value::LogicalArray(a) => a.data.is_empty(),
-        Value::Cell(c) => c.data.is_empty(),
+        Value::Cell(c) => c.data().is_empty(),
         Value::String(s) => s.is_empty(),
-        Value::StringArray(a) => a.data.is_empty(),
-        Value::CharArray(a) => a.data.is_empty(),
+        Value::StringArray(a) => a.data().is_empty(),
+        Value::CharArray(a) => a.data().is_empty(),
         _ => false,
     }
 }
@@ -2142,9 +2134,9 @@ fn is_scalar_boot_arg(value: &Value) -> bool {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::String(_) => true,
         Value::Tensor(t) => tensor::is_scalar_tensor(t),
         Value::LogicalArray(a) => a.data.len() == 1,
-        Value::StringArray(a) => a.data.len() == 1,
-        Value::CharArray(a) => a.data.len() == 1,
-        Value::Cell(a) => a.data.len() == 1,
+        Value::StringArray(a) => a.data().len() == 1,
+        Value::CharArray(a) => a.data().len() == 1,
+        Value::Cell(a) => a.data().len() == 1,
         _ => false,
     }
 }
@@ -2704,7 +2696,7 @@ mod tests {
             Value::CharArray(chars) => {
                 assert_eq!(chars.rows, 1);
                 assert_eq!(chars.cols, 5);
-                assert_eq!(chars.data, vec!['G'; 5]);
+                assert_eq!(chars.data(), vec!['G'; 5]);
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -2740,7 +2732,7 @@ mod tests {
             Value::Cell(cell) => {
                 assert_eq!(cell.shape, vec![3, 2]);
                 assert_eq!(
-                    cell.data,
+                    cell.data(),
                     vec![
                         Value::from("c"),
                         Value::from("d"),

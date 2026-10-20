@@ -33,8 +33,14 @@ fn assert_configured_path_guards(provider: std::sync::Arc<dyn runmat_filesystem:
     assert!(!block_on(value_is_folder_async(&file)).unwrap());
     assert!(!block_on(value_is_file_async(&folder)).unwrap());
     assert!(!block_on(value_is_file_async(&Value::String("/missing.txt".into()))).unwrap());
-    assert!(block_on(must_be_file::evaluate(vec![file])).is_ok());
-    assert!(block_on(must_be_folder::evaluate(vec![folder])).is_ok());
+    assert!(block_on(must_be_file::evaluate(
+        crate::builtins::common::validation::tests::retained_arguments(vec![file])
+    ))
+    .is_ok());
+    assert!(block_on(must_be_folder::evaluate(
+        crate::builtins::common::validation::tests::retained_arguments(vec![folder])
+    ))
+    .is_ok());
     let invalid = Value::Cell(
         CellArray::new(
             vec![Value::String("/validator-domain".into()), Value::Num(1.0)],

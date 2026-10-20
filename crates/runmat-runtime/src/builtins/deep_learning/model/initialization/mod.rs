@@ -2,6 +2,7 @@
 //! draws and user callbacks; generated values are published only as a set.
 use super::parameters::{ParameterRole, ParameterShape};
 use super::*;
+use crate::builtins::deep_learning::arguments::DeepLearningObjectEdit as _;
 use crate::execution::{RootedValue, RootedValueLease};
 
 mod generate;
@@ -31,8 +32,16 @@ pub(in crate::builtins) async fn initialise_layers_in_runtime(
     layers: &mut [Value],
     function: &'static str,
 ) -> BuiltinResult<RootedValueLease> {
-    let _source_roots =
-        RootedValueLease::for_values(layers.iter()).map_err(|error| error.into_runtime_error())?;
+    let active = crate::context::legacy::active();
+    let runtime = runtime.or(active.as_ref());
+    let _source_roots = match runtime {
+        Some(runtime) => RootedValueLease::for_values_in_context(layers, runtime)?,
+        None => {
+            require_ordinary_roots()?;
+            RootedValueLease::for_values(layers.iter())
+                .map_err(|error| error.into_runtime_error())?
+        }
+    };
     let tasks = plan::tasks(layers, function)?;
     let mut replacements = Vec::new();
     replacements.try_reserve_exact(tasks.len()).map_err(|_| {
@@ -169,31 +178,55 @@ pub(in crate::builtins) async fn initialise_layers_in_runtime(
             .map_err(|error| error.into_runtime_error())?;
         }
     }
-    publish_staged_parameters(layers, replacements)
+    publish_staged_parameters(runtime, layers, replacements)
 }
 
 fn publish_staged_parameters(
+    runtime: Option<&crate::context::RuntimeContext>,
     layers: &mut [Value],
     replacements: Vec<StagedParameter>,
 ) -> BuiltinResult<RootedValueLease> {
     // Register the complete old/new graph before the first mutation. This
     // registration cannot fail after a partial publication, and it survives
     // each staged owner's retirement until the caller roots the final network.
-    let publication_roots = RootedValueLease::for_values(
-        layers
-            .iter()
-            .chain(replacements.iter().map(|staged| staged.value.value())),
-    )
-    .map_err(|error| error.into_runtime_error())?;
+    let inputs = layers
+        .iter()
+        .chain(replacements.iter().map(|staged| staged.value.value()));
+    let publication_roots = match runtime {
+        Some(runtime) => RootedValueLease::for_values_iterator_in_context(inputs, runtime)?,
+        None => {
+            require_ordinary_roots()?;
+            RootedValueLease::for_values(inputs).map_err(|error| error.into_runtime_error())?
+        }
+    };
     for staged in replacements {
         let Value::Object(layer) = &mut layers[staged.layer_index] else {
             unreachable!("preflight established layer objects")
         };
-        staged.value.with_owned(|value| {
-            layer.properties.insert(staged.role.name().into(), value);
-        });
+        staged
+            .value
+            .with_owned(|value| layer.replace_dl_property(staged.role.name(), value))?;
     }
     Ok(publication_roots)
+}
+
+fn require_ordinary_roots() -> BuiltinResult<()> {
+    use crate::context::host_allocation::{
+        host_allocation_runtime_error, HostAllocationError, HostAllocationPolicy,
+        HostAllocationReceipt,
+    };
+    let error = |source| {
+        host_allocation_runtime_error(
+            None,
+            "RunMat:deepLearning:InitializationRoots",
+            "initializer root policy is unavailable",
+            source,
+        )
+    };
+    match HostAllocationReceipt::policy(None).map_err(error)? {
+        HostAllocationPolicy::Unbounded => Ok(()),
+        HostAllocationPolicy::Managed => Err(error(HostAllocationError::MissingManagedOwner)),
+    }
 }
 
 /// Reuse the initializer's effect-free structural plan when training needs

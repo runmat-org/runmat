@@ -7,7 +7,7 @@
 use anyhow::{anyhow, Result};
 use runmat_execution::Digest;
 use runmat_value::{
-    ComplexTensor, IntValue, NumericDType, NumericScalar, SparseTensor, Tensor, Value,
+    ComplexTensor, IntValue, NumericDType, NumericScalar, SparseTensor, Tensor, Utf8Text, Value,
 };
 use serde::{ser::SerializeSeq, Serialize, Serializer};
 
@@ -63,6 +63,18 @@ impl Serialize for SparseScalars<'_> {
     }
 }
 
+struct StringScalars<'a>(&'a [Utf8Text]);
+
+impl Serialize for StringScalars<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for value in self.0 {
+            sequence.serialize_element(value.as_str())?;
+        }
+        sequence.end()
+    }
+}
+
 impl From<NumericScalar> for ScalarBits {
     fn from(value: NumericScalar) -> Self {
         match value {
@@ -89,7 +101,7 @@ enum ConstantPayload<'a> {
     String(&'a str),
     StringArray {
         shape: &'a [usize],
-        data: &'a [String],
+        data: StringScalars<'a>,
     },
     CharArray {
         shape: &'a [usize],
@@ -131,11 +143,11 @@ pub(crate) fn exact_constant_digest(value: &Value) -> Result<Digest> {
         Value::String(value) => ConstantPayload::String(value),
         Value::StringArray(array) => ConstantPayload::StringArray {
             shape: &array.shape,
-            data: &array.data,
+            data: StringScalars(array.data()),
         },
         Value::CharArray(array) => ConstantPayload::CharArray {
             shape: &array.shape,
-            data: &array.data,
+            data: array.data(),
         },
         Value::LogicalArray(array) => ConstantPayload::LogicalArray {
             shape: &array.shape,
@@ -168,7 +180,28 @@ pub(crate) fn exact_constant_digest(value: &Value) -> Result<Digest> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_value::{ComplexTensor, IntegerStorage, SparseTensor, Tensor};
+    use runmat_value::{ComplexTensor, IntegerStorage, SparseTensor, StringArray, Tensor};
+
+    #[derive(Serialize)]
+    enum LegacyStringPayload<'a> {
+        StringArray {
+            shape: &'a [usize],
+            data: &'a [String],
+        },
+    }
+
+    #[test]
+    fn streamed_string_array_identity_matches_original_json_bytes() {
+        let strings = vec!["a\"b".to_owned(), "λ\n".to_owned(), String::new()];
+        let shape = vec![1, strings.len()];
+        let legacy = LegacyStringPayload::StringArray {
+            shape: &shape,
+            data: &strings,
+        };
+        let expected = Digest::sha256(serde_json::to_vec(&legacy).unwrap());
+        let value = Value::StringArray(StringArray::new(strings, shape).unwrap());
+        assert_eq!(exact_constant_digest(&value).unwrap(), expected);
+    }
 
     #[derive(Serialize)]
     enum LegacyNumericPayload<'a> {

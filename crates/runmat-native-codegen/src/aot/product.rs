@@ -1,15 +1,17 @@
 use runmat_execution::host::NativeProductMode;
 use runmat_execution::{Digest, ExecutableIdentity};
-use runmat_types::{ProgramFunctionId, ProgramSourceId};
+use runmat_types::{FunctionId, ProgramSourceId};
 
 use crate::NativeTarget;
 
-pub const NATIVE_OBJECT_SCHEMA_VERSION: u16 = 14;
-pub const AOT_PROGRAM_MANIFEST_SCHEMA_VERSION: u16 = 9;
+pub const NATIVE_OBJECT_SCHEMA_VERSION: u16 = 16;
+pub const AOT_PROGRAM_MANIFEST_SCHEMA_VERSION: u16 = 10;
 const MAX_AOT_PROGRAM_FUNCTIONS: usize = 100_000;
 const MAX_AOT_PROGRAM_MANIFEST_BYTES: usize = 64 * 1024 * 1024;
 pub const AOT_ENTRY_SYMBOL: &str = "runmat_aot_entry";
 pub const AOT_RUNTIME_MAIN_SYMBOL: &str = "runmat_aot_main";
+pub const AOT_RUNTIME_TEST_MAIN_SYMBOL: &str = "runmat_aot_test_main";
+pub const AOT_PAIRED_PRODUCT_SYMBOL: &str = "runmat_aot_paired_product";
 pub const AOT_SOURCE_SERVICE_FACTORY_SYMBOL: &str = "runmat_aot_source_evaluation_component_v2";
 pub const AOT_NATIVE_IR_SYMBOL: &str = "runmat_aot_native_ir";
 pub const AOT_PROGRAM_SYMBOL: &str = "runmat_aot_program";
@@ -61,7 +63,7 @@ pub struct AotProgramManifest {
     pub executable: ExecutableIdentity,
     /// Compiler/native identity selected for this product. The executable
     /// identity independently retains its immutable portable function ordinal.
-    pub entrypoint: ProgramFunctionId,
+    pub entrypoint: FunctionId,
     pub native_ir_digest: Digest,
     /// The bounded, canonical Config-owned policy captured with this program.
     pub foreign_policy: Option<runmat_execution_artifact::LogicalObject>,
@@ -77,7 +79,8 @@ pub struct AotProgramManifest {
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AotProgramFunction {
-    pub function: ProgramFunctionId,
+    pub function: FunctionId,
+    pub portable_function: runmat_types::ProgramFunctionId,
     pub source: ProgramSourceId,
     pub name: String,
     pub role: runmat_types::FunctionSourceRole,
@@ -89,6 +92,35 @@ struct AotProgramManifestAdmission {
 }
 
 impl AotProgramManifest {
+    /// Authenticate every local compiled coordinate against the portable
+    /// semantic identity retained by the same verified Native IR body.
+    pub fn validate_function_inventory(
+        &self,
+        assembly: &crate::NativeAssembly,
+    ) -> Result<(), crate::NativeCodegenError> {
+        let mut native = assembly
+            .functions
+            .iter()
+            .map(|function| {
+                (
+                    function.id,
+                    function.portable_id,
+                    function.source,
+                    function.name.as_str(),
+                    function.source_role,
+                )
+            })
+            .collect::<Vec<_>>();
+        native.sort_by_key(|function| function.0);
+        if !function_inventory_matches(&native, &self.functions) {
+            return Err(crate::NativeCodegenError::new(
+                "native.aot.program.function_inventory",
+                "AOT program function inventory differs from verified Native IR",
+            ));
+        }
+        Ok(())
+    }
+
     pub fn from_assembly_for_selected(
         selected: &super::SelectedNativeProduct<'_>,
         assembly: &crate::NativeAssembly,
@@ -137,6 +169,7 @@ impl AotProgramManifest {
             .iter()
             .map(|function| AotProgramFunction {
                 function: function.id,
+                portable_function: function.portable_id,
                 source: function.source,
                 name: function.name.clone(),
                 role: function.source_role,
@@ -212,6 +245,20 @@ impl AotProgramManifest {
                 .functions
                 .iter()
                 .any(|function| function.function == self.entrypoint)
+            || self
+                .functions
+                .iter()
+                .find(|function| function.function == self.entrypoint)
+                .is_none_or(|function| {
+                    Some(function.portable_function) != self.executable.entrypoint_function
+                })
+            || self
+                .functions
+                .iter()
+                .map(|function| function.portable_function)
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                != self.functions.len()
             || self.functions.iter().any(|function| {
                 function.name.is_empty()
                     || function.name.len() > 512
@@ -305,16 +352,36 @@ impl AotProgramManifest {
     /// Only a unique public primary can be selected without a caller/source
     /// context. Local, nested, method, and private names require their own
     /// exact lexical or source-scoped selection authority.
-    pub fn resolve_name(&self, name: &str) -> Option<ProgramFunctionId> {
+    pub fn resolve_name(&self, name: &str) -> Option<FunctionId> {
         resolve_unique_public_name(&self.functions, &self.source_map, name)
     }
+}
+
+fn function_inventory_matches(
+    native: &[(
+        FunctionId,
+        runmat_types::ProgramFunctionId,
+        ProgramSourceId,
+        &str,
+        runmat_types::FunctionSourceRole,
+    )],
+    manifest: &[AotProgramFunction],
+) -> bool {
+    native.len() == manifest.len()
+        && native.iter().zip(manifest).all(|(native, manifest)| {
+            native.0 == manifest.function
+                && native.1 == manifest.portable_function
+                && native.2 == manifest.source
+                && native.3 == manifest.name
+                && native.4 == manifest.role
+        })
 }
 
 fn resolve_unique_public_name(
     functions: &[AotProgramFunction],
     source_map: &runmat_execution::ExecutableSourceMapV2,
     name: &str,
-) -> Option<ProgramFunctionId> {
+) -> Option<FunctionId> {
     let mut matches = functions.iter().filter(|function| {
         if function.name != name || function.role != runmat_types::FunctionSourceRole::Primary {
             return false;
@@ -341,7 +408,7 @@ mod admission_tests {
     #[test]
     fn public_name_requires_unique_primary_and_never_leaks_private_or_nested() {
         use runmat_execution::{Digest, ExecutableSourceMapV2, ExecutableSourceRecordV2};
-        use runmat_types::{FunctionSourceRole, ProgramFunctionId, ProgramSourceId};
+        use runmat_types::{FunctionId, FunctionSourceRole, ProgramSourceId};
 
         let source_map = ExecutableSourceMapV2 {
             entries: ["a/helper.m", "b/helper.m", "a/private/helper.m"]
@@ -358,7 +425,8 @@ mod admission_tests {
                 .collect(),
         };
         let function = |ordinal, source, role| super::AotProgramFunction {
-            function: ProgramFunctionId(ordinal),
+            function: FunctionId(ordinal as usize),
+            portable_function: runmat_types::ProgramFunctionId(ordinal),
             source: ProgramSourceId(source),
             name: "helper".into(),
             role,
@@ -370,12 +438,59 @@ mod admission_tests {
         ];
         assert_eq!(
             super::resolve_unique_public_name(&functions, &source_map, "helper"),
-            Some(ProgramFunctionId(2))
+            Some(FunctionId(2))
         );
         functions.push(function(3, 1, FunctionSourceRole::Primary));
         assert_eq!(
             super::resolve_unique_public_name(&functions, &source_map, "helper"),
             None
+        );
+    }
+
+    #[test]
+    fn local_inventory_rejects_swapped_nonentry_portable_identities() {
+        use runmat_types::{FunctionId, FunctionSourceRole, ProgramFunctionId, ProgramSourceId};
+
+        let native = [
+            (
+                FunctionId(10),
+                ProgramFunctionId(1),
+                ProgramSourceId(0),
+                "first",
+                FunctionSourceRole::Local,
+            ),
+            (
+                FunctionId(20),
+                ProgramFunctionId(2),
+                ProgramSourceId(0),
+                "second",
+                FunctionSourceRole::Local,
+            ),
+        ];
+        let mut manifest = vec![
+            super::AotProgramFunction {
+                function: FunctionId(10),
+                portable_function: ProgramFunctionId(1),
+                source: ProgramSourceId(0),
+                name: "first".into(),
+                role: FunctionSourceRole::Local,
+            },
+            super::AotProgramFunction {
+                function: FunctionId(20),
+                portable_function: ProgramFunctionId(2),
+                source: ProgramSourceId(0),
+                name: "second".into(),
+                role: FunctionSourceRole::Local,
+            },
+        ];
+        assert!(super::function_inventory_matches(&native, &manifest));
+        let first = manifest[0].portable_function;
+        let second = manifest[1].portable_function;
+        manifest[0].portable_function = second;
+        manifest[1].portable_function = first;
+        assert!(
+            !super::function_inventory_matches(&native, &manifest),
+            "same local/name/source inventory cannot authorize swapped portable origins"
         );
     }
 
@@ -448,7 +563,7 @@ pub fn native_object_format_for_target(
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NativeObjectFunction {
-    pub function: ProgramFunctionId,
+    pub function: FunctionId,
     pub symbol: String,
 }
 
@@ -505,7 +620,7 @@ pub struct NativeObjectManifest {
     pub foreign_policy: Option<runmat_execution::ForeignPolicyRef>,
     pub object_digest: Digest,
     pub object_bytes: u64,
-    pub entrypoint: ProgramFunctionId,
+    pub entrypoint: FunctionId,
     pub selected_entrypoint_body: Digest,
     pub functions: Vec<NativeObjectFunction>,
     pub data: Vec<NativeObjectDataDescriptor>,
@@ -613,10 +728,7 @@ pub(super) fn valid_data_symbol(symbol: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
 }
 
-pub(super) fn function_symbol(
-    function: ProgramFunctionId,
-    entrypoint: ProgramFunctionId,
-) -> String {
+pub(super) fn function_symbol(function: FunctionId, entrypoint: FunctionId) -> String {
     if function == entrypoint {
         AOT_ENTRY_SYMBOL.to_string()
     } else {

@@ -148,11 +148,12 @@ pub async fn execute_owned_builtin_work(
             RuntimeServicePorts::default().with_parallel(Rc::new(OwnedJobParallel(ledger))),
         );
     let mut cooperation = runtime.cpu_cooperation();
-    let values = match super::value_codec::decode_inline_values_cooperatively(
+    let values = match super::value_codec::decode_inline_values_cooperatively_in_context(
         &request.arguments,
         OWNED_BUILTIN_VALUE_LIMITS,
         None,
         Some(&mut cooperation),
+        &runtime,
     )
     .await
     {

@@ -59,7 +59,7 @@ fn context(host: &AnalysisHostWorkload, plan: &FeaResourcePlan) -> AnalysisExecu
         .required_capabilities
         .extend(host.workload.generic_capabilities().unwrap());
     AnalysisExecutionContext {
-        host: crate::test_fixtures::host_requirement(),
+        host: crate::tests::contract_default_host(),
         scope_id: ExecutionScopeId::derive(&[b"closure"]),
         pool_id: PoolId::derive(&[b"closure"]),
         program_artifact_id: ArtifactId::derive(&[b"closure"]),

@@ -529,7 +529,7 @@ fn debugger_compat_commands_execute_through_core() {
     let unlocked = runmat_core::execute_text_request_for_testing(&mut engine, "unlocked").unwrap();
     assert_eq!(unlocked.value.as_ref(), Some(&Value::Bool(false)));
     let status = runmat_core::execute_text_request_for_testing(&mut engine, "status").unwrap();
-    assert!(matches!(status.value.as_ref(), Some(Value::Cell(cell)) if cell.data.is_empty()));
+    assert!(matches!(status.value.as_ref(), Some(Value::Cell(cell)) if cell.data().is_empty()));
     let info = runmat_core::execute_text_request_for_testing(&mut engine, "info").unwrap();
     assert!(matches!(info.value.as_ref(), Some(Value::Struct(_))));
 
@@ -575,15 +575,15 @@ fn dbstack_reports_user_function_frame_through_core() {
         panic!("dbstack should return a cell row of frame structs");
     };
     assert!(
-        !cell.data.is_empty(),
+        !cell.data().is_empty(),
         "dbstack should include at least one frame"
     );
-    let Value::Struct(first) = &cell.data[0] else {
+    let Value::Struct(first) = &cell.data()[0] else {
         panic!("first frame should be a struct");
     };
     assert_eq!(
         first.fields.get("name"),
-        Some(&Value::String("stack_probe".to_string()))
+        Some(&Value::String("stack_probe".to_string().into()))
     );
     let Some(Value::Num(line)) = first.fields.get("line") else {
         panic!("first frame should include a numeric line");

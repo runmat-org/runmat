@@ -218,8 +218,16 @@ pub fn install_semantic_function_invoker(
 ) -> Result<FunctionInvokerGuard, crate::RuntimeError> {
     replace_semantic_function_invoker(invoker.map(|invoker| {
         Rc::new(
-            move |_runtime, function, arguments: &[Value], requested_outputs| {
-                invoker(function, arguments, requested_outputs)
+            move |_runtime,
+                  function,
+                  arguments: crate::call::RootedFunctionArguments,
+                  requested_outputs|
+                  -> UserFunctionFuture {
+                let invoker = invoker.clone();
+                Box::pin(async move {
+                    let arguments = arguments.materialize_legacy_contiguous(None)?;
+                    invoker(function, &arguments, requested_outputs).await
+                })
             },
         ) as Rc<FunctionInvoker>
     }))

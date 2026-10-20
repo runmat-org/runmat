@@ -158,6 +158,31 @@ fn input_error(request: &ExecutionRequest, message: String) -> ExecutionResponse
     }
 }
 
+/// Project handoff installation is asynchronous on native hosts (resolution may
+/// read the filesystem) and synchronous in the browser; captured runs use both.
+impl RunMatSession {
+    async fn install_handoff_for_target(
+        &mut self,
+        handoff: runmat_package::FrozenProjectHandoff,
+    ) -> Result<(), runmat_package::FrozenProjectHandoffError> {
+        #[cfg(not(target_arch = "wasm32"))]
+        let installed = self.install_project_handoff(handoff).await;
+        #[cfg(target_arch = "wasm32")]
+        let installed = self.install_project_handoff(handoff);
+        installed.map(|_| ())
+    }
+
+    async fn clear_handoff_for_target(
+        &mut self,
+    ) -> Result<(), runmat_package::FrozenProjectHandoffError> {
+        #[cfg(not(target_arch = "wasm32"))]
+        let cleared = self.clear_project_handoff().await;
+        #[cfg(target_arch = "wasm32")]
+        let cleared = self.clear_project_handoff();
+        cleared
+    }
+}
+
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
@@ -165,12 +190,27 @@ mod tests {
     use runmat_filesystem::{FsProvider, MemoryFsProvider};
     use std::path::Path;
 
-    #[tokio::test]
-    async fn captured_project_executes_its_catalog_and_restores_the_live_context() {
+    // The provider override is process-wide. Keep its canonical lock on the
+    // synchronous test stack for the complete current-thread runtime, including
+    // all async provider operations and restoration during unwinding.
+    fn with_serialized_provider(test: impl std::future::Future<Output = ()>) {
+        let _serial = runmat_filesystem::provider_override_lock();
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(test);
+    }
+
+    #[test]
+    fn captured_project_executes_its_catalog_and_restores_the_live_context() {
+        with_serialized_provider(captured_project_body());
+    }
+
+    async fn captured_project_body() {
         use runmat_filesystem::pinned::{PinnedContent, PinnedEntry};
         use runmat_package::*;
         use std::collections::BTreeSet;
-        let _serial = runmat_filesystem::provider_override_lock();
         let base = Arc::new(MemoryFsProvider::new());
         let _restore = runmat_filesystem::replace_provider(base.clone());
         base.create_dir_all(Path::new("/src")).await.unwrap();
@@ -261,9 +301,12 @@ mod tests {
         assert!(!session.has_captured_project(&inputs));
     }
 
-    #[tokio::test]
-    async fn notebook_cells_share_output_ownership_only_within_the_same_capture() {
-        let _serial = runmat_filesystem::provider_override_lock();
+    #[test]
+    fn notebook_cells_share_output_ownership_only_within_the_same_capture() {
+        with_serialized_provider(notebook_cells_body());
+    }
+
+    async fn notebook_cells_body() {
         let base = Arc::new(MemoryFsProvider::new());
         let _restore = runmat_filesystem::replace_provider(base.clone());
         let mut session = RunMatSession::with_options(false, false).unwrap();
@@ -323,30 +366,5 @@ mod tests {
             base.read(Path::new("/result.txt")).await.unwrap(),
             b"cell one"
         );
-    }
-}
-
-/// Project handoff installation is asynchronous on native hosts (resolution may
-/// read the filesystem) and synchronous in the browser; captured runs use both.
-impl RunMatSession {
-    async fn install_handoff_for_target(
-        &mut self,
-        handoff: runmat_package::FrozenProjectHandoff,
-    ) -> Result<(), runmat_package::FrozenProjectHandoffError> {
-        #[cfg(not(target_arch = "wasm32"))]
-        let installed = self.install_project_handoff(handoff).await;
-        #[cfg(target_arch = "wasm32")]
-        let installed = self.install_project_handoff(handoff);
-        installed.map(|_| ())
-    }
-
-    async fn clear_handoff_for_target(
-        &mut self,
-    ) -> Result<(), runmat_package::FrozenProjectHandoffError> {
-        #[cfg(not(target_arch = "wasm32"))]
-        let cleared = self.clear_project_handoff().await;
-        #[cfg(target_arch = "wasm32")]
-        let cleared = self.clear_project_handoff();
-        cleared
     }
 }

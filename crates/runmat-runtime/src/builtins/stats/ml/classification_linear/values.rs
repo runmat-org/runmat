@@ -2,20 +2,26 @@ use super::*;
 
 pub(super) fn scalar_text(value: &Value) -> Option<String> {
     match value {
-        Value::String(text) => Some(text.clone()),
-        Value::CharArray(array) if array.rows == 1 => Some(array.data.iter().collect()),
-        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
+        Value::String(text) => Some(text.as_str().to_owned()),
+        Value::CharArray(array) if array.rows == 1 => Some(array.data().iter().collect()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Some(array.data()[0].as_str().to_owned())
+        }
         _ => None,
     }
 }
 
 pub(super) fn text_list(value: &Value, name: &str) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(text) => Ok(vec![text.clone()]),
+        Value::String(text) => Ok(vec![text.as_str().to_owned()]),
         Value::CharArray(array) => Ok(char_rows(array)),
-        Value::StringArray(array) => Ok(array.data.clone()),
+        Value::StringArray(array) => Ok(array
+            .data()
+            .iter()
+            .map(|text| text.as_str().to_owned())
+            .collect()),
         Value::Cell(cell) => cell
-            .data
+            .data()
             .iter()
             .map(|value| {
                 scalar_text(value).ok_or_else(|| {
@@ -33,7 +39,7 @@ pub(super) fn char_rows(array: &CharArray) -> Vec<String> {
     let mut out = Vec::with_capacity(array.rows);
     for row in 0..array.rows {
         let start = row * array.cols;
-        out.push(array.data[start..start + array.cols].iter().collect());
+        out.push(array.data()[start..start + array.cols].iter().collect());
     }
     out
 }

@@ -4,7 +4,11 @@ use runmat_builtins::SAVE_DESCRIPTOR;
 use std::path::Path;
 
 async fn save_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    super::save_builtin(None, args).await
+    super::save_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(args),
+    )
+    .await
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -12,7 +16,8 @@ async fn save_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 fn known_invalid_option_rejects_before_resident_preparation() {
     let _state = crate::builtins::io::mat::tests::state_guard();
     let args = [Value::from("case.mat"), Value::from("-unsupported")];
-    let error = preflight_known_options(&args).expect_err("unsupported flag");
+    let error = preflight_known_options(crate::call::FunctionArgumentView::from_slice(&args))
+        .expect_err("unsupported flag");
     assert_eq!(error.identifier(), Some("RunMat:save:InvalidOption"));
 }
 
@@ -25,7 +30,8 @@ fn regexp_followed_by_another_option_has_no_pattern() {
         Value::from("-regexp"),
         Value::from("-append"),
     ];
-    let error = preflight_known_options(&args).expect_err("missing regexp pattern");
+    let error = preflight_known_options(crate::call::FunctionArgumentView::from_slice(&args))
+        .expect_err("missing regexp pattern");
     assert_eq!(error.identifier(), Some("RunMat:save:InvalidOption"));
 }
 
@@ -103,7 +109,10 @@ fn finite_save_without_complete_resource_evidence_rejects_before_workspace_gathe
     );
     let error = block_on(super::save_builtin(
         Some(runtime),
-        vec![Value::from("blocked.mat"), Value::from("gpu_data")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("blocked.mat"),
+            Value::from("gpu_data"),
+        ]),
     ))
     .expect_err("unknown complete-call memory cannot enter finite route");
     assert_eq!(
@@ -140,7 +149,10 @@ fn selected_outer_save_reports_write_error_once_with_source() {
     let witness = Witness::new(filesystem.clone());
     let error = block_on(super::save_builtin(
         Some(witness.runtime.clone()),
-        vec![Value::from(filename), Value::from("answer")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from(filename),
+            Value::from("answer"),
+        ]),
     ))
     .expect_err("provider write failure must propagate");
     assert_eq!(error.identifier(), Some("RunMat:save:Io"));
@@ -176,7 +188,10 @@ fn selected_outer_save_observes_only_after_published_mat_payload() {
     let witness = Witness::new(filesystem.clone());
     let status = block_on(super::save_builtin(
         Some(witness.runtime.clone()),
-        vec![Value::from(filename), Value::from("answer")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from(filename),
+            Value::from("answer"),
+        ]),
     ))
     .expect("selected save");
     assert_eq!(status, Value::Num(0.0));
@@ -215,7 +230,10 @@ fn revoked_mat_resource_authority_rejects_outer_save_before_write() {
     witness.revoke();
     let error = block_on(super::save_builtin(
         Some(witness.runtime.clone()),
-        vec![Value::from(filename), Value::from("answer")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from(filename),
+            Value::from("answer"),
+        ]),
     ))
     .expect_err("revoked resource producer cannot select a write");
     assert_eq!(
@@ -246,7 +264,10 @@ fn selected_outer_save_pending_drop_and_late_cancel_release_without_feedback() {
 
     let unpolled = super::save_builtin(
         Some(witness.runtime.clone()),
-        vec![Value::from(filename), Value::from("answer")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from(filename),
+            Value::from("answer"),
+        ]),
     );
     drop(unpolled);
     assert_eq!(witness.selections(), 0);
@@ -254,7 +275,10 @@ fn selected_outer_save_pending_drop_and_late_cancel_release_without_feedback() {
 
     let mut abandoned = Box::pin(super::save_builtin(
         Some(witness.runtime.clone()),
-        vec![Value::from(filename), Value::from("answer")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from(filename),
+            Value::from("answer"),
+        ]),
     ));
     assert!(matches!(
         super::super::tests::receipt::poll_once(abandoned.as_mut()),
@@ -275,7 +299,10 @@ fn selected_outer_save_pending_drop_and_late_cancel_release_without_feedback() {
         .with_cancellation_token(cancellation.token());
     let mut cancelled = Box::pin(super::save_builtin(
         Some(runtime),
-        vec![Value::from(filename), Value::from("answer")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from(filename),
+            Value::from("answer"),
+        ]),
     ));
     assert!(matches!(
         super::super::tests::receipt::poll_once(cancelled.as_mut()),
@@ -322,7 +349,10 @@ fn selected_outer_save_pending_nested_resident_gather_cancels_without_write() {
         .with_cancellation_token(cancellation.token());
     let mut abandoned = Box::pin(super::save_builtin(
         Some(runtime.clone()),
-        vec![Value::from(filename), Value::from("nested")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from(filename),
+            Value::from("nested"),
+        ]),
     ));
     assert!(matches!(
         super::super::tests::receipt::poll_once(abandoned.as_mut()),
@@ -337,7 +367,10 @@ fn selected_outer_save_pending_nested_resident_gather_cancels_without_write() {
     assert!(witness.outcomes().is_empty());
     let mut future = Box::pin(super::save_builtin(
         Some(runtime),
-        vec![Value::from(filename), Value::from("nested")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from(filename),
+            Value::from("nested"),
+        ]),
     ));
     assert!(matches!(
         super::super::tests::receipt::poll_once(future.as_mut()),
@@ -450,7 +483,7 @@ fn captured_status_is_a_pre_effect_runmat_extension() {
     crate::compatibility::set_runmat_extensions_enabled(false);
     let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     let result = block_on(save_builtin(vec![Value::String(
-        path.to_string_lossy().into_owned(),
+        path.to_string_lossy().into_owned().into(),
     )]));
     crate::compatibility::set_runmat_extensions_enabled(previous);
     let error = result.expect_err("captured status requires RunMat extension");
@@ -462,7 +495,7 @@ fn captured_status_is_a_pre_effect_runmat_extension() {
     drop(_outputs);
     let _statement = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let status = block_on(save_builtin(vec![Value::String(
-        path.to_string_lossy().into_owned(),
+        path.to_string_lossy().into_owned().into(),
     )]))
     .expect("MATLAB-compatible statement form");
     assert_eq!(status, Value::Num(0.0));
@@ -680,14 +713,14 @@ fn save_char_matrix_variable_names() {
 fn save_struct_fields() {
     let _state = crate::builtins::io::mat::tests::state_guard();
     ensure_test_resolver();
-    let mut opts_struct = StructValue::new();
+    let mut opts_struct = runmat_value::UnboundedStructValueBuilder::new();
     opts_struct
         .fields
         .insert("foo".to_string(), Value::Num(1.0));
     opts_struct
         .fields
         .insert("bar".to_string(), Value::Num(2.0));
-    set_workspace(&[("opts", Value::Struct(opts_struct))]);
+    set_workspace(&[("opts", Value::Struct(opts_struct.finish()))]);
     let dir = tempdir().unwrap();
     let path = dir.path().join("struct.mat");
     let args = vec![
@@ -711,14 +744,14 @@ fn save_struct_fields() {
 fn save_struct_field_selection() {
     let _state = crate::builtins::io::mat::tests::state_guard();
     ensure_test_resolver();
-    let mut opts_struct = StructValue::new();
+    let mut opts_struct = runmat_value::UnboundedStructValueBuilder::new();
     opts_struct
         .fields
         .insert("foo".to_string(), Value::Num(11.0));
     opts_struct
         .fields
         .insert("bar".to_string(), Value::Num(22.0));
-    set_workspace(&[("opts", Value::Struct(opts_struct))]);
+    set_workspace(&[("opts", Value::Struct(opts_struct.finish()))]);
     let dir = tempdir().unwrap();
     let path = dir.path().join("struct_subset.mat");
     let args = vec![
@@ -889,11 +922,11 @@ fn save_struct_without_filename_defaults_to_matlab_mat() {
     ensure_test_resolver();
     #[cfg(not(target_arch = "wasm32"))]
     let _lock = lock_env_override();
-    let mut payload_struct = StructValue::new();
+    let mut payload_struct = runmat_value::UnboundedStructValueBuilder::new();
     payload_struct
         .fields
         .insert("alpha".to_string(), Value::Num(3.0));
-    set_workspace(&[("payload", Value::Struct(payload_struct))]);
+    set_workspace(&[("payload", Value::Struct(payload_struct.finish()))]);
     let dir = tempdir().unwrap();
     #[cfg(not(target_arch = "wasm32"))]
     let target = dir.path().join("matlab_struct.mat");

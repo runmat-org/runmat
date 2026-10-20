@@ -3,6 +3,7 @@ use runmat_value::{IntValue, NumericScalar, Value};
 
 use super::UniformScalarError;
 
+#[derive(Clone, Debug)]
 pub(super) enum ClassifiedValue {
     Logical(bool),
     F64(f64),
@@ -25,19 +26,19 @@ pub(super) fn value(value: &Value) -> Result<ClassifiedValue, UniformScalarError
         Value::Tensor(value) if tensor::is_scalar_tensor(value) => numeric(
             value
                 .numeric_value_at(0)
-                .ok_or(UniformScalarError::InvalidStorage("numeric scalar"))?,
+                .ok_or(UniformScalarError::invalid_storage("numeric scalar"))?,
         ),
         Value::Complex(real, imaginary) => Ok(ClassifiedValue::ComplexF64((*real, *imaginary))),
         Value::ComplexTensor(value) if tensor::is_scalar_complex_tensor(value) => {
             let (real, imaginary) = value
                 .numeric_value_at(0)
-                .ok_or(UniformScalarError::InvalidStorage("complex scalar"))?;
+                .ok_or(UniformScalarError::invalid_storage("complex scalar"))?;
             complex(real, imaginary)
         }
         Value::CharArray(value) if value.rows * value.cols == 1 => Ok(ClassifiedValue::Char(
-            value.data.first().copied().unwrap_or('\0'),
+            value.data().first().copied().unwrap_or('\0'),
         )),
-        _ => Err(UniformScalarError::NonScalar),
+        _ => Err(UniformScalarError::NON_SCALAR),
     }
 }
 
@@ -48,7 +49,7 @@ fn numeric(value: NumericScalar) -> Result<ClassifiedValue, UniformScalarError> 
         value => value
             .into_int_value()
             .map(ClassifiedValue::Integer)
-            .ok_or(UniformScalarError::InvalidStorage("integer scalar")),
+            .ok_or(UniformScalarError::invalid_storage("integer scalar")),
     }
 }
 
@@ -65,10 +66,10 @@ fn complex(
         }
         (real, imaginary) => Ok(ClassifiedValue::IntegerComplex(
             real.into_int_value()
-                .ok_or(UniformScalarError::InvalidStorage("complex scalar"))?,
+                .ok_or(UniformScalarError::invalid_storage("complex scalar"))?,
             imaginary
                 .into_int_value()
-                .ok_or(UniformScalarError::InvalidStorage("complex scalar"))?,
+                .ok_or(UniformScalarError::invalid_storage("complex scalar"))?,
         )),
     }
 }

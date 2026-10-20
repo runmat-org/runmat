@@ -21,7 +21,7 @@ pub(super) struct Ttest2OptionPlan {
 }
 
 impl Ttest2OptionPlan {
-    pub(super) fn admit(rest: Vec<Value>) -> BuiltinResult<Self> {
+    pub(super) fn admit(rest: crate::call::BuiltinArguments) -> BuiltinResult<Self> {
         if !rest.len().is_multiple_of(2) {
             let last = rest.last().expect("odd option list has a last name");
             if !crate::value_contains_gpu(last) {

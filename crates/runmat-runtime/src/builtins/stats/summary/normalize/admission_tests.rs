@@ -124,7 +124,11 @@ fn invalid_host_visible_calls_do_not_download_resident_input_or_controls() {
             "not supported for real",
         ),
     ] {
-        let error = block_on(normalize_builtin(data, args)).unwrap_err();
+        let error = block_on(normalize_builtin(
+            data,
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .unwrap_err();
         assert!(
             error.message().contains(diagnostic),
             "expected {diagnostic}: {error}"
@@ -136,7 +140,11 @@ fn invalid_host_visible_calls_do_not_download_resident_input_or_controls() {
         assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
     }
 
-    let error = block_on(normalize_builtin(resident(), vec![])).unwrap_err();
+    let error = block_on(normalize_builtin(
+        resident(),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap_err();
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
     assert_eq!(error.identifier(), Some("RunMat:gather:DownloadFailed"));
     assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);

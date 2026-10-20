@@ -1,7 +1,7 @@
 use super::*;
 use futures::executor::block_on;
 use runmat_builtins::{STATGET_DESCRIPTOR, STATSET_DESCRIPTOR};
-use runmat_value::IntegerStorage;
+use runmat_value::{CharArray, IntegerStorage};
 
 fn struct_value(value: Value) -> StructValue {
     let Value::Struct(st) = value else {
@@ -23,14 +23,17 @@ fn num_field(options: &StructValue, name: &str) -> f64 {
 #[test]
 fn statset_builds_custom_options() {
     let options = struct_value(
-        block_on(statset_builtin(vec![
-            Value::from("FunValCheck"),
-            Value::from("on"),
-            Value::from("TolX"),
-            Value::Num(1.0e-8),
-            Value::from("UseParallel"),
-            Value::from("off"),
-        ]))
+        block_on(statset_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("FunValCheck"),
+                Value::from("on"),
+                Value::from("TolX"),
+                Value::Num(1.0e-8),
+                Value::from("UseParallel"),
+                Value::from("off"),
+            ]),
+        ))
         .unwrap(),
     );
     assert!(matches!(options.fields.get("FunValCheck"), Some(Value::String(s)) if s == "on"));
@@ -40,23 +43,39 @@ fn statset_builds_custom_options() {
         Some(Value::Bool(false))
     ));
     assert!(
-        matches!(options.fields.get("Streams"), Some(Value::Cell(cell)) if cell.data.is_empty())
+        matches!(options.fields.get("Streams"), Some(Value::Cell(cell)) if cell.data().is_empty())
     );
 }
 
 #[test]
 fn statset_character_row_option_values_normalize_to_scalar_text() {
     let value = Value::CharArray(CharArray::new("off".chars().collect(), 1, 3).unwrap());
-    let options =
-        struct_value(block_on(statset_builtin(vec![Value::from("Display"), value])).unwrap());
+    let options = struct_value(
+        block_on(statset_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("Display"),
+                value,
+            ]),
+        ))
+        .unwrap(),
+    );
     assert!(matches!(options.fields.get("Display"), Some(Value::String(text)) if text == "off"));
 }
 
 #[test]
 fn statset_empty_single_tolerance_retains_class_and_shape() {
     let value = Value::Tensor(Tensor::from_f32(Vec::new(), vec![1, 0]).unwrap());
-    let options =
-        struct_value(block_on(statset_builtin(vec![Value::from("TolX"), value])).unwrap());
+    let options = struct_value(
+        block_on(statset_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("TolX"),
+                value,
+            ]),
+        ))
+        .unwrap(),
+    );
     let Some(Value::Tensor(tolerance)) = options.fields.get("TolX") else {
         panic!("expected empty numeric tolerance")
     };
@@ -71,16 +90,19 @@ fn statset_scalar_logical_arrays_follow_scalar_logical_option_rules() {
         Value::LogicalArray(runmat_value::LogicalArray::new(vec![1], vec![1, 1]).unwrap()),
     ] {
         let options = struct_value(
-            block_on(statset_builtin(vec![
-                Value::from("MaxIter"),
-                value.clone(),
-                Value::from("TolX"),
-                value.clone(),
-                Value::from("DerivStep"),
-                value.clone(),
-                Value::from("UseParallel"),
-                value,
-            ]))
+            block_on(statset_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::from("MaxIter"),
+                    value.clone(),
+                    Value::from("TolX"),
+                    value.clone(),
+                    Value::from("DerivStep"),
+                    value.clone(),
+                    Value::from("UseParallel"),
+                    value,
+                ]),
+            ))
             .unwrap(),
         );
         assert_eq!(num_field(&options, "MaxIter"), 1.0);
@@ -97,10 +119,13 @@ fn statset_scalar_logical_arrays_follow_scalar_logical_option_rules() {
 fn statset_integer_derivstep_keeps_tensor_storage_boundary_explicit() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let scalar = struct_value(
-        block_on(statset_builtin(vec![
-            Value::from("DerivStep"),
-            Value::Int(runmat_value::IntValue::U64(7)),
-        ]))
+        block_on(statset_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("DerivStep"),
+                Value::Int(runmat_value::IntValue::U64(7)),
+            ]),
+        ))
         .unwrap(),
     );
     assert!(matches!(
@@ -109,10 +134,13 @@ fn statset_integer_derivstep_keeps_tensor_storage_boundary_explicit() {
     ));
     let tensor = Tensor::new_integer(IntegerStorage::U64(vec![7]), vec![1, 1]).unwrap();
     let array = struct_value(
-        block_on(statset_builtin(vec![
-            Value::from("DerivStep"),
-            Value::Tensor(tensor),
-        ]))
+        block_on(statset_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("DerivStep"),
+                Value::Tensor(tensor),
+            ]),
+        ))
         .unwrap(),
     );
     let Some(Value::Tensor(step)) = array.fields.get("DerivStep") else {
@@ -133,16 +161,19 @@ fn statset_reads_typed_integer_tensor_options_exactly() {
         Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("UseParallel");
 
     let options = struct_value(
-        block_on(statset_builtin(vec![
-            Value::from("MaxIter"),
-            Value::Tensor(max_iter),
-            Value::from("TolFun"),
-            Value::Tensor(tol_fun),
-            Value::from("DerivStep"),
-            Value::Tensor(deriv_step.clone()),
-            Value::from("UseParallel"),
-            Value::Tensor(use_parallel),
-        ]))
+        block_on(statset_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("MaxIter"),
+                Value::Tensor(max_iter),
+                Value::from("TolFun"),
+                Value::Tensor(tol_fun),
+                Value::from("DerivStep"),
+                Value::Tensor(deriv_step.clone()),
+                Value::from("UseParallel"),
+                Value::Tensor(use_parallel),
+            ]),
+        ))
         .expect("statset"),
     );
 
@@ -164,8 +195,14 @@ fn statset_typed_integer_option_is_mode_gated() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
     let value =
         Value::Tensor(Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).unwrap());
-    let error = block_on(statset_builtin(vec![Value::from("MaxIter"), value]))
-        .expect_err("MATLAB-compatible mode must reject typed integer option values");
+    let error = block_on(statset_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("MaxIter"),
+            value,
+        ]),
+    ))
+    .expect_err("MATLAB-compatible mode must reject typed integer option values");
     assert_eq!(
         error.identifier(),
         Some("RunMat:compatibility:StatsetIntegerOptionValueExtension")
@@ -175,9 +212,12 @@ fn statset_typed_integer_option_is_mode_gated() {
 #[test]
 fn statset_invalid_integer_statfun_is_not_misclassified_as_an_option_extension() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-    let error = block_on(statset_builtin(vec![Value::Int(
-        runmat_value::IntValue::U8(7),
-    )]))
+    let error = block_on(statset_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(
+            runmat_value::IntValue::U8(7),
+        )]),
+    ))
     .expect_err("an integer is not a statistics function name");
     assert_eq!(error.identifier(), Some("RunMat:statset:InvalidArgument"));
 }
@@ -227,13 +267,20 @@ fn statset_integer_counts_read_all_integer_storage_variants() {
 
 #[test]
 fn statset_applies_function_defaults_and_updates() {
-    let base = block_on(statset_builtin(vec![Value::from("nbinfit")])).unwrap();
+    let base = block_on(statset_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("nbinfit")]),
+    ))
+    .unwrap();
     let options = struct_value(
-        block_on(statset_builtin(vec![
-            base,
-            Value::from("TolX"),
-            Value::Num(1.0e-8),
-        ]))
+        block_on(statset_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                base,
+                Value::from("TolX"),
+                Value::Num(1.0e-8),
+            ]),
+        ))
         .unwrap(),
     );
     assert_eq!(num_field(&options, "MaxIter"), 200.0);
@@ -244,26 +291,35 @@ fn statset_applies_function_defaults_and_updates() {
 #[test]
 fn statset_old_new_merge_prefers_nonempty_new_fields() {
     let oldopts = struct_value(
-        block_on(statset_builtin(vec![
-            Value::from("TolX"),
-            Value::Num(1.0e-6),
-            Value::from("MaxIter"),
-            Value::Num(20.0),
-        ]))
+        block_on(statset_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("TolX"),
+                Value::Num(1.0e-6),
+                Value::from("MaxIter"),
+                Value::Num(20.0),
+            ]),
+        ))
         .unwrap(),
     );
     let newopts = struct_value(
-        block_on(statset_builtin(vec![
-            Value::from("TolX"),
-            Value::Num(1.0e-9),
-        ]))
+        block_on(statset_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("TolX"),
+                Value::Num(1.0e-9),
+            ]),
+        ))
         .unwrap(),
     );
     let merged = struct_value(
-        block_on(statset_builtin(vec![
-            Value::Struct(oldopts),
-            Value::Struct(newopts),
-        ]))
+        block_on(statset_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Struct(oldopts),
+                Value::Struct(newopts),
+            ]),
+        ))
         .unwrap(),
     );
     assert_eq!(num_field(&merged, "TolX"), 1.0e-9);
@@ -272,17 +328,20 @@ fn statset_old_new_merge_prefers_nonempty_new_fields() {
 
 #[test]
 fn statget_supports_unique_prefix_and_default_for_empty() {
-    let options = block_on(statset_builtin(vec![
-        Value::from("TolX"),
-        Value::Num(1.0e-8),
-        Value::from("MaxIter"),
-        Value::Num(15.0),
-    ]))
+    let options = block_on(statset_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("TolX"),
+            Value::Num(1.0e-8),
+            Value::from("MaxIter"),
+            Value::Num(15.0),
+        ]),
+    ))
     .unwrap();
     let value = block_on(statget_builtin(
         options.clone(),
         Value::from("TolX"),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap();
     assert_eq!(value, Value::Num(1.0e-8));
@@ -290,7 +349,7 @@ fn statget_supports_unique_prefix_and_default_for_empty() {
     let value = block_on(statget_builtin(
         options.clone(),
         Value::from("MaxI"),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap();
     assert_eq!(value, Value::Num(15.0));
@@ -298,7 +357,7 @@ fn statget_supports_unique_prefix_and_default_for_empty() {
     let value = block_on(statget_builtin(
         options,
         Value::from("TolFun"),
-        vec![Value::Num(3.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(3.0)]),
     ))
     .unwrap();
     assert_eq!(value, Value::Num(3.0));
@@ -306,14 +365,14 @@ fn statget_supports_unique_prefix_and_default_for_empty() {
 
 #[test]
 fn statget_returns_integer_default_data_without_a_floating_mirror() {
-    let options = Value::Struct(empty_options());
+    let options = Value::Struct(empty_options(None).unwrap());
     let expected = IntegerStorage::U64(vec![9_007_199_254_740_993]);
     let default =
         Value::Tensor(Tensor::new_integer(expected.clone(), vec![1, 1]).expect("integer default"));
     let value = block_on(statget_builtin(
         options,
         Value::from("TolFun"),
-        vec![default],
+        crate::builtins::common::test_support::builtin_arguments(vec![default]),
     ))
     .expect("statget");
     let Value::Tensor(tensor) = value else {
@@ -324,17 +383,23 @@ fn statget_returns_integer_default_data_without_a_floating_mirror() {
 
 #[test]
 fn statset_rejects_invalid_values() {
-    let err = block_on(statset_builtin(vec![
-        Value::from("MaxIter"),
-        Value::Num(2.5),
-    ]))
+    let err = block_on(statset_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("MaxIter"),
+            Value::Num(2.5),
+        ]),
+    ))
     .unwrap_err();
     assert_eq!(err.identifier(), Some("RunMat:statset:InvalidOption"));
 
-    let err = block_on(statset_builtin(vec![
-        Value::from("Display"),
-        Value::from("verbose"),
-    ]))
+    let err = block_on(statset_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("Display"),
+            Value::from("verbose"),
+        ]),
+    ))
     .unwrap_err();
     assert!(err.message.contains("Display"));
 }
@@ -372,11 +437,14 @@ fn statset_invalid_pair_grammar_precedes_resident_materialization() {
             runmat_accelerate_api::GpuTensorStorage::Real,
         )
         .unwrap();
-    let error = block_on(statset_builtin(vec![
-        Value::from("MaxIter"),
-        Value::GpuTensor(allocation.handle.clone()),
-        Value::from("TolX"),
-    ]))
+    let error = block_on(statset_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("MaxIter"),
+            Value::GpuTensor(allocation.handle.clone()),
+            Value::from("TolX"),
+        ]),
+    ))
     .expect_err("trailing field name must fail before an upload or gather");
     assert_eq!(error.identifier(), Some("RunMat:statset:InvalidArgument"));
     assert_eq!(allocation.probe.retirements(), 0);
@@ -393,11 +461,14 @@ fn statset_unknown_field_precedes_resident_value_materialization() {
             runmat_accelerate_api::GpuTensorStorage::Real,
         )
         .unwrap();
-    let error = block_on(statset_builtin(vec![
-        Value::Struct(empty_options()),
-        Value::from("UnknownOption"),
-        Value::GpuTensor(allocation.handle.clone()),
-    ]))
+    let error = block_on(statset_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Struct(empty_options(None).unwrap()),
+            Value::from("UnknownOption"),
+            Value::GpuTensor(allocation.handle.clone()),
+        ]),
+    ))
     .expect_err("invalid field must fail before gathering its value");
     assert_eq!(error.identifier(), Some("RunMat:statset:InvalidOption"));
     assert_eq!(allocation.probe.retirements(), 0);
@@ -414,12 +485,17 @@ fn statget_unselected_resident_fields_and_default_are_not_materialized() {
             runmat_accelerate_api::GpuTensorStorage::Real,
         )
         .unwrap();
-    let mut options = empty_options();
-    options.insert("TolX", Value::GpuTensor(allocation.handle.clone()));
+    let options = replace_option(
+        None,
+        &empty_options(None).unwrap(),
+        StatOptionField::TolX,
+        Value::GpuTensor(allocation.handle.clone()),
+    )
+    .unwrap();
     let result = block_on(statget_builtin(
         Value::Struct(options),
         Value::from("MaxIter"),
-        vec![Value::Num(7.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(7.0)]),
     ))
     .expect("selected empty field uses host default");
     assert_eq!(result, Value::Num(7.0));
@@ -438,9 +514,11 @@ fn statget_unknown_field_ignores_resident_default() {
         )
         .unwrap();
     let result = block_on(statget_builtin(
-        Value::Struct(empty_options()),
+        Value::Struct(empty_options(None).unwrap()),
         Value::from("NoSuchField"),
-        vec![Value::GpuTensor(allocation.handle.clone())],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(
+            allocation.handle.clone(),
+        )]),
     ))
     .expect("unknown field returns empty without touching default");
     assert!(matches!(result, Value::Tensor(tensor) if tensor.shape() == [0, 0]));
@@ -453,12 +531,15 @@ fn statget_unknown_field_ignores_resident_default() {
 fn statset_stores_callback_handles_without_running_them() {
     let callback = Value::FunctionHandle("undefined_callback_for_statset".into());
     let options = struct_value(
-        block_on(statset_builtin(vec![
-            Value::from("OutputFcn"),
-            callback.clone(),
-            Value::from("RobustWgtFun"),
-            callback.clone(),
-        ]))
+        block_on(statset_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("OutputFcn"),
+                callback.clone(),
+                Value::from("RobustWgtFun"),
+                callback.clone(),
+            ]),
+        ))
         .expect("option construction stores callbacks"),
     );
     assert_eq!(options.fields.get("OutputFcn"), Some(&callback));
@@ -468,15 +549,19 @@ fn statset_stores_callback_handles_without_running_them() {
 #[test]
 fn statset_and_statget_reject_extra_outputs_before_value_access() {
     let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
-    let set_error = block_on(statset_builtin(vec![])).expect_err("one output maximum");
+    let set_error = block_on(statset_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .expect_err("one output maximum");
     assert_eq!(
         set_error.identifier(),
         Some("RunMat:statset:InvalidArgument")
     );
     let get_error = block_on(statget_builtin(
-        Value::Struct(empty_options()),
+        Value::Struct(empty_options(None).unwrap()),
         Value::from("TolX"),
-        vec![],
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
     ))
     .expect_err("one output maximum");
     assert_eq!(

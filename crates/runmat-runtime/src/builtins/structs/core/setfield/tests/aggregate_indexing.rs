@@ -3,22 +3,25 @@ use super::*;
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn setfield_rejects_cell_content_traversal() {
-    let mut inner1 = StructValue::new();
+    let mut inner1 = runmat_value::UnboundedStructValueBuilder::new();
     inner1.fields.insert("value".to_string(), Value::Num(1.0));
-    let mut inner2 = StructValue::new();
+    let mut inner2 = runmat_value::UnboundedStructValueBuilder::new();
     inner2.fields.insert("value".to_string(), Value::Num(2.0));
     let cell = CellArray::new_with_shape(
-        vec![Value::Struct(inner1), Value::Struct(inner2)],
+        vec![
+            Value::Struct(inner1.finish()),
+            Value::Struct(inner2.finish()),
+        ],
         vec![1, 2],
     )
     .unwrap();
-    let mut root = StructValue::new();
+    let mut root = runmat_value::UnboundedStructValueBuilder::new();
     root.fields.insert("samples".to_string(), Value::Cell(cell));
 
     let index_cell =
         CellArray::new_with_shape(vec![Value::Int(IntValue::I32(2))], vec![1, 1]).unwrap();
     let error = run_setfield(
-        Value::Struct(root),
+        Value::Struct(root.finish()),
         vec![
             Value::from("samples"),
             Value::Cell(index_cell),
@@ -45,7 +48,7 @@ fn setfield_cell_parentheses_assignment_uses_column_major_subscripts() {
         vec![2, 2],
     )
     .expect("cell target");
-    let mut root = StructValue::new();
+    let mut root = runmat_value::UnboundedStructValueBuilder::new();
     root.fields.insert("samples".into(), Value::Cell(cell));
     let selector = CellArray::new_with_shape(
         vec![Value::Int(IntValue::I32(2)), Value::Int(IntValue::I32(1))],
@@ -56,7 +59,7 @@ fn setfield_cell_parentheses_assignment_uses_column_major_subscripts() {
         CellArray::new_with_shape(vec![Value::from("updated")], vec![1, 1]).expect("replacement");
 
     let updated = run_setfield(
-        Value::Struct(root),
+        Value::Struct(root.finish()),
         vec![
             Value::from("samples"),
             Value::Cell(selector),
@@ -70,6 +73,6 @@ fn setfield_cell_parentheses_assignment_uses_column_major_subscripts() {
     let Value::Cell(cell) = root.fields.get("samples").expect("samples field") else {
         panic!("expected cell field");
     };
-    assert_eq!(cell.data[2], Value::from("updated"));
-    assert_eq!(cell.data[1], Value::from("r1c2"));
+    assert_eq!(cell.data()[2], Value::from("updated"));
+    assert_eq!(cell.data()[1], Value::from("r1c2"));
 }

@@ -117,11 +117,11 @@ fn ismethod_builtin(receiver: Value, method_designator: Value) -> crate::Builtin
 
 fn parse_method_name(value: &Value) -> BuiltinResult<String> {
     match value {
-        Value::String(s) => Ok(s.clone()),
-        Value::StringArray(sa) if sa.rows == 1 && sa.cols == 1 && !sa.data.is_empty() => {
-            Ok(sa.data[0].clone())
+        Value::String(s) => Ok(s.as_str().to_owned()),
+        Value::StringArray(sa) if sa.rows == 1 && sa.cols == 1 && !sa.data().is_empty() => {
+            Ok(sa.data()[0].as_str().to_owned())
         }
-        Value::CharArray(ca) if ca.rows <= 1 => Ok(ca.data.iter().collect::<String>()),
+        Value::CharArray(ca) if ca.rows <= 1 => Ok(ca.data().iter().collect::<String>()),
         _ => Err(ismethod_error(&ISMETHOD_ERROR_NAME_INVALID)),
     }
 }
@@ -150,8 +150,8 @@ fn value_has_public_method(receiver: &Value, method_name: &str) -> bool {
 fn receiver_class_name(receiver: &Value) -> Option<runmat_types::ClassIdentity> {
     match receiver {
         Value::ObjectArray(array) => Some(array.class_name().clone()),
-        Value::Object(object) => Some(object.class_name.clone()),
-        Value::HandleObject(handle) => Some(handle.class_name.clone()),
+        Value::Object(object) => Some(object.class_name().clone()),
+        Value::HandleObject(handle) => Some(handle.class_name.as_identity().clone()),
         Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle) => {
             Some(runmat_types::standard::GPU_ARRAY.into())
         }
@@ -268,9 +268,18 @@ mod tests {
         let (_parent, child) = register_pair("Public");
         let receiver = object(&child);
 
-        assert!(call(receiver.clone(), Value::String("run".to_string())));
-        assert!(call(receiver.clone(), Value::String("make".to_string())));
-        assert!(call(receiver, Value::String("inherited".to_string())));
+        assert!(call(
+            receiver.clone(),
+            Value::String("run".to_string().into())
+        ));
+        assert!(call(
+            receiver.clone(),
+            Value::String("make".to_string().into())
+        ));
+        assert!(call(
+            receiver,
+            Value::String("inherited".to_string().into())
+        ));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -279,8 +288,11 @@ mod tests {
         let (_parent, child) = register_pair("MemberAccess");
         let receiver = object(&child);
 
-        assert!(!call(receiver.clone(), Value::String("secret".to_string())));
-        assert!(!call(receiver, Value::String("hidden".to_string())));
+        assert!(!call(
+            receiver.clone(),
+            Value::String("secret".to_string().into())
+        ));
+        assert!(!call(receiver, Value::String("hidden".to_string().into())));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -307,22 +319,22 @@ mod tests {
         let (_parent, child) = register_pair("ClassName");
 
         assert!(!call(
-            Value::String(child.clone()),
-            Value::String("run".to_string())
+            Value::String(child.clone().into()),
+            Value::String("run".to_string().into())
         ));
         assert!(!call(
             Value::CharArray(CharArray::new_row(&child)),
-            Value::String("make".to_string())
+            Value::String("make".to_string().into())
         ));
         assert!(!call(
             Value::StringArray(
                 StringArray::new(vec![child.clone()], vec![1, 1]).expect("class scalar")
             ),
-            Value::String("inherited".to_string())
+            Value::String("inherited".to_string().into())
         ));
         assert!(!call(
             Value::ClassRef(child.into()),
-            Value::String("run".to_string())
+            Value::String("run".to_string().into())
         ));
     }
 
@@ -379,13 +391,22 @@ mod tests {
     fn ismethod_returns_false_for_missing_empty_and_nonobject_values() {
         let (_parent, child) = register_pair("Negative");
 
-        assert!(!call(object(&child), Value::String("missing".to_string())));
-        assert!(!call(object(&child), Value::String(String::new())));
-        assert!(!call(object(&child), Value::String(" run ".to_string())));
-        assert!(!call(Value::Num(1.0), Value::String("run".to_string())));
         assert!(!call(
-            Value::String("MissingClassForIsmethod".to_string()),
-            Value::String("run".to_string())
+            object(&child),
+            Value::String("missing".to_string().into())
+        ));
+        assert!(!call(object(&child), Value::String(String::new().into())));
+        assert!(!call(
+            object(&child),
+            Value::String(" run ".to_string().into())
+        ));
+        assert!(!call(
+            Value::Num(1.0),
+            Value::String("run".to_string().into())
+        ));
+        assert!(!call(
+            Value::String("MissingClassForIsmethod".to_string().into()),
+            Value::String("run".to_string().into())
         ));
     }
 

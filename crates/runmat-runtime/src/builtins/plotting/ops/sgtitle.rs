@@ -18,7 +18,7 @@ use crate::builtins::plotting::{
     binding_variant = "default",
     builtin_path = "crate::builtins::plotting::sgtitle"
 )]
-pub fn sgtitle_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+pub fn sgtitle_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<f64> {
     crate::output_count::validate_fixed_outputs(
         &SGTITLE_DESCRIPTOR,
         &SGTITLE_ERROR_TOO_MANY_OUTPUTS,
@@ -36,7 +36,7 @@ pub(super) fn sgtitle_impl(
     builtin: &'static str,
     invalid: &'static BuiltinErrorDescriptor,
     internal: &'static BuiltinErrorDescriptor,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<f64> {
     if args.is_empty() {
         return Err(annotation_error(
@@ -45,7 +45,7 @@ pub(super) fn sgtitle_impl(
             plotting_error(builtin, format!("{builtin}: expected text input")),
         ));
     }
-    let (target, rest) = split_figure_target(builtin, &args)
+    let (target, rest) = split_figure_target(builtin, args.view())
         .map_err(|error| annotation_error(builtin, invalid, error))?;
     if rest.is_empty() {
         return Err(annotation_error(
@@ -62,7 +62,7 @@ pub(super) fn sgtitle_impl(
                 format!("{builtin}: expected text as char array, string, string array, or cell array of strings"),
             ))
         })?;
-    let style = parse_text_style_pairs(builtin, &rest[1..])
+    let style = parse_text_style_pairs(builtin, rest.range(1..)?)
         .map_err(|error| annotation_error(builtin, invalid, error))?;
     let target = target.unwrap_or_else(current_figure_handle);
     set_sg_title_for_figure(target, &text, style)
@@ -71,8 +71,8 @@ pub(super) fn sgtitle_impl(
 
 fn split_figure_target<'a>(
     builtin: &'static str,
-    args: &'a [Value],
-) -> crate::BuiltinResult<(Option<FigureHandle>, &'a [Value])> {
+    args: crate::call::FunctionArgumentView<'a>,
+) -> crate::BuiltinResult<(Option<FigureHandle>, crate::call::FunctionArgumentView<'a>)> {
     // Only attempt handle detection when there is a subsequent argument to serve as title text.
     // Without this guard, `sgtitle(42)` would be misread as targeting figure 42 with no text,
     // making it impossible to use a numeric value as title text when that figure exists.
@@ -80,7 +80,7 @@ fn split_figure_target<'a>(
         if let Some(first) = args.first() {
             if let Some(handle) = try_parse_figure_target(first) {
                 if figure_handle_exists(handle) {
-                    return Ok((Some(handle), &args[1..]));
+                    return Ok((Some(handle), args.range(1..)?));
                 }
                 return Err(plotting_error(
                     builtin,
@@ -151,7 +151,10 @@ mod tests {
     #[test]
     fn sgtitle_returns_handle_and_updates_current_figure() {
         let _guard = setup();
-        let handle = sgtitle_builtin(vec![Value::String("Overview".into())]).unwrap();
+        let handle = sgtitle_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::String("Overview".into())],
+        ))
+        .unwrap();
         let (figure, axes, kind) = decode_plot_object_handle(handle).unwrap();
         assert_eq!(figure, current_figure_handle());
         assert_eq!(axes, 0);
@@ -165,14 +168,16 @@ mod tests {
     fn sgtitle_accepts_explicit_figure_targets_and_properties() {
         let _guard = setup();
         let fig = figure_builtin(vec![Value::Num(321.0)]).unwrap();
-        sgtitle_builtin(vec![
-            Value::Num(fig),
-            Value::String("Figure Overview".into()),
-            Value::String("FontSize".into()),
-            Value::Num(18.0),
-            Value::String("FontWeight".into()),
-            Value::String("bold".into()),
-        ])
+        sgtitle_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![
+                Value::Num(fig),
+                Value::String("Figure Overview".into()),
+                Value::String("FontSize".into()),
+                Value::Num(18.0),
+                Value::String("FontWeight".into()),
+                Value::String("bold".into()),
+            ],
+        ))
         .unwrap();
 
         let figure = clone_figure(FigureHandle::from(321)).unwrap();
@@ -184,7 +189,10 @@ mod tests {
     #[test]
     fn sgtitle_handle_supports_get() {
         let _guard = setup();
-        let handle = sgtitle_builtin(vec![Value::String("Top".into())]).unwrap();
+        let handle = sgtitle_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::String("Top".into())],
+        ))
+        .unwrap();
         let string = get_builtin(vec![Value::Num(handle), Value::String("String".into())]).unwrap();
         assert_eq!(string, Value::String("Top".into()));
         let ty = get_builtin(vec![Value::Num(handle), Value::String("Type".into())]).unwrap();
@@ -194,14 +202,19 @@ mod tests {
     #[test]
     fn sgtitle_rejects_invalid_inputs() {
         let _guard = setup();
-        let err = sgtitle_builtin(vec![]).unwrap_err();
+        let err = sgtitle_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![],
+        ))
+        .unwrap_err();
         assert!(err.message.contains("expected text input"));
 
-        let err = sgtitle_builtin(vec![
-            Value::String("Top".into()),
-            Value::String("Bogus".into()),
-            Value::Num(1.0),
-        ])
+        let err = sgtitle_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![
+                Value::String("Top".into()),
+                Value::String("Bogus".into()),
+                Value::Num(1.0),
+            ],
+        ))
         .unwrap_err();
         assert!(err.message.contains("unsupported property"));
     }
@@ -213,7 +226,10 @@ mod tests {
         let _guard = setup();
         let _ = figure_builtin(vec![Value::Num(42.0)]).unwrap();
         let current = current_figure_handle();
-        sgtitle_builtin(vec![Value::Num(42.0)]).unwrap();
+        sgtitle_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::Num(42.0)],
+        ))
+        .unwrap();
         let fig = clone_figure(current).unwrap();
         assert_eq!(fig.sg_title.as_deref(), Some("42"));
     }
@@ -224,7 +240,10 @@ mod tests {
         // exist (previously errored with "invalid figure handle").
         let _guard = setup();
         let current = current_figure_handle();
-        sgtitle_builtin(vec![Value::Num(99.0)]).unwrap();
+        sgtitle_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::Num(99.0)],
+        ))
+        .unwrap();
         let fig = clone_figure(current).unwrap();
         assert_eq!(fig.sg_title.as_deref(), Some("99"));
     }
@@ -234,7 +253,10 @@ mod tests {
         let _guard = setup();
         let current = current_figure_handle();
         let pi = std::f64::consts::PI;
-        sgtitle_builtin(vec![Value::Num(pi)]).unwrap();
+        sgtitle_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::Num(pi)],
+        ))
+        .unwrap();
         let fig = clone_figure(current).unwrap();
         let expected = format!("{pi}");
         assert_eq!(fig.sg_title.as_deref(), Some(expected.as_str()));
@@ -244,7 +266,10 @@ mod tests {
     fn sgtitle_preserves_full_width_integer_title_text() {
         let _guard = setup();
         let current = current_figure_handle();
-        sgtitle_builtin(vec![Value::Int(IntValue::U64(9_007_199_254_740_993))]).unwrap();
+        sgtitle_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::Int(IntValue::U64(9_007_199_254_740_993))],
+        ))
+        .unwrap();
         let fig = clone_figure(current).unwrap();
         assert_eq!(fig.sg_title.as_deref(), Some("9007199254740993"));
     }
@@ -255,7 +280,10 @@ mod tests {
         // the target figure — the pre-existing behaviour must be preserved.
         let _guard = setup();
         let _ = figure_builtin(vec![Value::Num(7.0)]).unwrap();
-        sgtitle_builtin(vec![Value::Num(7.0), Value::String("Seven".into())]).unwrap();
+        sgtitle_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::Num(7.0), Value::String("Seven".into())],
+        ))
+        .unwrap();
         let fig = clone_figure(FigureHandle::from(7)).unwrap();
         assert_eq!(fig.sg_title.as_deref(), Some("Seven"));
     }
@@ -273,10 +301,12 @@ mod tests {
             "expected 1 child (axes) before sgtitle, got {children_before}"
         );
 
-        sgtitle_builtin(vec![
-            Value::Num(fig_handle),
-            Value::String("Now it exists".into()),
-        ])
+        sgtitle_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![
+                Value::Num(fig_handle),
+                Value::String("Now it exists".into()),
+            ],
+        ))
         .unwrap();
         let children_after = figure_children_count(fig_handle);
         assert_eq!(
@@ -290,13 +320,19 @@ mod tests {
 mod output_contract_tests {
     #[test]
     fn missing_required_input_uses_identity_diagnostic() {
-        let error = super::sgtitle_builtin(vec![]).expect_err("missing annotation input");
+        let error = super::sgtitle_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        )
+        .expect_err("missing annotation input");
         assert_eq!(error.identifier(), Some("RunMat:sgtitle:InvalidArgument"));
     }
     #[test]
     fn excessive_outputs_reject_before_argument_or_graphics_effects() {
         let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
-        let error = super::sgtitle_builtin(vec![]).expect_err("excess outputs");
+        let error = super::sgtitle_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        )
+        .expect_err("excess outputs");
         assert_eq!(error.identifier(), Some("RunMat:sgtitle:TooManyOutputs"));
     }
 }

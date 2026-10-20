@@ -25,7 +25,12 @@ use crate::builtins::common::fs as fs_helpers;
 
 fn dlmwrite_builtin(filename: Value, data: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let _fs_lock = runmat_filesystem::provider_override_lock();
-    futures::executor::block_on(super::dlmwrite_builtin(None, filename, data, rest))
+    futures::executor::block_on(super::dlmwrite_builtin(
+        None,
+        filename,
+        data,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    ))
 }
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);

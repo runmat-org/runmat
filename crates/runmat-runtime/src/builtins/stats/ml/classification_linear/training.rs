@@ -1,6 +1,9 @@
 use super::*;
 
-pub(super) fn fit_models(spec: &FitSpec) -> BuiltinResult<FitResult> {
+pub(super) fn fit_models(
+    runtime: Option<&crate::context::RuntimeContext>,
+    spec: &FitSpec,
+) -> BuiltinResult<FitResult> {
     let lambdas = spec
         .options
         .lambdas
@@ -13,91 +16,65 @@ pub(super) fn fit_models(spec: &FitSpec) -> BuiltinResult<FitResult> {
     let (observations, predictors) = classification_matrix_dimensions(&spec.x);
     let beta_value = beta_value(&models, predictors)?;
     let bias_value = row_tensor(models.iter().map(|model| model.bias).collect())?;
-    let mut object = ObjectInstance::new(runmat_types::standard::CLASSIFICATION_LINEAR.to_string());
-    object
-        .properties
-        .insert("Beta".to_string(), beta_value.clone());
-    object
-        .properties
-        .insert("Bias".to_string(), bias_value.clone());
-    object
-        .properties
-        .insert("Lambda".to_string(), row_tensor(lambdas.clone())?);
-    object.properties.insert(
-        "Learner".to_string(),
-        Value::String(spec.options.learner.as_str().to_string()),
+    let lambda = row_tensor(lambdas.clone())?;
+    let learner = Value::string(spec.options.learner.as_str().to_string());
+    let regularization = Value::string(spec.options.regularization.as_str().to_string());
+    let solver = Value::String(spec.options.solver.public_name().into());
+    let score_transform = Value::string(score_transform(spec).as_str().to_string());
+    let response_name = Value::string(spec.response_name.clone());
+    let predictor_names = Value::StringArray(
+        StringArray::new(
+            spec.predictor_names.clone(),
+            vec![1, spec.predictor_names.len()],
+        )
+        .map_err(fitclinear_internal)?,
     );
-    object.properties.insert(
-        "Regularization".to_string(),
-        Value::String(spec.options.regularization.as_str().to_string()),
-    );
-    object.properties.insert(
-        "Solver".to_string(),
-        Value::String(spec.options.solver.public_name().into()),
-    );
-    object.properties.insert(
-        "ScoreTransform".to_string(),
-        Value::String(score_transform(spec).as_str().to_string()),
-    );
-    object
-        .properties
-        .insert("FitBias".to_string(), Value::Bool(spec.options.fit_bias));
-    object.properties.insert(
-        "ResponseName".to_string(),
-        Value::String(spec.response_name.clone()),
-    );
-    object.properties.insert(
-        "PredictorNames".to_string(),
-        Value::StringArray(StringArray {
-            data: spec.predictor_names.clone(),
-            shape: vec![1, spec.predictor_names.len()],
-            rows: 1,
-            cols: spec.predictor_names.len(),
-        }),
-    );
-    object.properties.insert(
-        "ClassNames".to_string(),
-        labels_value(&spec.class_names, spec.class_kind)?,
-    );
-    object
-        .properties
-        .insert("Prior".to_string(), row_tensor(spec.priors.clone())?);
-    object.properties.insert(
-        "NumObservations".to_string(),
-        Value::Num(observations as f64),
-    );
-    object
-        .properties
-        .insert("NumPredictors".to_string(), Value::Num(predictors as f64));
-    object.properties.insert(
-        "__RunMatLinearClassKind".to_string(),
-        Value::String(label_kind_name(spec.class_kind).to_string()),
-    );
-    let mut parameters = StructValue::new();
-    parameters.insert(
-        "Learner",
-        Value::String(spec.options.learner.as_str().to_string()),
-    );
-    parameters.insert(
-        "Regularization",
-        Value::String(spec.options.regularization.as_str().to_string()),
-    );
-    parameters.insert(
-        "Solver",
-        Value::String(spec.options.solver.public_name().into()),
-    );
-    parameters.insert(
-        "ObservationsIn",
-        Value::String(spec.options.observations_in.as_str().to_string()),
-    );
-    parameters.insert("FitBias", Value::Bool(spec.options.fit_bias));
-    parameters.insert(
-        "IterationLimit",
-        Value::Num(spec.options.iteration_limit as f64),
-    );
-    object
-        .properties
-        .insert("ModelParameters".to_string(), Value::Struct(parameters));
+    let class_names = labels_value(&spec.class_names, spec.class_kind)?;
+    let prior = row_tensor(spec.priors.clone())?;
+    let class_kind = Value::string(label_kind_name(spec.class_kind).to_string());
+    let observations_in = Value::string(spec.options.observations_in.as_str().to_string());
+    let fit_bias = Value::Bool(spec.options.fit_bias);
+    let iteration_limit = Value::Num(spec.options.iteration_limit as f64);
+    let parameter_fields = [
+        ("Learner", &learner),
+        ("Regularization", &regularization),
+        ("Solver", &solver),
+        ("ObservationsIn", &observations_in),
+        ("FitBias", &fit_bias),
+        ("IterationLimit", &iteration_limit),
+    ];
+    let parameters = crate::execution::construct_struct_from_fields_in_optional_context(
+        runtime,
+        parameter_fields.into_iter(),
+    )?;
+    let (parameters, _parameter_roots) = parameters.into_value_and_lease();
+    let fields = [
+        ("Beta", beta_value),
+        ("Bias", bias_value),
+        ("Lambda", lambda),
+        ("Learner", learner),
+        ("Regularization", regularization),
+        ("Solver", solver),
+        ("ScoreTransform", score_transform),
+        ("FitBias", Value::Bool(spec.options.fit_bias)),
+        ("ResponseName", response_name),
+        ("PredictorNames", predictor_names),
+        ("ClassNames", class_names),
+        ("Prior", prior),
+        ("NumObservations", Value::Num(observations as f64)),
+        ("NumPredictors", Value::Num(predictors as f64)),
+        ("__RunMatLinearClassKind", class_kind),
+        ("ModelParameters", parameters),
+    ];
+    let object = crate::execution::object::construct_object_from_borrowed_fields(
+        runtime,
+        runmat_types::standard::CLASSIFICATION_LINEAR.display_name(),
+        fields.iter().map(|(name, value)| (*name, value)),
+    )?;
+    let (object, _object_roots) = object.into_value_and_lease();
+    let Value::Object(object) = object else {
+        unreachable!("object constructor publishes Object")
+    };
     let fit_info = fit_info_value(spec, lambdas, &models)?;
     Ok(FitResult { object, fit_info })
 }

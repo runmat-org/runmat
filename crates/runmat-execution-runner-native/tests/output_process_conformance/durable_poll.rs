@@ -9,7 +9,7 @@ pub(super) async fn verify(service: &NativeExecutionService, config: &NativeExec
         "function [first, second] = original_output_values(); while true; first = 13; end; second = 29; end").await;
     let job = service
         .submit_job(
-            original,
+            original.call.clone(),
             DurableJobOptions {
                 idempotency_key: Some("original-pending-cancellation".into()),
                 retention_millis: runmat_execution_runner_native::supervisor::MIN_RETENTION_MILLIS,
@@ -29,20 +29,20 @@ pub(super) async fn verify(service: &NativeExecutionService, config: &NativeExec
         .unwrap();
     let started = std::time::Instant::now();
     let AwaitAction::Pending(Value::Job(retained)) =
-        service.begin_await(Value::Job(job.clone())).unwrap()
+        service.begin_await(Value::Job(job.clone().into())).unwrap()
     else {
         panic!("live original job did not yield pending");
     };
-    assert_eq!(retained, job);
+    assert_eq!(retained.as_ref(), &job);
     assert!(started.elapsed() < Duration::from_secs(5));
     service
-        .cancel(&Value::Job(job.clone()), CancellationReason::Quota)
+        .cancel(&Value::Job(job.clone().into()), CancellationReason::Quota)
         .unwrap();
     tokio::time::timeout(Duration::from_secs(30), async {
         loop {
-            match service.begin_await(Value::Job(job.clone())) {
+            match service.begin_await(Value::Job(job.clone().into())) {
                 Ok(AwaitAction::Pending(Value::Job(retained))) => {
-                    assert_eq!(retained, job);
+                    assert_eq!(retained.as_ref(), &job);
                     tokio::time::sleep(Duration::from_millis(10)).await;
                 }
                 Err(ExecutionServiceError::Cancelled) => break,
@@ -69,7 +69,7 @@ pub(super) async fn verify(service: &NativeExecutionService, config: &NativeExec
         .iter()
         .all(|attempt| attempt.terminal.is_some()));
     service
-        .cancel(&Value::Job(job.clone()), CancellationReason::User)
+        .cancel(&Value::Job(job.clone().into()), CancellationReason::User)
         .unwrap();
     assert_eq!(
         client

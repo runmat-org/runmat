@@ -17,7 +17,8 @@ use crate::BuiltinResult;
     binding_variant = "default",
     builtin_path = "crate::builtins::geometry::generated::combine"
 )]
-pub async fn geometry_union_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn geometry_union_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     boolean(args, "geometry.union", |operands| {
         GeometryFeatureOperation::Union { operands }
     })
@@ -28,7 +29,10 @@ pub async fn geometry_union_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::geometry::generated::combine"
 )]
-pub async fn geometry_intersect_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn geometry_intersect_builtin(
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     boolean(args, "geometry.intersect", |operands| {
         GeometryFeatureOperation::Intersect { operands }
     })
@@ -39,7 +43,10 @@ pub async fn geometry_intersect_builtin(args: Vec<Value>) -> BuiltinResult<Value
     binding_variant = "default",
     builtin_path = "crate::builtins::geometry::generated::combine"
 )]
-pub async fn geometry_subtract_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn geometry_subtract_builtin(
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     if args.len() < 2 {
         return Err(invalid(
             "geometry.subtract",
@@ -60,7 +67,8 @@ pub async fn geometry_subtract_builtin(args: Vec<Value>) -> BuiltinResult<Value>
     binding_variant = "default",
     builtin_path = "crate::builtins::geometry::generated::combine"
 )]
-pub async fn geometry_finish_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn geometry_finish_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     let builtin = "geometry.finish";
     let args = exactly(builtin, args, 1)?;
     generated_value(

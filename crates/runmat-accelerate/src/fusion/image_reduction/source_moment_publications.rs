@@ -123,12 +123,15 @@ impl Projection<'_> {
                     Value::String(value) => string_bytes += value.len() as u64,
                     Value::StringArray(value) => {
                         shape_dimensions += value.shape.len() as u64;
-                        string_bytes +=
-                            value.data.iter().map(|text| text.len() as u64).sum::<u64>();
+                        string_bytes += value
+                            .data()
+                            .iter()
+                            .map(|text| text.len() as u64)
+                            .sum::<u64>();
                     }
                     Value::CharArray(value) => {
                         shape_dimensions += value.shape.len() as u64;
-                        char_elements += value.data.len() as u64;
+                        char_elements += value.data().len() as u64;
                     }
                     Value::Num(_) | Value::Int(_) => {}
                     _ => return Ok(None),

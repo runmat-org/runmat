@@ -112,7 +112,8 @@ pub(super) fn present(
         }
         None => (data, state_updates, None),
     };
-    let is_dlarray = matches!(input, Value::Object(object) if object.class_name.is(DLARRAY_CLASS));
+    let is_dlarray =
+        matches!(input, Value::Object(object) if object.class_name().is(DLARRAY_CLASS));
     let has_prediction_node = nodes
         .as_ref()
         .is_some_and(|nodes| nodes.prediction.is_some());
@@ -136,10 +137,10 @@ pub(super) fn present(
             "dlarray",
             vec![
                 ("Data", data),
-                ("Format", Value::String(format.clone())),
-                ("Labels", Value::String(format)),
+                ("Format", Value::string(format.clone())),
+                ("Labels", Value::string(format)),
             ],
-        )
+        )?
     } else {
         data
     };

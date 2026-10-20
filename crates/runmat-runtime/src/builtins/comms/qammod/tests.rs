@@ -14,7 +14,7 @@ fn provider_execution_error_keeps_source_and_borrowed_input_live() {
         let error = block_on(super::qammod_builtin(
             Value::GpuTensor(input.clone()),
             Value::Num(4.0),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .unwrap_err();
         assert!(std::error::Error::source(&error).is_some());
@@ -52,7 +52,13 @@ fn malformed_alias_rejection_preserves_original_allocation() {
 }
 
 fn qammod(x: Value, order: usize, rest: Vec<Value>) -> ComplexTensor {
-    match block_on(super::qammod_builtin(x, Value::Num(order as f64), rest)).expect("qammod") {
+    match block_on(super::qammod_builtin(
+        x,
+        Value::Num(order as f64),
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    ))
+    .expect("qammod")
+    {
         Value::ComplexTensor(tensor) => tensor,
         other => panic!("expected ComplexTensor, got {other:?}"),
     }
@@ -143,7 +149,7 @@ fn qammod_accepts_only_documented_integer_symbol_classes() {
         let err = block_on(super::qammod_builtin(
             integer_tensor(storage, vec![1, 4]),
             Value::Num(4.0),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .expect_err("unsupported integer X class");
         assert!(err.message().contains("int8, int16, uint8, or uint16"));
@@ -296,7 +302,10 @@ fn qammod_inprocess_gpu_bit_input_returns_complex_resident_output() {
         let result = block_on(super::qammod_builtin(
             Value::GpuTensor(input_handle.clone()),
             Value::Num(16.0),
-            vec![Value::from("InputType"), Value::from("bit")],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("InputType"),
+                Value::from("bit"),
+            ]),
         ))
         .expect("gpu qammod bit");
         let Value::GpuTensor(output_handle) = result else {
@@ -330,7 +339,7 @@ fn qammod_gpu_enforces_integer_symbol_classes_and_output_precision() {
         let result = block_on(super::qammod_builtin(
             Value::GpuTensor(accepted_handle),
             Value::Num(4.0),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .expect("supported integer gpuArray");
         let Value::GpuTensor(result_handle) = result else {
@@ -348,7 +357,7 @@ fn qammod_gpu_enforces_integer_symbol_classes_and_output_precision() {
         let err = block_on(super::qammod_builtin(
             Value::GpuTensor(rejected_handle),
             Value::Num(4.0),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .expect_err("unsupported integer gpuArray class");
         assert!(err.message().contains("int8, int16, uint8, or uint16"));
@@ -358,7 +367,7 @@ fn qammod_gpu_enforces_integer_symbol_classes_and_output_precision() {
         let result = block_on(super::qammod_builtin(
             Value::GpuTensor(single_handle),
             Value::Num(4.0),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .expect("single gpuArray");
         let Value::GpuTensor(result_handle) = result else {
@@ -376,7 +385,10 @@ fn qammod_bit_input_rejects_partial_symbols() {
     let err = block_on(super::qammod_builtin(
         tensor(vec![0.0, 1.0, 0.0], vec![3, 1]),
         Value::Num(16.0),
-        vec![Value::from("InputType"), Value::from("bit")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("InputType"),
+            Value::from("bit"),
+        ]),
     ))
     .expect_err("expected bit grouping error");
     assert!(err.to_string().contains("multiple of log2(M)"));
@@ -387,7 +399,10 @@ fn qammod_bit_input_rejects_non_bits() {
     let err = block_on(super::qammod_builtin(
         tensor(vec![0.0, 2.0, 0.0, 1.0], vec![4, 1]),
         Value::Num(16.0),
-        vec![Value::from("InputType"), Value::from("bit")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("InputType"),
+            Value::from("bit"),
+        ]),
     ))
     .expect_err("expected bit value error");
     assert!(err.to_string().contains("bit values must be 0 or 1"));
@@ -472,7 +487,7 @@ fn qammod_rejects_out_of_range_symbols() {
     let err = block_on(super::qammod_builtin(
         tensor(vec![0.0, 16.0], vec![1, 2]),
         Value::Num(16.0),
-        vec![],
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
     ))
     .expect_err("expected out-of-range error");
     assert!(err.to_string().contains("range [0, 15]"));
@@ -497,7 +512,7 @@ fn qammod_wgpu_input_returns_complex_resident_output() {
             let result = block_on(super::qammod_builtin(
                 Value::GpuTensor(input_handle.clone()),
                 Value::Num(4.0),
-                vec![],
+                crate::builtins::common::test_support::builtin_arguments(vec![]),
             ))
             .expect("gpu qammod");
             let Value::GpuTensor(output_handle) = result else {
@@ -549,7 +564,10 @@ fn qammod_wgpu_bit_input_returns_complex_resident_output() {
             let result = block_on(super::qammod_builtin(
                 Value::GpuTensor(input_handle.clone()),
                 Value::Num(16.0),
-                vec![Value::from("InputType"), Value::from("bit")],
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::from("InputType"),
+                    Value::from("bit"),
+                ]),
             ))
             .expect("gpu qammod bit");
             let Value::GpuTensor(output_handle) = result else {

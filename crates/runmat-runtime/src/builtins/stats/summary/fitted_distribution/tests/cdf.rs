@@ -7,7 +7,10 @@ fn cdf_classifies_all_integer_input_positions_as_runmat_extensions() {
         let x = block_on(cdf_builtin(
             Value::String("Normal".into()),
             mirrorless_int_tensor(storage.clone(), vec![1, 1]),
-            vec![Value::Num(0.0), Value::Num(1.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(0.0),
+                Value::Num(1.0),
+            ]),
         ))
         .expect("integer x");
         assert!(matches!(x, Value::Num(value) if (value - 0.841_344_746_068_543).abs() < 1.0e-12));
@@ -15,7 +18,10 @@ fn cdf_classifies_all_integer_input_positions_as_runmat_extensions() {
         let parameter = block_on(cdf_builtin(
             Value::String("Poisson".into()),
             Value::Num(0.0),
-            vec![mirrorless_int_tensor(storage, vec![1, 1])],
+            crate::builtins::common::test_support::builtin_arguments(vec![mirrorless_int_tensor(
+                storage,
+                vec![1, 1],
+            )]),
         ))
         .expect("integer parameter");
         assert!(
@@ -26,13 +32,13 @@ fn cdf_classifies_all_integer_input_positions_as_runmat_extensions() {
     let pd = block_on(fitdist_builtin(
         vec_tensor(&[0.0, 1.0, 2.0]),
         Value::String("Normal".into()),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("fitted normal");
     let object_x = block_on(cdf_builtin(
         pd,
         mirrorless_int_tensor(IntegerStorage::U16(vec![1]), vec![1, 1]),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("integer object evaluation point");
     assert_eq!(object_x, Value::Num(0.5));
@@ -44,7 +50,10 @@ fn cdf_compatibility_mode_rejects_integer_and_logical_extensions() {
     let integer_x = block_on(cdf_builtin(
         Value::String("Normal".into()),
         mirrorless_int_tensor(IntegerStorage::I8(vec![1]), vec![1, 1]),
-        vec![Value::Num(0.0), Value::Num(1.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(0.0),
+            Value::Num(1.0),
+        ]),
     ))
     .unwrap_err();
     assert_eq!(
@@ -54,13 +63,13 @@ fn cdf_compatibility_mode_rejects_integer_and_logical_extensions() {
     let pd = block_on(fitdist_builtin(
         vec_tensor(&[0.0, 1.0, 2.0]),
         Value::String("Normal".into()),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("fitted normal");
     let object_integer_x = block_on(cdf_builtin(
         pd,
         mirrorless_int_tensor(IntegerStorage::I16(vec![1]), vec![1, 1]),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap_err();
     assert_eq!(
@@ -70,10 +79,10 @@ fn cdf_compatibility_mode_rejects_integer_and_logical_extensions() {
     let integer_parameter = block_on(cdf_builtin(
         Value::String("Poisson".into()),
         Value::Num(0.0),
-        vec![mirrorless_int_tensor(
+        crate::builtins::common::test_support::builtin_arguments(vec![mirrorless_int_tensor(
             IntegerStorage::U16(vec![1]),
             vec![1, 1],
-        )],
+        )]),
     ))
     .unwrap_err();
     assert_eq!(
@@ -83,7 +92,10 @@ fn cdf_compatibility_mode_rejects_integer_and_logical_extensions() {
     let logical = block_on(cdf_builtin(
         Value::String("Normal".into()),
         Value::Bool(true),
-        vec![Value::Num(0.0), Value::Num(1.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(0.0),
+            Value::Num(1.0),
+        ]),
     ))
     .unwrap_err();
     assert_eq!(
@@ -97,11 +109,11 @@ fn cdf_broadcasts_parameters_supports_upper_and_preserves_single() {
     let result = block_on(cdf_builtin(
         Value::String("Normal".into()),
         Value::Tensor(Tensor::from_f32(vec![0.0, 2.0], vec![2, 1]).unwrap()),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap()),
             Value::Num(1.0),
             Value::String("upper".into()),
-        ],
+        ]),
     ))
     .expect("broadcast upper cdf");
     let Value::Tensor(result) = result else {
@@ -116,7 +128,10 @@ fn cdf_broadcasts_parameters_supports_upper_and_preserves_single() {
     let tail = block_on(cdf_builtin(
         Value::String("Exponential".into()),
         Value::Num(1000.0),
-        vec![Value::Num(1.0), Value::String("upper".into())],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(1.0),
+            Value::String("upper".into()),
+        ]),
     ))
     .expect("upper tail");
     assert_eq!(tail, Value::Num(0.0));
@@ -128,7 +143,10 @@ fn cdf_rejects_inexact_wide_integers() {
     let error = block_on(cdf_builtin(
         Value::String("Normal".into()),
         mirrorless_int_tensor(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1]),
-        vec![Value::Num(0.0), Value::Num(1.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(0.0),
+            Value::Num(1.0),
+        ]),
     ))
     .unwrap_err();
     assert!(error.message().contains("exactly representable as double"));
@@ -139,7 +157,10 @@ fn cdf_rejects_inexact_wide_integers() {
         let exact = block_on(cdf_builtin(
             Value::String("Normal".into()),
             mirrorless_int_tensor(storage, vec![1, 1]),
-            vec![Value::Num(0.0), Value::Num(1.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(0.0),
+                Value::Num(1.0),
+            ]),
         ));
         assert!(
             exact.is_ok(),
@@ -158,7 +179,10 @@ fn cdf_gpu_fallback_preserves_residency_precision_and_guard_order() {
         let result = block_on(cdf_builtin(
             Value::String("Normal".into()),
             Value::GpuTensor(handle),
-            vec![Value::Num(0.0), Value::Num(1.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(0.0),
+                Value::Num(1.0),
+            ]),
         ))
         .expect("resident cdf");
         let Value::GpuTensor(result_handle) = &result else {
@@ -178,7 +202,10 @@ fn cdf_gpu_fallback_preserves_residency_precision_and_guard_order() {
         let error = block_on(cdf_builtin(
             Value::String("Normal".into()),
             Value::GpuTensor(handle),
-            vec![Value::Num(0.0), Value::Num(1.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(0.0),
+                Value::Num(1.0),
+            ]),
         ))
         .unwrap_err();
         assert_eq!(

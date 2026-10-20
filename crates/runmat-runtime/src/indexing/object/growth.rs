@@ -1,84 +1,136 @@
-//! Scatter object assignments into a grown column-major shape.
-//!
-//! Newly addressed slots must be supplied by the assignment. Missing objects
-//! require class construction, which this storage operation does not perform.
-
-use runmat_value::{ObjectArray, Value};
-
+//! Scatter directly into one admitted final homogeneous generation.
+use crate::execution::object_array::{indices::Indices, Class, ObjectArrayConstruction};
 use crate::indexing::{plan::IndexPlan, shape::column_major_strides};
 use crate::{runtime_error::semantic_error, RuntimeError};
+use runmat_value::{ObjectArray, Value};
 
 pub(super) fn assign(
     array: &ObjectArray,
     plan: &IndexPlan,
-    replacements: Vec<Value>,
-) -> Result<Vec<Value>, RuntimeError> {
-    if array.shape() == plan.base_shape {
-        let mut data = array.data().to_vec();
-        for (index, value) in plan.indices.iter().zip(replacements) {
-            *data.get_mut(*index as usize).ok_or_else(invalid_index)? = value;
-        }
-        return Ok(data);
-    }
+    rhs: &Value,
+) -> Result<Value, RuntimeError> {
+    let context = crate::context::legacy::active();
+    let runtime = context.as_ref();
+    let source = Value::ObjectArray(array.clone());
+    let _roots = match runtime {
+        Some(runtime) => crate::execution::RootedValueLease::for_values_iterator_in_context(
+            [&source, rhs].into_iter(),
+            runtime,
+        )?,
+        None => crate::execution::RootedValueLease::for_values([&source, rhs].into_iter())
+            .map_err(|e| e.into_runtime_error())?,
+    };
     let source_shape = crate::indexing::plan::effective_index_shape(array.shape(), plan.dims)?;
     let target_shape = crate::indexing::plan::effective_index_shape(&plan.base_shape, plan.dims)?;
     if source_shape
         .iter()
         .enumerate()
-        .any(|(dimension, extent)| target_shape.get(dimension).copied().unwrap_or(1) < *extent)
+        .any(|(d, &n)| target_shape.get(d).copied().unwrap_or(1) < n)
     {
         return Err(semantic_error(
             "InvalidIndexSelectorPlan",
             "Object-array assignment cannot shrink an existing dimension",
         ));
     }
-    let target_len = plan.base_shape.iter().try_fold(1usize, |length, extent| {
-        length.checked_mul(*extent).ok_or_else(invalid_index)
-    })?;
+    let target_len = plan
+        .base_shape
+        .iter()
+        .try_fold(1usize, |n, &d| n.checked_mul(d))
+        .ok_or_else(invalid_index)?;
     let old_strides = column_major_strides(&source_shape)?;
     let target_strides = column_major_strides(&target_shape)?;
-    let mut slots = Vec::new();
-    slots.try_reserve_exact(target_len).map_err(|_| {
-        semantic_error(
-            "ObjectArrayAssignment",
-            "Object-array growth exceeds available storage",
-        )
-    })?;
-    slots.resize_with(target_len, || None);
-    for (index, value) in array.data().iter().enumerate() {
+    let mut positions = Indices::new(runtime, target_len)?;
+    for start in (0..target_len).step_by(4096) {
+        positions.checkpoint()?;
+        let end = start.saturating_add(4096).min(target_len);
+        positions.values_mut()[start..end].fill(usize::MAX);
+    }
+    positions.checkpoint()?;
+    for index in 0..array.len() {
+        if index % 4096 == 0 {
+            positions.checkpoint()?;
+        }
         let destination =
             source_shape
                 .iter()
                 .enumerate()
-                .try_fold(0usize, |offset, (dimension, extent)| {
-                    let coordinate = (index / old_strides[dimension]) % extent;
-                    let stride = *target_strides.get(dimension).ok_or_else(invalid_index)?;
+                .try_fold(0usize, |offset, (d, &extent)| {
+                    let coordinate = (index / old_strides[d]) % extent;
                     coordinate
-                        .checked_mul(stride)
-                        .and_then(|component| offset.checked_add(component))
+                        .checked_mul(*target_strides.get(d).ok_or_else(invalid_index)?)
+                        .and_then(|n| offset.checked_add(n))
                         .ok_or_else(invalid_index)
                 })?;
-        *slots.get_mut(destination).ok_or_else(invalid_index)? = Some(value.clone());
+        *positions
+            .values_mut()
+            .get_mut(destination)
+            .ok_or_else(invalid_index)? = index;
     }
-    for (index, value) in plan.indices.iter().zip(replacements) {
-        *slots.get_mut(*index as usize).ok_or_else(invalid_index)? = Some(value);
+    let rhs_array = match rhs {
+        Value::ObjectArray(rhs)
+            if rhs.class_name() == array.class_name() && rhs.len() == plan.indices.len() =>
+        {
+            Some(rhs)
+        }
+        _ => None,
+    };
+    let scalar = if rhs_array.is_none() {
+        Some(super::assignment_scalar(rhs, array.class_name())?)
+    } else {
+        None
+    };
+    for (ordinal, &index) in plan.indices.iter().enumerate() {
+        if ordinal % 4096 == 0 {
+            positions.checkpoint()?;
+        }
+        let encoded = array
+            .len()
+            .checked_add(ordinal)
+            .filter(|&n| n != usize::MAX)
+            .ok_or_else(invalid_index)?;
+        *positions
+            .values_mut()
+            .get_mut(index as usize)
+            .ok_or_else(invalid_index)? = encoded;
     }
-    slots
-        .into_iter()
-        .map(|value| {
-            value.ok_or_else(|| {
-                semantic_error(
-                    "ObjectArrayDefaultConstructionRequired",
-                    "Object-array growth with unassigned slots requires a default constructor",
-                )
-            })
-        })
-        .collect()
+    let mut output = ObjectArrayConstruction::new(
+        runtime,
+        Class::Owner(array.class_name_owner()),
+        target_len,
+        &plan.base_shape,
+        array.selected_provenance().iter(),
+        array.has_unselected_provenance(),
+    )?;
+    for (index, &position) in positions.values().iter().enumerate() {
+        if index % 4096 == 0 {
+            positions.checkpoint()?;
+        }
+        if position == usize::MAX {
+            return Err(semantic_error(
+                "ObjectArrayDefaultConstructionRequired",
+                "Object-array growth with unassigned slots requires a default constructor",
+            ));
+        }
+        let child = if position < array.len() {
+            &array.data()[position]
+        } else if let Some(rhs) = rhs_array {
+            &rhs.data()[position - array.len()]
+        } else {
+            scalar.expect("validated scalar assignment")
+        };
+        output.push(child.clone())?;
+    }
+    let result = output.finish()?;
+    positions.checkpoint()?;
+    Ok(result.with_owned(|value| match value {
+        Value::ObjectArray(array) if array.len() == 1 && array.shape() == [1, 1] => {
+            array.data()[0].clone()
+        }
+        value => value,
+    }))
 }
-
 fn invalid_index() -> RuntimeError {
     semantic_error("IndexOutOfBounds", "Object array index is out of bounds")
 }
-
 #[cfg(test)]
 mod tests;

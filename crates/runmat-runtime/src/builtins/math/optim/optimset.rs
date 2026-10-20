@@ -7,7 +7,7 @@ use runmat_builtins::{
     OPTIMSET_RESIDENT_OPTION_EXTENSION as RESIDENT_OPTION_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{StructValue, Value};
+use runmat_value::Value;
 
 mod admission;
 
@@ -42,7 +42,7 @@ fn optimset_error_builder(
     binding_variant = "default",
     builtin_path = "crate::builtins::math::optim::optimset"
 )]
-async fn optimset_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn optimset_builtin(rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &runmat_builtins::OPTIMSET_DESCRIPTOR,
         &OPTIMSET_ERROR_INVALID_ARGUMENT,
@@ -50,11 +50,11 @@ async fn optimset_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
     )?;
     // All names and pair grammar are admitted before any resident gather.
     let steps = admission::admit(rest)?;
-    let mut fields = StructValue::new();
+    let mut fields = runmat_value::UnboundedStructValueBuilder::new();
     for step in steps {
         match step {
             admission::Step::Copy(existing) => {
-                for (name, value) in existing.fields {
+                for (name, value) in existing.into_fields_unbounded() {
                     fields.insert(name, prepare_optimset_payload(value).await?);
                 }
             }
@@ -66,10 +66,10 @@ async fn optimset_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
             }
         }
     }
-    Ok(Value::Struct(fields))
+    Ok(Value::Struct(fields.finish()))
 }
 
-fn ensure_optimset_extensions(args: &[Value]) -> BuiltinResult<()> {
+fn ensure_optimset_extensions(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<()> {
     let mut payloads = Vec::new();
     let mut pair_start = 0usize;
     if let Some(Value::Struct(existing)) = args.first() {
@@ -124,12 +124,14 @@ mod tests {
 
     #[test]
     fn optimset_builds_struct_from_pairs() {
-        let value = block_on(optimset_builtin(vec![
-            Value::from("TolX"),
-            Value::Num(1.0e-8),
-            Value::from("Display"),
-            Value::from("off"),
-        ]))
+        let value = block_on(optimset_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("TolX"),
+                Value::Num(1.0e-8),
+                Value::from("Display"),
+                Value::from("off"),
+            ]),
+        ))
         .unwrap();
         match value {
             Value::Struct(options) => {
@@ -172,7 +174,10 @@ mod tests {
 
     #[test]
     fn optimset_odd_name_value_pairs_use_stable_identifier() {
-        let err = block_on(optimset_builtin(vec![Value::from("TolX")])).unwrap_err();
+        let err = block_on(optimset_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from("TolX")]),
+        ))
+        .unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:optimset:InvalidArgument"));
     }
 
@@ -198,7 +203,10 @@ mod tests {
             let odd = bad_tail.len() == 1;
             let mut arguments = vec![Value::from("TolX"), Value::GpuTensor(handle.clone())];
             arguments.extend(bad_tail);
-            let error = block_on(optimset_builtin(arguments)).unwrap_err();
+            let error = block_on(optimset_builtin(
+                crate::builtins::common::test_support::builtin_arguments(arguments),
+            ))
+            .unwrap_err();
             assert_eq!(
                 error.identifier(),
                 Some(if odd {
@@ -221,10 +229,12 @@ mod tests {
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let value = Tensor::new_integer(IntegerStorage::I64(vec![17]), vec![1, 1]).unwrap();
 
-        let error = block_on(optimset_builtin(vec![
-            Value::from("MaxIter"),
-            Value::Tensor(value),
-        ]))
+        let error = block_on(optimset_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("MaxIter"),
+                Value::Tensor(value),
+            ]),
+        ))
         .expect_err("integer payload is a RunMat-only extension");
 
         assert_eq!(
@@ -239,10 +249,12 @@ mod tests {
         let expected = u64::MAX;
         let value = Tensor::new_integer(IntegerStorage::U64(vec![expected]), vec![1, 1]).unwrap();
 
-        let result = block_on(optimset_builtin(vec![
-            Value::from("MaxIter"),
-            Value::Tensor(value),
-        ]))
+        let result = block_on(optimset_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("MaxIter"),
+                Value::Tensor(value),
+            ]),
+        ))
         .expect("RunMat integer payload");
 
         let Value::Struct(options) = result else {
@@ -272,10 +284,12 @@ mod tests {
                 .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
                 .expect("admit provenance view");
 
-            let automatic_result = block_on(optimset_builtin(vec![
-                Value::from("TolX"),
-                Value::GpuTensor(automatic),
-            ]))
+            let automatic_result = block_on(optimset_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::from("TolX"),
+                    Value::GpuTensor(automatic),
+                ]),
+            ))
             .expect("automatic residency gathers");
             assert!(matches!(
                 automatic_result,
@@ -295,10 +309,12 @@ mod tests {
             drop(explicit_input);
             let physical = explicit.allocation_lease().downgrade();
             let strict = crate::compatibility::push_runmat_extensions_enabled(false);
-            let error = block_on(optimset_builtin(vec![
-                Value::from("TolX"),
-                Value::GpuTensor(explicit.clone()),
-            ]))
+            let error = block_on(optimset_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::from("TolX"),
+                    Value::GpuTensor(explicit.clone()),
+                ]),
+            ))
             .expect_err("explicit payload must be gated");
             assert_eq!(
                 error.identifier(),
@@ -316,12 +332,14 @@ mod tests {
             let mixed_automatic = mixed_automatic
                 .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
                 .expect("admit provenance view");
-            let explicit_result = block_on(optimset_builtin(vec![
-                Value::from("TolX"),
-                Value::GpuTensor(explicit),
-                Value::from("MaxFunEvals"),
-                Value::GpuTensor(mixed_automatic),
-            ]))
+            let explicit_result = block_on(optimset_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::from("TolX"),
+                    Value::GpuTensor(explicit),
+                    Value::from("MaxFunEvals"),
+                    Value::GpuTensor(mixed_automatic),
+                ]),
+            ))
             .expect("RunMat preserves explicit and gathers automatic payloads independently");
             assert!(matches!(
                 explicit_result,
@@ -359,24 +377,25 @@ mod tests {
             // same owned graph as gather, without following managed referents.
             fn nested_objects(payload: Value) -> Value {
                 let mut object = runmat_value::ObjectInstance::new("OptimsetPayload");
-                object.properties.insert("payload".into(), payload);
+                object.replace_property_unbounded("payload".into(), payload);
                 let array = runmat_value::ObjectArray::from_objects(
                     "OptimsetPayload",
                     vec![object.clone(), object],
                     vec![1, 2],
                 )
                 .expect("homogeneous value objects");
-                let mut structure = StructValue::new();
+                let mut structure = runmat_value::UnboundedStructValueBuilder::new();
                 structure.insert("items", Value::ObjectArray(array));
                 Value::Cell(
-                    runmat_value::CellArray::new(vec![Value::Struct(structure)], 1, 1).unwrap(),
+                    runmat_value::CellArray::new(vec![Value::Struct(structure.finish())], 1, 1)
+                        .unwrap(),
                 )
             }
             fn objects(payload: &Value) -> &runmat_value::ObjectArray {
                 let Value::Cell(cell) = payload else {
                     panic!("outer cell")
                 };
-                let Value::Struct(structure) = &cell.data[0] else {
+                let Value::Struct(structure) = &cell.data()[0] else {
                     panic!("nested struct")
                 };
                 let Value::ObjectArray(array) = &structure.fields["items"] else {
@@ -412,20 +431,24 @@ mod tests {
                 .unwrap(),
             ));
             let strict = crate::compatibility::push_runmat_extensions_enabled(false);
-            let error = block_on(optimset_builtin(vec![
-                Value::from("FutureOption"),
-                mixed.clone(),
-            ]))
+            let error = block_on(optimset_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::from("FutureOption"),
+                    mixed.clone(),
+                ]),
+            ))
             .expect_err("nested explicit ObjectArray value must be gated before gather");
             assert_eq!(
                 error.identifier(),
                 RESIDENT_OPTION_EXTENSION.error_identifier
             );
             drop(strict);
-            let Value::Struct(result) = block_on(optimset_builtin(vec![
-                Value::from("FutureOption"),
-                mixed.clone(),
-            ]))
+            let Value::Struct(result) = block_on(optimset_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::from("FutureOption"),
+                    mixed.clone(),
+                ]),
+            ))
             .unwrap() else {
                 panic!("options struct")
             };
@@ -461,10 +484,12 @@ mod tests {
                 runmat_accelerate_api::GpuHandleProvenance::Automatic,
             )));
             let strict = crate::compatibility::push_runmat_extensions_enabled(false);
-            let Value::Struct(result) = block_on(optimset_builtin(vec![
-                Value::from("FutureOption"),
-                automatic,
-            ]))
+            let Value::Struct(result) = block_on(optimset_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::from("FutureOption"),
+                    automatic,
+                ]),
+            ))
             .unwrap() else {
                 panic!("options struct")
             };
@@ -473,7 +498,7 @@ mod tests {
                     panic!("value object")
                 };
                 assert!(
-                    matches!(&object.properties["payload"], Value::Tensor(tensor) if tensor.materialize_f64() == values)
+                    matches!(&object.properties()["payload"], Value::Tensor(tensor) if tensor.materialize_f64() == values)
                 );
             }
             drop(strict);
@@ -482,26 +507,32 @@ mod tests {
                 Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).unwrap(),
             ));
             let strict = crate::compatibility::push_runmat_extensions_enabled(false);
-            let error = block_on(optimset_builtin(vec![
-                Value::from("FutureOption"),
-                integer.clone(),
-            ]))
+            let error = block_on(optimset_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::from("FutureOption"),
+                    integer.clone(),
+                ]),
+            ))
             .expect_err("nested native ObjectArray property must be gated");
             assert_eq!(
                 error.identifier(),
                 INTEGER_OPTION_EXTENSION.error_identifier
             );
             drop(strict);
-            let Value::Struct(result) =
-                block_on(optimset_builtin(vec![Value::from("FutureOption"), integer])).unwrap()
-            else {
+            let Value::Struct(result) = block_on(optimset_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::from("FutureOption"),
+                    integer,
+                ]),
+            ))
+            .unwrap() else {
                 panic!("options struct")
             };
             for value in objects(&result.fields["FutureOption"]).data() {
                 let Value::Object(object) = value else {
                     panic!("value object")
                 };
-                let Value::Tensor(tensor) = &object.properties["payload"] else {
+                let Value::Tensor(tensor) = &object.properties()["payload"] else {
                     panic!("integer tensor")
                 };
                 assert!(matches!(

@@ -13,7 +13,7 @@ fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
     binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::magic"
 )]
-async fn magic_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn magic_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     if matches!(crate::output_count::current_output_count(), Some(count) if count > 1) {
         let error = &runmat_builtins::MAGIC_ERROR_TOO_MANY_OUTPUTS;
         return Err(build_runtime_error(error.message)
@@ -26,7 +26,7 @@ async fn magic_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     Ok(tensor::tensor_into_value(tensor))
 }
 
-async fn parse_order(args: Vec<Value>) -> crate::BuiltinResult<usize> {
+async fn parse_order(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<usize> {
     if args.len() != 1 {
         return Err(builtin_error("magic: requires exactly one input argument"));
     }
@@ -93,7 +93,7 @@ async fn parse_order_host(value: &Value) -> crate::BuiltinResult<usize> {
     }
     if let Value::CharArray(array) = value {
         let raw = array
-            .data
+            .data()
             .first()
             .map(|value| *value as u32 as f64)
             .ok_or_else(|| builtin_error("magic: input must contain a numeric value"))?;

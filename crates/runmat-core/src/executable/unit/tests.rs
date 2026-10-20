@@ -237,15 +237,30 @@ fn compiled_owners_exclude_inherited_mir_bodies_and_declarations() {
         BTreeSet::from([entrypoint, current_function])
     );
     assert_eq!(owners.registered_bodies, BTreeSet::from([current_function]));
+    let analysis = runmat_mir::analysis::analyze_assembly(&mir);
+    let analysis_owners = owners.analysis_owners(&analysis, &bytecode).unwrap();
+    assert_eq!(analysis_owners[&entrypoint], ProgramFunctionId(0));
+    assert_eq!(analysis_owners[&current_function], ProgramFunctionId(1));
+    let projected = analysis
+        .project_product_functions(&analysis_owners)
+        .unwrap();
+    assert!(projected.function_for_local(inherited_function).is_none());
+    assert_eq!(
+        projected
+            .function_for_local(current_function)
+            .unwrap()
+            .function,
+        ProgramFunctionId(1)
+    );
     let old = bytecode.function_registry.functions[&entrypoint].clone();
     bytecode
-        .install_regions_for_product(&[], &owners.assembly, &owners.registered_bodies)
+        .install_regions_for_product(&[], &analysis_owners, &owners.registered_bodies)
         .unwrap();
     bytecode
         .install_parallel_regions_for_product(
             &mir,
             &runmat_types::ParallelManifest::empty(),
-            &owners.assembly,
+            &analysis_owners,
             &owners.registered_bodies,
         )
         .unwrap();

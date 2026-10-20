@@ -87,21 +87,39 @@ impl Invocation {
     fn invoke(self, resident: Value) -> BuiltinResult<Value> {
         use super::super::entrypoints::*;
         match self {
-            Self::Missing => block_on(missing_builtin(vec![resident])),
+            Self::Missing => block_on(missing_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![resident]),
+            )),
             Self::IsMissing => block_on(ismissing_builtin(resident)),
             Self::AnyMissing => block_on(anymissing_builtin(resident)),
-            Self::StandardizeInput => {
-                block_on(standardize_missing_builtin(resident, vec![Value::Num(0.0)]))
-            }
-            Self::StandardizeIndicators => {
-                block_on(standardize_missing_builtin(Value::Num(1.0), vec![resident]))
-            }
-            Self::Remove => block_on(rmmissing_builtin(resident, Vec::new())),
-            Self::Fill => block_on(fillmissing_builtin(
+            Self::StandardizeInput => block_on(standardize_missing_builtin(
+                None,
                 resident,
-                vec![Value::from("constant"), Value::Num(0.0)],
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(0.0)]),
             )),
-            Self::MovingMad => block_on(movmad_builtin(resident, Value::Num(3.0), Vec::new())),
+            Self::StandardizeIndicators => block_on(standardize_missing_builtin(
+                None,
+                Value::Num(1.0),
+                crate::builtins::common::test_support::builtin_arguments(vec![resident]),
+            )),
+            Self::Remove => block_on(rmmissing_builtin(
+                None,
+                resident,
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+            )),
+            Self::Fill => block_on(fillmissing_builtin(
+                None,
+                resident,
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::from("constant"),
+                    Value::Num(0.0),
+                ]),
+            )),
+            Self::MovingMad => block_on(movmad_builtin(
+                resident,
+                Value::Num(3.0),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+            )),
         }
     }
 }

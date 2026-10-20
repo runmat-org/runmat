@@ -80,7 +80,7 @@ use target::OutputTarget;
 async fn filewrite_builtin(
     path: Value,
     data: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     crate::compatibility::ensure_builtin_extension_enabled(
         &FILEWRITE_NATIVE_EXTENSION,
@@ -88,7 +88,7 @@ async fn filewrite_builtin(
     )?;
     // Path and option forms are host text only. Reject them, and data classes
     // known to be invalid, before any resident data is materialized.
-    let options = parse_options(&rest)?;
+    let options = parse_options(rest.view())?;
     let resolved = resolve_path(&path)?;
     preflight_data_kind(&data)?;
     let target = OutputTarget::capture(resolved)?;

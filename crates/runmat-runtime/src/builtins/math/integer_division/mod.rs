@@ -9,7 +9,7 @@ mod engine;
     binding_variant = "default",
     builtin_path = "crate::builtins::math::integer_division"
 )]
-pub(crate) async fn idivide_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(crate) async fn idivide_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     engine::evaluate(args).await
 }
 

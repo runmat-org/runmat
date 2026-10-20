@@ -1,5 +1,7 @@
 //! MATLAB-compatible `shiftdim` with native-class and GPU-residency preservation.
 
+use crate::aggregate::structure::operations as struct_ops;
+
 use crate::builtins::array::shape::permute::{
     permute_char_array, permute_complex_tensor, permute_generic, permute_logical_array,
     permute_string_array, permute_tensor,
@@ -155,7 +157,10 @@ fn make_plan(shape: &[usize], shift: Option<isize>) -> Result<ShiftPlan, Runtime
     binding_variant = "default",
     builtin_path = "crate::builtins::array::shape::shiftdim"
 )]
-async fn shiftdim_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn shiftdim_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(shiftdim_error(
             &SHIFTDIM_ERROR_TOO_MANY_INPUTS,
@@ -308,9 +313,9 @@ fn value_shape(value: &Value) -> Result<Vec<usize>, RuntimeError> {
         Value::Tensor(tensor) => Ok(tensor.shape().to_vec()),
         Value::ComplexTensor(tensor) => Ok(tensor.shape().to_vec()),
         Value::LogicalArray(array) => Ok(array.shape.to_vec()),
-        Value::StringArray(array) => Ok(array.shape.clone()),
-        Value::CharArray(array) => Ok(array.shape.clone()),
-        Value::Cell(array) => Ok(array.shape.clone()),
+        Value::StringArray(array) => Ok(array.shape().to_vec()),
+        Value::CharArray(array) => Ok(array.shape().to_vec()),
+        Value::Cell(array) => Ok(array.shape().to_vec()),
         Value::StructArray(array) => Ok(array.shape().to_vec()),
         Value::GpuTensor(handle) => Ok(handle.shape().to_vec()),
         Value::Num(_)
@@ -374,10 +379,13 @@ async fn permute_value(value: Value, order: &[usize]) -> crate::BuiltinResult<Va
                 .map(Value::Cell)
                 .map_err(|error| shiftdim_error(&SHIFTDIM_ERROR_UNSUPPORTED_INPUT, error))
         }
-        Value::StructArray(array) => array
-            .permute(order)
+        Value::StructArray(array) => struct_ops::permute(array, order)
             .map(Value::StructArray)
-            .map_err(|error| shiftdim_error(&SHIFTDIM_ERROR_UNSUPPORTED_INPUT, error)),
+            .map_err(|error| {
+                struct_ops::remap(error, |message| {
+                    shiftdim_error(&SHIFTDIM_ERROR_UNSUPPORTED_INPUT, message)
+                })
+            }),
         Value::GpuTensor(handle) => permute_gpu(handle, order).await,
         Value::Num(_)
         | Value::Int(_)
@@ -410,16 +418,21 @@ fn reshape_value(value: Value, shape: &[usize]) -> crate::BuiltinResult<Value> {
         Value::LogicalArray(array) => LogicalArray::from_host_buffer(array.data, shape.to_vec())
             .map(Value::LogicalArray)
             .map_err(|error| shiftdim_error(&SHIFTDIM_ERROR_UNSUPPORTED_INPUT, error)),
-        Value::StringArray(array) => StringArray::new(array.data, shape.to_vec())
-            .map(Value::StringArray)
-            .map_err(|error| shiftdim_error(&SHIFTDIM_ERROR_UNSUPPORTED_INPUT, error)),
+        Value::StringArray(array) => {
+            StringArray::from_shared_storage(array.into_parts().0, shape.to_vec().into())
+                .map(Value::StringArray)
+                .map_err(|error| shiftdim_error(&SHIFTDIM_ERROR_UNSUPPORTED_INPUT, error))
+        }
         Value::Cell(array) => CellArray::from_column_major(array.to_column_major(), shape.to_vec())
             .map(Value::Cell)
             .map_err(|error| shiftdim_error(&SHIFTDIM_ERROR_UNSUPPORTED_INPUT, error)),
-        Value::StructArray(array) => array
-            .reshape(shape.to_vec())
+        Value::StructArray(array) => struct_ops::reshape(array, shape.to_vec())
             .map(Value::StructArray)
-            .map_err(|error| shiftdim_error(&SHIFTDIM_ERROR_UNSUPPORTED_INPUT, error)),
+            .map_err(|error| {
+                struct_ops::remap(error, |message| {
+                    shiftdim_error(&SHIFTDIM_ERROR_UNSUPPORTED_INPUT, message)
+                })
+            }),
         Value::CharArray(array) => reshape_char(array, shape).map(Value::CharArray),
         Value::GpuTensor(handle) => reshape_gpu(handle, shape),
         Value::SparseTensor(array) if shape == [array.rows, array.cols] => {

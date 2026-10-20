@@ -70,7 +70,10 @@ fn disp_gather_error(source: crate::RuntimeError) -> crate::RuntimeError {
     binding_variant = "default",
     builtin_path = "crate::builtins::io::disp"
 )]
-async fn disp_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn disp_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     if matches!(crate::output_count::current_output_count(), Some(n) if n > 0) {
         return Err(disp_error(&DISP_ERROR_TOO_MANY_OUTPUTS));
     }

@@ -16,7 +16,7 @@ macro_rules! define_colormap_builtin {
                                     binding_variant = "default",
                                     builtin_path = "crate::builtins::plotting::colormap_arrays"
                                 )]
-        pub fn $function(args: Vec<Value>) -> BuiltinResult<Value> {
+        pub fn $function(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
             let length = parse_length_arg(&args, $name)?;
             Ok(Value::Tensor(colormap_tensor($palette, length)))
         }
@@ -111,10 +111,13 @@ pub(crate) fn parse_rgb_colormap_tensor(
     Ok((map, rows))
 }
 
-fn parse_length_arg(args: &[Value], builtin: &'static str) -> BuiltinResult<usize> {
-    match args {
-        [] => Ok(current_colormap_length()),
-        [value] => colormap_length(value, builtin),
+fn parse_length_arg(
+    args: &crate::call::BuiltinArguments,
+    builtin: &'static str,
+) -> BuiltinResult<usize> {
+    match args.len() {
+        0 => Ok(current_colormap_length()),
+        1 => colormap_length(&args[0], builtin),
         _ => Err(invalid(builtin, "expected zero or one input argument")),
     }
 }

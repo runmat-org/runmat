@@ -13,7 +13,9 @@ pub(super) fn decode_fit_option(named: &NamedOption, value: &Value) -> BuiltinRe
     Ok(match named.identity {
         FitlmOption::Intercept => FitlmAction::Intercept(bool_scalar(value, "Intercept")?),
         FitlmOption::ResponseVar => FitlmAction::ResponseVar(
-            scalar_text(value).ok_or_else(|| fitlm_invalid("fitlm: ResponseVar must be text"))?,
+            scalar_text(value)
+                .ok_or_else(|| fitlm_invalid("fitlm: ResponseVar must be text"))?
+                .into_owned(),
         ),
         FitlmOption::PredictorVars => {
             FitlmAction::PredictorVars(text_list(value, "PredictorVars")?)
@@ -21,7 +23,7 @@ pub(super) fn decode_fit_option(named: &NamedOption, value: &Value) -> BuiltinRe
         FitlmOption::VarNames => FitlmAction::VarNames(text_list(value, "VarNames")?),
         FitlmOption::Exclude => FitlmAction::Exclude(exclude_spec(value)?),
         FitlmOption::Weights => FitlmAction::Weights(if let Some(name) = scalar_text(value) {
-            WeightSpec::Variable(name)
+            WeightSpec::Variable(name.into_owned())
         } else {
             WeightSpec::Values(numeric_vector(value, "Weights")?)
         }),
@@ -35,7 +37,7 @@ pub(super) fn decode_fit_option(named: &NamedOption, value: &Value) -> BuiltinRe
 }
 
 pub(super) fn parse_fit_name_values(
-    values: &[Value],
+    values: crate::call::FunctionArgumentView<'_>,
     names: Vec<PreparedOption>,
     index_offset: usize,
     options: &mut FitOptions,
@@ -57,7 +59,9 @@ pub(super) fn parse_fit_name_values(
     Ok(())
 }
 
-pub(super) fn parse_predict_options(values: Vec<Value>) -> BuiltinResult<PredictOptions> {
+pub(super) fn parse_predict_options(
+    values: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<PredictOptions> {
     if !values.len().is_multiple_of(2) {
         return Err(predict_invalid(
             "predict: name-value options must be paired",

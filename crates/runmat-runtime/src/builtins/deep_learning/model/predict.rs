@@ -4,6 +4,7 @@
 //! belong to the shared network executor. Output wrappers, State publication,
 //! and tape recording belong to the common network output presenter.
 
+use crate::builtins::deep_learning::arguments::DeepLearningObjectEdit as _;
 use runmat_builtins::{DeepLearningAxisLabel, DeepLearningAxisLayout};
 use runmat_value::{ObjectInstance, Value};
 
@@ -26,6 +27,7 @@ pub(crate) async fn predict_deep_learning_object(
     xnew: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Vec<Value>> {
+    let rest = crate::call::BuiltinArguments::from_borrowed(&rest, None)?;
     predict_deep_learning_object_in_runtime(
         None,
         crate::output_count::current_output_count(),
@@ -41,12 +43,12 @@ pub(in crate::builtins) async fn predict_deep_learning_object_in_runtime(
     requested_outputs: Option<usize>,
     network: ObjectInstance,
     xnew: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Vec<Value>> {
-    let requested_state = requested_outputs == Some(2) && network.class_name.is(DLNETWORK_CLASS);
+    let requested_state = requested_outputs == Some(2) && network.class_name().is(DLNETWORK_CLASS);
     if requested_outputs.is_some_and(|count| {
         count
-            > if network.class_name.is(DLNETWORK_CLASS) {
+            > if network.class_name().is(DLNETWORK_CLASS) {
                 2
             } else {
                 1
@@ -57,12 +59,12 @@ pub(in crate::builtins) async fn predict_deep_learning_object_in_runtime(
             "predict: too many output arguments",
         ));
     }
-    let observations = parse_observations_in(&rest)?;
+    let observations = parse_observations_in(rest.view())?;
     let formatted = matches!(&xnew, Value::Object(value)
-        if value.class_name.is(DLARRAY_CLASS)
-            && matches!(value.properties.get("Format"), Some(Value::String(format)) if !format.is_empty()));
+        if value.class_name().is(DLARRAY_CLASS)
+            && matches!(value.properties().get("Format"), Some(Value::String(format)) if !format.is_empty()));
     let unformatted_dlarray = matches!(&xnew, Value::Object(value)
-        if value.class_name.is(DLARRAY_CLASS) && !formatted);
+        if value.class_name().is(DLARRAY_CLASS) && !formatted);
     let input = prepare_input(xnew, observations)?;
     let outcome = execute_network(NetworkExecutionRequest {
         runtime,
@@ -102,11 +104,11 @@ fn prepare_input(input: Value, observations: ObservationsIn) -> BuiltinResult<Va
     .map_err(|error| deep_learning_error("predict", format!("predict: {error}")))?;
     let column_format = column_layout.labels();
     match input {
-        Value::Object(mut value) if value.class_name.is(DLARRAY_CLASS) => {
-            let data = value.properties.get("Data").ok_or_else(|| {
+        Value::Object(mut value) if value.class_name().is(DLARRAY_CLASS) => {
+            let data = value.properties().get("Data").ok_or_else(|| {
                 deep_learning_error("predict", "predict: dlarray is missing Data")
             })?;
-            let format = match value.properties.get("Format") {
+            let format = match value.properties().get("Format") {
                 Some(Value::String(text)) => text.as_str(),
                 None => "",
                 Some(_) => {
@@ -116,7 +118,7 @@ fn prepare_input(input: Value, observations: ObservationsIn) -> BuiltinResult<Va
                     ))
                 }
             };
-            let labels = match value.properties.get("Labels") {
+            let labels = match value.properties().get("Labels") {
                 Some(Value::String(text)) => text.as_str(),
                 None => format,
                 Some(_) => {
@@ -155,12 +157,8 @@ fn prepare_input(input: Value, observations: ObservationsIn) -> BuiltinResult<Va
                     }
                 }
             } else if observations == ObservationsIn::Columns {
-                value
-                    .properties
-                    .insert("Format".into(), Value::String(column_format.clone()));
-                value
-                    .properties
-                    .insert("Labels".into(), Value::String(column_format));
+                value.replace_dl_property("Format", Value::string(column_format.clone()))?;
+                value.replace_dl_property("Labels", Value::string(column_format))?;
             }
             Ok(Value::Object(value))
         }
@@ -174,15 +172,17 @@ fn prepare_input(input: Value, observations: ObservationsIn) -> BuiltinResult<Va
                 "dlarray",
                 vec![
                     ("Data", data),
-                    ("Format", Value::String(format.clone())),
-                    ("Labels", Value::String(format)),
+                    ("Format", Value::string(format.clone())),
+                    ("Labels", Value::string(format)),
                 ],
-            ))
+            )?)
         }
     }
 }
 
-fn parse_observations_in(values: &[Value]) -> BuiltinResult<ObservationsIn> {
+fn parse_observations_in(
+    values: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<ObservationsIn> {
     if !values.len().is_multiple_of(2) {
         return Err(deep_learning_error(
             "predict",

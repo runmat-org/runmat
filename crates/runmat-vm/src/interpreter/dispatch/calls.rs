@@ -828,7 +828,7 @@ pub(crate) fn checked_class_registration(
             PropertyDefaultLiteral::Num(value) => Value::Num(value),
             PropertyDefaultLiteral::Int(value) => Value::Int(value),
             PropertyDefaultLiteral::Bool(value) => Value::Bool(value),
-            PropertyDefaultLiteral::String(value) => Value::String(value),
+            PropertyDefaultLiteral::String(value) => Value::String(value.into()),
         });
         crate::object::class_def::RuntimeClassPropertyRegistration {
             name: property.name,

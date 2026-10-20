@@ -11,11 +11,14 @@ use runmat_builtins::{
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::summary::distributions::normcdf"
 )]
-pub(crate) async fn normcdf_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(crate) async fn normcdf_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     super::ensure_normal_extensions(
         "normcdf",
         &value,
-        &rest,
+        rest.view(),
         [
             &INTEGER_X_EXTENSION,
             &INTEGER_MU_EXTENSION,

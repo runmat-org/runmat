@@ -13,7 +13,7 @@ pub(super) async fn load_graphics_member(
     base: Value,
     field: &str,
 ) -> Result<RootedValue, RuntimeError> {
-    let arguments = [base, Value::String(field.to_string())];
+    let arguments = [base, Value::string(field.to_string())];
     match context {
         Some(context) => crate::call_builtin_async_in_context(context, "get", &arguments).await,
         None => crate::call_builtin_async("get", &arguments).await,
@@ -26,7 +26,7 @@ pub(super) async fn store_graphics_member(
     field: &str,
     rhs: Value,
 ) -> Result<RootedValue, RuntimeError> {
-    let arguments = [base.clone(), Value::String(field.to_string()), rhs];
+    let arguments = [base.clone(), Value::string(field.to_string()), rhs];
     match context {
         Some(context) => crate::call_builtin_async_in_context(context, "set", &arguments).await?,
         None => crate::call_builtin_async("set", &arguments).await?,

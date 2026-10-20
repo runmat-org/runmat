@@ -23,7 +23,7 @@ pub(super) struct SelectedImhist {
 pub(super) fn select(
     runtime: Option<&crate::context::RuntimeContext>,
     image: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     outputs: usize,
 ) -> BuiltinResult<Option<SelectedImhist>> {
     let Value::GpuTensor(owner) = image else {
@@ -47,15 +47,17 @@ pub(super) fn select(
     }
     // Resident indexed calls retain their established unsupported diagnostic;
     // neither their colormap nor a resident control is an admitted upload route.
-    let bins = match rest {
-        [] => {
+    let bins = match (rest.len(), rest.first()) {
+        (0, _) => {
             if handle_is_logical(owner) {
                 LOGICAL_BINS
             } else {
                 DEFAULT_GRAYSCALE_BINS
             }
         }
-        [control] if !matches!(control, Value::GpuTensor(_)) && !is_colormap_argument(control) => {
+        (1, Some(control))
+            if !matches!(control, Value::GpuTensor(_)) && !is_colormap_argument(control) =>
+        {
             let Some(bins) = call::parse_optional_bin_count(control)? else {
                 return Ok(None);
             };

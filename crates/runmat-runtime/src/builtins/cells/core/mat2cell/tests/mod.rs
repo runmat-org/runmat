@@ -11,7 +11,11 @@ use super::implementation;
 use crate::BuiltinResult;
 
 fn run(value: Value, partitions: Vec<Value>) -> BuiltinResult<Value> {
-    block_on(implementation::execute(value, partitions))
+    block_on(implementation::execute(
+        None,
+        value,
+        crate::builtins::common::test_support::builtin_arguments(partitions),
+    ))
 }
 
 fn row_vector(values: &[f64]) -> Value {

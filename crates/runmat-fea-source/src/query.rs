@@ -85,7 +85,9 @@ pub enum FeaBrowseOutcome {
 impl From<Result<FeaBrowsePage, FeaQueryError>> for FeaBrowseOutcome {
     fn from(result: Result<FeaBrowsePage, FeaQueryError>) -> Self {
         match result {
-            Ok(page) => Self::Page { page: Box::new(page) },
+            Ok(page) => Self::Page {
+                page: Box::new(page),
+            },
             Err(reason) => Self::Rejected { reason },
         }
     }

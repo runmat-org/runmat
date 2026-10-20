@@ -2749,7 +2749,9 @@ impl runmat_accelerate_api::AccelProvider for AdmissionProbeProvider {
     ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
         let _ = host;
         self.uploads.fetch_add(1, Ordering::Relaxed);
-        Err(anyhow::anyhow!("admission probe never allocates device memory"))
+        Err(anyhow::anyhow!(
+            "admission probe never allocates device memory"
+        ))
     }
 
     fn download<'a>(

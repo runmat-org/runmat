@@ -217,13 +217,15 @@ mod tests {
         let second = super::super::steps::structural_static_builtin("second".into())
             .await
             .unwrap();
-        let sequence = super::super::sequences::sequence(vec![
-            "sequence".into(),
-            Value::Cell(CellArray::new(vec![first, second], 1, 2).unwrap()),
-            Value::Cell(CellArray::new(Vec::new(), 0, 0).unwrap()),
-            Value::Cell(CellArray::new(Vec::new(), 0, 0).unwrap()),
-            Value::Cell(CellArray::new(Vec::new(), 0, 0).unwrap()),
-        ])
+        let sequence = super::super::sequences::sequence(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                "sequence".into(),
+                Value::Cell(CellArray::new(vec![first, second], 1, 2).unwrap()),
+                Value::Cell(CellArray::new(Vec::new(), 0, 0).unwrap()),
+                Value::Cell(CellArray::new(Vec::new(), 0, 0).unwrap()),
+                Value::Cell(CellArray::new(Vec::new(), 0, 0).unwrap()),
+            ]),
+        )
         .await
         .unwrap();
         let plan = execution_plan_defaults(
@@ -275,13 +277,15 @@ mod tests {
         let second = super::super::steps::structural_static_builtin("second".into())
             .await
             .unwrap();
-        let sequence = super::super::sequences::sequence(vec![
-            "sequence".into(),
-            Value::Cell(CellArray::new(vec![first.clone(), second], 1, 2).unwrap()),
-            Value::Cell(CellArray::new(Vec::new(), 0, 0).unwrap()),
-            Value::Cell(CellArray::new(Vec::new(), 0, 0).unwrap()),
-            Value::Cell(CellArray::new(Vec::new(), 0, 0).unwrap()),
-        ])
+        let sequence = super::super::sequences::sequence(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                "sequence".into(),
+                Value::Cell(CellArray::new(vec![first.clone(), second], 1, 2).unwrap()),
+                Value::Cell(CellArray::new(Vec::new(), 0, 0).unwrap()),
+                Value::Cell(CellArray::new(Vec::new(), 0, 0).unwrap()),
+                Value::Cell(CellArray::new(Vec::new(), 0, 0).unwrap()),
+            ]),
+        )
         .await
         .unwrap();
         let first_options = solver_defaults(first.clone()).await.unwrap();
@@ -303,10 +307,12 @@ mod tests {
     #[test]
     fn study_rejects_retired_string_execution_options() {
         for option in ["Backend", "Requirement", "FormulationRequirement"] {
-            let error = super::super::modeling::StudyConstructorOptions::parse(&[
-                Value::String(option.to_string()),
-                Value::String("cpu".to_string()),
-            ])
+            let error = super::super::modeling::StudyConstructorOptions::parse(
+                crate::call::FunctionArgumentView::from_slice(&[
+                    Value::String(option.to_string().into()),
+                    Value::String("cpu".to_string().into()),
+                ]),
+            )
             .unwrap_err();
             assert!(
                 error.to_string().contains("unsupported fea.study option"),

@@ -7,9 +7,7 @@ pub(super) fn cells(array: CellArray, dimensions: &[usize]) -> crate::BuiltinRes
     // Unlike scalar numeric arrays, an authoritative cell shape of [] has no
     // elements to partition. Explicit dimensions still use normal rank admission.
     if array.shape.is_empty() && dimensions.is_empty() {
-        return CellArray::new_with_shape(array.data, array.shape)
-            .map(Value::Cell)
-            .map_err(error::internal);
+        return Ok(Value::Cell(array));
     }
     let shape = array.shape.clone();
     let plan = PartitionPlan::new(&shape, dimensions)?;
@@ -27,36 +25,26 @@ pub(super) fn cells(array: CellArray, dimensions: &[usize]) -> crate::BuiltinRes
 }
 
 pub(super) fn objects(array: ObjectArray, dimensions: &[usize]) -> crate::BuiltinResult<Value> {
-    let shape = array.shape().to_vec();
-    let class = array.class_name().clone();
-    let plan = PartitionPlan::new(&shape, dimensions)?;
-    let (selected_provenance, unselected_provenance) = if plan.slice_shape.contains(&0) {
-        crate::indexing::object::empty_result_provenance(&array)
-            .map_err(|error| error::internal(error.to_string()))?
-    } else {
-        (Vec::new(), false)
-    };
-    let mut values = options(array.into_data());
+    let plan = PartitionPlan::new(array.shape(), dimensions)?;
+    let context = crate::context::legacy::active();
     let cells = plan
         .groups()
         .map(|indices| {
-            let mut group = take_group(&mut values, &indices?, "object")?;
-            if group.len() == 1 {
-                return group
-                    .pop()
-                    .ok_or_else(|| error::internal("object group is empty"));
+            let indices = indices?;
+            if let [index] = indices.as_slice() {
+                return array
+                    .data()
+                    .get(*index)
+                    .cloned()
+                    .ok_or_else(|| error::internal("object group index is out of bounds"));
             }
-            let mut selected = ObjectArray::new(class.clone(), group, plan.slice_shape.clone())
-                .map_err(error::internal)?;
-            if selected.is_empty() {
-                selected = selected
-                    .with_selected_provenance(selected_provenance.iter().cloned())
-                    .map_err(error::internal)?;
-                if unselected_provenance {
-                    selected = selected.with_unselected_provenance();
-                }
-            }
-            Ok(Value::ObjectArray(selected))
+            crate::execution::object_array::select(
+                &array,
+                indices.iter().copied(),
+                &plan.slice_shape,
+                context.as_ref(),
+            )
+            .map(|output| output.with_owned(|value| value))
         })
         .collect::<crate::BuiltinResult<Vec<_>>>()?;
     super::output(&plan, cells)

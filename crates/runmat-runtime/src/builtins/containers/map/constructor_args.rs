@@ -152,7 +152,7 @@ pub(super) fn infer_key_type(value: &Value, builtin: &'static str) -> BuiltinRes
     match value {
         Value::CharArray(_) | Value::StringArray(_) | Value::String(_) => Ok(KeyType::Char),
         Value::Cell(cell)
-            if cell.data.iter().all(|value| {
+            if cell.data().iter().all(|value| {
                 matches!(value, Value::CharArray(_) | Value::String(_) | Value::StringArray(_))
             }) =>
         {
@@ -244,7 +244,7 @@ pub(super) fn infer_value_type(value: &Value) -> ValueType {
             }
         }
         Value::Cell(cell) => {
-            let mut iter = cell.data.iter();
+            let mut iter = cell.data().iter();
             let Some(first) = iter.next() else {
                 return ValueType::Any;
             };

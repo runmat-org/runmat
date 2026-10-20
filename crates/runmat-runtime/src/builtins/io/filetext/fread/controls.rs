@@ -126,13 +126,16 @@ pub(super) type ClassifiedArgs<'a> = (
     Option<&'a Value>,
 );
 
-pub(super) fn classify_arguments<'a>(args: &[&'a Value]) -> Result<ClassifiedArgs<'a>, String> {
-    let mut filtered_indices: Vec<usize> = Vec::with_capacity(args.len());
+pub(super) fn classify_arguments<'a>(
+    args: crate::call::FunctionArgumentView<'a>,
+) -> Result<ClassifiedArgs<'a>, String> {
+    let mut filtered_indices = [0usize; 4];
+    let mut filtered_count = 0usize;
     let mut like_proto: Option<&Value> = None;
     let mut i = 0usize;
 
     while i < args.len() {
-        let value = args[i];
+        let value = &args[i];
         if matches_keyword(value, "like") {
             if like_proto.is_some() {
                 return Err("multiple 'like' prototypes are not supported".to_string());
@@ -141,25 +144,29 @@ pub(super) fn classify_arguments<'a>(args: &[&'a Value]) -> Result<ClassifiedArg
             let Some(proto_value) = args.get(i) else {
                 return Err("expected prototype after 'like'".to_string());
             };
-            like_proto = Some(*proto_value);
+            like_proto = Some(proto_value);
             i += 1;
             continue;
         }
-        filtered_indices.push(i);
+        if filtered_count < filtered_indices.len() {
+            filtered_indices[filtered_count] = i;
+        }
+        filtered_count += 1;
         i += 1;
     }
 
-    if filtered_indices.len() > 4 {
+    if filtered_count > filtered_indices.len() {
         return Err("too many input arguments".to_string());
     }
 
     let (size_idx, precision_idx, skip_idx, machine_idx) =
-        classify_ordered_indices(args, &filtered_indices)?;
+        classify_ordered_indices(args, &filtered_indices[..filtered_count])?;
 
-    let size = size_idx.map(|index| args[index]);
-    let precision = precision_idx.map(|index| args[index]);
-    let skip = skip_idx.map(|index| args[index]);
-    let machine = machine_idx.map(|index| args[index]);
+    let size = size_idx.map(|index| args.get(index).expect("classified fread control index"));
+    let precision =
+        precision_idx.map(|index| args.get(index).expect("classified fread control index"));
+    let skip = skip_idx.map(|index| args.get(index).expect("classified fread control index"));
+    let machine = machine_idx.map(|index| args.get(index).expect("classified fread control index"));
 
     Ok((size, precision, skip, machine, like_proto))
 }
@@ -167,7 +174,7 @@ pub(super) fn classify_arguments<'a>(args: &[&'a Value]) -> Result<ClassifiedArg
 pub(super) type ClassifiedIndices = (Option<usize>, Option<usize>, Option<usize>, Option<usize>);
 
 pub(super) fn classify_ordered_indices(
-    args: &[&Value],
+    args: crate::call::FunctionArgumentView<'_>,
     indices: &[usize],
 ) -> Result<ClassifiedIndices, String> {
     let mut position = 0usize;
@@ -177,7 +184,7 @@ pub(super) fn classify_ordered_indices(
     let mut machine_idx: Option<usize> = None;
 
     if let Some(&first_index) = indices.get(position) {
-        let first = args[first_index];
+        let first = &args[first_index];
         if is_string_like(first) {
             precision_idx = Some(first_index);
         } else {
@@ -187,7 +194,7 @@ pub(super) fn classify_ordered_indices(
     }
 
     if let Some(&index) = indices.get(position) {
-        let candidate = args[index];
+        let candidate = &args[index];
         if precision_idx.is_none() && is_string_like(candidate) {
             precision_idx = Some(index);
             position += 1;
@@ -203,7 +210,7 @@ pub(super) fn classify_ordered_indices(
     }
 
     if let Some(&index) = indices.get(position) {
-        let candidate = args[index];
+        let candidate = &args[index];
         if skip_idx.is_none() && is_numeric_like(candidate) {
             skip_idx = Some(index);
             position += 1;
@@ -216,7 +223,7 @@ pub(super) fn classify_ordered_indices(
     }
 
     if let Some(&index) = indices.get(position) {
-        let candidate = args[index];
+        let candidate = &args[index];
         if machine_idx.is_none() && is_string_like(candidate) {
             machine_idx = Some(index);
             position += 1;

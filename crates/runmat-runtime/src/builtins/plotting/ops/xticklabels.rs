@@ -15,19 +15,22 @@ use super::axis_ticks::TickAxis;
 )]
 pub fn xticklabels_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     xticklabels_with_runtime(runtime.as_ref(), args)
 }
 
 #[cfg(test)]
 pub fn xticklabels_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    xticklabels_with_runtime(None, args)
+    xticklabels_with_runtime(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(args),
+    )
 }
 
 fn xticklabels_with_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &XTICKLABELS_DESCRIPTOR,

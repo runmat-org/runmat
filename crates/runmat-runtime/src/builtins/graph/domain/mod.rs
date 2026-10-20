@@ -2,7 +2,6 @@ use runmat_types::MemberAccess;
 
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, VecDeque};
-use std::sync::OnceLock;
 
 use runmat_builtins::{
     BuiltinErrorDescriptor, DIGRAPH_CLASS, GRAPH_CLASS, GRAPH_ERROR_INTERNAL,
@@ -99,9 +98,10 @@ pub(crate) use entrypoints::{
     __runmat_wasm_register_builtin_bfsearch_builtin,
     __runmat_wasm_register_builtin_conncomp_builtin, __runmat_wasm_register_builtin_degree_builtin,
     __runmat_wasm_register_builtin_dfsearch_builtin,
-    __runmat_wasm_register_builtin_digraph_builtin,
+    __runmat_wasm_register_builtin_digraph_builtin_context,
     __runmat_wasm_register_builtin_distances_builtin,
-    __runmat_wasm_register_builtin_findedge_builtin, __runmat_wasm_register_builtin_graph_builtin,
+    __runmat_wasm_register_builtin_findedge_builtin,
+    __runmat_wasm_register_builtin_graph_builtin_context,
     __runmat_wasm_register_builtin_indegree_builtin,
     __runmat_wasm_register_builtin_neighbors_builtin,
     __runmat_wasm_register_builtin_numedges_builtin,

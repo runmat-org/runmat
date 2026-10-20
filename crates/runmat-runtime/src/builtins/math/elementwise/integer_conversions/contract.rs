@@ -45,7 +45,7 @@ macro_rules! define_integer_conversion_builtin {
             context = true,
             builtin_path = $path
         )]
-        pub(crate) async fn $function(runtime: Option<RuntimeContext>, value: Value, rest: Vec<Value>) -> BuiltinResult<RootedValue> {
+        pub(crate) async fn $function(runtime: Option<RuntimeContext>, value: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<RootedValue> {
             if !rest.is_empty() {
                 return Err(error(&$argument_error, "too many input arguments"));
             }

@@ -17,7 +17,7 @@ pub(crate) fn newline_builtin() -> BuiltinResult<Value> {
         &NEWLINE_ERROR_TOO_MANY_OUTPUTS,
         "newline",
     )?;
-    Ok(Value::String("\n".to_string()))
+    Ok(Value::string("\n".to_string()))
 }
 
 #[cfg(test)]

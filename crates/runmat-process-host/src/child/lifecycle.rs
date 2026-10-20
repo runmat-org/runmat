@@ -24,6 +24,15 @@ pub struct ChildProcess {
     stdio: Option<ChildStdio>,
     _containment: Option<super::process_tree::ProcessContainment>,
     process_group_placement: ProcessGroupPlacement,
+    retirement: RetirementPhase,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum RetirementPhase {
+    Live,
+    ExitObserved,
+    Signaled,
+    Retired,
 }
 
 impl ChildProcess {
@@ -41,6 +50,7 @@ impl ChildProcess {
             stdio: None,
             _containment: containment,
             process_group_placement,
+            retirement: RetirementPhase::Live,
         }
     }
 
@@ -99,18 +109,56 @@ impl ChildProcess {
         Ok(process_exit(status))
     }
 
+    /// Preserve the direct child's Unix PID until its owned group is signaled
+    /// and retired. Call this instead of reaping and subsequently signaling a
+    /// numeric group identifier that the OS could already have reused.
+    pub async fn wait_and_retire_tree(&mut self) -> ProcessHostResult<ProcessExit> {
+        #[cfg(unix)]
+        if self.retirement == RetirementPhase::Live {
+            super::exit_observation::wait_unreaped(self.process_id)
+                .await
+                .map_err(ProcessHostError::ExitObservation)?;
+            self.retirement = RetirementPhase::ExitObserved;
+        }
+        #[cfg(not(unix))]
+        let _ = self.child.wait().await?;
+        self.terminate_tree().await?;
+        self.wait().await
+    }
+
     pub fn try_wait(&mut self) -> ProcessHostResult<Option<ProcessExit>> {
         Ok(self.child.try_wait()?.map(process_exit))
     }
 
+    pub(super) fn try_wait_unreaped(&mut self) -> ProcessHostResult<Option<ProcessExit>> {
+        #[cfg(unix)]
+        if matches!(
+            self.retirement,
+            RetirementPhase::Live | RetirementPhase::ExitObserved
+        ) {
+            let exit = super::exit_observation::try_wait_unreaped(self.process_id)
+                .map_err(ProcessHostError::ExitObservation)?;
+            if exit.is_some() {
+                self.retirement = RetirementPhase::ExitObserved;
+            }
+            return Ok(exit);
+        }
+        self.try_wait()
+    }
+
     pub async fn terminate_tree(&mut self) -> ProcessHostResult<()> {
-        super::process_tree::terminate(
+        if self.retirement == RetirementPhase::Retired {
+            return Ok(());
+        }
+        self.begin_retirement()?;
+        super::process_tree::await_retirement(
             &mut self.child,
             self.process_id,
             self._containment.as_ref(),
             self.process_group_placement,
         )
         .await?;
+        self.retirement = RetirementPhase::Retired;
         Ok(())
     }
 
@@ -118,12 +166,36 @@ impl ChildProcess {
     /// bootstrap future was cancelled. Joined children prove only member
     /// retirement; their ancestor remains responsible for its process group.
     pub(super) fn terminate_tree_blocking(&mut self) -> ProcessHostResult<()> {
-        super::process_tree::terminate_blocking(
+        if self.retirement == RetirementPhase::Retired {
+            return Ok(());
+        }
+        self.begin_retirement()?;
+        super::process_tree::await_retirement_blocking(
             &mut self.child,
             self.process_id,
             self._containment.as_ref(),
             self.process_group_placement,
         )?;
+        self.retirement = RetirementPhase::Retired;
+        Ok(())
+    }
+
+    fn begin_retirement(&mut self) -> ProcessHostResult<()> {
+        if matches!(
+            self.retirement,
+            RetirementPhase::Live | RetirementPhase::ExitObserved
+        ) {
+            super::process_tree::begin_termination(
+                &mut self.child,
+                self.process_id,
+                self._containment.as_ref(),
+                self.process_group_placement,
+                self.retirement == RetirementPhase::ExitObserved,
+            )?;
+            // Record synchronously, before the first await or possible reap.
+            // Cancellation retries may finish waiting, never signal again.
+            self.retirement = RetirementPhase::Signaled;
+        }
         Ok(())
     }
 }

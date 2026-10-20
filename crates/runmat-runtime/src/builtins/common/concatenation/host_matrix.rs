@@ -36,6 +36,10 @@ fn platform_can_run_inline(rows: &[Vec<Value>]) -> bool {
     let canonical = *CANONICAL_NATIVE_BINDINGS.get_or_init(|| {
         for (name, matches) in [
             (
+                "cat",
+                cat::is_canonical_host_binding as fn(crate::builtin::RuntimeBuiltinBinding) -> bool,
+            ),
+            (
                 "horzcat",
                 horzcat::is_canonical_host_binding
                     as fn(crate::builtin::RuntimeBuiltinBinding) -> bool,
@@ -51,7 +55,7 @@ fn platform_can_run_inline(rows: &[Vec<Value>]) -> bool {
                 return false;
             }
         }
-        cat::has_selected_host_legacy_implementation()
+        true
     });
     if !canonical {
         return false;
@@ -65,11 +69,11 @@ fn host_literal_value(value: &Value) -> bool {
     // control in some argument positions. Keep those literals on dispatch.
     let like_token = match value {
         Value::String(text) => text.eq_ignore_ascii_case("like"),
-        Value::StringArray(array) if array.data.len() == 1 => {
-            array.data[0].eq_ignore_ascii_case("like")
+        Value::StringArray(array) if array.data().len() == 1 => {
+            array.data()[0].eq_ignore_ascii_case("like")
         }
         Value::CharArray(array) if array.rows == 1 => array
-            .data
+            .data()
             .iter()
             .copied()
             .map(|ch| ch.to_ascii_lowercase())

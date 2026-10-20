@@ -599,6 +599,18 @@ pub fn admit_executable_unit(
         .ok_or(ExecutableUnitAdmissionError::MissingComponent("MIR"))?;
     let mir = serde_json::from_slice(&mir_payload.bytes)
         .map_err(ExecutableUnitAdmissionError::InvalidMir)?;
+    let analysis_payload = envelope
+        .component(ExecutableComponentKind::Analysis)
+        .ok_or(ExecutableUnitAdmissionError::MissingComponent("analysis"))?;
+    let analysis: runmat_mir::analysis::AnalysisStore =
+        serde_json::from_slice(&analysis_payload.bytes).map_err(|error| {
+            ExecutableUnitAdmissionError::SourceBinding(format!(
+                "invalid analysis component: {error}"
+            ))
+        })?;
+    analysis.revision.validate_current().map_err(|error| {
+        ExecutableUnitAdmissionError::SourceBinding(format!("invalid analysis revision: {error}"))
+    })?;
     let bytecode_payload = envelope
         .component(ExecutableComponentKind::Bytecode)
         .ok_or(ExecutableUnitAdmissionError::MissingComponent("bytecode"))?;
@@ -635,8 +647,15 @@ pub fn admit_executable_unit(
         .ok_or(ExecutableUnitAdmissionError::MissingComponent("source map"))?;
     let source_map = runmat_execution::ExecutableSourceMapV2::decode(&source_map_payload.bytes)
         .map_err(ExecutableUnitAdmissionError::InvalidSourceMap)?;
-    let entrypoint =
-        entrypoint::admit(&envelope, &mir, &bytecode, &registry, &layout, &source_map)?;
+    let entrypoint = entrypoint::admit(
+        &envelope,
+        &mir,
+        &analysis,
+        &bytecode,
+        &registry,
+        &layout,
+        &source_map,
+    )?;
     let (static_imports, linked_native_imports) =
         static_import::admit(&envelope, &bytecode, &registry)?;
     Ok(AdmittedExecutableUnit {

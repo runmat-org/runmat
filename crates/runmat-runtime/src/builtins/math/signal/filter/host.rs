@@ -340,7 +340,7 @@ mod tests {
             Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap()),
             Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap()),
             Value::Tensor(Tensor::new(vec![1.0; 8192], vec![8192, 1]).unwrap()),
-            &[],
+            crate::call::FunctionArgumentView::from_slice(&[]),
             &mut cooperation,
         ))
         .unwrap()

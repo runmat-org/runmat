@@ -109,24 +109,24 @@ fn contains_symbolic_value(value: &Value) -> bool {
     matches!(value, Value::Symbolic(_) | Value::SymbolicArray(_))
 }
 
-struct SymbolicOperand {
-    data: Vec<SymbolicExpr>,
+struct SymbolicOperand<'a> {
+    data: std::borrow::Cow<'a, [SymbolicExpr]>,
     shape: Vec<usize>,
 }
 
-impl SymbolicOperand {
+impl<'a> SymbolicOperand<'a> {
     fn scalar(expr: SymbolicExpr) -> Self {
         Self {
-            data: vec![expr],
+            data: std::borrow::Cow::Owned(vec![expr]),
             shape: vec![1, 1],
         }
     }
 
-    fn from_value(value: &Value) -> Option<Self> {
+    fn from_value(value: &'a Value) -> Option<Self> {
         match value {
             Value::Symbolic(expr) => Some(Self::scalar(expr.clone())),
             Value::SymbolicArray(array) => Some(Self {
-                data: array.data.clone(),
+                data: std::borrow::Cow::Borrowed(array.data()),
                 shape: normalize_symbolic_shape(&array.shape),
             }),
             Value::Num(value) => Some(Self::scalar(SymbolicExpr::constant(*value))),
@@ -137,20 +137,24 @@ impl SymbolicOperand {
                 0.0
             }))),
             Value::Tensor(tensor) => Some(Self {
-                data: tensor
-                    .materialize_f64()
-                    .iter()
-                    .copied()
-                    .map(SymbolicExpr::constant)
-                    .collect(),
+                data: std::borrow::Cow::Owned(
+                    tensor
+                        .materialize_f64()
+                        .iter()
+                        .copied()
+                        .map(SymbolicExpr::constant)
+                        .collect(),
+                ),
                 shape: normalize_symbolic_shape(tensor.shape()),
             }),
             Value::LogicalArray(array) => Some(Self {
-                data: array
-                    .data
-                    .iter()
-                    .map(|value| SymbolicExpr::constant(if *value == 0 { 0.0 } else { 1.0 }))
-                    .collect(),
+                data: std::borrow::Cow::Owned(
+                    array
+                        .data
+                        .iter()
+                        .map(|value| SymbolicExpr::constant(if *value == 0 { 0.0 } else { 1.0 }))
+                        .collect(),
+                ),
                 shape: normalize_symbolic_shape(&array.shape),
             }),
             _ => None,
@@ -246,9 +250,11 @@ pub(crate) fn empty_return_value() -> Value {
 
 pub(crate) fn text_scalar(value: &Value) -> Option<String> {
     match value {
-        Value::String(text) => Some(text.clone()),
-        Value::CharArray(chars) if chars.rows == 1 => Some(chars.data.iter().collect()),
-        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
+        Value::String(text) => Some(text.as_str().to_owned()),
+        Value::CharArray(chars) if chars.rows == 1 => Some(chars.data().iter().collect()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Some(array.data()[0].as_str().to_owned())
+        }
         _ => None,
     }
 }

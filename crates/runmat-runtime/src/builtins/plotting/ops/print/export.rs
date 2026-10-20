@@ -286,9 +286,11 @@ mod tests {
         let owners: Vec<_> = values
             .iter()
             .map(|value| {
-                let path = super::super::preflight_host_arguments(std::slice::from_ref(value))
-                    .expect("valid text")
-                    .expect("known host filename");
+                let path = super::super::preflight_host_arguments(
+                    crate::call::FunctionArgumentView::from_slice(std::slice::from_ref(value)),
+                )
+                .expect("valid text")
+                .expect("known host filename");
                 PrintFsOwner::capture(Some(&path)).expect("capture mounted provider")
             })
             .collect();
@@ -308,10 +310,12 @@ mod tests {
         let selected = Arc::new(MemoryFsProvider::with_current_dir("/selected"));
         let _restore = fs::replace_provider(selected.clone());
         fs::set_current_dir("/selected").expect("selected directory");
-        assert!(super::super::preflight_host_arguments(&[
-            runmat_value::Value::from("plot"),
-            runmat_value::Value::from("-dsvg"),
-        ])
+        assert!(super::super::preflight_host_arguments(
+            crate::call::FunctionArgumentView::from_slice(&[
+                runmat_value::Value::from("plot"),
+                runmat_value::Value::from("-dsvg"),
+            ])
+        )
         .is_err());
         assert!(selected.read_project_path("/selected/plot.png").is_err());
     }

@@ -7,8 +7,10 @@ fn numeric_filename_decode_preserves_low_rank_row_admission_without_writing() {
     let _compatibility = crate::compatibility::push_runmat_extensions_enabled(true);
     for shape in [Vec::new(), vec![1]] {
         let value = Value::Tensor(Tensor::new(vec![97.0], shape).unwrap());
-        let request = futures::executor::block_on(super::super::input::decode(vec![value]))
-            .expect("numeric row filename");
+        let request = futures::executor::block_on(super::super::input::decode(
+            crate::builtins::common::test_support::builtin_arguments(vec![value]),
+        ))
+        .expect("numeric row filename");
         assert_eq!(request.filename.as_deref(), Some("a"));
     }
     for (shape, codes) in [
@@ -17,8 +19,9 @@ fn numeric_filename_decode_preserves_low_rank_row_admission_without_writing() {
         (vec![1, 1, 2], vec![97.0, 98.0]),
     ] {
         let value = Value::Tensor(Tensor::new(codes, shape).unwrap());
-        let Err(error) = futures::executor::block_on(super::super::input::decode(vec![value]))
-        else {
+        let Err(error) = futures::executor::block_on(super::super::input::decode(
+            crate::builtins::common::test_support::builtin_arguments(vec![value]),
+        )) else {
             panic!("non-row numeric filename must fail")
         };
         assert_eq!(
@@ -53,7 +56,7 @@ fn rejects_excess_arity_and_output_count() {
 fn rejects_empty_and_non_scalar_text_before_writing() {
     let _lock = super::support::lock();
     let empty =
-        super::support::run(vec![Value::String(String::new())], 1, true).expect_err("empty");
+        super::support::run(vec![Value::String(String::new().into())], 1, true).expect_err("empty");
     assert_eq!(
         empty.identifier(),
         runmat_builtins::SAVEPATH_ERROR_EMPTY_FILENAME.identifier
@@ -92,7 +95,7 @@ fn rejects_invalid_numeric_codes_and_reports_write_failure_as_status() {
     std::fs::write(&parent_file, "file").expect("parent file");
     let target = parent_file.join("pathdef.m");
     let value = super::support::run(
-        vec![Value::String(target.to_string_lossy().into_owned())],
+        vec![Value::String(target.to_string_lossy().into_owned().into())],
         1,
         false,
     )

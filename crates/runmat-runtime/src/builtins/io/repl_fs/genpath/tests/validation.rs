@@ -11,8 +11,10 @@ fn numeric_root_decode_preserves_low_rank_row_admission() {
     let _compatibility = crate::compatibility::push_runmat_extensions_enabled(true);
     for shape in [Vec::new(), vec![1]] {
         let codes = Value::Tensor(Tensor::new(vec![97.0], shape).unwrap());
-        let request = futures::executor::block_on(super::super::input::decode(vec![codes]))
-            .expect("numeric row root");
+        let request = futures::executor::block_on(super::super::input::decode(
+            crate::builtins::common::test_support::builtin_arguments(vec![codes]),
+        ))
+        .expect("numeric row root");
         assert_eq!(request.root.as_deref(), Some("a"));
     }
     for (shape, codes) in [
@@ -21,8 +23,9 @@ fn numeric_root_decode_preserves_low_rank_row_admission() {
         (vec![1, 1, 2], vec![97.0, 98.0]),
     ] {
         let value = Value::Tensor(Tensor::new(codes, shape).unwrap());
-        let Err(error) = futures::executor::block_on(super::super::input::decode(vec![value]))
-        else {
+        let Err(error) = futures::executor::block_on(super::super::input::decode(
+            crate::builtins::common::test_support::builtin_arguments(vec![value]),
+        )) else {
             panic!("non-row numeric root must fail")
         };
         assert_eq!(
@@ -108,8 +111,10 @@ fn accepts_trailing_singleton_text_and_numeric_roots() {
 fn distinguishes_missing_roots_from_files() {
     let directory = tempdir().expect("directory");
     let missing = directory.path().join("missing");
-    let missing_error =
-        call(vec![Value::String(missing.to_string_lossy().into())]).expect_err("missing root");
+    let missing_error = call(vec![Value::String(
+        missing.to_string_lossy().into_owned().into(),
+    )])
+    .expect_err("missing root");
     assert_eq!(
         missing_error.identifier(),
         runmat_builtins::GENPATH_ERROR_FOLDER_NOT_FOUND.identifier
@@ -117,8 +122,10 @@ fn distinguishes_missing_roots_from_files() {
 
     let file = directory.path().join("file.txt");
     fs::write(&file, b"contents").expect("file");
-    let file_error =
-        call(vec![Value::String(file.to_string_lossy().into())]).expect_err("file root");
+    let file_error = call(vec![Value::String(
+        file.to_string_lossy().into_owned().into(),
+    )])
+    .expect_err("file root");
     assert_eq!(
         file_error.identifier(),
         runmat_builtins::GENPATH_ERROR_NOT_FOLDER.identifier

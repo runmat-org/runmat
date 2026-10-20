@@ -19,7 +19,7 @@ mod assignin_args;
 /// not rediscover or reselect a callable by name.
 pub struct DynamicWorkspaceInvocation<'a> {
     pub builtin: runmat_builtins::DynamicWorkspaceBuiltin,
-    pub arguments: &'a [Value],
+    pub arguments: crate::call::FunctionArgumentView<'a>,
     pub requested_outputs: usize,
     pub callsite: Option<crate::callsite::CallsiteInfo>,
 }
@@ -30,6 +30,18 @@ pub struct DynamicWorkspaceInvocation<'a> {
 pub fn execute_assignin_effect(
     runtime: &RuntimeContext,
     arguments: &[Value],
+    requested_outputs: usize,
+) -> Result<(), RuntimeError> {
+    execute_assignin_effect_view(
+        runtime,
+        crate::call::FunctionArgumentView::from_slice(arguments),
+        requested_outputs,
+    )
+}
+
+pub fn execute_assignin_effect_view(
+    runtime: &RuntimeContext,
+    arguments: crate::call::FunctionArgumentView<'_>,
     requested_outputs: usize,
 ) -> Result<(), RuntimeError> {
     if arguments.len() < 3 {
@@ -98,13 +110,11 @@ pub fn execute_assignin_effect(
 /// scoped replacement, direct-call observation, and implementation admission
 /// have already selected the canonical builtin body before this function is
 /// entered.
-pub async fn execute_selected_dynamic_workspace(
+fn required_dynamic_runtime(
     runtime: Option<RuntimeContext>,
     builtin: runmat_builtins::DynamicWorkspaceBuiltin,
-    arguments: Vec<Value>,
-    requested_outputs: Option<usize>,
-) -> Result<crate::execution::RootedValueSequence, RuntimeError> {
-    let runtime = runtime.ok_or_else(|| {
+) -> Result<RuntimeContext, RuntimeError> {
+    runtime.ok_or_else(|| {
         let descriptor = match builtin {
             runmat_builtins::DynamicWorkspaceBuiltin::Run => {
                 &runmat_builtins::RUN_ERROR_REQUIRES_VM
@@ -117,7 +127,33 @@ pub async fn execute_selected_dynamic_workspace(
             }
         };
         crate::runtime_descriptor_error(builtin.name(), descriptor)
-    })?;
+    })
+}
+
+pub async fn execute_selected_dynamic_workspace(
+    runtime: Option<RuntimeContext>,
+    builtin: runmat_builtins::DynamicWorkspaceBuiltin,
+    arguments: Vec<Value>,
+    requested_outputs: Option<usize>,
+) -> Result<crate::execution::RootedValueSequence, RuntimeError> {
+    let runtime = required_dynamic_runtime(runtime, builtin)?;
+    let arguments = crate::call::BuiltinArguments::from_borrowed(&arguments, Some(&runtime))?;
+    execute_selected_dynamic_workspace_retained(
+        Some(runtime),
+        builtin,
+        arguments,
+        requested_outputs,
+    )
+    .await
+}
+
+pub async fn execute_selected_dynamic_workspace_retained(
+    runtime: Option<RuntimeContext>,
+    builtin: runmat_builtins::DynamicWorkspaceBuiltin,
+    arguments: crate::call::BuiltinArguments,
+    requested_outputs: Option<usize>,
+) -> Result<crate::execution::RootedValueSequence, RuntimeError> {
+    let runtime = required_dynamic_runtime(runtime, builtin)?;
     let requested_outputs = requested_outputs.unwrap_or(match builtin {
         runmat_builtins::DynamicWorkspaceBuiltin::Assignin
         | runmat_builtins::DynamicWorkspaceBuiltin::Run => 0,
@@ -126,7 +162,7 @@ pub async fn execute_selected_dynamic_workspace(
         | runmat_builtins::DynamicWorkspaceBuiltin::Evalin => 1,
     });
     if builtin == runmat_builtins::DynamicWorkspaceBuiltin::Assignin {
-        execute_assignin_effect(&runtime, &arguments, requested_outputs)?;
+        execute_assignin_effect_view(&runtime, arguments.view(), requested_outputs)?;
         return crate::execution::RootedValueSequence::new(runmat_value::ValueSequence::empty())
             .map_err(|error| error.into_runtime_error());
     }
@@ -136,7 +172,7 @@ pub async fn execute_selected_dynamic_workspace(
         .map_err(super::RuntimeCapabilityError::into_runtime_error)?;
     let invocation = DynamicWorkspaceInvocation {
         builtin,
-        arguments: &arguments,
+        arguments: arguments.view(),
         requested_outputs,
         callsite: crate::callsite::current_callsite(),
     };

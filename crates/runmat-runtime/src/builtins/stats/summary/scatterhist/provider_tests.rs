@@ -127,9 +127,16 @@ fn nested_scalar_resident_group_decodes_through_typed_key() {
     let group =
         Value::Cell(CellArray::new(vec![Value::GpuTensor(scalar.handle.clone())], 1, 1).unwrap());
     let options = block_on(
-        ScatterhistOptionPlan::admit(vec![Value::String("Group".into()), group], 1)
-            .unwrap()
-            .evaluate(1),
+        ScatterhistOptionPlan::admit(
+            crate::call::BuiltinArguments::from_borrowed(
+                &[Value::String("Group".into()), group],
+                None,
+            )
+            .unwrap(),
+            1,
+        )
+        .unwrap()
+        .evaluate(1),
     )
     .unwrap();
     assert_eq!(options.group, Some(vec![Some(KeyAtom::Number(1.0))]));

@@ -20,6 +20,15 @@ use crate::{
     AotError, AotResult, NativeObjectOptions,
 };
 
+pub mod admission;
+mod operator_pair;
+pub use operator_pair::compile_operator_selected_pair;
+mod paired;
+pub use paired::{
+    compile_selected_target_pack_pair, CompiledSelectedNativePair, NativePairArtifactRecipes,
+    SelectedPairedLinkRequest,
+};
+
 pub struct SelectedTargetPack<'a> {
     pub manifest: &'a TargetPackManifest,
     pub requirements: &'a TargetPackRequirements,
@@ -43,6 +52,23 @@ pub fn compile_selected_target_pack_standalone(
     capabilities: RuntimeArchiveCapabilities,
     link: SelectedLinkRequest<'_>,
 ) -> AotResult<LinkedProgram> {
+    with_verified_product(pack, |selected| {
+        compile_selected_standalone(
+            unit,
+            selected,
+            options,
+            capabilities,
+            link.admission,
+            link.hosted,
+            link.publication,
+        )
+    })
+}
+
+fn with_verified_product<T>(
+    pack: SelectedTargetPack<'_>,
+    operation: impl FnOnce(&SelectedNativeProduct<'_>) -> AotResult<T>,
+) -> AotResult<T> {
     let selection = pack
         .manifest
         .select(pack.requirements, pack.numerical_admission)
@@ -53,15 +79,7 @@ pub fn compile_selected_target_pack_standalone(
         .map_err(|error| AotError::contract("aot.selected.bytes", error.to_string()))?;
     let selected = SelectedNativeProduct::from_verified(&verified)
         .map_err(|error| AotError::contract("aot.selected.product", error.to_string()))?;
-    compile_selected_standalone(
-        unit,
-        &selected,
-        options,
-        capabilities,
-        link.admission,
-        link.hosted,
-        link.publication,
-    )
+    operation(&selected)
 }
 
 pub fn compile_selected_standalone(

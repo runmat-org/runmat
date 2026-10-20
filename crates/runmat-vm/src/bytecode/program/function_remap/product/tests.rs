@@ -1,6 +1,6 @@
 use super::*;
 use crate::bytecode::{BytecodeSourceRef, FunctionRegistry, Instr};
-use runmat_types::{FunctionSourceRole, ProgramSourceId};
+use runmat_types::{FunctionSourceRole, ProgramFunctionId, ProgramSourceId};
 
 fn decorated_registry() -> (Bytecode, FunctionRegistry) {
     let source = Some(BytecodeSourceRef::Program(ProgramSourceId(0)));

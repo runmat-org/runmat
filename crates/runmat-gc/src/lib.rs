@@ -152,7 +152,7 @@ pub use stats::{CollectionEvent, CollectionType, GcStats};
 pub use compression::*;
 
 /// Errors that can occur during garbage collection
-#[derive(Error, Debug)]
+#[derive(Error, Debug, PartialEq, Eq)]
 pub enum GcError {
     #[error("Out of memory: {0}")]
     OutOfMemory(String),
@@ -1667,8 +1667,8 @@ mod tests {
             let (result_tx, result_rx) = mpsc::channel();
 
             let worker = thread::spawn(move || {
-                let handle =
-                    gc_allocate(Value::String("thread-root".to_string())).expect("allocation");
+                let handle = gc_allocate(Value::String("thread-root".to_string().into()))
+                    .expect("allocation");
                 let root_value = Value::HandleObject(HandleRef {
                     class_name: "ThreadRoot".into(),
                     target: handle,
@@ -1707,7 +1707,7 @@ mod tests {
             gc_add_root(protected).expect("root registration failed");
 
             for i in 0..60 {
-                let _ = gc_allocate(Value::String(format!("garbage_{i}")));
+                let _ = gc_allocate(Value::String(format!("garbage_{i}").into()));
             }
 
             let _ = gc_collect_minor().expect("collection failed");
@@ -1723,8 +1723,8 @@ mod tests {
     #[test]
     fn explicit_root_unregisters_on_drop() {
         gc_test_context(|| {
-            let protected =
-                gc_allocate(Value::String("protected".to_string())).expect("allocation failed");
+            let protected = gc_allocate(Value::String("protected".to_string().into()))
+                .expect("allocation failed");
             let addr = protected.addr();
 
             {
@@ -1740,8 +1740,8 @@ mod tests {
     #[test]
     fn explicit_root_unroot_removes_registration() {
         gc_test_context(|| {
-            let protected =
-                gc_allocate(Value::String("protected".to_string())).expect("allocation failed");
+            let protected = gc_allocate(Value::String("protected".to_string().into()))
+                .expect("allocation failed");
             let addr = protected.addr();
 
             let root = gc_root(protected).expect("root guard creation failed");
@@ -1756,8 +1756,8 @@ mod tests {
     #[test]
     fn duplicate_explicit_roots_are_counted_independently() {
         gc_test_context(|| {
-            let protected =
-                gc_allocate(Value::String("protected".to_string())).expect("allocation failed");
+            let protected = gc_allocate(Value::String("protected".to_string().into()))
+                .expect("allocation failed");
             let first = gc_root(protected).expect("first root");
             let second = gc_root(protected).expect("second root");
 
@@ -1768,7 +1768,7 @@ mod tests {
             gc_collect_minor().expect("minor collection failed");
             assert_eq!(
                 gc_clone_value(&protected).expect("second root should keep value alive"),
-                Value::String("protected".to_string())
+                Value::String("protected".to_string().into())
             );
 
             drop(second);
@@ -1779,15 +1779,15 @@ mod tests {
     #[test]
     fn rooted_allocation_registers_before_collection() {
         gc_test_context(|| {
-            let root =
-                gc_allocate_rooted(Value::String("rooted".to_string())).expect("rooted alloc");
+            let root = gc_allocate_rooted(Value::String("rooted".to_string().into()))
+                .expect("rooted alloc");
             let handle = root.handle();
 
             assert!(GC.root_ptrs.lock().contains_key(&handle));
             gc_collect_minor().expect("minor collection failed");
             assert_eq!(
                 gc_clone_value(&handle).expect("rooted handle should remain live"),
-                Value::String("rooted".to_string())
+                Value::String("rooted".to_string().into())
             );
 
             drop(root);
@@ -1798,8 +1798,8 @@ mod tests {
     #[test]
     fn reconfigure_preserves_live_allocations() {
         gc_test_context(|| {
-            let root =
-                gc_allocate_rooted(Value::String("still live".to_string())).expect("rooted alloc");
+            let root = gc_allocate_rooted(Value::String("still live".to_string().into()))
+                .expect("rooted alloc");
             let handle = root.handle();
             let mut config = gc_get_config();
             config.minor_gc_threshold = 0.5;
@@ -1808,7 +1808,7 @@ mod tests {
 
             assert_eq!(
                 gc_clone_value(&handle).expect("reconfiguration must preserve the live heap"),
-                Value::String("still live".to_string())
+                Value::String("still live".to_string().into())
             );
         });
     }
@@ -1828,8 +1828,8 @@ mod tests {
     #[test]
     fn reconfigure_rejects_generation_count_change_with_live_allocations() {
         gc_test_context(|| {
-            let root =
-                gc_allocate_rooted(Value::String("still live".to_string())).expect("rooted alloc");
+            let root = gc_allocate_rooted(Value::String("still live".to_string().into()))
+                .expect("rooted alloc");
             let handle = root.handle();
             let mut config = gc_get_config();
             config.num_generations = 2;
@@ -1839,7 +1839,7 @@ mod tests {
             assert!(error.to_string().contains("while GC allocations are live"));
             assert_eq!(
                 gc_clone_value(&handle).expect("failed reconfiguration must preserve live heap"),
-                Value::String("still live".to_string())
+                Value::String("still live".to_string().into())
             );
         });
     }

@@ -102,14 +102,37 @@ impl SelectedLocalBody {
             .view
             .definition_dependency_owners(self.function)
             .ok_or_else(|| invalid("callable dependency graph is incomplete"))?;
-        let functions = owners
+        let imports = owners
             .iter()
-            .map(|(function, _)| *function)
+            .map(|(function, owner)| {
+                let lease = authority
+                    .local_lease(function.0)
+                    .filter(|lease| lease.matches(owner))
+                    .ok_or_else(|| invalid("dependency lacks its exact fingerprint lease"))?;
+                let body = self.view.get_owned(*function, lease).ok_or_else(|| {
+                    invalid("dependency lease does not select its fingerprint body")
+                })?;
+                Ok((
+                    *function,
+                    body.selected_executable_product
+                        .as_ref()
+                        .map(|product| product.fingerprint_imports())
+                        .unwrap_or_default(),
+                ))
+            })
+            .collect::<Result<Vec<_>, ValueCodecError>>()?;
+        let inputs = imports
+            .iter()
+            .map(|(function, imports)| (*function, imports.as_slice()))
             .collect::<Vec<_>>();
         let mut fingerprints = self
             .view
-            .selected_runtime_body_fingerprints(&functions)
-            .map_err(|_| invalid("selected dependency fingerprints are invalid"))?;
+            .selected_runtime_body_fingerprints_by_product(&inputs)
+            .map_err(|reason| {
+                invalid(format!(
+                    "selected dependency fingerprints are invalid: {reason}"
+                ))
+            })?;
         owners
             .into_iter()
             .map(|(function, _)| {

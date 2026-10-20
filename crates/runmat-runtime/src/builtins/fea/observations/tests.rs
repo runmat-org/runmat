@@ -42,14 +42,14 @@ fn absent_choices_expose_an_empty_value_and_encode() {
             panic!("typed object")
         };
         assert!(matches!(
-            object.properties.get("value"),
+            object.properties().get("value"),
             Some(Value::Tensor(tensor)) if tensor.len() == 0
         ));
         let decoded = codec_round_trip(&absent);
         let Value::Object(decoded) = decoded else {
             panic!("decoded object")
         };
-        assert_eq!(decoded.class_name, object.class_name);
+        assert_eq!(decoded.class_name(), object.class_name());
     }
     let reduction = block_on(storage::reduction_none()).unwrap();
     assert_eq!(
@@ -79,13 +79,15 @@ fn monitor_with_progress_only_condition_decodes_without_a_stop() {
 
 #[test]
 fn observation_cost_encodes_through_its_registered_schema() {
-    let cost = block_on(storage::cost(vec![
-        Value::Num(25000.0),
-        Value::Num(400000.0),
-        Value::Num(24000.0),
-        Value::Num(24000.0),
-        Value::Num(0.0),
-    ]))
+    let cost = block_on(storage::cost(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(25000.0),
+            Value::Num(400000.0),
+            Value::Num(24000.0),
+            Value::Num(24000.0),
+            Value::Num(0.0),
+        ]),
+    ))
     .unwrap();
     let decoded = codec_round_trip(&cost);
     let policy: runmat_analysis_core::ObservationCostPolicy =
@@ -111,7 +113,7 @@ fn typed_vectors_are_rows_and_still_decode() {
     let Value::Object(object) = &policy else {
         panic!("typed object")
     };
-    let Some(Value::Struct(value)) = object.properties.get("value") else {
+    let Some(Value::Struct(value)) = object.properties().get("value") else {
         panic!("typed payload struct")
     };
     let Some(Value::Tensor(times)) = value.fields.get("time_seconds") else {

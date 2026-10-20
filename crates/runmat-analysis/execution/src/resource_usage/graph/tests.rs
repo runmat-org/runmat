@@ -30,7 +30,7 @@ fn original(plan: &FeaResourcePlan, first: FirstAttempt) -> TaskExecutionEvidenc
         cpu_millicores: plan.request.cpu_millicores,
         memory_bytes: plan.request.memory_bytes,
         scratch_bytes: plan.request.scratch_bytes.max(1),
-        accelerators: crate::test_fixtures::accelerator_devices(&plan.request.accelerators),
+        accelerators: crate::tests::contract_devices(&plan.request.accelerators),
         capabilities: resources.required_capabilities.clone(),
     };
     let mut driver = Driver::new(DriverConfig::default(), 1).unwrap();
@@ -57,7 +57,7 @@ fn original(plan: &FeaResourcePlan, first: FirstAttempt) -> TaskExecutionEvidenc
         .unwrap();
     driver
         .handle(DriverCommand::RegisterWorker(WorkerSpec {
-            host: crate::test_fixtures::host_inventory(),
+            host: crate::tests::contract_worker(&crate::tests::contract_default_host()),
             id: worker,
             pool_id: pool,
             resources: inventory,
@@ -74,19 +74,20 @@ fn original(plan: &FeaResourcePlan, first: FirstAttempt) -> TaskExecutionEvidenc
             executable: runmat_execution::TaskExecutableIdentity::ProgramArtifact(
                 ArtifactId::derive(&[b"usage-history"]),
             ),
+            host: crate::tests::contract_default_host(),
+            invocation_context: runmat_execution::ProgramInvocationContext::Direct,
             callable: Callable::for_program(
                 "bookkeeping-test",
                 &runmat_execution::ProgramCallable::semantic(
                     runmat_execution::ProgramFunctionId(0),
-                    None,
+                    Some("original-history".into()),
                 ),
             ),
-            host: crate::test_fixtures::host_requirement(),
-            invocation_context: runmat_execution::ProgramInvocationContext::Direct,
             inputs: Vec::new(),
             outputs: OutputContract {
                 owned_work: None,
                 requested_outputs: 0,
+                owned_work: None,
             },
             resources,
             retry: RetryPolicy::ExplicitlyIdempotent { max_attempts: 2 },

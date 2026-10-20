@@ -2,6 +2,8 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use self::capture::DEFAULT_SVG_CAPTURE_ADAPTER;
+#[cfg(feature = "plot-core")]
+use runmat_geometry_core::{AssemblyNode, DiagnosticSeverity};
 use runmat_geometry_core::{
     EntityIdRange, EntityKind, EntityRef, GeometryAsset, GeometrySource, MeshKind, Region,
     SourceGeometry, SourceGeometryKind, TessellationProfile, UnitSystem,
@@ -10,8 +12,6 @@ use runmat_geometry_io::{
     import::GeometryImportError, import_geometry_with_context, GeometryFormat,
     GeometryImportContext, GeometryImportOptions,
 };
-#[cfg(feature = "plot-core")]
-use runmat_geometry_core::{AssemblyNode, DiagnosticSeverity};
 use runmat_geometry_ops::{compute_stats, find_region, GeometryStats, QueryError};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -1039,7 +1039,8 @@ pub fn geometry_preview_scene(
                 chunk_end_triangle += 1;
             }
             let triangles = &surface_mesh.triangles[chunk_start_triangle..chunk_end_triangle];
-            let mut remap = std::collections::HashMap::<u32, u32>::with_capacity(triangles.len() * 3);
+            let mut remap =
+                std::collections::HashMap::<u32, u32>::with_capacity(triangles.len() * 3);
             let mut local_positions = Vec::<[f32; 3]>::new();
             let mut local_colors = Vec::<[f32; 4]>::new();
             let mut indices = Vec::<u32>::with_capacity(triangles.len() * 3);

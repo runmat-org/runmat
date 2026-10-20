@@ -2,7 +2,9 @@ use super::*;
 use runmat_value::{CharArray, StringArray, Value};
 
 fn run(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    futures::executor::block_on(getenv_builtin(args))
+    let args = crate::call::BuiltinArguments::from_borrowed(&args, None)?;
+    futures::executor::block_on(getenv_builtin(None, args))
+        .map(|rooted| rooted.into_value_and_lease().0)
 }
 
 #[test]
@@ -53,7 +55,7 @@ fn scalar_and_shaped_queries_preserve_public_result_forms() {
         panic!("expected string array");
     };
     assert_eq!(values.shape, vec![1, 2]);
-    assert_eq!(values.data, vec!["alpha", "beta"]);
+    assert_eq!(values.data(), vec!["alpha", "beta"]);
     crate::builtins::common::env::remove_var("RUNMAT_GETENV_TEST_A");
     crate::builtins::common::env::remove_var("RUNMAT_GETENV_TEST_B");
 }

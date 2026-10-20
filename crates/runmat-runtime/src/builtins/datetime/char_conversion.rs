@@ -5,14 +5,14 @@ pub fn datetime_char_array(value: &Value) -> BuiltinResult<Option<CharArray>> {
         return Ok(None);
     };
     let width = array
-        .data
+        .data()
         .iter()
         .map(|s| s.chars().count())
         .max()
         .unwrap_or(0);
-    let rows = array.data.len();
+    let rows = array.data().len();
     let mut data = vec![' '; rows * width];
-    for (row, text) in array.data.iter().enumerate() {
+    for (row, text) in array.data().iter().enumerate() {
         for (col, ch) in text.chars().enumerate() {
             data[row * width + col] = ch;
         }

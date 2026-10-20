@@ -3,7 +3,7 @@ use super::*;
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn sign_string_input_errors() {
-    let err = sign_builtin(Value::String("runmat".to_string())).unwrap_err();
+    let err = sign_builtin(Value::String("runmat".to_string().into())).unwrap_err();
     assert!(
         err.message()
             .contains("expected numeric, logical, or character input"),

@@ -6,7 +6,7 @@ use runmat_value::NumericScalar;
 pub(in crate::builtins::table) fn grpstats_impl(
     value: Value,
     group: Value,
-    rest: Vec<Value>,
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<Value> {
     if table_object(&value).is_some() {
         return grpstats_table_impl(value, group, rest);
@@ -90,7 +90,7 @@ impl Default for GrpStatsOptions {
 }
 
 fn parse_grpstats_options(
-    rest: Vec<Value>,
+    rest: crate::call::FunctionArgumentView<'_>,
     table_context: Option<(&ObjectInstance, &[String])>,
 ) -> BuiltinResult<GrpStatsOptions> {
     let mut options = GrpStatsOptions::default();
@@ -163,8 +163,8 @@ fn parse_grpstats_stat_list(value: &Value) -> BuiltinResult<Vec<GrpStat>> {
             "grpstats: custom function-handle summary statistics are not supported yet",
         )),
         Value::Cell(cell) => {
-            let mut stats = Vec::with_capacity(cell.data.len());
-            for value in &cell.data {
+            let mut stats = Vec::with_capacity(cell.data().len());
+            for value in cell.data() {
                 stats.extend(parse_grpstats_stat_list(value)?);
             }
             Ok(stats)
@@ -203,7 +203,11 @@ fn scalar_number(value: &Value) -> Option<f64> {
     }
 }
 
-fn grpstats_table_impl(table: Value, groupvars: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+fn grpstats_table_impl(
+    table: Value,
+    groupvars: Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Value> {
     let object = into_table_object(table, "grpstats")?;
     let names = table_variable_names_from_object(&object)?;
     let group_names = if option_value_is_empty(&groupvars) {
@@ -222,7 +226,7 @@ fn grpstats_table_impl(table: Value, groupvars: Value, rest: Vec<Value>) -> Buil
             .filter(|name| {
                 variables
                     .fields
-                    .get(*name)
+                    .get(name)
                     .map(is_numeric_or_logical_column)
                     .unwrap_or(false)
             })
@@ -380,7 +384,11 @@ fn summarize_integer_table_groups<'a>(
         .map_err(invalid_variable)
 }
 
-fn grpstats_matrix_impl(value: Value, group: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+fn grpstats_matrix_impl(
+    value: Value,
+    group: Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Value> {
     let options = parse_grpstats_options(rest, None)?;
     let matrix = numeric_matrix(value, "grpstats")?;
     let groups = matrix_groups(&group, matrix.rows)?;
@@ -596,7 +604,7 @@ fn grouped_rows_from_row_keys(row_keys: Vec<(usize, Vec<GroupAtom>)>) -> Grouped
     let keys = if preserve_first_seen {
         first_seen
     } else {
-        buckets.keys().cloned().collect()
+        buckets.keys().map(ToOwned::to_owned).collect()
     };
     let rows = keys
         .iter()
@@ -610,14 +618,14 @@ fn grouping_columns(group: &Value, rows: usize) -> BuiltinResult<Vec<Vec<GroupAt
         return Ok(Vec::new());
     }
     if let Value::Cell(cell) = group {
-        let treats_as_grouping_list = cell.data.len() > 1
+        let treats_as_grouping_list = cell.data().len() > 1
             && cell
-                .data
+                .data()
                 .iter()
                 .all(|value| grouping_vector_len(value).is_some_and(|len| len == rows));
         if treats_as_grouping_list {
             return cell
-                .data
+                .data()
                 .iter()
                 .map(|value| grouping_atoms(value, rows))
                 .collect();
@@ -630,9 +638,9 @@ fn grouping_vector_len(value: &Value) -> Option<usize> {
     match value {
         Value::Tensor(tensor) => Some(tensor_utils::tensor_element_len(tensor)),
         Value::LogicalArray(array) => Some(array.data.len()),
-        Value::StringArray(array) => Some(array.data.len()),
+        Value::StringArray(array) => Some(array.data().len()),
         Value::CharArray(array) => Some(array.rows),
-        Value::Cell(cell) => Some(cell.data.len()),
+        Value::Cell(cell) => Some(cell.data().len()),
         Value::Object(obj) if obj.is_class(CATEGORICAL_CLASS) => value_row_count(value).ok(),
         _ => None,
     }
@@ -668,12 +676,16 @@ fn grouping_atoms(value: &Value, rows: usize) -> BuiltinResult<Vec<GroupAtom>> {
             .iter()
             .map(|value| GroupAtom::Logical(*value != 0))
             .collect()),
-        Value::StringArray(array) => Ok(array.data.iter().cloned().map(text_group_atom).collect()),
+        Value::StringArray(array) => Ok(array
+            .data()
+            .iter()
+            .map(|text| text_group_atom(text.to_string()))
+            .collect()),
         Value::CharArray(array) => Ok((0..array.rows)
             .map(|row| {
                 let start = row * array.cols;
                 GroupAtom::Text(
-                    array.data[start..start + array.cols]
+                    array.data()[start..start + array.cols]
                         .iter()
                         .collect::<String>()
                         .trim()
@@ -681,7 +693,7 @@ fn grouping_atoms(value: &Value, rows: usize) -> BuiltinResult<Vec<GroupAtom>> {
                 )
             })
             .collect()),
-        Value::Cell(cell) => Ok(cell.data.iter().map(cell_atom).collect()),
+        Value::Cell(cell) => Ok(cell.data().iter().map(cell_atom).collect()),
         Value::Object(obj) if obj.is_class(CATEGORICAL_CLASS) => Ok((0..rows)
             .map(|row| {
                 categorical_label_at(obj, row)
@@ -698,9 +710,9 @@ fn cell_atom(value: &Value) -> GroupAtom {
         Value::Num(value) => number_group_atom(*value),
         Value::Int(value) => GroupAtom::Integer(value.clone()),
         Value::Bool(value) => GroupAtom::Logical(*value),
-        Value::String(value) => text_group_atom(value.clone()),
+        Value::String(value) => text_group_atom(value.to_string()),
         Value::CharArray(array) if array.rows == 1 => {
-            text_group_atom(array.data.iter().collect::<String>().trim().to_string())
+            text_group_atom(array.data().iter().collect::<String>().trim().to_string())
         }
         Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => tensor
             .integer_storage()

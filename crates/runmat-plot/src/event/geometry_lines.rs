@@ -32,7 +32,7 @@ impl GeometryLines {
     pub(super) fn restore(self, id: String) -> Result<GeometrySceneChunk, String> {
         let count = self.indices.as_ref().map_or(self.positions.len(), Vec::len);
         if self.positions.len() != self.colors.len()
-            || count % 2 != 0
+            || !count.is_multiple_of(2)
             || self
                 .positions
                 .iter()

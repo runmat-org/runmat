@@ -76,7 +76,7 @@ fn remap_char_flow(err: RuntimeError) -> RuntimeError {
     binding_variant = "default",
     builtin_path = "crate::builtins::strings::core::char"
 )]
-async fn char_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn char_builtin(rest: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
         let empty =
             CharArray::new(Vec::new(), 0, 0).map_err(|_| char_error(&CHAR_ERROR_INTERNAL))?;
@@ -203,7 +203,7 @@ fn char_array_rows(ca: &CharArray) -> Vec<Vec<char>> {
     for r in 0..ca.rows {
         let mut row = Vec::with_capacity(ca.cols);
         for c in 0..ca.cols {
-            row.push(ca.data[r * ca.cols + c]);
+            row.push(ca.data()[r * ca.cols + c]);
         }
         rows.push(row);
     }
@@ -212,10 +212,10 @@ fn char_array_rows(ca: &CharArray) -> Vec<Vec<char>> {
 
 fn string_array_rows(sa: &StringArray) -> BuiltinResult<Vec<Vec<char>>> {
     ensure_two_dimensional(&sa.shape, "char")?;
-    if sa.data.is_empty() {
+    if sa.data().is_empty() {
         return Ok(Vec::new());
     }
-    let mut rows = Vec::with_capacity(sa.data.len());
+    let mut rows = Vec::with_capacity(sa.data().len());
     let rows_count = sa.rows();
     let cols_count = sa.cols();
     if rows_count == 0 || cols_count == 0 {
@@ -224,7 +224,7 @@ fn string_array_rows(sa: &StringArray) -> BuiltinResult<Vec<Vec<char>>> {
     for c in 0..cols_count {
         for r in 0..rows_count {
             let idx = r + c * rows_count;
-            rows.push(sa.data[idx].chars().collect());
+            rows.push(sa.data()[idx].chars().collect());
         }
     }
     Ok(rows)
@@ -232,7 +232,7 @@ fn string_array_rows(sa: &StringArray) -> BuiltinResult<Vec<Vec<char>>> {
 
 fn symbolic_array_rows(array: &SymbolicArray) -> BuiltinResult<Vec<Vec<char>>> {
     ensure_two_dimensional(&array.shape, "char")?;
-    let (rows, cols) = infer_rows_cols(&array.shape, array.data.len());
+    let (rows, cols) = infer_rows_cols(&array.shape, array.data().len());
     if rows == 0 {
         return Ok(Vec::new());
     }
@@ -244,7 +244,7 @@ fn symbolic_array_rows(array: &SymbolicArray) -> BuiltinResult<Vec<Vec<char>>> {
                 continue;
             }
             let idx = r + c * rows;
-            row.extend(array.data[idx].to_string().chars());
+            row.extend(array.data()[idx].to_string().chars());
         }
         out.push(row);
     }
@@ -311,8 +311,8 @@ fn logical_rows(la: &LogicalArray) -> BuiltinResult<Vec<Vec<char>>> {
 }
 
 fn cell_rows(ca: &CellArray) -> BuiltinResult<Vec<Vec<char>>> {
-    let mut rows = Vec::with_capacity(ca.data.len());
-    for ptr in &ca.data {
+    let mut rows = Vec::with_capacity(ca.data().len());
+    for ptr in ca.data() {
         let element = (ptr).clone();
         let mut converted = value_to_char_rows(&element)?;
         match converted.len() {
@@ -435,7 +435,9 @@ pub(crate) mod tests {
     use runmat_value::{IntegerStorage, NumericStorage, StringArray, SymbolicArray, SymbolicExpr};
 
     fn char_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(super::char_builtin(rest))
+        futures::executor::block_on(super::char_builtin(
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -449,7 +451,7 @@ pub(crate) mod tests {
             panic!("character array expected")
         };
         assert_eq!((scalar.rows, scalar.cols), (1, 1));
-        assert_eq!(scalar.data, vec!['A']);
+        assert_eq!(scalar.data(), vec!['A']);
 
         let vector = char_builtin(vec![Value::Tensor(
             Tensor::new(vec![65.0, 66.0], vec![2]).unwrap(),
@@ -459,7 +461,7 @@ pub(crate) mod tests {
             panic!("character array expected")
         };
         assert_eq!((vector.rows, vector.cols), (1, 2));
-        assert_eq!(vector.data, vec!['A', 'B']);
+        assert_eq!(vector.data(), vec!['A', 'B']);
     }
 
     fn error_message(err: crate::RuntimeError) -> String {
@@ -474,7 +476,7 @@ pub(crate) mod tests {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 0);
                 assert_eq!(ca.cols, 0);
-                assert!(ca.data.is_empty());
+                assert!(ca.data().is_empty());
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -483,13 +485,13 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_from_string_scalar() {
-        let value = Value::String("RunMat".to_string());
+        let value = Value::String("RunMat".to_string().into());
         let result = char_builtin(vec![value]).expect("char");
         match result {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 1);
                 assert_eq!(ca.cols, 6);
-                assert_eq!(ca.data, "RunMat".chars().collect::<Vec<_>>());
+                assert_eq!(ca.data(), "RunMat".chars().collect::<Vec<_>>());
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -505,7 +507,7 @@ pub(crate) mod tests {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 1);
                 assert_eq!(ca.cols, 6);
-                assert_eq!(ca.data, "RUNMAT".chars().collect::<Vec<_>>());
+                assert_eq!(ca.data(), "RUNMAT".chars().collect::<Vec<_>>());
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -518,7 +520,7 @@ pub(crate) mod tests {
                 .expect("single tensor");
         let result = char_builtin(vec![Value::Tensor(tensor)]).expect("char");
         match result {
-            Value::CharArray(array) => assert_eq!(array.data, vec!['R', 'M']),
+            Value::CharArray(array) => assert_eq!(array.data(), vec!['R', 'M']),
             other => panic!("expected char array, got {other:?}"),
         }
     }
@@ -534,7 +536,7 @@ pub(crate) mod tests {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 1);
                 assert_eq!(ca.cols, 2);
-                assert_eq!(ca.data, vec!['R', '\u{FFFF}']);
+                assert_eq!(ca.data(), vec!['R', '\u{FFFF}']);
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -557,7 +559,7 @@ pub(crate) mod tests {
             else {
                 panic!("expected char array");
             };
-            assert_eq!(array.data, vec!['A']);
+            assert_eq!(array.data(), vec!['A']);
         }
     }
 
@@ -571,7 +573,7 @@ pub(crate) mod tests {
         else {
             panic!("expected char array");
         };
-        assert_eq!(array.data, vec!['\0']);
+        assert_eq!(array.data(), vec!['\0']);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -584,7 +586,7 @@ pub(crate) mod tests {
         else {
             panic!("expected char array");
         };
-        assert_eq!(array.data, vec!['\u{FFFF}']);
+        assert_eq!(array.data(), vec!['\u{FFFF}']);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -598,7 +600,7 @@ pub(crate) mod tests {
                 assert_eq!(ca.rows, 2);
                 assert_eq!(ca.cols, 7);
                 assert_eq!(
-                    ca.data,
+                    ca.data(),
                     vec!['c', 'a', 't', ' ', ' ', ' ', ' ', 'g', 'i', 'r', 'a', 'f', 'f', 'e']
                 );
             }
@@ -625,7 +627,7 @@ pub(crate) mod tests {
                 assert_eq!(ca.rows, 3);
                 assert_eq!(ca.cols, 5);
                 assert_eq!(
-                    ca.data,
+                    ca.data(),
                     vec!['n', 'o', 'r', 't', 'h', 'e', 'a', 's', 't', ' ', 'w', 'e', 's', 't', ' ']
                 );
             }
@@ -636,14 +638,14 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_numeric_and_text_arguments_concatenate() {
-        let text = Value::String("hi".to_string());
+        let text = Value::String("hi".to_string().into());
         let codes = Tensor::new(vec![65.0, 66.0], vec![1, 2]).expect("tensor");
         let result = char_builtin(vec![text, Value::Tensor(codes)]).expect("char");
         match result {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 2);
                 assert_eq!(ca.cols, 2);
-                assert_eq!(ca.data, vec!['h', 'i', 'A', 'B']);
+                assert_eq!(ca.data(), vec!['h', 'i', 'A', 'B']);
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -665,7 +667,7 @@ pub(crate) mod tests {
                 Value::CharArray(ca) => {
                     assert_eq!(ca.rows, 1);
                     assert_eq!(ca.cols, 3);
-                    assert_eq!(ca.data, vec!['R', 'U', 'N']);
+                    assert_eq!(ca.data(), vec!['R', 'U', 'N']);
                 }
                 other => panic!("expected char array, got {other:?}"),
             }
@@ -678,7 +680,7 @@ pub(crate) mod tests {
         let Value::CharArray(array) = char_builtin(vec![Value::Num(65.9)]).expect("char") else {
             panic!("expected char array");
         };
-        assert_eq!(array.data, vec!['A']);
+        assert_eq!(array.data(), vec!['A']);
     }
 
     #[test]
@@ -698,7 +700,7 @@ pub(crate) mod tests {
             else {
                 panic!("expected char array");
             };
-            assert_eq!(array.data, vec!['A']);
+            assert_eq!(array.data(), vec!['A']);
         }
 
         let err = char_builtin(vec![Value::Int(IntValue::U16(0xD800))])
@@ -755,7 +757,7 @@ pub(crate) mod tests {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 4);
                 assert_eq!(ca.cols, 4);
-                assert_eq!(ca.data, "c0r0c0r1c1r0c1r1".chars().collect::<Vec<char>>());
+                assert_eq!(ca.data(), "c0r0c0r1c1r0c1r1".chars().collect::<Vec<char>>());
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -781,7 +783,7 @@ pub(crate) mod tests {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 2);
                 assert_eq!(ca.cols, 2);
-                assert_eq!(ca.data, vec!['x', 'y', 'z', 'w']);
+                assert_eq!(ca.data(), vec!['x', 'y', 'z', 'w']);
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -807,7 +809,7 @@ pub(crate) mod tests {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 2);
                 assert_eq!(ca.cols, 7);
-                assert_eq!(ca.data.iter().collect::<String>(), "x1thetayz     ");
+                assert_eq!(ca.data().iter().collect::<String>(), "x1thetayz     ");
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -828,7 +830,7 @@ pub(crate) mod tests {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 1);
                 assert_eq!(ca.cols, 2);
-                assert_eq!(ca.data, vec!['x', 'y']);
+                assert_eq!(ca.data(), vec!['x', 'y']);
             }
             other => panic!("expected char array, got {other:?}"),
         }

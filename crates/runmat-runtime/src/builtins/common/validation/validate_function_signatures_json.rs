@@ -9,15 +9,15 @@ use runmat_builtins::{
     binding_variant = "default",
     builtin_path = "crate::builtins::common::validation::validate_function_signatures_json"
 )]
-fn builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+fn builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     evaluate(args)
 }
 
-pub(super) fn evaluate(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) fn evaluate(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     super::admission::inputs(
         &VALIDATE_FUNCTION_SIGNATURES_JSON_CATALOG_ENTRY,
         &VALIDATE_FUNCTION_SIGNATURES_JSON_ERROR_OUTPUTS,
-        &args,
+        args.view(),
     )?;
     super::admission::reject_resident_text(
         &VALIDATE_FUNCTION_SIGNATURES_JSON_CATALOG_ENTRY,

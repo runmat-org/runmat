@@ -12,16 +12,17 @@ pub enum FillMissingMethodKind {
 
 impl FillMissingMethodKind {
     pub fn parse(text: &str) -> Option<Self> {
-        match text.to_ascii_lowercase().as_str() {
-            "constant" => Some(Self::Constant),
-            "previous" => Some(Self::Previous),
-            "next" => Some(Self::Next),
-            "nearest" => Some(Self::Nearest),
-            "linear" => Some(Self::Linear),
-            "mean" => Some(Self::Mean),
-            "median" => Some(Self::Median),
-            _ => None,
-        }
+        [
+            ("constant", Self::Constant),
+            ("previous", Self::Previous),
+            ("next", Self::Next),
+            ("nearest", Self::Nearest),
+            ("linear", Self::Linear),
+            ("mean", Self::Mean),
+            ("median", Self::Median),
+        ]
+        .into_iter()
+        .find_map(|(spelling, kind)| text.eq_ignore_ascii_case(spelling).then_some(kind))
     }
 }
 

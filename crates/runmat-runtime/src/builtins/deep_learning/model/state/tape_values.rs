@@ -21,7 +21,7 @@ pub(in crate::builtins::deep_learning) fn stage_annotated(
         ));
     }
 
-    let Some(stored) = network.properties.get(STORAGE_PROPERTY) else {
+    let Some(stored) = network.properties().get(STORAGE_PROPERTY) else {
         unreachable!("State view admitted canonical State")
     };
     let mut replacements = replacements.into_iter();
@@ -53,30 +53,44 @@ fn map_values(
     function: &'static str,
     mut mapper: impl FnMut(&StateKey, Value) -> BuiltinResult<Value>,
 ) -> BuiltinResult<Value> {
-    let Some(Value::Cell(layers)) = network.properties.get("Layers") else {
+    let Some(Value::Cell(layers)) = network.properties().get("Layers") else {
         return Err(deep_learning_error(
             function,
             format!("{function}: network is missing Layers"),
         ));
     };
-    table::validate_canonical(&layers.data, source, function)?;
-    let keys = schema::keys(&layers.data, function)?;
+    table::validate_canonical(layers.data(), source, function)?;
+    let keys = schema::keys(layers.data(), function)?;
     let Value::Object(stored) = source else {
         unreachable!("canonical State validation admitted a table")
     };
-    let mut variables = crate::builtins::table::table_variables(stored)
+    let variables = crate::builtins::table::table_variables(stored)
         .map_err(|error| deep_learning_error(function, error.to_string()))?;
-    let Some(Value::Cell(column)) = variables.fields.get_mut("Value") else {
+    let Some(Value::Cell(column)) = variables.fields.get("Value") else {
         unreachable!("canonical State validation admitted the Value column")
     };
-    for (key, slot) in keys.iter().zip(&mut column.data) {
+    let context = crate::context::legacy::active();
+    let prepared_column = crate::execution::structure::replacement::cell(column, context.as_ref())?;
+    let _column_roots = prepared_column.1;
+    let mut column = prepared_column.0;
+    let slots = column
+        .try_data_mut_unique()
+        .expect("new admitted State slots are unique");
+    for (key, slot) in keys.iter().zip(slots.iter_mut()) {
         let value = mapper(key, slot.clone())?;
         schema::validate_value(&value, key, function)?;
         *slot = value;
     }
+    let prepared_variables =
+        crate::execution::structure::replacement::record(&variables, context.as_ref())?;
+    let _variables_roots = prepared_variables.1;
+    let mut variables = prepared_variables.0;
+    variables
+        .try_replace_unique("Value", Value::Cell(column))
+        .expect("new admitted State map contains Value");
     let replacement = crate::builtins::table::table_replace_variables_like(stored, variables)
         .map_err(|error| deep_learning_error(function, error.to_string()))?;
-    table::validate_canonical(&layers.data, &replacement, function)?;
+    table::validate_canonical(layers.data(), &replacement, function)?;
     Ok(replacement)
 }
 
@@ -84,8 +98,9 @@ fn map_values(
 pub(in crate::builtins::deep_learning) fn install_annotated(
     network: &mut ObjectInstance,
     staged: Value,
-) {
-    network.properties.insert(STORAGE_PROPERTY.into(), staged);
+) -> BuiltinResult<()> {
+    network.replace_dl_property(STORAGE_PROPERTY, staged)?;
+    Ok(())
 }
 
 #[cfg(test)]

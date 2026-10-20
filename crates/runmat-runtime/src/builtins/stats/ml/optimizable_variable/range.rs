@@ -9,7 +9,7 @@ pub(super) enum OptimizableRange {
     },
     Categorical {
         value: Value,
-        categories: Vec<String>,
+        categories: Vec<runmat_value::Utf8Text>,
     },
 }
 
@@ -74,12 +74,12 @@ impl OptimizableRange {
                 let category = char_row_to_string(&chars, "Range", &ERROR_INVALID_RANGE)?;
                 check_categories(std::slice::from_ref(&category))?;
                 let value = Value::Cell(
-                    CellArray::new(vec![Value::String(category.clone())], 1, 1)
+                    CellArray::new(vec![Value::string(category.clone())], 1, 1)
                         .map_err(|err| error(err, &ERROR_INVALID_RANGE))?,
                 );
                 Ok(Self::Categorical {
                     value,
-                    categories: vec![category],
+                    categories: vec![category.into()],
                 })
             }
             other => Err(error(
@@ -118,7 +118,7 @@ impl OptimizableRange {
         }
     }
 
-    pub(super) fn value(&self) -> &Value {
+    pub(super) fn into_value(self) -> Value {
         match self {
             Self::Numeric { value, .. } | Self::Categorical { value, .. } => value,
         }
@@ -184,22 +184,23 @@ fn validate_integer_transform(lower: f64, transform: Transform) -> BuiltinResult
     Ok(())
 }
 
-fn text_categories_from_string_array(array: &StringArray) -> BuiltinResult<Vec<String>> {
-    let categories = array.data.clone();
-    check_categories(&categories)?;
-    Ok(categories)
+fn text_categories_from_string_array(
+    array: &StringArray,
+) -> BuiltinResult<Vec<runmat_value::Utf8Text>> {
+    check_categories(array.data_owner().as_slice())?;
+    Ok(array.data().to_vec())
 }
 
-fn text_categories_from_cell(cell: &CellArray) -> BuiltinResult<Vec<String>> {
-    let mut categories = Vec::with_capacity(cell.data.len());
-    for value in &cell.data {
+fn text_categories_from_cell(cell: &CellArray) -> BuiltinResult<Vec<runmat_value::Utf8Text>> {
+    let mut categories = Vec::with_capacity(cell.data().len());
+    for value in cell.data() {
         categories.push(parse_text_scalar(value, "Range", &ERROR_INVALID_RANGE)?);
     }
     check_categories(&categories)?;
     Ok(categories)
 }
 
-fn check_categories(categories: &[String]) -> BuiltinResult<()> {
+fn check_categories(categories: &[impl AsRef<str>]) -> BuiltinResult<()> {
     if categories.is_empty() {
         return Err(error(
             "optimizableVariable: categorical Range must contain at least one category",
@@ -208,13 +209,14 @@ fn check_categories(categories: &[String]) -> BuiltinResult<()> {
     }
     let mut seen = HashSet::with_capacity(categories.len());
     for category in categories {
+        let category = category.as_ref();
         if category.trim().is_empty() {
             return Err(error(
                 "optimizableVariable: categorical Range values must be nonempty text",
                 &ERROR_INVALID_RANGE,
             ));
         }
-        if !seen.insert(category.clone()) {
+        if !seen.insert(category) {
             return Err(error(
                 "optimizableVariable: categorical Range values must be unique",
                 &ERROR_INVALID_RANGE,

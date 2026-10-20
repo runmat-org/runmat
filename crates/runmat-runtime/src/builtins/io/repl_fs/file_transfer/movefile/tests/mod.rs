@@ -9,7 +9,10 @@ use super::super::outcome::TransferOutcome;
 use crate::BuiltinResult;
 
 fn evaluate(args: &[Value]) -> BuiltinResult<TransferOutcome> {
-    futures::executor::block_on(super::execute::evaluate(args, None))
+    futures::executor::block_on(super::execute::evaluate(
+        crate::call::FunctionArgumentView::from_slice(args),
+        None,
+    ))
 }
 
 fn text(path: &std::path::Path) -> Value {

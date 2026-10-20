@@ -11,14 +11,18 @@ enum MfilenameMode {
 
 fn text_value(value: &Value) -> Option<String> {
     match value {
-        Value::String(text) => Some(text.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
-        Value::CharArray(array) if array.rows == 1 => Some(array.data.iter().collect()),
+        Value::String(text) => Some(text.as_str().to_owned()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Some(array.data()[0].as_str().to_owned())
+        }
+        Value::CharArray(array) if array.rows == 1 => Some(array.data().iter().collect()),
         _ => None,
     }
 }
 
-fn mode_from_args(args: &[Value]) -> crate::BuiltinResult<MfilenameMode> {
+fn mode_from_args(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<MfilenameMode> {
     if args.len() > 1 {
         return Err(crate::runtime_descriptor_error(
             "mfilename",
@@ -74,8 +78,15 @@ fn file_stem_without_extension(name: &str) -> String {
         .unwrap_or_else(|| path_without_extension(name))
 }
 
+#[cfg(test)]
 pub(crate) fn dispatch_mfilename(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let mode = mode_from_args(&args)?;
+    dispatch_mfilename_arguments(crate::call::FunctionArgumentView::from_slice(&args))
+}
+
+fn dispatch_mfilename_arguments(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<Value> {
+    let mode = mode_from_args(args)?;
     let result = match mode {
         MfilenameMode::Name => crate::source_context::current_source_info()
             .map(|source| file_stem_without_extension(source.lexical_file_name()))
@@ -92,7 +103,7 @@ pub(crate) fn dispatch_mfilename(args: Vec<Value>) -> crate::BuiltinResult<Value
             .map(|identity| identity.display_name().to_owned())
             .unwrap_or_default(),
     };
-    Ok(Value::String(result))
+    Ok(Value::string(result))
 }
 
 #[runmat_macros::runtime_builtin(
@@ -100,8 +111,10 @@ pub(crate) fn dispatch_mfilename(args: Vec<Value>) -> crate::BuiltinResult<Value
     binding_variant = "default",
     builtin_path = "crate::builtins::introspection::mfilename"
 )]
-pub fn mfilename_builtin_registered(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    dispatch_mfilename(args)
+pub fn mfilename_builtin_registered(
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    dispatch_mfilename_arguments(args.view())
 }
 
 #[cfg(test)]
@@ -115,7 +128,7 @@ mod tests {
             Some("name = mfilename();"),
         );
         let value = dispatch_mfilename(Vec::new()).expect("mfilename succeeds");
-        assert_eq!(value, Value::String("demo_file".to_string()));
+        assert_eq!(value, Value::String("demo_file".to_string().into()));
     }
 
     #[test]
@@ -124,9 +137,9 @@ mod tests {
             Some("/tmp/demo_file.m"),
             Some("name = mfilename('fullpath');"),
         );
-        let value = dispatch_mfilename(vec![Value::String("fullpath".to_string())])
+        let value = dispatch_mfilename(vec![Value::String("fullpath".to_string().into())])
             .expect("mfilename fullpath succeeds");
-        assert_eq!(value, Value::String("/tmp/demo_file".to_string()));
+        assert_eq!(value, Value::String("/tmp/demo_file".to_string().into()));
     }
 
     #[test]
@@ -137,7 +150,7 @@ mod tests {
         );
         assert_eq!(
             dispatch_mfilename(vec![Value::from("class")]).expect("class mode"),
-            Value::String(String::new()),
+            Value::String(String::new().into()),
         );
         assert_eq!(
             dispatch_mfilename(vec![Value::from("unsupported")]).expect("default mode"),
@@ -186,12 +199,12 @@ mod tests {
         assert_eq!(current.text.as_ref(), "mfilename()");
         assert_eq!(
             dispatch_mfilename(Vec::new()).expect("mfilename succeeds"),
-            Value::String("outer_file".to_string())
+            Value::String("outer_file".to_string().into())
         );
         assert_eq!(
-            dispatch_mfilename(vec![Value::String("fullpath".to_string())])
+            dispatch_mfilename(vec![Value::String("fullpath".to_string().into())])
                 .expect("mfilename fullpath succeeds"),
-            Value::String("/project/outer_file".to_string())
+            Value::String("/project/outer_file".to_string().into())
         );
     }
 }

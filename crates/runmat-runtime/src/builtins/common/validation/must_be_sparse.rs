@@ -6,15 +6,15 @@ use runmat_builtins::{MUST_BE_SPARSE_CATALOG_ENTRY, MUST_BE_SPARSE_ERROR_OUTPUTS
     binding_variant = "default",
     builtin_path = "crate::builtins::common::validation::must_be_sparse"
 )]
-fn builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+fn builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     evaluate(args)
 }
 
-pub(super) fn evaluate(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) fn evaluate(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     super::admission::inputs(
         &MUST_BE_SPARSE_CATALOG_ENTRY,
         &MUST_BE_SPARSE_ERROR_OUTPUTS,
-        &args,
+        args.view(),
     )?;
     super::check_validator(
         MUST_BE_SPARSE_CATALOG_ENTRY.identity.name,

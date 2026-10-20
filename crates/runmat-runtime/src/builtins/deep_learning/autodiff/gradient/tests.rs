@@ -1,4 +1,5 @@
 use super::*;
+use crate::builtins::deep_learning::arguments::DeepLearningObjectEdit as _;
 use crate::builtins::deep_learning::autodiff::array_methods::dlarray_sum_builtin;
 use crate::builtins::deep_learning::autodiff::tape::{annotate_tree, Tape, TapeActivation};
 use futures::executor::block_on;
@@ -11,10 +12,12 @@ use std::rc::Rc;
 fn layer(kind: DeepLearningLayerKind, name: &str, fields: &[(&str, Value)]) -> Value {
     let mut object = ObjectInstance::new(kind.class().owned());
     object
-        .properties
-        .insert("Name".into(), Value::String(name.into()));
+        .replace_dl_property("Name", Value::String(name.into()))
+        .expect("fixture property");
     for (key, value) in fields {
-        object.properties.insert((*key).into(), value.clone());
+        object
+            .replace_dl_property(key, value.clone())
+            .expect("fixture property");
     }
     Value::Object(object)
 }
@@ -37,7 +40,11 @@ fn table_columns(table: &Value) -> (Vec<String>, Vec<String>, Vec<Value>) {
     let Some(Value::Cell(values)) = variables.fields.get("Value") else {
         panic!("Value column expected")
     };
-    (layers.data.clone(), roles.data.clone(), values.data.clone())
+    (
+        layers.data().iter().map(ToString::to_string).collect(),
+        roles.data().iter().map(ToString::to_string).collect(),
+        values.data().to_vec(),
+    )
 }
 
 fn gradient_for_public_table(network: Value, state: bool) -> (Value, Value) {
@@ -49,8 +56,16 @@ fn gradient_for_public_table(network: Value, state: bool) -> (Value, Value) {
         block_on(model::get_learnables_builtin(network)).unwrap()
     };
     let (_, _, values) = table_columns(&table);
-    let loss = dlarray_sum_builtin(values[0].clone(), vec![Value::String("all".into())]).unwrap();
-    let gradient = block_on(dlgradient_direct(loss, vec![table.clone()])).unwrap();
+    let loss = dlarray_sum_builtin(
+        values[0].clone(),
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::String("all".into())]),
+    )
+    .unwrap();
+    let gradient = block_on(dlgradient_direct(
+        loss,
+        crate::builtins::common::test_support::builtin_arguments(vec![table.clone()]),
+    ))
+    .unwrap();
     (table, gradient)
 }
 
@@ -88,7 +103,7 @@ fn public_learnables_table_gradient_preserves_identities_and_mixed_precision() {
     let Value::Object(weights) = &values[0] else {
         panic!("Weights gradient dlarray expected")
     };
-    let Some(Value::Tensor(weights)) = weights.properties.get("Data") else {
+    let Some(Value::Tensor(weights)) = weights.properties().get("Data") else {
         panic!("Weights gradient tensor expected")
     };
     assert_eq!(weights.numeric_dtype(), NumericDType::F32);
@@ -96,7 +111,7 @@ fn public_learnables_table_gradient_preserves_identities_and_mixed_precision() {
     let Value::Object(bias) = &values[1] else {
         panic!("Bias gradient dlarray expected")
     };
-    let Some(Value::Tensor(bias)) = bias.properties.get("Data") else {
+    let Some(Value::Tensor(bias)) = bias.properties().get("Data") else {
         panic!("Bias gradient tensor expected")
     };
     assert_eq!(bias.numeric_dtype(), NumericDType::F64);
@@ -136,7 +151,7 @@ fn public_state_table_gradient_preserves_identities_and_mixed_precision() {
     let Value::Object(hidden) = &values[0] else {
         panic!("HiddenState gradient dlarray expected")
     };
-    let Some(Value::Tensor(hidden)) = hidden.properties.get("Data") else {
+    let Some(Value::Tensor(hidden)) = hidden.properties().get("Data") else {
         panic!("HiddenState gradient tensor expected")
     };
     assert_eq!(hidden.numeric_dtype(), NumericDType::F32);
@@ -144,7 +159,7 @@ fn public_state_table_gradient_preserves_identities_and_mixed_precision() {
     let Value::Object(cell) = &values[1] else {
         panic!("CellState gradient dlarray expected")
     };
-    let Some(Value::Tensor(cell)) = cell.properties.get("Data") else {
+    let Some(Value::Tensor(cell)) = cell.properties().get("Data") else {
         panic!("CellState gradient tensor expected")
     };
     assert_eq!(cell.numeric_dtype(), NumericDType::F64);
@@ -174,28 +189,40 @@ fn public_parameter_table_names_are_metadata_not_builtin_role_authority() {
         let values = roles
             .iter()
             .map(|_| {
-                annotate_tree(super::super::super::object_with_identity(
-                    DLARRAY_CLASS,
-                    vec![
-                        (
-                            "Data",
-                            Value::Tensor(Tensor::from_f32(vec![2.0], vec![1, 1]).unwrap()),
-                        ),
-                        ("Format", Value::String(String::new())),
-                        ("Labels", Value::String(String::new())),
-                    ],
-                ))
+                annotate_tree(
+                    super::super::super::object_with_identity(
+                        DLARRAY_CLASS,
+                        vec![
+                            (
+                                "Data",
+                                Value::Tensor(Tensor::from_f32(vec![2.0], vec![1, 1]).unwrap()),
+                            ),
+                            ("Format", Value::String(String::new().into())),
+                            ("Labels", Value::String(String::new().into())),
+                        ],
+                    )
+                    .expect("fixture object"),
+                )
                 .unwrap()
             })
             .collect::<Vec<_>>();
-        let loss =
-            dlarray_sum_builtin(values[0].clone(), vec![Value::String("all".into())]).unwrap();
+        let loss = dlarray_sum_builtin(
+            values[0].clone(),
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "all".into(),
+            )]),
+        )
+        .unwrap();
         let target = network_table(
             layers.into_iter().map(String::from).collect(),
             roles.into_iter().map(String::from).collect(),
             values,
         );
-        let gradient = block_on(dlgradient_direct(loss, vec![target.clone()])).unwrap();
+        let gradient = block_on(dlgradient_direct(
+            loss,
+            crate::builtins::common::test_support::builtin_arguments(vec![target.clone()]),
+        ))
+        .unwrap();
         let (layers, roles, _) = table_columns(&target);
         let (gradient_layers, gradient_roles, values) = table_columns(&gradient);
         assert_eq!(gradient_layers, layers);
@@ -204,7 +231,7 @@ fn public_parameter_table_names_are_metadata_not_builtin_role_authority() {
             let Value::Object(array) = value else {
                 panic!("gradient dlarray expected")
             };
-            let Some(Value::Tensor(data)) = array.properties.get("Data") else {
+            let Some(Value::Tensor(data)) = array.properties().get("Data") else {
                 panic!("gradient tensor expected")
             };
             assert_eq!(data.numeric_dtype(), NumericDType::F32);
@@ -235,19 +262,28 @@ fn parameter_table_column_order_does_not_change_target_admission() {
         ["Value", "Parameter", "Layer"],
     ] {
         let _activation = TapeActivation::enter(Rc::new(RefCell::new(Tape::new())));
-        let traced = annotate_tree(super::super::super::object_with_identity(
-            DLARRAY_CLASS,
-            vec![
-                (
-                    "Data",
-                    Value::Tensor(Tensor::from_f32(vec![2.0], vec![1, 1]).unwrap()),
-                ),
-                ("Format", Value::String(String::new())),
-                ("Labels", Value::String(String::new())),
-            ],
-        ))
+        let traced = annotate_tree(
+            super::super::super::object_with_identity(
+                DLARRAY_CLASS,
+                vec![
+                    (
+                        "Data",
+                        Value::Tensor(Tensor::from_f32(vec![2.0], vec![1, 1]).unwrap()),
+                    ),
+                    ("Format", Value::String(String::new().into())),
+                    ("Labels", Value::String(String::new().into())),
+                ],
+            )
+            .expect("fixture object"),
+        )
         .unwrap();
-        let loss = dlarray_sum_builtin(traced.clone(), vec![Value::String("all".into())]).unwrap();
+        let loss = dlarray_sum_builtin(
+            traced.clone(),
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "all".into(),
+            )]),
+        )
+        .unwrap();
         let columns = names
             .iter()
             .map(|name| match *name {
@@ -266,7 +302,11 @@ fn parameter_table_column_order_does_not_change_target_admission() {
             columns,
         )
         .unwrap();
-        let gradient = block_on(dlgradient_direct(loss, vec![target])).unwrap();
+        let gradient = block_on(dlgradient_direct(
+            loss,
+            crate::builtins::common::test_support::builtin_arguments(vec![target]),
+        ))
+        .unwrap();
         let Value::Object(table) = &gradient else {
             panic!("table gradient expected")
         };
@@ -280,7 +320,7 @@ fn parameter_table_column_order_does_not_change_target_admission() {
         let Value::Object(array) = &values[0] else {
             panic!("gradient dlarray expected")
         };
-        let Some(Value::Tensor(data)) = array.properties.get("Data") else {
+        let Some(Value::Tensor(data)) = array.properties().get("Data") else {
             panic!("gradient data expected")
         };
         assert_eq!(data.numeric_dtype(), NumericDType::F32);
@@ -306,17 +346,20 @@ fn canonical_metadata_requires_typed_string_columns() {
 #[test]
 fn ordinary_dlarray_table_keeps_recursive_gradient_behavior() {
     let _activation = TapeActivation::enter(Rc::new(RefCell::new(Tape::new())));
-    let traced = annotate_tree(super::super::super::object_with_identity(
-        DLARRAY_CLASS,
-        vec![
-            (
-                "Data",
-                Value::Tensor(Tensor::from_f32(vec![2.0], vec![1, 1]).unwrap()),
-            ),
-            ("Format", Value::String(String::new())),
-            ("Labels", Value::String(String::new())),
-        ],
-    ))
+    let traced = annotate_tree(
+        super::super::super::object_with_identity(
+            DLARRAY_CLASS,
+            vec![
+                (
+                    "Data",
+                    Value::Tensor(Tensor::from_f32(vec![2.0], vec![1, 1]).unwrap()),
+                ),
+                ("Format", Value::String(String::new().into())),
+                ("Labels", Value::String(String::new().into())),
+            ],
+        )
+        .expect("fixture object"),
+    )
     .unwrap();
     let target = crate::builtins::table::table_from_columns(
         vec!["Payload".into()],
@@ -331,10 +374,10 @@ fn ordinary_dlarray_table_keeps_recursive_gradient_behavior() {
     let Some(Value::Cell(payload)) = variables.fields.get("Payload") else {
         panic!("Payload cell expected")
     };
-    let Value::Object(dlarray) = &payload.data[0] else {
+    let Value::Object(dlarray) = &payload.data()[0] else {
         panic!("gradient dlarray expected")
     };
-    let Some(Value::Tensor(data)) = dlarray.properties.get("Data") else {
+    let Some(Value::Tensor(data)) = dlarray.properties().get("Data") else {
         panic!("gradient Data expected")
     };
     assert_eq!(data.numeric_dtype(), NumericDType::F32);
@@ -344,25 +387,28 @@ fn ordinary_dlarray_table_keeps_recursive_gradient_behavior() {
 #[test]
 fn legacy_scalar_parameter_record_preserves_extra_metadata() {
     let _activation = TapeActivation::enter(Rc::new(RefCell::new(Tape::new())));
-    let traced = annotate_tree(super::super::super::object_with_identity(
-        DLARRAY_CLASS,
-        vec![
-            (
-                "Data",
-                Value::Tensor(Tensor::from_f32(vec![2.0], vec![1, 1]).unwrap()),
-            ),
-            ("Format", Value::String(String::new())),
-            ("Labels", Value::String(String::new())),
-        ],
-    ))
+    let traced = annotate_tree(
+        super::super::super::object_with_identity(
+            DLARRAY_CLASS,
+            vec![
+                (
+                    "Data",
+                    Value::Tensor(Tensor::from_f32(vec![2.0], vec![1, 1]).unwrap()),
+                ),
+                ("Format", Value::String(String::new().into())),
+                ("Labels", Value::String(String::new().into())),
+            ],
+        )
+        .expect("fixture object"),
+    )
     .unwrap();
-    let mut record = StructValue::new();
+    let mut record = runmat_value::UnboundedStructValueBuilder::new();
     record.insert("Layer", Value::String("custom".into()));
     record.insert("Parameter", Value::String("Gain".into()));
     record.insert("Value", traced);
     record.insert("Owner", Value::Bool(true));
     let Value::Struct(gradient) =
-        gradient_tree_for_target(&Value::Struct(record), &HashMap::new()).unwrap()
+        gradient_tree_for_target(&Value::Struct(record.finish()), &HashMap::new()).unwrap()
     else {
         panic!("legacy record gradient expected")
     };
@@ -378,7 +424,7 @@ fn legacy_scalar_parameter_record_preserves_extra_metadata() {
     let Some(Value::Object(value)) = gradient.fields.get("Value") else {
         panic!("gradient Value must be a dlarray")
     };
-    let Some(Value::Tensor(data)) = value.properties.get("Data") else {
+    let Some(Value::Tensor(data)) = value.properties().get("Data") else {
         panic!("gradient Data expected")
     };
     assert_eq!(data.numeric_dtype(), NumericDType::F32);

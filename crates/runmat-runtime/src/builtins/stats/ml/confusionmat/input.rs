@@ -37,14 +37,14 @@ pub(super) fn labels_from_value(value: Value, name: &str) -> BuiltinResult<Label
             })
         }
         Value::String(text) => Ok(LabelVector {
-            labels: vec![Label::Text(text)],
+            labels: vec![Label::Text(text.as_str().to_owned())],
             kind: LabelKind::String,
             categories: None,
         }),
         Value::StringArray(array) => {
             ensure_vector_shape(&array.shape, name)?;
             Ok(LabelVector {
-                labels: array.data.into_iter().map(Label::Text).collect(),
+                labels: array.data().iter().map(|text| Label::Text(text.as_str().to_owned())).collect(),
                 kind: LabelKind::String,
                 categories: None,
             })
@@ -60,9 +60,9 @@ pub(super) fn labels_from_value(value: Value, name: &str) -> BuiltinResult<Label
         })},
         Value::Cell(cell) => {
             ensure_vector_shape(&cell.shape, name)?;
-            let mut labels = Vec::with_capacity(cell.data.len());
-            for item in cell.data {
-                labels.push(Label::Text(scalar_text(&item, name)?));
+            let mut labels = Vec::with_capacity(cell.data().len());
+            for item in cell.data().iter() {
+                labels.push(Label::Text(scalar_text(item, name)?));
             }
             Ok(LabelVector {
                 labels,
@@ -103,8 +103,14 @@ pub(super) fn ensure_vector_shape(shape: &[usize], name: &str) -> BuiltinResult<
 pub(super) fn categorical_categories(
     object: &ObjectInstance,
 ) -> BuiltinResult<Option<Vec<String>>> {
-    match object.properties.get("Categories") {
-        Some(Value::StringArray(array)) => Ok(Some(array.data.clone())),
+    match object.properties().get("Categories") {
+        Some(Value::StringArray(array)) => Ok(Some(
+            array
+                .data()
+                .iter()
+                .map(|text| text.as_str().to_owned())
+                .collect(),
+        )),
         Some(_) => Err(invalid(
             "confusionmat: categorical Categories must be strings",
         )),
@@ -116,7 +122,7 @@ pub(super) fn ensure_categorical_vector_shape(
     object: &ObjectInstance,
     name: &str,
 ) -> BuiltinResult<()> {
-    match object.properties.get("Codes") {
+    match object.properties().get("Codes") {
         Some(Value::Tensor(tensor)) => ensure_vector_shape(tensor.shape(), name),
         Some(_) => Err(invalid("confusionmat: categorical Codes must be numeric")),
         None => Ok(()),
@@ -125,13 +131,15 @@ pub(super) fn ensure_categorical_vector_shape(
 
 pub(super) fn scalar_text(value: &Value, name: &str) -> BuiltinResult<String> {
     match value {
-        Value::String(text) => Ok(text.clone()),
+        Value::String(text) => Ok(text.as_str().to_owned()),
         Value::CharArray(chars)
             if chars.rows <= 1 && chars.shape.iter().skip(2).all(|dimension| *dimension == 1) =>
         {
-            Ok(chars.data.iter().collect())
+            Ok(chars.data().iter().collect())
         }
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(array.data()[0].as_str().to_owned())
+        }
         other => Err(invalid(format!(
             "confusionmat: {name} must be a string scalar, got {other:?}"
         ))),

@@ -13,16 +13,19 @@ use super::*;
 )]
 pub(super) async fn datetime_builtin(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     ensure_datetime_class_registered();
-    let (positional_end, options) = parse_trailing_options(&args)?;
-    let positional_inputs = &args[..positional_end];
+    let (positional_end, options) = parse_trailing_options(args.view())?;
+    let positional_inputs = args.view().range(..positional_end)?;
     let mut budget = runtime
         .as_ref()
         .map(crate::context::RuntimeContext::cpu_cooperation);
 
-    if let [input] = positional_inputs {
+    if let Some(input) = positional_inputs
+        .first()
+        .filter(|_| positional_inputs.len() == 1)
+    {
         validate_cell_text_input(input, budget.as_mut(), runtime.as_ref()).await?;
     }
 
@@ -46,10 +49,16 @@ pub(super) async fn datetime_builtin(
     }
     if options.input_format.is_some()
         && (options.convert_from.is_some()
-            || !matches!(
-                positional_inputs,
-                [Value::String(_) | Value::StringArray(_) | Value::CharArray(_) | Value::Cell(_)]
-            ))
+            || !(positional_inputs.len() == 1
+                && matches!(
+                    positional_inputs.first(),
+                    Some(
+                        Value::String(_)
+                            | Value::StringArray(_)
+                            | Value::CharArray(_)
+                            | Value::Cell(_)
+                    )
+                )))
     {
         return Err(datetime_argument_error(
             "datetime: InputFormat requires exactly one text input",
@@ -85,23 +94,27 @@ pub(super) async fn datetime_builtin(
             .await
             .map_err(|source| datetime_execution_error(runtime.as_ref(), source))?;
     }
-    let mut positional = Vec::with_capacity(positional_end);
-    for value in args.into_iter().take(positional_end) {
-        positional.push(
-            crate::dispatcher::gather_if_needed_owned_async(value, budget.as_mut())
-                .await
-                .map_err(|err| datetime_gather_error(runtime.as_ref(), err))?,
-        );
-    }
+    let positional_inputs = args.into_range(..positional_end)?;
+    let positional = positional_inputs
+        .try_map_preserving_roots_async(positional_inputs.len(), runtime.as_ref(), async |index| {
+            crate::dispatcher::gather_if_needed_owned_async(
+                positional_inputs[index].clone(),
+                budget.as_mut(),
+            )
+            .await
+            .map_err(|err| datetime_gather_error(runtime.as_ref(), err))
+        })
+        .await?;
 
     if options.convert_from.is_some() {
-        return numeric_value_to_datetime(positional[0].clone(), options.format);
+        return numeric_value_to_datetime(runtime.as_ref(), positional[0].clone(), options.format);
     }
 
     match positional.len() {
         0 => {
             let now = Local::now().naive_local();
             datetime_object_from_serials(
+                runtime.as_ref(),
                 vec![datenum_from_naive(now)],
                 vec![1, 1],
                 options
@@ -115,7 +128,7 @@ pub(super) async fn datetime_builtin(
                 let format = options
                     .format
                     .unwrap_or_else(|| datetime_format_from_value(&positional[0]));
-                datetime_object_from_serial_tensor(serials, format)
+                datetime_object_from_serial_tensor(runtime.as_ref(), serials, format)
             }
             Value::Cell(_) => {
                 let (serials, shape, inferred_format) = parse_cell_text_input(
@@ -132,6 +145,7 @@ pub(super) async fn datetime_builtin(
                         .map_err(|source| datetime_execution_error(runtime.as_ref(), source))?;
                 }
                 datetime_object_from_serials(
+                    runtime.as_ref(),
                     serials,
                     shape,
                     options.format.unwrap_or(inferred_format),
@@ -141,6 +155,7 @@ pub(super) async fn datetime_builtin(
                 let (serials, shape, inferred_format) =
                     parse_text_input(&positional[0], options.input_format.as_deref())?;
                 datetime_object_from_serials(
+                    runtime.as_ref(),
                     serials,
                     shape,
                     options.format.unwrap_or(inferred_format),
@@ -149,18 +164,30 @@ pub(super) async fn datetime_builtin(
             _ => {
                 let numeric = tensor_from_numeric(positional[0].clone(), "date vector")?;
                 if numeric.shape().len() == 2 && matches!(numeric.shape()[1], 3 | 6) {
-                    build_from_date_vectors(positional[0].clone(), options.format)
+                    build_from_date_vectors(runtime.as_ref(), positional[0].clone(), options.format)
                 } else {
                     crate::compatibility::ensure_builtin_extension_enabled(
                         &DATETIME_RAW_DATENUM_EXTENSION,
                         BUILTIN_NAME,
                     )?;
-                    numeric_value_to_datetime(positional[0].clone(), options.format)
+                    numeric_value_to_datetime(
+                        runtime.as_ref(),
+                        positional[0].clone(),
+                        options.format,
+                    )
                 }
             }
         },
-        3 | 6 | 7 => build_from_components(positional, options.format),
-        4 | 5 => build_from_components(positional, options.format),
+        3 | 6 | 7 => build_from_components(runtime.as_ref(), positional, options.format),
+        4 | 5 => build_from_components(runtime.as_ref(), positional, options.format),
         _ => unreachable!("constructor arity validated before resident access"),
     }
+}
+#[cfg(test)]
+pub(crate) async fn datetime_builtin_source(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    let retained = crate::call::BuiltinArguments::from_borrowed(&args, runtime.as_ref())?;
+    datetime_builtin(runtime, retained).await
 }

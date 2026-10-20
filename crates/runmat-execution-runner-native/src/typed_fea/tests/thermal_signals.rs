@@ -101,8 +101,10 @@ async fn checked_named_thermal_inputs_match_tables_and_independent_source_bounda
         std::collections::BTreeSet::new(),
     )
     .unwrap();
-    futures::executor::block_on(session.install_project_handoff(runmat_package::FrozenProjectHandoff::new(project)))
-    .unwrap();
+    session
+        .install_project_handoff(runmat_package::FrozenProjectHandoff::new(project))
+        .await
+        .unwrap();
     let study_path = directory
         .path()
         .join("src/study.fea")
@@ -173,10 +175,14 @@ async fn checked_named_thermal_inputs_match_tables_and_independent_source_bounda
         for chunk in &input.program().chunks {
             let response = crate::execute_host_program_request(chunk.request.clone()).await;
             response.validate_against(&chunk.request).unwrap();
-            let ProgramExecutionResponse::Success { outputs: response_outputs } = response else {
+            let ProgramExecutionResponse::Success {
+                outputs: mut response_outputs,
+            } = response
+            else {
                 panic!("named thermal function failed: {response:?}")
             };
-            let [value]: [_; 1] = response_outputs.try_into().unwrap();
+            assert_eq!(response_outputs.len(), 1, "one original semantic output");
+            let value = response_outputs.remove(0);
             outputs.push(GeneratorChunkOutput {
                 chunk_identity: chunk.plan.identity,
                 value,

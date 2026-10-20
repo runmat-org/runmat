@@ -73,8 +73,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::rand"
 )]
-async fn rand_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    if let Some(command) = LegacyRandCommand::parse(&rest)? {
+async fn rand_builtin(rest: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
+    if let Some(command) = LegacyRandCommand::parse(rest.view())? {
         let mut turn =
             random::acquire_turn(crate::context::legacy::active().as_ref(), "rand").await?;
         return command.apply(&mut turn);
@@ -89,7 +89,7 @@ enum LegacyRandCommand {
 }
 
 impl LegacyRandCommand {
-    fn parse(args: &[Value]) -> crate::BuiltinResult<Option<Self>> {
+    fn parse(args: crate::call::FunctionArgumentView<'_>) -> crate::BuiltinResult<Option<Self>> {
         let Some(first) = args.first() else {
             return Ok(None);
         };
@@ -191,7 +191,7 @@ enum RandTemplate {
 }
 
 impl ParsedRand {
-    async fn parse(args: Vec<Value>) -> crate::BuiltinResult<Self> {
+    async fn parse(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Self> {
         let mut dims: Vec<usize> = Vec::new();
         let mut saw_dims_arg = false;
         let mut template: Option<RandTemplate> = None;
@@ -572,7 +572,10 @@ pub(crate) mod tests {
     fn rand_default_scalar() {
         let _guard = random::test_guard();
         let _guard = reset_rng_clean();
-        let result = block_on(rand_builtin(Vec::new())).expect("rand");
+        let result = block_on(rand_builtin(
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect("rand");
         let expected = random::expected_uniform_sequence(1)[0];
         match result {
             Value::Num(v) => {
@@ -604,7 +607,10 @@ pub(crate) mod tests {
         let _guard = random::test_guard();
         let _guard = reset_rng_clean();
         let args = vec![Value::Num(3.0)];
-        let result = block_on(rand_builtin(args)).expect("rand");
+        let result = block_on(rand_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect("rand");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape(), &[3, 3]);
@@ -621,11 +627,13 @@ pub(crate) mod tests {
     #[test]
     fn rand_integer_dimensions_clamp_negative_and_normalize_trailing_singletons() {
         let _guard = reset_rng_clean();
-        let result = block_on(rand_builtin(vec![
-            Value::Int(IntValue::I32(-2)),
-            Value::Int(IntValue::U8(3)),
-            Value::Int(IntValue::U64(1)),
-        ]))
+        let result = block_on(rand_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Int(IntValue::I32(-2)),
+                Value::Int(IntValue::U8(3)),
+                Value::Int(IntValue::U64(1)),
+            ]),
+        ))
         .expect("rand integer dimensions");
         let Value::Tensor(tensor) = result else {
             panic!("expected empty host tensor");
@@ -639,7 +647,10 @@ pub(crate) mod tests {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let size = Tensor::new_integer(IntegerStorage::I16(vec![2, 3]), vec![2, 1])
             .expect("column size vector");
-        let error = block_on(rand_builtin(vec![Value::Tensor(size)])).unwrap_err();
+        let error = block_on(rand_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(size)]),
+        ))
+        .unwrap_err();
         assert_eq!(
             error.identifier(),
             Some("RunMat:compatibility:RandColumnSizeVectorExtension")
@@ -651,18 +662,53 @@ pub(crate) mod tests {
     fn rand_legacy_seed_string_resets_sequence_and_queries_seed() {
         let _guard = random::test_guard();
         let _guard = reset_rng_clean();
-        let seed_result = block_on(rand_builtin(vec![Value::from("seed"), Value::Num(2026.0)]))
-            .expect("rand seed");
+        let seed_result = block_on(rand_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("seed"),
+                Value::Num(2026.0),
+            ]),
+        ))
+        .expect("rand seed");
         assert!(matches!(seed_result, Value::Tensor(t) if t.shape() == [0, 0]));
-        let query = block_on(rand_builtin(vec![Value::from("seed")])).expect("rand seed query");
+        let query = block_on(rand_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from("seed")]),
+        ))
+        .expect("rand seed query");
         assert!(matches!(query, Value::Num(seed) if (seed - 2026.0).abs() < f64::EPSILON));
 
-        let prefix = block_on(rand_builtin(vec![Value::Num(1.0), Value::Num(4.0)])).expect("rand");
-        let saved = block_on(rand_builtin(vec![Value::from("seed")])).expect("rand seed query");
+        let prefix = block_on(rand_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(1.0),
+                Value::Num(4.0),
+            ]),
+        ))
+        .expect("rand");
+        let saved = block_on(rand_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from("seed")]),
+        ))
+        .expect("rand seed query");
         assert!(matches!(&saved, Value::Num(seed) if (*seed - 2026.0).abs() > f64::EPSILON));
-        let first = block_on(rand_builtin(vec![Value::Num(1.0), Value::Num(3.0)])).expect("rand");
-        block_on(rand_builtin(vec![Value::from("seed"), saved])).expect("rand restore state token");
-        let second = block_on(rand_builtin(vec![Value::Num(1.0), Value::Num(3.0)])).expect("rand");
+        let first = block_on(rand_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(1.0),
+                Value::Num(3.0),
+            ]),
+        ))
+        .expect("rand");
+        block_on(rand_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("seed"),
+                saved,
+            ]),
+        ))
+        .expect("rand restore state token");
+        let second = block_on(rand_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(1.0),
+                Value::Num(3.0),
+            ]),
+        ))
+        .expect("rand");
         match (prefix, first, second) {
             (Value::Tensor(prefix), Value::Tensor(a), Value::Tensor(b)) => {
                 assert_eq!(prefix.shape(), &[1, 4]);
@@ -681,15 +727,24 @@ pub(crate) mod tests {
         random::reset_rng();
         test_support::with_test_provider(|provider| {
             let draw = || {
-                let Value::Tensor(values) =
-                    block_on(rand_builtin(vec![Value::Num(4.0), Value::Num(1.0)]))
-                        .expect("host uniform")
-                else {
+                let Value::Tensor(values) = block_on(rand_builtin(
+                    crate::builtins::common::test_support::builtin_arguments(vec![
+                        Value::Num(4.0),
+                        Value::Num(1.0),
+                    ]),
+                ))
+                .expect("host uniform") else {
                     panic!("expected host tensor");
                 };
                 values.materialize_f64()
             };
-            block_on(rand_builtin(vec![Value::from("seed"), Value::Num(9.0)])).expect("rand seed");
+            block_on(rand_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::from("seed"),
+                    Value::Num(9.0),
+                ]),
+            ))
+            .expect("rand seed");
             let first = draw();
             let host_before = random::snapshot().expect("host snapshot");
             let handle = provider.random_uniform(&[4, 1]).expect("gpu uniform");
@@ -697,8 +752,13 @@ pub(crate) mod tests {
             assert_eq!(random::snapshot().expect("host snapshot"), host_before);
             drop(handle);
             let after_provider = draw();
-            block_on(rand_builtin(vec![Value::from("seed"), Value::Num(9.0)]))
-                .expect("rand reseed");
+            block_on(rand_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::from("seed"),
+                    Value::Num(9.0),
+                ]),
+            ))
+            .expect("rand reseed");
             let expected_first = draw();
             let expected_after = draw();
             assert_eq!(first, expected_first);
@@ -711,11 +771,34 @@ pub(crate) mod tests {
     fn rand_legacy_seed_literal_restarts_sequence() {
         let _guard = random::test_guard();
         let _guard = reset_rng_clean();
-        block_on(rand_builtin(vec![Value::from("seed"), Value::Num(2026.0)])).expect("rand seed");
-        let first = block_on(rand_builtin(vec![Value::Num(1.0), Value::Num(4.0)])).expect("rand");
-        block_on(rand_builtin(vec![Value::from("seed"), Value::Num(2026.0)]))
-            .expect("rand seed again");
-        let second = block_on(rand_builtin(vec![Value::Num(1.0), Value::Num(4.0)])).expect("rand");
+        block_on(rand_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("seed"),
+                Value::Num(2026.0),
+            ]),
+        ))
+        .expect("rand seed");
+        let first = block_on(rand_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(1.0),
+                Value::Num(4.0),
+            ]),
+        ))
+        .expect("rand");
+        block_on(rand_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("seed"),
+                Value::Num(2026.0),
+            ]),
+        ))
+        .expect("rand seed again");
+        let second = block_on(rand_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(1.0),
+                Value::Num(4.0),
+            ]),
+        ))
+        .expect("rand");
         match (first, second) {
             (Value::Tensor(a), Value::Tensor(b)) => {
                 assert_eq!(a.shape(), &[1, 4]);
@@ -732,11 +815,34 @@ pub(crate) mod tests {
         let _guard = random::test_guard();
         let _guard = reset_rng_clean();
         let seed_keyword = Value::CharArray(runmat_value::CharArray::new_row("seed"));
-        block_on(rand_builtin(vec![seed_keyword.clone(), Value::Num(17.0)]))
-            .expect("rand char seed");
-        let first = block_on(rand_builtin(vec![Value::Num(1.0), Value::Num(3.0)])).expect("rand");
-        block_on(rand_builtin(vec![seed_keyword, Value::Num(17.0)])).expect("rand char seed again");
-        let second = block_on(rand_builtin(vec![Value::Num(1.0), Value::Num(3.0)])).expect("rand");
+        block_on(rand_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                seed_keyword.clone(),
+                Value::Num(17.0),
+            ]),
+        ))
+        .expect("rand char seed");
+        let first = block_on(rand_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(1.0),
+                Value::Num(3.0),
+            ]),
+        ))
+        .expect("rand");
+        block_on(rand_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                seed_keyword,
+                Value::Num(17.0),
+            ]),
+        ))
+        .expect("rand char seed again");
+        let second = block_on(rand_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(1.0),
+                Value::Num(3.0),
+            ]),
+        ))
+        .expect("rand");
         match (first, second) {
             (Value::Tensor(a), Value::Tensor(b)) => {
                 assert_eq!(a.shape(), &[1, 3]);
@@ -750,18 +856,25 @@ pub(crate) mod tests {
     fn rand_legacy_seed_reads_typed_integer_tensor_storage_exactly() {
         let _guard = random::test_guard();
         reset_rng_clean();
-        block_on(rand_builtin(vec![
-            Value::from("seed"),
-            poisoned_int_tensor(IntegerStorage::U16(vec![2026]), vec![1, 1]),
-        ]))
+        block_on(rand_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("seed"),
+                poisoned_int_tensor(IntegerStorage::U16(vec![2026]), vec![1, 1]),
+            ]),
+        ))
         .expect("typed integer tensor seed");
-        let query = block_on(rand_builtin(vec![Value::from("seed")])).expect("rand seed query");
+        let query = block_on(rand_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from("seed")]),
+        ))
+        .expect("rand seed query");
         assert!(matches!(query, Value::Num(seed) if (seed - 2026.0).abs() < f64::EPSILON));
 
-        let err = block_on(rand_builtin(vec![
-            Value::from("seed"),
-            poisoned_int_tensor(IntegerStorage::I16(vec![-1]), vec![1, 1]),
-        ]))
+        let err = block_on(rand_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("seed"),
+                poisoned_int_tensor(IntegerStorage::I16(vec![-1]), vec![1, 1]),
+            ]),
+        ))
         .expect_err("negative typed integer seed");
         assert!(err.message().contains("non-negative"));
     }
@@ -771,22 +884,31 @@ pub(crate) mod tests {
     fn rand_legacy_seed_rejects_invalid_seed_values() {
         let _guard = random::test_guard();
         let _guard = reset_rng_clean();
-        let err = block_on(rand_builtin(vec![Value::from("seed"), Value::Num(-1.0)]))
-            .expect_err("negative seed");
+        let err = block_on(rand_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("seed"),
+                Value::Num(-1.0),
+            ]),
+        ))
+        .expect_err("negative seed");
         assert!(err.message().contains("non-negative"));
 
-        let err = block_on(rand_builtin(vec![
-            Value::from("seed"),
-            Value::Int(IntValue::U64((1_u64 << 53) + 1)),
-        ]))
+        let err = block_on(rand_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("seed"),
+                Value::Int(IntValue::U64((1_u64 << 53) + 1)),
+            ]),
+        ))
         .expect_err("imprecise integer seed");
         assert!(err.message().contains("53-bit"));
 
-        let err = block_on(rand_builtin(vec![
-            Value::from("seed"),
-            Value::Num(1.0),
-            Value::Num(2.0),
-        ]))
+        let err = block_on(rand_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("seed"),
+                Value::Num(1.0),
+                Value::Num(2.0),
+            ]),
+        ))
         .expect_err("extra seed argument");
         assert!(err.message().contains("expects zero or one seed"));
     }
@@ -798,10 +920,16 @@ pub(crate) mod tests {
         let _guard = reset_rng_clean();
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let args = vec![Value::from("like"), Value::Tensor(tensor.clone())];
-        let result = block_on(rand_builtin(args)).expect("rand");
+        let result = block_on(rand_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect("rand");
         assert!(matches!(result, Value::Num(value) if (0.0..1.0).contains(&value)));
 
-        let error = block_on(rand_builtin(vec![Value::Tensor(tensor)])).unwrap_err();
+        let error = block_on(rand_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(tensor)]),
+        ))
+        .unwrap_err();
         assert!(error.message().contains("unsupported dimension or option"));
     }
 
@@ -821,29 +949,35 @@ pub(crate) mod tests {
 
         for storage in storages {
             let prototype = Tensor::new_integer(storage, vec![1, 1]).expect("prototype");
-            let error = block_on(rand_builtin(vec![
-                Value::Num(1.0),
-                Value::Num(2.0),
-                Value::from("like"),
-                Value::Tensor(prototype),
-            ]))
+            let error = block_on(rand_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(1.0),
+                    Value::Num(2.0),
+                    Value::from("like"),
+                    Value::Tensor(prototype),
+                ]),
+            ))
             .unwrap_err();
             assert!(error.message().contains("must be single or double"));
         }
 
-        let scalar = block_on(rand_builtin(vec![
-            Value::Num(2.0),
-            Value::from("like"),
-            Value::Int(IntValue::U64(u64::MAX)),
-        ]))
+        let scalar = block_on(rand_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(2.0),
+                Value::from("like"),
+                Value::Int(IntValue::U64(u64::MAX)),
+            ]),
+        ))
         .unwrap_err();
         assert!(scalar.message().contains("must be single or double"));
 
-        let logical = block_on(rand_builtin(vec![
-            Value::Num(2.0),
-            Value::from("like"),
-            Value::Bool(true),
-        ]))
+        let logical = block_on(rand_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(2.0),
+                Value::from("like"),
+                Value::Bool(true),
+            ]),
+        ))
         .unwrap_err();
         assert!(logical.message().contains("must be single or double"));
 
@@ -853,11 +987,13 @@ pub(crate) mod tests {
             vec![1, 1],
         )
         .unwrap();
-        let complex_integer = block_on(rand_builtin(vec![
-            Value::Num(2.0),
-            Value::from("like"),
-            Value::ComplexTensor(complex_integer),
-        ]))
+        let complex_integer = block_on(rand_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(2.0),
+                Value::from("like"),
+                Value::ComplexTensor(complex_integer),
+            ]),
+        ))
         .unwrap_err();
         assert!(complex_integer
             .message()
@@ -870,7 +1006,10 @@ pub(crate) mod tests {
         let _guard = random::test_guard();
         let _guard = reset_rng_clean();
         let args = vec![Value::Num(2.0), Value::Num(2.0), Value::from("single")];
-        let result = block_on(rand_builtin(args)).expect("rand single");
+        let result = block_on(rand_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect("rand single");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape(), &[2, 2]);
@@ -901,7 +1040,10 @@ pub(crate) mod tests {
             Value::from("like"),
             Value::Complex(0.0, 1.0),
         ];
-        let result = block_on(rand_builtin(args)).expect("rand");
+        let result = block_on(rand_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect("rand");
         match result {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape(), &[2, 2]);
@@ -920,11 +1062,13 @@ pub(crate) mod tests {
         let _guard = reset_rng_clean();
         let prototype =
             ComplexTensor::from_f32(vec![(1.0, 2.0)], vec![1, 1]).expect("complex single");
-        let result = block_on(rand_builtin(vec![
-            Value::Num(2.0),
-            Value::from("like"),
-            Value::ComplexTensor(prototype),
-        ]))
+        let result = block_on(rand_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(2.0),
+                Value::from("like"),
+                Value::ComplexTensor(prototype),
+            ]),
+        ))
         .expect("rand complex single like");
         let Value::ComplexTensor(output) = result else {
             panic!("expected complex tensor");
@@ -943,7 +1087,10 @@ pub(crate) mod tests {
         let _guard = reset_rng_clean();
         test_support::with_test_provider(|_| {
             let args = vec![Value::Num(3.0), Value::Num(4.0), Value::from("gpuArray")];
-            let result = block_on(rand_builtin(args)).expect("rand gpuArray");
+            let result = block_on(rand_builtin(
+                crate::builtins::common::test_support::builtin_arguments(args),
+            ))
+            .expect("rand gpuArray");
             let Value::GpuTensor(handle) = result else {
                 panic!("expected resident gpuArray");
             };
@@ -973,7 +1120,10 @@ pub(crate) mod tests {
                 Value::from("like"),
                 Value::GpuTensor(handle),
             ];
-            let result = block_on(rand_builtin(args)).expect("rand");
+            let result = block_on(rand_builtin(
+                crate::builtins::common::test_support::builtin_arguments(args),
+            ))
+            .expect("rand");
             match result {
                 Value::GpuTensor(gpu) => {
                     assert_eq!(gpu.shape(), vec![2, 2]);
@@ -1005,13 +1155,18 @@ pub(crate) mod tests {
                 .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
                 .expect("automatic view");
             let gpu_before = random::gpu::snapshot().expect("GPU child snapshot");
-            let expected = block_on(rand_builtin(vec![Value::Num(2.0)])).expect("host rand");
+            let expected = block_on(rand_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(2.0)]),
+            ))
+            .expect("host rand");
             random::reset_rng();
-            let actual = block_on(rand_builtin(vec![
-                Value::Num(2.0),
-                Value::from("like"),
-                Value::GpuTensor(source),
-            ]))
+            let actual = block_on(rand_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(2.0),
+                    Value::from("like"),
+                    Value::GpuTensor(source),
+                ]),
+            ))
             .expect("automatic like rand");
             assert_eq!(actual, expected);
             assert_eq!(
@@ -1037,14 +1192,21 @@ pub(crate) mod tests {
                 .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
                 .expect("automatic prototype");
             random::set_seed(29).expect("host seed");
-            let expected = block_on(rand_builtin(vec![Value::Num(2.0), Value::from("single")]))
-                .expect("ordinary host single");
+            let expected = block_on(rand_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(2.0),
+                    Value::from("single"),
+                ]),
+            ))
+            .expect("ordinary host single");
             random::set_seed(29).expect("restore host seed");
-            let actual = block_on(rand_builtin(vec![
-                Value::Num(2.0),
-                Value::from("like"),
-                Value::GpuTensor(source),
-            ]))
+            let actual = block_on(rand_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(2.0),
+                    Value::from("like"),
+                    Value::GpuTensor(source),
+                ]),
+            ))
             .expect("selected unbounded like");
             assert_eq!(actual, expected);
             assert_eq!(witness.selections(), 1);
@@ -1066,11 +1228,13 @@ pub(crate) mod tests {
                 .expect("upload integer gpu prototype")
                 .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
                 .expect("explicit gpuArray prototype");
-            let error = block_on(rand_builtin(vec![
-                Value::Num(2.0),
-                Value::from("like"),
-                Value::GpuTensor(handle),
-            ]))
+            let error = block_on(rand_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(2.0),
+                    Value::from("like"),
+                    Value::GpuTensor(handle),
+                ]),
+            ))
             .unwrap_err();
             assert!(error.message().contains("single or double underlying type"));
         });

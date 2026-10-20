@@ -98,8 +98,11 @@ fn invalid_path_classes_and_shapes_have_zero_filesystem_reads() {
             Value::StringArray(StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap()),
         ];
         for value in invalid {
-            let load = block_on(geometry_load_builtin(value.clone(), Vec::new()))
-                .expect_err("load path admission");
+            let load = block_on(geometry_load_builtin(
+                value.clone(),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+            ))
+            .expect_err("load path admission");
             assert_eq!(load.identifier(), GEOMETRY_LOAD_ERROR_INPUT.identifier);
             let inspect =
                 block_on(geometry_inspect_builtin(value)).expect_err("inspect path admission");
@@ -114,8 +117,11 @@ fn invalid_path_classes_and_shapes_have_zero_filesystem_reads() {
             Value::CharArray(CharArray::new_row("part.stl")),
             Value::StringArray(StringArray::new(vec!["part.stl".into()], vec![1, 1]).unwrap()),
         ] {
-            let asset = block_on(geometry_load_builtin(value.clone(), Vec::new()))
-                .expect("supported text load");
+            let asset = block_on(geometry_load_builtin(
+                value.clone(),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+            ))
+            .expect("supported text load");
             assert!(matches!(asset, Value::Object(_)));
             let info = block_on(geometry_inspect_builtin(value)).expect("supported text inspect");
             assert!(matches!(info, Value::Object(_)));

@@ -76,9 +76,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::math::poly::polyval"
 )]
-async fn polyval_builtin(p: Value, x: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn polyval_builtin(
+    p: Value,
+    x: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     if let Some(out_count) = crate::output_count::current_output_count() {
-        let eval = evaluate(p, x, &rest, out_count >= 2).await?;
+        let eval = evaluate_view(p, x, rest.view(), out_count >= 2).await?;
         if out_count == 0 {
             return Ok(Value::output_list(Vec::new()));
         }
@@ -90,7 +94,7 @@ async fn polyval_builtin(p: Value, x: Value, rest: Vec<Value>) -> crate::Builtin
             out_count, outputs,
         ));
     }
-    let eval = evaluate(p, x, &rest, false).await?;
+    let eval = evaluate_view(p, x, rest.view(), false).await?;
     Ok(eval.value())
 }
 
@@ -99,6 +103,21 @@ pub async fn evaluate(
     coefficients: Value,
     points: Value,
     rest: &[Value],
+    want_delta: bool,
+) -> BuiltinResult<PolyvalEval> {
+    evaluate_view(
+        coefficients,
+        points,
+        crate::call::FunctionArgumentView::from_slice(rest),
+        want_delta,
+    )
+    .await
+}
+
+async fn evaluate_view(
+    coefficients: Value,
+    points: Value,
+    rest: crate::call::FunctionArgumentView<'_>,
     want_delta: bool,
 ) -> BuiltinResult<PolyvalEval> {
     // Arity and an absent/known-empty statistics argument are decidable from
@@ -328,7 +347,7 @@ fn is_known_empty_option(value: &Value) -> bool {
     match value {
         Value::Tensor(tensor) => tensor_element_len(tensor) == 0,
         Value::LogicalArray(array) => array.data.is_empty(),
-        Value::Cell(array) => array.data.is_empty(),
+        Value::Cell(array) => array.data().is_empty(),
         Value::GpuTensor(handle) => handle.shape().contains(&0),
         _ => false,
     }
@@ -370,7 +389,7 @@ fn required_stat_field(
 }
 
 async fn preflight_host_options(
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     coefficients: &Value,
 ) -> BuiltinResult<(Option<Mu>, Option<PolyfitStats>)> {
     // Inspect the later host control before any earlier resident statistics
@@ -416,7 +435,9 @@ async fn preflight_host_options(
     Ok((mu, stats))
 }
 
-async fn parse_option_values(rest: &[Value]) -> BuiltinResult<ParsedOptions> {
+async fn parse_option_values(
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<ParsedOptions> {
     match rest.len() {
         0 => Ok(ParsedOptions { s: None, mu: None }),
         1 => Ok(ParsedOptions {
@@ -1003,7 +1024,7 @@ async fn is_empty_value(value: &Value) -> BuiltinResult<bool> {
     match value {
         Value::Tensor(t) => Ok(tensor_element_len(t) == 0),
         Value::LogicalArray(l) => Ok(l.data.is_empty()),
-        Value::Cell(ca) => Ok(ca.data.is_empty()),
+        Value::Cell(ca) => Ok(ca.data().is_empty()),
         Value::GpuTensor(handle) => {
             let gathered =
                 gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone())).await?;
@@ -1022,7 +1043,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_value::{IntegerComplexStorage, IntegerStorage, StructValue};
+    use runmat_value::{IntegerComplexStorage, IntegerStorage};
 
     fn assert_error_contains(err: crate::RuntimeError, needle: &str) {
         assert!(
@@ -1217,7 +1238,7 @@ pub(crate) mod tests {
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let coeffs = Tensor::new(vec![1.0, -3.0, 2.0], vec![1, 3]).unwrap();
         let points = Tensor::new(vec![0.0, 1.0, 2.0], vec![1, 3]).unwrap();
-        let mut st = StructValue::new();
+        let mut st = runmat_value::UnboundedStructValueBuilder::new();
         let r = Tensor::new_integer(
             IntegerStorage::I16(vec![1, 0, 0, 0, 1, 0, 0, 0, 1]),
             vec![3, 3],
@@ -1232,7 +1253,7 @@ pub(crate) mod tests {
         let eval = futures::executor::block_on(evaluate(
             Value::Tensor(coeffs),
             Value::Tensor(points),
-            &[Value::Struct(st)],
+            &[Value::Struct(st.finish())],
             true,
         ))
         .expect("polyval");
@@ -1255,7 +1276,7 @@ pub(crate) mod tests {
     fn polyval_delta_computation() {
         let coeffs = Tensor::new(vec![1.0, -3.0, 2.0], vec![1, 3]).unwrap();
         let points = Tensor::new(vec![0.0, 1.0, 2.0], vec![1, 3]).unwrap();
-        let mut st = StructValue::new();
+        let mut st = runmat_value::UnboundedStructValueBuilder::new();
         let r = Tensor::new(
             vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
             vec![3, 3],
@@ -1264,7 +1285,7 @@ pub(crate) mod tests {
         st.fields.insert("R".to_string(), Value::Tensor(r));
         st.fields.insert("df".to_string(), Value::Num(4.0));
         st.fields.insert("normr".to_string(), Value::Num(2.0));
-        let stats = Value::Struct(st);
+        let stats = Value::Struct(st.finish());
         let eval = futures::executor::block_on(evaluate(
             Value::Tensor(coeffs),
             Value::Tensor(points),
@@ -1350,10 +1371,10 @@ pub(crate) mod tests {
     fn polyval_invalid_stats_missing_r() {
         let coeffs = Tensor::new(vec![1.0, -3.0, 2.0], vec![1, 3]).unwrap();
         let points = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
-        let mut st = StructValue::new();
+        let mut st = runmat_value::UnboundedStructValueBuilder::new();
         st.fields.insert("df".to_string(), Value::Num(1.0));
         st.fields.insert("normr".to_string(), Value::Num(1.0));
-        let stats = Value::Struct(st);
+        let stats = Value::Struct(st.finish());
         let err = polyval_builtin(Value::Tensor(coeffs), Value::Tensor(points), vec![stats])
             .expect_err("expected missing R error");
         assert_error_contains(err, "missing the field 'R'");
@@ -1363,14 +1384,14 @@ pub(crate) mod tests {
     #[cfg_attr(not(target_arch = "wasm32"), test)]
     fn polyval_stat_matrix_preserves_rank_zero_and_rank_one_geometry() {
         let statistics = |shape| {
-            let mut fields = StructValue::new();
+            let mut fields = runmat_value::UnboundedStructValueBuilder::new();
             fields.fields.insert(
                 "R".to_string(),
                 Value::Tensor(Tensor::new(vec![1.0], shape).expect("R tensor")),
             );
             fields.fields.insert("df".to_string(), Value::Num(1.0));
             fields.fields.insert("normr".to_string(), Value::Num(0.0));
-            Value::Struct(fields)
+            Value::Struct(fields.finish())
         };
         let coefficients = || Value::Tensor(Tensor::new(vec![2.0], vec![1, 1]).unwrap());
 
@@ -1475,6 +1496,7 @@ pub(crate) mod tests {
     }
 
     fn polyval_builtin(p: Value, x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let rest = crate::call::BuiltinArguments::from_borrowed(&rest, None)?;
         block_on(super::polyval_builtin(p, x, rest))
     }
 }

@@ -413,6 +413,13 @@ pub fn parse_line_style_args(
     rest: &[Value],
     opts: &LineStyleParseOptions,
 ) -> BuiltinResult<ParsedLineStyle> {
+    parse_line_style_arguments(crate::call::FunctionArgumentView::from_slice(rest), opts)
+}
+
+pub fn parse_line_style_arguments(
+    rest: crate::call::FunctionArgumentView<'_>,
+    opts: &LineStyleParseOptions,
+) -> BuiltinResult<ParsedLineStyle> {
     if rest.is_empty() {
         return Ok(ParsedLineStyle {
             appearance: LineAppearance::default(),
@@ -435,7 +442,7 @@ pub fn parse_line_style_args(
     let mut idx = 0usize;
     let mut saw_style_token = false;
     while idx < rest.len() {
-        if opts.forbid_interleaved_numeric && begins_with_numeric(&rest[idx..]) {
+        if opts.forbid_interleaved_numeric && begins_with_numeric(rest.range(idx..)?) {
             return Err(ctx_err(
                 opts,
                 "per-series styles interleaved with data are not supported yet",
@@ -458,8 +465,8 @@ pub fn parse_line_style_args(
         }
 
         let pair = rest
-            .get(idx..=idx + 1)
-            .ok_or_else(|| ctx_err(opts, "name-value arguments must come in pairs"))?;
+            .range(idx..=idx + 1)
+            .map_err(|_| ctx_err(opts, "name-value arguments must come in pairs"))?;
         options.merge(parse_name_value_pairs(opts, pair)?);
         idx += 2;
     }
@@ -477,7 +484,7 @@ pub fn parse_line_style_args(
 
 pub fn parse_surface_style_args(
     builtin: &'static str,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     defaults: SurfaceStyleDefaults,
 ) -> BuiltinResult<SurfaceStyle> {
     let opts = LineStyleParseOptions::generic(builtin);
@@ -538,7 +545,7 @@ pub fn parse_surface_style_args(
     Ok(style)
 }
 
-fn begins_with_numeric(rest: &[Value]) -> bool {
+fn begins_with_numeric(rest: crate::call::FunctionArgumentView<'_>) -> bool {
     matches!(
         rest.first(),
         Some(
@@ -596,7 +603,7 @@ fn parse_style_string(
 
 fn parse_name_value_pairs(
     opts: &LineStyleParseOptions,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<LineStyleOptions> {
     let mut options = LineStyleOptions::default();
     let mut iter = args.chunks_exact(2);
@@ -745,7 +752,11 @@ fn parse_line_style_order_value(
     value: &Value,
 ) -> BuiltinResult<Vec<LineStyle>> {
     let strings = match value {
-        Value::StringArray(arr) => arr.data.clone(),
+        Value::StringArray(arr) => arr
+            .data()
+            .iter()
+            .map(|text| text.as_str().to_owned())
+            .collect(),
         Value::Cell(cell) => collect_cell_strings(cell, opts)?,
         _ => {
             if let Some(text) = value_as_string(value) {
@@ -950,8 +961,8 @@ pub(crate) fn parse_handle_visibility(
 
 pub fn value_as_string(value: &Value) -> Option<String> {
     match value {
-        Value::CharArray(chars) => Some(chars.data.iter().collect()),
-        Value::String(s) => Some(s.clone()),
+        Value::CharArray(chars) => Some(chars.data().iter().collect()),
+        Value::String(s) => Some(s.as_str().to_owned()),
         _ => None,
     }
 }
@@ -982,7 +993,7 @@ pub(crate) fn value_as_bool(value: &Value) -> Option<bool> {
         Value::Num(v) => Some(*v != 0.0),
         Value::Int(i) => Some(!i.is_zero()),
         Value::CharArray(chars) => {
-            let text: String = chars.data.iter().collect();
+            let text: String = chars.data().iter().collect();
             bool_from_text(&text)
         }
         Value::String(text) => bool_from_text(text),

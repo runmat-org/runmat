@@ -11,7 +11,12 @@ fn invalid_mode_and_extra_arguments_do_not_create_figure() {
         vec![Value::String("invalid".into())],
         vec![Value::String("on".into()), Value::String("off".into())],
     ] {
-        assert!(hidden_builtin(args).is_err());
+        assert!(
+            hidden_builtin(crate::builtins::common::test_support::builtin_arguments(
+                args
+            ))
+            .is_err()
+        );
         assert!(crate::builtins::plotting::state::current_figure_handle_if_exists().is_none());
     }
 }
@@ -24,12 +29,22 @@ fn hidden_toggles_and_sets_current_axes_hidden_line_removal() {
         get_builtin(vec![ax.clone(), Value::String("HiddenLineRemoval".into())]).unwrap(),
         Value::String("on".into())
     );
-    assert!(!hidden_builtin(vec![]).unwrap());
+    assert!(
+        !hidden_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![]
+        ))
+        .unwrap()
+    );
     assert_eq!(
         get_builtin(vec![ax.clone(), Value::String("HiddenLineRemoval".into())]).unwrap(),
         Value::String("off".into())
     );
-    assert!(hidden_builtin(vec![Value::String("on".into())]).unwrap());
+    assert!(
+        hidden_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::String("on".into())]
+        ))
+        .unwrap()
+    );
     assert_eq!(
         get_builtin(vec![ax, Value::String("HiddenLineRemoval".into())]).unwrap(),
         Value::String("on".into())
@@ -52,7 +67,10 @@ fn hidden_accepts_axes_target_without_selecting_current_axes() {
     )
     .unwrap();
 
-    hidden_builtin(vec![Value::Num(ax1), Value::String("off".into())]).unwrap();
+    hidden_builtin(crate::builtins::common::test_support::builtin_arguments(
+        vec![Value::Num(ax1), Value::String("off".into())],
+    ))
+    .unwrap();
 
     assert_eq!(
         crate::builtins::plotting::gca::gca_builtin(vec![]).unwrap(),
@@ -105,10 +123,9 @@ fn hidden_line_removal_property_set_get_and_rejects_invalid_values() {
 #[test]
 fn hidden_rejects_extra_arguments() {
     let _guard = setup();
-    let err = hidden_builtin(vec![
-        Value::String("on".into()),
-        Value::String("off".into()),
-    ])
+    let err = hidden_builtin(crate::builtins::common::test_support::builtin_arguments(
+        vec![Value::String("on".into()), Value::String("off".into())],
+    ))
     .unwrap_err();
     assert_eq!(err.identifier(), Some("RunMat:hidden:InvalidArgument"));
 }

@@ -17,7 +17,7 @@ macro_rules! lowering_builtin {
                                                                     binding_variant = "default",
                                     builtin_path = "crate::builtins::parallel::primitives"
                                                                 )]
-        async fn $function(_arguments: Vec<Value>) -> crate::BuiltinResult<Value> {
+        async fn $function(_arguments: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
             Err(lowering_required($name))
         }
     };

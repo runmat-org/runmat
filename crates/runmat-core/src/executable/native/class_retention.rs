@@ -3,22 +3,14 @@
 use std::collections::BTreeSet;
 
 use runmat_hir::FunctionId;
-use runmat_types::ProgramFunctionId;
 
 use super::{native_product_error, NativeCompilationInput};
 
 pub(super) fn close(
     input: &NativeCompilationInput,
-    requested: &BTreeSet<ProgramFunctionId>,
-) -> Result<BTreeSet<ProgramFunctionId>, runmat_runtime::RuntimeError> {
-    let mut retained = requested
-        .iter()
-        .map(|function| {
-            usize::try_from(function.0)
-                .map(FunctionId)
-                .map_err(|_| native_product_error("function identity exceeds host indexing".into()))
-        })
-        .collect::<Result<BTreeSet<_>, _>>()?;
+    requested: &BTreeSet<FunctionId>,
+) -> Result<BTreeSet<FunctionId>, runmat_runtime::RuntimeError> {
+    let mut retained = requested.clone();
     for class in &input.mir.classes {
         for method in &class.methods {
             if !input.mir.functions.contains_key(&method.function) {
@@ -38,12 +30,5 @@ pub(super) fn close(
             }
         }
     }
-    retained
-        .into_iter()
-        .map(|function| {
-            u32::try_from(function.0)
-                .map(ProgramFunctionId)
-                .map_err(|_| native_product_error("function identity exceeds Native IR".into()))
-        })
-        .collect()
+    Ok(retained)
 }

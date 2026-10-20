@@ -11,16 +11,16 @@ pub(super) fn preflight_group_labels(value: &Value, expected_len: usize) -> Buil
 }
 
 fn preflight_cell_labels(cell: &CellArray, expected_len: usize) -> BuiltinResult<()> {
-    if cell.data.len() != expected_len {
+    if cell.data().len() != expected_len {
         return Err(invalid(
             "scatterhist: Group must have one label per observation",
         ));
     }
-    for label in &cell.data {
+    for label in cell.data() {
         let scalar = match label {
             Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::String(_) => true,
             Value::CharArray(chars) => chars.rows == 1,
-            Value::StringArray(array) => array.data.len() == 1,
+            Value::StringArray(array) => array.data().len() == 1,
             Value::Tensor(tensor) => tensor::tensor_element_len(tensor) == 1,
             Value::LogicalArray(array) => array.len() == 1,
             Value::GpuTensor(handle) => {
@@ -55,7 +55,7 @@ pub(super) fn group_labels(
             Ok(vec![Some(KeyAtom::Logical(*value))])
         }
         Value::String(value) if expected_len == 1 => {
-            Ok(vec![Some(KeyAtom::Text(value.clone()))])
+            Ok(vec![Some(KeyAtom::Text(value.as_str().to_owned()))])
         }
         Value::LogicalArray(array) if array.len() == expected_len => Ok(array
             .data
@@ -67,16 +67,16 @@ pub(super) fn group_labels(
                 .map(|index| tensor.numeric_value_at(index).and_then(scatterhist_numeric_key))
                 .collect())
         }
-        Value::StringArray(array) if array.data.len() == expected_len => Ok(array
-            .data
+        Value::StringArray(array) if array.data().len() == expected_len => Ok(array
+            .data()
             .iter()
-            .map(|value| Some(KeyAtom::Text(value.clone())))
+            .map(|value| Some(KeyAtom::Text(value.as_str().to_owned())))
             .collect()),
         Value::CharArray(chars) if chars.rows == expected_len => Ok((0..chars.rows)
             .map(|row| {
                 let start = row * chars.cols;
                 let end = start + chars.cols;
-                Some(KeyAtom::Text(chars.data[start..end].iter().collect::<String>().trim().to_string()))
+                Some(KeyAtom::Text(chars.data()[start..end].iter().collect::<String>().trim().to_string()))
             })
             .collect()),
         Value::Cell(cell) => group_labels_from_cell(cell, expected_len),
@@ -99,7 +99,7 @@ pub(super) fn group_labels_from_cell(
     expected_len: usize,
 ) -> BuiltinResult<Vec<Option<KeyAtom>>> {
     preflight_cell_labels(cell, expected_len)?;
-    cell.data.iter().map(scalar_group_label).collect()
+    cell.data().iter().map(scalar_group_label).collect()
 }
 
 fn scalar_group_label(value: &Value) -> BuiltinResult<Option<KeyAtom>> {
@@ -107,9 +107,9 @@ fn scalar_group_label(value: &Value) -> BuiltinResult<Option<KeyAtom>> {
         Value::Num(value) => Ok(scatterhist_numeric_key(NumericScalar::F64(*value))),
         Value::Int(value) => Ok(Some(KeyAtom::Integer(value.clone()))),
         Value::Bool(value) => Ok(Some(KeyAtom::Logical(*value))),
-        Value::String(value) => Ok(Some(KeyAtom::Text(value.clone()))),
-        Value::CharArray(chars) => Ok(Some(KeyAtom::Text(chars.data.iter().collect()))),
-        Value::StringArray(array) => Ok(Some(KeyAtom::Text(array.data[0].clone()))),
+        Value::String(value) => Ok(Some(KeyAtom::Text(value.as_str().to_owned()))),
+        Value::CharArray(chars) => Ok(Some(KeyAtom::Text(chars.data().iter().collect()))),
+        Value::StringArray(array) => Ok(Some(KeyAtom::Text(array.data()[0].as_str().to_owned()))),
         Value::Tensor(tensor) => Ok(tensor.numeric_value_at(0).and_then(scatterhist_numeric_key)),
         Value::LogicalArray(array) => Ok(Some(KeyAtom::Logical(array.data[0] != 0))),
         _ => Err(invalid("scatterhist: cell Group labels must be scalar")),

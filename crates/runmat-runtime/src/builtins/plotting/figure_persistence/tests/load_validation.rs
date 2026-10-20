@@ -12,20 +12,20 @@ fn hgload_applies_property_overrides_and_returns_old_values() {
     let _ = std::fs::remove_file(&path);
     block_on(hgsave_builtin(vec![
         Value::Num(fig),
-        Value::String(path.to_string_lossy().into_owned()),
+        Value::String(path.to_string_lossy().into_owned().into()),
     ]))
     .expect("hgsave");
     clear_figure(None).expect("clear");
-    let mut overrides = StructValue::new();
+    let mut overrides = runmat_value::UnboundedStructValueBuilder::new();
     overrides.insert("Name", Value::String("After".into()));
     overrides.insert("NotAProperty", Value::Num(1.0));
     let result = block_on(execute_hgload(
         None,
         Some(2),
-        vec![
-            Value::String(path.to_string_lossy().into_owned()),
-            Value::Struct(overrides),
-        ],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::String(path.to_string_lossy().into_owned().into()),
+            Value::Struct(overrides.finish()),
+        ]),
     ))
     .expect("hgload");
     let outputs = result.into_output_storage();
@@ -33,7 +33,7 @@ fn hgload_applies_property_overrides_and_returns_old_values() {
     let Value::Cell(cell) = &outputs[1] else {
         panic!("expected old values cell");
     };
-    let Value::Struct(old) = &cell.data[0] else {
+    let Value::Struct(old) = &cell.data()[0] else {
         panic!("expected old values struct");
     };
     assert_eq!(
@@ -52,7 +52,7 @@ fn hgload_output_admission_failure_rolls_back_imported_figures() {
     let _ = std::fs::remove_file(&path);
     block_on(hgsave_builtin(vec![
         Value::Num(figure),
-        Value::String(path.to_string_lossy().into_owned()),
+        Value::String(path.to_string_lossy().into_owned().into()),
     ]))
     .expect("save archive");
     reset_plot_state();
@@ -60,7 +60,9 @@ fn hgload_output_admission_failure_rolls_back_imported_figures() {
     block_on(execute_hgload(
         None,
         Some(3),
-        vec![Value::String(path.to_string_lossy().into_owned())],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+            path.to_string_lossy().into_owned().into(),
+        )]),
     ))
     .expect_err("three outputs reject");
     assert_eq!(figure_handles(), before);

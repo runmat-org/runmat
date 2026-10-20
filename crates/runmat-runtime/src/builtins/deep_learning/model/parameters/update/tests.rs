@@ -1,13 +1,17 @@
 use super::*;
-use crate::builtins::deep_learning::layers::{
-    feature_input_layer_builtin, fully_connected_layer_builtin,
-};
+use crate::builtins::deep_learning::layers::feature_input_layer_builtin;
 use crate::builtins::deep_learning::model::dlnetwork_builtin;
+use crate::builtins::deep_learning::tests::fully_connected_layer_builtin;
 use futures::executor::block_on;
 
 fn network() -> crate::execution::RootedValue {
-    let input = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
+    let input = block_on(feature_input_layer_builtin(
+        Value::Num(2.0),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap();
     let dense = block_on(fully_connected_layer_builtin(
+        None,
         Value::Num(2.0),
         vec![
             Value::String("Weights".into()),
@@ -61,8 +65,8 @@ fn selected_native_updates_preserve_canonical_store_metadata_and_input_alias() {
     let network_owner = network();
     let mut input = network_object(&network_owner);
     input
-        .properties
-        .insert("UserMarker".into(), Value::String("keep".into()));
+        .replace_dl_property("UserMarker", Value::String("keep".into()))
+        .expect("fixture property");
     let original = input.clone();
     let rows = view(&input, "test").unwrap();
     let weight_key = rows[0].key.clone();
@@ -79,15 +83,15 @@ fn selected_native_updates_preserve_canonical_store_metadata_and_input_alias() {
         panic!("updated network expected")
     };
     assert_eq!(
-        updated.properties.get("UserMarker"),
+        updated.properties().get("UserMarker"),
         Some(&Value::String("keep".into()))
     );
     assert_eq!(
         updated
-            .properties
+            .properties()
             .get(super::super::state::STORAGE_PROPERTY),
         original
-            .properties
+            .properties()
             .get(super::super::state::STORAGE_PROPERTY)
     );
     let updated_rows = view(&updated, "test").unwrap();
@@ -176,24 +180,31 @@ fn selected_updates_reject_duplicate_foreign_and_precision_changing_keys() {
 fn selected_updates_preserve_dlarray_format_without_reusing_wrapper_identity() {
     let network_owner = network();
     let mut input = network_object(&network_owner);
-    let Value::Cell(layers) = input.properties.get_mut("Layers").unwrap() else {
+    let Value::Cell(layers) = input.fixture_dl_property_mut("Layers").unwrap() else {
         panic!("Layers cell expected")
     };
-    let Value::Object(dense) = &mut layers.data[1] else {
+    let Value::Object(dense) =
+        &mut crate::builtins::deep_learning::tests::fixture_array_mut(layers)[1]
+    else {
         panic!("dense layer expected")
     };
-    let original = dense.properties.remove("Weights").unwrap();
+    let original = dense
+        .remove_dl_property("Weights")
+        .expect("fixture removal")
+        .unwrap();
     let mut wrapper = ObjectInstance::new(crate::builtins::deep_learning::DLARRAY_CLASS.owned());
-    wrapper.properties.insert("Data".into(), original);
     wrapper
-        .properties
-        .insert("Format".into(), Value::String(String::new()));
+        .replace_dl_property("Data", original)
+        .expect("fixture property");
     wrapper
-        .properties
-        .insert("Labels".into(), Value::String(String::new()));
+        .replace_dl_property("Format", Value::String(String::new().into()))
+        .expect("fixture property");
+    wrapper
+        .replace_dl_property("Labels", Value::String(String::new().into()))
+        .expect("fixture property");
     dense
-        .properties
-        .insert("Weights".into(), Value::Object(wrapper));
+        .replace_dl_property("Weights", Value::Object(wrapper))
+        .expect("fixture property");
 
     let key = view(&input, "test").unwrap()[0].key.clone();
     let Value::Object(updated) = apply_updates(
@@ -212,14 +223,14 @@ fn selected_updates_preserve_dlarray_format_without_reusing_wrapper_identity() {
         panic!("dlarray wrapper expected")
     };
     assert_eq!(
-        replacement.properties.get("Format"),
-        Some(&Value::String(String::new()))
+        replacement.properties().get("Format"),
+        Some(&Value::String(String::new().into()))
     );
     assert_eq!(
-        replacement.properties.get("Labels"),
-        Some(&Value::String(String::new()))
+        replacement.properties().get("Labels"),
+        Some(&Value::String(String::new().into()))
     );
-    assert_eq!(replacement.properties.len(), 3);
+    assert_eq!(replacement.properties().len(), 3);
     let original = view(&input, "test").unwrap();
     let Value::Tensor(original) = parameter_data(original[0].value.unwrap(), "test").unwrap()
     else {

@@ -16,7 +16,7 @@ pub struct NativeLoweringInput<'a> {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeEntrypointBinding {
-    compiled: runmat_types::ProgramFunctionId,
+    compiled: runmat_types::FunctionId,
     portable: runmat_types::ProgramFunctionId,
     body_digest: runmat_execution::Digest,
 }
@@ -27,14 +27,6 @@ impl NativeEntrypointBinding {
         compiled: runmat_hir::FunctionId,
         portable: runmat_types::ProgramFunctionId,
     ) -> NativeCodegenResult<Self> {
-        let compiled = u32::try_from(compiled.0)
-            .map(runmat_types::ProgramFunctionId)
-            .map_err(|_| {
-                NativeCodegenError::new(
-                    "native.lowering.entrypoint_identity",
-                    "native entrypoint identity exceeds the Native IR schema",
-                )
-            })?;
         let body_digest = entrypoint_body_digest(mir, compiled)?;
         Ok(Self {
             compiled,
@@ -43,7 +35,7 @@ impl NativeEntrypointBinding {
         })
     }
 
-    pub fn compiled(&self) -> runmat_types::ProgramFunctionId {
+    pub fn compiled(&self) -> runmat_types::FunctionId {
         self.compiled
     }
 
@@ -70,16 +62,8 @@ impl NativeEntrypointBinding {
 
 fn entrypoint_body_digest(
     mir: &runmat_mir::MirAssembly,
-    function: runmat_types::ProgramFunctionId,
+    function: runmat_types::FunctionId,
 ) -> NativeCodegenResult<runmat_execution::Digest> {
-    let function = usize::try_from(function.0)
-        .map(runmat_hir::FunctionId)
-        .map_err(|_| {
-            NativeCodegenError::new(
-                "native.lowering.entrypoint_identity",
-                "native entrypoint identity exceeds this host",
-            )
-        })?;
     let metadata = mir.functions.get(&function).ok_or_else(|| {
         NativeCodegenError::new(
             "native.lowering.entrypoint_identity",
@@ -136,18 +120,11 @@ pub fn lower_executable(input: NativeLoweringInput<'_>) -> NativeCodegenResult<N
         ));
     }
     super::requirements::validate_requirements(input.mir, input.manifest)?;
-    super::requirements::reject_predeclared_capabilities(input.mir)?;
+    super::requirements::reject_predeclared_capabilities(input.mir, input.analysis)?;
 
     let mut functions = Vec::with_capacity(input.mir.bodies.len());
     for (function, body) in &input.mir.bodies {
-        let function_id = u32::try_from(function.0)
-            .map(runmat_types::ProgramFunctionId)
-            .map_err(|_| {
-                NativeCodegenError::new(
-                    "native.lowering.function_identity",
-                    "MIR function identity exceeds the Native IR schema",
-                )
-            })?;
+        let function_id = *function;
         let metadata = input.mir.functions.get(function).ok_or_else(|| {
             NativeCodegenError::new(
                 "native.lowering.function_metadata",
@@ -165,6 +142,7 @@ pub fn lower_executable(input: NativeLoweringInput<'_>) -> NativeCodegenResult<N
                 })?;
         functions.push(super::function::lower_function(
             function_id,
+            entrypoint_body_digest(input.mir, function_id)?,
             &input,
             metadata,
             retained_callable_parent,
@@ -174,35 +152,14 @@ pub fn lower_executable(input: NativeLoweringInput<'_>) -> NativeCodegenResult<N
     functions.sort_by_key(|function| function.id);
 
     input.entrypoint.validate(input.mir, input.manifest)?;
-    let entrypoint = usize::try_from(input.entrypoint.compiled().0)
-        .map(runmat_hir::FunctionId)
-        .map_err(|_| {
-            NativeCodegenError::new(
-                "native.lowering.entrypoint_identity",
-                "native entrypoint identity exceeds this host",
-            )
-        })?;
+    let entrypoint = input.entrypoint.compiled();
     if !input.mir.bodies.contains_key(&entrypoint) {
         return Err(NativeCodegenError::new(
             "native.lowering.entrypoint_identity",
             "selected native entrypoint is absent from canonical MIR",
         ));
     }
-    let mut entrypoints = input
-        .mir
-        .entrypoints
-        .iter()
-        .map(|function| {
-            u32::try_from(function.0)
-                .map(runmat_types::ProgramFunctionId)
-                .map_err(|_| {
-                    NativeCodegenError::new(
-                        "native.lowering.entrypoint_identity",
-                        "MIR entrypoint identity exceeds the Native IR schema",
-                    )
-                })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    let mut entrypoints = input.mir.entrypoints.to_vec();
     entrypoints.push(input.entrypoint.compiled());
     entrypoints.sort_unstable();
     entrypoints.dedup();
@@ -303,14 +260,7 @@ pub fn verify_against_mir(
         ));
     }
     for (function, body) in &mir.bodies {
-        let function_id = u32::try_from(function.0)
-            .map(runmat_types::ProgramFunctionId)
-            .map_err(|_| {
-                NativeCodegenError::new(
-                    "native.ir.mir_function_identity",
-                    "MIR function identity exceeds the Native IR schema",
-                )
-            })?;
+        let function_id = *function;
         let native = functions.get(&function_id).ok_or_else(|| {
             NativeCodegenError::new(
                 "native.ir.mir_functions",
@@ -318,6 +268,13 @@ pub fn verify_against_mir(
             )
             .at_function(function_id)
         })?;
+        if native.mir_body_digest != entrypoint_body_digest(mir, function_id)? {
+            return Err(NativeCodegenError::new(
+                "native.ir.mir_body_digest",
+                "Native IR function body identity differs from canonical MIR",
+            )
+            .at_function(function_id));
+        }
         if native.locals.len() != body.locals.len() {
             return Err(NativeCodegenError::new(
                 "native.ir.mir_locals",
@@ -390,7 +347,7 @@ pub fn verify_against_mir(
             )
             .at_function(function_id));
         }
-        let expected = super::inventory::expected_sites(function_id, body)?;
+        let expected = super::inventory::expected_sites(native.portable_id, body)?;
         if native.expected_sites != expected {
             return Err(NativeCodegenError::new(
                 "native.ir.mir_construct_coverage",
@@ -406,7 +363,7 @@ pub fn verify_against_mir(
 fn verify_statement_operations(
     native: &crate::NativeFunction,
     body: &runmat_mir::MirBody,
-    function: runmat_types::ProgramFunctionId,
+    function: runmat_types::FunctionId,
 ) -> NativeCodegenResult<()> {
     for block in &body.blocks {
         let block_id = u32::try_from(block.id.0)
@@ -438,7 +395,7 @@ fn verify_statement_operations(
                 .at_function(function)
             })?;
             let point = runmat_types::ProgramPointId {
-                function,
+                function: native.portable_id,
                 block: block_id.0,
                 position,
             };

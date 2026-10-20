@@ -56,8 +56,11 @@ fn knot_object(builtin: &'static str, knot: RuntimeSignalKnot) -> BuiltinResult<
     )
 }
 
-
-#[runtime_builtin(name = "fea.SignalKnot.continuous", binding_variant = "default", builtin_path = "crate::builtins::fea::signals::knots")]
+#[runtime_builtin(
+    name = "fea.SignalKnot.continuous",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::fea::signals::knots"
+)]
 pub async fn continuous(abscissa: Value, value: Value) -> BuiltinResult<Value> {
     let abscissa = finite_numeric_scalar("fea.SignalKnot.continuous", &abscissa, "abscissa")?;
     let value = raw_ordinate("fea.SignalKnot.continuous", &value, "value")?;
@@ -70,8 +73,11 @@ pub async fn continuous(abscissa: Value, value: Value) -> BuiltinResult<Value> {
     )
 }
 
-
-#[runtime_builtin(name = "fea.SignalKnot.jump", binding_variant = "default", builtin_path = "crate::builtins::fea::signals::knots")]
+#[runtime_builtin(
+    name = "fea.SignalKnot.jump",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::fea::signals::knots"
+)]
 pub async fn jump(
     abscissa: Value,
     left_limit: Value,
@@ -121,7 +127,7 @@ fn runtime_knots(builtin: &'static str, value: &Value) -> BuiltinResult<Vec<Runt
             "knots must be a row or column cell array",
         ));
     };
-    if cell.data.len() < 2 || (cell.rows != 1 && cell.cols != 1) {
+    if cell.data().len() < 2 || (cell.rows != 1 && cell.cols != 1) {
         return Err(builtin_error(
             builtin,
             &ERROR_INPUT,
@@ -129,7 +135,7 @@ fn runtime_knots(builtin: &'static str, value: &Value) -> BuiltinResult<Vec<Runt
         ));
     }
     let knots = cell
-        .data
+        .data()
         .iter()
         .map(|value| {
             object_payload::<SignalKnotObject>(builtin, value, SIGNAL_KNOT_CLASS).and_then(

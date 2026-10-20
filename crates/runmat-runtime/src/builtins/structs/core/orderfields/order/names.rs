@@ -10,10 +10,12 @@ pub(super) fn parse(value: &Value) -> crate::BuiltinResult<Option<Vec<String>>> 
             .collect::<crate::BuiltinResult<Vec<_>>>()
             .map(Some),
         Value::StringArray(array) => array
-            .data
+            .data()
             .iter()
             .enumerate()
-            .map(|(index, name)| nonempty(name.clone(), format!("string element {}", index + 1)))
+            .map(|(index, name)| {
+                nonempty(name.to_string(), format!("string element {}", index + 1))
+            })
             .collect::<crate::BuiltinResult<Vec<_>>>()
             .map(Some),
         Value::String(_) => scalar(value, "string input").map(|name| Some(vec![name])),
@@ -26,7 +28,7 @@ fn character_rows(array: &CharArray) -> crate::BuiltinResult<Vec<String>> {
     (0..array.rows)
         .map(|row| {
             let start = row * array.cols;
-            let mut name = array.data[start..start + array.cols]
+            let mut name = array.data()[start..start + array.cols]
                 .iter()
                 .collect::<String>();
             while name.ends_with(' ') {

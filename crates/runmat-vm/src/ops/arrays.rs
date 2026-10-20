@@ -194,7 +194,7 @@ fn scalar_to_real(value: &Value) -> Result<f64, RuntimeError> {
 fn scalar_to_symbolic(value: &Value) -> Result<SymbolicExpr, RuntimeError> {
     match value {
         Value::Symbolic(expr) => Ok(expr.clone()),
-        Value::SymbolicArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::SymbolicArray(array) if array.data().len() == 1 => Ok(array.data()[0].clone()),
         Value::Num(n) => Ok(SymbolicExpr::constant(*n)),
         Value::Int(i) => Ok(SymbolicExpr::constant(i.to_f64())),
         Value::Bool(flag) => Ok(SymbolicExpr::constant(if *flag { 1.0 } else { 0.0 })),

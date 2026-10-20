@@ -6,7 +6,7 @@ use super::identities::{
     FEA_EXECUTION_PLAN_CLASS, FEA_MATERIAL_CLASS, FEA_MODEL_CLASS,
     FEA_PROPERTY_REGION_TARGET_CLASS, FEA_STUDY_CLASS, GEOMETRY_ASSET_CLASS, MESHING_MESH_CLASS,
 };
-use super::options::{FeaModelOption, FeaStructuralOption};
+use super::options::{FeaModelOption, FeaStudyOption, FeaSweepOption};
 use crate::{
     catalog::{argument_error, finish_fixed},
     BuiltinCatalogEntry,
@@ -77,9 +77,10 @@ pub fn infer_constructor(
             }
         }
         FeaConstructorKind::MaterialAssignment => {
-            if arguments.first().is_some_and(|target| {
-                !possible_object(target, &[FEA_PROPERTY_REGION_TARGET_CLASS])
-            }) {
+            if arguments
+                .first()
+                .is_some_and(|target| !possible_object(target, &[FEA_PROPERTY_REGION_TARGET_CLASS]))
+            {
                 diagnostics.push(argument_error(
                     "RM-CATALOG-FEA-TARGET",
                     "fea.materialAssignment requires a fea.PropertyRegionTarget; region text is not accepted",
@@ -147,18 +148,13 @@ fn infer_options(
         };
         match kind {
             FeaConstructorKind::Study | FeaConstructorKind::Sweep => {
-                let option = FeaStructuralOption::decode(&name);
-                let (allowed, class) = match (kind, option) {
-                    (FeaConstructorKind::Study, Some(FeaStructuralOption::Execution)) => {
-                        (true, Some(FEA_EXECUTION_PLAN_CLASS))
-                    }
-                    (FeaConstructorKind::Study, Some(FeaStructuralOption::Mesh)) => {
-                        (true, Some(MESHING_MESH_CLASS))
-                    }
-                    (FeaConstructorKind::Sweep, Some(FeaStructuralOption::FailFast)) => {
-                        (true, None)
-                    }
-                    _ => (false, None),
+                let (allowed, class) = match kind {
+                    FeaConstructorKind::Study => match FeaStudyOption::decode(&name) {
+                        Some(FeaStudyOption::Execution) => (true, Some(FEA_EXECUTION_PLAN_CLASS)),
+                        Some(FeaStudyOption::Mesh) => (true, Some(MESHING_MESH_CLASS)),
+                        None => (false, None),
+                    },
+                    _ => (FeaSweepOption::decode(&name).is_some(), None),
                 };
                 if !allowed {
                     diagnostics.push(argument_error(
@@ -222,12 +218,15 @@ fn infer_options(
                     }
                     "confidence" => {
                         value.is_none_or(host_text)
-                            && request.literals.literal_string_at(index + 1).is_none_or(|text| {
-                                matches!(
-                                    text.to_ascii_lowercase().as_str(),
-                                    "verified" | "probable" | "inferred"
-                                )
-                            })
+                            && request
+                                .literals
+                                .literal_string_at(index + 1)
+                                .is_none_or(|text| {
+                                    matches!(
+                                        text.to_ascii_lowercase().as_str(),
+                                        "verified" | "probable" | "inferred"
+                                    )
+                                })
                     }
                     _ => {
                         diagnostics.push(argument_error(

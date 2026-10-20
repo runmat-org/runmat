@@ -558,7 +558,9 @@ const catalogEntriesRootPath = "crates/runmat-builtins/src/catalog/entries/mod.r
 const catalogEntriesRoot = read(catalogEntriesRootPath);
 const catalogEntriesObserved = parseObservedComposition("catalog-root", catalogEntriesRootPath);
 const catalogEntriesComposition = catalogEntriesObserved.surface;
-const catalogEntriesRootLines = catalogEntriesRoot.split("\n").length;
+const catalogEntriesRootLines = catalogEntriesRoot.endsWith("\n")
+  ? catalogEntriesRoot.split("\n").length - 1
+  : catalogEntriesRoot.split("\n").length;
 if (catalogEntriesRootLines > 80) {
   fail(`${catalogEntriesRootPath} must remain a domain-only composition root (found ${catalogEntriesRootLines} lines; maximum 80)`);
 }

@@ -338,12 +338,21 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
         syn::ReturnType::Type(_, ty) => infer_builtin_type(ty),
     };
 
-    // Detect if last parameter is variadic Vec<Value>
+    // Canonical variadics retain their source owner; historical bindings may
+    // still expose an explicitly ordinary Vec<Value> ABI.
     let is_last_variadic = param_types
         .last()
         .map(|ty| {
             // crude detection: type path starts with Vec and inner type is runmat_value::Value or Value
             if let syn::Type::Path(tp) = ty {
+                if tp
+                    .path
+                    .segments
+                    .last()
+                    .is_some_and(|segment| segment.ident == "BuiltinArguments")
+                {
+                    return true;
+                }
                 if tp
                     .path
                     .segments
@@ -385,11 +394,28 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
             .enumerate()
             .take(param_len - 1)
         {
-            stmts.push(quote! { let #ident : #ty = std::convert::TryInto::try_into(&args[#i])?; });
+            let conversion =
+                builtin_parameter_conversion(binding_variant_lit.is_some(), i, ident, ty);
+            stmts.push(conversion);
         }
-        // Collect the rest into Vec<Value>
+        // Canonical calls transfer a logical range of the original owner.
         let last_ident = &param_idents[param_len - 1];
-        stmts.push(quote! {
+        if matches!(&param_types[param_len - 1], syn::Type::Path(path)
+            if path.path.segments.last().is_some_and(|segment| segment.ident == "BuiltinArguments"))
+        {
+            stmts.push(quote! {
+                let #last_ident: crate::call::BuiltinArguments = args.into_range((#param_len - 1)..)?;
+            });
+        } else {
+            if binding_variant_lit.is_some() {
+                return syn::Error::new_spanned(
+                    &param_types[param_len - 1],
+                    "canonical variadic bindings require BuiltinArguments to retain their argument owner",
+                )
+                .to_compile_error()
+                .into();
+            }
+            stmts.push(quote! {
             let #last_ident : Vec<runmat_value::Value> = {
                 let mut v = Vec::new();
                 for j in (#param_len-1)..args.len() {
@@ -398,7 +424,8 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
                 }
                 v
             };
-        });
+            });
+        }
         stmts
     } else {
         param_idents
@@ -406,7 +433,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
             .zip(param_types.iter())
             .enumerate()
             .map(|(i, (ident, ty))| {
-                quote! { let #ident : #ty = std::convert::TryInto::try_into(&args[#i])?; }
+                builtin_parameter_conversion(binding_variant_lit.is_some(), i, ident, ty)
             })
             .collect()
     };
@@ -453,10 +480,8 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
         quote! { runmat_builtins::BuiltinFuture }
     };
     let wrapper_args = if binding_variant_lit.is_some() {
-        // Register the original argument graph before returning the future:
-        // a caller may retire its roots before this future is first polled.
         quote! {
-            let args = crate::execution::RootedValues::new(invocation.args.to_vec());
+            let input = invocation.into_continuation_input();
         }
     } else {
         quote! { let args = args.to_vec(); }
@@ -506,6 +531,11 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
             async fn #body_ident(
                 input: crate::builtin::BuiltinContinuationInput,
             ) -> Result<crate::execution::RootedValueSequence, crate::RuntimeError> {
+                let _argument_context = input.context.clone();
+                // A variadic body consumes its argument range. Keep the same
+                // original roots until its returned values have acquired the
+                // canonical output owner, including direct embedding calls.
+                let _argument_owner = input.args.fork();
                 #owned_args_binding
                 #owned_context_binding
                 #owned_requested_outputs_binding
@@ -524,28 +554,25 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
         quote! {
             fn #wrapper_ident(#wrapper_input) -> #wrapper_return {
                 #wrapper_args
-                let args = match args {
-                    Ok(args) => args,
+                let input = match input {
+                    Ok(input) => input,
                     Err(error) => {
-                        return Box::pin(std::future::ready(Err(error.into_runtime_error())));
+                        return Box::pin(std::future::ready(Err(error)));
                     }
                 };
+                let args = &input.args;
                 #arity_check
                 if let Some(message) = arity_error {
                     return Box::pin(std::future::ready(Err(std::convert::From::from(message))));
                 }
-                // The allocation issuer is used only before the returned
-                // continuation is polled. The same session context moves
-                // into the builtin body below.
-                let input = crate::builtin::BuiltinContinuationInput::new(args, invocation);
+                // Keep the target-sized async state out of this wrapper's
+                // caller stack. The factory boundary admits the exact named
+                // body type before constructing and erasing it once.
                 let allocation_context = input.context.clone();
-                // The named body is the same future type measured by the
-                // worker-target layout query below.
-                let continuation = #body_ident(input);
-                crate::builtin::admitted_builtin_future(
-                    allocation_context.as_ref(),
+                crate::builtin::admitted_builtin_future_with(
+                    allocation_context,
                     #name_lit,
-                    continuation,
+                    move |_| #body_ident(input),
                 )
             }
         }
@@ -1432,6 +1459,26 @@ fn helper_ident_from_name(prefix: &str, name: &str) -> proc_macro2::Ident {
 }
 
 /// Smart type inference from Rust types to our enhanced Type enum
+fn builtin_parameter_conversion(
+    canonical: bool,
+    index: usize,
+    ident: &syn::Ident,
+    ty: &syn::Type,
+) -> proc_macro2::TokenStream {
+    if canonical
+        && matches!(ty, syn::Type::Path(path)
+        if path.path.segments.last().is_some_and(|segment| segment.ident == "Utf8Text"))
+    {
+        quote! {
+            let #ident: #ty = crate::call::argument_text::convert(
+                &args[#index], _argument_context.as_ref(),
+            )?;
+        }
+    } else {
+        quote! { let #ident: #ty = std::convert::TryInto::try_into(&args[#index])?; }
+    }
+}
+
 fn infer_builtin_type(ty: &syn::Type) -> proc_macro2::TokenStream {
     use syn::Type;
 

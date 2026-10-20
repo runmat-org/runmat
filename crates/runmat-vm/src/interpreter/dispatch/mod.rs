@@ -21,7 +21,7 @@ use crate::interpreter::persistent::{self, PersistentAlias};
 use crate::interpreter::vars::InterpreterVars;
 use crate::runtime::workspace::{workspace_slot_assigned, workspace_slot_name};
 use runmat_runtime::RuntimeError;
-use runmat_value::{ObjectInstance, StructValue, Tensor, Value};
+use runmat_value::{Tensor, Value};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::future::Future;
 
@@ -669,58 +669,6 @@ pub(super) fn requested_outputs_from_slot(
     }
 }
 
-fn initialize_object_with_defaults(class_name: &runmat_types::ClassIdentity) -> ObjectInstance {
-    let empty_default = || Value::Tensor(Tensor::new(vec![], vec![0, 0]).expect("empty tensor"));
-    if let Some(def) = runmat_runtime::class_registry::get_class(class_name) {
-        let mut chain: Vec<runmat_runtime::class_registry::RuntimeClass> = Vec::new();
-        let mut visited = HashSet::new();
-        let mut cursor = Some(def.name.clone());
-        while let Some(name) = cursor {
-            if !visited.insert(name.clone()) {
-                break;
-            }
-            if let Some(class_def) = runmat_runtime::class_registry::get_class(&name) {
-                chain.push(class_def.clone());
-                cursor = class_def.parent.clone();
-            } else {
-                break;
-            }
-        }
-        chain.reverse();
-        let mut object = ObjectInstance::new(def.name.clone());
-        for class_def in chain {
-            for (property_name, property_def) in class_def.properties {
-                if !property_def.is_static {
-                    object.properties.insert(
-                        property_name.to_string(),
-                        property_def.default_value.unwrap_or_else(empty_default),
-                    );
-                }
-            }
-        }
-        object
-    } else {
-        ObjectInstance::new(class_name.clone())
-    }
-}
-
-fn pop_aggregate_literal_values(
-    stack: &mut crate::interpreter::stack::InterpreterStack,
-    field_count: usize,
-) -> Result<Vec<Value>, RuntimeError> {
-    let mut values = Vec::with_capacity(field_count);
-    for _ in 0..field_count {
-        values.push(stack.pop().ok_or_else(|| {
-            crate::interpreter::errors::mex(
-                "StackUnderflow",
-                "stack underflow while building aggregate literal",
-            )
-        })?);
-    }
-    values.reverse();
-    Ok(values)
-}
-
 pub fn dispatch_instruction<'a>(
     meta: DispatchMeta<'a>,
     state: DispatchState<'a>,
@@ -1251,23 +1199,46 @@ fn dispatch_immediate(
             )))
         }
         Instr::CreateStructLiteral(fields) => {
-            let values = pop_aggregate_literal_values(stack, fields.len())?;
-            let mut struct_value = StructValue::new();
-            for (field, value) in fields.iter().zip(values) {
-                struct_value.fields.insert(field.clone(), value);
-            }
-            stack.try_push(Value::Struct(struct_value))?;
+            let start = stack.len().checked_sub(fields.len()).ok_or_else(|| {
+                crate::interpreter::errors::mex(
+                    "StackUnderflow",
+                    "stack underflow while building aggregate literal",
+                )
+            })?;
+            let values = stack.try_extract_output(start)?;
+            let values = runmat_runtime::execution::RootedValues::from_output_storage_in_context(
+                values,
+                &context.runtime,
+            )?;
+            let structure = runmat_runtime::execution::construct_struct_in_context(
+                &context.runtime,
+                fields.iter().map(String::as_str),
+                values,
+            )?;
+            structure.with_owned(|value| stack.try_push(value))?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
         }
         Instr::CreateObjectLiteral { class_name, fields } => {
-            let values = pop_aggregate_literal_values(stack, fields.len())?;
-            let mut object = initialize_object_with_defaults(class_name);
-            for (field, value) in fields.iter().zip(values) {
-                object.properties.insert(field.clone(), value);
-            }
-            stack.try_push(Value::Object(object))?;
+            let start = stack.len().checked_sub(fields.len()).ok_or_else(|| {
+                crate::interpreter::errors::mex(
+                    "StackUnderflow",
+                    "stack underflow while building aggregate literal",
+                )
+            })?;
+            let values = stack.try_extract_output(start)?;
+            let values = runmat_runtime::execution::RootedValues::from_output_storage_in_context(
+                values,
+                &context.runtime,
+            )?;
+            let object = runmat_runtime::class_registry::construct_class_literal_in_context(
+                &context.runtime,
+                class_name,
+                fields,
+                values,
+            )?;
+            object.with_owned(|value| stack.try_push(value))?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))

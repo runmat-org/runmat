@@ -6914,6 +6914,7 @@ dependencies = [
 name = "runmat-aot"
 version = "0.6.2"
 dependencies = [
+ "anyhow",
  "ar_archive_writer",
  "cc",
  "object 0.37.3",
@@ -6930,7 +6931,9 @@ dependencies = [
  "runmat-package-cache",
  "runmat-python",
  "runmat-runtime",
+ "runmat-test",
  "runmat-types",
+ "same-file",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -6973,6 +6976,7 @@ name = "runmat-async"
 version = "0.6.2"
 dependencies = [
  "miette",
+ "runmat-execution",
  "thiserror 1.0.69",
  "wasm-bindgen-test",
 ]
@@ -7121,6 +7125,7 @@ dependencies = [
  "runmat-execution",
  "runmat-package",
  "runmat-process-host",
+ "runmat-test",
  "runmat-types",
  "serde",
  "serde_json",
@@ -8091,9 +8096,13 @@ dependencies = [
 name = "runmat-test-runner-native"
 version = "0.6.2"
 dependencies = [
+ "anyhow",
  "log",
+ "runmat-aot",
  "runmat-core",
  "runmat-execution",
+ "runmat-execution-artifact",
+ "runmat-native-codegen",
  "runmat-package",
  "runmat-process-host",
  "runmat-test",

@@ -5,7 +5,7 @@ use runmat_builtins::{
     DYNAMIC_ERROR_INVALID_TARGET, DYNAMIC_ERROR_UNSUPPORTED_METADATA,
 };
 use runmat_types::MemberAccess;
-use runmat_value::{DynamicPropertyDef, HandleRef, ObjectInstance, StructValue, Tensor, Value};
+use runmat_value::{DynamicPropertyDef, HandleRef, ObjectInstance, Tensor, Value};
 
 pub(super) fn dynamic_error(
     builtin: impl AsRef<str>,
@@ -71,11 +71,19 @@ pub(super) fn empty_default_value() -> Value {
     empty_metadata_result()
 }
 
-pub(super) fn metadata_string(value: &Value, field: &str) -> BuiltinResult<String> {
+pub(super) fn metadata_text(
+    runtime: Option<&crate::context::RuntimeContext>,
+    value: &Value,
+    field: &str,
+) -> BuiltinResult<runmat_value::Utf8Text> {
     match value {
-        Value::String(text) => Ok(text.clone()),
-        Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data.iter().collect()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::String(_) => crate::call::argument_text::convert(value, runtime),
+        Value::CharArray(chars) if chars.rows == 1 => {
+            crate::call::argument_text::convert(value, runtime)
+        }
+        Value::StringArray(array) if array.data().len() == 1 => {
+            crate::call::argument_text::convert(value, runtime)
+        }
         _ => Err(dynamic_error(
             DYNAMIC_PROPERTY_CLASS,
             &DYNAMIC_ERROR_UNSUPPORTED_METADATA,
@@ -105,16 +113,27 @@ pub(super) fn metadata_bool(value: &Value, field: &str) -> BuiltinResult<bool> {
     }
 }
 
-pub(super) fn metadata_access(value: &Value, field: &str) -> BuiltinResult<MemberAccess> {
-    match metadata_string(value, field)?.to_ascii_lowercase().as_str() {
-        "public" => Ok(MemberAccess::Public),
-        "private" => Ok(MemberAccess::Private),
-        "protected" => Ok(MemberAccess::Protected),
-        other => Err(dynamic_error(
+pub(super) fn metadata_access(
+    runtime: Option<&crate::context::RuntimeContext>,
+    value: &Value,
+    field: &str,
+) -> BuiltinResult<MemberAccess> {
+    let text = metadata_text(runtime, value, field)?;
+    if text.eq_ignore_ascii_case("public") {
+        Ok(MemberAccess::Public)
+    } else if text.eq_ignore_ascii_case("private") {
+        Ok(MemberAccess::Private)
+    } else if text.eq_ignore_ascii_case("protected") {
+        Ok(MemberAccess::Protected)
+    } else {
+        Err(dynamic_error(
             DYNAMIC_PROPERTY_CLASS,
             &DYNAMIC_ERROR_UNSUPPORTED_METADATA,
-            format!("dynamic property metadata field '{field}' has unsupported access '{other}'"),
-        )),
+            format!(
+                "dynamic property metadata field '{field}' has unsupported access '{}'",
+                text.to_ascii_lowercase()
+            ),
+        ))
     }
 }
 
@@ -124,7 +143,7 @@ pub(super) fn access_value(access: &MemberAccess) -> Value {
         MemberAccess::Private => "private",
         MemberAccess::Protected => "protected",
     };
-    Value::String(text.to_string())
+    Value::string(text.to_string())
 }
 
 pub(super) fn dynamic_def_to_metadata_object(
@@ -132,92 +151,155 @@ pub(super) fn dynamic_def_to_metadata_object(
     target: Option<Value>,
     class_name: runmat_types::StaticClassIdentity,
 ) -> ObjectInstance {
-    let mut object = ObjectInstance::new(class_name);
-    object
-        .properties
-        .insert("Name".to_string(), Value::String(def.name.clone()));
-    object.properties.insert(
+    let mut object = runmat_value::UnboundedObjectBuilder::new(class_name);
+    object.insert("Name".to_string(), Value::string(def.name.clone()));
+    object.insert(
         "DefiningClass".to_string(),
-        Value::ClassRef(def.defining_class.clone()),
+        Value::ClassRef(def.defining_class.clone().into()),
     );
-    object
-        .properties
-        .insert("GetAccess".to_string(), access_value(&def.get_access));
-    object
-        .properties
-        .insert("SetAccess".to_string(), access_value(&def.set_access));
-    object
-        .properties
-        .insert("Dependent".to_string(), Value::Bool(def.dependent));
-    object
-        .properties
-        .insert("Hidden".to_string(), Value::Bool(def.hidden));
-    object
-        .properties
-        .insert("Transient".to_string(), Value::Bool(def.transient));
-    object
-        .properties
-        .insert("NonCopyable".to_string(), Value::Bool(def.non_copyable));
-    object
-        .properties
-        .insert("AbortSet".to_string(), Value::Bool(def.abort_set));
-    object
-        .properties
-        .insert("SetObservable".to_string(), Value::Bool(def.set_observable));
-    object
-        .properties
-        .insert("GetObservable".to_string(), Value::Bool(def.get_observable));
-    object.properties.insert(
+    object.insert("GetAccess".to_string(), access_value(&def.get_access));
+    object.insert("SetAccess".to_string(), access_value(&def.set_access));
+    object.insert("Dependent".to_string(), Value::Bool(def.dependent));
+    object.insert("Hidden".to_string(), Value::Bool(def.hidden));
+    object.insert("Transient".to_string(), Value::Bool(def.transient));
+    object.insert("NonCopyable".to_string(), Value::Bool(def.non_copyable));
+    object.insert("AbortSet".to_string(), Value::Bool(def.abort_set));
+    object.insert("SetObservable".to_string(), Value::Bool(def.set_observable));
+    object.insert("GetObservable".to_string(), Value::Bool(def.get_observable));
+    object.insert(
         "Description".to_string(),
-        Value::String(def.description.clone()),
+        Value::string(def.description.clone()),
     );
-    object
-        .properties
-        .insert(VALID_FIELD.to_string(), Value::Bool(true));
+    object.insert(VALID_FIELD.to_string(), Value::Bool(true));
     if let Some(target) = target {
-        object.properties.insert(TARGET_FIELD.to_string(), target);
+        object.insert(TARGET_FIELD.to_string(), target);
     }
-    object
+    object.finish()
 }
 
 pub(super) fn dynamic_def_from_class_property(
+    runtime: Option<&crate::context::RuntimeContext>,
     class_name: &runmat_types::ClassIdentity,
-    name: &runmat_types::MemberName,
+    name: &runmat_value::Utf8Text,
     prop: &runmat_value::SelectedReceiverPropertyDeclaration,
-) -> DynamicPropertyDef {
-    let mut def = DynamicPropertyDef::new(name.to_string(), class_name.clone());
+) -> BuiltinResult<DynamicPropertyDef> {
+    use crate::context::host_allocation::{
+        HostAllocationError, HostAllocationPlan, HostAllocationReceipt,
+    };
+    let error = |source| {
+        dynamic_error_with_source(
+            "findprop",
+            &runmat_builtins::ADDPROP_ERROR_ALLOCATION,
+            "findprop: class metadata admission failed",
+            source,
+        )
+    };
+    let bytes = runmat_value::SharedClassIdentity::requested_bytes_for_capacity(
+        class_name.display_name().len(),
+    )
+    .map_err(|source| error(HostAllocationError::from(source)))?;
+    let retained = HostAllocationPlan::retained_exact_output_bytes(
+        u64::try_from(bytes).map_err(|_| error(HostAllocationError::Overflow))?,
+        1,
+    )
+    .map_err(error)?;
+    let receipt = HostAllocationReceipt::admit(
+        runtime,
+        HostAllocationPlan::new(0, retained).map_err(error)?,
+    )
+    .map_err(error)?;
+    let class_name = match &receipt {
+        Some(receipt) => {
+            let runtime = runtime.expect("managed class metadata has context");
+            let permit = receipt.output_permit(runtime).map_err(error)?;
+            let class =
+                runmat_value::PreparedObjectClassName::prepare(class_name.display_name(), &permit)
+                    .map_err(|source| {
+                        dynamic_error_with_source(
+                            "findprop",
+                            &runmat_builtins::ADDPROP_ERROR_ALLOCATION,
+                            "findprop: class metadata preparation failed",
+                            source,
+                        )
+                    })?
+                    .into_identity();
+            receipt.checkpoint(runtime).map_err(error)?;
+            class
+        }
+        None => class_name.clone().into(),
+    };
+    let mut def = DynamicPropertyDef::new(String::new(), class_name);
+    def.name = name.clone();
     def.get_access = prop.get_access;
     def.set_access = prop.set_access;
     def.dependent = prop.is_dependent;
-    def
+    Ok(def)
 }
 
 pub(super) fn allocate_dynamic_property_handle(
+    runtime: Option<&crate::context::RuntimeContext>,
     def: &DynamicPropertyDef,
     target: Value,
-) -> BuiltinResult<HandleRef> {
-    let metadata = dynamic_def_to_metadata_object(def, Some(target), DYNAMIC_PROPERTY_CLASS);
-    let handle = runmat_gc::gc_allocate(Value::Object(metadata)).map_err(|source| {
-        dynamic_error_with_source(
-            "addprop",
-            &runmat_builtins::ADDPROP_ERROR_ALLOCATION,
-            "addprop: failed to allocate metadata handle",
-            source,
+) -> BuiltinResult<crate::execution::RootedValue> {
+    let metadata =
+        super::projection::metadata_object(runtime, def, Some(target), DYNAMIC_PROPERTY_CLASS)?;
+    let Value::Object(object) = metadata.value() else {
+        unreachable!("dynamic metadata object")
+    };
+    let class_name = object.class_name_owner().clone();
+    metadata.with_owned(|value| {
+        let handle = runmat_gc::gc_allocate_rooted(value).map_err(|source| {
+            dynamic_error_with_source(
+                "addprop",
+                &runmat_builtins::ADDPROP_ERROR_ALLOCATION,
+                "addprop: failed to allocate metadata handle",
+                source,
+            )
+        })?;
+        crate::execution::RootedValue::in_optional_context(
+            Value::HandleObject(HandleRef {
+                class_name,
+                target: handle.handle(),
+                valid: true,
+            }),
+            runtime,
         )
-    })?;
-    Ok(HandleRef {
-        class_name: DYNAMIC_PROPERTY_CLASS.into(),
-        target: handle,
-        valid: true,
     })
 }
 
-pub(super) fn dynamic_property_handle_from_gc(target: runmat_gc::GcHandle) -> Value {
-    Value::HandleObject(HandleRef {
-        class_name: DYNAMIC_PROPERTY_CLASS.into(),
-        target,
-        valid: true,
+pub(super) fn dynamic_property_handle_from_gc(
+    runtime: Option<&crate::context::RuntimeContext>,
+    target: runmat_gc::GcHandle,
+) -> BuiltinResult<crate::execution::RootedValue> {
+    let class_name = runmat_gc::gc_with_value(&target, |value| match value {
+        Value::Object(object) if object.is_class(DYNAMIC_PROPERTY_CLASS) => {
+            Some(object.class_name_owner().clone())
+        }
+        _ => None,
     })
+    .map_err(|source| {
+        dynamic_error_with_source(
+            "findprop",
+            &DYNAMIC_ERROR_INVALID_METADATA,
+            "dynamic metadata handle is unavailable",
+            source,
+        )
+    })?
+    .ok_or_else(|| {
+        dynamic_error(
+            "findprop",
+            &DYNAMIC_ERROR_INVALID_METADATA,
+            "dynamic metadata handle does not reference its metadata class",
+        )
+    })?;
+    crate::execution::RootedValue::in_optional_context(
+        Value::HandleObject(HandleRef {
+            class_name,
+            target,
+            valid: true,
+        }),
+        runtime,
+    )
 }
 
 pub(super) fn require_dynamicprops_target(
@@ -235,34 +317,33 @@ pub(super) fn require_dynamicprops_target(
 }
 
 pub(super) fn metadata_target_and_name(
+    runtime: Option<&crate::context::RuntimeContext>,
     metadata: &ObjectInstance,
-) -> BuiltinResult<(HandleRef, String)> {
-    if !metadata.class_name.is(DYNAMIC_PROPERTY_CLASS) {
+) -> BuiltinResult<(HandleRef, runmat_value::Utf8Text)> {
+    if !metadata.class_name().is(DYNAMIC_PROPERTY_CLASS) {
         return Err(dynamic_error(
             DYNAMIC_PROPERTY_CLASS,
             &DYNAMIC_ERROR_INVALID_METADATA,
             "dynamic property operation requires matlab.metadata.DynamicProperty",
         ));
     }
-    if !matches!(
-        metadata.properties.get(VALID_FIELD),
-        Some(Value::Bool(true))
-    ) {
+    if !matches!(metadata.property(VALID_FIELD), Some(Value::Bool(true))) {
         return Err(dynamic_error(
             DYNAMIC_PROPERTY_CLASS,
             &DYNAMIC_ERROR_INVALID_METADATA,
             "dynamic property metadata handle is invalid",
         ));
     }
-    let Some(Value::HandleObject(target)) = metadata.properties.get(TARGET_FIELD).cloned() else {
+    let Some(Value::HandleObject(target)) = metadata.property(TARGET_FIELD).cloned() else {
         return Err(dynamic_error(
             DYNAMIC_PROPERTY_CLASS,
             &DYNAMIC_ERROR_INVALID_METADATA,
             "dynamic property metadata is missing its target object",
         ));
     };
-    let name = metadata_string(
-        metadata.properties.get("Name").ok_or_else(|| {
+    let name = metadata_text(
+        runtime,
+        metadata.property("Name").ok_or_else(|| {
             dynamic_error(
                 DYNAMIC_PROPERTY_CLASS,
                 &DYNAMIC_ERROR_INVALID_METADATA,
@@ -280,8 +361,7 @@ pub fn dynamic_property_get(
 ) -> Option<(DynamicPropertyDef, Value)> {
     let def = obj.dynamic_property(name)?.clone();
     let value = obj
-        .properties
-        .get(name)
+        .property(name)
         .cloned()
         .unwrap_or_else(empty_default_value);
     Some((def, value))
@@ -306,7 +386,15 @@ pub fn dynamic_property_assign(
             format!("Property '{name}' is private"),
         ));
     }
-    obj.properties.insert(name.to_string(), value);
+    let mut replacement = obj.clone().into_unbounded_builder().map_err(|_| {
+        dynamic_error(
+            "setfield",
+            &DYNAMIC_ERROR_UNSUPPORTED_METADATA,
+            "dynamic property requires an admitted edit generation",
+        )
+    })?;
+    replacement.insert(name.to_string(), value);
+    *obj = replacement.finish();
     Ok(true)
 }
 
@@ -322,9 +410,9 @@ pub(crate) fn dynamic_property_assignment_access(
     let def = obj.dynamic_property(name)?;
     Some(match def.set_access {
         MemberAccess::Public => true,
-        MemberAccess::Private => caller == Some(&def.defining_class),
+        MemberAccess::Private => caller == Some(def.defining_class.as_identity()),
         MemberAccess::Protected => caller.is_some_and(|caller| {
-            crate::class_registry::is_class_or_subclass(caller, &def.defining_class)
+            crate::class_registry::is_class_or_subclass(caller, def.defining_class.as_identity())
         }),
     })
 }
@@ -335,7 +423,7 @@ pub fn dynamic_property_read(obj: &ObjectInstance, name: &str) -> BuiltinResult<
     };
     if let Some(projection) = crate::class_registry::checked_receiver_projection(obj)? {
         if !projection.receiver_member_accessible(
-            &def.defining_class,
+            def.defining_class.as_identity(),
             def.get_access,
             crate::dispatcher::class_access_context().as_deref(),
         ) {
@@ -358,11 +446,12 @@ pub fn dynamic_property_read(obj: &ObjectInstance, name: &str) -> BuiltinResult<
 }
 
 pub fn metadata_assignment(
+    runtime: Option<&crate::context::RuntimeContext>,
     metadata: &mut ObjectInstance,
     field: &str,
     value: Value,
 ) -> BuiltinResult<bool> {
-    if !metadata.class_name.is(DYNAMIC_PROPERTY_CLASS) {
+    if !metadata.class_name().is(DYNAMIC_PROPERTY_CLASS) {
         return Ok(false);
     }
     if field == "Name" || field == "DefiningClass" {
@@ -372,47 +461,124 @@ pub fn metadata_assignment(
             format!("dynamic property metadata field '{field}' is read-only"),
         ));
     }
-    let (target, name) = metadata_target_and_name(metadata)?;
-    let update = |def: &mut DynamicPropertyDef| -> BuiltinResult<()> {
-        match field {
-            "GetAccess" => def.get_access = metadata_access(&value, field)?,
-            "SetAccess" => def.set_access = metadata_access(&value, field)?,
-            "Dependent" => def.dependent = metadata_bool(&value, field)?,
-            "Hidden" => def.hidden = metadata_bool(&value, field)?,
-            "Transient" => def.transient = metadata_bool(&value, field)?,
-            "NonCopyable" => def.non_copyable = metadata_bool(&value, field)?,
-            "AbortSet" => def.abort_set = metadata_bool(&value, field)?,
-            "SetObservable" => def.set_observable = metadata_bool(&value, field)?,
-            "GetObservable" => def.get_observable = metadata_bool(&value, field)?,
-            "Description" => def.description = metadata_string(&value, field)?,
-            _ => {
-                return Err(dynamic_error(
-                    DYNAMIC_PROPERTY_CLASS,
-                    &DYNAMIC_ERROR_UNSUPPORTED_METADATA,
-                    format!("unsupported dynamic property metadata field '{field}'"),
-                ))
-            }
+    let owner = crate::context::host_allocation::HostAllocationReceipt::capture_owner(runtime)
+        .map_err(|source| {
+            crate::context::host_allocation::host_allocation_runtime_error(
+                runtime,
+                "RunMat:dynamicprops:Allocation",
+                "dynamic metadata publication authority failed",
+                source,
+            )
+        })?;
+    let _sources = crate::execution::RootedValue::in_optional_context(
+        Value::Object(metadata.clone()),
+        runtime,
+    )?;
+    let (target, name) = metadata_target_and_name(runtime, metadata)?;
+    let source = runmat_gc::gc_with_value(&target.target, |target| match target {
+        Value::Object(object) => Ok(object.clone()),
+        _ => Err(dynamic_error(
+            DYNAMIC_PROPERTY_CLASS,
+            &DYNAMIC_ERROR_INVALID_METADATA,
+            "dynamic property target is not an object",
+        )),
+    })
+    .map_err(|source| {
+        dynamic_error_with_source(
+            DYNAMIC_PROPERTY_CLASS,
+            &DYNAMIC_ERROR_INVALID_METADATA,
+            "dynamic property target is invalid",
+            source,
+        )
+    })??;
+    let mut definition = source.dynamic_property(&name).cloned().ok_or_else(|| {
+        dynamic_error(
+            DYNAMIC_PROPERTY_CLASS,
+            &DYNAMIC_ERROR_INVALID_METADATA,
+            format!("dynamic property '{name}' no longer exists"),
+        )
+    })?;
+    match field {
+        "GetAccess" => definition.get_access = metadata_access(runtime, &value, field)?,
+        "SetAccess" => definition.set_access = metadata_access(runtime, &value, field)?,
+        "Dependent" => definition.dependent = metadata_bool(&value, field)?,
+        "Hidden" => definition.hidden = metadata_bool(&value, field)?,
+        "Transient" => definition.transient = metadata_bool(&value, field)?,
+        "NonCopyable" => definition.non_copyable = metadata_bool(&value, field)?,
+        "AbortSet" => definition.abort_set = metadata_bool(&value, field)?,
+        "SetObservable" => definition.set_observable = metadata_bool(&value, field)?,
+        "GetObservable" => definition.get_observable = metadata_bool(&value, field)?,
+        "Description" => {
+            definition.description = metadata_text(runtime, &value, field)?;
         }
-        Ok(())
+        _ => {
+            return Err(dynamic_error(
+                DYNAMIC_PROPERTY_CLASS,
+                &DYNAMIC_ERROR_UNSUPPORTED_METADATA,
+                format!("unsupported dynamic property metadata field '{field}'"),
+            ))
+        }
+    }
+    // Prepare both generations before either target is changed. Rooted metadata
+    // owns the new handle edge; the original target remains rooted by _sources.
+    let projected = super::projection::metadata_object(
+        runtime,
+        &definition,
+        Some(Value::HandleObject(target.clone())),
+        DYNAMIC_PROPERTY_CLASS,
+    )?;
+    let Value::Object(projected_object) = projected.value() else {
+        unreachable!("metadata object")
     };
-    let mut updated_def = None;
-    runmat_gc::gc_with_value_mut(&target.target, |target_value| -> BuiltinResult<()> {
-        let Value::Object(target_obj) = target_value else {
+    let mut replacement = source.clone();
+    crate::execution::object::replacement::replace_dynamic_definition(
+        runtime,
+        &mut replacement,
+        definition,
+        |message, error| {
+            crate::context::host_allocation::host_allocation_runtime_error(
+                runtime,
+                "RunMat:dynamicprops:Allocation",
+                message,
+                error,
+            )
+        },
+        |message| {
+            dynamic_error(
+                DYNAMIC_PROPERTY_CLASS,
+                &DYNAMIC_ERROR_INVALID_METADATA,
+                message,
+            )
+        },
+    )?;
+    if let Some(owner) = &owner {
+        owner
+            .check(runtime.expect("managed owner context"))
+            .map_err(|source| {
+                crate::context::host_allocation::host_allocation_runtime_error(
+                    runtime,
+                    "RunMat:dynamicprops:Allocation",
+                    "dynamic metadata publication was cancelled",
+                    source,
+                )
+            })?;
+    }
+    runmat_gc::gc_with_value_mut(&target.target, |target| -> BuiltinResult<()> {
+        let Value::Object(current) = target else {
             return Err(dynamic_error(
                 DYNAMIC_PROPERTY_CLASS,
                 &DYNAMIC_ERROR_INVALID_METADATA,
-                "dynamic property target is not an object",
+                "dynamic property target changed during preparation",
             ));
         };
-        let Some(def) = target_obj.dynamic_property_mut(&name) else {
+        if !current.shares_generation_with(&source) {
             return Err(dynamic_error(
                 DYNAMIC_PROPERTY_CLASS,
                 &DYNAMIC_ERROR_INVALID_METADATA,
-                format!("dynamic property '{name}' no longer exists"),
+                "dynamic property target changed during preparation",
             ));
-        };
-        update(def)?;
-        updated_def = Some(def.clone());
+        }
+        *current = replacement;
         Ok(())
     })
     .map_err(|source| {
@@ -423,26 +589,25 @@ pub fn metadata_assignment(
             source,
         )
     })??;
-    if let Some(def) = updated_def {
-        *metadata = dynamic_def_to_metadata_object(
-            &def,
-            Some(Value::HandleObject(target)),
-            DYNAMIC_PROPERTY_CLASS,
-        );
-    }
+    *metadata = projected_object.clone();
     Ok(true)
 }
-
 pub fn object_dynamic_property_names(obj: &ObjectInstance) -> Vec<String> {
-    let mut names = obj.dynamic_property_names();
+    let mut names = obj
+        .dynamic_property_names()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
     names.sort();
     names
 }
 
 pub fn dynamic_property_metadata_struct(def: &DynamicPropertyDef) -> Value {
-    let mut fields = StructValue::new();
-    fields.insert("Name", Value::String(def.name.clone()));
-    fields.insert("DefiningClass", Value::ClassRef(def.defining_class.clone()));
+    let mut fields = runmat_value::UnboundedStructValueBuilder::new();
+    fields.insert("Name", Value::string(def.name.clone()));
+    fields.insert(
+        "DefiningClass",
+        Value::ClassRef(def.defining_class.clone().into()),
+    );
     fields.insert("GetAccess", access_value(&def.get_access));
     fields.insert("SetAccess", access_value(&def.set_access));
     fields.insert("Dependent", Value::Bool(def.dependent));
@@ -452,6 +617,6 @@ pub fn dynamic_property_metadata_struct(def: &DynamicPropertyDef) -> Value {
     fields.insert("AbortSet", Value::Bool(def.abort_set));
     fields.insert("SetObservable", Value::Bool(def.set_observable));
     fields.insert("GetObservable", Value::Bool(def.get_observable));
-    fields.insert("Description", Value::String(def.description.clone()));
-    Value::Struct(fields)
+    fields.insert("Description", Value::string(def.description.clone()));
+    Value::Struct(fields.finish())
 }

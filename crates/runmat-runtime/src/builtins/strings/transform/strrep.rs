@@ -203,7 +203,7 @@ async fn strrep_builtin(
     }
 
     match gathered_str {
-        Value::String(text) => Ok(Value::String(strrep_string_value(
+        Value::String(text) => Ok(Value::string(strrep_string_value(
             text, &old_text, &new_text,
         ))),
         Value::StringArray(array) => strrep_string_array(array, &old_text, &new_text),
@@ -213,12 +213,12 @@ async fn strrep_builtin(
     }
 }
 
-fn parse_pattern(value: Value) -> BuiltinResult<(String, PatternKind)> {
+fn parse_pattern(value: Value) -> BuiltinResult<(runmat_value::Utf8Text, PatternKind)> {
     match value {
         Value::String(text) => Ok((text, PatternKind::String)),
         Value::StringArray(array) => {
-            if array.data.len() == 1 {
-                Ok((array.data[0].clone(), PatternKind::String))
+            if array.data().len() == 1 {
+                Ok((array.data()[0].clone(), PatternKind::String))
             } else {
                 Err(strrep_error(&STRREP_ERROR_PATTERN_TYPE))
             }
@@ -228,9 +228,9 @@ fn parse_pattern(value: Value) -> BuiltinResult<(String, PatternKind)> {
                 let text = if array.rows == 0 {
                     String::new()
                 } else {
-                    char_row_to_string_slice(&array.data, array.cols, 0)
+                    char_row_to_string_slice(array.data(), array.cols, 0)
                 };
-                Ok((text, PatternKind::Char))
+                Ok((text.into(), PatternKind::Char))
             } else {
                 Err(strrep_error(&STRREP_ERROR_PATTERN_TYPE))
             }
@@ -239,41 +239,39 @@ fn parse_pattern(value: Value) -> BuiltinResult<(String, PatternKind)> {
     }
 }
 
-fn strrep_string_value(text: String, old: &str, new: &str) -> String {
+fn strrep_string_value(
+    text: runmat_value::Utf8Text,
+    old: &str,
+    new: &str,
+) -> runmat_value::Utf8Text {
     if is_missing_string(&text) {
         text
     } else {
-        text.replace(old, new)
+        text.replace(old, new).into()
     }
 }
 
 fn strrep_string_array(array: StringArray, old: &str, new: &str) -> BuiltinResult<Value> {
-    let StringArray { data, shape, .. } = array;
-    let replaced = data
+    let (data, shape, _, _) = array.into_parts();
+    let values: Vec<_> = match data.try_into_owned() {
+        Ok(values) => values.into_iter().collect(),
+        Err(data) => data.iter().cloned().collect(),
+    };
+    let replaced = values
         .into_iter()
         .map(|text| strrep_string_value(text, old, new))
         .collect::<Vec<_>>();
-    let rebuilt = StringArray::new(replaced, shape).map_err(|e| {
+    let rebuilt = StringArray::from_texts_unbounded(replaced, shape.to_vec()).map_err(|e| {
         strrep_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRREP_ERROR_INTERNAL)
     })?;
     Ok(Value::StringArray(rebuilt))
 }
 
 fn strrep_char_array(array: CharArray, old: &str, new: &str) -> BuiltinResult<Value> {
-    let CharArray {
-        data,
-        shape,
-        rows,
-        cols,
-    } = array;
-    if rows == 0 || cols == 0 {
-        return Ok(Value::CharArray(CharArray {
-            data,
-            shape,
-            rows,
-            cols,
-        }));
+    if array.rows == 0 || array.cols == 0 {
+        return Ok(Value::CharArray(array));
     }
+    let (data, _, rows, cols) = array.into_parts();
 
     let mut replaced_rows = Vec::with_capacity(rows);
     let mut target_cols = 0usize;
@@ -301,19 +299,19 @@ fn strrep_char_array(array: CharArray, old: &str, new: &str) -> BuiltinResult<Va
 }
 
 fn strrep_cell_array(cell: CellArray, old: &str, new: &str) -> BuiltinResult<Value> {
-    let CellArray { data, shape, .. } = cell;
+    let (data, shape, _, _) = cell.into_parts();
     let mut replaced = Vec::with_capacity(data.len());
     for ptr in &data {
         replaced.push(strrep_cell_element(ptr, old, new)?);
     }
-    make_cell_with_shape(replaced, shape).map_err(|e| {
+    make_cell_with_shape(replaced, shape.to_vec()).map_err(|e| {
         strrep_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRREP_ERROR_INTERNAL)
     })
 }
 
 fn strrep_cell_element(value: &Value, old: &str, new: &str) -> BuiltinResult<Value> {
     match value {
-        Value::String(text) => Ok(Value::String(strrep_string_value(text.clone(), old, new))),
+        Value::String(text) => Ok(Value::string(strrep_string_value(text.clone(), old, new))),
         Value::StringArray(array) => strrep_string_array(array.clone(), old, new),
         Value::CharArray(array) => strrep_char_array(array.clone(), old, new),
         _ => Err(strrep_error(&STRREP_ERROR_CELL_ELEMENT)),
@@ -363,7 +361,7 @@ pub(crate) mod tests {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![3, 1]);
                 assert_eq!(
-                    sa.data,
+                    sa.data(),
                     vec![
                         String::from("GPU"),
                         String::from("<missing>"),
@@ -392,7 +390,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![2, 1]);
-                assert_eq!(sa.data, vec![String::from("AlphA"), String::from("betA")]);
+                assert_eq!(sa.data(), vec![String::from("AlphA"), String::from("betA")]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -413,7 +411,7 @@ pub(crate) mod tests {
                 assert_eq!(out.rows, 1);
                 assert_eq!(out.cols, 7);
                 let expected: Vec<char> = "Run_Mat".chars().collect();
-                assert_eq!(out.data, expected);
+                assert_eq!(out.data(), expected);
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -436,7 +434,7 @@ pub(crate) mod tests {
                 assert_eq!(out.rows, 2);
                 assert_eq!(out.cols, 4);
                 let expected: Vec<char> = vec!['l', 'p', 'h', ' ', 'b', 'e', 't', ' '];
-                assert_eq!(out.data, expected);
+                assert_eq!(out.data(), expected);
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -541,7 +539,7 @@ pub(crate) mod tests {
                         assert_eq!(ca.cols, 5);
                         let expected: Vec<char> =
                             vec!['A', 'l', 'p', 'h', 'A', 'b', 'e', 't', 'A', ' '];
-                        assert_eq!(ca.data, expected);
+                        assert_eq!(ca.data(), expected);
                     }
                     other => panic!("expected char array element, got {other:?}"),
                 }
@@ -567,7 +565,7 @@ pub(crate) mod tests {
                 match nested {
                     Value::StringArray(sa) => {
                         assert_eq!(sa.shape, vec![1, 2]);
-                        assert_eq!(sa.data, vec![String::from("AlphA"), String::from("betA")]);
+                        assert_eq!(sa.data(), vec![String::from("AlphA"), String::from("betA")]);
                     }
                     other => panic!("expected string array element, got {other:?}"),
                 }

@@ -38,10 +38,10 @@ pub(crate) fn class_identity_for_value(value: &Value) -> ClassIdentity {
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle(_)
         | Value::Closure(_) => standard::FUNCTION_HANDLE.owned(),
-        Value::HandleObject(handle) => handle.class_name.clone(),
+        Value::HandleObject(handle) => handle.class_name.as_identity().clone(),
         Value::Listener(_) => standard::EVENT_LISTENER.owned(),
         Value::ObjectArray(array) => array.class_name().clone(),
-        Value::Object(object) => object.class_name.clone(),
+        Value::Object(object) => object.class_name().clone(),
         Value::ClassRef(_) => standard::META_CLASS.owned(),
         Value::MException(_) => standard::MEXCEPTION.owned(),
         Value::OutputList(_) => ClassIdentity::from("output_list"),

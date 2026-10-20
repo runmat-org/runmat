@@ -50,7 +50,7 @@ pub(super) fn numeric_elements(
         ),
         Value::CharArray(array) => Box::new(
             array
-                .data
+                .data()
                 .iter()
                 .map(|ch| WriteElement::Floating((u32::from(*ch) & 0xff) as f64)),
         ),
@@ -58,8 +58,8 @@ pub(super) fn numeric_elements(
             text.chars()
                 .map(|ch| WriteElement::Floating(u32::from(ch) as f64)),
         ),
-        Value::StringArray(array) if array.data.len() == 1 => Box::new(
-            array.data[0]
+        Value::StringArray(array) if array.data().len() == 1 => Box::new(
+            array.data()[0]
                 .chars()
                 .map(|ch| WriteElement::Floating(u32::from(ch) as f64)),
         ),

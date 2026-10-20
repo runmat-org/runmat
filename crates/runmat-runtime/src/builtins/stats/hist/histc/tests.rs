@@ -24,7 +24,7 @@ fn floating_dimension_tolerance_remains_accepted() {
     let result = block_on(histc_builtin(
         tensor(vec![0., 1.], vec![1, 2]),
         tensor(vec![0., 1.], vec![1, 2]),
-        vec![Value::Num(1.0000001)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0000001)]),
     ))
     .unwrap();
     let Value::Tensor(counts) = result else {
@@ -70,7 +70,12 @@ fn excess_outputs_and_zero_dimension_fail_before_provider_access() {
         .unwrap();
     let resident = Value::GpuTensor(allocation.handle.clone());
     let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
-    let error = block_on(histc_builtin(resident.clone(), Value::Num(0.0), vec![])).unwrap_err();
+    let error = block_on(histc_builtin(
+        resident.clone(),
+        Value::Num(0.0),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap_err();
     assert!(error.message().contains("too many output"));
     drop(_outputs);
     let error = block_on(evaluate(resident, Value::Num(0.0), Some(0))).unwrap_err();
@@ -332,7 +337,12 @@ fn histc_rejects_excess_outputs_and_huge_dimensions() {
     let x = tensor(vec![0.0, 1.0], vec![1, 2]);
     let edges = tensor(vec![0.0, 1.0], vec![1, 2]);
     let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
-    let err = block_on(histc_builtin(x, edges, Vec::new())).expect_err("too many outputs");
+    let err = block_on(histc_builtin(
+        x,
+        edges,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect_err("too many outputs");
     assert_eq!(err.identifier(), ERROR_INVALID_ARGUMENT.identifier);
     drop(_guard);
 
@@ -341,7 +351,9 @@ fn histc_rejects_excess_outputs_and_huge_dimensions() {
     let err = block_on(histc_builtin(
         x,
         edges,
-        vec![Value::Num((MAX_DIMENSION_ARGUMENT + 1) as f64)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(
+            (MAX_DIMENSION_ARGUMENT + 1) as f64,
+        )]),
     ))
     .expect_err("dim cap");
     assert_eq!(err.identifier(), ERROR_INVALID_ARGUMENT.identifier);
@@ -351,7 +363,12 @@ fn histc_rejects_excess_outputs_and_huge_dimensions() {
 fn histc_runtime_builtin_handles_output_count_padding() {
     let x = tensor(vec![0.0, 1.0], vec![1, 2]);
     let edges = tensor(vec![0.0, 1.0], vec![1, 2]);
-    let result = block_on(histc_builtin(x, edges, Vec::new())).expect("histc builtin");
+    let result = block_on(histc_builtin(
+        x,
+        edges,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect("histc builtin");
     let Value::Tensor(counts) = result else {
         panic!("expected tensor");
     };

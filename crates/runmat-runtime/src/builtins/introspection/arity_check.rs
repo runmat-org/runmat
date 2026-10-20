@@ -96,7 +96,7 @@ fn parse_max_arity_bound(
 }
 
 fn validate_bounds(
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     builtin: &'static str,
     argument_error: &'static BuiltinErrorDescriptor,
     bounds_error: &'static BuiltinErrorDescriptor,
@@ -129,9 +129,11 @@ fn arity_violation(actual: usize, min: usize, max: ArityBound) -> Option<ArityVi
 
 fn scalar_text(value: &Value) -> Option<String> {
     match value {
-        Value::String(value) => Some(value.clone()),
-        Value::StringArray(value) if value.data.len() == 1 => Some(value.data[0].clone()),
-        Value::CharArray(value) if value.rows == 1 => Some(value.data.iter().collect()),
+        Value::String(value) => Some(value.as_str().to_owned()),
+        Value::StringArray(value) if value.data().len() == 1 => {
+            Some(value.data()[0].as_str().to_owned())
+        }
+        Value::CharArray(value) if value.rows == 1 => Some(value.data().iter().collect()),
         _ => None,
     }
 }
@@ -154,20 +156,20 @@ fn legacy_nargout_result(violation: Option<ArityViolation>, structured: bool) ->
         }
     };
     if structured {
-        let mut value = StructValue::new();
+        let mut value = runmat_value::UnboundedStructValueBuilder::new();
         value.insert("message", Value::CharArray(CharArray::new_row(message)));
         value.insert(
             "identifier",
             Value::CharArray(CharArray::new_row(identifier)),
         );
-        Value::Struct(value)
+        Value::Struct(value.finish())
     } else {
         Value::CharArray(CharArray::new_row(message))
     }
 }
 
 fn validate_arg_count(
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     builtin: &'static str,
     too_few: &'static BuiltinErrorDescriptor,
     too_many: &'static BuiltinErrorDescriptor,
@@ -184,17 +186,21 @@ pub(crate) fn dispatch_narginchk_in_context(
     runtime: Option<&crate::context::RuntimeContext>,
     args: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
-    dispatch_narginchk_with_outputs(runtime, None, args)
+    dispatch_narginchk_with_outputs(
+        runtime,
+        None,
+        crate::call::FunctionArgumentView::from_slice(&args),
+    )
 }
 
 fn dispatch_narginchk_with_outputs(
     runtime: Option<&crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
-    args: Vec<Value>,
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> crate::BuiltinResult<Value> {
     let builtin = NARGINCHK_BUILTIN_NAME;
     validate_arg_count(
-        &args,
+        args,
         builtin,
         &NARGINCHK_ERROR_NOT_ENOUGH_INPUTS,
         &NARGINCHK_ERROR_TOO_MANY_INPUTS,
@@ -211,7 +217,7 @@ fn dispatch_narginchk_with_outputs(
         .and_then(|arity| arity.function_counts())
         .ok_or_else(|| descriptor_error(builtin, &NARGINCHK_ERROR_CONTEXT_UNAVAILABLE))?;
     let (min, max) = validate_bounds(
-        &args,
+        args,
         builtin,
         &NARGINCHK_ERROR_ARGUMENT_INVALID,
         &NARGINCHK_ERROR_BOUNDS_INVALID,
@@ -236,13 +242,17 @@ pub fn dispatch_nargoutchk_in_context(
     runtime: Option<&crate::context::RuntimeContext>,
     args: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
-    dispatch_nargoutchk_with_outputs(runtime, None, args)
+    dispatch_nargoutchk_with_outputs(
+        runtime,
+        None,
+        crate::call::FunctionArgumentView::from_slice(&args),
+    )
 }
 
 fn dispatch_nargoutchk_with_outputs(
     runtime: Option<&crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
-    args: Vec<Value>,
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> crate::BuiltinResult<Value> {
     let builtin = NARGOUTCHK_BUILTIN_NAME;
     if !(2..=4).contains(&args.len()) {
@@ -263,7 +273,7 @@ fn dispatch_nargoutchk_with_outputs(
         requested_outputs,
     )?;
     let (min, max) = validate_bounds(
-        &args,
+        args,
         builtin,
         &NARGOUTCHK_ERROR_ARGUMENT_INVALID,
         &NARGOUTCHK_ERROR_BOUNDS_INVALID,
@@ -321,9 +331,9 @@ fn dispatch_nargoutchk_with_outputs(
 pub fn narginchk_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
-    dispatch_narginchk_with_outputs(runtime.as_ref(), requested_outputs, args)
+    dispatch_narginchk_with_outputs(runtime.as_ref(), requested_outputs, args.view())
 }
 
 #[runmat_macros::runtime_builtin(
@@ -336,9 +346,9 @@ pub fn narginchk_builtin_registered(
 pub fn nargoutchk_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
-    dispatch_nargoutchk_with_outputs(runtime.as_ref(), requested_outputs, args)
+    dispatch_nargoutchk_with_outputs(runtime.as_ref(), requested_outputs, args.view())
 }
 
 #[cfg(test)]

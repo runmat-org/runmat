@@ -37,7 +37,7 @@ fn conversion_error(type_name: &str) -> RuntimeError {
 async fn single_builtin(
     runtime: Option<RuntimeContext>,
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<RootedValue> {
     dispatch::execute(runtime.as_ref(), value, rest).await
 }

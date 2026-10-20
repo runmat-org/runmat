@@ -88,8 +88,8 @@ fn meshgrid_type(args: &[Type], _context: &ResolveContext) -> Type {
     binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::meshgrid"
 )]
-async fn meshgrid_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let eval = evaluate(&rest).await?;
+async fn meshgrid_builtin(rest: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
+    let eval = evaluate(rest.view()).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         return eval.into_output_list(out_count).await;
     }
@@ -97,7 +97,9 @@ async fn meshgrid_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
 }
 
 /// Evaluate the `meshgrid` builtin once and reuse the result for multiple outputs.
-pub async fn evaluate(args: &[Value]) -> crate::BuiltinResult<MeshgridEval> {
+pub async fn evaluate(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<MeshgridEval> {
     let parsed = ParsedMeshgrid::parse(args).await?;
     let (x_axis, y_axis, z_axis) = normalise_axes(&parsed.axes);
 
@@ -169,7 +171,7 @@ struct ParsedMeshgrid {
 }
 
 impl ParsedMeshgrid {
-    async fn parse(args: &[Value]) -> crate::BuiltinResult<Self> {
+    async fn parse(args: crate::call::FunctionArgumentView<'_>) -> crate::BuiltinResult<Self> {
         if args.is_empty() {
             return Err(builtin_error(
                 "meshgrid: at least one input vector is required",
@@ -1159,7 +1161,9 @@ pub(crate) mod tests {
     use runmat_value::IntValue;
 
     fn evaluate(args: &[Value]) -> crate::BuiltinResult<MeshgridEval> {
-        block_on(super::evaluate(args))
+        block_on(super::evaluate(
+            crate::call::FunctionArgumentView::from_slice(args),
+        ))
     }
 
     fn eval_first(eval: &MeshgridEval) -> crate::BuiltinResult<Value> {
@@ -1392,7 +1396,7 @@ pub(crate) mod tests {
         let prototype = ComplexTensor::new(vec![(1.0, 1.0)], vec![1, 1]).expect("prototype");
         let eval = evaluate(&[
             Value::Tensor(axis),
-            Value::String("like".to_string()),
+            Value::String("like".to_string().into()),
             Value::ComplexTensor(prototype),
         ])
         .expect("parse meshgrid");

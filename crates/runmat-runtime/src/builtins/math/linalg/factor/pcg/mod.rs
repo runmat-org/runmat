@@ -27,7 +27,7 @@ async fn pcg_builtin(
     runtime: Option<RuntimeContext>,
     coefficient: Value,
     rhs: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let request = request::parse(coefficient, rhs, rest)?;
     execution::execute(

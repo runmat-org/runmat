@@ -13,26 +13,32 @@ const REFERENCE_POINT_CLASS: &str =
 const REFERENCE_POINT_FIELDS: &[&str] = &["reference_point_id", "position"];
 #[runtime_builtin(
     name = "fea.ReferencePoint.fromCoordinates",
-    binding_variant = "default",
-    builtin_path = "crate::builtins::fea::constraints::support::reference_point"
+    builtin_path = "crate::builtins::fea::constraints::support::reference_point",
+    context = true,
+    binding_variant = "default"
 )]
 pub async fn reference_point_from_coordinates_builtin(
-    id: String,
+    runtime: Option<crate::context::RuntimeContext>,
+    id: runmat_value::Utf8Text,
     position: Value,
 ) -> BuiltinResult<Value> {
     crate::builtins::fea::constraints::fixed_outputs(
         &runmat_builtins::FEA_REFERENCE_POINT_FROM_COORDINATES_DESCRIPTOR,
         "fea.ReferencePoint.fromCoordinates",
     )?;
-    validate_id("fea.ReferencePoint.fromCoordinates", &id)?;
+    validate_id("fea.ReferencePoint.fromCoordinates", id.as_str())?;
     position_meters("fea.ReferencePoint.fromCoordinates", &position)?;
     ensure_reference_point_class_registered();
-    let mut object = ObjectInstance::new(REFERENCE_POINT_CLASS);
-    object
-        .properties
-        .insert("reference_point_id".into(), Value::String(id));
-    object.properties.insert("position".into(), position);
-    Ok(Value::Object(object))
+    let fields = [
+        ("reference_point_id", Value::String(id)),
+        ("position", position),
+    ];
+    let object = crate::execution::object::construct_object_from_borrowed_fields(
+        runtime.as_ref(),
+        REFERENCE_POINT_CLASS,
+        fields.iter().map(|(name, value)| (*name, value)),
+    )?;
+    Ok(object.into_value_and_lease().0)
 }
 
 pub(crate) fn reference_point_from_value(
@@ -47,7 +53,7 @@ pub(crate) fn reference_point_from_value(
         ));
     };
     if !object
-        .class_name
+        .class_name()
         .is(runmat_builtins::fea_contract::model_types::classes::FEA_REFERENCE_POINT_CLASS)
     {
         return Err(builtin_error(
@@ -55,12 +61,12 @@ pub(crate) fn reference_point_from_value(
             &ERROR_INPUT,
             format!(
                 "expected {REFERENCE_POINT_CLASS}, got {}",
-                object.class_name
+                object.class_name()
             ),
         ));
     }
-    let id = match object.properties.get("reference_point_id") {
-        Some(Value::String(value)) if !value.trim().is_empty() => value.clone(),
+    let id = match object.properties().get("reference_point_id") {
+        Some(Value::String(value)) if !value.trim().is_empty() => value.to_string(),
         _ => {
             return Err(builtin_error(
                 builtin,
@@ -69,7 +75,7 @@ pub(crate) fn reference_point_from_value(
             ))
         }
     };
-    let position = object.properties.get("position").ok_or_else(|| {
+    let position = object.properties().get("position").ok_or_else(|| {
         builtin_error(
             builtin,
             &ERROR_INPUT,
@@ -110,12 +116,12 @@ pub(super) fn ensure_reference_point_class_registered() {
 
 fn validate_reference_point_object(object: &ObjectInstance) -> Result<(), String> {
     let id_valid = matches!(
-        object.properties.get("reference_point_id"),
+        object.properties().get("reference_point_id"),
         Some(Value::String(value)) if !value.trim().is_empty()
     );
     let position_valid = matches!(
-        object.properties.get("position"),
-        Some(Value::Object(value)) if value.class_name.display_name() == POSITION_CLASS
+        object.properties().get("position"),
+        Some(Value::Object(value)) if value.class_name().display_name() == POSITION_CLASS
     );
     if !id_valid || !position_valid {
         return Err(

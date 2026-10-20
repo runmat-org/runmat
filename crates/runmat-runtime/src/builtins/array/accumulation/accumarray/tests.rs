@@ -14,9 +14,10 @@ fn empty() -> Value {
 #[test]
 fn sums_vector_and_matrix_subscripts() {
     let vector = block_on(accumarray_builtin(
+        None,
         tensor(vec![1.0, 3.0, 4.0, 2.0, 4.0, 1.0], vec![6, 1]),
         tensor(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![6, 1]),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("vector accumulation");
     let Value::Tensor(vector) = vector.value() else {
@@ -25,12 +26,13 @@ fn sums_vector_and_matrix_subscripts() {
     assert_eq!(vector.materialize_f64(), vec![7.0, 4.0, 2.0, 8.0]);
 
     let matrix = block_on(accumarray_builtin(
+        None,
         tensor(
             vec![1.0, 2.0, 3.0, 1.0, 2.0, 4.0, 1.0, 2.0, 2.0, 1.0, 2.0, 1.0],
             vec![6, 2],
         ),
         tensor(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![6, 1]),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("matrix accumulation");
     let Value::Tensor(matrix) = matrix.value() else {
@@ -45,6 +47,9 @@ fn sums_vector_and_matrix_subscripts() {
 
 #[test]
 fn preserves_callback_numeric_classes() {
+    let runtime = crate::context::RuntimeContext::new(std::rc::Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ));
     for storage in integer_triplets() {
         let fill = storage.zeros_like(1).value_at(0).expect("integer zero");
         let expected = storage
@@ -55,17 +60,18 @@ fn preserves_callback_numeric_classes() {
             ])
             .expect("same-class values");
         let output = block_on(accumarray_builtin(
+            Some(runtime.clone()),
             Value::Tensor(
                 Tensor::new_integer(IntegerStorage::U8(vec![1, 1, 2]), vec![3, 1]).unwrap(),
             ),
             Value::Tensor(Tensor::new_integer(storage, vec![3, 1]).unwrap()),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::Tensor(
                     Tensor::new_integer(IntegerStorage::U8(vec![3, 1]), vec![1, 2]).unwrap(),
                 ),
                 Value::FunctionHandle("min".into()),
                 Value::Int(fill),
-            ],
+            ]),
         ))
         .expect("integer callback accumulation");
         let Value::Tensor(output) = output.value() else {
@@ -78,12 +84,13 @@ fn preserves_callback_numeric_classes() {
         Tensor::new_with_dtype(vec![4.0, 2.0, 9.0], vec![3, 1], NumericDType::F32).unwrap(),
     );
     let output = block_on(accumarray_builtin(
+        Some(runtime),
         tensor(vec![1.0, 1.0, 2.0], vec![3, 1]),
         single,
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             tensor(vec![3.0, 1.0], vec![1, 2]),
             Value::FunctionHandle("min".into()),
-        ],
+        ]),
     ))
     .expect("single callback accumulation");
     let Value::Tensor(output) = output.value() else {
@@ -95,14 +102,15 @@ fn preserves_callback_numeric_classes() {
 #[test]
 fn sparse_output_enforces_compatible_constraints() {
     let sparse = block_on(accumarray_builtin(
+        None,
         tensor(vec![1.0, 3.0], vec![2, 1]),
         Value::Num(1.0),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             tensor(vec![4.0, 1.0], vec![1, 2]),
             empty(),
             empty(),
             Value::Bool(true),
-        ],
+        ]),
     ))
     .expect("sparse accumulation");
     let Value::SparseTensor(sparse) = sparse.value() else {
@@ -113,9 +121,15 @@ fn sparse_output_enforces_compatible_constraints() {
     let integer_data =
         Value::Tensor(Tensor::new_integer(IntegerStorage::U16(vec![1, 2]), vec![2, 1]).unwrap());
     let error = block_on(accumarray_builtin(
+        None,
         tensor(vec![1.0, 2.0], vec![2, 1]),
         integer_data,
-        vec![empty(), empty(), empty(), Value::Bool(true)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            empty(),
+            empty(),
+            empty(),
+            Value::Bool(true),
+        ]),
     ))
     .expect_err("sparse integer data must fail");
     assert!(error.message.contains("requires double input data"));
@@ -124,17 +138,24 @@ fn sparse_output_enforces_compatible_constraints() {
 #[test]
 fn rejects_invalid_indices_sizes_and_controls() {
     let error = block_on(accumarray_builtin(
+        None,
         tensor(vec![1.0, -1.0], vec![2, 1]),
         tensor(vec![1.0, 2.0], vec![2, 1]),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect_err("negative index must fail");
     assert!(error.message.contains("positive integer"));
 
     let error = block_on(accumarray_builtin(
+        None,
         Value::Num(1.0),
         Value::Num(1.0),
-        vec![empty(), empty(), empty(), Value::Int(IntValue::U8(2))],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            empty(),
+            empty(),
+            empty(),
+            Value::Int(IntValue::U8(2)),
+        ]),
     ))
     .expect_err("nonbinary sparse control must fail");
     assert!(error.message.contains("numeric 0 or 1"));
@@ -165,11 +186,12 @@ fn every_integer_class_is_exact_for_indices_and_sizes() {
             .from_exact_values_like(vec![storage.cast_f64_assignment(3.0)])
             .expect("same-class size");
         let output = block_on(accumarray_builtin(
+            None,
             Value::Tensor(Tensor::new_integer(storage, vec![2, 1]).unwrap()),
             Value::Num(1.0),
-            vec![Value::Tensor(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(
                 Tensor::new_integer(size, vec![1, 1]).unwrap(),
-            )],
+            )]),
         ))
         .expect("integer structural inputs");
         let Value::Tensor(output) = output.value() else {
@@ -186,9 +208,10 @@ fn resident_integer_data_is_rejected_before_provider_gather() {
         let data = Tensor::new_integer(IntegerStorage::U16(vec![1, 2]), vec![2, 1]).unwrap();
         let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &data).unwrap();
         let error = block_on(accumarray_builtin(
+            None,
             tensor(vec![1.0, 2.0], vec![2, 1]),
             Value::GpuTensor(handle.clone()),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect_err("resident integer data must reject");
         assert!(error.message.contains("GPU input data must be"));

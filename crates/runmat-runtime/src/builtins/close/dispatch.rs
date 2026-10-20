@@ -16,7 +16,7 @@ use runmat_builtins::{
 )]
 pub async fn close_builtin(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<f64> {
     crate::output_count::validate_fixed_outputs(
         &CLOSE_DESCRIPTOR,
@@ -36,12 +36,13 @@ pub async fn close_builtin(
         )?;
     }
     if let Some(status) =
-        crate::builtins::io::net::close::close_if_network_targets(runtime.as_ref(), &args).await?
+        crate::builtins::io::net::close::close_if_network_targets(runtime.as_ref(), args.view())
+            .await?
     {
         return Ok(status);
     }
 
-    close_plotting_targets(&args)
+    close_plotting_targets(args.view())
 }
 
 fn is_typed_integer_value(value: &Value) -> bool {
@@ -50,12 +51,16 @@ fn is_typed_integer_value(value: &Value) -> bool {
 }
 
 #[cfg(feature = "plot-core")]
-fn close_plotting_targets(args: &[Value]) -> crate::BuiltinResult<f64> {
+fn close_plotting_targets(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<f64> {
     crate::builtins::plotting::close::close_plot_targets(args)
 }
 
 #[cfg(not(feature = "plot-core"))]
-fn close_plotting_targets(_args: &[Value]) -> crate::BuiltinResult<f64> {
+fn close_plotting_targets(
+    _args: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<f64> {
     let mut builder =
         crate::build_runtime_error(CLOSE_ERROR_INVALID_ARGUMENT.message).with_builtin("close");
     if let Some(identifier) = CLOSE_ERROR_INVALID_ARGUMENT.identifier {

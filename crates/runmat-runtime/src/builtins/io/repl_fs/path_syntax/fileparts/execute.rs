@@ -4,7 +4,7 @@ use crate::BuiltinResult;
 
 const IDENTITY: &str = "fileparts";
 
-pub(super) fn run(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) fn run(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     let requested = crate::output_count::current_output_count();
     if requested.is_some_and(|count| count > 3) {
         return Err(super::super::error::catalog(

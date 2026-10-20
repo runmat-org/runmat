@@ -173,6 +173,9 @@ pub(in super::super) fn mat_array_to_value(array: MatArray) -> BuiltinResult<Val
             StructArray::normalize_field_major(field_names, values, array.dims.clone())
                 .map_err(load_error)
         }
+        MatData::Object { .. } => Err(load_error(
+            "load: object MAT node requires selected-runtime restoration before Value construction",
+        )),
         MatData::Sparse {
             rows,
             cols,

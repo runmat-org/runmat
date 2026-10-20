@@ -81,7 +81,7 @@ pub fn value_has_native_integer_class(value: &Value) -> bool {
 /// gather can erase resident class metadata.
 pub fn value_contains_native_integer_class(value: &Value) -> bool {
     match value {
-        Value::Cell(cell) => cell.data.iter().any(value_contains_native_integer_class),
+        Value::Cell(cell) => cell.data().iter().any(value_contains_native_integer_class),
         Value::Struct(value) => value
             .fields
             .values()
@@ -89,7 +89,7 @@ pub fn value_contains_native_integer_class(value: &Value) -> bool {
         Value::StructArray(value) => value.any_value(value_contains_native_integer_class),
         Value::ObjectArray(value) => value.data().iter().any(value_contains_native_integer_class),
         Value::Object(value) => value
-            .properties
+            .properties()
             .values()
             .any(value_contains_native_integer_class),
         Value::Closure(value) => value
@@ -106,11 +106,11 @@ pub fn value_contains_native_integer_class(value: &Value) -> bool {
 pub fn value_contains_explicit_gpu(value: &Value) -> bool {
     match value {
         Value::GpuTensor(handle) => runmat_accelerate_api::handle_is_explicit(handle),
-        Value::Cell(cell) => cell.data.iter().any(value_contains_explicit_gpu),
+        Value::Cell(cell) => cell.data().iter().any(value_contains_explicit_gpu),
         Value::Struct(value) => value.fields.values().any(value_contains_explicit_gpu),
         Value::StructArray(value) => value.any_value(value_contains_explicit_gpu),
         Value::ObjectArray(value) => value.data().iter().any(value_contains_explicit_gpu),
-        Value::Object(value) => value.properties.values().any(value_contains_explicit_gpu),
+        Value::Object(value) => value.properties().values().any(value_contains_explicit_gpu),
         Value::Closure(value) => value.captures.iter().any(value_contains_explicit_gpu),
         Value::OutputList(values) => values.iter().any(value_contains_explicit_gpu),
         _ => false,
@@ -158,13 +158,13 @@ pub fn native_integer_value_is_exact_f64(value: &Value) -> bool {
         Value::ComplexTensor(tensor) => tensor
             .integer_storage()
             .is_none_or(|storage| storage_exact(storage.real()) && storage_exact(storage.imag())),
-        Value::Cell(cell) => cell.data.iter().all(native_integer_value_is_exact_f64),
+        Value::Cell(cell) => cell.data().iter().all(native_integer_value_is_exact_f64),
         Value::Struct(value) => value.fields.values().all(native_integer_value_is_exact_f64),
         Value::StructArray(value) => {
             !value.any_value(|child| !native_integer_value_is_exact_f64(child))
         }
         Value::Object(value) => value
-            .properties
+            .properties()
             .values()
             .all(native_integer_value_is_exact_f64),
         Value::Closure(value) => value.captures.iter().all(native_integer_value_is_exact_f64),

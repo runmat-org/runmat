@@ -254,7 +254,7 @@ fn begin_case(
     runtime.set_runmat_extensions_enabled(true);
     executor
         .begin_request(runmat_native_executor::NativeInvocationRequest {
-            function: ProgramFunctionId(0),
+            function: FunctionId(0),
             captures: Vec::new(),
             arguments: vec![
                 Value::String("RunMat".into()),
@@ -421,7 +421,7 @@ fn compiled_statement_output_orders_once_and_roots_pending_gather() {
             };
             let mut invocation = executor
                 .begin_request(runmat_native_executor::NativeInvocationRequest {
-                    function: ProgramFunctionId(0),
+                    function: FunctionId(0),
                     captures: Vec::new(),
                     arguments: vec![argument],
                     requested_outputs: 1,

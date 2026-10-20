@@ -5,7 +5,7 @@ use runmat_builtins::{
     GCA_INTEGER_FIGURE_ALIAS_EXTENSION, GCA_STRUCT_OUTPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{StructValue, Value};
+use runmat_value::Value;
 
 use super::op_common::handles::{handle_from_integer, handle_from_scalar};
 use super::plotting_error;
@@ -27,19 +27,22 @@ const BUILTIN_NAME: &str = "gca";
 )]
 pub fn gca_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     gca_with_runtime(runtime.as_ref(), rest)
 }
 
 #[cfg(test)]
 pub fn gca_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    gca_with_runtime(None, rest)
+    gca_with_runtime(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    )
 }
 
 fn gca_with_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &GCA_DESCRIPTOR,
@@ -121,7 +124,7 @@ fn is_typed_integer_figure_alias(value: &Value) -> bool {
 }
 
 fn axes_struct_response(state: FigureAxesState) -> Value {
-    let mut st = StructValue::new();
+    let mut st = runmat_value::UnboundedStructValueBuilder::new();
     st.insert(
         "handle",
         Value::Num(encode_axes_handle(state.handle, state.active_index)),
@@ -130,7 +133,7 @@ fn axes_struct_response(state: FigureAxesState) -> Value {
     st.insert("rows", Value::Num(state.rows as f64));
     st.insert("cols", Value::Num(state.cols as f64));
     st.insert("index", Value::Num((state.active_index + 1) as f64));
-    Value::Struct(st)
+    Value::Struct(st.finish())
 }
 
 fn figure_handle_arg(value: &Value) -> crate::BuiltinResult<Option<FigureHandle>> {
@@ -225,7 +228,7 @@ pub(crate) mod tests {
     fn struct_mode_returns_struct() {
         setup_plot_tests();
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let value = gca_builtin(vec![Value::String("struct".to_string())]).unwrap();
+        let value = gca_builtin(vec![Value::String("struct".to_string().into())]).unwrap();
         assert!(matches!(value, Value::Struct(_)));
     }
 
@@ -242,7 +245,7 @@ pub(crate) mod tests {
     #[test]
     fn invalid_arguments_return_plotting_error() {
         setup_plot_tests();
-        let err = gca_builtin(vec![Value::String("unsupported".to_string())]).unwrap_err();
+        let err = gca_builtin(vec![Value::String("unsupported".to_string().into())]).unwrap_err();
         let text = err.to_string();
         assert!(
             text.contains("gca: unsupported arguments"),

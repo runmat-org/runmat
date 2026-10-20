@@ -40,7 +40,8 @@ pub(crate) struct GeometryRegionRef {
     binding_variant = "default",
     builtin_path = "crate::builtins::geometry::region"
 )]
-pub async fn geometry_region_binding(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn geometry_region_binding(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     let [asset, selector] = args.as_slice() else {
         return Err(input_error(format!(
             "expected an asset and a selector, got {} arguments",
@@ -48,9 +49,9 @@ pub async fn geometry_region_binding(args: Vec<Value>) -> BuiltinResult<Value> {
         )));
     };
     let selector = match selector {
-        Value::String(text) => text.clone(),
-        Value::StringArray(array) if array.data.len() == 1 => array.data[0].clone(),
-        Value::CharArray(chars) if chars.rows == 1 => chars.data.iter().collect(),
+        Value::String(text) => text.to_string(),
+        Value::StringArray(array) if array.data().len() == 1 => array.data()[0].to_string(),
+        Value::CharArray(chars) if chars.rows == 1 => chars.data().iter().collect(),
         _ => return Err(input_error("selector must be scalar text")),
     };
     geometry_region_builtin(asset.clone(), selector).await
@@ -92,24 +93,27 @@ pub(crate) fn region_ref_from_value(
             format!("expected {GEOMETRY_REGION_CLASS}"),
         ));
     };
-    if !object.class_name.is(runmat_builtins::GEOMETRY_REGION_CLASS) {
+    if !object
+        .class_name()
+        .is(runmat_builtins::GEOMETRY_REGION_CLASS)
+    {
         return Err(region_error(
             builtin,
             format!(
                 "expected {GEOMETRY_REGION_CLASS}, got {}",
-                object.class_name
+                object.class_name()
             ),
         ));
     }
     validate_region_object(object).map_err(|message| region_error(builtin, message))?;
-    let string = |name: &str| match object.properties.get(name) {
+    let string = |name: &str| match object.properties().get(name) {
         Some(Value::String(value)) => Ok(value.clone()),
         _ => Err(region_error(
             builtin,
             format!("{GEOMETRY_REGION_CLASS}.{name} must be a string"),
         )),
     };
-    let geometry_revision = match object.properties.get("geometry_revision") {
+    let geometry_revision = match object.properties().get("geometry_revision") {
         Some(Value::Int(IntValue::U32(value))) => *value,
         _ => {
             return Err(region_error(
@@ -118,7 +122,7 @@ pub(crate) fn region_ref_from_value(
             ))
         }
     };
-    let tag = match object.properties.get("tag") {
+    let tag = match object.properties().get("tag") {
         Some(Value::String(value)) => Some(value.clone()),
         None => None,
         _ => {
@@ -129,11 +133,11 @@ pub(crate) fn region_ref_from_value(
         }
     };
     Ok(GeometryRegionRef {
-        geometry_id: string("geometry_id")?,
+        geometry_id: string("geometry_id")?.to_string(),
         geometry_revision,
-        region_id: string("region_id")?,
-        name: string("name")?,
-        tag,
+        region_id: string("region_id")?.to_string(),
+        name: string("name")?.to_string(),
+        tag: tag.map(|text| text.to_string()),
     })
 }
 
@@ -201,27 +205,27 @@ fn resolve_region<'a>(asset: &'a GeometryAsset, selector: &str) -> BuiltinResult
 
 fn region_to_value(asset: &GeometryAsset, region: &Region) -> BuiltinResult<Value> {
     ensure_region_class_registered();
-    let mut object = ObjectInstance::new(runmat_builtins::GEOMETRY_REGION_CLASS);
-    object.properties.insert(
-        "geometry_id".into(),
-        Value::String(asset.geometry_id.clone()),
+    let mut object = runmat_value::UnboundedObjectBuilder::with_property_capacity(
+        GEOMETRY_REGION_CLASS.to_string(),
+        5,
     );
-    object.properties.insert(
+    object.insert(
+        "geometry_id".into(),
+        Value::String(asset.geometry_id.clone().into()),
+    );
+    object.insert(
         "geometry_revision".into(),
         Value::Int(IntValue::U32(asset.revision)),
     );
-    object
-        .properties
-        .insert("region_id".into(), Value::String(region.region_id.clone()));
-    object
-        .properties
-        .insert("name".into(), Value::String(region.name.clone()));
+    object.insert(
+        "region_id".into(),
+        Value::String(region.region_id.clone().into()),
+    );
+    object.insert("name".into(), Value::String(region.name.clone().into()));
     if let Some(tag) = &region.tag {
-        object
-            .properties
-            .insert("tag".into(), Value::String(tag.clone()));
+        object.insert("tag".into(), Value::String(tag.clone().into()));
     }
-    Ok(Value::Object(object))
+    Ok(Value::Object(object.finish()))
 }
 
 pub(crate) fn ensure_region_class_registered() {
@@ -250,7 +254,7 @@ pub(crate) fn ensure_region_class_registered() {
 
 fn validate_region_object(object: &ObjectInstance) -> Result<(), String> {
     for name in ["geometry_id", "region_id", "name"] {
-        match object.properties.get(name) {
+        match object.properties().get(name) {
             Some(Value::String(value)) if !value.is_empty() => {}
             Some(Value::String(_)) => {
                 return Err(format!("{GEOMETRY_REGION_CLASS}.{name} must not be empty"))
@@ -259,14 +263,14 @@ fn validate_region_object(object: &ObjectInstance) -> Result<(), String> {
         }
     }
     if !matches!(
-        object.properties.get("geometry_revision"),
+        object.properties().get("geometry_revision"),
         Some(Value::Int(IntValue::U32(_)))
     ) {
         return Err(format!(
             "{GEOMETRY_REGION_CLASS}.geometry_revision must be uint32"
         ));
     }
-    if let Some(tag) = object.properties.get("tag") {
+    if let Some(tag) = object.properties().get("tag") {
         if !matches!(tag, Value::String(value) if !value.is_empty()) {
             return Err(format!(
                 "{GEOMETRY_REGION_CLASS}.tag must be a non-empty string when present"
@@ -303,8 +307,8 @@ mod tests {
         )
         .unwrap();
         let value = block_on(geometry_load_builtin(
-            Value::String(path.to_string_lossy().to_string()),
-            Vec::new(),
+            Value::String(path.to_string_lossy().to_string().into()),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .expect("fixture geometry should load");
         let mut asset = geometry_asset_from_value_with_error(
@@ -358,7 +362,10 @@ mod tests {
             vec![Value::Num(1.0), Value::String("face:1".into())],
             vec![Value::String("only one argument".into())],
         ] {
-            let error = block_on(geometry_region_binding(args)).expect_err("invalid input");
+            let error = block_on(geometry_region_binding(
+                crate::builtins::common::test_support::builtin_arguments(args),
+            ))
+            .expect_err("invalid input");
             assert_eq!(
                 error.identifier(),
                 Some("RunMat:geometry:region:InvalidInput")
@@ -372,26 +379,30 @@ mod tests {
         )
         .unwrap();
         let asset = block_on(geometry_load_builtin(
-            Value::String(path.to_string_lossy().to_string()),
-            Vec::new(),
+            Value::String(path.to_string_lossy().to_string().into()),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect("fixture geometry should load");
-        let error = block_on(geometry_region_binding(vec![
-            asset.clone(),
-            Value::Num(3.0),
-        ]))
+        let error = block_on(geometry_region_binding(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                asset.clone(),
+                Value::Num(3.0),
+            ]),
+        ))
         .expect_err("numeric selector");
         assert_eq!(
             error.identifier(),
             Some("RunMat:geometry:region:InvalidInput")
         );
-        let region = block_on(geometry_region_binding(vec![
-            asset,
-            Value::String("tag:mesh_default".into()),
-        ]))
+        let region = block_on(geometry_region_binding(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                asset,
+                Value::String("tag:mesh_default".into()),
+            ]),
+        ))
         .expect("tag selector");
         assert!(
-            matches!(&region, Value::Object(object) if object.class_name.is(runmat_builtins::GEOMETRY_REGION_CLASS))
+            matches!(&region, Value::Object(object) if object.class_name().is(runmat_builtins::GEOMETRY_REGION_CLASS))
         );
     }
 

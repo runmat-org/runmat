@@ -1,5 +1,7 @@
 //! MATLAB-compatible `flipud` builtin with GPU-aware semantics for RunMat.
 
+use crate::aggregate::structure::operations as struct_ops;
+
 use crate::builtins::array::shape::flip::{
     complex_tensor_into_value, flip_char_array_with, flip_complex_tensor_with, flip_gpu_with,
     flip_logical_array_with, flip_string_array_with, flip_tensor_with,
@@ -79,10 +81,13 @@ async fn flipud_builtin(value: Value) -> crate::BuiltinResult<Value> {
         Value::String(scalar) => Ok(Value::String(scalar)),
         Value::Cell(cell) => flip_cell_array_rows(cell).map_err(remap_flipud_error),
         Value::Struct(structure) => Ok(Value::Struct(structure)),
-        Value::StructArray(array) => array
-            .flip(0)
-            .map(Value::StructArray)
-            .map_err(|error| flipud_error(format!("flipud: {error}"))),
+        Value::StructArray(array) => {
+            struct_ops::flip(array, 0)
+                .map(Value::StructArray)
+                .map_err(|error| {
+                    struct_ops::remap(error, |message| flipud_error(format!("flipud: {message}")))
+                })
+        }
         Value::Num(n) => {
             let tensor = tensor::value_into_tensor_for("flipud", Value::Num(n))
                 .map_err(|e| flipud_error(e))?;
@@ -133,12 +138,12 @@ async fn flipud_builtin(value: Value) -> crate::BuiltinResult<Value> {
 }
 
 fn flip_cell_array_rows(cell: CellArray) -> crate::BuiltinResult<Value> {
-    if cell.rows <= 1 || cell.data.is_empty() {
+    if cell.rows <= 1 || cell.data().is_empty() {
         return Ok(Value::Cell(cell));
     }
     let rows = cell.rows;
     let cols = cell.cols;
-    let data = cell.data;
+    let data = cell.data();
     let mut flipped = Vec::with_capacity(data.len());
     for row in (0..rows).rev() {
         let base = row * cols;
@@ -166,7 +171,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_value::{
         CellArray, CharArray, IntegerComplexStorage, IntegerStorage, LogicalArray, StringArray,
-        StructValue, Tensor, Value,
+        Tensor, Value,
     };
 
     #[test]
@@ -239,7 +244,7 @@ pub(crate) mod tests {
         let result = flipud_builtin(Value::CharArray(chars)).expect("flipud");
         match result {
             Value::CharArray(out) => {
-                let collected: String = out.data.iter().collect();
+                let collected: String = out.data().iter().collect();
                 assert_eq!(collected, "matrun");
             }
             other => panic!("expected char array, got {other:?}"),
@@ -253,7 +258,7 @@ pub(crate) mod tests {
             StringArray::new(vec!["top".into(), "bottom".into()], vec![2, 1]).expect("strings");
         let result = flipud_builtin(Value::StringArray(strings)).expect("flipud");
         match result {
-            Value::StringArray(out) => assert_eq!(out.data, vec!["bottom", "top"]),
+            Value::StringArray(out) => assert_eq!(out.data(), vec!["bottom", "top"]),
             other => panic!("expected string array, got {other:?}"),
         }
     }
@@ -378,8 +383,9 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn flipud_preserves_scalar_structure() {
-        let mut st = StructValue::new();
+        let mut st = runmat_value::UnboundedStructValueBuilder::new();
         st.fields.insert("field".into(), Value::Num(1.0));
+        let st = st.finish();
         let result = flipud_builtin(Value::Struct(st.clone())).expect("scalar structure");
         assert_eq!(result, Value::Struct(st));
     }

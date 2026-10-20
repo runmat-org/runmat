@@ -43,17 +43,29 @@ pub trait CapturedIo: Send + Sync + 'static {
         _request: crate::workspace::WorkspacePublicationRequest,
         _lease: &crate::execution::ExecutionLease,
     ) -> io::Result<crate::execution::FencedWorkspacePublicationOutcome> {
-        Err(io::Error::new(io::ErrorKind::Unsupported, "authoritative fenced publication is unavailable"))
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "authoritative fenced publication is unavailable",
+        ))
     }
     async fn transition_execution(
         &self,
         _work: &crate::execution::ExecutionWorkId,
         _command: crate::execution::ExecutionLeaseCommand,
     ) -> io::Result<crate::execution::ExecutionLeaseOutcome> {
-        Err(io::Error::new(io::ErrorKind::Unsupported, "authoritative execution ownership is unavailable"))
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "authoritative execution ownership is unavailable",
+        ))
     }
-    async fn lookup_workspace_publication(&self, _request: &crate::workspace::WorkspacePublicationRequest) -> io::Result<Option<crate::workspace::WorkspacePublicationOutcome>> {
-        Err(io::Error::new(io::ErrorKind::Unsupported, "authoritative workspace receipts are unavailable"))
+    async fn lookup_workspace_publication(
+        &self,
+        _request: &crate::workspace::WorkspacePublicationRequest,
+    ) -> io::Result<Option<crate::workspace::WorkspacePublicationOutcome>> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "authoritative workspace receipts are unavailable",
+        ))
     }
     async fn capture_workspace(
         &self,
@@ -163,20 +175,51 @@ impl SandboxFsProvider {
 #[cfg(not(target_arch = "wasm32"))]
 #[async_trait(?Send)]
 impl FsProvider for SandboxFsProvider {
-    fn workspace_access(&self, root: &Path, writable: bool, maximum_resident_bytes: u64) -> io::Result<Box<dyn crate::workspace_access::WorkspaceAccess>> {
+    fn workspace_access(
+        &self,
+        root: &Path,
+        writable: bool,
+        maximum_resident_bytes: u64,
+    ) -> io::Result<Box<dyn crate::workspace_access::WorkspaceAccess>> {
         if self.captured_io.is_some() {
-            return Err(io::Error::new(io::ErrorKind::Unsupported, "captured authority does not expose coherent workspace access"));
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "captured authority does not expose coherent workspace access",
+            ));
         }
-        if root.components().any(|part| matches!(part, Component::ParentDir | Component::Prefix(_))) {
-            return Err(io::Error::new(io::ErrorKind::PermissionDenied, "workspace access root escapes its mount"));
+        if root
+            .components()
+            .any(|part| matches!(part, Component::ParentDir | Component::Prefix(_)))
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "workspace access root escapes its mount",
+            ));
         }
         let target = self.resolve(root);
-        let mount_guard = if target != self.root { crate::workspace_native::guard_admitted(&self.root, true, maximum_resident_bytes)? } else { None };
-        Ok(Box::new(crate::workspace_access::NativeAccess::open(target, writable, mount_guard, maximum_resident_bytes)?))
+        let mount_guard = if target != self.root {
+            crate::workspace_native::guard_admitted(&self.root, true, maximum_resident_bytes)?
+        } else {
+            None
+        };
+        Ok(Box::new(crate::workspace_access::NativeAccess::open(
+            target,
+            writable,
+            mount_guard,
+            maximum_resident_bytes,
+        )?))
     }
-    async fn publish_workspace_fenced(&self, request: crate::workspace::WorkspacePublicationRequest, lease: &crate::execution::ExecutionLease) -> io::Result<crate::execution::FencedWorkspacePublicationOutcome> {
-        if let Some(authority) = &self.captured_io { return authority.publish_workspace_fenced(request, lease).await; }
-        crate::execution::fenced_outcome(crate::workspace_native::publish_with_lease(&self.root, request, Some(lease)).await)
+    async fn publish_workspace_fenced(
+        &self,
+        request: crate::workspace::WorkspacePublicationRequest,
+        lease: &crate::execution::ExecutionLease,
+    ) -> io::Result<crate::execution::FencedWorkspacePublicationOutcome> {
+        if let Some(authority) = &self.captured_io {
+            return authority.publish_workspace_fenced(request, lease).await;
+        }
+        crate::execution::fenced_outcome(
+            crate::workspace_native::publish_with_lease(&self.root, request, Some(lease)).await,
+        )
     }
     async fn transition_execution(
         &self,
@@ -188,8 +231,13 @@ impl FsProvider for SandboxFsProvider {
         }
         crate::workspace_native::transition_execution(&self.root, work, command)
     }
-    async fn lookup_workspace_publication(&self, request: &crate::workspace::WorkspacePublicationRequest) -> io::Result<Option<crate::workspace::WorkspacePublicationOutcome>> {
-        if let Some(authority) = &self.captured_io { return authority.lookup_workspace_publication(request).await; }
+    async fn lookup_workspace_publication(
+        &self,
+        request: &crate::workspace::WorkspacePublicationRequest,
+    ) -> io::Result<Option<crate::workspace::WorkspacePublicationOutcome>> {
+        if let Some(authority) = &self.captured_io {
+            return authority.lookup_workspace_publication(request).await;
+        }
         crate::workspace_native::lookup(&self.root, request)
     }
     async fn capture_workspace(
@@ -616,18 +664,26 @@ mod tests {
     #[test]
     fn execution_authority_never_falls_back_to_the_cache_for_a_remote_project() {
         let temp = tempdir().unwrap();
-        let provider = SandboxFsProvider::new(temp.path().to_path_buf()).unwrap()
+        let provider = SandboxFsProvider::new(temp.path().to_path_buf())
+            .unwrap()
             .with_captured_io(Arc::new(CapturedFixture));
         let work = crate::execution::ExecutionWorkId {
             session_id: crate::execution::SessionId("session".into()),
             turn_id: crate::execution::TurnId("turn".into()),
         };
-        let error = executor::block_on(provider.transition_execution(&work,
+        let error = executor::block_on(provider.transition_execution(
+            &work,
             crate::execution::ExecutionLeaseCommand::Acquire {
-                owner: crate::execution::ExecutionOwnerId([1;16]), duration_ms:30_000,
-            })).unwrap_err();
+                owner: crate::execution::ExecutionOwnerId([1; 16]),
+                duration_ms: 30_000,
+            },
+        ))
+        .unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::Unsupported);
-        assert!(!temp.path().join(".artifacts/workspace-publications").exists());
+        assert!(!temp
+            .path()
+            .join(".artifacts/workspace-publications")
+            .exists());
     }
 
     #[test]

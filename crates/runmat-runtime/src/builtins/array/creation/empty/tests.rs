@@ -2,7 +2,10 @@ use super::*;
 
 #[test]
 fn failures_use_the_declared_boundary_identifiers() {
-    let size = futures::executor::block_on(int8_empty_builtin(vec![Value::Num(0.5)])).unwrap_err();
+    let size = futures::executor::block_on(int8_empty_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(0.5)]),
+    ))
+    .unwrap_err();
     assert_eq!(size.identifier(), Some("RunMat:empty:InvalidSize"));
     let unsupported =
         futures::executor::block_on(build_empty(EmptyClass::Struct, vec![0, 0])).unwrap_err();
@@ -24,11 +27,13 @@ fn failures_use_the_declared_boundary_identifiers() {
 fn explicit_gpu_empty_keeps_shape_and_device_intent() {
     crate::builtins::common::test_support::with_test_provider(|_| {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let result = futures::executor::block_on(empty_builtin(vec![
-            Value::Num(0.0),
-            Value::Num(3.0),
-            Value::from("gpuArray"),
-        ]))
+        let result = futures::executor::block_on(empty_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(0.0),
+                Value::Num(3.0),
+                Value::from("gpuArray"),
+            ]),
+        ))
         .unwrap();
         let Value::GpuTensor(handle) = result else {
             panic!("expected device empty");
@@ -47,9 +52,12 @@ fn resident_integer_size_controls_preserve_host_receiver_class() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let input = Tensor::new_integer(IntegerStorage::U64(vec![0, 7]), vec![1, 2]).unwrap();
         let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &input).unwrap();
-        let result =
-            futures::executor::block_on(int16_empty_builtin(vec![Value::GpuTensor(handle)]))
-                .unwrap();
+        let result = futures::executor::block_on(int16_empty_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(
+                handle,
+            )]),
+        ))
+        .unwrap();
         let Value::Tensor(result) = result else {
             panic!("expected host empty");
         };
@@ -71,15 +79,24 @@ fn requested_outputs_reject_before_size_or_provider_access() {
             .expect("genuine unregistered allocation")
             .handle,
     );
-    let error = futures::executor::block_on(uint64_empty_builtin(vec![resident])).unwrap_err();
+    let error = futures::executor::block_on(uint64_empty_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![resident]),
+    ))
+    .unwrap_err();
     assert_eq!(error.identifier(), Some("RunMat:empty:TooManyOutputs"));
 }
 
 #[test]
 fn discarded_output_still_validates_empty_shape() {
     let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
-    assert!(futures::executor::block_on(int8_empty_builtin(vec![])).is_ok());
-    assert!(futures::executor::block_on(int8_empty_builtin(vec![Value::Num(3.0)])).is_err());
+    assert!(futures::executor::block_on(int8_empty_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![])
+    ))
+    .is_ok());
+    assert!(futures::executor::block_on(int8_empty_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(3.0)])
+    ))
+    .is_err());
 }
 
 #[test]
@@ -95,7 +112,10 @@ fn global_compatibility_rejects_before_resident_controls() {
             .expect("genuine unregistered allocation")
             .handle,
     );
-    let error = futures::executor::block_on(empty_builtin(vec![resident])).unwrap_err();
+    let error = futures::executor::block_on(empty_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![resident]),
+    ))
+    .unwrap_err();
     assert_eq!(
         error.identifier(),
         Some("RunMat:compatibility:EmptyGlobalCallExtension")
@@ -104,6 +124,7 @@ fn global_compatibility_rejects_before_resident_controls() {
 
 fn run_static(class: EmptyClass, args: Vec<Value>) -> BuiltinResult<Value> {
     futures::executor::block_on(async {
+        let args = crate::builtins::common::test_support::builtin_arguments(args);
         let shape = parse_shape(&args).await?;
         build_empty(class, shape).await
     })
@@ -183,10 +204,12 @@ fn nonempty_shapes_reject_without_multiplication() {
 #[test]
 fn global_shorthand_is_gated_in_matlab_mode() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-    let err = futures::executor::block_on(empty_builtin(vec![
-        Value::Int(IntValue::U8(0)),
-        Value::from("uint8"),
-    ]))
+    let err = futures::executor::block_on(empty_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Int(IntValue::U8(0)),
+            Value::from("uint8"),
+        ]),
+    ))
     .unwrap_err();
     assert_eq!(
         err.identifier(),
@@ -207,7 +230,8 @@ fn resident_size_control_rejects_before_provider_access_in_matlab_mode() {
             .expect("genuine unregistered allocation")
             .handle,
     );
-    let err = futures::executor::block_on(parse_shape(&[resident])).unwrap_err();
+    let arguments = crate::builtins::common::test_support::builtin_arguments(vec![resident]);
+    let err = futures::executor::block_on(parse_shape(&arguments)).unwrap_err();
     assert_eq!(
         err.identifier(),
         Some("RunMat:compatibility:EmptyResidentSizeExtension")

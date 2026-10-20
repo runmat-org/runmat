@@ -10,7 +10,7 @@ use runmat_builtins::{
 #[cfg(test)]
 use runmat_builtins::{JSONDECODE_DESCRIPTOR, JSONDECODE_INTEGER_AUDIT};
 use runmat_macros::runtime_builtin;
-use runmat_value::{CellArray, CharArray, LogicalArray, StringArray, StructValue, Tensor, Value};
+use runmat_value::{CellArray, CharArray, LogicalArray, StringArray, Tensor, Value};
 use serde_json::Value as JsonValue;
 
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
@@ -97,12 +97,12 @@ fn extract_text(value: Value) -> BuiltinResult<String> {
             if array.rows > 1 {
                 return Err(jsondecode_error(&JSONDECODE_ERROR_INPUT_TYPE));
             }
-            Ok(array.data.into_iter().collect::<String>())
+            Ok(array.data().iter().copied().collect::<String>())
         }
-        Value::String(s) => Ok(s),
+        Value::String(s) => Ok(s.into_string_unbounded()),
         Value::StringArray(sa) => {
-            if sa.data.len() == 1 {
-                Ok(sa.data[0].clone())
+            if sa.data().len() == 1 {
+                Ok(sa.data()[0].as_str().to_owned())
             } else {
                 Err(jsondecode_error(&JSONDECODE_ERROR_INPUT_TYPE))
             }

@@ -12,7 +12,13 @@ async fn imfilter_builtin(
     kernel: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
-    super::imfilter_builtin(None, image, kernel, rest).await
+    super::imfilter_builtin(
+        None,
+        image,
+        kernel,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    )
+    .await
 }
 
 struct MutatingAliasingImfilterProvider {

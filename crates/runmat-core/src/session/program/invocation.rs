@@ -13,13 +13,11 @@ impl SessionProgramService {
         let current = Rc::new(unit.clone());
         let previous = user_functions::current_external_function_invoker();
         user_functions::install_local_external_function_invoker(Rc::new(move |caller, call| {
-            let owner = u32::try_from(call.function).ok().and_then(|id| {
-                let id = ProgramFunctionId(id);
-                owners
-                    .get(&id)
-                    .cloned()
-                    .or_else(|| current.owns_callable(id).then(|| Rc::clone(&current)))
-            });
+            let id = runmat_types::FunctionId(call.function);
+            let owner = owners
+                .get(&id)
+                .cloned()
+                .or_else(|| current.owns_callable(id).then(|| Rc::clone(&current)));
             let service = Rc::clone(&service);
             let previous = previous.clone();
             // The caller's context carries its live services; the installer's
@@ -71,12 +69,14 @@ impl SessionProgramService {
                                 .source_id
                                 .and_then(|source| source.resolve_in(&nested_runtime)),
                         );
-                        runmat_vm::invoke_semantic_function_value_in_context(
+                        runmat_vm::invoke_semantic_function_with_rooted_arguments_and_dynamic_admission_in_context(
                             call.function,
-                            &call.arguments,
+                            call.arguments,
                             call.requested_outputs,
                             owner.functions(),
                             nested_runtime,
+                            None,
+                            None,
                         )
                         .await
                     })

@@ -57,6 +57,7 @@ fn verify_removal(
 }
 
 fn remove_owned_definition(
+    runtime: Option<&crate::context::RuntimeContext>,
     target: &HandleRef,
     name: &str,
     metadata_handle: runmat_gc::GcHandle,
@@ -70,8 +71,28 @@ fn remove_owned_definition(
             ));
         };
         owned_definition(object, name, metadata_handle)?;
-        object.remove_dynamic_property(name);
-        object.properties.remove(name);
+        let (removed, definition) = crate::execution::object::replacement::remove_dynamic_property(
+            runtime,
+            object,
+            name,
+            |message, source| {
+                dynamic_error_with_source(
+                    DYNAMIC_PROPERTY_CLASS,
+                    &DYNAMIC_ERROR_INVALID_TARGET,
+                    message,
+                    source,
+                )
+            },
+            |message| {
+                dynamic_error(
+                    DYNAMIC_PROPERTY_CLASS,
+                    &DYNAMIC_ERROR_INVALID_TARGET,
+                    message,
+                )
+            },
+        )?;
+        drop(removed);
+        drop(definition);
         Ok(())
     })
     .map_err(|source| {
@@ -85,16 +106,21 @@ fn remove_owned_definition(
 }
 
 fn set_metadata_validity(
+    runtime: Option<&crate::context::RuntimeContext>,
     prop_handle: &HandleRef,
     target: &HandleRef,
     valid: bool,
 ) -> BuiltinResult<()> {
-    if valid {
-        runmat_gc::gc_record_handle_write(
-            &prop_handle.target,
-            &Value::HandleObject(target.clone()),
-        );
-    }
+    let allocation = |message: &'static str, source| {
+        crate::context::host_allocation::host_allocation_runtime_error(
+            runtime,
+            "RunMat:DynamicProperty:Metadata",
+            message,
+            source,
+        )
+    };
+    let owner = crate::context::host_allocation::HostAllocationReceipt::capture_owner(runtime)
+        .map_err(|source| allocation("dynamic metadata edit authority is unavailable", source))?;
     runmat_gc::gc_with_value_mut(&prop_handle.target, |value| -> BuiltinResult<()> {
         let Value::Object(metadata) = value else {
             return Err(dynamic_error(
@@ -103,21 +129,60 @@ fn set_metadata_validity(
                 "dynamic property metadata target is not an object",
             ));
         };
-        metadata
-            .properties
-            .insert(VALID_FIELD.to_string(), Value::Bool(valid));
-        metadata.properties.insert(
-            crate::HANDLE_VALID_FLAG_PROPERTY.to_string(),
-            Value::Bool(valid),
-        );
-        if valid {
-            metadata.properties.insert(
-                TARGET_FIELD.to_string(),
-                Value::HandleObject(target.clone()),
-            );
-        } else {
-            metadata.properties.remove(TARGET_FIELD);
+        // Both flags and the target edge publish together. A private copy can
+        // fail or be cancelled without exposing an intermediate generation.
+        let mut replacement = metadata.clone();
+        let fields = [
+            (VALID_FIELD, Value::Bool(valid)),
+            (crate::HANDLE_VALID_FLAG_PROPERTY, Value::Bool(valid)),
+        ];
+        let target_value = Value::HandleObject(target.clone());
+        crate::execution::object::replacement::replace_properties(
+            runtime,
+            &mut replacement,
+            fields
+                .iter()
+                .map(|(name, value)| (*name, value))
+                .chain(valid.then_some((TARGET_FIELD, &target_value))),
+            allocation,
+            |message| {
+                dynamic_error(
+                    DYNAMIC_PROPERTY_CLASS,
+                    &DYNAMIC_ERROR_INVALID_METADATA,
+                    message,
+                )
+            },
+        )?;
+        if !valid && replacement.property(TARGET_FIELD).is_some() {
+            crate::execution::object::replacement::remove_property(
+                runtime,
+                &mut replacement,
+                TARGET_FIELD,
+                allocation,
+                |message| {
+                    dynamic_error(
+                        DYNAMIC_PROPERTY_CLASS,
+                        &DYNAMIC_ERROR_INVALID_METADATA,
+                        message,
+                    )
+                },
+            )?;
         }
+        if let Some(owner) = &owner {
+            owner
+                .check(runtime.expect("managed metadata owner has context"))
+                .map_err(|source| allocation("dynamic metadata edit authority changed", source))?;
+        }
+        if runtime.is_some_and(crate::context::RuntimeContext::is_cancelled) {
+            return Err(allocation(
+                "dynamic metadata edit was cancelled",
+                crate::context::host_allocation::HostAllocationError::Cancelled,
+            ));
+        }
+        if valid {
+            runmat_gc::gc_record_handle_write(&prop_handle.target, &target_value);
+        }
+        *metadata = replacement;
         Ok(())
     })
     .map_err(|source| {
@@ -131,10 +196,15 @@ fn set_metadata_validity(
 }
 
 pub(super) fn delete_metadata_property(
+    runtime: Option<&crate::context::RuntimeContext>,
     prop_handle: &HandleRef,
     after_invalidation: impl FnOnce() -> BuiltinResult<()>,
 ) -> BuiltinResult<()> {
-    let _metadata_root = runmat_gc::gc_root(prop_handle.target).map_err(|source| {
+    let _metadata_root = crate::execution::RootedValue::in_optional_context(
+        Value::HandleObject(prop_handle.clone()),
+        runtime,
+    )
+    .map_err(|source| {
         dynamic_error_with_source(
             DYNAMIC_PROPERTY_CLASS,
             &DYNAMIC_ERROR_INVALID_METADATA,
@@ -157,8 +227,15 @@ pub(super) fn delete_metadata_property(
             "dynamic property metadata target is not an object",
         ));
     };
-    let (target, name) = metadata_target_and_name(&metadata)?;
-    let _target_root = runmat_gc::gc_root(target.target).map_err(|source| {
+    let (target, name) = metadata_target_and_name(runtime, &metadata)?;
+    // The actual metadata handle is already rooted. Retire this snapshot
+    // before creating the separate owner root needed after edge invalidation.
+    drop(metadata);
+    let _target_root = crate::execution::RootedValue::in_optional_context(
+        Value::HandleObject(target.clone()),
+        runtime,
+    )
+    .map_err(|source| {
         dynamic_error_with_source(
             DYNAMIC_PROPERTY_CLASS,
             &DYNAMIC_ERROR_INVALID_TARGET,
@@ -169,15 +246,15 @@ pub(super) fn delete_metadata_property(
     verify_removal(&target, &name, prop_handle.target)?;
     // Invalidate all aliases before removing the owning definition. A fault
     // after this point cannot leave a still-valid alias to a missing property.
-    set_metadata_validity(prop_handle, &target, false)?;
+    set_metadata_validity(runtime, prop_handle, &target, false)?;
     let removal = after_invalidation()
-        .and_then(|()| remove_owned_definition(&target, &name, prop_handle.target));
+        .and_then(|()| remove_owned_definition(runtime, &target, &name, prop_handle.target));
     if let Err(mut failure) = removal {
         // No property was removed on either rejection path. Restore metadata
         // before returning the original failure when the GC permits it. If
         // restoration itself fails, preserve the original identifier/source
         // and report the second failure without claiming an atomic rollback.
-        if let Err(rollback) = set_metadata_validity(prop_handle, &target, true) {
+        if let Err(rollback) = set_metadata_validity(runtime, prop_handle, &target, true) {
             failure.message = format!(
                 "{}; metadata restoration also failed: {}",
                 failure.message, rollback.message

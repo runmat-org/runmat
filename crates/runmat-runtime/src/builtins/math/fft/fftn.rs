@@ -88,7 +88,10 @@ fn fftn_error_with_message(
     binding_variant = "default",
     builtin_path = "crate::builtins::math::fft::fftn"
 )]
-async fn fftn_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn fftn_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     crate::builtins::common::validation::reject_typed_complex_integer(&value, "fftn")?;
     if is_wide_integer_value(&value) {
         crate::compatibility::ensure_builtin_extension_enabled(
@@ -103,7 +106,7 @@ async fn fftn_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
             BUILTIN_NAME,
         )?;
     }
-    let sizes = parse_fftn_sizes(&rest, fftn_input_rank(&value))?;
+    let sizes = parse_fftn_sizes(rest.view(), fftn_input_rank(&value))?;
     match value {
         Value::GpuTensor(handle) => fftn_gpu(handle, sizes).await,
         other => fftn_host(other, sizes),
@@ -245,7 +248,10 @@ fn fftn_complex_tensor(
     .map_err(|source| fftn_error_with_source(&FFTN_ERROR_INTERNAL, "transform failed", source))
 }
 
-fn parse_fftn_sizes(args: &[Value], input_rank: usize) -> BuiltinResult<Option<Vec<usize>>> {
+fn parse_fftn_sizes(
+    args: crate::call::FunctionArgumentView<'_>,
+    input_rank: usize,
+) -> BuiltinResult<Option<Vec<usize>>> {
     match args.len() {
         0 => Ok(None),
         1 => {
@@ -364,14 +370,22 @@ mod tests {
 
     #[test]
     fn fftn_rejects_invalid_argument_count() {
-        let err = parse_fftn_sizes(&[Value::Num(2.0), Value::Num(3.0)], 2).unwrap_err();
+        let err = parse_fftn_sizes(
+            crate::call::FunctionArgumentView::from_slice(&[Value::Num(2.0), Value::Num(3.0)]),
+            2,
+        )
+        .unwrap_err();
         assert_eq!(error_identifier(&err), FFTN_ERROR_ARG_COUNT.identifier);
         assert!(error_message(err).contains(FFTN_ERROR_ARG_COUNT.message));
     }
 
     #[test]
     fn fftn_rejects_invalid_size_argument() {
-        let err = parse_fftn_sizes(&[Value::from("bad")], 2).unwrap_err();
+        let err = parse_fftn_sizes(
+            crate::call::FunctionArgumentView::from_slice(&[Value::from("bad")]),
+            2,
+        )
+        .unwrap_err();
         assert_eq!(error_identifier(&err), FFTN_ERROR_INVALID_SIZE.identifier);
         assert!(error_message(err).contains(FFTN_ERROR_INVALID_SIZE.message));
     }
@@ -387,18 +401,26 @@ mod tests {
             runmat_value::LogicalArray::new(vec![1, 1], vec![1, 2]).expect("logical size vector");
         block_on(fftn_builtin(
             Value::Int(runmat_value::IntValue::I16(4)),
-            vec![Value::LogicalArray(logical_sizes)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::LogicalArray(
+                logical_sizes,
+            )]),
         ))
         .expect("documented logical SIZE vector");
 
         let matrix = Tensor::new(vec![1.0, 1.0, 1.0, 1.0], vec![2, 2]).unwrap();
-        let error = block_on(fftn_builtin(Value::Num(1.0), vec![Value::Tensor(matrix)]))
-            .expect_err("SIZE matrix must be rejected");
+        let error = block_on(fftn_builtin(
+            Value::Num(1.0),
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(matrix)]),
+        ))
+        .expect_err("SIZE matrix must be rejected");
         assert_eq!(error.identifier(), FFTN_ERROR_INVALID_SIZE.identifier);
 
         let zero = Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap();
-        let error = block_on(fftn_builtin(Value::Num(1.0), vec![Value::Tensor(zero)]))
-            .expect_err("zero SIZE must be rejected");
+        let error = block_on(fftn_builtin(
+            Value::Num(1.0),
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(zero)]),
+        ))
+        .expect_err("zero SIZE must be rejected");
         assert_eq!(error.identifier(), FFTN_ERROR_INVALID_SIZE.identifier);
     }
 
@@ -407,7 +429,9 @@ mod tests {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let short = block_on(fftn_builtin(
             Value::Num(1.0),
-            vec![Value::Int(runmat_value::IntValue::U16(2))],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(
+                runmat_value::IntValue::U16(2),
+            )]),
         ))
         .expect_err("short SIZE must gate");
         assert_eq!(
@@ -417,8 +441,11 @@ mod tests {
 
         let wide =
             Tensor::new_integer(runmat_value::IntegerStorage::I64(vec![1]), vec![1, 1]).unwrap();
-        let error = block_on(fftn_builtin(Value::Tensor(wide), Vec::new()))
-            .expect_err("wide data must gate");
+        let error = block_on(fftn_builtin(
+            Value::Tensor(wide),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect_err("wide data must gate");
         assert_eq!(
             error.identifier(),
             Some("RunMat:compatibility:FftnWideIntegerDataExtension")

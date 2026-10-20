@@ -15,7 +15,6 @@ use crate::context::host_effect::{
     HostEffectWorkload, MatEncodeMode, MatEncodeOutput, MatStructSelection,
 };
 
-use crate::builtins::introspection::object_serialization::prepare_value_for_mat_save_in_context;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 use workspace_io::WorkspaceReadSet;
 
@@ -32,7 +31,7 @@ use runmat_builtins::{
 )]
 async fn save_builtin(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     let output_scope = crate::output_count::current_output_scope();
     let requested_outputs = match output_scope {
@@ -46,7 +45,7 @@ async fn save_builtin(
             BUILTIN_NAME,
         )?;
     }
-    preflight_known_options(&args)?;
+    preflight_known_options(args.view())?;
     // Public arguments are filename, option, and workspace-selector text;
     // saved payloads come from the workspace only after these controls pass.
     if args.iter().any(crate::dispatcher::value_contains_gpu) {
@@ -68,7 +67,7 @@ async fn save_builtin(
         }
     }
 
-    let request = parse_arguments(&args[option_start..]).await?;
+    let request = parse_arguments(args.view().range(option_start..)?).await?;
     let regex_patterns: Vec<Regex> = request
         .regex_patterns
         .iter()
@@ -269,21 +268,11 @@ async fn encode_selected_entries(
     let mut mat_vars = Vec::with_capacity(entries.len());
     for (name, value) in entries {
         cooperation.completed(0).await?;
-        let runtime = cooperation.runtime();
-        let value = cooperation
-            .await_io(prepare_value_for_mat_save_in_context(value, runtime))
-            .await??;
-        workspace_read.retain_values(std::iter::once(value.value()))?;
+        workspace_read.retain_values(std::iter::once(&value))?;
         cooperation.completed(0).await?;
-        let array = value
-            .with_owned_async(|value| {
-                convert_value_with_cooperation(
-                    value,
-                    MatEncodingOwner::Save,
-                    Some(&mut *cooperation),
-                )
-            })
-            .await?;
+        let array =
+            convert_value_with_cooperation(value, MatEncodingOwner::Save, Some(&mut *cooperation))
+                .await?;
         mat_vars.push(MatVar { name, array });
         cooperation.completed(0).await?;
     }

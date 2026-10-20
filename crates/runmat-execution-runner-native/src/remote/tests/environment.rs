@@ -50,10 +50,11 @@ async fn encrypted_driver_uses_exact_environment_after_source_teardown_without_h
         "run-frozen-environment-second",
     ] {
         let response = run_encrypted_remote_request(run, bundle.clone()).await;
-        let ProgramExecutionResponse::Success { outputs } = response else {
+        let ProgramExecutionResponse::Success { mut outputs } = response else {
             panic!("driver did not return its original test result: {response:?}")
         };
-        let [value]: [_; 1] = outputs.try_into().unwrap();
+        assert_eq!(outputs.len(), 1, "one original semantic output");
+        let value = outputs.remove(0);
         let execution = decode_execution(&value).unwrap();
         assert_eq!(
             execution.result.state.disposition,

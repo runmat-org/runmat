@@ -85,7 +85,7 @@ pub(in crate::builtins::deep_learning) fn publish_updates(
         }
         values.push(super::super::parameters::public_value(
             value.as_ref().or(Some(row.value)),
-        ));
+        )?);
         keys.push(row.key);
     }
     if !supplied.is_empty() {
@@ -95,10 +95,10 @@ pub(in crate::builtins::deep_learning) fn publish_updates(
         ));
     }
     let result = table::table(&keys, values, function)?;
-    let Some(Value::Cell(layers)) = network.properties.get("Layers") else {
+    let Some(Value::Cell(layers)) = network.properties().get("Layers") else {
         unreachable!("view admitted network Layers")
     };
-    table::validate_canonical(&layers.data, &result, function)?;
+    table::validate_canonical(layers.data(), &result, function)?;
     Ok(result)
 }
 
@@ -144,7 +144,7 @@ mod tests {
             let Value::Object(wrapper) = row.value else {
                 panic!("expected public dlarray State");
             };
-            let Value::Tensor(tensor) = wrapper.properties.get("Data").unwrap() else {
+            let Value::Tensor(tensor) = wrapper.properties().get("Data").unwrap() else {
                 panic!("expected native State payload");
             };
             assert_eq!(tensor.as_f64_slice().unwrap(), &[expected; 6]);
@@ -176,7 +176,7 @@ mod tests {
         let Value::Object(wrapper) = rows[0].value else {
             panic!("expected dlarray");
         };
-        let Value::Tensor(tensor) = wrapper.properties.get("Data").unwrap() else {
+        let Value::Tensor(tensor) = wrapper.properties().get("Data").unwrap() else {
             panic!("expected tensor");
         };
         assert_eq!(tensor.as_f32_slice().unwrap(), &[0.25; 3]);

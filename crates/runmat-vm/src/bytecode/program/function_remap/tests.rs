@@ -17,12 +17,14 @@ fn session_binding_rejects_text_and_accepts_explicit_handle() {
             ..Default::default()
         },
     )]));
-    let binding = SessionCallableBinding::named(0, helper, "helper".into());
+    let binding =
+        SessionCallableBinding::named(0, helper, "helper".into(), FunctionReferenceKind::Local);
     assert!(remap_session_entrypoint(&mut bytecode, &HashMap::new(), &[binding]).is_err());
     assert!(matches!(bytecode.instructions[0], Instr::LoadCharRow(_)));
 
     bytecode.instructions[0] = Instr::CreateFunctionHandle("helper".into());
-    let binding = SessionCallableBinding::named(0, helper, "helper".into());
+    let binding =
+        SessionCallableBinding::named(0, helper, "helper".into(), FunctionReferenceKind::Local);
     remap_session_entrypoint(&mut bytecode, &HashMap::new(), &[binding])
         .expect("explicit source handle may bind");
     assert!(matches!(
@@ -108,7 +110,6 @@ fn session_publication_projects_nested_parent_and_rejects_unproved_external_eval
     remap_session_function(
         &mut nested,
         destination_nested,
-        runmat_types::ProgramFunctionId(3),
         None,
         &HashMap::from([
             (compiler_parent, destination_parent),
@@ -133,7 +134,6 @@ fn session_publication_projects_nested_parent_and_rejects_unproved_external_eval
     assert!(remap_session_function(
         &mut eval_nested,
         destination_nested,
-        runmat_types::ProgramFunctionId(3),
         None,
         // This external parent has a numeric ID but is not an admitted member
         // of the eval unit's remap.
@@ -167,7 +167,6 @@ fn closed_nested_parent_absence_rejects_without_mutating_definition() {
     assert!(remap_closed_session_function(
         &mut published,
         FunctionId(43),
-        runmat_types::ProgramFunctionId(3),
         &HashMap::from([(FunctionId(3), FunctionId(43))]),
     )
     .is_err());

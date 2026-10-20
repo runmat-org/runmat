@@ -11,5 +11,8 @@ use runmat_value::Value;
 use crate::BuiltinResult;
 
 pub(super) fn call(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    block_on(super::pow2_builtin(first, rest))
+    block_on(super::pow2_builtin(
+        first,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    ))
 }

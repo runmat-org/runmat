@@ -26,7 +26,9 @@ fn numeric_character_admission_preserves_low_rank_row_policy() {
 }
 
 fn run(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    block_on(super::execute::run(args))
+    block_on(super::execute::run(
+        crate::builtins::common::test_support::builtin_arguments(args),
+    ))
 }
 
 #[test]
@@ -52,7 +54,7 @@ fn mixed_cell_and_string_paths_follow_semantic_order_in_every_dimension() {
             panic!("mixed text returns strings");
         };
         assert_eq!(result.shape, shape);
-        for (index, value) in result.data.iter().enumerate() {
+        for (index, value) in result.data().iter().enumerate() {
             assert_eq!(
                 value,
                 &super::super::lexical::join(&[&folders[index], &files[index]])
@@ -127,7 +129,7 @@ fn broadcasts_scalars_over_string_arrays() {
         panic!("string array")
     };
     assert_eq!(paths.shape, vec![1, 2]);
-    assert!(paths.data[0].ends_with("a.m"));
+    assert!(paths.data()[0].ends_with("a.m"));
 }
 
 #[test]

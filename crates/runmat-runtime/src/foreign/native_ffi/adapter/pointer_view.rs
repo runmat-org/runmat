@@ -2,13 +2,16 @@ use super::pointer_roles::{PointerMember, PointerMethod};
 use super::*;
 
 impl NativeFfiAdapter {
-    pub(super) fn pointer_value(&self, arguments: &[Value]) -> Result<Value, RuntimeError> {
+    pub(super) fn pointer_value(
+        &self,
+        arguments: &(impl InvocationArguments + ?Sized),
+    ) -> Result<Value, RuntimeError> {
         if arguments.len() != 1 {
             return Err(invalid_call(
                 "native FFI pointer_value expects one pointer resource",
             ));
         }
-        let Value::Foreign(reference) = &arguments[0] else {
+        let Some(Value::Foreign(reference)) = arguments.get(0) else {
             return Err(invalid_call("pointer_value requires a foreign pointer"));
         };
         self.handles.resolve(reference, ForeignCapability::Read)?;
@@ -36,14 +39,17 @@ impl NativeFfiAdapter {
         }
     }
 
-    pub(super) fn get_member(&self, arguments: &[Value]) -> Result<Value, RuntimeError> {
+    pub(super) fn get_member(
+        &self,
+        arguments: &(impl InvocationArguments + ?Sized),
+    ) -> Result<Value, RuntimeError> {
         if arguments.len() != 2 {
             return Err(invalid_call(
                 "native FFI get_member expects a foreign resource and member name",
             ));
         }
         let member = PointerMember::parse(string_argument(arguments, 1, "get_member")?);
-        let Value::Foreign(reference) = &arguments[0] else {
+        let Some(Value::Foreign(reference)) = arguments.get(0) else {
             return Err(invalid_call(
                 "native FFI member access requires a foreign resource",
             ));
@@ -71,7 +77,7 @@ impl NativeFfiAdapter {
                 .value(&metadata)
                 .map_err(|error| foreign_error_with_source(ForeignErrorKind::InvalidCall, error)),
             (PointerMember::DataType, PointerEntry::CallerOwned { type_name, .. }) => {
-                Ok(Value::String(type_name))
+                Ok(Value::string(type_name))
             }
             (
                 PointerMember::Value,
@@ -96,7 +102,7 @@ impl NativeFfiAdapter {
                 .map_err(|error| foreign_error_with_source(ForeignErrorKind::InvalidCall, error))
             }
             (PointerMember::DataType, PointerEntry::Opaque { pointer, view, .. }) => {
-                Ok(Value::String(
+                Ok(Value::string(
                     view.borrow()
                         .as_ref()
                         .map(|view| view.type_name.clone())
@@ -127,14 +133,18 @@ impl NativeFfiAdapter {
         }
     }
 
-    pub(super) fn set_member(&self, arguments: &[Value]) -> Result<Value, RuntimeError> {
+    pub(super) fn set_member(
+        &self,
+        context: &RuntimeContext,
+        arguments: &(impl InvocationArguments + ?Sized),
+    ) -> Result<Value, RuntimeError> {
         if arguments.len() != 3 {
             return Err(invalid_call(
                 "native FFI set_member expects a foreign resource, member name, and value",
             ));
         }
         let member = PointerMember::parse(string_argument(arguments, 1, "set_member")?);
-        let Value::Foreign(reference) = &arguments[0] else {
+        let Some(Value::Foreign(reference)) = arguments.get(0) else {
             return Err(invalid_call(
                 "native FFI member assignment requires a foreign resource",
             ));
@@ -154,33 +164,45 @@ impl NativeFfiAdapter {
             })?;
         match entry {
             PointerEntry::CallerOwned { pointer, metadata, .. } => {
-                let replacement = match member {
-                    PointerMember::Value => arguments[2].clone(),
-                    PointerMember::DataType => return Err(invalid_call(
+                if matches!(&member, PointerMember::Value) {
+                    pointer
+                        .set_value(arguments.get(2).expect("validated member value"), &metadata)
+                        .map_err(|error| foreign_error_with_source(ForeignErrorKind::InvalidCall, error))?;
+                    return Ok(Value::Foreign(reference.clone()));
+                }
+                match member {
+                    PointerMember::Value => unreachable!("handled by borrowed pointer assignment"),
+                    PointerMember::DataType => Err(invalid_call(
                         "native pointer member `DataType` is read-only",
                     )),
                     PointerMember::Field(member) => {
                         let current = pointer.value(&metadata).map_err(|error| {
                             foreign_error_with_source(ForeignErrorKind::InvalidCall, error)
                         })?;
-                        let Value::Struct(mut structure) = current else {
+                        let current = crate::execution::RootedValue::in_context(current, context)?;
+                        let Value::Struct(structure) = current.value() else {
                             return Err(invalid_call(format!(
                                 "native pointer member `{member}` is unavailable"
                             )));
                         };
-                        let Some(field) = structure.fields.get_mut(&member) else {
+                        if !structure.fields.contains_key(&member) {
                             return Err(invalid_call(format!(
                                 "native structure has no field `{member}`"
                             )));
-                        };
-                        *field = arguments[2].clone();
-                        Value::Struct(structure)
+                        }
+                        let replacement = arguments.get(2).expect("validated member value");
+                        let replacement_roots = crate::execution::structure::replacement::lease(replacement, Some(context))?;
+                        let updated = crate::execution::construct_struct_from_fields_in_context(
+                            context,
+                            structure.fields.iter().map(|(name, value)| (name, if name == member.as_str() { replacement } else { value })),
+                        )?;
+                        pointer.set_value(updated.value(), &metadata).map_err(|error| {
+                            foreign_error_with_source(ForeignErrorKind::InvalidCall, error)
+                        })?;
+                        drop(replacement_roots);
+                        Ok(Value::Foreign(reference.clone()))
                     }
-                };
-                pointer.set_value(&replacement, &metadata).map_err(|error| {
-                    foreign_error_with_source(ForeignErrorKind::InvalidCall, error)
-                })?;
-                Ok(arguments[0].clone())
+                }
             }
             PointerEntry::Opaque { .. } => Err(invalid_call(
                 "opaque library pointer values cannot be assigned without an explicit copy contract",
@@ -188,13 +210,16 @@ impl NativeFfiAdapter {
         }
     }
 
-    pub(super) fn invoke_member(&self, arguments: &[Value]) -> Result<Value, RuntimeError> {
+    pub(super) fn invoke_member(
+        &self,
+        arguments: &(impl InvocationArguments + ?Sized),
+    ) -> Result<Value, RuntimeError> {
         if arguments.len() < 2 {
             return Err(invalid_call(
                 "native FFI invoke_member expects a foreign resource and method name",
             ));
         }
-        let Value::Foreign(reference) = &arguments[0] else {
+        let Some(Value::Foreign(reference)) = arguments.get(0) else {
             return Err(invalid_call(
                 "native FFI method invocation requires a foreign resource",
             ));
@@ -204,16 +229,34 @@ impl NativeFfiAdapter {
         let role = PointerMethod::parse(&method)
             .ok_or_else(|| invalid_call(format!("native pointer has no method `{method}`")))?;
         match role {
-            PointerMethod::SetDataType => self.set_pointer_datatype(reference, &arguments[2..]),
-            PointerMethod::IsNull => self.pointer_is_null(reference, &arguments[2..]),
-            PointerMethod::Reshape => self.reshape_pointer(reference, &arguments[2..]),
+            PointerMethod::SetDataType => self.set_pointer_datatype(
+                reference,
+                &ArgumentWindow {
+                    source: arguments,
+                    offset: 2,
+                },
+            ),
+            PointerMethod::IsNull => self.pointer_is_null(
+                reference,
+                &ArgumentWindow {
+                    source: arguments,
+                    offset: 2,
+                },
+            ),
+            PointerMethod::Reshape => self.reshape_pointer(
+                reference,
+                &ArgumentWindow {
+                    source: arguments,
+                    offset: 2,
+                },
+            ),
         }
     }
 
     pub(super) fn set_pointer_datatype(
         &self,
         reference: &runmat_value::ForeignRef,
-        arguments: &[Value],
+        arguments: &(impl InvocationArguments + ?Sized),
     ) -> Result<Value, RuntimeError> {
         if arguments.len() < 2 {
             return Err(invalid_call(
@@ -221,9 +264,8 @@ impl NativeFfiAdapter {
             ));
         }
         let type_name = string_argument(arguments, 0, "setdatatype")?;
-        let shape = arguments[1..]
-            .iter()
-            .map(pointer_dimension)
+        let shape = (1..arguments.len())
+            .map(|index| pointer_dimension(arguments.get(index).expect("validated dimension")))
             .collect::<Result<Vec<_>, _>>()?;
         shape.iter().try_fold(1usize, |count, dimension| {
             count
@@ -255,7 +297,7 @@ impl NativeFfiAdapter {
     pub(super) fn pointer_is_null(
         &self,
         reference: &runmat_value::ForeignRef,
-        arguments: &[Value],
+        arguments: &(impl InvocationArguments + ?Sized),
     ) -> Result<Value, RuntimeError> {
         if !arguments.is_empty() {
             return Err(invalid_call("isNull does not accept arguments"));
@@ -276,14 +318,13 @@ impl NativeFfiAdapter {
     pub(super) fn reshape_pointer(
         &self,
         reference: &runmat_value::ForeignRef,
-        arguments: &[Value],
+        arguments: &(impl InvocationArguments + ?Sized),
     ) -> Result<Value, RuntimeError> {
         if arguments.is_empty() {
             return Err(invalid_call("reshape expects one or more dimensions"));
         }
-        let shape = arguments
-            .iter()
-            .map(pointer_dimension)
+        let shape = (0..arguments.len())
+            .map(|index| pointer_dimension(arguments.get(index).expect("validated dimension")))
             .collect::<Result<Vec<_>, _>>()?;
         let requested = shape.iter().try_fold(1usize, |count, dimension| {
             count
@@ -404,13 +445,13 @@ pub(super) fn pointer_dimension(value: &Value) -> Result<usize, RuntimeError> {
 pub(super) fn default_structure_value(
     name: &str,
     metadata: &NativeLibraryMetadata,
-) -> Result<StructValue, RuntimeError> {
+) -> Result<runmat_value::StructValue, RuntimeError> {
     let definition = metadata
         .structures
         .iter()
         .find(|definition| definition.name == name)
         .ok_or_else(|| invalid_call(format!("missing native structure definition `{name}`")))?;
-    let mut value = StructValue::new();
+    let mut value = runmat_value::UnboundedStructValueBuilder::new();
     for field in &definition.fields {
         let field_value = match &field.ty {
             NativeType::Scalar { .. } | NativeType::Enumeration { .. } => Value::Num(0.0),
@@ -424,9 +465,9 @@ pub(super) fn default_structure_value(
                 )))
             }
         };
-        value.fields.insert(field.name.clone(), field_value);
+        value.insert(field.name.clone(), field_value);
     }
-    Ok(value)
+    Ok(value.finish())
 }
 
 pub(super) fn pointer_type_identity(nominal_type: String) -> ForeignTypeIdentity {

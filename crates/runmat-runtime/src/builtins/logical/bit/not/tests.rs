@@ -157,7 +157,7 @@ fn not_maps_table_variables_and_preserves_the_container() {
     let Value::Object(output) = output_owner.value() else {
         panic!("expected table output")
     };
-    assert_eq!(output.class_name, runmat_types::standard::TABLE);
+    assert!(output.class_name().is(runmat_types::standard::TABLE));
     let variables = crate::builtins::table::table_variables(output).unwrap();
     assert!(matches!(
         &variables.fields["A"],

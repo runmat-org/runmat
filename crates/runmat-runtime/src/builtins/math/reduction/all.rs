@@ -75,7 +75,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 async fn all_builtin(
     runtime: Option<RuntimeContext>,
     value: Value,
-    arguments: Vec<Value>,
+    arguments: crate::call::BuiltinArguments,
 ) -> BuiltinResult<RootedValue> {
     super::logical::execute(runtime.as_ref(), &CONFIG, value, arguments).await
 }

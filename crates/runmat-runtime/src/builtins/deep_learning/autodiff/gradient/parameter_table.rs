@@ -24,7 +24,7 @@ pub(super) fn values<'a>(
             )
         })?;
     let text_column = |name| match variables.fields.get(name) {
-        Some(Value::StringArray(array)) if array.shape == [array.data.len(), 1] => Ok(array),
+        Some(Value::StringArray(array)) if array.shape == [array.data().len(), 1] => Ok(array),
         _ => Err(deep_learning_error(
             function,
             format!("{function}: {name} must be a string column in a parameter table"),
@@ -38,13 +38,14 @@ pub(super) fn values<'a>(
             format!("{function}: parameter table Value must be a column cell array"),
         ));
     };
-    if values.shape != [values.data.len(), 1] {
+    if values.shape != [values.data().len(), 1] {
         return Err(deep_learning_error(
             function,
             format!("{function}: parameter table Value must be a column cell array"),
         ));
     }
-    if layers.data.len() != parameters.data.len() || layers.data.len() != values.data.len() {
+    if layers.data().len() != parameters.data().len() || layers.data().len() != values.data().len()
+    {
         return Err(deep_learning_error(
             function,
             format!("{function}: parameter table columns have different row counts"),

@@ -178,7 +178,7 @@ fn decomposition_scalar_operands_read_typed_integer_storage_exactly() {
     let prop = block_on(decomposition_subsref(
         scaled,
         OBJECT_INDEX_MEMBER.to_string(),
-        Value::String(SCALE_FACTOR_FIELD.to_string()),
+        Value::String(SCALE_FACTOR_FIELD.to_string().into()),
     ))
     .expect("ScaleFactor");
     assert_eq!(approx_vec_rooted(prop), vec![3.0]);

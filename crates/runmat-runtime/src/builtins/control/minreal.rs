@@ -49,7 +49,7 @@ fn check(runtime: Option<&RuntimeContext>) -> BuiltinResult<()> {
 async fn minreal_builtin(
     runtime: Option<RuntimeContext>,
     system: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     if rest.len() > 1 || crate::output_count::current_output_count().is_some_and(|n| n > 1) {
         return Err(invalid(
@@ -77,7 +77,7 @@ async fn minreal_builtin(
     if !object.is_class(TF_CLASS) {
         return Err(unsupported(format!(
             "minreal does not yet support model class '{}'",
-            object.class_name
+            object.class_name()
         )));
     }
     if policy(runtime.as_ref())? == HostAllocationPolicy::Managed {

@@ -4,29 +4,28 @@ pub(super) fn scalar_tensor(value: f64) -> Tensor {
     Tensor::new(vec![value], vec![1, 1]).expect("scalar tensor shape is valid")
 }
 
-pub(super) fn pop_upper_tail(rest: &mut Vec<Value>) -> DistributionTail {
+pub(super) fn split_upper_tail(
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<(crate::call::BuiltinArguments, DistributionTail)> {
     let tail = rest
         .last()
         .and_then(crate::builtins::common::random_args::keyword_of)
         .and_then(|keyword| DistributionTail::from_keyword(&keyword))
         .unwrap_or(DistributionTail::Lower);
-    if tail == DistributionTail::Upper {
-        rest.pop();
-    }
-    tail
+    let end = rest.len() - usize::from(tail == DistributionTail::Upper);
+    Ok((rest.into_range(..end)?, tail))
 }
 
 pub(super) async fn normal_args(
     name: &str,
     first: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
     kind: DistributionKind,
 ) -> BuiltinResult<NormalArgs> {
-    let mut rest = rest;
-    let tail = if kind.supports_upper_tail() {
-        pop_upper_tail(&mut rest)
+    let (rest, tail) = if kind.supports_upper_tail() {
+        split_upper_tail(rest)?
     } else {
-        DistributionTail::Lower
+        (rest, DistributionTail::Lower)
     };
     if rest.len() > 2 {
         return Err(normal_error(
@@ -34,21 +33,27 @@ pub(super) async fn normal_args(
             format!("{name}: expected x, x, mu, or x, mu, sigma"),
         ));
     }
-    let inputs = std::iter::once(&first)
-        .chain(rest.iter())
-        .collect::<Vec<_>>();
-    numeric_inputs(name, &inputs, NumericShapePolicy::Broadcast)?;
-    let output = NormalOutputPlan::inspect(name, &first, &rest)?;
+    match rest.len() {
+        0 => numeric_inputs(name, &[&first], NumericShapePolicy::Broadcast)?,
+        1 => numeric_inputs(name, &[&first, &rest[0]], NumericShapePolicy::Broadcast)?,
+        2 => numeric_inputs(
+            name,
+            &[&first, &rest[0], &rest[1]],
+            NumericShapePolicy::Broadcast,
+        )?,
+        _ => unreachable!(),
+    }
+    let output = NormalOutputPlan::inspect(name, &first, rest.view())?;
     let x = normal_value_to_tensor(name, "x or p", first).await?;
-    let (mu, sigma) = match rest.as_slice() {
-        [] => (scalar_tensor(0.0), scalar_tensor(1.0)),
-        [mu] => (
-            normal_value_to_tensor(name, "mu", mu.clone()).await?,
+    let (mu, sigma) = match rest.len() {
+        0 => (scalar_tensor(0.0), scalar_tensor(1.0)),
+        1 => (
+            normal_value_to_tensor(name, "mu", rest[0].clone()).await?,
             scalar_tensor(1.0),
         ),
-        [mu, sigma] => (
-            normal_value_to_tensor(name, "mu", mu.clone()).await?,
-            normal_value_to_tensor(name, "sigma", sigma.clone()).await?,
+        2 => (
+            normal_value_to_tensor(name, "mu", rest[0].clone()).await?,
+            normal_value_to_tensor(name, "sigma", rest[1].clone()).await?,
         ),
         _ => unreachable!(),
     };
@@ -158,7 +163,11 @@ pub(super) fn broadcast_tensor_to(
     Ok(out)
 }
 
-pub(super) async fn t_args(name: &str, first: Value, rest: Vec<Value>) -> BuiltinResult<TArgs> {
+pub(super) async fn t_args(
+    name: &str,
+    first: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<TArgs> {
     if rest.len() != 1 {
         return Err(normal_error(
             name,
@@ -175,7 +184,7 @@ pub(super) async fn t_args(name: &str, first: Value, rest: Vec<Value>) -> Builti
 pub(super) async fn three_args(
     name: &str,
     first: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
     defaults: Option<(f64, f64)>,
 ) -> BuiltinResult<ThreeArgs> {
     if !matches!((rest.len(), defaults.is_some()), (0, true) | (2, _)) {
@@ -184,15 +193,21 @@ pub(super) async fn three_args(
             format!("{name}: expected one or three numeric arguments"),
         ));
     }
-    let inputs = std::iter::once(&first)
-        .chain(rest.iter())
-        .collect::<Vec<_>>();
-    numeric_inputs(name, &inputs, NumericShapePolicy::Broadcast)?;
-    let (a, b) = match (rest.as_slice(), defaults) {
-        ([], Some((a, b))) => (scalar_tensor(a), scalar_tensor(b)),
-        ([a, b], _) => (
-            value_to_tensor(name, a.clone()).await?,
-            value_to_tensor(name, b.clone()).await?,
+    match rest.len() {
+        0 => numeric_inputs(name, &[&first], NumericShapePolicy::Broadcast)?,
+        1 => numeric_inputs(name, &[&first, &rest[0]], NumericShapePolicy::Broadcast)?,
+        2 => numeric_inputs(
+            name,
+            &[&first, &rest[0], &rest[1]],
+            NumericShapePolicy::Broadcast,
+        )?,
+        _ => unreachable!(),
+    }
+    let (a, b) = match (rest.len(), defaults) {
+        (0, Some((a, b))) => (scalar_tensor(a), scalar_tensor(b)),
+        (2, _) => (
+            value_to_tensor(name, rest[0].clone()).await?,
+            value_to_tensor(name, rest[1].clone()).await?,
         ),
         _ => {
             return Err(normal_error(

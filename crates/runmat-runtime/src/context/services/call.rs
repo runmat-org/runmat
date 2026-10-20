@@ -13,7 +13,7 @@ pub struct RuntimeCallRequest {
     descriptor: crate::call::descriptor::CallableDescriptor,
     // This is the same physical callable generation as the descriptor's
     // retained target, with its GC roots kept through an unpolled call future.
-    source_roots: Option<crate::execution::RetainedValueReadLease>,
+    source_roots: Option<crate::call::RetainedCallableTarget>,
     // The descriptor owns the original supplied Vec; this lease protects its
     // GC children until the selected call finishes or the request is dropped.
     supplied_roots: crate::execution::RootedValueLease,
@@ -22,23 +22,28 @@ pub struct RuntimeCallRequest {
 impl RuntimeCallRequest {
     pub(crate) fn new(
         descriptor: crate::call::descriptor::CallableDescriptor,
-        source_roots: Option<crate::execution::RetainedValueReadLease>,
+        source_roots: Option<crate::call::RetainedCallableTarget>,
         supplied_roots: crate::execution::RootedValueLease,
     ) -> Result<Self, RuntimeError> {
         use crate::call::descriptor::CallableTarget;
 
-        let captured = match &descriptor.target {
+        let target_retained = matches!(
+            &descriptor.target,
+            CallableTarget::BoundLexical { .. }
+                | CallableTarget::CapturedResolved { .. }
+                | CallableTarget::RetainedFevalForward(_)
+        );
+        let captured_matches = match &descriptor.target {
             CallableTarget::BoundLexical { closure, .. }
-            | CallableTarget::CapturedResolved { closure, .. } => Some(closure),
+            | CallableTarget::CapturedResolved { closure, .. } => source_roots
+                .as_ref()
+                .map(|owner| closure.matches_callable_owner(owner)),
+            CallableTarget::RetainedFevalForward(value) => source_roots
+                .as_ref()
+                .map(|owner| value.matches_callable_owner(owner)),
             _ => None,
         };
-        if captured.is_some() && source_roots.is_none()
-            || captured
-                .zip(source_roots.as_ref())
-                .is_some_and(|(closure, roots)| {
-                    !closure.generation().ptr_eq(&roots.shared_generation())
-                })
-        {
+        if target_retained && captured_matches != Some(true) {
             return Err(crate::runtime_error::semantic_error(
                 "RuntimeCallOwner",
                 "callback target and retained source owner disagree",
@@ -59,7 +64,7 @@ impl RuntimeCallRequest {
         self,
     ) -> (
         crate::call::descriptor::CallableDescriptor,
-        Option<crate::execution::RetainedValueReadLease>,
+        Option<crate::call::RetainedCallableTarget>,
         crate::execution::RootedValueLease,
     ) {
         (self.descriptor, self.source_roots, self.supplied_roots)

@@ -1,11 +1,8 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::io::ErrorKind;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
-use chrono::Utc;
 use runmat_analysis_core::{
     validate_model_against_geometry, AnalysisConstraint, AnalysisField, AnalysisInterfaceKind,
     AnalysisModel, AnalysisProcedure, BoundaryOperator, ContactFriction, CoordinateFrame,
@@ -53,6 +50,8 @@ use policy::{
 };
 
 mod artifact_root;
+mod evidence_filesystem;
+use evidence_filesystem::{atomic_write_bytes, fs_create_dir_all};
 mod modal_run_admission;
 mod render_topology;
 use modal_run_admission::analysis_admit_modal_run_with_id;
@@ -331,18 +330,18 @@ fn install_fea_solver_context() -> runmat_analysis_fea::FeaProgressContextGuard 
 pub use contracts::{
     analysis_authoring_workflow, analysis_language_reference_paths, analysis_output_operation_ids,
     analysis_procedure_ids, AcousticFrequencyEntryEvidence, AcousticFrequencyResultsData,
-    AnalysisAcousticRunOptions,
-    AnalysisBucklingRunOptions, AnalysisCfdRunOptions, AnalysisChtRunOptions,
-    AnalysisDiagnosticsArtifactPayload, AnalysisDocumentCheckResult, AnalysisDocumentKind,
-    AnalysisDocumentRunResult, AnalysisExecutionCapability, AnalysisExecutionPlan,
-    AnalysisExecutionStep, AnalysisFieldBinding, AnalysisFieldBindingsArtifactPayload,
-    AnalysisFieldDescriptor, AnalysisFieldKind, AnalysisFieldLocation, AnalysisFieldPageResult,
-    AnalysisFieldPageValues, AnalysisFieldPagingDescriptor, AnalysisFieldRequestOptions,
-    AnalysisFieldSelection, AnalysisFieldStatistic, AnalysisFieldStorage, AnalysisFieldStorageRef,
-    AnalysisFsiRunOptions, AnalysisImmutableValueSpec, AnalysisModalRunOptions,
-    AnalysisModelSourceEvidence, AnalysisModelSourceFileEvidence, AnalysisModelSourceKind,
-    AnalysisNonlinearRunOptions, AnalysisObjectArtifactMetadata, AnalysisRandomResponseRunOptions,
-    AnalysisRenderMesh, AnalysisRenderRegion, AnalysisRenderTopology, AnalysisRenderTopologySource,
+    AnalysisAcousticRunOptions, AnalysisBucklingRunOptions, AnalysisCfdRunOptions,
+    AnalysisChtRunOptions, AnalysisDiagnosticsArtifactPayload, AnalysisDocumentCheckResult,
+    AnalysisDocumentKind, AnalysisDocumentRunResult, AnalysisExecutionCapability,
+    AnalysisExecutionPlan, AnalysisExecutionStep, AnalysisFieldBinding,
+    AnalysisFieldBindingsArtifactPayload, AnalysisFieldDescriptor, AnalysisFieldKind,
+    AnalysisFieldLocation, AnalysisFieldPageResult, AnalysisFieldPageValues,
+    AnalysisFieldPagingDescriptor, AnalysisFieldRequestOptions, AnalysisFieldSelection,
+    AnalysisFieldStatistic, AnalysisFieldStorage, AnalysisFieldStorageRef, AnalysisFsiRunOptions,
+    AnalysisImmutableValueSpec, AnalysisModalRunOptions, AnalysisModelSourceEvidence,
+    AnalysisModelSourceFileEvidence, AnalysisModelSourceKind, AnalysisNonlinearRunOptions,
+    AnalysisObjectArtifactMetadata, AnalysisRandomResponseRunOptions, AnalysisRenderMesh,
+    AnalysisRenderRegion, AnalysisRenderTopology, AnalysisRenderTopologySource,
     AnalysisRenderTriangleRange, AnalysisResponseSpectrumRunOptions, AnalysisResultsCompareData,
     AnalysisResultsCompareQuery, AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary,
     AnalysisRunDatasetFieldPagingPolicy, AnalysisRunDatasetPayload, AnalysisRunDatasetStudyRef,
@@ -4568,40 +4567,6 @@ fn resolve_solver_mesh_artifact(
         ));
     }
     Ok(Some(mesh))
-}
-
-fn atomic_write_bytes(path: &PathBuf, bytes: &[u8]) -> Result<(), String> {
-    let tmp = path.with_extension(format!(
-        "tmp-{}-{}",
-        std::process::id(),
-        Utc::now().timestamp_nanos_opt().unwrap_or_default()
-    ));
-    fs_write(&tmp, bytes)
-        .map_err(|err| format!("failed to write temporary study evidence file: {err}"))?;
-    fs_rename(&tmp, path).map_err(|err| {
-        let _ = fs_remove_file(&tmp);
-        format!("failed to atomically persist study evidence file: {err}")
-    })
-}
-
-fn fs_create_dir_all(path: impl Into<PathBuf>) -> std::io::Result<()> {
-    runmat_filesystem::create_dir_all(path.into())
-}
-
-fn fs_write(path: impl Into<PathBuf>, bytes: &[u8]) -> std::io::Result<()> {
-    runmat_filesystem::write(path.into(), bytes)
-}
-
-fn fs_rename(from: impl Into<PathBuf>, to: impl Into<PathBuf>) -> std::io::Result<()> {
-    runmat_filesystem::rename(from.into(), to.into())
-}
-
-fn fs_remove_file(path: impl Into<PathBuf>) -> std::io::Result<()> {
-    match runmat_filesystem::remove_file(path.into()) {
-        Ok(()) => Ok(()),
-        Err(err) if err.kind() == ErrorKind::NotFound => Ok(()),
-        Err(err) => Err(err),
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

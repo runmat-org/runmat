@@ -385,13 +385,13 @@ async fn invoke_selected_root(
     match &request.roots {
         GraphInvocationRoots::Callable { target, .. } => {
             let invocation = match callable_argument_layout(request.schema_version) {
-                Some(CallableArgumentLayout::SuppliedOnly) => {
-                    invoke_bound_root_v12(request, selected, values, *target).await
-                }
-                Some(CallableArgumentLayout::LegacyFlattened) => {
-                    // Old BoundFunctionHandle targets can carry captures only
-                    // in their flattened argument prefix. Preserve that ABI.
-                    invoke_bound_root_legacy(request, selected, &values, *target).await
+                Some(
+                    CallableArgumentLayout::SuppliedOnly | CallableArgumentLayout::LegacyFlattened,
+                ) => {
+                    // Older bound handles already carry captures in the
+                    // supplied prefix. Closures retain their own capture
+                    // generation under either transport schema.
+                    invoke_bound_root(request, selected, values, *target).await
                 }
                 None => Err(runmat_runtime::runtime_error::semantic_error(
                     "WorkerGraph",
@@ -432,7 +432,7 @@ async fn invoke_selected_root(
                 &request.recipe,
                 primary.bytecode(),
                 primary.runtime(),
-                values.values().to_vec(),
+                values,
             )
             .await
             .map_err(|error| match error {
@@ -470,46 +470,7 @@ fn callable_argument_layout(version: u16) -> Option<CallableArgumentLayout> {
     }
 }
 
-async fn invoke_bound_root_legacy(
-    request: &GraphExecutionRequest,
-    selected: &SelectedWorkerGraph,
-    values: &RootedValues,
-    target: GraphNodeRef,
-) -> Result<RootedValueSequence, runmat_runtime::RuntimeError> {
-    let (binding, view, selected_runtime) = prepare_bound_root(request, selected, target)?;
-    let target_value = values.values().first().ok_or_else(|| {
-        runmat_runtime::runtime_error::semantic_error("WorkerGraph", "graph target root is absent")
-    })?;
-    let (mut arguments, environment) = match target_value {
-        Value::Closure(closure) if closure.binding.as_ref() == Some(&binding) => (
-            closure.captures.clone(),
-            closure.lexical_environment.clone(),
-        ),
-        Value::BoundFunctionHandle(handle)
-            if handle.function == binding.function && handle.authority == binding.authority =>
-        {
-            (Vec::new(), None)
-        }
-        _ => {
-            return Err(runmat_runtime::runtime_error::semantic_error(
-                "WorkerGraph",
-                "reconstructed target differs from selected bound callable",
-            ))
-        }
-    };
-    arguments.extend(values.values()[1..].iter().cloned());
-    crate::invoke_semantic_function_value_with_environment_in_context(
-        binding.function,
-        &arguments,
-        usize::from(request.requested_outputs),
-        &view,
-        selected_runtime,
-        environment,
-    )
-    .await
-}
-
-async fn invoke_bound_root_v12(
+async fn invoke_bound_root(
     request: &GraphExecutionRequest,
     selected: &SelectedWorkerGraph,
     values: RootedValues,
@@ -517,14 +478,18 @@ async fn invoke_bound_root_v12(
 ) -> Result<RootedValueSequence, runmat_runtime::RuntimeError> {
     let (binding, view, selected_runtime) = prepare_bound_root(request, selected, target)?;
     values
-        .with_unbounded_values_async(move |mut owned| async move {
-            if owned.is_empty() {
-                return Err(runmat_runtime::runtime_error::semantic_error(
-                    "WorkerGraph",
-                    "graph target root is absent",
-                ));
-            }
-            let target_value = owned.remove(0);
+        .with_owned_output_storage_async(move |storage| async move {
+            let mut owned = storage.try_into_owned().map_err(|_| {
+                graph_error("graph arguments require their original unique collection owner")
+            })?;
+            let target_value = owned
+                .try_remove(0)
+                .ok_or_else(|| graph_error("graph target root is absent"))?;
+            let supplied = owned.try_into_storage().map_err(|_| {
+                graph_error("graph arguments could not republish their original collection owner")
+            })?;
+            let supplied =
+                RootedValues::from_output_storage_in_context(supplied, &selected_runtime)?;
             let (arguments, environment) = match target_value {
                 Value::Closure(closure) if closure.binding.as_ref() == Some(&binding) => {
                     let environment = closure.lexical_environment.clone();
@@ -533,7 +498,6 @@ async fn invoke_bound_root_v12(
                             Value::Closure(closure),
                             &selected_runtime,
                         )?;
-                    let supplied = RootedValues::in_context(owned, &selected_runtime)?;
                     (
                         runmat_runtime::call::RootedFunctionArguments::captured(
                             callable, supplied,
@@ -545,7 +509,6 @@ async fn invoke_bound_root_v12(
                     if handle.function == binding.function
                         && handle.authority == binding.authority =>
                 {
-                    let supplied = RootedValues::in_context(owned, &selected_runtime)?;
                     (
                         runmat_runtime::call::RootedFunctionArguments::ordinary(supplied),
                         None,
@@ -568,7 +531,7 @@ async fn invoke_bound_root_v12(
             )
             .await
         })
-        .await?
+        .await
 }
 
 fn prepare_bound_root(

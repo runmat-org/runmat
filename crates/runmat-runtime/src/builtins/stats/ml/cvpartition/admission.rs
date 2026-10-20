@@ -15,7 +15,7 @@ pub(super) enum AdmittedBoolean {
 pub(super) fn admit_cvpartition(
     first: &Value,
     second: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<AdmittedPartition> {
     if crate::output_count::current_output_count().is_some_and(|count| count > 1) {
         return Err(invalid_argument("cvpartition: too many output arguments"));
@@ -48,7 +48,7 @@ pub(super) fn admit_cvpartition(
         }
         PartitionKind::Leaveout | PartitionKind::Resubstitution => 0,
     };
-    let options = &rest[option_start..];
+    let options = rest.range(option_start..)?;
     if !options.len().is_multiple_of(2) {
         return Err(invalid_argument(
             "cvpartition: name-value options must be supplied in pairs",
@@ -97,7 +97,7 @@ pub(super) fn admit_cvpartition(
 pub(super) fn preflight_host_partition(
     first: &Value,
     second: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     kind: PartitionKind,
     custom_first: bool,
 ) -> BuiltinResult<()> {
@@ -187,7 +187,7 @@ pub(super) fn inspect_host_observation_count(value: &Value) -> BuiltinResult<Opt
         }
         Value::Tensor(tensor) => vector_len(tensor.shape(), tensor::tensor_element_len(tensor))?,
         Value::LogicalArray(array) => vector_len(&array.shape, array.data.len())?,
-        Value::StringArray(array) => vector_len(&array.shape, array.data.len())?,
+        Value::StringArray(array) => vector_len(&array.shape, array.data().len())?,
         Value::CharArray(chars) if chars.rows > 0 => chars.rows,
         Value::Bool(_) | Value::String(_) => 1,
         other => return Err(invalid_argument(format!(
@@ -223,7 +223,7 @@ pub(super) fn documented_logical_scalar(value: &Value) -> bool {
 pub(super) fn ensure_cvpartition_extensions(
     first: &Value,
     second: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     kind: PartitionKind,
     custom_first: bool,
 ) -> BuiltinResult<()> {

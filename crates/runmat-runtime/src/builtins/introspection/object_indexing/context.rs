@@ -13,13 +13,16 @@ pub(crate) fn ensure_indexing_context_classes_registered() {
 }
 
 pub(super) fn register_indexing_context_class(name: runmat_types::StaticClassIdentity) {
-    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-        events: Default::default(),
-        name: name.into(),
-        parent: None,
-        properties: std::collections::HashMap::new(),
-        methods: std::collections::HashMap::new(),
-    });
+    crate::class_registry::register_builtin_class(
+        name,
+        crate::class_registry::RuntimeClass {
+            events: Default::default(),
+            name: name.into(),
+            parent: None,
+            properties: std::collections::HashMap::new(),
+            methods: std::collections::HashMap::new(),
+        },
+    );
     crate::class_registry::register_class_enumerations(
         &name.owned(),
         [
@@ -44,12 +47,12 @@ pub(super) fn num_args_error(
 pub(super) fn parse_indexing_context(value: &Value) -> crate::BuiltinResult<IndexingContext> {
     let text = match value {
         Value::Object(object)
-            if object.class_name == INDEXING_CONTEXT_CLASS
-                || object.class_name == LEGACY_INDEXING_CONTEXT_CLASS =>
+            if object.class_name().is(INDEXING_CONTEXT_CLASS)
+                || object.class_name().is(LEGACY_INDEXING_CONTEXT_CLASS) =>
         {
-            match object.properties.get(ENUM_MEMBER_PROPERTY) {
-                Some(Value::String(member)) => member.clone(),
-                Some(Value::CharArray(chars)) => chars.data.iter().collect(),
+            match object.property(ENUM_MEMBER_PROPERTY) {
+                Some(Value::String(member)) => member.as_str().to_owned(),
+                Some(Value::CharArray(chars)) => chars.data().iter().collect(),
                 _ => {
                     return Err(num_args_error(
                         &NUM_ARGUMENTS_ERROR_CONTEXT,
@@ -89,10 +92,10 @@ pub(super) fn indexing_context_value(context: IndexingContext) -> Value {
         IndexingContext::Expression => INDEXING_CONTEXT_EXPRESSION,
         IndexingContext::Assignment => INDEXING_CONTEXT_ASSIGNMENT,
     };
-    let mut value = runmat_value::ObjectInstance::new(INDEXING_CONTEXT_CLASS.to_string());
-    value.properties.insert(
+    let mut value = runmat_value::UnboundedObjectBuilder::new(INDEXING_CONTEXT_CLASS);
+    value.insert(
         ENUM_MEMBER_PROPERTY.to_string(),
-        Value::String(member.to_string()),
+        Value::string(member.to_string()),
     );
-    Value::Object(value)
+    Value::Object(value.finish())
 }

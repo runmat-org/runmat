@@ -1,6 +1,7 @@
 use super::*;
 use crate::dispatcher::call_builtin;
 use runmat_filesystem::{self as fs, FsProvider};
+use runmat_value::StructValue;
 use std::sync::Arc;
 
 #[test]
@@ -31,11 +32,11 @@ fn path_and_manifest_failures_retain_typed_source_causes() {
 mod receipt;
 
 fn empty_schema() -> Value {
-    let mut schema = StructValue::new();
+    let mut schema = runmat_value::UnboundedStructValueBuilder::new();
     schema
         .fields
         .insert("arrays".into(), Value::Struct(StructValue::new()));
-    Value::Struct(schema)
+    Value::Struct(schema.finish())
 }
 
 #[test]
@@ -163,25 +164,34 @@ fn later_invalid_schema_dtype_rejects_before_first_array_write() {
     let provider = Arc::new(fs::MemoryFsProvider::with_current_dir("/selected"));
     let _provider = fs::replace_provider(provider.clone() as Arc<dyn FsProvider>);
 
-    let mut first = StructValue::new();
+    let mut first = runmat_value::UnboundedStructValueBuilder::new();
     first
         .fields
         .insert("dtype".into(), Value::String("uint64".into()));
     first.fields.insert("shape".into(), Value::Num(1.0));
-    let mut second = StructValue::new();
+    let mut second = runmat_value::UnboundedStructValueBuilder::new();
     second
         .fields
         .insert("dtype".into(), Value::String("not-a-dtype".into()));
     second.fields.insert("shape".into(), Value::Num(1.0));
-    let mut arrays = StructValue::new();
-    arrays.fields.insert("first".into(), Value::Struct(first));
-    arrays.fields.insert("second".into(), Value::Struct(second));
-    let mut schema = StructValue::new();
-    schema.fields.insert("arrays".into(), Value::Struct(arrays));
+    let mut arrays = runmat_value::UnboundedStructValueBuilder::new();
+    arrays
+        .fields
+        .insert("first".into(), Value::Struct(first.finish()));
+    arrays
+        .fields
+        .insert("second".into(), Value::Struct(second.finish()));
+    let mut schema = runmat_value::UnboundedStructValueBuilder::new();
+    schema
+        .fields
+        .insert("arrays".into(), Value::Struct(arrays.finish()));
 
     let error = call_builtin(
         "data.create",
-        &[Value::String("late-bad.data".into()), Value::Struct(schema)],
+        &[
+            Value::String("late-bad.data".into()),
+            Value::Struct(schema.finish()),
+        ],
     )
     .expect_err("late invalid dtype must reject");
     assert_eq!(error.identifier.as_deref(), Some("RUNMAT:Data:Error"));
@@ -199,13 +209,16 @@ fn recursive_tree_destinations_reject_before_creating_any_child() {
     let _serial = fs::provider_override_lock();
     let provider = Arc::new(fs::MemoryFsProvider::with_current_dir("/selected"));
     let _provider = fs::replace_provider(provider.clone() as Arc<dyn FsProvider>);
-    let mut schema = StructValue::new();
+    let mut schema = runmat_value::UnboundedStructValueBuilder::new();
     schema
         .fields
         .insert("arrays".into(), Value::Struct(StructValue::new()));
     call_builtin(
         "data.create",
-        &[Value::String("source.data".into()), Value::Struct(schema)],
+        &[
+            Value::String("source.data".into()),
+            Value::Struct(schema.finish()),
+        ],
     )
     .expect("source fixture");
 

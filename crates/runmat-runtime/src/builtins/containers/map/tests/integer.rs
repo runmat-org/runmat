@@ -127,8 +127,8 @@ fn vector_map_keys_and_values_read_typed_integer_storage_exactly() {
     match result {
         Value::Cell(cell) => {
             assert_eq!((cell.rows, cell.cols), (1, 2));
-            assert_eq!(cell.data[0], Value::Int(IntValue::I32(11)));
-            assert_eq!(cell.data[1], Value::Int(IntValue::I32(22)));
+            assert_eq!(cell.data()[0], Value::Int(IntValue::I32(11)));
+            assert_eq!(cell.data()[1], Value::Int(IntValue::I32(22)));
         }
         other => panic!("expected cell lookup result, got {:?}", other),
     }
@@ -149,7 +149,7 @@ fn map_numeric_admission_preserves_low_rank_and_exact_integer_values() {
         let Value::Cell(values) = containers_map_values(map, vec![keys]).unwrap() else {
             panic!("expected selected map values");
         };
-        assert_eq!(values.data, vec![Value::Int(IntValue::I32(11))]);
+        assert_eq!(values.data(), vec![Value::Int(IntValue::I32(11))]);
     }
     for shape in [vec![2, 2], vec![2, 1, 2]] {
         let matrix = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], shape).unwrap());
@@ -202,7 +202,7 @@ fn property_text(map: Value, name: &str) -> String {
     let Value::CharArray(chars) = value.value() else {
         panic!("expected char property");
     };
-    chars.data.iter().collect()
+    chars.data().iter().collect()
 }
 
 #[test]
@@ -225,7 +225,7 @@ fn constructor_subsref_and_values_preserve_all_integer_value_classes_exactly() {
             panic!("expected values cell");
         };
         assert_eq!(
-            all_values.data,
+            all_values.data(),
             vec![
                 Value::Int(expected[0].clone()),
                 Value::Int(expected[1].clone())
@@ -241,7 +241,7 @@ fn constructor_subsref_and_values_preserve_all_integer_value_classes_exactly() {
         };
         assert_eq!((selected.rows, selected.cols), (2, 1));
         assert_eq!(
-            selected.data,
+            selected.data(),
             vec![
                 Value::Int(expected[1].clone()),
                 Value::Int(expected[0].clone())
@@ -263,7 +263,7 @@ fn keys_iskey_and_remove_preserve_all_public_integer_key_classes() {
             panic!("expected keys cell");
         };
         assert_eq!(
-            keys.data,
+            keys.data(),
             vec![
                 Value::Int(expected[0].clone()),
                 Value::Int(expected[1].clone())

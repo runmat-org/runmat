@@ -25,9 +25,9 @@ const BOUNDARY: RandomBoundary = RandomBoundary::new(
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::random::distribution_random::binornd"
 )]
-pub(crate) async fn binornd_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(crate) async fn binornd_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     BOUNDARY.reject_excess_outputs()?;
-    let prepared = parse_args(&args).await?;
+    let prepared = parse_args(args.view()).await?;
     validate_parameters(&prepared.random)?;
     let len = BOUNDARY.checked_element_count(&prepared.random.shape)?;
     let mut turn = random::acquire_turn(None, BOUNDARY.name()).await?;
@@ -42,7 +42,9 @@ pub(crate) async fn binornd_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     prepared.finish(&BOUNDARY, data)
 }
 
-async fn parse_args(args: &[Value]) -> BuiltinResult<PreparedRandomArgs> {
+async fn parse_args(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<PreparedRandomArgs> {
     if args.len() < 2 {
         return Err(BOUNDARY.invalid("expected trial-count and probability parameters"));
     }
@@ -69,7 +71,9 @@ fn validate_parameters(args: &RandomArgs) -> BuiltinResult<()> {
     Ok(())
 }
 
-fn ensure_supported_representations(args: &[Value]) -> BuiltinResult<()> {
+fn ensure_supported_representations(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     for (index, value) in args.iter().enumerate() {
         let parameter = index < 2;
         let supported = matches!(value, Value::Num(_) | Value::Int(_) | Value::Tensor(_))
@@ -90,7 +94,7 @@ fn ensure_supported_representations(args: &[Value]) -> BuiltinResult<()> {
     Ok(())
 }
 
-fn ensure_extensions(args: &[Value]) -> BuiltinResult<()> {
+fn ensure_extensions(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<()> {
     for (value, extension) in args.iter().take(2).zip([
         &BINORND_INTEGER_TRIALS_EXTENSION,
         &BINORND_INTEGER_PROBABILITY_EXTENSION,

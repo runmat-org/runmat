@@ -171,14 +171,16 @@ fn normalization_cancellation(fail_after_cancel: bool, recorded: bool) {
                 Value::Tensor(Tensor::new(vec![0.0, 0.0], vec![2, 1]).unwrap()),
             ),
         ],
-    );
+    )
+    .expect("fixture object");
     let Value::Object(network) = crate::builtins::deep_learning::object(
         "dlnetwork",
         vec![(
             "Layers",
             Value::Cell(CellArray::new(vec![Value::Num(0.0), layer], 2, 1).unwrap()),
         )],
-    ) else {
+    )
+    .expect("fixture object") else {
         panic!("network fixture must be an object")
     };
     let stage = NormalizationStage {

@@ -138,19 +138,44 @@ struct DetectionResult {
     threshold_shape: Vec<usize>,
 }
 
+#[cfg(test)]
+pub(crate) async fn isoutlier_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let rest =
+        crate::execution::RootedValues::new(rest).map_err(|error| error.into_runtime_error())?;
+    isoutlier_builtin_registered(None, value, rest.into()).await
+}
+
+#[cfg(test)]
+pub(crate) async fn filloutliers_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let rest =
+        crate::execution::RootedValues::new(rest).map_err(|error| error.into_runtime_error())?;
+    filloutliers_builtin_registered(None, value, rest.into()).await
+}
+
 #[runtime_builtin(
     name = "isoutlier",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::stats::summary::outliers"
 )]
-pub(crate) async fn isoutlier_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let decoded = DecodedOptions::new(OutlierOperation::Detect, &rest);
-    ensure_isoutlier_extensions(&value, &rest, &decoded)?;
-    preflight_host_options(OutlierOperation::Detect, &rest, &decoded).await?;
-    ensure_isoutlier_exact_boundaries(&value, &rest, &decoded).await?;
+pub(crate) async fn isoutlier_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let decoded = DecodedOptions::new(OutlierOperation::Detect, rest.view());
+    ensure_isoutlier_extensions(&value, rest.view(), &decoded)?;
+    preflight_host_options(OutlierOperation::Detect, rest.view(), &decoded).await?;
+    ensure_isoutlier_exact_boundaries(&value, rest.view(), &decoded).await?;
     let output_source = isoutlier_gpu_source(&value);
     let tensor = value_to_tensor(ISOUTLIER_NAME, value).await?;
-    let options = parse_detection_options(OutlierOperation::Detect, rest, decoded.all()).await?;
+    let options = parse_detection_options(
+        OutlierOperation::Detect,
+        rest,
+        decoded.all(),
+        runtime.as_ref(),
+    )
+    .await?;
     let result = detect_outliers(&tensor, &options, ISOUTLIER_NAME)?;
     let value = outlier_outputs(ISOUTLIER_NAME, None, result)?;
     restore_isoutlier_value(value, output_source.as_ref())
@@ -211,7 +236,7 @@ fn explicit_isoutlier_gpu(value: &Value) -> bool {
 
 fn ensure_isoutlier_extensions(
     value: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     decoded: &DecodedOptions,
 ) -> BuiltinResult<()> {
     if is_typed_integer_value(value) {
@@ -286,7 +311,7 @@ fn ensure_isoutlier_extensions(
 
 async fn ensure_isoutlier_exact_boundaries(
     value: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     decoded: &DecodedOptions,
 ) -> BuiltinResult<()> {
     ensure_isoutlier_exact_f64(value, "input data").await?;
@@ -321,23 +346,31 @@ async fn ensure_isoutlier_exact_f64(value: &Value, role: &str) -> BuiltinResult<
 #[runtime_builtin(
     name = "filloutliers",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::stats::summary::outliers"
 )]
-pub(crate) async fn filloutliers_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let decoded = DecodedOptions::new(OutlierOperation::Fill, &rest);
-    ensure_filloutliers_extensions(&value, &rest, &decoded)?;
-    preflight_host_options(OutlierOperation::Fill, &rest, &decoded).await?;
+pub(crate) async fn filloutliers_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let decoded = DecodedOptions::new(OutlierOperation::Fill, rest.view());
+    ensure_filloutliers_extensions(&value, rest.view(), &decoded)?;
+    preflight_host_options(OutlierOperation::Fill, rest.view(), &decoded).await?;
     let tensor = value_to_tensor(FILLOUTLIERS_NAME, value).await?;
-    let mut rest = gather_values(rest).await?;
+    let rest = gather_values(rest, runtime.as_ref()).await?;
     if rest.is_empty() {
         return Err(invalid_argument(
             FILLOUTLIERS_NAME,
             "filloutliers: fill method is required",
         ));
     }
-    let fill_method = parse_fill_method(&mut rest)?;
-    let options =
-        parse_detection_options(OutlierOperation::Fill, rest, decoded.after_fill()).await?;
+    let fill_method = parse_fill_method(rest.first().expect("fill method checked above"))?;
+    let options = options::parse_gathered_detection_options(
+        OutlierOperation::Fill,
+        rest.view().range(1..)?,
+        decoded.after_fill(),
+    )?;
     let mut result = detect_outliers(&tensor, &options, FILLOUTLIERS_NAME)?;
     let (filled, filled_mask) = fill_outlier_tensor(&tensor, &result, &options, &fill_method)?;
     result.mask = filled_mask;
@@ -346,7 +379,7 @@ pub(crate) async fn filloutliers_builtin(value: Value, rest: Vec<Value>) -> Buil
 
 fn ensure_filloutliers_extensions(
     value: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     decoded: &DecodedOptions,
 ) -> BuiltinResult<()> {
     if is_typed_integer_value(value) {
@@ -404,12 +437,15 @@ fn is_typed_integer_value(value: &Value) -> bool {
         || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
 }
 
-async fn gather_values(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(values.len());
-    for value in values {
-        out.push(gather_if_needed_async(&value).await?);
-    }
-    Ok(out)
+async fn gather_values(
+    values: crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    values
+        .try_map_preserving_roots_async(values.len(), runtime, |index| {
+            gather_if_needed_async(&values[index])
+        })
+        .await
 }
 
 async fn value_to_tensor(builtin: &'static str, value: Value) -> BuiltinResult<Tensor> {

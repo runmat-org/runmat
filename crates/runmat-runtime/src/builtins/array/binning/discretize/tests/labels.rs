@@ -57,7 +57,7 @@ fn text_replacements_preserve_input_shape_and_use_empty_missing_values() {
         panic!("expected string array");
     };
     assert_eq!(output.shape, vec![3, 1]);
-    assert_eq!(output.data, vec!["", "low", "high"]);
+    assert_eq!(output.data(), vec!["", "low", "high"]);
 }
 
 #[test]

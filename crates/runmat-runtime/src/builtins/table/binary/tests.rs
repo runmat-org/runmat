@@ -22,7 +22,8 @@ fn set_row_names(value: &mut Value, names: &[&str]) {
         panic!("expected table")
     };
     let mut properties = super::super::table_public_properties(object).unwrap();
-    properties.insert(
+    crate::builtins::common::test_support::replace_struct_field_unbounded(
+        &mut properties,
         super::super::ROW_NAMES,
         Value::StringArray(
             StringArray::new(
@@ -32,7 +33,7 @@ fn set_row_names(value: &mut Value, names: &[&str]) {
             .unwrap(),
         ),
     );
-    super::super::sync_table_properties(object, properties);
+    super::super::sync_table_properties(None, object, properties).unwrap();
 }
 
 fn timetable(values: &[f64], row_times: Vec<u64>) -> Value {
@@ -40,11 +41,14 @@ fn timetable(values: &[f64], row_times: Vec<u64>) -> Value {
     let Value::Object(object) = &mut value else {
         panic!("expected table")
     };
-    object.class_name = super::super::TIMETABLE_CLASS.owned();
+    *object = crate::builtins::common::test_support::reclassify_object_unbounded(
+        object,
+        super::super::TIMETABLE_CLASS.display_name(),
+    );
     let times = Value::Tensor(
         Tensor::new_integer(IntegerStorage::U64(row_times), vec![values.len(), 1]).unwrap(),
     );
-    super::super::set_timetable_row_times(object, Some(times)).unwrap();
+    super::super::set_timetable_row_times(None, object, Some(times)).unwrap();
     value
 }
 

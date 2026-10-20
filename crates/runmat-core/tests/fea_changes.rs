@@ -7,7 +7,7 @@ use runmat_runtime::analysis::LogicalSourcePath;
 use std::{path::Path, sync::Arc};
 
 fn logical(value: &str) -> LogicalSourcePath {
-    LogicalSourcePath::new(format!("{value}")).unwrap()
+    LogicalSourcePath::new(value.to_owned()).unwrap()
 }
 fn proposal() -> FeaChangeSetRequest {
     FeaChangeSetRequest { base: None, changes: vec![
@@ -40,13 +40,13 @@ fn workspace_relative_staging_does_not_confuse_a_real_project_directory() {
             }))
             .unwrap();
             assert!(staged.publication_valid);
-            assert!(provider.read_project_path(&format!("/{path}")).is_err());
+            assert!(provider.read_project_path(format!("/{path}")).is_err());
             assert!(matches!(
                 block_on(session.publish_fea_changes(staged.id)).unwrap(),
                 FeaChangeSetPublication::Published { .. }
             ));
             assert_eq!(
-                provider.read_project_path(&format!("/{path}")).unwrap(),
+                provider.read_project_path(format!("/{path}")).unwrap(),
                 b"model bracket {}\n"
             );
         }

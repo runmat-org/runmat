@@ -1,8 +1,8 @@
 //! Iterative Value tracing with one resumable frame per active aggregate.
 
 use crate::{
-    DynamicPropertyDef, ExactHostAllocationClaim, ExactHostAllocationPermit,
-    ExactHostNumericAllocationError, ObjectInstance, StructArray, StructValue, Value,
+    ExactHostAllocationClaim, ExactHostAllocationPermit, ExactHostNumericAllocationError,
+    ObjectInstance, StructArray, StructValue, Value,
 };
 use runmat_gc_api::{GcHandle, Trace, Tracer};
 use std::alloc::{alloc, Layout};
@@ -157,8 +157,8 @@ enum Frame<'a> {
     Object {
         source: &'a ObjectInstance,
         native_index: usize,
-        properties: std::collections::hash_map::Values<'a, String, Value>,
-        metadata: Option<std::collections::hash_map::Values<'a, String, DynamicPropertyDef>>,
+        property_index: usize,
+        metadata_index: usize,
     },
 }
 
@@ -185,8 +185,8 @@ impl<'a> Frame<'a> {
             Value::Object(source) => Some(Self::Object {
                 source,
                 native_index: 0,
-                properties: source.properties.values(),
-                metadata: source.trace_dynamic_property_values(),
+                property_index: 0,
+                metadata_index: 0,
             }),
             Value::ObjectArray(array) => Some(Self::Slice(array.data().iter())),
             Value::OutputList(values) => Some(Self::Slice(values.iter())),
@@ -245,20 +245,31 @@ impl<'a> Frame<'a> {
             Self::Object {
                 source,
                 native_index,
-                properties,
-                metadata,
+                property_index,
+                metadata_index,
             } => {
                 if let Some(child) = source.trace_native_value_at(*native_index) {
                     *native_index += 1;
                     return Some(Step::Value(child));
                 }
-                if let Some(child) = properties.next() {
+                if let Some(child) = source
+                    .properties()
+                    .get_index(*property_index)
+                    .map(|entry| entry.1)
+                {
+                    *property_index += 1;
                     return Some(Step::Value(child));
                 }
-                metadata
-                    .as_mut()
-                    .and_then(|properties| properties.find_map(|property| property.metadata_handle))
-                    .map(Step::Mark)
+                loop {
+                    let property = source
+                        .dynamic_property_definitions()
+                        .nth(*metadata_index)?
+                        .1;
+                    *metadata_index += 1;
+                    if let Some(handle) = property.metadata_handle {
+                        return Some(Step::Mark(handle));
+                    }
+                }
             }
         }
     }

@@ -74,12 +74,11 @@ pub(super) fn evaluate_rvalue(
             elements,
         } => super::aggregate::evaluate(state, kind, row_lengths, elements)
             .map(|reference| vec![reference]),
-        MirRvalue::StructLiteral { fields } => {
-            super::aggregate::structure(state, fields).map(|value| vec![state.arena.insert(value)])
-        }
+        MirRvalue::StructLiteral { fields } => super::aggregate::structure(state, fields)
+            .map(|rooted| rooted.with_owned(|value| vec![state.arena.insert(value)])),
         MirRvalue::ObjectLiteral { class_name, fields } => {
             super::aggregate::object(state, class_name, fields)
-                .map(|value| vec![state.arena.insert(value)])
+                .map(|rooted| rooted.with_owned(|value| vec![state.arena.insert(value)]))
         }
         MirRvalue::Index { base, indexing } => {
             super::indexing::read(state, base, indexing, requested_outputs).and_then(|values| {
@@ -234,7 +233,8 @@ pub(super) fn evaluate_rvalue(
                 .iter()
                 .map(|segment| segment.0.as_str())
                 .collect::<Vec<_>>()
-                .join("."),
+                .join(".")
+                .into(),
         ))]),
         MirRvalue::Colon => Ok(vec![state.arena.insert(Value::Num(0.0))]),
         MirRvalue::End => {
@@ -277,9 +277,34 @@ pub(super) fn evaluate_rvalue(
         } => {
             let arguments = super::call::materialize_arguments(state, args)?;
             runmat_runtime::execution::validate_spawn_captures(&arguments)?;
+            let identity = match value {
+                MirRvalue::ExternalFuture { display_name, .. } => {
+                    runmat_types::CallableIdentity::ExternalFunction {
+                        function: *function,
+                        display_name: display_name.clone(),
+                    }
+                }
+                _ => runmat_types::CallableIdentity::BoundFunction(*function),
+            };
+            let selected_function = state
+                .runtime
+                .selected_graph_function_binding(state.function.id, &identity);
+            let capabilities = match &selected_function {
+                Some(selected) => selected.capabilities.clone(),
+                None if matches!(
+                    identity,
+                    runmat_types::CallableIdentity::ExternalFunction { .. }
+                ) =>
+                {
+                    return Err(NativeExecutorError::Host(
+                        "native external future has no exact selected function contract".into(),
+                    ));
+                }
+                None => native_function_capabilities(state, *function)?,
+            };
             let mut invocation = runmat_runtime::execution::DeferredInvocation::callable(
                 runmat_runtime::call::descriptor::CallableDescriptor::resolved(
-                    runmat_types::CallableIdentity::BoundFunction(*function),
+                    identity.clone(),
                     arguments,
                     requested_outputs.executor_carrier_count().ok_or_else(|| {
                         NativeExecutorError::Host(
@@ -291,25 +316,27 @@ pub(super) fn evaluate_rvalue(
                     runmat_runtime::call::descriptor::CallableCallKind::Direct,
                 ),
             );
-            let program = if !state.runtime.execution().requires_program_capture() {
-                runmat_runtime::execution::DeferredProgram::Local
-            } else if let Some(selected) = state.runtime.selected_graph_program() {
-                let binding = state
-                    .runtime
-                    .selected_graph_function_binding(*function)
-                    .ok_or_else(|| {
-                        NativeExecutorError::Host(
-                            "native async callable has no exact selected definition and source graph"
-                                .into(),
-                        )
-                    })?;
+            if let Some(selected) = selected_function {
                 let runmat_runtime::execution::DeferredInvocation::Callable(descriptor) =
                     &mut invocation
                 else {
                     unreachable!("native future admission created a callable invocation")
                 };
                 descriptor.target =
-                    runmat_runtime::call::descriptor::CallableTarget::Bound(binding);
+                    runmat_runtime::call::descriptor::CallableTarget::Bound(selected.binding);
+            }
+            let program = if !state.runtime.execution().requires_program_capture() {
+                runmat_runtime::execution::DeferredProgram::Local
+            } else if let Some(selected) = state.runtime.selected_graph_program() {
+                if !matches!(&invocation,
+                    runmat_runtime::execution::DeferredInvocation::Callable(descriptor)
+                    if matches!(&descriptor.target, runmat_runtime::call::descriptor::CallableTarget::Bound(_))
+                ) {
+                    return Err(NativeExecutorError::Host(
+                        "native async callable has no exact selected definition and source graph"
+                            .into(),
+                    ));
+                }
                 runmat_runtime::execution::DeferredProgram::SelectedGraph(selected.clone())
             } else {
                 if runmat_runtime::execution::value_codec::deferred_invocation_requires_graph(
@@ -351,11 +378,11 @@ pub(super) fn evaluate_rvalue(
                         .host()
                         .and_then(|host| host.console_limits()),
                     program_revision,
-                    capabilities: native_function_capabilities(state, *function)?,
+                    capabilities,
                     program,
                 })
                 .map_err(execution_service_error)?;
-            Ok(vec![state.arena.insert(Value::Future(future))])
+            Ok(vec![state.arena.insert(Value::Future(future.into()))])
         }
         MirRvalue::Spawn(operand) => {
             let value = materialize_operand(state, operand)?;
@@ -371,7 +398,7 @@ pub(super) fn evaluate_rvalue(
                 .execution()
                 .spawn(&future)
                 .map_err(execution_service_error)?;
-            Ok(vec![state.arena.insert(Value::Task(task))])
+            Ok(vec![state.arena.insert(Value::Task(task.into()))])
         }
         MirRvalue::Distributed(_) | MirRvalue::Collective(_) => Err(NativeExecutorError::Host(
             "predeclared distributed capability rejection reached native execution".into(),
@@ -383,14 +410,6 @@ fn native_function_capabilities(
     state: &super::state::HostState,
     function: runmat_types::FunctionId,
 ) -> NativeExecutorResult<runmat_types::CapabilitySet> {
-    let Some(function) = u32::try_from(function.0)
-        .ok()
-        .map(runmat_types::ProgramFunctionId)
-    else {
-        return Err(NativeExecutorError::Host(
-            "async function identity exceeds its portable representation".into(),
-        ));
-    };
     state
         .functions
         .iter()
@@ -473,7 +492,7 @@ pub(super) fn evaluate_operand(
                 MirConstant::String(text) if text.is_character_row() => {
                     Value::CharArray(runmat_value::CharArray::new_row(&text.runtime_text()))
                 }
-                MirConstant::String(text) => Value::String(text.runtime_text()),
+                MirConstant::String(text) => Value::String(text.runtime_text().into()),
                 MirConstant::Symbol(symbol) => {
                     runmat_runtime::builtin::builtin_constant_value(&symbol.0).ok_or_else(|| {
                         NativeExecutorError::Host(format!("unknown MIR constant {}", symbol.0))
@@ -491,13 +510,7 @@ pub(super) fn evaluate_operand(
             if let runmat_types::CallableIdentity::BoundFunction(function)
             | runmat_types::CallableIdentity::AnonymousFunction(function) = identity
             {
-                let function = u32::try_from(function.0)
-                    .map(runmat_types::ProgramFunctionId)
-                    .map_err(|_| {
-                        NativeExecutorError::Host(
-                            "function handle identity exceeds native schema".into(),
-                        )
-                    })?;
+                let function = *function;
                 if let Some(target) = state.program_function(function) {
                     let name = target.name.clone();
                     let source_role = target.source_role;
@@ -514,16 +527,16 @@ pub(super) fn evaluate_operand(
                     {
                         Value::bound_function_handle(
                             name,
-                            function.0 as usize,
+                            function.0,
                             runmat_runtime::user_functions::bound_function_authority_for(
-                                function.0 as usize,
+                                function.0,
                             ),
                             source_role,
-                            runmat_runtime::user_functions::source_file_for(function.0 as usize),
+                            runmat_runtime::user_functions::source_file_for(function.0),
                         )
                     } else {
                         runmat_runtime::call::closures::semantic_closure_value(
-                            runmat_types::FunctionId(function.0 as usize),
+                            function,
                             name,
                             captures,
                             source_role,

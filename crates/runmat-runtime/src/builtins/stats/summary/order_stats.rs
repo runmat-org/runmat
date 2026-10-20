@@ -23,7 +23,7 @@ fn is_real_typed_integer_value(value: &Value) -> bool {
 fn ensure_quantile_integer_extensions(
     name: &str,
     input: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     data_extension: &BuiltinExtensionDescriptor,
     probability_extension: &BuiltinExtensionDescriptor,
 ) -> BuiltinResult<()> {

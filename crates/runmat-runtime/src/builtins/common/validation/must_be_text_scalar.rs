@@ -6,15 +6,15 @@ use runmat_builtins::{MUST_BE_TEXT_SCALAR_CATALOG_ENTRY, MUST_BE_TEXT_SCALAR_ERR
     binding_variant = "default",
     builtin_path = "crate::builtins::common::validation::must_be_text_scalar"
 )]
-fn builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+fn builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     evaluate(args)
 }
 
-pub(super) fn evaluate(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) fn evaluate(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     super::admission::inputs(
         &MUST_BE_TEXT_SCALAR_CATALOG_ENTRY,
         &MUST_BE_TEXT_SCALAR_ERROR_OUTPUTS,
-        &args,
+        args.view(),
     )?;
     super::admission::reject_resident_text(&MUST_BE_TEXT_SCALAR_CATALOG_ENTRY, &args[0])?;
     super::check_validator(

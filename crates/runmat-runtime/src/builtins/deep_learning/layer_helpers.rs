@@ -29,17 +29,17 @@ pub(in crate::builtins) fn layer_object(
     if let Some(value) = extra.remove(&DeepLearningLayerOption::Description) {
         description = scalar_text(&value, function)?;
     }
-    owned_properties.push(("Type".to_string(), Value::String(type_name.to_string())));
-    owned_properties.push(("Name".to_string(), Value::String(name)));
-    owned_properties.push(("Description".to_string(), Value::String(description)));
+    owned_properties.push(("Type".to_string(), Value::string(type_name.to_string())));
+    owned_properties.push(("Name".to_string(), Value::string(name)));
+    owned_properties.push(("Description".to_string(), Value::string(description)));
     for (key, value) in extra {
         owned_properties.push((key.canonical_name().to_string(), value));
     }
-    Ok(object_with_identity(class_name, owned_properties))
+    object_with_identity(class_name, owned_properties)
 }
 
 pub(super) fn parse_layer_options(
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     kind: DeepLearningLayerKind,
     function: &'static str,
 ) -> BuiltinResult<BTreeMap<DeepLearningLayerOption, Value>> {
@@ -73,7 +73,7 @@ pub(super) fn parse_layer_options(
 }
 
 pub(in crate::builtins) fn parse_name_values(
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
     function: &'static str,
 ) -> BuiltinResult<std::collections::BTreeMap<String, Value>> {
     if !args.len().is_multiple_of(2) {
@@ -98,7 +98,11 @@ pub(in crate::builtins) fn layers_from_value(
 ) -> BuiltinResult<Vec<Value>> {
     match value {
         Value::Object(_) => Ok(vec![value]),
-        Value::Cell(cell) => Ok(cell.data),
+        Value::Cell(cell) => cell
+            .into_owned_data()
+            .map_err(|_| deep_learning_error(function, format!("{function}: shared Layers require an admitted replacement")))?
+            .try_into_unbounded_vec()
+            .map_err(|_| deep_learning_error(function, format!("{function}: admitted Layers cannot become an unclaimed vector"))),
         Value::OutputList(values) => values
             .try_into_owned()
             .map_err(|_| {
@@ -128,10 +132,10 @@ pub(in crate::builtins) fn layer_names(
         match layer {
             Value::Object(object) => {
                 let name = object
-                    .properties
+                    .properties()
                     .get("Name")
                     .and_then(|value| match value {
-                        Value::String(s) if !s.is_empty() => Some(s.clone()),
+                        Value::String(s) if !s.is_empty() => Some(s.to_string()),
                         _ => None,
                     })
                     .unwrap_or_else(|| format!("layer_{}", idx + 1));

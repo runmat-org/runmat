@@ -105,10 +105,16 @@ fn remote_direct_program_object_preserves_descriptor_wire_bytes() {
 fn executable_unit_request() -> ProgramExecutionRequest {
     // Keep the frozen compatibility fixture untouched. This test needs a
     // current envelope so request validation can reach callable checks.
-    let mut envelope: runmat_execution::ExecutableUnitEnvelope = serde_json::from_slice(
-        include_bytes!("../../../../runmat-execution/tests/fixtures/executable-unit-current.json"),
-    )
+    let mut frozen: serde_json::Value = serde_json::from_slice(include_bytes!(
+        "../../../../runmat-execution/tests/fixtures/executable-unit-current.json"
+    ))
     .unwrap();
+    // This positive control has no dependency graph. Supply the current
+    // required field explicitly; the historical bytes remain unchanged.
+    frozen["manifest"]["dependencies"] = serde_json::json!([]);
+    frozen["dependency_products"] = serde_json::json!([]);
+    let mut envelope: runmat_execution::ExecutableUnitEnvelope =
+        serde_json::from_value(frozen).unwrap();
     envelope.schema_version = runmat_execution::EXECUTABLE_UNIT_SCHEMA_VERSION;
     envelope.manifest.schema_version = runmat_execution::EXECUTABLE_UNIT_SCHEMA_VERSION;
     let bytes = envelope.canonical_bytes().unwrap();
@@ -188,8 +194,7 @@ fn source_unit_request() -> ProgramExecutionRequest {
         .find(|component| component.kind == source)
         .expect("source descriptor");
     *descriptor =
-        runmat_execution::ExecutableComponentDescriptor::from_payload(source, 2, &bytes)
-            .unwrap();
+        runmat_execution::ExecutableComponentDescriptor::from_payload(source, 2, &bytes).unwrap();
     envelope
         .payloads
         .iter_mut()
@@ -530,13 +535,13 @@ fn frozen_v5_request_is_rejected_before_payload_deserialization() {
     let error = admit_program_execution_request_bytes(frozen).unwrap_err();
     assert!(error
         .to_string()
-        .contains("unsupported program execution request schema 5; expected 7"));
+        .contains(&format!("unsupported program execution request schema 5; expected {PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION}")));
     let old_failure_frame_contract = br#"{"schema_version":6,"arguments":[]}"#;
     assert!(
         admit_program_execution_request_bytes(old_failure_frame_contract)
             .unwrap_err()
             .to_string()
-            .contains("unsupported program execution request schema 6; expected 7")
+            .contains(&format!("unsupported program execution request schema 6; expected {PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION}"))
     );
     assert!(serde_json::from_slice::<ProgramExecutionRequest>(frozen).is_err());
 }
@@ -595,8 +600,7 @@ fn named_executable_unit_binds_recipe_name_and_typed_function_identity() {
     request.validate().unwrap();
 
     let mut wrong_function = request.clone();
-    wrong_function.callable =
-        ProgramCallable::semantic(ProgramFunctionId(1), Some("main".into()));
+    wrong_function.callable = ProgramCallable::semantic(ProgramFunctionId(1), Some("main".into()));
     let error = wrong_function.validate().unwrap_err();
     assert!(error
         .to_string()
@@ -794,12 +798,12 @@ fn spmd_response_preserves_unassigned_outputs_as_protocol_state() {
 fn canonical_request_digest_is_exact_without_a_small_envelope_limit() {
     let mut large = request();
     large.arguments.push(ValuePayload::Inline(Box::new(
-        runmat_execution::value::InlineValue::String("x".repeat(300_000).into()),
+        runmat_execution::value::InlineValue::String("x".repeat(300_000)),
     )));
     let digest = large.canonical_digest().unwrap();
     let mut changed = large;
     changed.arguments[0] = ValuePayload::Inline(Box::new(
-        runmat_execution::value::InlineValue::String(format!("{}y", "x".repeat(299_999)).into()),
+        runmat_execution::value::InlineValue::String(format!("{}y", "x".repeat(299_999))),
     ));
     assert_ne!(digest, changed.canonical_digest().unwrap());
 }
@@ -808,7 +812,7 @@ fn canonical_request_digest_is_exact_without_a_small_envelope_limit() {
 fn borrowed_request_preserves_original_payload_wire_identity_and_cold_decode() {
     let mut owned = request();
     owned.arguments.push(ValuePayload::Inline(Box::new(
-        runmat_execution::value::InlineValue::String("λ\\\"\n".repeat(25_000).into()),
+        runmat_execution::value::InlineValue::String("λ\\\"\n".repeat(25_000)),
     )));
     let borrowed = owned.as_borrowed();
     assert!(std::ptr::eq(borrowed.recipe, &owned.recipe));

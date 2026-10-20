@@ -206,9 +206,9 @@ impl CancellationToken {
             .iter()
             .any(|state| state.cancelled.load(Ordering::Acquire))
             || self.interrupted()
-            || self.deadline_unix_ms.is_some_and(|deadline| {
-                runmat_time::unix_timestamp_ms() >= u128::from(deadline)
-            })
+            || self
+                .deadline_unix_ms
+                .is_some_and(|deadline| runmat_time::unix_timestamp_ms() >= u128::from(deadline))
     }
 
     /// Reason from a cancelled generation or a raised interrupt flag (`User`).

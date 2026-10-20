@@ -4,7 +4,7 @@ use crate::region::placement_test_support::Probe;
 use runmat_mir::MirLocalId;
 use runmat_runtime::native::{NativeSitePhase, NativeSiteRequest};
 use runmat_types::MemberName;
-use runmat_value::StructValue;
+use runmat_value::UnboundedStructValueBuilder;
 use std::rc::Rc;
 
 #[test]
@@ -21,9 +21,9 @@ fn static_and_dynamic_member_reads_suspend_before_resolving_the_same_value() {
                 reserved: 0,
             };
             state.current_request = Some(request);
-            let mut structure = StructValue::new();
+            let mut structure = UnboundedStructValueBuilder::with_capacity(1);
             structure.insert("answer", Value::Num(42.0));
-            let base = state.arena.insert(Value::Struct(structure));
+            let base = state.arena.insert(Value::Struct(structure.finish()));
             state.locals.push(base);
             let value = if dynamic {
                 let member = state.arena.insert(Value::String("answer".into()));

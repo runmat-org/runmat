@@ -160,7 +160,7 @@ async fn read_brace_sequence(
                     "Composite brace indexing requires a selected runtime",
                 )
             })?;
-            crate::parallel::composite::read_composite_entry(runtime, *handle, &indices)
+            crate::parallel::composite::read_composite_entry(runtime, handle, &indices)
                 .await?
                 .try_map_owned(
                     |value| {

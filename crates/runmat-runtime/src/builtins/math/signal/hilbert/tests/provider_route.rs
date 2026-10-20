@@ -303,7 +303,12 @@ fn unpolled_and_pending_dropped_calls_do_not_publish_or_replay() {
 }
 
 async fn hilbert_call_async(value: Value) -> BuiltinResult<Value> {
-    hilbert_builtin(None, value, Vec::new()).await
+    hilbert_builtin(
+        None,
+        value,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    )
+    .await
 }
 
 #[cfg(not(target_arch = "wasm32"))]

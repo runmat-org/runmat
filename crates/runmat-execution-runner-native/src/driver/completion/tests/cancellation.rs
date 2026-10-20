@@ -119,7 +119,8 @@ fn a_failed_task_diagnostic_cannot_impersonate_typed_cancellation() {
         &driver.snapshot(),
         &request,
         Err(TransferFailure::Execution(message.into())),
-    ).unwrap();
+    )
+    .unwrap();
     let completion = TaskCompletion::new();
     completion.complete(original, NativeCheckpointEvidence::Durable);
     let completion = completion.try_native_completion().unwrap();

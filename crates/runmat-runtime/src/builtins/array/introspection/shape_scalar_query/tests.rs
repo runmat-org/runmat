@@ -16,29 +16,32 @@ fn distributed_value(global_shape: Vec<u64>) -> Value {
         function,
         ordinal: 1,
     });
-    Value::Distributed(Box::new(DistributedValueHandle {
-        id: DistributedObjectId::derive(&[b"shape-scalar-value"]),
-        contract: DistributedValueId {
-            function,
-            ordinal: 2,
-        },
-        owner: DistributedOwner::Region(owner),
-        scope_id,
-        generation: 1,
-        pool: PoolHandle {
-            id: PoolId::derive(&[b"shape-scalar-pool"]),
+    Value::Distributed(
+        Box::new(DistributedValueHandle {
+            id: DistributedObjectId::derive(&[b"shape-scalar-value"]),
+            contract: DistributedValueId {
+                function,
+                ordinal: 2,
+            },
+            owner: DistributedOwner::Region(owner),
             scope_id,
             generation: 1,
-        },
-        partition_count: LabCount(2),
-        value: ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
-            class: NumericClass::Double,
-            domain: NumericDomain::Real,
-        })),
-        global_shape,
-        scheme: DistributionScheme::Replicated,
-        materializable: true,
-    }))
+            pool: PoolHandle {
+                id: PoolId::derive(&[b"shape-scalar-pool"]),
+                scope_id,
+                generation: 1,
+            },
+            partition_count: LabCount(2),
+            value: ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Double,
+                domain: NumericDomain::Real,
+            })),
+            global_shape,
+            scheme: DistributionScheme::Replicated,
+            materializable: true,
+        })
+        .into(),
+    )
 }
 
 fn boundary(query: ShapeScalarQuery) -> ShapeScalarQueryBoundary {

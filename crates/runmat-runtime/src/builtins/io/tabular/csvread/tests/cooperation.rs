@@ -75,7 +75,7 @@ impl RuntimeExecutionServices for PendingOutputService {
     }
     fn claim_next_task_result(
         &self,
-        _: &[TaskHandle],
+        _: &[runmat_value::SharedTaskHandle],
     ) -> Result<TaskResultClaim, ExecutionServiceError> {
         Err(ExecutionServiceError::UnknownHandle)
     }
@@ -87,7 +87,7 @@ impl RuntimeExecutionServices for PendingOutputService {
     }
     fn complete_future(
         &self,
-        _: &FutureHandle,
+        _: crate::execution::FutureCompletionRef<'_>,
         _: Result<RootedValueSequence, ExecutionServiceError>,
     ) -> Result<(), ExecutionServiceError> {
         Err(ExecutionServiceError::UnknownHandle)
@@ -122,7 +122,7 @@ fn actual_csvread_future_abandons_during_output_selection_without_publication() 
     let mut call = Box::pin(super::super::csvread_builtin(
         Some(runtime),
         Value::from("large.csv"),
-        vec![],
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
     ));
     let waker = futures::task::noop_waker();
     assert!(matches!(
@@ -139,7 +139,7 @@ fn actual_csvread_future_abandons_during_output_selection_without_publication() 
     let value = futures::executor::block_on(super::super::csvread_builtin(
         None,
         Value::from("large.csv"),
-        vec![],
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
     ))
     .expect("subsequent read retains source owner");
     let Value::Tensor(matrix) = value else {
@@ -172,7 +172,7 @@ fn long_unterminated_csv_line_suspends_during_bounded_acquisition() {
     let mut call = Box::pin(super::super::csvread_builtin(
         Some(runtime),
         Value::from("long.csv"),
-        vec![],
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
     ));
     let waker = futures::task::noop_waker();
     assert!(matches!(
@@ -189,7 +189,7 @@ fn long_unterminated_csv_line_suspends_during_bounded_acquisition() {
     let value = futures::executor::block_on(super::super::csvread_builtin(
         None,
         Value::from("long.csv"),
-        vec![],
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
     ))
     .expect("subsequent full read");
     let Value::Tensor(matrix) = value else {

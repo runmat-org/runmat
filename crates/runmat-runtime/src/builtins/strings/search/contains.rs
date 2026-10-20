@@ -44,9 +44,9 @@ fn remap_contains_flow(err: RuntimeError) -> RuntimeError {
 async fn contains_builtin(
     text: Value,
     pattern: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
-    let ignore_case = validate_contains_options(&rest)?;
+    let ignore_case = validate_contains_options(rest.view())?;
     reject_resident_numeric_text(&text)?;
     reject_resident_numeric_text(&pattern)?;
     let text = gather_if_needed_async(&text)
@@ -70,7 +70,7 @@ async fn contains_builtin(
     evaluate_contains(&subject, &patterns, ignore_case)
 }
 
-fn validate_contains_options(rest: &[Value]) -> BuiltinResult<bool> {
+fn validate_contains_options(rest: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<bool> {
     if rest.len() > 2 {
         return Err(contains_error_with_message(
             "contains: expected at most one 'IgnoreCase' name-value pair",
@@ -86,9 +86,9 @@ fn validate_contains_options(rest: &[Value]) -> BuiltinResult<bool> {
             BUILTIN_NAME,
         )?;
     }
-    let value = match rest {
-        [value] => Some(value),
-        [_, value] => Some(value),
+    let value = match rest.len() {
+        1 => rest.get(0),
+        2 => rest.get(1),
         _ => None,
     };
     if value.is_some_and(is_numeric_ignore_case_value) {
@@ -221,7 +221,11 @@ pub(crate) mod tests {
     };
 
     fn run_contains(text: Value, pattern: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(contains_builtin(text, pattern, rest))
+        futures::executor::block_on(contains_builtin(
+            text,
+            pattern,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

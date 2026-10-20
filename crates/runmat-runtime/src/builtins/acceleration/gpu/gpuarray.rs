@@ -88,8 +88,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::acceleration::gpu::gpuarray"
 )]
-async fn gpu_array_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let options = parse_options(&rest)?;
+async fn gpu_array_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    let options = parse_options(rest.view())?;
     if options.dims.is_some() {
         crate::compatibility::ensure_builtin_extension_enabled(
             &GPUARRAY_SIZE_EXTENSION,
@@ -172,7 +175,7 @@ fn gpu_array_value_shape(value: &Value) -> Vec<usize> {
         Value::ComplexTensor(tensor) => tensor.shape().to_vec(),
         Value::LogicalArray(array) => array.shape.to_vec(),
         Value::GpuTensor(handle) => handle.shape().to_vec(),
-        Value::CharArray(array) => array.shape.clone(),
+        Value::CharArray(array) => array.shape().to_vec(),
         Value::String(text) => vec![1, text.chars().count()],
         _ => vec![1, 1],
     }
@@ -303,7 +306,7 @@ struct ParsedOptions {
     prototype: Option<Value>,
 }
 
-fn parse_options(rest: &[Value]) -> BuiltinResult<ParsedOptions> {
+fn parse_options(rest: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<ParsedOptions> {
     let (index_after_dims, dims) = parse_size_arguments(rest)?;
     let mut options = ParsedOptions {
         dims,
@@ -360,7 +363,9 @@ fn parse_options(rest: &[Value]) -> BuiltinResult<ParsedOptions> {
     Ok(options)
 }
 
-fn parse_size_arguments(rest: &[Value]) -> BuiltinResult<(usize, Option<Vec<usize>>)> {
+fn parse_size_arguments(
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<(usize, Option<Vec<usize>>)> {
     let mut idx = 0;
     let mut dims: Vec<usize> = Vec::new();
     let mut vector_consumed = false;
@@ -1134,7 +1139,7 @@ fn char_array_to_tensor(ca: &CharArray) -> BuiltinResult<Tensor> {
     for row in 0..rows {
         for col in 0..cols {
             let idx_char = row * cols + col;
-            let ch = ca.data[idx_char];
+            let ch = ca.data()[idx_char];
             data[row * cols + col] = ch as u32 as f64;
         }
     }
@@ -1153,7 +1158,10 @@ pub(crate) mod tests {
 
     fn call(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        block_on(gpu_array_builtin(value, rest))
+        block_on(gpu_array_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     fn call_with_mode(
@@ -1162,7 +1170,10 @@ pub(crate) mod tests {
         extensions_enabled: bool,
     ) -> crate::BuiltinResult<Value> {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(extensions_enabled);
-        block_on(gpu_array_builtin(value, rest))
+        block_on(gpu_array_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     fn gather_complex(value: Value) -> ComplexTensor {
@@ -1680,7 +1691,7 @@ pub(crate) mod tests {
     fn gpu_array_supports_char_arrays() {
         test_support::with_test_provider(|_| {
             let chars = CharArray::new("row1row2".chars().collect(), 2, 4).unwrap();
-            let original: Vec<char> = chars.data.clone();
+            let original: Vec<char> = chars.data().to_vec();
             let result =
                 call(Value::CharArray(chars), Vec::new()).expect("gpuArray char array upload");
             let Value::GpuTensor(handle) = result else {

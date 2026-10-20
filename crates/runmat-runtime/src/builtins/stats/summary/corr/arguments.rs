@@ -39,7 +39,10 @@ pub(super) fn is_typed_integer_value(value: &Value) -> bool {
         )
 }
 
-pub(super) fn ensure_corr_integer_extensions(value: &Value, rest: &[Value]) -> BuiltinResult<()> {
+pub(super) fn ensure_corr_integer_extensions(
+    value: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     let second_is_data = rest
         .first()
         .is_some_and(|candidate| keyword_of(candidate).is_none());
@@ -48,9 +51,9 @@ pub(super) fn ensure_corr_integer_extensions(value: &Value, rest: &[Value]) -> B
     {
         crate::compatibility::ensure_builtin_extension_enabled(&CORR_INTEGER_DATA_EXTENSION, NAME)?;
     }
-    if rest.windows(2).any(|pair| {
-        keyword_of(&pair[0]).is_some_and(|name| name.eq_ignore_ascii_case("weights"))
-            && is_typed_integer_value(&pair[1])
+    if rest.iter().zip(rest.iter().skip(1)).any(|(name, value)| {
+        keyword_of(name).is_some_and(|name| name.eq_ignore_ascii_case("weights"))
+            && is_typed_integer_value(value)
     }) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &CORR_INTEGER_WEIGHTS_EXTENSION,
@@ -60,7 +63,10 @@ pub(super) fn ensure_corr_integer_extensions(value: &Value, rest: &[Value]) -> B
     Ok(())
 }
 
-pub(super) async fn parse_args(value: Value, rest: Vec<Value>) -> BuiltinResult<CorrArgs> {
+pub(super) async fn parse_args(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<CorrArgs> {
     let left = value_to_tensor(value).await?;
     let mut right = None;
     let mut corr_type = CorrType::Pearson;

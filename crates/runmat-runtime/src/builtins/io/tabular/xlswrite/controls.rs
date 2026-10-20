@@ -16,7 +16,9 @@ impl Default for XlsWriteRequest {
 }
 
 impl XlsWriteRequest {
-    pub(super) fn preflight_host_arguments(args: &[Value]) -> BuiltinResult<()> {
+    pub(super) fn preflight_host_arguments(
+        args: crate::call::FunctionArgumentView<'_>,
+    ) -> BuiltinResult<()> {
         if args.len() > 3 {
             return Err(xlswrite_error_with(
                 &XLSWRITE_ERROR_INVALID_ARGUMENT,
@@ -24,11 +26,13 @@ impl XlsWriteRequest {
             ));
         }
         let host = |value: &Value| !matches!(value, Value::GpuTensor(_));
-        match args {
-            [single] if host(single) => {
+        match args.len() {
+            1 if host(&args[0]) => {
+                let single = &args[0];
                 parse_single_selector(single, &mut Self::default())?;
             }
-            [sheet, range] => {
+            2 => {
+                let (sheet, range) = (&args[0], &args[1]);
                 if host(sheet) {
                     parse_sheet_selector(sheet)?;
                 }
@@ -36,7 +40,8 @@ impl XlsWriteRequest {
                     parse_range_start(range)?;
                 }
             }
-            [sheet, range, mode] => {
+            3 => {
+                let (sheet, range, mode) = (&args[0], &args[1], &args[2]);
                 if host(sheet) {
                     parse_sheet_selector(sheet)?;
                 }
@@ -52,16 +57,18 @@ impl XlsWriteRequest {
         Ok(())
     }
 
-    pub(super) fn parse(args: &[Value]) -> BuiltinResult<Self> {
+    pub(super) fn parse(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<Self> {
         let mut request = Self::default();
-        match args {
-            [] => {}
-            [single] => parse_single_selector(single, &mut request)?,
-            [sheet, range] => {
+        match args.len() {
+            0 => {}
+            1 => parse_single_selector(&args[0], &mut request)?,
+            2 => {
+                let (sheet, range) = (&args[0], &args[1]);
                 request.sheet = parse_sheet_selector(sheet)?;
                 request.range = parse_range_start(range)?;
             }
-            [sheet, range, mode] => {
+            3 => {
+                let (sheet, range, mode) = (&args[0], &args[1], &args[2]);
                 request.sheet = parse_sheet_selector(sheet)?;
                 request.range = parse_range_start(range)?;
                 parse_basic_mode(mode)?;

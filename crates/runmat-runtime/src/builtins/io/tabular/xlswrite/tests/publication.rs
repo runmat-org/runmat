@@ -275,7 +275,7 @@ fn public_call_drop_during_pending_publish_retires_stage_without_replay() {
                     Some(runtime),
                     Value::from("out.xlsx"),
                     Value::Num(7.0),
-                    Vec::new(),
+                    crate::builtins::common::test_support::builtin_arguments(Vec::new()),
                 ));
                 let waker = futures::task::noop_waker();
                 for _ in 0..8 {
@@ -317,7 +317,7 @@ fn public_call_cancel_during_pending_publish_is_indeterminate_not_false() {
                 Some(runtime),
                 Value::from("out.xlsx"),
                 Value::Num(7.0),
-                Vec::new(),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
             ));
             let wakes = Arc::new(WakeCount::default());
             let waker = waker_ref(&wakes);
@@ -408,7 +408,7 @@ fn public_call_ready_publish_then_cancel_keeps_published_disposition() {
                 Some(runtime),
                 Value::from("out.xlsx"),
                 Value::Num(7.0),
-                Vec::new(),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
             ))
             .expect_err("completed publication with cancellation is not false status");
             assert_eq!(
@@ -440,7 +440,7 @@ fn public_call_precancelled_before_first_poll_has_no_provider_effect() {
                 Some(runtime),
                 Value::from("out.xlsx"),
                 Value::Num(7.0),
-                Vec::new(),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
             );
             source.cancel(CancellationReason::User);
             let error = block_on(call).expect_err("pre-cancelled public call must not publish");

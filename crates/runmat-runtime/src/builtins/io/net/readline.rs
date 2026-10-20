@@ -50,7 +50,7 @@ fn readline_flow(error: &'static BuiltinErrorDescriptor, message: impl AsRef<str
 pub(super) async fn readline_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     client: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     if !rest.is_empty() {
         return Err(readline_error(&READLINE_ERROR_INVALID_ARGUMENTS));
@@ -105,14 +105,14 @@ pub(super) async fn readline_builtin(
 
 fn value_from_bytes(bytes: Vec<u8>) -> Value {
     if bytes.is_empty() {
-        return Value::String(String::new());
+        return Value::string(String::new());
     }
     match String::from_utf8(bytes) {
-        Ok(text) => Value::String(text),
+        Ok(text) => Value::string(text),
         Err(err) => {
             let lossy = err.into_bytes();
             let mapped: String = lossy.into_iter().map(|b| b as char).collect();
-            Value::String(mapped)
+            Value::string(mapped)
         }
     }
 }
@@ -150,7 +150,11 @@ pub(crate) mod tests {
         client: Value,
         rest: Vec<Value>,
     ) -> crate::BuiltinResult<Value> {
-        futures::executor::block_on(readline_builtin(Some(host.runtime.clone()), client, rest))
+        futures::executor::block_on(readline_builtin(
+            Some(host.runtime.clone()),
+            client,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -342,7 +346,7 @@ pub(crate) mod tests {
         handle.join().expect("server");
         assert_eq!(
             run_readline(&host, client.clone(), Vec::new()).expect("EOF read"),
-            Value::String(String::new())
+            Value::String(String::new().into())
         );
         let err = run_readline(&host, client.clone(), Vec::new())
             .expect_err("expected not-connected error");

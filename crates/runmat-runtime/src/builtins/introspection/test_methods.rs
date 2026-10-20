@@ -8,7 +8,7 @@ use runmat_builtins::{
     OVERIDX_ERROR_RECEIVER_INVALID, OVERIDX_ERROR_SUBSASGN_PAYLOAD_UNSUPPORTED,
     OVERIDX_ERROR_SUBSREF_PAYLOAD_UNSUPPORTED,
 };
-use runmat_value::{ObjectInstance, StructValue, Value};
+use runmat_value::Value;
 
 const POINT_MOVE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "obj",
@@ -71,18 +71,21 @@ pub const POINT_MOVE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 )]
 pub(crate) async fn point_move_method(obj: Value, dx: f64, dy: f64) -> crate::BuiltinResult<Value> {
     match obj {
-        Value::Object(mut o) => {
+        Value::Object(o) => {
             let mut x = 0.0;
             let mut y = 0.0;
-            if let Some(Value::Num(v)) = o.properties.get("x") {
+            if let Some(Value::Num(v)) = o.property("x") {
                 x = *v;
             }
-            if let Some(Value::Num(v)) = o.properties.get("y") {
+            if let Some(Value::Num(v)) = o.property("y") {
                 y = *v;
             }
-            o.properties.insert("x".to_string(), Value::Num(x + dx));
-            o.properties.insert("y".to_string(), Value::Num(y + dy));
-            Ok(Value::Object(o))
+            let mut o = o.into_unbounded_builder().map_err(|_| {
+                runtime_descriptor_error("Point.move", &POINT_MOVE_ERROR_RECEIVER_INVALID)
+            })?;
+            o.insert("x".to_string(), Value::Num(x + dx));
+            o.insert("y".to_string(), Value::Num(y + dy));
+            Ok(Value::Object(o.finish()))
         }
         other => Err(runtime_descriptor_error_with_detail(
             "Point.move",
@@ -121,10 +124,10 @@ pub const POINT_ORIGIN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn point_origin_method() -> crate::BuiltinResult<Value> {
-    let mut o = runmat_value::ObjectInstance::new("Point".to_string());
-    o.properties.insert("x".to_string(), Value::Num(0.0));
-    o.properties.insert("y".to_string(), Value::Num(0.0));
-    Ok(Value::Object(o))
+    let mut o = runmat_value::UnboundedObjectBuilder::new("Point");
+    o.insert("x".to_string(), Value::Num(0.0));
+    o.insert("y".to_string(), Value::Num(0.0));
+    Ok(Value::Object(o.finish()))
 }
 
 const SHAPE_AREA_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -211,7 +214,7 @@ pub const CIRCLE_AREA_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 pub(crate) async fn circle_area_method(obj: Value) -> crate::BuiltinResult<Value> {
     match obj {
         Value::Object(o) => {
-            let r = if let Some(Value::Num(v)) = o.properties.get("r") {
+            let r = if let Some(Value::Num(v)) = o.property("r") {
                 *v
             } else {
                 0.0
@@ -263,9 +266,9 @@ pub const CTOR_CTOR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 )]
 pub(crate) async fn ctor_ctor_method(x: f64) -> crate::BuiltinResult<Value> {
     // Construct object with property 'x' initialized
-    let mut o = runmat_value::ObjectInstance::new("Ctor".to_string());
-    o.properties.insert("x".to_string(), Value::Num(x));
-    Ok(Value::Object(o))
+    let mut o = runmat_value::UnboundedObjectBuilder::new("Ctor");
+    o.insert("x".to_string(), Value::Num(x));
+    Ok(Value::Object(o.finish()))
 }
 
 // --- Test-only package functions to exercise import precedence ---
@@ -357,7 +360,7 @@ async fn overidx_read_step(
             Ok(Value::Num(99.0))
         }
         (Value::Object(o), crate::object::indexing::ObjectIndexKind::Brace, Value::Cell(_)) => {
-            if let Some(v) = o.properties.get("lastCell") {
+            if let Some(v) = o.property("lastCell") {
                 Ok(v.clone())
             } else {
                 Ok(Value::Num(0.0))
@@ -369,7 +372,7 @@ async fn overidx_read_step(
             Value::String(field),
         ) => {
             // If field exists, return it; otherwise sentinel 77
-            if let Some(v) = o.properties.get(&field) {
+            if let Some(v) = o.property(field.as_str()) {
                 Ok(v.clone())
             } else {
                 Ok(Value::Num(77.0))
@@ -380,8 +383,8 @@ async fn overidx_read_step(
             crate::object::indexing::ObjectIndexKind::Member,
             Value::CharArray(ca),
         ) => {
-            let field: String = ca.data.iter().collect();
-            if let Some(v) = o.properties.get(&field) {
+            let field: String = ca.data().iter().collect();
+            if let Some(v) = o.property(&field) {
                 Ok(v.clone())
             } else {
                 Ok(Value::Num(77.0))
@@ -426,36 +429,40 @@ pub(crate) async fn overidx_subsasgn(
 }
 
 async fn overidx_write_step(
-    mut obj: Value,
+    obj: Value,
     step: crate::object::indexing::ObjectSubscript,
     rhs: Value,
 ) -> crate::BuiltinResult<RootedValue> {
     let payload = step.selector_value()?;
-    match (&mut obj, step.kind(), payload) {
-        (Value::Object(o), crate::object::indexing::ObjectIndexKind::Paren, Value::Cell(_)) => {
+    let Value::Object(object) = obj else {
+        return Err(runtime_descriptor_error(
+            "OverIdx.subsasgn",
+            &OVERIDX_ERROR_SUBSASGN_PAYLOAD_UNSUPPORTED,
+        ));
+    };
+    let mut object = object.into_unbounded_builder().map_err(|_| {
+        runtime_descriptor_error(
+            "OverIdx.subsasgn",
+            &OVERIDX_ERROR_SUBSASGN_PAYLOAD_UNSUPPORTED,
+        )
+    })?;
+    match (step.kind(), payload) {
+        (crate::object::indexing::ObjectIndexKind::Paren, Value::Cell(_)) => {
             // Store into 'last' property
-            o.properties.insert("last".to_string(), rhs);
+            object.insert("last".to_string(), rhs);
             Ok(())
         }
-        (Value::Object(o), crate::object::indexing::ObjectIndexKind::Brace, Value::Cell(_)) => {
-            o.properties.insert("lastCell".to_string(), rhs);
+        (crate::object::indexing::ObjectIndexKind::Brace, Value::Cell(_)) => {
+            object.insert("lastCell".to_string(), rhs);
             Ok(())
         }
-        (
-            Value::Object(o),
-            crate::object::indexing::ObjectIndexKind::Member,
-            Value::String(field),
-        ) => {
-            o.properties.insert(field, rhs);
+        (crate::object::indexing::ObjectIndexKind::Member, Value::String(field)) => {
+            object.insert(field.as_str().to_owned(), rhs);
             Ok(())
         }
-        (
-            Value::Object(o),
-            crate::object::indexing::ObjectIndexKind::Member,
-            Value::CharArray(ca),
-        ) => {
-            let field: String = ca.data.iter().collect();
-            o.properties.insert(field, rhs);
+        (crate::object::indexing::ObjectIndexKind::Member, Value::CharArray(ca)) => {
+            let field: String = ca.data().iter().collect();
+            object.insert(field, rhs);
             Ok(())
         }
         _ => Err(runtime_descriptor_error(
@@ -463,7 +470,7 @@ async fn overidx_write_step(
             &OVERIDX_ERROR_SUBSASGN_PAYLOAD_UNSUPPORTED,
         )),
     }?;
-    RootedValue::new(obj).map_err(|error| error.into_runtime_error())
+    RootedValue::new(Value::Object(object.finish())).map_err(|error| error.into_runtime_error())
 }
 
 const OVERIDX_NUM_ARGUMENTS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -523,11 +530,7 @@ pub(crate) async fn overidx_num_arguments_from_subscript(
     _indexing_context: Value,
 ) -> crate::BuiltinResult<Value> {
     let object = overidx_expect_object(obj, "OverIdx.numArgumentsFromSubscript")?;
-    Ok(object
-        .properties
-        .get("nargs")
-        .cloned()
-        .unwrap_or(Value::Num(3.0)))
+    Ok(object.property("nargs").cloned().unwrap_or(Value::Num(3.0)))
 }
 
 const OVERIDX_SAVEOBJ_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -566,17 +569,17 @@ pub const OVERIDX_SAVEOBJ_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 )]
 pub(crate) async fn overidx_saveobj(obj: Value) -> crate::BuiltinResult<Value> {
     let object = overidx_expect_object(obj, "OverIdx.saveobj")?;
-    let mut payload = StructValue::new();
+    let mut payload = runmat_value::UnboundedStructValueBuilder::new();
     for key in ["k", "nargs"] {
-        if let Some(value) = object.properties.get(key) {
+        if let Some(value) = object.property(key) {
             payload.insert(key.to_string(), value.clone());
         }
     }
     payload.insert(
         "saved_by".to_string(),
-        Value::String("OverIdx.saveobj".to_string()),
+        Value::string("OverIdx.saveobj".to_string()),
     );
-    Ok(Value::Struct(payload))
+    Ok(Value::Struct(payload.finish()))
 }
 
 const OVERIDX_LOADOBJ_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -614,19 +617,19 @@ pub const OVERIDX_LOADOBJ_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     builtin_path = "crate::builtins::introspection::test_methods"
 )]
 pub(crate) async fn overidx_loadobj(payload: Value) -> crate::BuiltinResult<Value> {
-    let mut object = ObjectInstance::new("OverIdx".to_string());
+    let mut object = runmat_value::UnboundedObjectBuilder::new("OverIdx");
     if let Value::Struct(st) = payload {
-        for (name, value) in st.fields {
+        for (name, value) in st.into_fields_unbounded() {
             if name != "saved_by" {
-                object.properties.insert(name, value);
+                object.insert(name, value);
             }
         }
     }
-    object.properties.insert(
+    object.insert(
         "loaded_by".to_string(),
-        Value::String("OverIdx.loadobj".to_string()),
+        Value::string("OverIdx.loadobj".to_string()),
     );
-    Ok(Value::Object(object))
+    Ok(Value::Object(object.finish()))
 }
 
 fn overidx_expect_object(
@@ -649,7 +652,7 @@ fn overidx_binary_operands(
     method: &str,
 ) -> crate::BuiltinResult<(f64, f64)> {
     fn object_value(object: runmat_value::ObjectInstance) -> f64 {
-        match object.properties.get("k") {
+        match object.property("k") {
             Some(Value::Num(value)) => *value,
             _ => 0.0,
         }
@@ -1067,8 +1070,8 @@ mod rooted_fixture_tests {
             let initial = runmat_gc::gc_allocate_rooted(Value::String("fixture payload".into()))
                 .expect("allocate managed test property");
             let handle = initial.handle();
-            let mut object = ObjectInstance::new("OverIdx");
-            object.properties.insert(
+            let mut object = runmat_value::UnboundedObjectBuilder::new("OverIdx");
+            object.insert(
                 "last".into(),
                 Value::HandleObject(runmat_value::HandleRef {
                     class_name: "FixturePayload".into(),
@@ -1081,9 +1084,11 @@ mod rooted_fixture_tests {
                 Value::String("last".into()),
             )
             .expect("member path");
-            let output =
-                futures::executor::block_on(overidx_subsref(Value::Object(object), subscript))
-                    .expect("fixture member read");
+            let output = futures::executor::block_on(overidx_subsref(
+                Value::Object(object.finish()),
+                subscript,
+            ))
+            .expect("fixture member read");
             OBSERVED_HANDLE.with(|slot| *slot.borrow_mut() = Some(handle));
             let seen = Arc::new(AtomicBool::new(false));
             let observed = Arc::clone(&seen);

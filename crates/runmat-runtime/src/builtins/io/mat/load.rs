@@ -9,7 +9,7 @@ use regex::Regex;
 use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_gc::{Trace, Tracer};
 use runmat_macros::runtime_builtin;
-use runmat_value::{CharArray, StructValue, Value};
+use runmat_value::{CharArray, Value};
 
 use super::authority::MatFsPath;
 use crate::builtins::introspection::object_serialization::{
@@ -35,7 +35,7 @@ use crate::context::host_effect::{HostEffectReceipt, MatDecodeOutput};
 )]
 async fn load_builtin(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<RootedValue> {
     let requested_outputs = match crate::output_count::current_output_scope() {
         crate::output_count::InvocationOutputScope::Requested(count) => Some(count),
@@ -56,7 +56,7 @@ async fn load_builtin(
         None
     };
     let execution = evaluate_with_context(
-        &args,
+        args.view(),
         runtime.as_ref(),
         if requested_outputs == Some(0) {
             MatDecodeOutput::Workspace
@@ -123,11 +123,11 @@ pub type RootedMatEntries = RootedResult<MatEntries>;
 
 impl LoadEval {
     pub fn first_output(&self) -> BuiltinResult<RootedValue> {
-        let mut st = StructValue::new();
+        let mut st = runmat_value::UnboundedStructValueBuilder::new();
         for (name, value) in &self.variables.value().0 {
             st.fields.insert(name.clone(), value.clone());
         }
-        RootedValue::new(Value::Struct(st)).map_err(|error| error.into_runtime_error())
+        RootedValue::new(Value::Struct(st.finish())).map_err(|error| error.into_runtime_error())
     }
 
     pub fn variables(&self) -> &[(String, Value)] {
@@ -270,13 +270,17 @@ fn load_workspace_flow(mut error: RuntimeError) -> RuntimeError {
 }
 
 pub async fn evaluate(args: &[Value]) -> BuiltinResult<LoadEval> {
-    evaluate_with_context(args, None, MatDecodeOutput::Struct)
-        .await
-        .map(|execution| execution.eval)
+    evaluate_with_context(
+        crate::call::FunctionArgumentView::from_slice(args),
+        None,
+        MatDecodeOutput::Struct,
+    )
+    .await
+    .map(|execution| execution.eval)
 }
 
 async fn evaluate_with_context(
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     runtime: Option<&crate::context::RuntimeContext>,
     output: MatDecodeOutput,
 ) -> BuiltinResult<LoadExecution> {
@@ -289,9 +293,7 @@ async fn evaluate_with_context(
     preflight_known_options(args)?;
     // Filename/options/selectors are text controls. A numeric resident handle
     // cannot become an admitted text control by downloading it first.
-    let host_args = args.to_vec();
-
-    let invocation = parse_invocation(&host_args).await?;
+    let invocation = parse_invocation(args).await?;
 
     let mut path_value = if let Some(path) = invocation.path_value {
         path
@@ -365,6 +367,10 @@ mod reader;
 pub use reader::decode_workspace_from_mat_bytes;
 #[cfg(test)]
 pub(crate) use reader::read_mat_file;
+#[cfg(test)]
+pub(crate) use reader::restore_typed_mat_array_for_test;
+#[cfg(test)]
+pub(crate) use reader::restore_typed_mat_entry_for_test;
 pub(crate) use reader::{
     read_mat_file_for_builtin, read_mat_file_for_builtin_on_with_resource_liveness,
     read_mat_file_on_with_resource_liveness,
@@ -373,6 +379,7 @@ pub(crate) use reader::{
 mod decoder;
 #[cfg(test)]
 use decoder::mat_array_to_value;
+#[cfg(test)]
 use decoder::read_mat_reader;
 
 #[cfg(test)]

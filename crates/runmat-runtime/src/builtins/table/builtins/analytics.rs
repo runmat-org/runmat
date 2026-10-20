@@ -11,90 +11,79 @@ use runmat_value::{IntValue, NumericScalar};
 
 #[runtime_builtin(
     name = "grpstats",
+    context = true,
     binding_variant = "default",
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn grpstats_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     value: Value,
     group: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    ensure_grpstats_extensions(&value, &group, &rest)?;
-    let value = gather_if_needed_async(&value)
-        .await
-        .map_err(map_control_flow)?;
-    let group = gather_if_needed_async(&group)
-        .await
-        .map_err(map_control_flow)?;
-    let rest = gather_values(&rest).await?;
-    grpstats_impl(value, group, rest)
+    ensure_grpstats_extensions(&value, &group, rest.view())?;
+    let value = gather_retained_value(&value, runtime.as_ref()).await?;
+    let group = gather_retained_value(&group, runtime.as_ref()).await?;
+    let rest = gather_retained_values(&rest, runtime.as_ref()).await?;
+    grpstats_impl(value, group, rest.view())
 }
 
 #[runtime_builtin(
     name = "pivot",
+    context = true,
     binding_variant = "default",
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn pivot_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     table: Value,
     rowvars: Value,
     colvars: Value,
     datavar: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    let table = gather_if_needed_async(&table)
-        .await
-        .map_err(map_control_flow)?;
-    let rowvars = gather_if_needed_async(&rowvars)
-        .await
-        .map_err(map_control_flow)?;
-    let colvars = gather_if_needed_async(&colvars)
-        .await
-        .map_err(map_control_flow)?;
-    let datavar = gather_if_needed_async(&datavar)
-        .await
-        .map_err(map_control_flow)?;
-    let rest = gather_values(&rest).await?;
-    let method = parse_named_text_option(&rest, "Method", "sum", "pivot")?;
+    let table = gather_retained_value(&table, runtime.as_ref()).await?;
+    let rowvars = gather_retained_value(&rowvars, runtime.as_ref()).await?;
+    let colvars = gather_retained_value(&colvars, runtime.as_ref()).await?;
+    let datavar = gather_retained_value(&datavar, runtime.as_ref()).await?;
+    let rest = gather_retained_values(&rest, runtime.as_ref()).await?;
+    let method = parse_named_text_option(rest.view(), "Method", "sum", "pivot")?;
     pivot_impl(table, rowvars, colvars, datavar, &method)
 }
 
 #[runtime_builtin(
     name = "groupsummary",
+    context = true,
     binding_variant = "default",
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn groupsummary_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     table: Value,
     groupvars: Value,
     method: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    ensure_groupsummary_extensions(&table, &groupvars, &method, &rest)?;
-    let table = gather_if_needed_async(&table)
-        .await
-        .map_err(map_control_flow)?;
-    let groupvars = gather_if_needed_async(&groupvars)
-        .await
-        .map_err(map_control_flow)?;
-    let method = gather_if_needed_async(&method)
-        .await
-        .map_err(map_control_flow)?;
-    let rest = gather_values(&rest).await?;
+    ensure_groupsummary_extensions(&table, &groupvars, &method, rest.view())?;
+    let table = gather_retained_value(&table, runtime.as_ref()).await?;
+    let groupvars = gather_retained_value(&groupvars, runtime.as_ref()).await?;
+    let method = gather_retained_value(&method, runtime.as_ref()).await?;
+    let rest = gather_retained_values(&rest, runtime.as_ref()).await?;
     if matches!(&table, Value::Object(object) if is_tabular_object(object)) {
-        groupsummary_with_numeric_bins(table, groupvars, method, rest)
+        groupsummary_with_numeric_bins(runtime.as_ref(), table, groupvars, method, rest).await
     } else {
-        groupsummary_array(table, groupvars, method, rest)
+        groupsummary_array(runtime.as_ref(), table, groupvars, method, rest).await
     }
 }
 
-fn groupsummary_array(
+async fn groupsummary_array(
+    runtime: Option<&crate::context::RuntimeContext>,
     data: Value,
     groupvars: Value,
     method_or_bins: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    let data = groupsummary_array_columns(data, "input array")?;
+    let data = groupsummary_array_columns(&data, "input array")?;
     let groups = groupsummary_group_columns(groupvars)?;
     let rows = data.first().map(value_row_count).transpose()?.unwrap_or(0);
     for value in &groups {
@@ -123,18 +112,20 @@ fn groupsummary_array(
                 .map_err(invalid_variable)?,
         )
     };
-    let result = groupsummary_with_numeric_bins(table, group_selector, method_or_bins, rest)?;
+    let result =
+        groupsummary_with_numeric_bins(runtime, table, group_selector, method_or_bins, rest)
+            .await?;
     groupsummary_array_outputs(result, &group_names)
 }
 
-fn groupsummary_array_columns(value: Value, role: &str) -> BuiltinResult<Vec<Value>> {
+fn groupsummary_array_columns(value: &Value, role: &str) -> BuiltinResult<Vec<Value>> {
     match value {
         Value::Tensor(tensor) => (0..tensor.cols())
-            .map(|column| groupsummary_tensor_column(&tensor, column).map(Value::Tensor))
+            .map(|column| groupsummary_tensor_column(tensor, column).map(Value::Tensor))
             .collect(),
         Value::Cell(cell) => {
             let mut columns = Vec::new();
-            for value in cell.data {
+            for value in cell.data().iter() {
                 let mut nested = groupsummary_array_columns(value, role)?;
                 columns.append(&mut nested);
             }
@@ -152,7 +143,7 @@ fn groupsummary_array_columns(value: Value, role: &str) -> BuiltinResult<Vec<Val
 }
 
 fn groupsummary_group_columns(value: Value) -> BuiltinResult<Vec<Value>> {
-    groupsummary_array_columns(value, "groupvars")
+    groupsummary_array_columns(&value, "groupvars")
 }
 
 fn groupsummary_tensor_column(tensor: &Tensor, column: usize) -> BuiltinResult<Tensor> {
@@ -336,9 +327,9 @@ fn value_is_native_integer(value: &Value) -> bool {
 
 fn option_name(value: &Value) -> Option<String> {
     match value {
-        Value::String(value) => Some(value.clone()),
-        Value::CharArray(value) if value.rows == 1 => Some(value.data.iter().collect()),
-        Value::StringArray(value) if value.data.len() == 1 => Some(value.data[0].clone()),
+        Value::String(value) => Some(value.to_string()),
+        Value::CharArray(value) if value.rows == 1 => Some(value.data().iter().collect()),
+        Value::StringArray(value) if value.data().len() == 1 => Some(value.data()[0].to_string()),
         _ => None,
     }
 }
@@ -347,7 +338,7 @@ fn ensure_groupsummary_extensions(
     table: &Value,
     groupvars: &Value,
     method: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<()> {
     if groupsummary_contains_explicit_gpu(table)
         || groupsummary_contains_explicit_gpu(groupvars)
@@ -359,7 +350,10 @@ fn ensure_groupsummary_extensions(
             "groupsummary",
         )?;
     }
-    if rest.windows(2).any(|pair| {
+    if (0..rest.len().saturating_sub(1)).any(|index| {
+        let pair = rest
+            .range(index..index + 2)
+            .expect("bounded adjacent option view");
         option_name(&pair[0]).is_some_and(|name| {
             name.eq_ignore_ascii_case("IncludeMissingGroups")
                 || name.eq_ignore_ascii_case("IncludeEmptyGroups")
@@ -383,19 +377,19 @@ fn groupsummary_typed_integer_scalar(value: &Value) -> bool {
     matches!(value, Value::Int(_))
         || matches!(value, Value::Tensor(tensor) if tensor.len() == 1 && tensor.integer_storage().is_some())
         || matches!(value, Value::GpuTensor(handle) if handle.shape().iter().all(|&dimension| dimension == 1) && runmat_accelerate_api::handle_integer_type(handle).is_some())
-        || matches!(value, Value::Cell(cell) if cell.data.len() == 1 && groupsummary_typed_integer_scalar(&cell.data[0]))
+        || matches!(value, Value::Cell(cell) if cell.data().len() == 1 && groupsummary_typed_integer_scalar(&cell.data()[0]))
 }
 
 fn groupsummary_contains_explicit_gpu(value: &Value) -> bool {
     match value {
         Value::GpuTensor(handle) => runmat_accelerate_api::handle_is_explicit(handle),
-        Value::Cell(cell) => cell.data.iter().any(groupsummary_contains_explicit_gpu),
+        Value::Cell(cell) => cell.data().iter().any(groupsummary_contains_explicit_gpu),
         Value::Struct(value) => value
             .fields
             .values()
             .any(groupsummary_contains_explicit_gpu),
         Value::Object(value) => value
-            .properties
+            .properties()
             .values()
             .any(groupsummary_contains_explicit_gpu),
         Value::Closure(value) => value
@@ -407,23 +401,24 @@ fn groupsummary_contains_explicit_gpu(value: &Value) -> bool {
     }
 }
 
-fn groupsummary_with_numeric_bins(
+async fn groupsummary_with_numeric_bins(
+    runtime: Option<&crate::context::RuntimeContext>,
     table: Value,
     groupvars: Value,
     method_or_bins: Value,
-    mut rest: Vec<Value>,
+    mut rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     if !groupsummary_is_numeric_bins(&method_or_bins) {
-        return groupsummary_impl(table, groupvars, method_or_bins, rest);
+        return groupsummary_impl(table, groupvars, method_or_bins, rest.view());
     }
     if rest.is_empty() {
         return Err(invalid_argument(
             "groupsummary: a computation method must follow groupbins",
         ));
     }
-    let method = rest.remove(0);
+    let method = rest.pop_front().expect("nonempty computation method");
     let bin_spec = match &method_or_bins {
-        Value::Cell(cell) if cell.data.len() == 1 => &cell.data[0],
+        Value::Cell(cell) if cell.data().len() == 1 => &cell.data()[0],
         Value::Cell(_) => {
             return Err(invalid_argument(
                 "groupsummary: a cell groupbins argument must contain exactly one specification for one grouping variable",
@@ -446,10 +441,11 @@ fn groupsummary_with_numeric_bins(
         .ok_or_else(|| invalid_variable("groupsummary: missing grouping variable"))?;
     let values = groupsummary_numeric_scalars(group_value)?;
     if scalar_text(bin_spec, "groupbins").is_ok_and(|text| text.eq_ignore_ascii_case("none")) {
-        let (_, _, forwarded) = groupsummary_bin_options(rest)?;
-        return groupsummary_impl(Value::Object(object), groupvars, method, forwarded);
+        let (_, _, forwarded) = groupsummary_bin_options(rest, runtime).await?;
+        return groupsummary_impl(Value::Object(object), groupvars, method, forwarded.view());
     }
-    let (included_right, include_empty, forwarded) = groupsummary_bin_options(rest)?;
+    let (included_right, include_empty, forwarded) =
+        groupsummary_bin_options(rest, runtime).await?;
     let (assignments, labels) = groupsummary_bin_assignments(&values, bin_spec, included_right)?;
     let internal = assignments
         .into_iter()
@@ -476,21 +472,24 @@ fn groupsummary_with_numeric_bins(
         }
     }
     let binned_table = table_from_columns(names, replaced)?;
-    let result = groupsummary_impl(binned_table, groupvars, method, forwarded)?;
+    let result = groupsummary_impl(binned_table, groupvars, method, forwarded.view())?;
     groupsummary_finalize_bins(result, &selected[0], &labels, include_empty)
 }
 
 fn groupsummary_is_numeric_bins(value: &Value) -> bool {
     matches!(value, Value::Num(_) | Value::Int(_) | Value::Tensor(_))
-        || matches!(value, Value::Cell(cell) if cell.data.len() == 1 && groupsummary_is_numeric_bins(&cell.data[0]))
+        || matches!(value, Value::Cell(cell) if cell.data().len() == 1 && groupsummary_is_numeric_bins(&cell.data()[0]))
         || matches!(value, Value::String(text) if text.eq_ignore_ascii_case("none"))
-        || matches!(value, Value::CharArray(chars) if chars.data.iter().collect::<String>().eq_ignore_ascii_case("none"))
+        || matches!(value, Value::CharArray(chars) if chars.data().iter().collect::<String>().eq_ignore_ascii_case("none"))
 }
 
-fn groupsummary_bin_options(rest: Vec<Value>) -> BuiltinResult<(bool, bool, Vec<Value>)> {
+async fn groupsummary_bin_options(
+    rest: crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<(bool, bool, crate::call::BuiltinArguments)> {
     let mut included_right = false;
     let mut include_empty = false;
-    let mut forwarded = Vec::with_capacity(rest.len());
+    let mut forwarded_count = 0usize;
     let mut index = 0;
     if rest.first().is_some_and(|value| {
         !option_name(value).is_some_and(|name| {
@@ -499,7 +498,7 @@ fn groupsummary_bin_options(rest: Vec<Value>) -> BuiltinResult<(bool, bool, Vec<
                 || name.eq_ignore_ascii_case("IncludeMissingGroups")
         })
     }) {
-        forwarded.push(rest[0].clone());
+        forwarded_count += 1;
         index = 1;
     }
     while index < rest.len() {
@@ -525,11 +524,48 @@ fn groupsummary_bin_options(rest: Vec<Value>) -> BuiltinResult<(bool, bool, Vec<
         } else if name.eq_ignore_ascii_case("IncludeEmptyGroups") {
             include_empty = zero_one_bool_scalar(&rest[index + 1], "IncludeEmptyGroups")?;
         } else {
-            forwarded.push(rest[index].clone());
-            forwarded.push(rest[index + 1].clone());
+            forwarded_count += 2;
         }
         index += 2;
     }
+    // The read-only pass above validates all pairs before destination admission.
+    // Only forwarded headers are initialized; all payload/root owners stay shared.
+    let has_selector = rest.first().is_some_and(|value| {
+        !option_name(value).is_some_and(|name| {
+            name.eq_ignore_ascii_case("IncludedEdge")
+                || name.eq_ignore_ascii_case("IncludeEmptyGroups")
+                || name.eq_ignore_ascii_case("IncludeMissingGroups")
+        })
+    });
+    let mut cursor = 0usize;
+    let mut pair_value = false;
+    let forwarded = rest
+        .try_map_preserving_roots_async(forwarded_count, runtime, async |_| {
+            if has_selector && cursor == 0 {
+                cursor = 1;
+                return Ok(rest[0].clone());
+            }
+            loop {
+                if pair_value {
+                    let value = rest[cursor].clone();
+                    cursor += 1;
+                    pair_value = false;
+                    return Ok(value);
+                }
+                let name = scalar_text(&rest[cursor], "groupsummary option name")?;
+                if name.eq_ignore_ascii_case("IncludedEdge")
+                    || name.eq_ignore_ascii_case("IncludeEmptyGroups")
+                {
+                    cursor += 2;
+                    continue;
+                }
+                let value = rest[cursor].clone();
+                cursor += 1;
+                pair_value = true;
+                return Ok(value);
+            }
+        })
+        .await?;
     Ok((included_right, include_empty, forwarded))
 }
 
@@ -833,16 +869,16 @@ fn groupsummary_finalize_bins(
         ));
     };
     let existing = groups
-        .data
+        .data()
         .iter()
         .enumerate()
-        .map(|(row, label)| (label.clone(), row))
+        .map(|(row, label)| (label.as_str(), row))
         .collect::<BTreeMap<_, _>>();
     let mut desired = labels
         .iter()
         .enumerate()
         .map(|(index, label)| (format!("{index:08}|{label}"), label.clone()))
-        .filter(|(internal, _)| include_empty || existing.contains_key(internal))
+        .filter(|(internal, _)| include_empty || existing.contains_key(internal.as_str()))
         .collect::<Vec<_>>();
     if existing.contains_key("<missing>") {
         desired.push(("<missing>".to_string(), "<missing>".to_string()));
@@ -871,7 +907,7 @@ fn groupsummary_finalize_bins(
         if tensor.integer_storage().is_some()
             && desired
                 .iter()
-                .any(|(internal, _)| !existing.contains_key(internal))
+                .any(|(internal, _)| !existing.contains_key(internal.as_str()))
         {
             return Err(invalid_argument(
                 "groupsummary: empty binned groups for integer-class min/max are not implemented because the public fill class is unresolved",
@@ -880,7 +916,7 @@ fn groupsummary_finalize_bins(
         if tensor.integer_storage().is_some() {
             let rows = desired
                 .iter()
-                .filter_map(|(internal, _)| existing.get(internal).copied())
+                .filter_map(|(internal, _)| existing.get(internal.as_str()).copied())
                 .collect::<Vec<_>>();
             output.push(select_rows(value, &rows)?);
         } else {
@@ -888,7 +924,7 @@ fn groupsummary_finalize_bins(
                 .iter()
                 .map(|(internal, _)| {
                     existing
-                        .get(internal)
+                        .get(internal.as_str())
                         .map(|row| tensor.materialize_f64()[*row])
                         .unwrap_or_else(|| if name == "GroupCount" { 0.0 } else { f64::NAN })
                 })
@@ -901,7 +937,11 @@ fn groupsummary_finalize_bins(
     table_from_columns(names, output)
 }
 
-fn ensure_grpstats_extensions(value: &Value, group: &Value, rest: &[Value]) -> BuiltinResult<()> {
+fn ensure_grpstats_extensions(
+    value: &Value,
+    group: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     if crate::value_contains_gpu(value)
         || crate::value_contains_gpu(group)
         || rest.iter().any(crate::value_contains_gpu)
@@ -919,7 +959,10 @@ fn ensure_grpstats_extensions(value: &Value, group: &Value, rest: &[Value]) -> B
         )?;
     }
     if rest.first().is_some_and(value_is_native_integer)
-        || rest.windows(2).any(|pair| {
+        || (0..rest.len().saturating_sub(1)).any(|index| {
+            let pair = rest
+                .range(index..index + 2)
+                .expect("bounded adjacent option view");
             option_name(&pair[0]).is_some_and(|name| name.eq_ignore_ascii_case("Alpha"))
                 && value_is_native_integer(&pair[1])
         })
@@ -931,7 +974,10 @@ fn ensure_grpstats_extensions(value: &Value, group: &Value, rest: &[Value]) -> B
     }
     if table_input
         && (value_is_native_integer(group)
-            || rest.windows(2).any(|pair| {
+            || (0..rest.len().saturating_sub(1)).any(|index| {
+                let pair = rest
+                    .range(index..index + 2)
+                    .expect("bounded adjacent option view");
                 option_name(&pair[0]).is_some_and(|name| name.eq_ignore_ascii_case("DataVars"))
                     && value_is_native_integer(&pair[1])
             }))
@@ -947,6 +993,39 @@ fn ensure_grpstats_extensions(value: &Value, group: &Value, rest: &[Value]) -> B
 #[cfg(test)]
 mod integer_compatibility_tests {
     use super::*;
+    fn ensure_grpstats_extensions(
+        value: &Value,
+        group: &Value,
+        rest: &[Value],
+    ) -> BuiltinResult<()> {
+        super::ensure_grpstats_extensions(
+            value,
+            group,
+            crate::call::FunctionArgumentView::from_slice(rest),
+        )
+    }
+    fn ensure_groupsummary_extensions(
+        table: &Value,
+        groups: &Value,
+        method: &Value,
+        rest: &[Value],
+    ) -> BuiltinResult<()> {
+        super::ensure_groupsummary_extensions(
+            table,
+            groups,
+            method,
+            crate::call::FunctionArgumentView::from_slice(rest),
+        )
+    }
+    async fn groupsummary_builtin(
+        table: Value,
+        groups: Value,
+        method: Value,
+        rest: Vec<Value>,
+    ) -> BuiltinResult<Value> {
+        let rest = crate::call::BuiltinArguments::from_borrowed(&rest, None)?;
+        super::groupsummary_builtin(None, table, groups, method, rest).await
+    }
     use runmat_builtins::{
         GROUPSUMMARY_EXTENSIONS, GROUPSUMMARY_INTEGER_CAPABILITIES, GRPSTATS_EXTENSIONS,
         GRPSTATS_INTEGER_CAPABILITIES,

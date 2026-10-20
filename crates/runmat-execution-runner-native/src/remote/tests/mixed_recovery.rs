@@ -82,7 +82,7 @@ async fn mixed_recovery_uses_exact_encryption_purposes_and_reencrypts_alias_chan
         recipe,
         callable: runmat_execution::ProgramCallable::semantic(
             runmat_execution::ProgramFunctionId(0),
-            None,
+            Some("analysis_workload".into()),
         ),
         context: runmat_execution::ProgramInvocationContext::Direct,
         assignment: None,
@@ -205,7 +205,7 @@ async fn scheduler_and_physical_roots_survive_one_serialized_publication_sequenc
         recipe,
         callable: runmat_execution::ProgramCallable::semantic(
             runmat_execution::ProgramFunctionId(0),
-            None,
+            Some("analysis_workload".into()),
         ),
         context: runmat_execution::ProgramInvocationContext::Direct,
         assignment: None,

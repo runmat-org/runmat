@@ -43,14 +43,22 @@ const SPHERICAL_FIELDS: &[&str] = &["frame_id", "origin", "polar_axis", "azimuth
 macro_rules! simple_frame_builtin {
     ($function:ident, $descriptor:ident, $name:literal, $class:expr) => {
         #[runtime_builtin(
-                    name = $name,
-                    binding_variant = "default",
-                    builtin_path = "crate::builtins::fea::constraints::support::frame"
-                )]
-        pub async fn $function() -> BuiltinResult<Value> {
+                            name = $name,
+                            binding_variant = "default",
+                            context = true,
+                            builtin_path = "crate::builtins::fea::constraints::support::frame"
+                        )]
+        pub async fn $function(
+            runtime: Option<crate::context::RuntimeContext>,
+        ) -> BuiltinResult<Value> {
             crate::builtins::fea::constraints::fixed_outputs(&runmat_builtins::$descriptor, $name)?;
             ensure_frame_classes_registered();
-            Ok(Value::Object(ObjectInstance::new($class)))
+            let object = crate::execution::object::construct_object_from_borrowed_fields(
+                runtime.as_ref(),
+                $class,
+                std::iter::empty::<(&str, &Value)>(),
+            )?;
+            Ok(object.into_value_and_lease().0)
         }
     };
 }
@@ -83,19 +91,21 @@ simple_frame_builtin!(
 macro_rules! axis_frame_builtin {
     ($function:ident, $descriptor:ident, $name:literal, $class:expr, $build:expr, $primary:literal, $secondary:literal) => {
         #[runtime_builtin(
-                    name = $name,
-                    binding_variant = "default",
-                    builtin_path = "crate::builtins::fea::constraints::support::frame"
-                )]
+                            name = $name,
+                            binding_variant = "default",
+                            context = true,
+                            builtin_path = "crate::builtins::fea::constraints::support::frame"
+                        )]
         pub async fn $function(
-            id: String,
+            runtime: Option<crate::context::RuntimeContext>,
+            id: runmat_value::Utf8Text,
             origin: Value,
             primary_axis: Value,
             secondary_axis: Value,
         ) -> BuiltinResult<Value> {
             crate::builtins::fea::constraints::fixed_outputs(&runmat_builtins::$descriptor, $name)?;
             let frame = ($build)(
-                id.clone(),
+                id.as_str().to_owned(),
                 Position::new(position_meters($name, &origin)?),
                 direction_from_value($name, &primary_axis)?,
                 direction_from_value($name, &secondary_axis)?,
@@ -104,14 +114,18 @@ macro_rules! axis_frame_builtin {
                 .map_err(|error| builtin_error($name, &ERROR_INPUT, error.to_string()))?;
             require_orthogonal_axes($name, &frame)?;
             ensure_frame_classes_registered();
-            let mut object = ObjectInstance::new($class);
-            object
-                .properties
-                .insert("frame_id".into(), Value::String(id));
-            object.properties.insert("origin".into(), origin);
-            object.properties.insert($primary.into(), primary_axis);
-            object.properties.insert($secondary.into(), secondary_axis);
-            Ok(Value::Object(object))
+            let fields = [
+                ("frame_id", Value::String(id)),
+                ("origin", origin),
+                ($primary, primary_axis),
+                ($secondary, secondary_axis),
+            ];
+            let object = crate::execution::object::construct_object_from_borrowed_fields(
+                runtime.as_ref(),
+                $class,
+                fields.iter().map(|(name, value)| (*name, value)),
+            )?;
+            Ok(object.into_value_and_lease().0)
         }
     };
 }
@@ -196,24 +210,28 @@ pub(crate) fn coordinate_frame_from_value(
             "expected a typed fea.CoordinateFrame value",
         ));
     };
-    let string = |name: &str| match object.properties.get(name) {
-        Some(Value::String(value)) if !value.is_empty() => Ok(value.clone()),
+    let string = |name: &str| match object.properties().get(name) {
+        Some(Value::String(value)) if !value.is_empty() => Ok(value.to_string()),
         _ => Err(builtin_error(
             builtin,
             &ERROR_INPUT,
-            format!("{}.{} must be a non-empty string", object.class_name, name),
+            format!(
+                "{}.{} must be a non-empty string",
+                object.class_name(),
+                name
+            ),
         )),
     };
     let nested = |name: &str| {
-        object.properties.get(name).ok_or_else(|| {
+        object.properties().get(name).ok_or_else(|| {
             builtin_error(
                 builtin,
                 &ERROR_INPUT,
-                format!("{}.{} is required", object.class_name, name),
+                format!("{}.{} is required", object.class_name(), name),
             )
         })
     };
-    let frame = match object.class_name.display_name() {
+    let frame = match object.class_name().display_name() {
         GLOBAL_FRAME_CLASS => CoordinateFrame::Global,
         MATERIAL_FRAME_CLASS => CoordinateFrame::Material,
         ELEMENT_FRAME_CLASS => CoordinateFrame::Element,

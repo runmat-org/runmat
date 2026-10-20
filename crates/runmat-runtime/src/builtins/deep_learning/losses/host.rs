@@ -118,13 +118,13 @@ impl LossPayload {
                     dlarray: false,
                 })
             }
-            Value::Object(object) if object.class_name.is(runmat_types::standard::DL_ARRAY) => {
-                let data = object.properties.get("Data").ok_or_else(|| {
+            Value::Object(object) if object.class_name().is(runmat_types::standard::DL_ARRAY) => {
+                let data = object.properties().get("Data").ok_or_else(|| {
                     deep_learning_error("crossentropy", "crossentropy: dlarray is missing Data")
                 })?;
                 let mut payload = Self::parse(data, label)?;
                 let raw_format = object
-                    .properties
+                    .properties()
                     .get("Format")
                     .and_then(|value| scalar_text(value, "crossentropy").ok())
                     .filter(|format| !format.is_empty());
@@ -149,10 +149,10 @@ impl LossPayload {
                 "dlarray",
                 vec![
                     ("Data", Value::Num(loss)),
-                    ("Format", Value::String(String::new())),
-                    ("Labels", Value::String(String::new())),
+                    ("Format", Value::string(String::new())),
+                    ("Labels", Value::string(String::new())),
                 ],
-            ))
+            )?)
         } else {
             Ok(Value::Num(loss))
         }
@@ -176,10 +176,10 @@ impl LossPayload {
                 "dlarray",
                 vec![
                     ("Data", tensor),
-                    ("Format", Value::String(format.clone())),
-                    ("Labels", Value::String(format)),
+                    ("Format", Value::string(format.clone())),
+                    ("Labels", Value::string(format)),
                 ],
-            ))
+            )?)
         } else {
             Ok(tensor)
         }

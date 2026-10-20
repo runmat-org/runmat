@@ -1,7 +1,7 @@
 //! Materialize only the controls consumed by the canonical solver option owner.
 
 use super::super::{optim_error, ScalarCooperation};
-use super::ScalarOptionFields;
+use super::{PreparedSolverOptions, ScalarOptionFields};
 use crate::BuiltinResult;
 use runmat_builtins::{
     BuiltinExtensionDescriptor, OptimAlgorithm, OptimDisplay, OptimOptionField, OptimSolver,
@@ -13,12 +13,18 @@ pub(crate) async fn prepare_solver_options(
     options: Option<StructValue>,
     numeric_extension: Option<&'static BuiltinExtensionDescriptor>,
     resident_extension: Option<&'static BuiltinExtensionDescriptor>,
+    runtime: Option<&crate::context::RuntimeContext>,
     cooperation: &mut ScalarCooperation,
-) -> BuiltinResult<Option<StructValue>> {
-    let Some(mut options) = options else {
+) -> BuiltinResult<Option<PreparedSolverOptions>> {
+    let Some(options) = options else {
         return Ok(None);
     };
-    let fields = ScalarOptionFields::from_struct(Some(&options));
+    let source =
+        crate::execution::RootedValue::in_optional_context(Value::Struct(options), runtime)?;
+    let Value::Struct(options) = source.value() else {
+        unreachable!("option input structure")
+    };
+    let fields = ScalarOptionFields::from_struct(Some(options));
     use OptimOptionField::*;
     let selected = [
         TolX,
@@ -29,18 +35,16 @@ pub(crate) async fn prepare_solver_options(
         Algorithm,
         SpecifyObjectiveGradient,
     ]
-    .into_iter()
-    .filter(|field| solver.accepts(*field))
-    .filter_map(|field| {
-        fields
-            .binding(field)
-            .map(|binding| (field, binding.name.to_owned()))
-    })
-    .collect::<Vec<_>>();
+    .map(|field| {
+        if !solver.accepts(field) {
+            return None;
+        }
+        fields.binding(field).map(|binding| (field, binding))
+    });
 
     // Validate all host-visible control metadata before the first provider operation.
-    for (field, name) in &selected {
-        let value = &options.fields[name];
+    for (field, binding) in selected.iter().flatten() {
+        let value = binding.value;
         if super::super::is_typed_integer_value(value) {
             if let Some(extension) = numeric_extension {
                 crate::compatibility::ensure_builtin_extension_enabled(extension, solver.name())?;
@@ -119,11 +123,14 @@ pub(crate) async fn prepare_solver_options(
             }
         }
     }
-    for (field, name) in selected {
-        let value = options
-            .fields
-            .get_mut(&name)
-            .expect("retained selected option key");
+    // Gathered controls are numeric/logical only; the original generation keeps
+    // all other descendants rooted until the one final generation is published.
+    let mut replacements: [Option<(&str, Value)>; 7] = std::array::from_fn(|_| None);
+    for (index, selected) in selected.into_iter().enumerate() {
+        let Some((field, binding)) = selected else {
+            continue;
+        };
+        let value = binding.value;
         if !matches!(value, Value::GpuTensor(_)) {
             continue;
         }
@@ -166,10 +173,23 @@ pub(crate) async fn prepare_solver_options(
             }
             _ => unreachable!(),
         }
-        *value = materialized;
+        replacements[index] = Some((binding.name, materialized));
         cooperation.completed(1).await?;
     }
-    Ok(Some(options))
+    let output = if replacements.iter().any(Option::is_some) {
+        let fields = options.fields.iter().map(|(name, original)| {
+            let value = replacements
+                .iter()
+                .flatten()
+                .find_map(|(replaced, value)| (name == *replaced).then_some(value))
+                .unwrap_or(original);
+            (name, value)
+        });
+        crate::execution::construct_struct_from_fields_in_optional_context(runtime, fields)?
+    } else {
+        source
+    };
+    Ok(Some(PreparedSolverOptions(output)))
 }
 
 fn switch_value(name: &str, field: &str, value: &Value) -> BuiltinResult<()> {
@@ -186,11 +206,11 @@ fn switch_value(name: &str, field: &str, value: &Value) -> BuiltinResult<()> {
                 number == 0.0 || number == 1.0
             }
             Value::String(text) => runmat_builtins::OptimSwitch::parse(text).is_some(),
-            Value::StringArray(values) if values.data.len() == 1 => {
-                runmat_builtins::OptimSwitch::parse(&values.data[0]).is_some()
+            Value::StringArray(values) if values.data().len() == 1 => {
+                runmat_builtins::OptimSwitch::parse(&values.data()[0]).is_some()
             }
             Value::CharArray(chars) if chars.rows == 1 => {
-                runmat_builtins::OptimSwitch::parse(&chars.data.iter().collect::<String>())
+                runmat_builtins::OptimSwitch::parse(&chars.data().iter().collect::<String>())
                     .is_some()
             }
             _ => false,
@@ -213,7 +233,7 @@ mod tests {
 
     #[test]
     fn preparation_preserves_public_keys_and_ignores_unconsumed_controls() {
-        let mut options = StructValue::new();
+        let mut options = runmat_value::UnboundedStructValueBuilder::new();
         options.insert("StepTolerance", Value::Num(0.125));
         options.insert("Algorithm", Value::Num(42.0));
         options.insert(
@@ -221,9 +241,11 @@ mod tests {
             Value::String("untouched".into()),
         );
         let mut cooperation = ScalarCooperation::new(OptimSolver::Fsolve, None);
+        let options = options.finish();
         let prepared = block_on(prepare_solver_options(
             OptimSolver::Fsolve,
             Some(options),
+            None,
             None,
             None,
             &mut cooperation,
@@ -231,16 +253,16 @@ mod tests {
         .unwrap()
         .unwrap();
         assert!(matches!(
-            prepared.fields.get("StepTolerance"),
+            prepared.structure().fields.get("StepTolerance"),
             Some(Value::Num(0.125))
         ));
         assert!(matches!(
-            prepared.fields.get("Algorithm"),
+            prepared.structure().fields.get("Algorithm"),
             Some(Value::Num(42.0))
         ));
         assert!(
-            matches!(prepared.fields.get("UnknownResidentLikeField"), Some(Value::String(value)) if value == "untouched")
+            matches!(prepared.structure().fields.get("UnknownResidentLikeField"), Some(Value::String(value)) if value == "untouched")
         );
-        assert!(prepared.fields.get("TolX").is_none());
+        assert!(prepared.structure().fields.get("TolX").is_none());
     }
 }

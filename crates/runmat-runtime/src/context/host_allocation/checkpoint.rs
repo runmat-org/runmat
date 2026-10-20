@@ -1,0 +1,84 @@
+//! Read-only identity of an allocation operation's original owner. Capturing
+//! this token allocates nothing and grants no bytes, permit, or service.
+
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
+
+use runmat_execution::cancellation::CancellationToken;
+
+use super::{HostAllocationContext, HostAllocationError};
+use crate::context::{
+    host_effect::ManagedHostEffectLedger, RuntimeContext, RuntimeParallelService,
+};
+
+#[derive(Clone)]
+pub(super) struct AllocationOwnerState {
+    pub(super) ledger: ManagedHostEffectLedger,
+    pub(super) epoch: u64,
+    pub(super) cancellation: CancellationToken,
+    pub(super) generation_owner: Arc<AtomicU64>,
+    pub(super) generation: u64,
+}
+
+impl AllocationOwnerState {
+    pub(super) fn check(&self) -> Result<(), HostAllocationError> {
+        if self.cancellation.is_cancelled() {
+            return Err(HostAllocationError::Cancelled);
+        }
+        let state = self.ledger.snapshot();
+        if self.generation_owner.load(Ordering::Acquire) != self.generation
+            || !state.current
+            || state.epoch != self.epoch
+        {
+            return Err(HostAllocationError::StaleAuthority);
+        }
+        Ok(())
+    }
+
+    fn check_parallel(
+        &self,
+        parallel: &dyn RuntimeParallelService,
+    ) -> Result<(), HostAllocationError> {
+        let ledger = parallel
+            .managed_host_effect_ledger()
+            .ok_or(HostAllocationError::StaleAuthority)?;
+        if !ledger.same_owner(&self.ledger) || parallel.placement_resources().epoch != self.epoch {
+            return Err(HostAllocationError::StaleAuthority);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct HostAllocationCheckpoint {
+    pub(super) context: HostAllocationContext,
+    pub(super) owner: AllocationOwnerState,
+}
+
+impl HostAllocationCheckpoint {
+    pub(crate) fn check(&self, runtime: &RuntimeContext) -> Result<(), HostAllocationError> {
+        self.owner.check()?;
+        if !self.context.matches_runtime(runtime)
+            || !self.context.matches_cancellation(&self.owner.cancellation)
+        {
+            return Err(HostAllocationError::StaleAuthority);
+        }
+        let parallel = runtime
+            .service_ports()
+            .parallel()
+            .ok_or(HostAllocationError::StaleAuthority)?;
+        self.owner.check_parallel(parallel.as_ref())?;
+        self.owner.check()
+    }
+
+    pub(super) fn check_captured(&self) -> Result<(), HostAllocationError> {
+        self.owner.check()?;
+        if !self.context.matches_cancellation(&self.owner.cancellation) {
+            return Err(HostAllocationError::StaleAuthority);
+        }
+        self.owner.check_parallel(self.context.parallel())?;
+        self.owner.check()
+    }
+}

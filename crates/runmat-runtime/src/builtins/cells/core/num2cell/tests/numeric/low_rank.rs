@@ -9,7 +9,7 @@ fn low_rank_numeric_inputs_preserve_cell_geometry_and_native_values() {
         panic!("scalar cell expected")
     };
     assert_eq!(scalar.shape, vec![1, 1]);
-    let Value::Tensor(value) = &scalar.data[0] else {
+    let Value::Tensor(value) = &scalar.data()[0] else {
         panic!("single scalar retains native storage")
     };
     assert_eq!(value.shape(), &[1, 1]);
@@ -22,7 +22,7 @@ fn low_rank_numeric_inputs_preserve_cell_geometry_and_native_values() {
     };
     assert_eq!(vector.shape, vec![2]);
     assert_eq!(
-        vector.data.as_slice(),
+        vector.data(),
         &[
             Value::Int(IntValue::U64(u64::MAX)),
             Value::Int(IntValue::U64(1 << 63))
@@ -40,7 +40,7 @@ fn rank_zero_numeric_and_complex_arrays_make_one_exact_cell() {
         panic!("double scalar cell expected")
     };
     assert_eq!(double.shape, vec![1, 1]);
-    assert_eq!(double.data, vec![Value::Num(2.5)]);
+    assert_eq!(double.data(), vec![Value::Num(2.5)]);
 
     let Value::Cell(integer) = run(
         Value::Tensor(Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![]).unwrap()),
@@ -49,7 +49,7 @@ fn rank_zero_numeric_and_complex_arrays_make_one_exact_cell() {
         panic!("integer scalar cell expected")
     };
     assert_eq!(integer.shape, vec![1, 1]);
-    assert_eq!(integer.data, vec![Value::Int(IntValue::U64(u64::MAX))]);
+    assert_eq!(integer.data(), vec![Value::Int(IntValue::U64(u64::MAX))]);
 
     let Value::Cell(complex_double) = run(
         Value::ComplexTensor(ComplexTensor::new(vec![(3.0, -4.0)], vec![]).unwrap()),
@@ -58,7 +58,7 @@ fn rank_zero_numeric_and_complex_arrays_make_one_exact_cell() {
         panic!("complex double scalar cell expected")
     };
     assert_eq!(complex_double.shape, vec![1, 1]);
-    assert_eq!(complex_double.data, vec![Value::Complex(3.0, -4.0)]);
+    assert_eq!(complex_double.data(), vec![Value::Complex(3.0, -4.0)]);
 
     let Value::Cell(complex_single) = run(
         Value::ComplexTensor(ComplexTensor::from_f32(vec![(1.5, -2.0)], vec![]).unwrap()),
@@ -67,7 +67,7 @@ fn rank_zero_numeric_and_complex_arrays_make_one_exact_cell() {
         panic!("complex single scalar cell expected")
     };
     assert_eq!(complex_single.shape, vec![1, 1]);
-    let Value::ComplexTensor(value) = &complex_single.data[0] else {
+    let Value::ComplexTensor(value) = &complex_single.data()[0] else {
         panic!("complex single retains native storage")
     };
     assert_eq!(value.shape(), &[1, 1]);
@@ -86,7 +86,7 @@ fn rank_zero_numeric_and_complex_arrays_make_one_exact_cell() {
         panic!("complex integer scalar cell expected")
     };
     assert_eq!(complex_integer.shape, vec![1, 1]);
-    let Value::ComplexTensor(value) = &complex_integer.data[0] else {
+    let Value::ComplexTensor(value) = &complex_integer.data()[0] else {
         panic!("complex integer retains exact component storage")
     };
     assert_eq!(value.shape(), &[1, 1]);

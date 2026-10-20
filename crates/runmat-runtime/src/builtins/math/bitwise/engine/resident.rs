@@ -1,6 +1,8 @@
 use super::*;
 
-pub(super) fn borrowed_gpu_inputs(args: &[Value]) -> Vec<runmat_accelerate_api::GpuTensorHandle> {
+pub(super) fn borrowed_gpu_inputs(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> Vec<runmat_accelerate_api::GpuTensorHandle> {
     args.iter()
         .filter_map(|value| match value {
             Value::GpuTensor(handle) => Some(handle.clone()),

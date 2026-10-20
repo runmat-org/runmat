@@ -101,7 +101,7 @@ fn blsprice_matches_documented_stock_option_example() {
             Value::Num(0.10),
             Value::Num(0.25),
             Value::Num(0.50),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .unwrap(),
     );
@@ -120,7 +120,7 @@ fn blsprice_vectorizes_scalar_inputs() {
             Value::Num(0.10),
             Value::Num(0.25),
             Value::Num(0.50),
-            vec![Value::Num(0.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(0.0)]),
         ))
         .unwrap(),
     );
@@ -144,10 +144,9 @@ fn blsprice_broadcast_inputs_read_typed_integer_storage_exactly() {
             Value::Num(0.10),
             Value::Num(0.25),
             Value::Num(0.50),
-            vec![poisoned_integer_tensor(
-                IntegerStorage::U8(vec![0]),
-                vec![1, 1],
-            )],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                poisoned_integer_tensor(IntegerStorage::U8(vec![0]), vec![1, 1]),
+            ]),
         ))
         .unwrap(),
     );
@@ -172,14 +171,14 @@ fn nondouble_pricing_inputs_are_gated_before_provider_work() {
         Value::Num(0.10),
         Value::Num(0.25),
         Value::Num(0.50),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect_err("integer pricing is a RunMat extension");
     assert_eq!(
         failure.identifier(),
         BLSPRICE_NONDOUBLE_EXTENSION.error_identifier
     );
-    let failure = block_on(blsimpv_builtin(
+    let failure = block_on(blsimpv_builtin_source(
         Value::Num(100.0),
         Value::Num(95.0),
         Value::Num(0.10),
@@ -204,7 +203,7 @@ fn nondouble_pricing_inputs_are_gated_before_provider_work() {
             Value::Num(0.10),
             Value::Num(0.25),
             Value::Num(0.50),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect_err("resident single is a RunMat extension");
         assert_eq!(
@@ -229,7 +228,7 @@ fn invalid_host_pricing_operand_precedes_any_resident_download_or_upload() {
             Value::Num(0.10),
             Value::Num(0.25),
             Value::Num(0.50),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect_err("known invalid host operand");
         assert_eq!(failure.identifier(), ERROR_INVALID_INPUT.identifier);
@@ -237,7 +236,7 @@ fn invalid_host_pricing_operand_precedes_any_resident_download_or_upload() {
         assert_eq!(provider.telemetry_snapshot().upload_bytes, 0);
 
         provider.reset_telemetry();
-        let failure = block_on(blsimpv_builtin(
+        let failure = block_on(blsimpv_builtin_source(
             Value::GpuTensor(handle),
             Value::Num(95.0),
             Value::Num(0.10),
@@ -261,7 +260,7 @@ fn blsprice_implicitly_expands_nonscalar_inputs() {
             Value::Num(0.05),
             Value::Num(0.5),
             Value::Num(0.2),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .unwrap(),
     );
@@ -320,7 +319,9 @@ fn blsprice_gpu_resident_inputs_preserve_residency() {
                 Value::GpuTensor(rate_gpu.clone()),
                 Value::GpuTensor(time_gpu.clone()),
                 Value::GpuTensor(volatility_gpu.clone()),
-                vec![Value::GpuTensor(yield_gpu.clone())],
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(
+                    yield_gpu.clone(),
+                )]),
             ))
             .unwrap(),
         );
@@ -362,7 +363,7 @@ fn blsprice_host_single_class_ignores_double_scalar_representation() {
             Value::Num(0.1),
             Value::Num(0.25),
             Value::Num(0.5),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect("single price with double scalar controls");
         assert_eq!(as_tensor(&result).numeric_dtype(), NumericDType::F32);
@@ -375,7 +376,7 @@ fn blsprice_host_single_class_ignores_double_scalar_representation() {
         Value::Num(0.1),
         Value::Num(0.25),
         Value::Num(0.5),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("single scalar result");
     assert_eq!(as_tensor(&all_scalar).numeric_dtype(), NumericDType::F32);
@@ -391,7 +392,7 @@ fn blsprice_nonscalar_double_array_forces_double() {
         Value::Num(0.1),
         Value::Num(0.25),
         Value::Num(0.5),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("double array determines result precision");
     assert_eq!(as_tensor(&result).numeric_dtype(), NumericDType::F64);
@@ -408,7 +409,7 @@ fn single_boundary_rejects_finite_double_scalar_overflow_and_underflow() {
             Value::Num(0.1),
             Value::Num(0.25),
             Value::Num(0.5),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect_err("double scalar outside single range");
         assert_eq!(failure.identifier(), ERROR_INVALID_INPUT.identifier);
@@ -425,7 +426,7 @@ fn black_scholes_nan_inputs_propagate_elementwise() {
             Value::Num(0.10),
             Value::Num(0.25),
             Value::Num(0.50),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .unwrap(),
     );
@@ -434,7 +435,7 @@ fn black_scholes_nan_inputs_propagate_elementwise() {
     assert!(call.materialize_f64()[0].is_finite());
     assert!(call.materialize_f64()[1].is_nan());
 
-    let vol = block_on(blsimpv_builtin(
+    let vol = block_on(blsimpv_builtin_source(
         tensor(vec![100.0, f64::NAN], 2, 1),
         Value::Num(95.0),
         Value::Num(0.10),
@@ -456,7 +457,7 @@ fn blsprice_empty_yield_uses_default_zero_yield() {
         Value::Num(0.10),
         Value::Num(0.25),
         Value::Num(0.50),
-        vec![empty_numeric()],
+        crate::builtins::common::test_support::builtin_arguments(vec![empty_numeric()]),
     ))
     .unwrap();
     let without_yield = block_on(blsprice_builtin(
@@ -465,7 +466,7 @@ fn blsprice_empty_yield_uses_default_zero_yield() {
         Value::Num(0.10),
         Value::Num(0.25),
         Value::Num(0.50),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap();
     assert!((as_scalar(&with_empty_yield) - as_scalar(&without_yield)).abs() < 1e-12);
@@ -481,7 +482,7 @@ fn blsprice_single_with_empty_yield_keeps_single_for_numeric_cell_and_string_arr
         Value::Num(0.10),
         Value::Num(0.25),
         Value::Num(0.50),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("default yield");
     for yield_value in [
@@ -495,7 +496,7 @@ fn blsprice_single_with_empty_yield_keeps_single_for_numeric_cell_and_string_arr
             Value::Num(0.10),
             Value::Num(0.25),
             Value::Num(0.50),
-            vec![yield_value],
+            crate::builtins::common::test_support::builtin_arguments(vec![yield_value]),
         ))
         .expect("empty yield uses default");
         let result = as_tensor(&result);
@@ -516,10 +517,10 @@ fn blsimpv_inverts_call_price() {
         Value::Num(0.10),
         Value::Num(0.25),
         Value::Num(0.50),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap();
-    let vol = block_on(blsimpv_builtin(
+    let vol = block_on(blsimpv_builtin_source(
         Value::Num(100.0),
         Value::Num(95.0),
         Value::Num(0.10),
@@ -541,12 +542,12 @@ fn blsimpv_supports_put_class_and_yield() {
             Value::Num(0.02),
             Value::Num(0.25),
             Value::Num(0.25),
-            vec![Value::Num(0.025)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(0.025)]),
         ))
         .unwrap(),
     );
     drop(guard);
-    let vol = block_on(blsimpv_builtin(
+    let vol = block_on(blsimpv_builtin_source(
         Value::Num(910.0),
         Value::Num(980.0),
         Value::Num(0.02),
@@ -569,7 +570,7 @@ fn blsimpv_vectorizes_class_strings() {
     let classes = Value::StringArray(
         StringArray::new(vec!["call".to_string(), "put".to_string()], vec![2, 1]).unwrap(),
     );
-    let out = block_on(blsimpv_builtin(
+    let out = block_on(blsimpv_builtin_source(
         tensor(vec![100.0, 100.0], 2, 1),
         Value::Num(95.0),
         Value::Num(0.10),
@@ -586,7 +587,7 @@ fn blsimpv_vectorizes_class_strings() {
 
 #[test]
 fn blsimpv_returns_nan_when_no_solution_in_limit() {
-    let out = block_on(blsimpv_builtin(
+    let out = block_on(blsimpv_builtin_source(
         Value::Num(100.0),
         Value::Num(95.0),
         Value::Num(0.10),
@@ -622,10 +623,10 @@ fn blsimpv_jackel_method_uses_default_bound_and_empty_defaults() {
         Value::Num(0.10),
         Value::Num(0.25),
         Value::Num(0.50),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap();
-    let vol = block_on(blsimpv_builtin(
+    let vol = block_on(blsimpv_builtin_source(
         Value::Num(100.0),
         Value::Num(95.0),
         Value::Num(0.10),
@@ -654,10 +655,10 @@ fn black_scholes_rejects_shape_mismatch_and_bad_options() {
         Value::Num(0.10),
         Value::Num(0.25),
         Value::Num(0.50),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .is_err());
-    assert!(block_on(blsimpv_builtin(
+    assert!(block_on(blsimpv_builtin_source(
         Value::Num(100.0),
         Value::Num(95.0),
         Value::Num(0.10),

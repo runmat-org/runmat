@@ -92,7 +92,7 @@ mod tests {
     use crate::builtins::math::interpolation::pp::{build_spline_pp, pp_to_value, NumericSeries};
     use futures::executor::block_on;
     use runmat_builtins::PPVAL_DESCRIPTOR;
-    use runmat_value::{StructValue, Tensor};
+    use runmat_value::Tensor;
 
     #[test]
     fn ppval_evaluates_spline_struct() {
@@ -152,7 +152,7 @@ mod tests {
 
     #[test]
     fn ppval_reads_piece_major_rows_from_external_vector_valued_pp() {
-        let mut pp = StructValue::new();
+        let mut pp = runmat_value::UnboundedStructValueBuilder::new();
         pp.insert("form", Value::String("pp".into()));
         pp.insert(
             "breaks",
@@ -170,7 +170,8 @@ mod tests {
         pp.insert("order", Value::Num(2.0));
         pp.insert("dim", Value::Num(2.0));
         let query = Value::Tensor(Tensor::new(vec![0.5, 1.5], vec![1, 2]).unwrap());
-        let Value::Tensor(output) = block_on(ppval_builtin(Value::Struct(pp), query)).unwrap()
+        let Value::Tensor(output) =
+            block_on(ppval_builtin(Value::Struct(pp.finish()), query)).unwrap()
         else {
             panic!("two-component pp must return a tensor");
         };

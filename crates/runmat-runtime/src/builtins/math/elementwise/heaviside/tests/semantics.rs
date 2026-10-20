@@ -80,7 +80,10 @@ fn runmat_extensions_promote_logical_integer_and_character_values() {
 
 #[test]
 fn rejects_complex_and_string_inputs_with_catalog_error() {
-    for input in [Value::Complex(1.0, 1.0), Value::String("runmat".to_owned())] {
+    for input in [
+        Value::Complex(1.0, 1.0),
+        Value::String("runmat".to_owned().into()),
+    ] {
         let error = execute(input).expect_err("unsupported input");
         assert_eq!(error.identifier(), HEAVISIDE_ERROR_INVALID_INPUT.identifier);
     }

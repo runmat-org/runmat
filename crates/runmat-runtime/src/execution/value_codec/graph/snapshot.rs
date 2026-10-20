@@ -86,6 +86,7 @@ pub fn prepare_invocation<'a>(
                     ));
                 }
                 CallableTarget::FevalForward(value) => Input::Borrowed(value),
+                CallableTarget::RetainedFevalForward(value) => Input::Borrowed(value.value()),
                 CallableTarget::Resolved { .. } => {
                     return Err(ValueCodecError::unsupported(
                         "$",
@@ -481,6 +482,9 @@ impl PreparedPayloadGraph<'_> {
 enum Input<'a> {
     Borrowed(&'a Value),
     Owned(Value),
+    /// The original shared Cell backing retains this child; `prepare_inputs`
+    /// separately leases all managed handles reached by the rooted traversal.
+    SharedCellChild(runmat_value::RetainedArrayValue),
     BoundTarget(&'a runmat_value::BoundFunctionBinding),
     SelectedAnchor(runmat_value::BoundFunctionBinding),
 }
@@ -490,6 +494,7 @@ impl<'a> Input<'a> {
         match self {
             Self::Borrowed(value) => Some(value),
             Self::Owned(value) => Some(value),
+            Self::SharedCellChild(child) => Some(child.value()),
             Self::BoundTarget(_) | Self::SelectedAnchor(_) => None,
         }
     }
@@ -498,6 +503,7 @@ impl<'a> Input<'a> {
         match self {
             Self::Borrowed(value) => value,
             Self::Owned(value) => value,
+            Self::SharedCellChild(child) => child.value(),
             Self::BoundTarget(_) | Self::SelectedAnchor(_) => {
                 unreachable!("typed bound target is not a Value")
             }
@@ -506,8 +512,37 @@ impl<'a> Input<'a> {
 
     fn cell_children(self) -> Vec<Self> {
         match self {
-            Self::Borrowed(Value::Cell(cell)) => cell.data.iter().map(Self::Borrowed).collect(),
-            Self::Owned(Value::Cell(cell)) => cell.data.into_iter().map(Self::Owned).collect(),
+            Self::Borrowed(Value::Cell(cell)) => cell.data().iter().map(Self::Borrowed).collect(),
+            Self::Owned(Value::Cell(cell)) => match cell.into_owned_data() {
+                Ok(values) => values.into_iter().map(Self::Owned).collect(),
+                Err(cell) => {
+                    let owner = cell.data_owner();
+                    (0..owner.len())
+                        .map(|index| {
+                            Self::SharedCellChild(
+                                owner.retain_value_at(index).expect("shared cell child"),
+                            )
+                        })
+                        .collect()
+                }
+            },
+            Self::SharedCellChild(parent) => {
+                let Value::Cell(cell) = parent.value() else {
+                    unreachable!("selected cell input")
+                };
+                (0..cell.data().len())
+                    .map(|index| {
+                        Self::SharedCellChild(
+                            parent
+                                .project(|value| match value {
+                                    Value::Cell(cell) => cell.data().get(index),
+                                    _ => None,
+                                })
+                                .expect("retained cell child"),
+                        )
+                    })
+                    .collect()
+            }
             _ => unreachable!("selected cell input"),
         }
     }
@@ -518,7 +553,24 @@ impl<'a> Input<'a> {
                 array.data().iter().map(Self::Borrowed).collect()
             }
             Self::Owned(Value::ObjectArray(array)) => {
-                array.into_data().into_iter().map(Self::Owned).collect()
+                array.data().iter().cloned().map(Self::Owned).collect()
+            }
+            Self::SharedCellChild(parent) => {
+                let Value::ObjectArray(array) = parent.value() else {
+                    unreachable!("selected object array input")
+                };
+                (0..array.data().len())
+                    .map(|index| {
+                        Self::SharedCellChild(
+                            parent
+                                .project(|value| match value {
+                                    Value::ObjectArray(array) => array.data().get(index),
+                                    _ => None,
+                                })
+                                .expect("retained object-array child"),
+                        )
+                    })
+                    .collect()
             }
             _ => unreachable!("selected object array input"),
         }
@@ -529,23 +581,60 @@ impl<'a> Input<'a> {
             Self::Borrowed(Value::Struct(value)) => value
                 .fields
                 .iter()
-                .map(|(name, value)| (name.clone(), Self::Borrowed(value)))
+                .map(|(name, value)| (name.to_owned(), Self::Borrowed(value)))
                 .collect(),
             Self::Owned(Value::Struct(value)) => value
                 .fields
-                .into_iter()
-                .map(|(name, value)| (name, Self::Owned(value)))
+                .iter()
+                .map(|(name, value)| (name.to_owned(), Self::Owned(value.clone())))
                 .collect(),
             Self::Borrowed(Value::Object(value)) => value
-                .properties
+                .properties()
                 .iter()
-                .map(|(name, value)| (name.clone(), Self::Borrowed(value)))
+                .map(|(name, value)| (name.to_owned(), Self::Borrowed(value)))
                 .collect(),
             Self::Owned(Value::Object(value)) => value
-                .properties
-                .into_iter()
-                .map(|(name, value)| (name, Self::Owned(value)))
+                .properties()
+                .iter()
+                .map(|(name, value)| (name.to_owned(), Self::Owned(value.clone())))
                 .collect(),
+            Self::SharedCellChild(parent) => match parent.value() {
+                Value::Struct(value) => value
+                    .fields
+                    .iter()
+                    .map(|(name, _)| {
+                        (
+                            name.to_owned(),
+                            Self::SharedCellChild(
+                                parent
+                                    .project(|value| match value {
+                                        Value::Struct(value) => value.fields.get(name),
+                                        _ => None,
+                                    })
+                                    .expect("retained struct child"),
+                            ),
+                        )
+                    })
+                    .collect(),
+                Value::Object(value) => value
+                    .properties()
+                    .keys()
+                    .map(|name| {
+                        (
+                            name.to_owned(),
+                            Self::SharedCellChild(
+                                parent
+                                    .project(|value| match value {
+                                        Value::Object(value) => value.properties().get(name),
+                                        _ => None,
+                                    })
+                                    .expect("retained object child"),
+                            ),
+                        )
+                    })
+                    .collect(),
+                _ => unreachable!("selected named input"),
+            },
             _ => unreachable!("selected named input"),
         };
         fields.sort_by(|left, right| left.0.cmp(&right.0));
@@ -557,12 +646,38 @@ impl<'a> Input<'a> {
             Self::Borrowed(Value::Closure(value)) => {
                 value.captures.iter().map(Self::Borrowed).collect()
             }
-            Self::Owned(Value::Closure(value)) => value
-                .into_data()
-                .captures
-                .into_iter()
-                .map(Self::Owned)
-                .collect(),
+            Self::Owned(Value::Closure(value)) => {
+                let captures = value.into_data().captures;
+                match captures.try_into_owned() {
+                    Ok(values) => values.into_iter().map(Self::Owned).collect(),
+                    Err(owner) => (0..owner.len())
+                        .map(|index| {
+                            Self::SharedCellChild(
+                                owner
+                                    .retain_value_at(index)
+                                    .expect("shared closure capture"),
+                            )
+                        })
+                        .collect(),
+                }
+            }
+            Self::SharedCellChild(parent) => {
+                let Value::Closure(closure) = parent.value() else {
+                    unreachable!("selected closure input")
+                };
+                (0..closure.captures.len())
+                    .map(|index| {
+                        Self::SharedCellChild(
+                            parent
+                                .project(|value| match value {
+                                    Value::Closure(closure) => closure.captures.get(index),
+                                    _ => None,
+                                })
+                                .expect("retained closure capture"),
+                        )
+                    })
+                    .collect()
+            }
             _ => unreachable!("selected closure input"),
         }
     }
@@ -730,6 +845,10 @@ impl<'a> Encoder<'a> {
                 {
                     Some(handle.target)
                 }
+                Input::SharedCellChild(_) => match input.value() {
+                    Value::HandleObject(handle) if handle.valid => Some(handle.target),
+                    _ => None,
+                },
                 _ => None,
             };
             if let Some(handle) = handle {

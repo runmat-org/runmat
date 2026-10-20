@@ -38,10 +38,10 @@ fn invalid_axes_source(source: RuntimeError) -> RuntimeError {
     builder.build()
 }
 
-fn validate_lsline_args(args: &[Value]) -> BuiltinResult<()> {
-    match args {
-        [] => Ok(()),
-        [arg] => match resolve_plot_handle(arg, NAME) {
+fn validate_lsline_args(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<()> {
+    match (args.len(), args.first()) {
+        (0, _) => Ok(()),
+        (1, Some(arg)) => match resolve_plot_handle(arg, NAME) {
             Ok(PlotHandle::Axes(_, _)) => Ok(()),
             Ok(_) => Err(invalid_argument("lsline: expected an axes handle")),
             Err(err) => Err(invalid_axes_source(err)),
@@ -55,11 +55,15 @@ fn validate_lsline_args(args: &[Value]) -> BuiltinResult<()> {
 #[runtime_builtin(
     name = "lsline",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::stats::summary::lsline"
 )]
-pub(crate) async fn lsline_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    validate_lsline_args(&args)?;
-    super::reference_lines::run_reference_lines(args, ReferenceLineOwner::Lsline).await
+pub(crate) async fn lsline_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    validate_lsline_args(args.view())?;
+    super::reference_lines::run_reference_lines(runtime, args, ReferenceLineOwner::Lsline).await
 }
 
 #[cfg(test)]
@@ -108,7 +112,11 @@ mod tests {
         ))
         .unwrap();
 
-        let handle = block_on(lsline_builtin(Vec::new())).unwrap();
+        let handle = block_on(lsline_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap();
         let Value::Num(handle) = handle else {
             panic!("expected line handle");
         };
@@ -136,7 +144,11 @@ mod tests {
 
         let fig = current_figure_handle();
         let ax = encode_axes_handle(fig, 1);
-        let handle = block_on(lsline_builtin(vec![Value::Num(ax)])).unwrap();
+        let handle = block_on(lsline_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(ax)]),
+        ))
+        .unwrap();
         let Value::Num(handle) = handle else {
             panic!("expected line handle");
         };
@@ -150,16 +162,27 @@ mod tests {
     #[test]
     fn lsline_rejects_extra_arguments() {
         let _guard = setup();
-        let err = block_on(lsline_builtin(vec![Value::Num(1.0), Value::Num(2.0)]))
-            .expect_err("extra arguments should fail");
+        let err = block_on(lsline_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(1.0),
+                Value::Num(2.0),
+            ]),
+        ))
+        .expect_err("extra arguments should fail");
         assert_eq!(err.identifier(), LSLINE_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[test]
     fn lsline_invalid_axes_keeps_its_own_diagnostic() {
         let _guard = setup();
-        let err = block_on(lsline_builtin(vec![Value::String("not axes".into())]))
-            .expect_err("text is not an axes handle");
+        let err = block_on(lsline_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "not axes".into(),
+            )]),
+        ))
+        .expect_err("text is not an axes handle");
         assert_eq!(err.identifier(), LSLINE_ERROR_INVALID_ARGUMENT.identifier);
         assert_eq!(err.context.builtin.as_deref(), Some("lsline"));
         assert!(std::error::Error::source(&err).is_some());

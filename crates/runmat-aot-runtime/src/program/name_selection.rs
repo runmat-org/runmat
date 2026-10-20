@@ -5,13 +5,13 @@ use std::path::Path;
 
 use runmat_execution::ExecutableSourceMapV2;
 use runmat_native_codegen::aot::{AotProgramFunction, AotProgramManifest};
-use runmat_types::{FunctionSourceRole, ProgramFunctionId};
+use runmat_types::{FunctionId, FunctionSourceRole};
 
 pub(super) fn select(
     program: &AotProgramManifest,
     caller: Option<usize>,
     name: &str,
-) -> Option<ProgramFunctionId> {
+) -> Option<FunctionId> {
     select_scoped_from(&program.functions, &program.source_map, caller, name)
         .or_else(|| program.resolve_name(name))
 }
@@ -20,7 +20,7 @@ pub(super) fn select_scoped(
     program: &AotProgramManifest,
     caller: Option<usize>,
     name: &str,
-) -> Option<ProgramFunctionId> {
+) -> Option<FunctionId> {
     select_scoped_from(&program.functions, &program.source_map, caller, name)
 }
 
@@ -29,10 +29,10 @@ fn select_scoped_from(
     map: &ExecutableSourceMapV2,
     caller: Option<usize>,
     name: &str,
-) -> Option<ProgramFunctionId> {
+) -> Option<FunctionId> {
     let caller = functions
         .iter()
-        .find(|function| usize::try_from(function.function.0).ok() == caller)?;
+        .find(|function| Some(function.function.0) == caller)?;
     let caller_source = source(map, caller)?;
     let caller_path = &caller_source.relative_path;
     let visibility_dir = private_parent(caller_path).or_else(|| Path::new(caller_path).parent());
@@ -84,7 +84,7 @@ fn private_parent(path: &str) -> Option<&Path> {
 
 fn select_unique<'a>(
     mut matches: impl Iterator<Item = &'a AotProgramFunction>,
-) -> Option<ProgramFunctionId> {
+) -> Option<FunctionId> {
     let selected = matches.next()?.function;
     matches.next().is_none().then_some(selected)
 }
@@ -113,7 +113,8 @@ mod tests {
         role: FunctionSourceRole,
     ) -> AotProgramFunction {
         AotProgramFunction {
-            function: ProgramFunctionId(ordinal),
+            function: FunctionId(ordinal as usize),
+            portable_function: runmat_types::ProgramFunctionId(ordinal),
             source: ProgramSourceId(source),
             name: name.into(),
             role,
@@ -141,11 +142,11 @@ mod tests {
         ];
         assert_eq!(
             select_scoped_from(&functions, &map, Some(0), "helper"),
-            Some(ProgramFunctionId(2))
+            Some(FunctionId(2))
         );
         assert_eq!(
             select_scoped_from(&functions, &map, Some(0), "local"),
-            Some(ProgramFunctionId(3))
+            Some(FunctionId(3))
         );
         assert_eq!(
             select_scoped_from(&functions, &map, Some(4), "helper"),
@@ -154,7 +155,7 @@ mod tests {
         assert_eq!(select_scoped_from(&functions, &map, Some(4), "local"), None);
         assert_eq!(
             select_scoped_from(&functions, &map, Some(5), "helper"),
-            Some(ProgramFunctionId(2))
+            Some(FunctionId(2))
         );
     }
 

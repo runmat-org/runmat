@@ -13,7 +13,7 @@ pub(crate) mod tests;
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
-pub(crate) use execution::{get_member_value, get_member_value_in_context};
+pub(crate) use execution::get_member_value_in_context;
 
 #[cfg(test)]
 pub(crate) use errors::is_undefined_function;
@@ -32,7 +32,7 @@ pub(crate) use spec::{
 async fn getfield_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     base: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<crate::execution::RootedValue> {
     let work = async {
         crate::output_count::validate_fixed_outputs(
@@ -53,5 +53,10 @@ pub(crate) async fn getfield_internal_with_context(
     base: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<crate::execution::RootedValue> {
-    execution::getfield(runtime, base, rest, false).await
+    let rest = match runtime {
+        Some(runtime) => crate::execution::RootedValues::in_context(rest, runtime)?,
+        None => crate::execution::RootedValues::new(rest)
+            .map_err(crate::execution::ExecutionServiceError::into_runtime_error)?,
+    };
+    execution::getfield(runtime, base, rest.into(), false).await
 }

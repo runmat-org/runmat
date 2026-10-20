@@ -9,15 +9,19 @@ use std::num::NonZeroUsize;
 #[path = "dense/admission.rs"]
 mod admission;
 use admission::DenseAdmission;
+#[path = "dense/managed.rs"]
+mod managed;
+use managed::{ManagedDense, ManagedDenseOwner};
 
 pub(in crate::execution::value_codec::decode::machine) struct DenseTask<'a> {
     source: &'a DenseValue,
-    path: String,
+    path: ControlPath<'a>,
     offset: usize,
     state: DenseState<'a>,
 }
 
 enum DenseState<'a> {
+    Managed(ManagedDenseOwner<'a>),
     Decode {
         output: DenseOutput,
         shape: ShapeCopy<'a>,
@@ -51,7 +55,11 @@ pub(super) enum DenseOutput {
 }
 
 impl<'a> DenseTask<'a> {
-    pub(super) fn new(source: &'a DenseValue, path: String) -> Result<Self, ValueCodecError> {
+    pub(super) fn new_with_runtime(
+        source: &'a DenseValue,
+        path: ControlPath<'a>,
+        runtime: Option<&'a crate::context::RuntimeContext>,
+    ) -> Result<Self, ValueCodecError> {
         let width = element_width(source.element_type);
         if !source.little_endian_data.len().is_multiple_of(width) {
             return Err(ValueCodecError::invalid(
@@ -64,8 +72,16 @@ impl<'a> DenseTask<'a> {
             ));
         }
         let elements = source.little_endian_data.len() / width;
+        if let Some(managed) = ManagedDense::new(source, elements, &path, runtime)? {
+            return Ok(Self {
+                source,
+                path,
+                offset: 0,
+                state: DenseState::Managed(managed),
+            });
+        }
         let output = DenseOutput::new(source.element_type, elements);
-        let shape = ShapeCopy::new(&source.shape, path.clone());
+        let shape = ShapeCopy::new(&source.shape, path.try_clone()?);
         Ok(Self {
             source,
             path,
@@ -74,7 +90,7 @@ impl<'a> DenseTask<'a> {
         })
     }
 
-    pub(super) fn path(&self) -> &str {
+    pub(super) fn path(&self) -> &ControlPath<'a> {
         &self.path
     }
 
@@ -83,6 +99,13 @@ impl<'a> DenseTask<'a> {
     }
 
     pub(super) fn advance(&mut self, maximum_work: usize) -> Result<usize, ValueCodecError> {
+        if let DenseState::Managed(managed) = &mut self.state {
+            let (completed, value) = managed.advance(self.source, maximum_work, &self.path)?;
+            if let Some(value) = value {
+                self.state = DenseState::Complete(value);
+            }
+            return Ok(completed);
+        }
         if self.offset < self.source.little_endian_data.len() {
             let width = element_width(self.source.element_type);
             let available = self.source.little_endian_data.len() - self.offset;
@@ -130,10 +153,9 @@ impl<'a> DenseTask<'a> {
     pub(super) fn finish(self) -> Result<Value, ValueCodecError> {
         match self.state {
             DenseState::Complete(value) => Ok(value),
-            DenseState::Decode { .. } | DenseState::Admit(_) => Err(ValueCodecError::invalid(
-                &self.path,
-                "dense admission unexpectedly incomplete",
-            )),
+            DenseState::Managed(_) | DenseState::Decode { .. } | DenseState::Admit(_) => Err(
+                ValueCodecError::invalid(&self.path, "dense admission unexpectedly incomplete"),
+            ),
         }
     }
 }

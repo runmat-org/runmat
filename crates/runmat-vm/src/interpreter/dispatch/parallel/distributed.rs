@@ -12,7 +12,7 @@ mod indices;
 /// polled, after the caller has released that slot guard.
 fn prepare_spmd_distributed_export<'runtime>(
     runtime: &'runtime runmat_runtime::context::RuntimeContext,
-    handle: &runmat_execution::DistributedValueHandle,
+    handle: &runmat_value::SharedDistributedHandle,
 ) -> Result<
     impl std::future::Future<Output = Result<runmat_execution::SpmdOutputValue, RuntimeError>>
         + use<'runtime>,
@@ -143,7 +143,7 @@ pub(super) async fn execute(
                     "getLocalPart requires an SPMD rank context for a multi-partition value",
                 ));
             };
-            return service.local_part(*handle, rank).await?.try_map_owned(
+            return service.local_part(handle, rank).await?.try_map_owned(
                 |value| {
                     runmat_value::ValueSequence::single(value)
                         .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
@@ -160,7 +160,7 @@ pub(super) async fn execute(
                 ));
             };
             runmat_runtime::parallel::lease::validate_distributed(&execution.runtime, &handle)?;
-            return service.materialize(*handle).await?.try_map_owned(
+            return service.materialize(handle).await?.try_map_owned(
                 |value| {
                     runmat_value::ValueSequence::single(value)
                         .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
@@ -198,9 +198,9 @@ pub(super) async fn execute(
                 handle.partition_count,
             )?;
             service
-                .redistribute(*handle, scheme)
+                .redistribute(handle, scheme)
                 .await
-                .map(|handle| Value::Distributed(Box::new(handle)))
+                .map(|handle| Value::Distributed(handle.into()))
         }
     }?;
     let sequence = runmat_value::ValueSequence::single(value)

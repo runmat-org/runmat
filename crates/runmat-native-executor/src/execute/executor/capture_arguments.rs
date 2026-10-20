@@ -10,7 +10,7 @@ use runmat_runtime::call::RootedFunctionArguments;
 impl NativeExecutor {
     pub(super) fn retained_capture_arguments(
         &self,
-        function: ProgramFunctionId,
+        function: FunctionId,
         arguments: &RootedFunctionArguments,
     ) -> NativeExecutorResult<Vec<NativeCaptureInput>> {
         let body = self
@@ -23,7 +23,7 @@ impl NativeExecutor {
         if let Some(Value::Closure(closure)) = arguments.callable().map(|owner| owner.value()) {
             if closure
                 .bound_function()
-                .is_some_and(|bound| bound != function.0 as usize)
+                .is_some_and(|bound| bound != function.0)
             {
                 return Err(NativeExecutorError::Host(
                     "selected native body differs from retained closure identity".into(),
@@ -76,7 +76,7 @@ impl NativeExecutor {
 
     pub fn split_flattened_capture_arguments(
         &self,
-        function: ProgramFunctionId,
+        function: FunctionId,
         arguments: Vec<Value>,
     ) -> NativeExecutorResult<(Vec<LexicalCapture>, Vec<Value>)> {
         let body = self
@@ -136,7 +136,9 @@ mod tests {
             lexical_bindings: Vec::new(),
             inherited_storage_bindings: Vec::new(),
             creates_lexical_environment: false,
-            id: ProgramFunctionId(4),
+            id: FunctionId(4),
+            portable_id: runmat_types::ProgramFunctionId(14),
+            mir_body_digest: runmat_execution::Digest::sha256(b"fixture:native-capture-arguments"),
             source: ProgramSourceId(0),
             name: "nested".into(),
             source_role: runmat_types::FunctionSourceRole::Unknown,

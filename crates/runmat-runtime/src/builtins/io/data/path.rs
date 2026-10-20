@@ -17,7 +17,7 @@ async fn data_create_builtin(
     runtime: Option<RuntimeContext>,
     path: Value,
     schema: Value,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<crate::execution::RootedValue> {
     let path = parse_string(&path, "data.create path")?;
     let schema = parse_schema(&schema)?;
     for meta in schema.arrays.values() {
@@ -78,7 +78,7 @@ async fn data_create_builtin(
             root.clone(),
             path.clone(),
         )?;
-        Ok(dataset_object(&path, &manifest, lease))
+        dataset_object(runtime.as_ref(), &path, &manifest, lease)
     })
     .await
 }
@@ -89,7 +89,10 @@ async fn data_create_builtin(
     context = true,
     builtin_path = "crate::builtins::io::data::path"
 )]
-async fn data_open_builtin(runtime: Option<RuntimeContext>, path: Value) -> BuiltinResult<Value> {
+async fn data_open_builtin(
+    runtime: Option<RuntimeContext>,
+    path: Value,
+) -> BuiltinResult<crate::execution::RootedValue> {
     let path = parse_string(&path, "data.open path")?;
     let authority = DataPathAuthority::capture(&[&path])?;
     let root = authority.resolve(&path)?;
@@ -109,9 +112,8 @@ async fn data_open_builtin(runtime: Option<RuntimeContext>, path: Value) -> Buil
             root.clone(),
             path.clone(),
         )?;
-        let mut ds = dataset_object(&path, &manifest, lease);
-        hydrate_dataset_descriptor_on(authority.provider(), &root, &mut ds).await;
-        Ok(ds)
+        let ds = dataset_object(runtime.as_ref(), &path, &manifest, lease)?;
+        hydrate_dataset_descriptor_on(runtime.as_ref(), authority.provider(), &root, ds).await
     })
     .await
 }
@@ -268,7 +270,7 @@ async fn data_import_builtin(
     path: Value,
     format: Value,
     source_path: Value,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<crate::execution::RootedValue> {
     let path = parse_string(&path, "data.import path")?;
     let format = parse_string(&format, "data.import format")?;
     if !format.eq_ignore_ascii_case("data") {
@@ -301,7 +303,7 @@ async fn data_import_builtin(
             root.clone(),
             path.clone(),
         )?;
-        Ok(dataset_object(&path, &manifest, lease))
+        dataset_object(runtime.as_ref(), &path, &manifest, lease)
     })
     .await
 }
@@ -397,7 +399,7 @@ async fn data_list_builtin(
                 .await
                 .is_ok()
             {
-                values.push(Value::String(
+                values.push(Value::string(
                     PathBuf::from(&prefix)
                         .join(entry.file_name())
                         .to_string_lossy()
@@ -434,17 +436,17 @@ async fn data_inspect_builtin(
     )?;
     admission::execute(runtime.as_ref(), receipt, async {
         let manifest = crate::data::read_manifest_on(authority.provider(), &root).await?;
-        let mut out = StructValue::new();
-        out.fields.insert("path".to_string(), Value::String(path));
+        let mut out = runmat_value::UnboundedStructValueBuilder::new();
+        out.fields.insert("path".to_string(), Value::string(path));
         out.fields
-            .insert("id".to_string(), Value::String(manifest.dataset_id));
+            .insert("id".to_string(), Value::string(manifest.dataset_id));
         out.fields.insert(
             "arrayCount".to_string(),
             Value::Num(manifest.arrays.len() as f64),
         );
         out.fields
-            .insert("updatedAt".to_string(), Value::String(manifest.updated_at));
-        Ok(Value::Struct(out))
+            .insert("updatedAt".to_string(), Value::string(manifest.updated_at));
+        Ok(Value::Struct(out.finish()))
     })
     .await
 }

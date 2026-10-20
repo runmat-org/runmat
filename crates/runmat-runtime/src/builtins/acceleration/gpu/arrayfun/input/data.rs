@@ -39,7 +39,7 @@ impl ArrayData {
             Self::Logical(value) => value.data.len(),
             Self::Complex(value) => value.len(),
             Self::Char(value) => value.rows * value.cols,
-            Self::String(value) => value.data.len(),
+            Self::String(value) => value.data().len(),
             Self::Scalar(_) => 1,
         }
     }

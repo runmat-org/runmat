@@ -307,7 +307,7 @@ fn logical_f32_resident_default_native_and_noop_adapt_to_double() {
     ] {
         let result = futures::executor::block_on(sum_with_nan_policy(
             Value::GpuTensor(automatic.clone()),
-            options,
+            crate::builtins::common::test_support::builtin_arguments(options),
             None,
         ))
         .expect("automatic logical sum");
@@ -326,7 +326,7 @@ fn logical_f32_resident_default_native_and_noop_adapt_to_double() {
         .unwrap();
     let error = futures::executor::block_on(sum_with_nan_policy(
         Value::GpuTensor(explicit),
-        vec![],
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
         None,
     ))
     .unwrap_err();

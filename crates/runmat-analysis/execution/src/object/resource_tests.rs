@@ -33,6 +33,32 @@ fn chunked_input_inventory_preserves_partition_cost_and_rejects_missing_bytes() 
             ObjectInventoryLimits::default(),
         )
         .unwrap();
+        let access = ArtifactAccess {
+            authorization_scope: "partition-reference-schema".into(),
+            encryption_context: Digest::sha256("partition-reference-key"),
+        };
+        let root = objects
+            .root_reference(&access, ValueRefKind::ResultObject)
+            .unwrap();
+        let references = analysis_object_references(
+            &objects.manifest,
+            &root,
+            &access,
+            ValueRefKind::ResultObject,
+        )
+        .unwrap();
+        assert_eq!(
+            references,
+            objects
+                .unique_references(&access, ValueRefKind::ResultObject)
+                .unwrap()
+        );
+        for reference in references {
+            assert_eq!(reference.schema_version, VALUE_PAYLOAD_SCHEMA_VERSION);
+            reference
+                .validate(runmat_execution::value::ValueLimits::default())
+                .unwrap();
+        }
         let facts = prepared_input_resource_facts_from_refs(std::iter::once(&objects)).unwrap();
         assert_eq!(facts.decoded_resident_bytes_admission_budget.0, expected);
         assert_eq!(

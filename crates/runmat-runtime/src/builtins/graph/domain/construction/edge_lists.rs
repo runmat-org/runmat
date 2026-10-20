@@ -7,7 +7,7 @@ use std::collections::HashMap;
 pub(super) fn graph_from_edges(
     name: &'static str,
     directed: bool,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<Value> {
     if args.len() < 2 {
         return Err(graph_error(

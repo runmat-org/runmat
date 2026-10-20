@@ -4,11 +4,12 @@ use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
 pub(crate) async fn dispatch_call_method(
+    runtime: Option<&crate::context::RuntimeContext>,
     base: Value,
-    method: String,
-    rest: Vec<Value>,
+    method: impl AsRef<str>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<RootedValue> {
-    let method = method.trim().to_string();
+    let method = method.as_ref().trim();
     if method.is_empty() {
         return Err(crate::runtime_descriptor_error(
             "call_method",
@@ -20,25 +21,37 @@ pub(crate) async fn dispatch_call_method(
             let class_name = crate::object_receiver_class_name(&receiver).ok_or_else(|| {
                 crate::runtime_descriptor_error("call_method", &CALL_METHOD_ERROR_RECEIVER_INVALID)
             })?;
-            let mut args = Vec::with_capacity(1 + rest.len());
-            args.push(receiver.clone());
-            args.extend(rest);
+            let args = rest
+                .into_function_arguments()
+                .prepend_routing(receiver, runtime)?;
+            let args = crate::call::BuiltinArguments::new(args)
+                .into_supplied_function_arguments(runtime)?;
             let requested_outputs = crate::current_requested_outputs();
-            match crate::dispatch_object_external_member(
-                class_name,
-                &method,
-                args.clone(),
+            let request = crate::user_functions::CallableRequest::rooted_resolved(
+                crate::class_member_identity(&class_name, method),
+                runmat_types::CallableFallbackPolicy::ExternalBoundary,
+                args,
+                requested_outputs,
+            )
+            .with_selected_runtime(runtime);
+            let args = match crate::user_functions::try_call_semantic_descriptor_owned(request)
+                .await
+            {
+                std::ops::ControlFlow::Break(result) => {
+                    return result
+                        .and_then(crate::call::arguments::project_rooted_legacy_builtin_value_abi);
+                }
+                std::ops::ControlFlow::Continue(args) => crate::call::BuiltinArguments::new(args),
+            };
+            let (identity, fallback_policy) = crate::callable_identity_for_handle_name(method);
+            crate::dispatch_retained_callable_with_policy_in_context(
+                runtime,
+                identity,
+                fallback_policy,
+                args,
                 requested_outputs,
             )
             .await
-            {
-                Ok(v) => return Ok(v),
-                Err(err) if crate::is_undefined_function_error(&err) => {}
-                Err(err) => return Err(err),
-            }
-            let (identity, fallback_policy) = crate::callable_identity_for_handle_name(&method);
-            crate::dispatch_callable_with_policy(identity, fallback_policy, args, requested_outputs)
-                .await
         }
         other => Err(crate::runtime_descriptor_error_with_detail(
             "call_method",
@@ -51,12 +64,14 @@ pub(crate) async fn dispatch_call_method(
 #[runtime_builtin(
     name = "call_method",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::introspection::call_method"
 )]
 pub async fn call_method_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     base: Value,
-    method: String,
-    rest: Vec<Value>,
+    method: runmat_value::Utf8Text,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<RootedValue> {
-    dispatch_call_method(base, method, rest).await
+    dispatch_call_method(runtime.as_ref(), base, method, rest).await
 }

@@ -38,15 +38,20 @@ pub struct LegendCommand {
 
 pub fn value_as_text_lines(value: &Value) -> Option<Vec<String>> {
     match value {
-        Value::String(text) => Some(vec![text.clone()]),
-        Value::CharArray(chars) => Some(vec![chars.data.iter().collect()]),
-        Value::StringArray(arr) => Some(arr.data.clone()),
+        Value::String(text) => Some(vec![text.as_str().to_owned()]),
+        Value::CharArray(chars) => Some(vec![chars.data().iter().collect()]),
+        Value::StringArray(arr) => Some(
+            arr.data()
+                .iter()
+                .map(|text| text.as_str().to_owned())
+                .collect(),
+        ),
         Value::Cell(cell) => {
             let mut lines = Vec::new();
             for row in 0..cell.rows {
                 for col in 0..cell.cols {
-                    let value = cell.get(row, col).ok()?;
-                    lines.push(value_as_string(&value)?);
+                    let value = &cell.data()[row * cell.cols + col];
+                    lines.push(value_as_string(value)?);
                 }
             }
             Some(lines)
@@ -86,7 +91,10 @@ pub fn annotation_error(
     builder.build()
 }
 
-pub fn parse_text_command(builtin: &'static str, args: &[Value]) -> BuiltinResult<TextCommand> {
+pub fn parse_text_command(
+    builtin: &'static str,
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<TextCommand> {
     if args.is_empty() {
         return Err(plotting_error(
             builtin,
@@ -109,7 +117,7 @@ pub fn parse_text_command(builtin: &'static str, args: &[Value]) -> BuiltinResul
             ),
         )
     })?;
-    let style = parse_text_style_pairs(builtin, &rest[1..])?;
+    let style = parse_text_style_pairs(builtin, rest.range(1..)?)?;
     Ok(TextCommand {
         target,
         text,
@@ -119,7 +127,7 @@ pub fn parse_text_command(builtin: &'static str, args: &[Value]) -> BuiltinResul
 
 pub fn parse_numeric_text_command(
     builtin: &'static str,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<TextCommand> {
     if args.is_empty() {
         return Err(plotting_error(
@@ -155,7 +163,7 @@ pub fn parse_numeric_text_command(
                 ),
             )
         })?;
-    let style = parse_text_style_pairs(builtin, &rest[1..])?;
+    let style = parse_text_style_pairs(builtin, rest.range(1..)?)?;
     Ok(TextCommand {
         target,
         text,
@@ -191,7 +199,10 @@ fn format_numeric_scalar(value: NumericScalar) -> Option<String> {
     }
 }
 
-pub fn parse_legend_command(builtin: &'static str, args: &[Value]) -> BuiltinResult<LegendCommand> {
+pub fn parse_legend_command(
+    builtin: &'static str,
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<LegendCommand> {
     let (target, rest) = split_axes_target(builtin, args)?;
     let (rest, style) = split_legend_style_pairs(builtin, rest)?;
 
@@ -262,8 +273,8 @@ pub fn parse_legend_command(builtin: &'static str, args: &[Value]) -> BuiltinRes
 
 pub(crate) fn split_axes_target<'a>(
     builtin: &'static str,
-    args: &'a [Value],
-) -> BuiltinResult<((FigureHandle, usize), &'a [Value])> {
+    args: crate::call::FunctionArgumentView<'a>,
+) -> BuiltinResult<((FigureHandle, usize), crate::call::FunctionArgumentView<'a>)> {
     let DeferredAxesArguments { target, rest } = split_axes_target_deferred(builtin, args)?;
     Ok((target.unwrap_or_else(current_axes_target), rest))
 }
@@ -273,19 +284,19 @@ pub(crate) fn split_axes_target<'a>(
 /// only after their input and cancellation checks have completed.
 pub(crate) struct DeferredAxesArguments<'a> {
     pub(crate) target: Option<(FigureHandle, usize)>,
-    pub(crate) rest: &'a [Value],
+    pub(crate) rest: crate::call::FunctionArgumentView<'a>,
 }
 
 pub(crate) fn split_axes_target_deferred<'a>(
     builtin: &'static str,
-    args: &'a [Value],
+    args: crate::call::FunctionArgumentView<'a>,
 ) -> BuiltinResult<DeferredAxesArguments<'a>> {
     if let Some(first) = args.first() {
         if let Some(target) = try_parse_axes_target(first) {
             if axes_handle_exists(target.0, target.1) {
                 return Ok(DeferredAxesArguments {
                     target: Some(target),
-                    rest: &args[1..],
+                    rest: args.range(1..)?,
                 });
             }
             return Err(plotting_error(
@@ -304,18 +315,21 @@ fn try_parse_axes_target(value: &Value) -> Option<(FigureHandle, usize)> {
     decode_axes_handle(numeric_handle_scalar(value)?).ok()
 }
 
-fn collect_label_strings(builtin: &'static str, args: &[Value]) -> BuiltinResult<Vec<String>> {
+fn collect_label_strings(
+    builtin: &'static str,
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Vec<String>> {
     let mut labels = Vec::new();
     for arg in args {
         match arg {
-            Value::StringArray(arr) => labels.extend(arr.data.iter().cloned()),
+            Value::StringArray(arr) => {
+                labels.extend(arr.data().iter().map(|text| text.as_str().to_owned()))
+            }
             Value::Cell(cell) => {
                 for row in 0..cell.rows {
                     for col in 0..cell.cols {
-                        let value = cell.get(row, col).map_err(|err| {
-                            plotting_error(builtin, format!("legend: invalid label cell: {err}"))
-                        })?;
-                        labels.push(value_as_text_string(&value).ok_or_else(|| {
+                        let value = &cell.data()[row * cell.cols + col];
+                        labels.push(value_as_text_string(value).ok_or_else(|| {
                             plotting_error(builtin, "legend: labels must be strings or char arrays")
                         })?);
                     }

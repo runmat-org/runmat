@@ -80,7 +80,7 @@ fn tf_error_with_message(
     binding_variant = "default",
     builtin_path = "crate::builtins::control::tf"
 )]
-async fn tf_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn tf_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     if args
         .iter()
         .any(crate::builtins::common::validation::value_contains_explicit_gpu)
@@ -90,20 +90,20 @@ async fn tf_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             BUILTIN_NAME,
         )?;
     }
-    match args.as_slice() {
-        [variable] if is_text_value(variable) => {
+    match (args.len(), args.get(0), args.get(1)) {
+        (1, Some(variable), _) if is_text_value(variable) => {
             ensure_variable_shorthand(variable, false)?;
             variable_model(variable, None)?.to_value("tf")
         }
-        [variable, sample_time] if is_text_value(variable) => {
+        (2, Some(variable), Some(sample_time)) if is_text_value(variable) => {
             ensure_variable_shorthand(variable, true)?;
             let sample_time = admitted_sample_time(sample_time).await?;
             variable_model(variable, Some(&Value::Num(sample_time)))?.to_value("tf")
         }
-        [numerator, denominator, rest @ ..] => {
+        (_, Some(numerator), Some(denominator)) => {
             preflight_coefficient_extensions(numerator)?;
             preflight_coefficient_extensions(denominator)?;
-            let admitted_options = TfAdmittedOptions::parse(rest)?;
+            let admitted_options = TfAdmittedOptions::parse(args.view().range(2..)?)?;
             let host_sample_times = admitted_options.preflight_host().await?;
             let host_numerator = preparse_host_coefficients(numerator, "numerator").await?;
             let host_denominator = preparse_host_coefficients(denominator, "denominator").await?;
@@ -131,7 +131,7 @@ async fn tf_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             )?
             .to_value("tf")
         }
-        [] => Err(tf_error_with_detail(
+        (0, _, _) => Err(tf_error_with_detail(
             &TF_ERROR_INVALID_ARGUMENT,
             "expected tf('s'), tf(num, den), or tf(num, den, ...)",
         )),
@@ -276,11 +276,11 @@ struct TfAdmittedOptions<'a> {
 }
 
 impl<'a> TfAdmittedOptions<'a> {
-    fn parse(rest: &'a [Value]) -> BuiltinResult<Self> {
+    fn parse(rest: crate::call::FunctionArgumentView<'a>) -> BuiltinResult<Self> {
         let mut options = Vec::new();
-        match rest {
-            [] => {}
-            [sample_time] => options.push(TfOption::SampleTime(sample_time)),
+        match (rest.len(), rest.first()) {
+            (0, _) => {}
+            (1, Some(sample_time)) => options.push(TfOption::SampleTime(sample_time)),
             _ => {
                 if !rest.len().is_multiple_of(2) {
                     return Err(tf_error_with_detail(
@@ -304,7 +304,9 @@ impl<'a> TfAdmittedOptions<'a> {
                             }
                             TfOption::Variable(variable)
                         }
-                        "ts" | "sampletime" => TfOption::SampleTime(&pair[1]),
+                        "ts" | "sampletime" => {
+                            TfOption::SampleTime(pair.get(1).expect("paired sample time"))
+                        }
                         _ => {
                             return Err(tf_error_with_detail(
                                 &TF_ERROR_INVALID_OPTION,
@@ -401,7 +403,7 @@ fn parse_variable(value: &Value) -> BuiltinResult<String> {
 fn is_text_value(value: &Value) -> bool {
     match value {
         Value::String(_) => true,
-        Value::StringArray(array) => array.data.len() == 1,
+        Value::StringArray(array) => array.data().len() == 1,
         Value::CharArray(array) => array.rows == 1,
         _ => false,
     }
@@ -450,11 +452,15 @@ mod tests {
     fn run_tf(numerator: Value, denominator: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         let mut args = vec![numerator, denominator];
         args.extend(rest);
-        block_on(tf_builtin(args))
+        block_on(tf_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
 
     fn run_tf_args(args: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(tf_builtin(args))
+        block_on(tf_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
 
     fn property<'a>(value: &'a Value, name: &str) -> &'a Value {
@@ -462,7 +468,7 @@ mod tests {
             panic!("expected object, got {value:?}");
         };
         object
-            .properties
+            .properties()
             .get(name)
             .unwrap_or_else(|| panic!("missing property {name}"))
     }
@@ -528,7 +534,7 @@ mod tests {
         let Value::Object(object) = &sys else {
             panic!("expected object");
         };
-        assert_eq!(object.class_name.display_name(), "tf");
+        assert_eq!(object.class_name().display_name(), "tf");
         assert_eq!(
             property(&sys, "Variable"),
             &Value::CharArray(CharArray::new_row("s"))

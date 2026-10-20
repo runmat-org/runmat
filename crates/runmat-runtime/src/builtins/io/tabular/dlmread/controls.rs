@@ -62,17 +62,17 @@ impl Default for DlmReadOptions {
 pub(super) async fn parse_arguments(
     runtime: Option<&crate::context::RuntimeContext>,
     cooperation: &mut TabularCooperation<'_>,
-    args: &[Value],
+    args: &crate::call::BuiltinArguments,
 ) -> BuiltinResult<DlmReadOptions> {
-    let mut gathered = Vec::with_capacity(args.len());
-    for value in args {
-        gathered.push(
-            await_io(runtime, BUILTIN_NAME, gather_if_needed_async(value))
+    let gathered = args
+        .try_map_preserving_roots_async(args.len(), runtime, async |index| {
+            let value = await_io(runtime, BUILTIN_NAME, gather_if_needed_async(&args[index]))
                 .await?
-                .map_err(map_control_flow)?,
-        );
-        cooperation.completed(0).await?;
-    }
+                .map_err(map_control_flow)?;
+            cooperation.completed(0).await?;
+            Ok(value)
+        })
+        .await?;
 
     let mut options = DlmReadOptions::default();
 

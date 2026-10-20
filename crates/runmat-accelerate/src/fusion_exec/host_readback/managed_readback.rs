@@ -2,19 +2,13 @@
 //! Every provider stage and native host payload is funded before its first
 //! external effect, including earlier sources still live in the invocation.
 use super::{source_matches, CpuReadbackFailure, CpuReadbackPlan, PreparedVmHostInputs};
-use runmat_accelerate_api::{
-    GpuTensorStorage, NumericElementType, ProviderFeasibilityQuery, ProviderQueryMetadataFootprint,
-};
 use runmat_runtime::context::host_allocation::{
     host_allocation_runtime_error, HostAllocationError, HostAllocationPlan, HostAllocationReceipt,
 };
 use runmat_runtime::context::RuntimeContext;
-use runmat_runtime::{build_runtime_error, runtime_error, GpuGatherRetry, RuntimeError};
-use runmat_value::{ExactHostTensorAllocation, NumericDType, Value};
+use runmat_runtime::{build_runtime_error, GpuGatherRetry, RuntimeError};
+use runmat_value::Value;
 use std::mem::size_of;
-
-mod adoption;
-use adoption::adopt_settled_download;
 
 fn invalid(message: &'static str) -> RuntimeError {
     let mut error = build_runtime_error(message)
@@ -50,18 +44,6 @@ fn phase_error(error: RuntimeError, prior_effect: bool) -> CpuReadbackFailure {
 
 struct QuoteError(&'static str);
 
-fn callback_bound(source: &super::Source) -> Result<u64, QuoteError> {
-    match source
-        .owner
-        .download_numeric_completion_host_bound(&source.handle)
-    {
-        runmat_execution::ResourceByteBound::Known(bytes) => Ok(bytes),
-        runmat_execution::ResourceByteBound::Unavailable(_) => {
-            Err(QuoteError("selected provider has no finite callback bound"))
-        }
-    }
-}
-
 pub(super) struct ReadbackQuote {
     pub plan: HostAllocationPlan,
     /// Decoded mirrors and their entry/mirror vectors remain live in the VM
@@ -79,85 +61,29 @@ fn quote_checked(sources: &[super::Source]) -> Result<ReadbackQuote, QuoteError>
     let mut callback_claims = 0_u64;
     let mut entry_count = 0_usize;
     for source in sources {
-        if source.handle.descriptor().storage != Some(GpuTensorStorage::Real)
-            || runmat_accelerate_api::handle_is_logical(&source.handle)
+        let source_quote =
+            runmat_runtime::builtins::common::gpu_helpers::quote_exact_native_download(
+                source.owner,
+                &source.handle,
+            )
+            .map_err(|_| QuoteError("selected host source geometry is unavailable"))?;
+        if source_quote.host_workspace != source.host_workspace
+            || source_quote.payload_bytes != source.payload_bytes
         {
-            return Err(QuoteError(
-                "selected finite readback requires native real floating storage",
-            ));
+            return Err(QuoteError("selected host source geometry changed"));
         }
-        let shape = source.handle.shape();
-        let dtype = match source.handle.physical().element_type() {
-            NumericElementType::F32 => NumericDType::F32,
-            NumericElementType::F64 => NumericDType::F64,
-            _ => {
-                return Err(QuoteError(
-                    "selected host source is not native real floating",
-                ))
-            }
-        };
-        let rank = shape.len();
-        let footprint = ProviderQueryMetadataFootprint {
-            operation: "transfer.download",
-            input_ranks: &[rank],
-            output_ranks: &[rank],
-            preparation_shape_ranks: &[rank],
-            preparation_representation_slots: 0,
-        };
-        let query = footprint
-            .requested_bytes()
-            .ok_or(QuoteError("selected host query extent overflows"))?;
-        let shape_bytes = rank
-            .checked_mul(size_of::<usize>())
-            .and_then(|bytes| u64::try_from(bytes).ok())
-            .ok_or(QuoteError("selected host shape extent overflows"))?;
-        if source
-            .payload_bytes
-            .checked_add(shape_bytes)
-            .is_none_or(|minimum| source.host_workspace < minimum)
-        {
-            return Err(QuoteError(
-                "selected provider host workspace omits returned native backing",
-            ));
-        }
-        let expected_capacity = shape
-            .iter()
-            .try_fold(1_usize, |count, dimension| count.checked_mul(*dimension))
-            .ok_or(QuoteError("selected host value extent overflows"))?;
-        let adopted_raw =
-            ExactHostTensorAllocation::adopted_requested_bytes(dtype, expected_capacity, rank)
-                .ok()
-                .and_then(|bytes| u64::try_from(bytes).ok())
-                .ok_or(QuoteError("selected host value extent overflows"))?;
-        let overhead = adopted_raw
-            .checked_sub(source.payload_bytes)
-            .and_then(|bytes| bytes.checked_sub(shape_bytes))
-            .ok_or(QuoteError("selected host wrapper extent overflows"))?;
-        let controls = HostAllocationPlan::retained_exact_output_bytes(
-            0,
-            ExactHostTensorAllocation::retained_claim_count(),
-        )
-        .map_err(|_| QuoteError("selected host claim extent overflows"))?;
         // The provider's host-workspace bound covers the returned Vec backing
         // at its actual capacity, even when it exceeds the logical length.
         // It may also include transient transpose/work buffers, so using the
         // entire bound for each retained mirror is conservative admission,
         // not a statement that those transient bytes remain physically live.
         // Fixed adoption metadata and both claim controls are additional.
-        let full_value = source
-            .host_workspace
-            .checked_add(overhead)
-            .and_then(|bytes| bytes.checked_add(controls))
-            .ok_or(QuoteError("selected host retained extent overflows"))?;
+        let full_value = source_quote.retained_value_upper;
         // Earlier decoded values remain live while the next native provider
         // workspace and its query/stage are allocated. Only one download is
         // active at a time; each finished value joins the retained mirrors.
         let active = retained_values
-            .checked_add(source.host_workspace)
-            .and_then(|bytes| bytes.checked_add(overhead))
-            .and_then(|bytes| bytes.checked_add(controls))
-            .and_then(|bytes| bytes.checked_add(query.checked_mul(2)?))
-            .and_then(|bytes| bytes.checked_add(shape_bytes.checked_mul(2)?))
+            .checked_add(source_quote.active_upper)
             .ok_or(QuoteError("selected host readback peak overflows"))?;
         retained_values = retained_values
             .checked_add(full_value)
@@ -165,9 +91,10 @@ fn quote_checked(sources: &[super::Source]) -> Result<ReadbackQuote, QuoteError>
         phase_peak = phase_peak.max(active).max(retained_values);
         callback_claims = callback_claims
             .checked_add(
-                HostAllocationPlan::retained_metadata_bytes(callback_bound(source)?)
+                HostAllocationPlan::retained_metadata_bytes(source_quote.callback_bytes)
                     .map_err(|_| QuoteError("selected host callback claim overflows"))?,
             )
+            .and_then(|bytes| bytes.checked_add(source_quote.precharged_output_bytes))
             .ok_or(QuoteError("selected host callback total overflows"))?;
         entry_count = entry_count
             .checked_add(source.offsets.len())
@@ -265,74 +192,38 @@ impl CpuReadbackPlan {
                     prior_effect,
                 ));
             }
-            receipt
-                .checkpoint(runtime)
-                .map_err(|cause| admission_error(runtime, cause, prior_effect))?;
-            let callback = callback_bound(&source)
-                .map_err(|cause| phase_error(invalid(cause.0), prior_effect))?;
-            let claim = receipt
-                .claim_retained_metadata(runtime, callback)
-                .map_err(|cause| admission_error(runtime, cause, prior_effect))?;
-            let query = ProviderFeasibilityQuery::exact_numeric_download(&source.handle)
-                .ok_or_else(|| phase_error(invalid("selected host query changed"), prior_effect))?;
-            let rank = source.handle.shape().len();
-            let footprint = ProviderQueryMetadataFootprint {
-                operation: "transfer.download",
-                input_ranks: &[rank],
-                output_ranks: &[rank],
-                preparation_shape_ranks: &[rank],
-                preparation_representation_slots: 0,
-            };
-            if !footprint.matches(&query) || !query.matches_numeric_download(&source.handle) {
+            let source_quote =
+                runmat_runtime::builtins::common::gpu_helpers::quote_exact_native_download(
+                    source.owner,
+                    &source.handle,
+                )
+                .map_err(|error| phase_error(error, prior_effect))?;
+            if source_quote.host_workspace != source.host_workspace
+                || source_quote.payload_bytes != source.payload_bytes
+            {
                 return Err(phase_error(
-                    invalid("selected host query no longer matches its source"),
+                    invalid("selected host source geometry changed"),
                     prior_effect,
                 ));
             }
-            let stage = source
-                .owner
-                .prepare_numeric_download_stage(&source.handle, &query, claim)
-                .map_err(|cause| {
-                    phase_error(
-                        runtime_error::with_provider_execution_source(
-                            invalid("selected host provider staging failed"),
-                            runmat_accelerate_api::ProviderExecutionError::from(cause),
-                        ),
-                        prior_effect,
-                    )
-                })?;
-            if !stage.matches_source(&source.handle) {
-                return Err(phase_error(
-                    invalid("selected host provider staged a different source"),
-                    prior_effect,
-                ));
-            }
-            receipt
-                .checkpoint(runtime)
-                .map_err(|cause| admission_error(runtime, cause, prior_effect))?;
-            prior_effect = true;
-            let host = runmat_runtime::builtins::common::gpu_helpers::download_numeric_preserving_residency_staged_async(
+            let value = runmat_runtime::builtins::common::gpu_helpers::download_exact_native(
+                runtime,
                 source.owner,
                 &source.handle,
-                stage,
+                &receipt,
+                source_quote,
             )
             .await
-            .map_err(CpuReadbackFailure::AfterEffect)?;
-            receipt.checkpoint(runtime).map_err(|cause| {
-                CpuReadbackFailure::AfterEffect(host_allocation_runtime_error(
-                    Some(runtime),
-                    "RunMat:Placement:HostReadback",
-                    "selected host readback authority changed",
-                    cause,
-                ))
-            })?;
+            .map_err(|failure| phase_error(
+                failure.error,
+                prior_effect || failure.phase == runmat_runtime::builtins::common::gpu_helpers::ExactDownloadPhase::AfterEffect,
+            ))?;
+            prior_effect = true;
             if !source_matches(&source, stack) {
                 return Err(CpuReadbackFailure::AfterEffect(invalid(
                     "selected host source changed during readback",
                 )));
             }
-            let value =
-                adopt_settled_download(host, &source, runtime, &receipt).map_err(|error| *error)?;
             entry.extend(source.offsets.iter().map(|&offset| (offset, value.clone())));
             mirrors.push((source, value));
         }

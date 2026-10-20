@@ -20,9 +20,13 @@ fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
 }
 
 fn classify(sample: Value, training: Value, group: Value, rest: Vec<Value>) -> Vec<Value> {
-    let Value::OutputList(values) =
-        block_on(classify_builtin(sample, training, group, rest)).expect("classify")
-    else {
+    let Value::OutputList(values) = block_on(classify_builtin(
+        sample,
+        training,
+        group,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    ))
+    .expect("classify") else {
         panic!("expected output list");
     };
     values

@@ -175,8 +175,8 @@ fn single_char_array_produces_codes() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn single_errors_on_string_input() {
-    let err =
-        single_builtin(Value::String("hello".to_string()), Vec::new()).expect_err("expected error");
+    let err = single_builtin(Value::String("hello".to_string().into()), Vec::new())
+        .expect_err("expected error");
     assert_eq!(err.identifier(), SINGLE_ERROR_INVALID_INPUT.identifier);
     assert!(err.message().contains("string"));
 }

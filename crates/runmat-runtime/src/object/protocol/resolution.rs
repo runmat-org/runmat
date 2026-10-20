@@ -94,7 +94,7 @@ pub(crate) fn selected_receiver_facts(
         }
         Value::HandleObject(handle) if handle.valid => {
             runmat_gc::gc_with_value(&handle.target, |target| match target {
-                Value::Object(object) if object.class_name == handle.class_name => {
+                Value::Object(object) if object.class_name() == &handle.class_name => {
                     if object.selected_class().is_some() && object.has_native_payload() {
                         return Err(semantic_error(
                             "SelectedObjectReceiverInvalid",

@@ -6,10 +6,7 @@ use runmat_execution::value::{
 };
 use runmat_execution::ExecutableSourceMapV2;
 use runmat_gc::ExplicitRoot;
-use runmat_value::{
-    BoundFunctionBinding, CellArray, Closure, LexicalEnvironment, ObjectInstance, StructValue,
-    Value,
-};
+use runmat_value::{BoundFunctionBinding, CellArray, Closure, LexicalEnvironment, Value};
 
 use super::{invalid, validate_bound_callable_proofs, GraphCallableProof, ValueCodecError};
 
@@ -80,6 +77,7 @@ pub(super) fn decode(
     }
     let remaining_uses = value_use_counts(graph)?;
     let mut decoder = Decoder {
+        runtime,
         graph,
         bindings,
         proofs,
@@ -147,6 +145,7 @@ pub(super) fn decode(
 }
 
 struct Decoder<'a> {
+    runtime: &'a crate::context::RuntimeContext,
     graph: &'a PayloadGraph,
     bindings: &'a HashMap<GraphBoundOwner, BoundFunctionBinding>,
     proofs: &'a HashMap<GraphBoundOwner, GraphCallableProof>,
@@ -224,61 +223,57 @@ fn value_use_counts(graph: &PayloadGraph) -> Result<Vec<usize>, ValueCodecError>
 }
 
 fn selected_dynamic_properties(
+    output: &mut super::super::object_output::ObjectOutput<'_>,
     selected: &runmat_execution::value::GraphSelectedObject,
-) -> Result<Option<HashMap<String, runmat_value::DynamicPropertyDef>>, ValueCodecError> {
-    if selected.dynamic_properties.is_empty() {
-        return Ok(None);
-    }
-    let mut dynamic = HashMap::with_capacity(selected.dynamic_properties.len());
+) -> Result<(), ValueCodecError> {
     for property in &selected.dynamic_properties {
         if property.name != property.definition_name {
             return Err(invalid("selected dynamic property names disagree"));
         }
-        if dynamic
-            .insert(
-                property.name.clone(),
-                runmat_value::DynamicPropertyDef {
-                    name: property.definition_name.clone(),
-                    defining_class: property.defining_class.clone(),
-                    metadata_handle: None,
-                    get_access: property.get_access,
-                    set_access: property.set_access,
-                    dependent: property.dependent,
-                    hidden: property.hidden,
-                    transient: property.transient,
-                    non_copyable: property.non_copyable,
-                    abort_set: property.abort_set,
-                    set_observable: property.set_observable,
-                    get_observable: property.get_observable,
-                    description: property.description.clone(),
-                },
-            )
-            .is_some()
-        {
+        if output.insert_dynamic_source(property, None, "$")? {
             return Err(invalid("selected dynamic property repeats"));
         }
     }
-    Ok(Some(dynamic))
+    Ok(())
 }
 
-impl Decoder<'_> {
+impl<'a> Decoder<'a> {
+    fn object_output(
+        &self,
+        class: &str,
+        fields: &[runmat_execution::value::GraphField],
+        dynamic: &[runmat_execution::value::DurableDynamicProperty],
+    ) -> Result<super::super::object_output::ObjectOutput<'a>, ValueCodecError> {
+        super::super::object_output::ObjectOutput::new(
+            class,
+            fields.iter().map(|f| f.name.as_str()),
+            dynamic,
+            super::super::object_output::DynamicMetadataCopy::Synchronous,
+            Some(self.runtime),
+            "$",
+        )
+    }
     fn allocate_selected_metadata_shells(&mut self) -> Result<(), ValueCodecError> {
         for (index, node) in self.graph.nodes.iter().enumerate() {
             if !matches!(node, GraphNode::SelectedDynamicPropertyMetadata(_)) {
                 continue;
             }
             let class = crate::builtins::introspection::dynamicprops::DYNAMIC_PROPERTY_CLASS;
-            let root = runmat_gc::gc_allocate_rooted(Value::Object(ObjectInstance::new(class)))
+            let object = self
+                .object_output(class.display_name(), &[], &[])?
+                .finish("$")?;
+            let class_name = object.class_name_owner().clone();
+            let root = runmat_gc::gc_allocate_rooted(Value::Object(object))
                 .map_err(|error| invalid(error.to_string()))?;
             let value = Value::HandleObject(runmat_value::HandleRef {
-                class_name: class.into(),
+                class_name,
                 target: root.handle(),
                 valid: true,
             });
             self.selected_metadata[index] = Some(root.handle());
             self.values[index] = Some(
-                crate::execution::RootedValue::new(value)
-                    .map_err(|error| invalid(error.to_string()))?,
+                crate::execution::RootedValue::in_context(value, self.runtime)
+                    .map_err(|error| ValueCodecError::runtime("$", error))?,
             );
             self.selected_metadata_roots.push(root);
         }
@@ -298,20 +293,21 @@ impl Decoder<'_> {
                     .get(&selected.constructor)
                     .ok_or_else(|| invalid("selected handle class product is absent"))?,
             );
-            let object = ObjectInstance::new(selected.class.clone())
-                .with_selected_class(facts)
-                .ok_or_else(|| invalid("selected handle class product differs"))?;
+            let mut output = self.object_output(selected.class.display_name(), &[], &[])?;
+            output.selected_class(facts, "$")?;
+            let object = output.finish("$")?;
+            let class_name = object.class_name_owner().clone();
             let root = runmat_gc::gc_allocate_rooted(Value::Object(object))
                 .map_err(|error| invalid(error.to_string()))?;
             let value = Value::HandleObject(runmat_value::HandleRef {
-                class_name: selected.class.clone(),
+                class_name,
                 target: root.handle(),
                 valid: true,
             });
             self.selected_handles[index] = Some(root.handle());
             self.values[index] = Some(
-                crate::execution::RootedValue::new(value)
-                    .map_err(|error| invalid(error.to_string()))?,
+                crate::execution::RootedValue::in_context(value, self.runtime)
+                    .map_err(|error| ValueCodecError::runtime("$", error))?,
             );
             self.selected_handle_roots.push(root);
         }
@@ -328,17 +324,27 @@ impl Decoder<'_> {
             }
             let handle = self.selected_handles[index]
                 .ok_or_else(|| invalid("selected handle shell is absent"))?;
-            let mut fields = HashMap::with_capacity(selected.fields.len());
             let mut leases = Vec::new();
+            let mut output = self.object_output(
+                selected.class.display_name(),
+                &selected.fields,
+                &selected.dynamic_properties,
+            )?;
+            output.selected_class(
+                std::rc::Rc::clone(
+                    self.selected_classes
+                        .get(&selected.constructor)
+                        .ok_or_else(|| invalid("selected handle class product is absent"))?,
+                ),
+                "$",
+            )?;
             for field in &selected.fields {
-                if fields
-                    .insert(field.name.clone(), self.value(field.value, 1, &mut leases)?)
-                    .is_some()
-                {
+                let key = output.copy_text(&field.name, "$")?;
+                if output.insert(key, self.value(field.value, 1, &mut leases)?, "$")? {
                     return Err(invalid("selected handle field repeats"));
                 }
             }
-            let mut dynamic = selected_dynamic_properties(selected)?;
+            selected_dynamic_properties(&mut output, selected)?;
             for reference in &selected.dynamic_metadata {
                 let GraphNode::SelectedDynamicPropertyMetadata(metadata) =
                     &self.graph.nodes[reference.0 as usize]
@@ -347,11 +353,7 @@ impl Decoder<'_> {
                 };
                 let metadata_handle = self.selected_metadata[reference.0 as usize]
                     .ok_or_else(|| invalid("selected metadata shell is absent"))?;
-                let definition = dynamic
-                    .as_mut()
-                    .and_then(|dynamic| dynamic.get_mut(&metadata.property))
-                    .ok_or_else(|| invalid("selected metadata property is absent"))?;
-                definition.metadata_handle = Some(metadata_handle);
+                output.metadata_handle(&metadata.property, metadata_handle, "$")?;
                 runmat_gc::gc_record_handle_write(
                     &handle,
                     &Value::HandleObject(runmat_value::HandleRef {
@@ -363,10 +365,10 @@ impl Decoder<'_> {
                     }),
                 );
             }
+            let destination = output.finish("$")?;
             runmat_gc::gc_with_value_mut(&handle, |stored| match stored {
-                Value::Object(object) if object.class_name == selected.class => {
-                    object.properties = fields;
-                    object.dynamic_properties = dynamic.map(Box::new);
+                Value::Object(object) if object.class_name() == &selected.class => {
+                    *object = destination;
                     Ok(())
                 }
                 _ => Err(invalid("selected handle shell changed before field fill")),
@@ -386,14 +388,12 @@ impl Decoder<'_> {
                 .ok_or_else(|| invalid("selected metadata shell is absent"))?;
             let receiver = self.selected_handles[metadata.receiver.0 as usize]
                 .ok_or_else(|| invalid("selected metadata receiver shell is absent"))?;
-            let receiver_class = match &self.graph.nodes[metadata.receiver.0 as usize] {
-                GraphNode::SelectedObject(object) => object.class.clone(),
-                _ => {
-                    return Err(invalid(
-                        "selected metadata receiver changed after validation",
-                    ))
-                }
-            };
+            let receiver_class = runmat_gc::gc_with_value(&receiver, |stored| match stored {
+                Value::Object(object) => Some(object.class_name_owner().clone()),
+                _ => None,
+            })
+            .map_err(|error| invalid(error.to_string()))?
+            .ok_or_else(|| invalid("selected metadata receiver changed after validation"))?;
             let definition = runmat_gc::gc_with_value(&receiver, |stored| {
                 let Value::Object(object) = stored else {
                     return None;
@@ -416,21 +416,23 @@ impl Decoder<'_> {
             runmat_gc::gc_record_handle_write(
                 &metadata_handle,
                 &Value::HandleObject(runmat_value::HandleRef {
-                    class_name: object.class_name.clone(),
+                    class_name: object.class_name_owner().clone(),
                     target: receiver,
                     valid: true,
                 }),
             );
-            runmat_gc::gc_with_value_mut(&metadata_handle, |stored| match stored {
+            runmat_gc::gc_with_value_mut(&metadata_handle, |stored| {
+                match stored {
                 Value::Object(existing)
-                    if existing.class_name
-                        == crate::builtins::introspection::dynamicprops::DYNAMIC_PROPERTY_CLASS
+                    if existing.class_name()
+                        == &crate::builtins::introspection::dynamicprops::DYNAMIC_PROPERTY_CLASS
                             .owned() =>
                 {
                     *existing = object;
                     Ok(())
                 }
                 _ => Err(invalid("selected metadata shell changed before fill")),
+            }
             })
             .map_err(|error| invalid(error.to_string()))??;
         }
@@ -474,7 +476,7 @@ impl Decoder<'_> {
                 })
                 .transpose()?;
             let (environment, roots) = crate::call::lexical::allocate_environment(parent)
-                .map_err(|error| invalid(error.to_string()))?;
+                .map_err(|error| ValueCodecError::runtime("$", error))?;
             self.environment_roots.extend(roots);
             for binding in &activation.bindings {
                 if !crate::call::lexical::reserve_owned_binding(&environment, binding.binding)
@@ -585,20 +587,43 @@ impl Decoder<'_> {
                 )
             }
             GraphNode::Struct { fields } => {
-                let mut output = StructValue::new();
                 for field in fields {
-                    output.insert(
-                        field.name.clone(),
-                        self.value(
-                            field.value,
-                            child_depth.ok_or_else(|| {
-                                invalid("value construction exceeds its depth limit")
-                            })?,
-                            &mut child_leases,
-                        )?,
-                    );
+                    self.build_value(
+                        field.value,
+                        child_depth
+                            .ok_or_else(|| invalid("value construction exceeds its depth limit"))?,
+                    )?;
+                    if self.remaining_uses[field.value.0 as usize] == 0
+                        || self.values[field.value.0 as usize].is_none()
+                    {
+                        return Err(invalid("reconstructed structure field is unavailable"));
+                    }
                 }
-                Value::Struct(output)
+                let output = crate::execution::construct_struct_from_fields_in_context(
+                    self.runtime,
+                    fields.iter().map(|field| {
+                        (
+                            field.name.as_str(),
+                            self.values[field.value.0 as usize]
+                                .as_ref()
+                                .expect("validated field owner")
+                                .value(),
+                        )
+                    }),
+                )
+                .map_err(|error| ValueCodecError::runtime("$", error))?;
+                for field in fields {
+                    // Retire original cache uses only after final map/root
+                    // publication. Child clones retain original payload owners.
+                    drop(self.value(
+                        field.value,
+                        child_depth.expect("validated field depth"),
+                        &mut child_leases,
+                    )?);
+                }
+                let (value, lease) = output.into_value_and_lease();
+                child_leases.push(lease);
+                value
             }
             GraphNode::Registered(registered) => {
                 if registered.kind != GraphRegisteredKind::ImmutableValueClass {
@@ -606,10 +631,11 @@ impl Decoder<'_> {
                 }
                 let class = runmat_types::ClassIdentity::new(&registered.type_identity)
                     .map_err(|error| invalid(error.to_string()))?;
-                let mut object = ObjectInstance::new(class);
+                let mut output =
+                    self.object_output(class.display_name(), &registered.fields, &[])?;
                 for field in &registered.fields {
-                    object.properties.insert(
-                        field.name.clone(),
+                    output.insert(
+                        output.copy_text(&field.name, "$")?,
                         self.value(
                             field.value,
                             child_depth.ok_or_else(|| {
@@ -617,8 +643,10 @@ impl Decoder<'_> {
                             })?,
                             &mut child_leases,
                         )?,
-                    );
+                        "$",
+                    )?;
                 }
+                let object = output.finish("$")?;
                 crate::parallel::codistributor::validate_definition(&object)
                     .map_err(|error| invalid(error.to_string()))?;
                 Value::Object(object)
@@ -632,12 +660,15 @@ impl Decoder<'_> {
                         .get(&selected.constructor)
                         .ok_or_else(|| invalid("selected object class product is absent"))?,
                 );
-                let mut object = ObjectInstance::new(selected.class.clone())
-                    .with_selected_class(facts)
-                    .ok_or_else(|| invalid("selected object class product differs"))?;
+                let mut output = self.object_output(
+                    selected.class.display_name(),
+                    &selected.fields,
+                    &selected.dynamic_properties,
+                )?;
+                output.selected_class(facts, "$")?;
                 for field in &selected.fields {
-                    object.properties.insert(
-                        field.name.clone(),
+                    output.insert(
+                        output.copy_text(&field.name, "$")?,
                         self.value(
                             field.value,
                             child_depth.ok_or_else(|| {
@@ -645,37 +676,39 @@ impl Decoder<'_> {
                             })?,
                             &mut child_leases,
                         )?,
-                    );
+                        "$",
+                    )?;
                 }
-                object.dynamic_properties = selected_dynamic_properties(selected)?.map(Box::new);
+                selected_dynamic_properties(&mut output, selected)?;
+                let object = output.finish("$")?;
                 Value::Object(object)
             }
             GraphNode::SelectedObjectArray(selected) => {
-                let data = selected
-                    .values
-                    .iter()
-                    .map(|reference| {
-                        self.value(
+                let mut shape = super::super::shape_copy::ShapeCopy::new(
+                    &selected.shape,
+                    Some(self.runtime),
+                    "$",
+                )?;
+                shape.advance(usize::MAX, "$")?;
+                let shape = shape.finish("$")?;
+                let mut output=crate::execution::object_array::ObjectArrayConstruction::with_capacity_retaining_shape(
+                    Some(self.runtime),crate::execution::object_array::Class::Name(selected.class.display_name()),
+                    selected.values.len(),&shape,
+                    if selected.values.is_empty(){selected.empty_provenance.len()}else{0},
+                    selected.includes_unselected,
+                ).map_err(|error|ValueCodecError::runtime("$",error))?;
+                for reference in &selected.values {
+                    output
+                        .push(self.value(
                             *reference,
                             child_depth.ok_or_else(|| {
                                 invalid("value construction exceeds its depth limit")
                             })?,
                             &mut child_leases,
-                        )
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                let shape = selected
-                    .shape
-                    .iter()
-                    .map(|extent| {
-                        usize::try_from(*extent)
-                            .map_err(|_| invalid("object-array shape is not host-addressable"))
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                let mut array = runmat_value::ObjectArray::new(selected.class.clone(), data, shape)
-                    .map_err(|error| invalid(error.to_string()))?;
-                if array.is_empty() {
-                    let mut provenance = Vec::with_capacity(selected.empty_provenance.len());
+                        )?)
+                        .map_err(|error| ValueCodecError::runtime("$", error))?;
+                }
+                if selected.values.is_empty() {
                     for reference in &selected.empty_provenance {
                         let GraphNode::Callable(anchor) = &self.graph.nodes[reference.0 as usize]
                         else {
@@ -710,16 +743,14 @@ impl Decoder<'_> {
                         {
                             return Err(invalid("selected array anchor differs from its class"));
                         }
-                        provenance.push(facts);
-                    }
-                    array = array
-                        .with_selected_provenance(provenance)
-                        .map_err(|error| invalid(error.to_string()))?;
-                    if selected.includes_unselected {
-                        array = array.with_unselected_provenance();
+                        output
+                            .push_provenance(facts)
+                            .map_err(|error| ValueCodecError::runtime("$", error))?;
                     }
                 }
-                Value::ObjectArray(array)
+                output
+                    .finish_value()
+                    .map_err(|error| ValueCodecError::runtime("$", error))?
             }
             GraphNode::SelectedDynamicPropertyMetadata(_) => {
                 return Err(invalid("selected metadata was not preallocated"));
@@ -767,11 +798,11 @@ impl Decoder<'_> {
                 match callable.form {
                     CallableForm::Closure => {
                         Value::Closure(Closure::from_data(runmat_value::ClosureData {
-                            function_name: callable.qualified_name.clone(),
+                            function_name: callable.qualified_name.clone().into(),
                             binding,
                             source_role: callable.source_role,
-                            source_file: source_file.clone().map(String::into_boxed_str),
-                            captures,
+                            source_file: source_file.clone().map(runmat_value::Utf8Text::new),
+                            captures: captures.into(),
                             lexical_environment: environment,
                         }))
                     }
@@ -801,8 +832,8 @@ impl Decoder<'_> {
             }
             GraphNode::Activation(_) => return Err(invalid("activation is not a value")),
         };
-        let rooted = crate::execution::RootedValue::new(value)
-            .map_err(|error| invalid(error.to_string()))?;
+        let rooted = crate::execution::RootedValue::in_context(value, self.runtime)
+            .map_err(|error| ValueCodecError::runtime("$", error))?;
         self.values[index] = Some(rooted);
         drop(child_leases);
         self.visiting[index] = false;

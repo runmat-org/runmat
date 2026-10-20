@@ -42,7 +42,7 @@ fn generated_native_sibling_and_descendant_calls_return_shared_mutation() {
         }
         let invocation = ProcedureInvocation {
             target: ProcedureTarget::Function("lexicalParent".into()),
-            arguments: Vec::new(),
+            arguments: crate::ProcedureArguments::Source(Vec::new()),
             requested_outputs: 1,
         };
         let output = block_on(session.invoke_executable(

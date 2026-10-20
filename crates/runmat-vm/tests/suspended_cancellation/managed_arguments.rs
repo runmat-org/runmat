@@ -69,7 +69,7 @@ fn produce(_: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
 }
 
 fn consume(invocation: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
-    let argument = RootedValue::new(invocation.args.first().expect("managed argument").clone())
+    let argument = RootedValue::new(invocation.args.get(0).expect("managed argument").clone())
         .map_err(|error| error.into_runtime_error());
     let receiver = state()
         .borrow_mut()

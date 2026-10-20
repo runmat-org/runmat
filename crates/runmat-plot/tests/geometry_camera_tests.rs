@@ -5,7 +5,6 @@ use runmat_plot::{
     event::FigureScene,
     plots::{Figure, MeshPlot},
 };
-use std::sync::Arc;
 
 #[tokio::test]
 async fn imported_geometry_remains_spatial_after_fit_and_reset() {
@@ -32,9 +31,8 @@ async fn imported_geometry_remains_spatial_after_fit_and_reset() {
         view_formats: vec![],
         desired_maximum_frame_latency: 2,
     };
-    let mut renderer = PlotRenderer::new(Arc::new(device), Arc::new(queue), config)
-        .await
-        .unwrap();
+    let access = runmat_accelerate_api::WgpuDeviceAccess::new(device, queue);
+    let mut renderer = PlotRenderer::new(access.clone(), config).await.unwrap();
     let mut sources = Vec::new();
     if let Ok(directory) = std::env::var("RUNMAT_DOCS_SNAPSHOT_PROJECT") {
         for view in ["geometry", "displacement", "stress"] {
@@ -97,6 +95,8 @@ async fn imported_geometry_remains_spatial_after_fit_and_reset() {
     let mut figure = Figure::new();
     figure
         .add_line_plot(runmat_plot::plots::LinePlot::new(vec![0.0, 1.0], vec![0.0, 1.0]).unwrap());
-    renderer.set_figure(figure);
+    access
+        .with_shared(|emission| renderer.set_figure(emission, figure))
+        .unwrap();
     assert!(!renderer.axes_has_3d_content(0));
 }

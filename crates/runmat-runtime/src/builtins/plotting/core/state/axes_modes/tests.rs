@@ -40,7 +40,10 @@ fn direction_property_and_axis_tokens_share_state_without_reordering_limits() {
     reset_plot_state();
     let axes = current_axes_state();
     set_axis_limits(Some((1., 4.)), Some((2., 8.)));
-    crate::builtins::plotting::cmds::axis_builtin(vec![Value::String("ij".into())]).unwrap();
+    crate::builtins::plotting::cmds::axis_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::String("ij".into())]),
+    )
+    .unwrap();
     let meta = axes_metadata_snapshot(axes.handle, axes.active_index).unwrap();
     assert_eq!(meta.y_limits, Some((2., 8.)));
     assert_eq!(meta.y_direction, YDirection::Reverse);

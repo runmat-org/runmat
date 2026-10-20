@@ -1611,9 +1611,9 @@ fn is_empty_placeholder_value(value: &Value) -> bool {
     match value {
         Value::Tensor(t) => tensor_element_len(t) == 0,
         Value::LogicalArray(l) => l.data.is_empty(),
-        Value::StringArray(sa) => sa.data.is_empty(),
-        Value::CharArray(ca) => ca.data.is_empty(),
-        Value::Cell(cell) => cell.data.is_empty(),
+        Value::StringArray(sa) => sa.data().is_empty(),
+        Value::CharArray(ca) => ca.data().is_empty(),
+        Value::Cell(cell) => cell.data().is_empty(),
         Value::String(s) => s.is_empty(),
         _ => false,
     }

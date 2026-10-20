@@ -386,7 +386,8 @@ pub async fn dependency(
     binding_variant = "default",
     builtin_path = "crate::builtins::fea::sequences"
 )]
-pub async fn transition(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn transition(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     study_outputs(
         &FEA_STATE_TRANSITION_NEW_DESCRIPTOR,
         "fea.StateTransition.new",
@@ -530,7 +531,8 @@ pub async fn restart_checkpoint(checkpoint: String, digest: String) -> BuiltinRe
     binding_variant = "default",
     builtin_path = "crate::builtins::fea::sequences"
 )]
-pub async fn sequence(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn sequence(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     study_outputs(
         &FEA_ANALYSIS_SEQUENCE_NEW_DESCRIPTOR,
         "fea.AnalysisSequence.new",
@@ -563,7 +565,8 @@ pub async fn sequence(args: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::fea::sequences"
 )]
-pub async fn configure_step(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn configure_step(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     study_outputs(
         &FEA_PROCEDURE_STEP_CONFIGURE_DESCRIPTOR,
         "fea.ProcedureStep.configure",
@@ -579,7 +582,7 @@ pub async fn configure_step(args: Vec<Value>) -> BuiltinResult<Value> {
             "step must be a typed FEA procedure step",
         ));
     };
-    let class_name = match object.class_name.display_name() {
+    let class_name = match object.class_name().display_name() {
         FEA_STRUCTURAL_STEP_CLASS => FEA_STRUCTURAL_STEP_CLASS,
         FEA_THERMAL_STEP_CLASS => FEA_THERMAL_STEP_CLASS,
         FEA_ELECTROMAGNETIC_STEP_CLASS => FEA_ELECTROMAGNETIC_STEP_CLASS,
@@ -870,71 +873,79 @@ mod tests {
         )
         .await
         .expect("storage");
-        let observation = observations::field(vec![
-            Value::String("displacement".into()),
-            super::super::study_policies::observation::quantity_displacement()
-                .await
-                .expect("quantity"),
-            target,
-            super::super::study_policies::observation::location_node()
-                .await
-                .expect("source location"),
-            super::super::study_policies::observation::location_node()
-                .await
-                .expect("output location"),
-            super::super::study_policies::observation::recovery_native()
-                .await
-                .expect("recovery"),
-            super::super::study_policies::observation::component_all()
-                .await
-                .expect("component"),
-            super::super::constraints::support::frame::coordinate_frame_global_builtin()
-                .await
-                .expect("frame"),
-            super::super::study_policies::observation::sign_native()
-                .await
-                .expect("sign"),
-            super::super::study_policies::observation::complex_real()
-                .await
-                .expect("complex representation"),
-            observations::sampling_final().await.expect("sampling"),
-            observations::reduction_none().await.expect("reduction"),
-            storage,
-            super::super::study_policies::observation::purpose_visualization()
-                .await
-                .expect("purpose"),
-            observations::cost(vec![0.into(), 0.into(), 0.into(), 0.into(), 0.into()])
+        let observation = observations::field(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("displacement".into()),
+                super::super::study_policies::observation::quantity_displacement()
+                    .await
+                    .expect("quantity"),
+                target,
+                super::super::study_policies::observation::location_node()
+                    .await
+                    .expect("source location"),
+                super::super::study_policies::observation::location_node()
+                    .await
+                    .expect("output location"),
+                super::super::study_policies::observation::recovery_native()
+                    .await
+                    .expect("recovery"),
+                super::super::study_policies::observation::component_all()
+                    .await
+                    .expect("component"),
+                super::super::constraints::support::frame::coordinate_frame_global_builtin(None)
+                    .await
+                    .expect("frame"),
+                super::super::study_policies::observation::sign_native()
+                    .await
+                    .expect("sign"),
+                super::super::study_policies::observation::complex_real()
+                    .await
+                    .expect("complex representation"),
+                observations::sampling_final().await.expect("sampling"),
+                observations::reduction_none().await.expect("reduction"),
+                storage,
+                super::super::study_policies::observation::purpose_visualization()
+                    .await
+                    .expect("purpose"),
+                observations::cost(crate::builtins::common::test_support::builtin_arguments(
+                    vec![0.into(), 0.into(), 0.into(), 0.into(), 0.into()],
+                ))
                 .await
                 .expect("cost"),
-        ])
+            ]),
+        )
         .await
         .expect("observation");
 
         let step = super::super::steps::structural_static_builtin(Value::String("static".into()))
             .await
             .expect("structural step");
-        let configured = configure_step(vec![
-            step,
-            domain_static().await.expect("domain"),
-            cell(vec![activation]),
-            cell(Vec::new()),
-            cell(vec![state]),
-            cell(vec![observation]),
-            super::super::accuracy::experimental_plan("acceptance".into())
-                .await
-                .expect("accuracy"),
-            restart_fresh().await.expect("restart"),
-        ])
+        let configured = configure_step(crate::builtins::common::test_support::builtin_arguments(
+            vec![
+                step,
+                domain_static().await.expect("domain"),
+                cell(vec![activation]),
+                cell(Vec::new()),
+                cell(vec![state]),
+                cell(vec![observation]),
+                super::super::accuracy::experimental_plan("acceptance".into())
+                    .await
+                    .expect("accuracy"),
+                restart_fresh().await.expect("restart"),
+            ],
+        ))
         .await
         .expect("configured step");
         let configured_for_conflict = configured.clone();
-        let value = sequence(vec![
-            Value::String("production".into()),
-            cell(vec![configured]),
-            cell(Vec::new()),
-            cell(Vec::new()),
-            cell(Vec::new()),
-        ])
+        let value = sequence(crate::builtins::common::test_support::builtin_arguments(
+            vec![
+                Value::String("production".into()),
+                cell(vec![configured]),
+                cell(Vec::new()),
+                cell(Vec::new()),
+                cell(Vec::new()),
+            ],
+        ))
         .await
         .expect("sequence");
 
@@ -959,30 +970,34 @@ mod tests {
         )
         .expect("write geometry fixture");
         let geometry = crate::builtins::geometry::geometry_load_builtin(
-            Value::String(path.to_string_lossy().into_owned()),
-            Vec::new(),
+            Value::String(path.to_string_lossy().into_owned().into()),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         )
         .await
         .expect("load geometry fixture");
-        let model_value = super::super::modeling::create_model_object_from_args(vec![
-            Value::String("model".into()),
-            geometry.clone(),
-            Value::String("Sequence".into()),
-            value.clone(),
-        ])
+        let model_value = super::super::modeling::create_model_object_from_args(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("model".into()),
+                geometry.clone(),
+                Value::String("Sequence".into()),
+                value.clone(),
+            ]),
+        )
         .expect("compose model with explicit sequence");
         let model: AnalysisModel =
             object_payload("test", &model_value, FEA_MODEL_CLASS).expect("decode typed model");
         assert_eq!(model.sequence.sequence_id, "production");
 
-        let conflict = super::super::modeling::create_model_object_from_args(vec![
-            Value::String("model".into()),
-            geometry,
-            Value::String("Sequence".into()),
-            value,
-            Value::String("Steps".into()),
-            cell(vec![configured_for_conflict]),
-        ])
+        let conflict = super::super::modeling::create_model_object_from_args(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("model".into()),
+                geometry,
+                Value::String("Sequence".into()),
+                value,
+                Value::String("Steps".into()),
+                cell(vec![configured_for_conflict]),
+            ]),
+        )
         .expect_err("sequence and steps must remain mutually exclusive");
         assert!(conflict.message.contains("mutually exclusive"));
     }

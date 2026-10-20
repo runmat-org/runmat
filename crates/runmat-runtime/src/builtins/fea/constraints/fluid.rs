@@ -7,11 +7,11 @@ fn vector_velocity(
     value: &Value,
 ) -> BuiltinResult<PrescribedValue<[Velocity; 3]>> {
     if let Value::Cell(cell) = value {
-        if cell.data.len() != 3 || (cell.rows != 1 && cell.cols != 1) {
+        if cell.data().len() != 3 || (cell.rows != 1 && cell.cols != 1) {
             return Err(builtin_error(builtin, &ERROR_INPUT, "velocity requires exactly three typed fea.Velocity components in global coordinates"));
         }
         let mut components = [Velocity::new(0.0); 3];
-        for (component, value) in components.iter_mut().zip(&cell.data) {
+        for (component, value) in components.iter_mut().zip(cell.data()) {
             *component = Velocity::new(quantity_scalar(
                 builtin,
                 value,
@@ -38,10 +38,10 @@ fn vector_velocity(
 macro_rules! define_vector_velocity_constraint {
     ($function:ident, $descriptor:ident, $name:literal, $build:expr) => {
         #[runtime_builtin(
-                    name = $name,
-                    binding_variant = "default",
-                    builtin_path = "crate::builtins::fea::constraints::fluid"
-                )]
+                                    name = $name,
+                                    binding_variant = "default",
+                                    builtin_path = "crate::builtins::fea::constraints::fluid"
+                                )]
         pub async fn $function(id: String, region: Value, value: Value) -> BuiltinResult<Value> {
             fixed_outputs(&runmat_builtins::$descriptor, $name)?;
             let (id, geometry_id, geometry_revision, target) = bound_region($name, id, &region)?;

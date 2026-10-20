@@ -7,7 +7,7 @@ fn pagefun_mtimes_single_page() {
     let result = pagefun_impl(
         Value::FunctionHandle("mtimes".into()),
         Value::Tensor(lhs),
-        vec![Value::Tensor(rhs)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(rhs)]),
     );
     let result = block_on(result).expect("pagefun");
     match result {
@@ -25,7 +25,7 @@ fn pagefun_preserves_rank_zero_and_rank_one_canonical_matrix_shapes() {
     let scalar = block_on(pagefun_impl(
         Value::FunctionHandle("mtimes".into()),
         Value::Tensor(Tensor::new(vec![2.0], Vec::new()).unwrap()),
-        vec![Value::Num(3.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(3.0)]),
     ))
     .expect("rank-zero matrix product");
     let Value::Tensor(scalar) = scalar else {
@@ -37,7 +37,7 @@ fn pagefun_preserves_rank_zero_and_rank_one_canonical_matrix_shapes() {
     let vector = block_on(pagefun_impl(
         Value::FunctionHandle("mtimes".into()),
         Value::ComplexTensor(ComplexTensor::new(vec![(1.0, 2.0), (3.0, 4.0)], vec![2]).unwrap()),
-        vec![Value::Num(2.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(2.0)]),
     ))
     .expect("rank-one complex matrix product");
     let Value::ComplexTensor(vector) = vector else {
@@ -55,7 +55,7 @@ fn pagefun_mtimes_multiple_pages() {
     let result = pagefun_impl(
         Value::from("@mtimes"),
         Value::Tensor(lhs),
-        vec![Value::Tensor(rhs)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(rhs)]),
     );
     let result = block_on(result).expect("pagefun");
     match result {
@@ -78,7 +78,7 @@ fn pagefun_mtimes_broadcast_rhs() {
     let result = pagefun_impl(
         Value::FunctionHandle("mtimes".into()),
         Value::Tensor(lhs),
-        vec![Value::Tensor(rhs)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(rhs)]),
     );
     let result = block_on(result).expect("pagefun");
     match result {
@@ -102,7 +102,7 @@ fn pagefun_mtimes_empty_pages() {
     let result = pagefun_impl(
         Value::from("@mtimes"),
         Value::Tensor(lhs),
-        vec![Value::Tensor(rhs)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(rhs)]),
     );
     let result = block_on(result).expect("pagefun");
     match result {
@@ -128,7 +128,7 @@ fn pagefun_page_dimension_mismatch() {
     let err = pagefun_impl(
         Value::FunctionHandle("mtimes".into()),
         Value::Tensor(lhs),
-        vec![Value::Tensor(rhs)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(rhs)]),
     );
     let err = block_on(err).expect_err("expected page dimension mismatch");
     assert!(
@@ -146,7 +146,7 @@ fn pagefun_mtimes_dim_mismatch() {
     let err = pagefun_impl(
         Value::FunctionHandle("mtimes".into()),
         Value::Tensor(lhs),
-        vec![Value::Tensor(rhs)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(rhs)]),
     );
     let err = block_on(err).expect_err("expected dimension mismatch");
     assert!(

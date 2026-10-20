@@ -8,12 +8,19 @@ fn scalar_text_rejects_multirow_and_nd_labels_and_option_names() {
     for shape in [vec![2, 1], vec![1, 1, 2]] {
         let chars = Value::CharArray(CharArray::new_with_shape(vec!['a', 'b'], shape).unwrap());
         let cell = Value::Cell(CellArray::new(vec![chars.clone()], 1, 1).unwrap());
-        let error = block_on(confusionmat_builtin(cell.clone(), cell, vec![])).unwrap_err();
+        let error = block_on(confusionmat_builtin(
+            None,
+            cell.clone(),
+            cell,
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap_err();
         assert!(error.message.contains("string scalar"));
         let error = block_on(confusionmat_builtin(
+            None,
             Value::Num(1.),
             Value::Num(1.),
-            vec![chars, Value::Num(1.)],
+            crate::builtins::common::test_support::builtin_arguments(vec![chars, Value::Num(1.)]),
         ))
         .unwrap_err();
         assert!(error.message.contains("string scalar"));
@@ -44,19 +51,24 @@ fn gathered_labels_do_not_release_borrowed_provider_inputs() {
 fn discarded_outputs_still_validate_labels_and_options() {
     with_outputs(0, || {
         assert!(block_on(confusionmat_builtin(
+            None,
             Value::Num(1.),
             Value::from("a"),
-            vec![]
+            crate::builtins::common::test_support::builtin_arguments(vec![])
         ))
         .is_err());
         assert!(block_on(confusionmat_builtin(
+            None,
             Value::Num(1.),
             Value::Num(1.),
-            vec![Value::from("bad"), Value::Num(1.)]
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("bad"),
+                Value::Num(1.)
+            ])
         ))
         .is_err());
         assert!(
-            matches!(block_on(confusionmat_builtin(Value::Num(1.),Value::Num(1.),vec![])).unwrap(),Value::OutputList(values) if values.is_empty())
+            matches!(block_on(confusionmat_builtin(None, Value::Num(1.),Value::Num(1.),crate::builtins::common::test_support::builtin_arguments(vec![]))).unwrap(),Value::OutputList(values) if values.is_empty())
         );
     });
 }
@@ -64,7 +76,13 @@ fn discarded_outputs_still_validate_labels_and_options() {
 #[test]
 fn character_pages_are_not_silently_ignored() {
     let chars = Value::CharArray(CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap());
-    let error = block_on(confusionmat_builtin(chars.clone(), chars, vec![])).unwrap_err();
+    let error = block_on(confusionmat_builtin(
+        None,
+        chars.clone(),
+        chars,
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap_err();
     assert!(error.message.contains("two-dimensional"));
 }
 
@@ -97,9 +115,13 @@ fn with_outputs<T>(count: usize, f: impl FnOnce() -> T) -> T {
 
 fn confusionmat(group: Value, grouphat: Value, rest: Vec<Value>, outputs: usize) -> Vec<Value> {
     with_outputs(outputs, || {
-        let Value::OutputList(values) =
-            block_on(confusionmat_builtin(group, grouphat, rest)).expect("confusionmat")
-        else {
+        let Value::OutputList(values) = block_on(confusionmat_builtin(
+            None,
+            group,
+            grouphat,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
+        .expect("confusionmat") else {
             panic!("expected output list");
         };
         values
@@ -199,9 +221,10 @@ fn typed_integer_labels_cover_all_classes_exactly() {
 fn typed_integer_labels_reject_mixed_classes() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let err = block_on(confusionmat_builtin(
+        None,
         int_tensor(IntegerStorage::I16(vec![1]), vec![1, 1]),
         int_tensor(IntegerStorage::U16(vec![1]), vec![1, 1]),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap_err();
     assert!(err.message.contains("label types must be compatible"));
@@ -235,9 +258,10 @@ fn uint64_labels_above_flintmax_remain_distinct() {
 fn typed_integer_roles_are_independently_compatibility_gated() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
     let group_err = block_on(confusionmat_builtin(
+        None,
         Value::Int(IntValue::I8(1)),
         Value::Int(IntValue::I8(1)),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap_err();
     assert_eq!(
@@ -245,9 +269,10 @@ fn typed_integer_roles_are_independently_compatibility_gated() {
         CONFUSIONMAT_INTEGER_GROUP_EXTENSION.error_identifier
     );
     let grouphat_err = block_on(confusionmat_builtin(
+        None,
         Value::Num(1.0),
         Value::Int(IntValue::I8(1)),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap_err();
     assert_eq!(
@@ -255,9 +280,13 @@ fn typed_integer_roles_are_independently_compatibility_gated() {
         CONFUSIONMAT_INTEGER_GROUPHAT_EXTENSION.error_identifier
     );
     let order_err = block_on(confusionmat_builtin(
+        None,
         Value::Num(1.0),
         Value::Num(1.0),
-        vec![Value::from("Order"), Value::Int(IntValue::I8(1))],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("Order"),
+            Value::Int(IntValue::I8(1)),
+        ]),
     ))
     .unwrap_err();
     assert_eq!(
@@ -279,9 +308,10 @@ fn resident_integer_labels_gate_before_gather_and_remain_exact_in_runmat_mode() 
         {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
             let err = block_on(confusionmat_builtin(
+                None,
                 Value::GpuTensor(group.clone()),
                 Value::GpuTensor(grouphat.clone()),
-                Vec::new(),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
             ))
             .unwrap_err();
             assert_eq!(
@@ -316,9 +346,10 @@ fn resident_floating_labels_use_the_resident_extension_gate() {
             .expect("upload");
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let err = block_on(confusionmat_builtin(
+            None,
             Value::GpuTensor(handle.clone()),
             Value::GpuTensor(handle),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .unwrap_err();
         assert_eq!(
@@ -384,7 +415,7 @@ fn supports_string_and_cell_text_labels() {
     let Value::StringArray(order) = &values[1] else {
         panic!("order");
     };
-    assert_eq!(order.data, vec!["dog", "cat"]);
+    assert_eq!(order.data(), vec!["dog", "cat"]);
 }
 
 #[test]
@@ -404,9 +435,13 @@ fn inferred_logical_order_contains_false_and_true() {
 #[test]
 fn explicit_order_must_cover_all_observed_labels() {
     let err = block_on(confusionmat_builtin(
+        None,
         tensor(vec![1.0, 2.0], vec![2, 1]),
         tensor(vec![1.0, 3.0], vec![2, 1]),
-        vec![Value::from("Order"), tensor(vec![1.0, 2.0], vec![2, 1])],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("Order"),
+            tensor(vec![1.0, 2.0], vec![2, 1]),
+        ]),
     ))
     .unwrap_err();
     assert_eq!(
@@ -467,9 +502,10 @@ fn supports_categorical_labels_in_category_order() {
 #[test]
 fn rejects_bad_shapes_and_options() {
     let err = block_on(confusionmat_builtin(
+        None,
         tensor(vec![1.0, 2.0], vec![2, 1]),
         tensor(vec![1.0], vec![1, 1]),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap_err();
     assert_eq!(
@@ -478,14 +514,19 @@ fn rejects_bad_shapes_and_options() {
     );
 
     let err = block_on(confusionmat_builtin(
+        None,
         tensor(vec![1.0], vec![1, 1]),
         tensor(vec![1.0], vec![1, 1]),
-        vec![Value::from("Rows"), Value::from("all")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("Rows"),
+            Value::from("all"),
+        ]),
     ))
     .unwrap_err();
     assert!(err.message.contains("unsupported option"));
 
     let err = block_on(confusionmat_builtin(
+        None,
         Value::StringArray(
             StringArray::new(
                 vec!["a".into(), "b".into(), "c".into(), "d".into()],
@@ -500,7 +541,7 @@ fn rejects_bad_shapes_and_options() {
             )
             .unwrap(),
         ),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap_err();
     assert!(err.message.contains("must be a vector"));

@@ -47,8 +47,9 @@ pub(super) enum TimeSpec {
 }
 
 impl TimeSpec {
-    pub(super) fn preflight_host(rest: &[Value]) -> BuiltinResult<()> {
-        if let [value] = rest {
+    pub(super) fn preflight_host(rest: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<()> {
+        if rest.len() == 1 {
+            let value = rest.first().expect("one impulse time argument");
             if !matches!(value, Value::GpuTensor(_)) {
                 if let Some(final_time) = scalar_time_from_value(value)? {
                     if !final_time.is_finite() || final_time < 0.0 {
@@ -74,10 +75,14 @@ impl TimeSpec {
         }
         Ok(())
     }
-    pub(super) async fn parse(system: &TfSystem, rest: &[Value]) -> BuiltinResult<Self> {
-        match rest {
-            [] => Ok(Self::Values(default_time_vector(system))),
-            [value] => {
+    pub(super) async fn parse(
+        system: &TfSystem,
+        rest: crate::call::FunctionArgumentView<'_>,
+    ) -> BuiltinResult<Self> {
+        match rest.len() {
+            0 => Ok(Self::Values(default_time_vector(system))),
+            1 => {
+                let value = rest.first().expect("one impulse time argument");
                 let gathered = crate::dispatcher::gather_if_needed_async(value).await?;
                 if let Some(final_time) = scalar_time_from_value(&gathered)? {
                     return Ok(Self::Values(time_vector_from_final_time(

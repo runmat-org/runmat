@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 pub(super) async fn handle_open(
     runtime: Option<&crate::context::RuntimeContext>,
     path_value: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     filesystem: Option<std::sync::Arc<registry::FileFilesystem>>,
 ) -> BuiltinResult<FopenEval> {
     if rest.len() > 3 {
@@ -68,7 +68,7 @@ pub(super) async fn handle_open(
 pub(super) fn handle_query(
     runtime: Option<&crate::context::RuntimeContext>,
     fid_value: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<FopenEval> {
     if !rest.is_empty() {
         return Err(fopen_error_with_detail(
@@ -86,7 +86,7 @@ pub(super) fn handle_query(
 
 pub(super) fn handle_all(
     runtime: Option<&crate::context::RuntimeContext>,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<FopenEval> {
     if rest.len() > 1 {
         return Err(fopen_error_with_detail(

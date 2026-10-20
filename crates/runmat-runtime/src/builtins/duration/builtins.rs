@@ -61,8 +61,10 @@ pub(super) async fn duration_indexing(
         ));
     };
     if components.is_empty() {
-        return crate::execution::RootedValue::new(duration_object_from_days_tensor(days, format)?)
-            .map_err(|error| error.into_runtime_error());
+        return crate::execution::RootedValue::new(duration_object_from_days_tensor(
+            None, days, format,
+        )?)
+        .map_err(|error| error.into_runtime_error());
     }
     for component in components {
         if let crate::object::indexing::ObjectIndexComponent::Value(value) = component {
@@ -89,19 +91,27 @@ pub(super) async fn duration_indexing(
             duration_error_from(DurationErrorKind::InvalidIndex, "duration.subsref: ", err)
         })?;
     let indexed_days = tensor_from_numeric(indexed, "duration index")?;
-    crate::execution::RootedValue::new(duration_object_from_days_tensor(indexed_days, format)?)
-        .map_err(|error| error.into_runtime_error())
+    crate::execution::RootedValue::new(duration_object_from_days_tensor(
+        None,
+        indexed_days,
+        format,
+    )?)
+    .map_err(|error| error.into_runtime_error())
 }
 
 #[runmat_macros::runtime_builtin(
     name = "duration",
     binding_variant = "default",
-    builtin_path = "crate::builtins::duration"
+    builtin_path = "crate::builtins::duration",
+    context = true
 )]
-pub(super) async fn duration_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub(super) async fn duration_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     ensure_duration_class_registered();
-    let (raw_positional_end, _) = parse_trailing_format(&args)?;
-    let raw_positional = &args[..raw_positional_end];
+    let (raw_positional_end, _) = parse_trailing_format(args.view())?;
+    let raw_positional = args.view().range(..raw_positional_end)?;
     if !(1..=4).contains(&raw_positional.len())
         || !raw_positional.iter().all(is_numeric_duration_input)
     {
@@ -149,9 +159,15 @@ pub(super) async fn duration_builtin(args: Vec<Value>) -> crate::BuiltinResult<V
             BUILTIN_NAME,
         )?;
     }
-    let short_numeric_form = match raw_positional {
-        [value] => is_numeric_duration_input(value) && !is_public_duration_matrix(value),
-        [first, second] => is_numeric_duration_input(first) && is_numeric_duration_input(second),
+    let short_numeric_form = match raw_positional.len() {
+        1 => {
+            is_numeric_duration_input(&raw_positional[0])
+                && !is_public_duration_matrix(&raw_positional[0])
+        }
+        2 => {
+            is_numeric_duration_input(&raw_positional[0])
+                && is_numeric_duration_input(&raw_positional[1])
+        }
         _ => false,
     };
     if short_numeric_form {
@@ -160,16 +176,18 @@ pub(super) async fn duration_builtin(args: Vec<Value>) -> crate::BuiltinResult<V
             BUILTIN_NAME,
         )?;
     }
-    let args = gather_args(&args).await?;
-    let (positional_end, format) = parse_trailing_format(&args)?;
-    let mut positional = args[..positional_end].to_vec();
+    let args = gather_retained_args(args, runtime.as_ref()).await?;
+    let (positional_end, format) = parse_trailing_format(args.view())?;
+    let mut positional = args.into_range(..positional_end)?;
 
     match positional.len() {
-        1 if is_public_duration_matrix(&positional[0]) => {
-            build_from_matrix(positional.remove(0), format)
-        }
+        1 if is_public_duration_matrix(&positional[0]) => build_from_matrix(
+            runtime.as_ref(),
+            positional.pop_front().expect("validated duration matrix"),
+            format,
+        ),
         1..=4 if positional.iter().all(is_numeric_duration_input) => {
-            build_from_components(positional, format)
+            build_from_components(runtime.as_ref(), positional, format)
         }
         _ => Err(duration_error(
             DurationErrorKind::InvalidArgument,
@@ -276,7 +294,7 @@ pub(super) async fn duration_read_step(
             let field = scalar_text(&step.selector_value()?, "field selector")?;
             match field.as_str() {
                 FORMAT_FIELD => {
-                    crate::execution::RootedValue::new(Value::String(format_for_object(&object)))
+                    crate::execution::RootedValue::new(Value::string(format_for_object(&object)))
                         .map_err(|error| error.into_runtime_error())
                 }
                 _ => Err(duration_error(
@@ -295,27 +313,33 @@ pub(super) async fn duration_read_step(
 #[runmat_macros::runtime_builtin(
     name = "duration.subsasgn",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::duration"
 )]
 pub(super) async fn duration_subsasgn(
+    runtime: Option<crate::context::RuntimeContext>,
     obj: Value,
     subscript: Value,
     rhs: Value,
 ) -> crate::BuiltinResult<crate::execution::RootedValue> {
     let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
-    crate::object::protocol::execute_owned_subsasgn(
+    crate::object::protocol::execute_owned_subsasgn_with_context(
+        runtime.as_ref(),
         obj,
         path,
         vec![rhs],
         duration_read_step,
-        |obj, step, mut values| async move {
-            let rhs = values.pop().ok_or_else(|| {
-                duration_error(
-                    DurationErrorKind::InvalidArgument,
-                    "duration.subsasgn: assignment value is missing",
-                )
-            })?;
-            duration_write_step(obj, step, rhs).await
+        |obj, step, mut values| {
+            let runtime = runtime.as_ref();
+            async move {
+                let rhs = values.pop().ok_or_else(|| {
+                    duration_error(
+                        DurationErrorKind::InvalidArgument,
+                        "duration.subsasgn: assignment value is missing",
+                    )
+                })?;
+                duration_write_step(runtime, obj, step, rhs).await
+            }
         },
         None,
     )
@@ -323,6 +347,7 @@ pub(super) async fn duration_subsasgn(
 }
 
 pub(super) async fn duration_write_step(
+    runtime: Option<&crate::context::RuntimeContext>,
     obj: Value,
     step: crate::object::indexing::ObjectSubscript,
     rhs: Value,
@@ -347,9 +372,22 @@ pub(super) async fn duration_write_step(
                 FORMAT_FIELD => {
                     let text = scalar_text(&rhs, "Format value")?;
                     validate_duration_format(&text)?;
-                    object
-                        .properties
-                        .insert(FORMAT_FIELD.to_string(), Value::String(text));
+                    let text = crate::call::argument_text::copy_str(&text, runtime)?;
+                    crate::execution::object::replacement::replace_property(
+                        runtime,
+                        &mut object,
+                        FORMAT_FIELD,
+                        Value::String(text),
+                        |message, source| {
+                            crate::context::host_allocation::host_allocation_runtime_error(
+                                runtime,
+                                "RunMat:duration:PropertyAllocation",
+                                message,
+                                source,
+                            )
+                        },
+                        |message| duration_error(DurationErrorKind::InvalidArgument, message),
+                    )?;
                     Ok(Value::Object(object))
                 }
                 _ => Err(duration_error(
@@ -363,7 +401,7 @@ pub(super) async fn duration_write_step(
             "duration.subsasgn: only member assignment is supported",
         )),
     }?;
-    crate::execution::RootedValue::new(value).map_err(|error| error.into_runtime_error())
+    crate::execution::RootedValue::in_optional_context(value, runtime)
 }
 
 #[runmat_macros::runtime_builtin(
@@ -423,9 +461,14 @@ pub(super) async fn duration_ge(lhs: Value, rhs: Value) -> crate::BuiltinResult<
 #[runmat_macros::runtime_builtin(
     name = "duration.plus",
     binding_variant = "default",
-    builtin_path = "crate::builtins::duration"
+    builtin_path = "crate::builtins::duration",
+    context = true
 )]
-pub(super) async fn duration_plus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
+pub(super) async fn duration_plus(
+    runtime: Option<crate::context::RuntimeContext>,
+    lhs: Value,
+    rhs: Value,
+) -> crate::BuiltinResult<Value> {
     validate_duration_operand(&lhs, false)?;
     let rhs_serials = if crate::builtins::datetime::is_datetime_object(&rhs) {
         Some(crate::builtins::datetime::serials_from_datetime_value(
@@ -447,6 +490,7 @@ pub(super) async fn duration_plus(lhs: Value, rhs: Value) -> crate::BuiltinResul
         let tensor = Tensor::new(serials, shape)
             .map_err(|err| duration_error(DurationErrorKind::Internal, format!("plus: {err}")))?;
         return crate::builtins::datetime::datetime_object_from_serial_tensor(
+            runtime.as_ref(),
             tensor,
             crate::builtins::datetime::datetime_format_from_value(&rhs),
         );
@@ -459,15 +503,25 @@ pub(super) async fn duration_plus(lhs: Value, rhs: Value) -> crate::BuiltinResul
         .zip(right.iter())
         .map(|(a, b)| a + b)
         .collect::<Vec<_>>();
-    duration_object_from_days(days, shape, duration_format_from_value(&lhs))
+    duration_object_from_days(
+        runtime.as_ref(),
+        days,
+        shape,
+        duration_format_from_value(&lhs),
+    )
 }
 
 #[runmat_macros::runtime_builtin(
     name = "duration.minus",
     binding_variant = "default",
-    builtin_path = "crate::builtins::duration"
+    builtin_path = "crate::builtins::duration",
+    context = true
 )]
-pub(super) async fn duration_minus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
+pub(super) async fn duration_minus(
+    runtime: Option<crate::context::RuntimeContext>,
+    lhs: Value,
+    rhs: Value,
+) -> crate::BuiltinResult<Value> {
     validate_duration_operand(&lhs, false)?;
     validate_duration_operand(&rhs, true)?;
     preflight_operand_shapes(&lhs, &rhs, "minus")?;
@@ -479,5 +533,18 @@ pub(super) async fn duration_minus(lhs: Value, rhs: Value) -> crate::BuiltinResu
         .zip(right.iter())
         .map(|(a, b)| a - b)
         .collect::<Vec<_>>();
-    duration_object_from_days(days, shape, duration_format_from_value(&lhs))
+    duration_object_from_days(
+        runtime.as_ref(),
+        days,
+        shape,
+        duration_format_from_value(&lhs),
+    )
+}
+#[cfg(test)]
+pub(crate) async fn duration_builtin_source(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    let retained = crate::call::BuiltinArguments::from_borrowed(&args, runtime.as_ref())?;
+    duration_builtin(runtime, retained).await
 }

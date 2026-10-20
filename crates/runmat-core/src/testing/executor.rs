@@ -11,7 +11,6 @@ use runmat_test::executor::{
 };
 use runmat_test::identity::TestId;
 use runmat_test::protocol::ProtocolLimits;
-use runmat_value::Value;
 
 use crate::{ExecutableUnit, InvocationControl, ProcedureInvocation, RunError, RunMatSession};
 
@@ -96,8 +95,13 @@ impl<'a> CoreTestExecutor<'a> {
             .get(&request.context.test_id)
             .map(Vec::as_slice)
             .unwrap_or_default();
-        let invocation = super::procedure::invocation_for(&unit, &request.procedure, parameters)
-            .map_err(uncaught)?;
+        let invocation = super::procedure::invocation_for(
+            self.session.runtime_context(),
+            &unit,
+            &request.procedure,
+            parameters,
+        )
+        .map_err(|error| run_error_failure(RunError::Runtime(error)))?;
         self.execute_invocation(request, unit, invocation).await
     }
 
@@ -190,29 +194,46 @@ impl<'a> CoreTestExecutor<'a> {
         request: &ExecutionRequest,
         teardown: RegisteredRuntimeTeardown,
     ) -> Result<ExecutionResponse, ExecutionFailure> {
-        let name = callback_name(&teardown.invocation.callback)
-            .ok_or_else(|| uncaught("runtime teardown callback is not callable".to_string()))?;
-        if teardown
+        let runtime = self
+            .session
+            .execution_runtime_context(teardown.unit.revision().program_revision.clone());
+        let runtime = teardown
             .unit
-            .procedure_names()
-            .iter()
-            .any(|item| item == &name)
+            .bind_runtime_sources(runtime)
+            .map_err(uncaught)?;
+        let bytecode = teardown.unit.runtime_bytecode(&runtime).map_err(uncaught)?;
+        let selected = crate::executable::callback::select(
+            &runtime,
+            &bytecode.function_registry,
+            teardown.invocation.callback.clone(),
+        )
+        .map_err(|error| uncaught(error.to_string()))?;
+        // This is a routing hint, not execution admission. The executable
+        // branch selects and authenticates the original target again after
+        // its actual Admission and source binding. Other callable families
+        // retain the canonical runtime callback dispatch instead.
+        if crate::executable::callback::owned_function(
+            &teardown.unit,
+            &bytecode.function_registry,
+            selected.selected_target(),
+        )
+        .is_some()
         {
+            drop(selected);
             return self
                 .execute_invocation(
                     request,
                     teardown.unit,
-                    ProcedureInvocation::function(name, teardown.invocation.arguments),
+                    ProcedureInvocation::retained_callable(
+                        teardown.invocation.callback,
+                        teardown.invocation.arguments,
+                    ),
                 )
                 .await;
         }
-        let runtime = self.session.runtime_context().clone();
         reset_console_output(&runtime);
         match runtime
-            .scope(runmat_runtime::call_builtin_async(
-                &name,
-                &teardown.invocation.arguments,
-            ))
+            .scope(selected.invoke_retained(Some(&runtime), teardown.invocation.arguments, 0))
             .await
         {
             Ok(_) => Ok(ExecutionResponse {
@@ -233,17 +254,6 @@ impl<'a> CoreTestExecutor<'a> {
 impl TestExecutor for CoreTestExecutor<'_> {
     fn execute<'a>(&'a mut self, request: &'a ExecutionRequest) -> ExecutionFuture<'a> {
         Box::pin(async move { self.execute_request(request).await })
-    }
-}
-
-fn callback_name(value: &Value) -> Option<String> {
-    match value {
-        Value::FunctionHandle(name)
-        | Value::ExternalFunctionHandle(name)
-        | Value::MethodFunctionHandle(name) => Some(name.name().to_owned()),
-        Value::BoundFunctionHandle(handle) => Some(handle.name.clone()),
-        Value::Closure(closure) => Some(closure.function_name.clone()),
-        _ => None,
     }
 }
 

@@ -11,12 +11,12 @@ fn has_bool(vars: &[Value], expected: bool) -> bool {
 
 fn has_table(vars: &[Value]) -> bool {
     vars.iter()
-        .any(|value| matches!(value, Value::Object(object) if object.class_name.is(runmat_types::StaticClassIdentity::new("table"))))
+        .any(|value| matches!(value, Value::Object(object) if object.class_name().is(runmat_types::StaticClassIdentity::new("table"))))
 }
 
 fn has_timetable(vars: &[Value]) -> bool {
     vars.iter()
-        .any(|value| matches!(value, Value::Object(object) if object.class_name.is(runmat_types::StaticClassIdentity::new("timetable"))))
+        .any(|value| matches!(value, Value::Object(object) if object.class_name().is(runmat_types::StaticClassIdentity::new("timetable"))))
 }
 
 fn has_tensor(vars: &[Value], expected: &[f64]) -> bool {
@@ -161,10 +161,10 @@ fn categorical_dictionary_and_selector_surface_executes_from_scripts() {
     assert!(has_logical_array(&vars, &[1, 1]));
     assert!(vars
         .iter()
-        .any(|value| matches!(value, Value::Object(object) if object.class_name.is(runmat_types::StaticClassIdentity::new("categorical")))));
+        .any(|value| matches!(value, Value::Object(object) if object.class_name().is(runmat_types::StaticClassIdentity::new("categorical")))));
     assert!(vars
         .iter()
-        .any(|value| matches!(value, Value::Object(object) if object.class_name.is(runmat_types::StaticClassIdentity::new("dictionary")))));
+        .any(|value| matches!(value, Value::Object(object) if object.class_name().is(runmat_types::StaticClassIdentity::new("dictionary")))));
 }
 
 #[test]
@@ -193,7 +193,7 @@ fn dictionary_compiled_surface_preserves_wide_integer_keys_and_scalar_expansion(
         .find_map(|value| match value {
             Value::Object(object)
                 if object
-                    .class_name
+                    .class_name()
                     .is(runmat_types::StaticClassIdentity::new("dictionary")) =>
             {
                 Some(object)
@@ -201,12 +201,12 @@ fn dictionary_compiled_surface_preserves_wide_integer_keys_and_scalar_expansion(
             _ => None,
         })
         .expect("dictionary result");
-    let Value::Cell(keys) = dictionary.properties.get("Keys").unwrap() else {
+    let Value::Cell(keys) = dictionary.properties().get("Keys").unwrap() else {
         panic!("dictionary keys");
     };
-    assert_eq!(keys.data.len(), 1);
+    assert_eq!(keys.data().len(), 1);
     assert_eq!(
-        keys.data[0],
+        keys.data()[0],
         Value::Int(runmat_value::IntValue::U64(9_007_199_254_740_993))
     );
 }
@@ -223,7 +223,7 @@ fn categorical_compiled_surface_preserves_exact_integer_identity_and_flags() {
         .find_map(|value| match value {
             Value::Object(object)
                 if object
-                    .class_name
+                    .class_name()
                     .is(runmat_types::StaticClassIdentity::new("categorical")) =>
             {
                 Some(object)
@@ -231,12 +231,12 @@ fn categorical_compiled_surface_preserves_exact_integer_identity_and_flags() {
             _ => None,
         })
         .expect("categorical object");
-    match object.properties.get("Codes").expect("codes") {
+    match object.properties().get("Codes").expect("codes") {
         Value::Tensor(codes) => assert_eq!(codes.materialize_f64(), vec![2.0, 1.0]),
         other => panic!("expected categorical codes, got {other:?}"),
     }
-    match object.properties.get("Categories").expect("categories") {
-        Value::StringArray(categories) => assert_eq!(categories.data, vec!["two", "one"]),
+    match object.properties().get("Categories").expect("categories") {
+        Value::StringArray(categories) => assert_eq!(categories.data(), vec!["two", "one"]),
         other => panic!("expected categorical names, got {other:?}"),
     }
 }

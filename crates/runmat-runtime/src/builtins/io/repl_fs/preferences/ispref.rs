@@ -15,7 +15,7 @@ use crate::BuiltinResult;
 )]
 pub(in crate::builtins::io::repl_fs) async fn ispref_builtin(
     runtime: Option<RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &ISPREF_DESCRIPTOR,

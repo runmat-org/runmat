@@ -1,7 +1,11 @@
 use super::*;
 use crate::execution::RootedValue;
 
-pub(super) async fn datetime_indexing(obj: Value, payload: Value) -> BuiltinResult<RootedValue> {
+pub(super) async fn datetime_indexing(
+    runtime: Option<&crate::context::RuntimeContext>,
+    obj: Value,
+    payload: Value,
+) -> BuiltinResult<RootedValue> {
     let Value::Object(object) = obj else {
         return Err(datetime_error(
             "datetime.subsref: receiver must be a datetime object",
@@ -15,16 +19,18 @@ pub(super) async fn datetime_indexing(obj: Value, payload: Value) -> BuiltinResu
             "datetime.subsref: indexing payload must be a cell array",
         ));
     };
-    if cell.data.is_empty() {
-        return RootedValue::new(datetime_object_from_serial_tensor(serials, format)?)
-            .map_err(|error| error.into_runtime_error());
+    if cell.data().is_empty() {
+        return RootedValue::new(datetime_object_from_serial_tensor(
+            runtime, serials, format,
+        )?)
+        .map_err(|error| error.into_runtime_error());
     }
-    if cell.data.len() != 1 {
+    if cell.data().len() != 1 {
         return Err(datetime_error(
             "datetime.subsref: only linear datetime indexing is currently supported",
         ));
     }
-    let selector = cell.data[0].clone();
+    let selector = cell.data()[0].clone();
     let selector = match selector {
         Value::Tensor(tensor) => tensor,
         Value::Num(value) => Tensor::new(vec![value], vec![1, 1])
@@ -57,6 +63,10 @@ pub(super) async fn datetime_indexing(obj: Value, payload: Value) -> BuiltinResu
             )))
         }
     };
-    RootedValue::new(datetime_object_from_serial_tensor(indexed_serials, format)?)
-        .map_err(|error| error.into_runtime_error())
+    RootedValue::new(datetime_object_from_serial_tensor(
+        runtime,
+        indexed_serials,
+        format,
+    )?)
+    .map_err(|error| error.into_runtime_error())
 }

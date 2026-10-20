@@ -14,7 +14,7 @@ pub(in super::super) const SAVE: BuiltinDocumentation = BuiltinDocumentation {
             "`-append` reads an existing Level-5 file, merges the new entries by name, and writes a refreshed file. A new value replaces an existing value of the same name. ASCII/text format switches such as `-ascii` and `-double` are not accepted.",
         ] },
         BuiltinDocumentationSection { heading: "Values", paragraphs: &[
-            "Dense real/complex single and double arrays; all eight signed/unsigned integer classes; logical, character, string, cell, struct, and real sparse arrays retain their available shapes and storage semantics. RunMat object envelopes may invoke registered `saveobj` hooks. Function handles and opaque graphics handles are unsupported and raise errors.",
+            "Dense real/complex single and double arrays; all eight signed/unsigned integer classes; logical, character, string, cell, struct, and real sparse arrays retain their available shapes and storage semantics. RunMat writes typed Level-5 object records and may invoke registered `saveobj` hooks. Function handles and opaque graphics handles are unsupported and raise errors.",
             "Resident array values are gathered from their owning provider before encoding. The MAT file holds host bytes; saving does not mutate the original resident value. Large arrays, append, object callbacks, and full-file encoding may require substantial host memory.",
         ] },
         BuiltinDocumentationSection { heading: "Execution", paragraphs: &[
@@ -36,7 +36,7 @@ pub(in super::super) const SAVE: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationFaq { question: "Which MAT-file version is generated?", answer: "Uncompressed Level-5 MAT files. Dense available numeric classes, exact integers, and real sparse matrices use Level-5 class tags; HDF5-backed v7.3 output is not supported." },
         BuiltinDocumentationFaq { question: "Is `-append` supported?", answer: "Yes for supported Level-5 content. The existing file is decoded, entries are merged by name, and a new Level-5 file is written. A duplicate name is replaced by the new value." },
         BuiltinDocumentationFaq { question: "Do `-ascii` or `-double` work?", answer: "No. The current writer uses the Level-5 MAT format only." },
-        BuiltinDocumentationFaq { question: "Are objects or function handles saved?", answer: "RunMat object envelopes and registered `saveobj` hooks are supported. Function handles are rejected." },
+        BuiltinDocumentationFaq { question: "Are objects or function handles saved?", answer: "RunMat typed Level-5 object records and registered `saveobj` hooks are supported. Function handles are rejected." },
         BuiltinDocumentationFaq { question: "Does `save` return a value?", answer: "The MATLAB-compatible call is a zero-output statement. With RunMat extensions enabled, one captured output is double zero on success." },
         BuiltinDocumentationFaq { question: "How do I change the bare-save filename?", answer: "Set `RUNMAT_SAVE_DEFAULT_PATH`. With no explicit filename, `save` uses that path instead of `matlab.mat`." },
         BuiltinDocumentationFaq { question: "Are parent folders created?", answer: "No. The parent folder must already exist, or the filesystem provider returns an error." },

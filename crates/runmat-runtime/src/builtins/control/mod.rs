@@ -39,7 +39,9 @@ pub mod minreal;
 /// always inside, the imaginary range is symmetric, and `pad` (a fraction of the larger span) keeps
 /// markers off the frame.
 async fn frame_complex_plane(points: &[num_complex::Complex64], pad: f64) {
-    let finite = points.iter().filter(|p| p.re.is_finite() && p.im.is_finite());
+    let finite = points
+        .iter()
+        .filter(|p| p.re.is_finite() && p.im.is_finite());
     let (mut xmin, mut xmax, mut ymax) = (0.0_f64, 0.0_f64, 0.0_f64);
     for p in finite {
         xmin = xmin.min(p.re);

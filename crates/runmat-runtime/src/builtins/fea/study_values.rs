@@ -84,13 +84,13 @@ fn register_immutable_schema(
 
 fn validate_immutable_value(object: &ObjectInstance) -> Result<(), String> {
     if object
-        .properties
+        .properties()
         .keys()
         .any(|name| name.starts_with("__runmat_"))
     {
         return Err(format!(
             "immutable study value `{}` contains an opaque runtime property",
-            object.class_name
+            object.class_name()
         ));
     }
     Ok(())
@@ -103,7 +103,7 @@ pub(super) fn object_or_cell<T: DeserializeOwned>(
 ) -> BuiltinResult<Vec<T>> {
     match value {
         Value::Cell(cell) => cell
-            .data
+            .data()
             .iter()
             .map(|item| object_payload(builtin, item, class_name))
             .collect(),

@@ -1,9 +1,10 @@
 //! Admitted text-line controls; parsed completely before filesystem access.
 use super::{line_error, scalar_text};
 use crate::BuiltinResult;
-use runmat_value::Value;
 
-pub(super) fn parse_empty_line_rule(args: &[Value]) -> BuiltinResult<bool> {
+pub(super) fn parse_empty_line_rule(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<bool> {
     let mut omit_empty = false;
     let mut idx = 0usize;
     while idx < args.len() {
@@ -37,7 +38,9 @@ pub(super) fn parse_empty_line_rule(args: &[Value]) -> BuiltinResult<bool> {
     Ok(omit_empty)
 }
 
-pub(super) fn parse_newline(args: &[Value]) -> BuiltinResult<Option<String>> {
+pub(super) fn parse_newline(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Option<String>> {
     let mut newline = None;
     let mut idx = 0usize;
     while idx < args.len() {

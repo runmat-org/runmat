@@ -11,6 +11,7 @@ pub(super) const VALID_FIELD: &str = "__runmat_dynamic_property_valid__";
 
 mod lifecycle;
 mod metadata;
+mod projection;
 pub(crate) mod operations;
 pub(crate) mod selected_graph;
 #[cfg(test)]

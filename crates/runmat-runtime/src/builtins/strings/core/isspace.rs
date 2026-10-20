@@ -7,7 +7,7 @@ use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
 use crate::builtins::common::map_control_flow_with_builtin;
-use crate::builtins::strings::core::classification::classify_text_value;
+use crate::builtins::strings::core::classification::{classify_string, classify_text_value};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 fn invalid_string_array_error() -> RuntimeError {
@@ -31,8 +31,8 @@ pub(crate) async fn isspace_builtin(text: Value) -> BuiltinResult<Value> {
         "isspace",
     )?;
     let text = match text {
-        Value::StringArray(array) if array.data.len() == 1 => {
-            Value::String(array.data.into_iter().next().expect("string scalar"))
+        Value::StringArray(array) if array.data().len() == 1 => {
+            return classify_string(array.data()[0].as_str(), "isspace", |ch| ch.is_whitespace());
         }
         Value::StringArray(_) => return Err(invalid_string_array_error()),
         Value::String(_) | Value::CharArray(_) => text,

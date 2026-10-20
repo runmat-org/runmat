@@ -15,7 +15,8 @@ use crate::BuiltinResult;
     binding_variant = "default",
     builtin_path = "crate::builtins::geometry::generated::features"
 )]
-pub async fn geometry_extrude_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn geometry_extrude_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     let builtin = "geometry.extrude";
     let args = exactly(builtin, args, 3)?;
     let graph = super::codec::feature_from_value(&args[0], builtin)?;
@@ -32,7 +33,8 @@ pub async fn geometry_extrude_builtin(args: Vec<Value>) -> BuiltinResult<Value> 
     binding_variant = "default",
     builtin_path = "crate::builtins::geometry::generated::features"
 )]
-pub async fn geometry_revolve_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn geometry_revolve_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     let builtin = "geometry.revolve";
     let args = exactly(builtin, args, 4)?;
     let graph = super::codec::feature_from_value(&args[0], builtin)?;
@@ -51,7 +53,8 @@ pub async fn geometry_revolve_builtin(args: Vec<Value>) -> BuiltinResult<Value> 
     binding_variant = "default",
     builtin_path = "crate::builtins::geometry::generated::features"
 )]
-pub async fn geometry_hole_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn geometry_hole_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     let builtin = "geometry.hole";
     let args = exactly(builtin, args, 5)?;
     let graph = super::codec::feature_from_value(&args[0], builtin)?;
@@ -70,7 +73,8 @@ pub async fn geometry_hole_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::geometry::generated::features"
 )]
-pub async fn geometry_pocket_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn geometry_pocket_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     let builtin = "geometry.pocket";
     let mut args = exactly(builtin, args, 4)?;
     let direction = vector3(&args[3], builtin, "direction")?;
@@ -91,7 +95,8 @@ pub async fn geometry_pocket_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::geometry::generated::features"
 )]
-pub async fn geometry_fillet_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn geometry_fillet_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     let builtin = "geometry.fillet";
     let args = exactly(builtin, args, 3)?;
     let radius = scalar(&args[2], builtin, "radius")?;
@@ -109,7 +114,8 @@ pub async fn geometry_fillet_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::geometry::generated::features"
 )]
-pub async fn geometry_chamfer_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn geometry_chamfer_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     let builtin = "geometry.chamfer";
     let args = exactly(builtin, args, 3)?;
     let distance = scalar(&args[2], builtin, "distance")?;

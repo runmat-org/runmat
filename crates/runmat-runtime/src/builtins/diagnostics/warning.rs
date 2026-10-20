@@ -16,7 +16,7 @@ use std::convert::TryFrom;
 #[cfg(test)]
 use std::sync::Mutex;
 
-use crate::builtins::common::format::format_variadic;
+use crate::builtins::common::format::format_variadic_arguments;
 use crate::warnings::{self, WarningMode, WarningRequest, WarningState};
 use crate::{build_runtime_error, RuntimeError};
 
@@ -65,13 +65,13 @@ where
     binding_variant = "default",
     builtin_path = "crate::builtins::diagnostics::warning"
 )]
-fn warning_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+fn warning_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     if args.is_empty() {
         return handle_query_default();
     }
 
     let first = &args[0];
-    let rest = &args[1..];
+    let rest = args.view().range(1..)?;
 
     match first {
         Value::Struct(_) | Value::Cell(_) => {
@@ -104,7 +104,7 @@ fn warning_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 fn handle_message_call(
     explicit_identifier: Option<String>,
     first_string: String,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> crate::BuiltinResult<Value> {
     if let Some(identifier) = explicit_identifier {
         return emit_warning(&identifier, &first_string, rest);
@@ -114,14 +114,18 @@ fn handle_message_call(
         emit_warning(warning_default_identifier(), &first_string, rest)
     } else if is_message_identifier(&first_string) {
         let fmt = value_to_string("warning", &rest[0])?;
-        let args = &rest[1..];
+        let args = rest.range(1..)?;
         emit_warning(&first_string, &fmt, args)
     } else {
         emit_warning(warning_default_identifier(), &first_string, rest)
     }
 }
 
-fn emit_warning(identifier_raw: &str, fmt: &str, args: &[Value]) -> crate::BuiltinResult<Value> {
+fn emit_warning(
+    identifier_raw: &str,
+    fmt: &str,
+    args: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<Value> {
     if args.iter().any(|value| {
         matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some() && tensor.len() != 1)
     }) {
@@ -131,7 +135,7 @@ fn emit_warning(identifier_raw: &str, fmt: &str, args: &[Value]) -> crate::Built
         )?;
     }
     let identifier = normalize_identifier(identifier_raw);
-    let message = format_variadic(fmt, args).map_err(|flow| {
+    let message = format_variadic_arguments(fmt, args).map_err(|flow| {
         remap_warning_flow(flow, &WARNING_ERROR_INVALID_INPUT, |err| {
             err.message().to_string()
         })
@@ -148,10 +152,17 @@ fn emit_warning(identifier_raw: &str, fmt: &str, args: &[Value]) -> crate::Built
 
 fn reissue_exception(mex: &runmat_value::MException) -> crate::BuiltinResult<Value> {
     let identifier = normalize_identifier(&mex.identifier);
-    emit_warning(&identifier, &mex.message, &[])
+    emit_warning(
+        &identifier,
+        &mex.message,
+        crate::call::FunctionArgumentView::from_slice(&[]),
+    )
 }
 
-fn handle_command(command: WarningCommand, rest: &[Value]) -> crate::BuiltinResult<Value> {
+fn handle_command(
+    command: WarningCommand,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<Value> {
     match command {
         WarningCommand::SetMode(mode) => set_mode_command(mode, rest),
         WarningCommand::Default => default_command(rest),
@@ -170,7 +181,10 @@ fn handle_command(command: WarningCommand, rest: &[Value]) -> crate::BuiltinResu
     }
 }
 
-fn set_mode_command(mode: WarningMode, rest: &[Value]) -> crate::BuiltinResult<Value> {
+fn set_mode_command(
+    mode: WarningMode,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<Value> {
     let identifier = if rest.is_empty() {
         "all".to_string()
     } else if rest.len() == 1 {
@@ -238,7 +252,7 @@ fn set_mode_for_special_mode(
     ))
 }
 
-fn default_command(rest: &[Value]) -> crate::BuiltinResult<Value> {
+fn default_command(rest: crate::call::FunctionArgumentView<'_>) -> crate::BuiltinResult<Value> {
     match rest.len() {
         0 => {
             let snapshot = warnings::with_policy(|policy| policy.reset_defaults());
@@ -286,7 +300,7 @@ fn default_command(rest: &[Value]) -> crate::BuiltinResult<Value> {
     }
 }
 
-fn query_command(rest: &[Value]) -> crate::BuiltinResult<Value> {
+fn query_command(rest: crate::call::FunctionArgumentView<'_>) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(warning_default_error(
             "warning: 'query' accepts at most one identifier argument",
@@ -304,20 +318,20 @@ fn query_command(rest: &[Value]) -> crate::BuiltinResult<Value> {
         WarningTarget::Last => Ok(warnings::with_policy(|policy| policy.last_warning())
             .map_or_else(
                 || {
-                    let mut st = StructValue::new();
+                    let mut st = runmat_value::UnboundedStructValueBuilder::new();
                     st.fields.insert("identifier".to_string(), Value::from(""));
                     st.fields.insert("message".to_string(), Value::from(""));
                     st.fields.insert("state".to_string(), Value::from("none"));
-                    Value::Struct(st)
+                    Value::Struct(st.finish())
                 },
                 |warning| {
-                    let mut st = StructValue::new();
+                    let mut st = runmat_value::UnboundedStructValueBuilder::new();
                     st.fields
                         .insert("identifier".to_string(), Value::from(warning.identifier));
                     st.fields
                         .insert("message".to_string(), Value::from(warning.message));
                     st.fields.insert("state".to_string(), Value::from("last"));
-                    Value::Struct(st)
+                    Value::Struct(st.finish())
                 },
             )),
         WarningTarget::Backtrace => {
@@ -342,18 +356,18 @@ fn query_command(rest: &[Value]) -> crate::BuiltinResult<Value> {
     }
 }
 
-fn status_command(rest: &[Value]) -> crate::BuiltinResult<Value> {
+fn status_command(rest: crate::call::FunctionArgumentView<'_>) -> crate::BuiltinResult<Value> {
     if !rest.is_empty() {
         return Err(warning_default_error(
             "warning: 'status' does not accept additional arguments",
         ));
     }
-    let value = query_command(&[])?;
+    let value = query_command(crate::call::FunctionArgumentView::from_slice(&[]))?;
     match &value {
         Value::Cell(cell) => {
             emit_status_line("Warning status:".to_string())?;
-            for idx in 0..cell.data.len() {
-                let entry = cell.data[idx].clone();
+            for idx in 0..cell.data().len() {
+                let entry = cell.data()[idx].clone();
                 if let Value::Struct(st) = entry {
                     let identifier = st
                         .fields
@@ -387,7 +401,7 @@ fn status_command(rest: &[Value]) -> crate::BuiltinResult<Value> {
     Ok(value)
 }
 
-fn backtrace_command(rest: &[Value]) -> crate::BuiltinResult<Value> {
+fn backtrace_command(rest: crate::call::FunctionArgumentView<'_>) -> crate::BuiltinResult<Value> {
     match rest.len() {
         0 => {
             let state = warnings::with_policy(|policy| {
@@ -424,15 +438,15 @@ fn backtrace_command(rest: &[Value]) -> crate::BuiltinResult<Value> {
 }
 
 fn handle_query_default() -> crate::BuiltinResult<Value> {
-    query_command(&[])
+    query_command(crate::call::FunctionArgumentView::from_slice(&[]))
 }
 
 fn apply_state_value(value: &Value) -> crate::BuiltinResult<()> {
     match value {
         Value::Struct(st) => apply_state_struct(st),
         Value::Cell(cell) => {
-            for idx in 0..cell.data.len() {
-                let entry = cell.data[idx].clone();
+            for idx in 0..cell.data().len() {
+                let entry = cell.data()[idx].clone();
                 apply_state_value(&entry)?;
             }
             Ok(())
@@ -540,9 +554,9 @@ fn restored_special_mode_enabled(
 
 fn value_to_string(context: &str, value: &Value) -> crate::BuiltinResult<String> {
     match value {
-        Value::String(s) => Ok(s.clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
+        Value::String(s) => Ok(s.to_string()),
+        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data().iter().collect()),
+        Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].to_string()),
         Value::CharArray(_) => Err(warning_default_error(format!(
             "{context}: expected scalar char array"
         ))),
@@ -579,14 +593,14 @@ fn normalize_identifier(raw: &str) -> String {
 }
 
 fn state_struct(identifier: &str, state: &str) -> StructValue {
-    let mut st = StructValue::new();
+    let mut st = runmat_value::UnboundedStructValueBuilder::new();
     st.fields.insert(
         "identifier".to_string(),
         Value::from(identifier.to_string()),
     );
     st.fields
         .insert("state".to_string(), Value::from(state.to_string()));
-    st
+    st.finish()
 }
 
 fn state_struct_value(identifier: &str, state: &str) -> Value {
@@ -655,8 +669,9 @@ pub(crate) mod tests {
     fn structs_from_value(value: Value) -> Vec<StructValue> {
         match value {
             Value::Cell(cell) => cell
-                .data
-                .into_iter()
+                .data()
+                .iter()
+                .cloned()
                 .map(|value| match value {
                     Value::Struct(st) => st,
                     other => panic!("expected struct entry, got {other:?}"),
@@ -679,7 +694,10 @@ pub(crate) mod tests {
     fn emits_basic_warning() {
         let _guard = TEST_LOCK.lock().unwrap();
         reset_manager();
-        let result = warning_builtin(vec![Value::from("Hello world!")]).expect("warning ok");
+        let result = warning_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::from("Hello world!")],
+        ))
+        .expect("warning ok");
         assert!(matches!(result, Value::Num(_)));
         let last = last_warning();
         assert_eq!(
@@ -701,7 +719,10 @@ pub(crate) mod tests {
             Value::from("value is %d"),
             Value::Int(runmat_value::IntValue::I32(7)),
         ];
-        warning_builtin(args).expect("warning ok");
+        warning_builtin(crate::builtins::common::test_support::builtin_arguments(
+            args,
+        ))
+        .expect("warning ok");
         let last = last_warning();
         assert_eq!(
             last.map(|warning| (warning.identifier, warning.message)),
@@ -714,10 +735,15 @@ pub(crate) mod tests {
     fn off_suppresses_warning() {
         let _guard = TEST_LOCK.lock().unwrap();
         reset_manager();
-        let state =
-            warning_builtin(vec![Value::from("off"), Value::from("all")]).expect("state change");
+        let state = warning_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::from("off"), Value::from("all")],
+        ))
+        .expect("state change");
         assert_state_struct(&state, "all", "on");
-        warning_builtin(vec![Value::from("Should suppress")]).expect("warning ok");
+        warning_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::from("Should suppress")],
+        ))
+        .expect("warning ok");
         let last = last_warning();
         assert!(last.is_none());
     }
@@ -727,11 +753,19 @@ pub(crate) mod tests {
     fn once_only_emits_first_warning() {
         let _guard = TEST_LOCK.lock().unwrap();
         reset_manager();
-        let state =
-            warning_builtin(vec![Value::from("once"), Value::from("all")]).expect("state change");
+        let state = warning_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::from("once"), Value::from("all")],
+        ))
+        .expect("state change");
         assert_state_struct(&state, "all", "on");
-        warning_builtin(vec![Value::from("First")]).expect("warning ok");
-        warning_builtin(vec![Value::from("Second")]).expect("warning ok");
+        warning_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::from("First")],
+        ))
+        .expect("warning ok");
+        warning_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::from("Second")],
+        ))
+        .expect("warning ok");
         let last = last_warning();
         assert_eq!(
             last.map(|warning| (warning.identifier, warning.message)),
@@ -747,11 +781,17 @@ pub(crate) mod tests {
     fn error_mode_promotes_to_error() {
         let _guard = TEST_LOCK.lock().unwrap();
         reset_manager();
-        let previous =
-            warning_builtin(vec![Value::from("error"), Value::from("all")]).expect("state change");
+        let previous = warning_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::from("error"), Value::from("all")],
+        ))
+        .expect("state change");
         assert_state_struct(&previous, "all", "on");
-        let err =
-            unwrap_error(warning_builtin(vec![Value::from("Promoted")]).expect_err("should error"));
+        let err = unwrap_error(
+            warning_builtin(crate::builtins::common::test_support::builtin_arguments(
+                vec![Value::from("Promoted")],
+            ))
+            .expect_err("should error"),
+        );
         assert_eq!(err.identifier(), Some(warning_default_identifier()));
         assert_eq!(err.message(), "Promoted");
     }
@@ -761,10 +801,14 @@ pub(crate) mod tests {
     fn query_returns_state_struct() {
         let _guard = TEST_LOCK.lock().unwrap();
         reset_manager();
-        warning_builtin(vec![Value::from("off"), Value::from("runmat:demo:test")])
-            .expect("state change");
-        let value = warning_builtin(vec![Value::from("query"), Value::from("runmat:demo:test")])
-            .expect("query ok");
+        warning_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::from("off"), Value::from("runmat:demo:test")],
+        ))
+        .expect("state change");
+        let value = warning_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::from("query"), Value::from("runmat:demo:test")],
+        ))
+        .expect("query ok");
         match value {
             Value::Struct(st) => {
                 let state = st.fields.get("state").unwrap();
@@ -779,14 +823,21 @@ pub(crate) mod tests {
     fn state_struct_restores_mode() {
         let _guard = TEST_LOCK.lock().unwrap();
         reset_manager();
-        let snapshot =
-            warning_builtin(vec![Value::from("query"), Value::from("all")]).expect("query all");
-        warning_builtin(vec![Value::from("off"), Value::from("all")]).expect("off all");
-        warning_builtin(vec![snapshot]).expect("restore");
-        let state = warning_builtin(vec![
-            Value::from("query"),
-            Value::from("runmat:demo:restored"),
-        ])
+        let snapshot = warning_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::from("query"), Value::from("all")],
+        ))
+        .expect("query all");
+        warning_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::from("off"), Value::from("all")],
+        ))
+        .expect("off all");
+        warning_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![snapshot],
+        ))
+        .expect("restore");
+        let state = warning_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::from("query"), Value::from("runmat:demo:restored")],
+        ))
         .expect("query")
         .expect_struct();
         assert_eq!(
@@ -800,12 +851,16 @@ pub(crate) mod tests {
     fn set_mode_backtrace_via_state() {
         let _guard = TEST_LOCK.lock().unwrap();
         reset_manager();
-        let prev = warning_builtin(vec![Value::from("on"), Value::from("backtrace")])
-            .expect("enable backtrace");
+        let prev = warning_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::from("on"), Value::from("backtrace")],
+        ))
+        .expect("enable backtrace");
         assert_state_struct(&prev, "backtrace", "off");
         assert!(warnings::with_policy(|policy| policy.backtrace_enabled()));
-        let prev = warning_builtin(vec![Value::from("off"), Value::from("backtrace")])
-            .expect("disable backtrace");
+        let prev = warning_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::from("off"), Value::from("backtrace")],
+        ))
+        .expect("disable backtrace");
         assert_state_struct(&prev, "backtrace", "on");
         assert!(!warnings::with_policy(|policy| policy.backtrace_enabled()));
     }
@@ -815,12 +870,16 @@ pub(crate) mod tests {
     fn set_mode_verbose_via_state() {
         let _guard = TEST_LOCK.lock().unwrap();
         reset_manager();
-        let prev = warning_builtin(vec![Value::from("on"), Value::from("verbose")])
-            .expect("enable verbose");
+        let prev = warning_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::from("on"), Value::from("verbose")],
+        ))
+        .expect("enable verbose");
         assert_state_struct(&prev, "verbose", "off");
         assert!(warnings::with_policy(|policy| policy.verbose_enabled()));
-        let prev = warning_builtin(vec![Value::from("off"), Value::from("verbose")])
-            .expect("disable verbose");
+        let prev = warning_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::from("off"), Value::from("verbose")],
+        ))
+        .expect("disable verbose");
         assert_state_struct(&prev, "verbose", "on");
         assert!(!warnings::with_policy(|policy| policy.verbose_enabled()));
     }
@@ -831,8 +890,10 @@ pub(crate) mod tests {
         let _guard = TEST_LOCK.lock().unwrap();
         reset_manager();
         let err = unwrap_error(
-            warning_builtin(vec![Value::from("once"), Value::from("backtrace")])
-                .expect_err("invalid state"),
+            warning_builtin(crate::builtins::common::test_support::builtin_arguments(
+                vec![Value::from("once"), Value::from("backtrace")],
+            ))
+            .expect_err("invalid state"),
         );
         assert_eq!(err.identifier(), Some(warning_default_identifier()));
         assert!(
@@ -848,8 +909,10 @@ pub(crate) mod tests {
         let _guard = TEST_LOCK.lock().unwrap();
         reset_manager();
         let err = unwrap_error(
-            warning_builtin(vec![Value::from("off"), Value::from("last")])
-                .expect_err("missing last"),
+            warning_builtin(crate::builtins::common::test_support::builtin_arguments(
+                vec![Value::from("off"), Value::from("last")],
+            ))
+            .expect_err("missing last"),
         );
         assert_eq!(err.identifier(), Some(warning_default_identifier()));
         assert!(
@@ -857,9 +920,14 @@ pub(crate) mod tests {
             "unexpected error: {}",
             err.message()
         );
-        warning_builtin(vec![Value::from("Hello!")]).expect("emit warning");
-        let previous =
-            warning_builtin(vec![Value::from("off"), Value::from("last")]).expect("disable last");
+        warning_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::from("Hello!")],
+        ))
+        .expect("emit warning");
+        let previous = warning_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::from("off"), Value::from("last")],
+        ))
+        .expect("disable last");
         assert_state_struct(&previous, warning_default_identifier(), "on");
         let last_mode =
             warnings::with_policy(|policy| policy.lookup_mode(warning_default_identifier()));
@@ -871,12 +939,14 @@ pub(crate) mod tests {
     fn default_returns_snapshot() {
         let _guard = TEST_LOCK.lock().unwrap();
         reset_manager();
-        warning_builtin(vec![
-            Value::from("off"),
-            Value::from("runmat:demo:snapshot"),
-        ])
+        warning_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::from("off"), Value::from("runmat:demo:snapshot")],
+        ))
         .expect("state change");
-        let snapshot = warning_builtin(vec![Value::from("default")]).expect("default");
+        let snapshot = warning_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::from("default")],
+        ))
+        .expect("default");
         let structs = structs_from_value(snapshot);
         assert!(structs.iter().any(|st| {
             field_str(st, "identifier").as_deref() == Some("all")
@@ -902,16 +972,26 @@ pub(crate) mod tests {
     fn default_special_modes_reset() {
         let _guard = TEST_LOCK.lock().unwrap();
         reset_manager();
-        warning_builtin(vec![Value::from("on"), Value::from("verbose")]).expect("enable verbose");
-        warning_builtin(vec![Value::from("on"), Value::from("backtrace")])
-            .expect("enable backtrace");
+        warning_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::from("on"), Value::from("verbose")],
+        ))
+        .expect("enable verbose");
+        warning_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::from("on"), Value::from("backtrace")],
+        ))
+        .expect("enable backtrace");
         let verbose_prev =
-            warning_builtin(vec![Value::from("default"), Value::from("verbose")]).expect("default");
+            warning_builtin(crate::builtins::common::test_support::builtin_arguments(
+                vec![Value::from("default"), Value::from("verbose")],
+            ))
+            .expect("default");
         assert_state_struct(&verbose_prev, "verbose", "on");
         assert!(!warnings::with_policy(|policy| policy.verbose_enabled()));
         let backtrace_prev =
-            warning_builtin(vec![Value::from("default"), Value::from("backtrace")])
-                .expect("default");
+            warning_builtin(crate::builtins::common::test_support::builtin_arguments(
+                vec![Value::from("default"), Value::from("backtrace")],
+            ))
+            .expect("default");
         assert_state_struct(&backtrace_prev, "backtrace", "on");
         assert!(!warnings::with_policy(|policy| policy.backtrace_enabled()));
     }
@@ -921,12 +1001,19 @@ pub(crate) mod tests {
     fn query_backtrace_and_verbose() {
         let _guard = TEST_LOCK.lock().unwrap();
         reset_manager();
-        warning_builtin(vec![Value::from("on"), Value::from("verbose")]).expect("enable verbose");
-        let verbose = warning_builtin(vec![Value::from("query"), Value::from("verbose")])
-            .expect("query verbose");
+        warning_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::from("on"), Value::from("verbose")],
+        ))
+        .expect("enable verbose");
+        let verbose = warning_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::from("query"), Value::from("verbose")],
+        ))
+        .expect("query verbose");
         assert_state_struct(&verbose, "verbose", "on");
-        let backtrace = warning_builtin(vec![Value::from("query"), Value::from("backtrace")])
-            .expect("query backtrace");
+        let backtrace = warning_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::from("query"), Value::from("backtrace")],
+        ))
+        .expect("query backtrace");
         assert_state_struct(&backtrace, "backtrace", "off");
     }
 
@@ -935,27 +1022,33 @@ pub(crate) mod tests {
     fn apply_state_struct_special_modes() {
         let _guard = TEST_LOCK.lock().unwrap();
         reset_manager();
-        let mut backtrace = StructValue::new();
+        let mut backtrace = runmat_value::UnboundedStructValueBuilder::new();
         backtrace
             .fields
             .insert("identifier".to_string(), Value::from(" BaCkTrAcE "));
         backtrace
             .fields
             .insert("state".to_string(), Value::from(" ON "));
-        warning_builtin(vec![Value::Struct(backtrace)]).expect("apply backtrace");
+        warning_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::Struct(backtrace.finish())],
+        ))
+        .expect("apply backtrace");
         assert!(warnings::with_policy(|policy| policy.backtrace_enabled()));
 
-        let mut verbose = StructValue::new();
+        let mut verbose = runmat_value::UnboundedStructValueBuilder::new();
         verbose
             .fields
             .insert("identifier".to_string(), Value::from("verbose"));
         verbose
             .fields
             .insert("state".to_string(), Value::from(" DeFaUlT "));
-        warning_builtin(vec![Value::Struct(verbose)]).expect("apply verbose");
+        warning_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::Struct(verbose.finish())],
+        ))
+        .expect("apply verbose");
         assert!(!warnings::with_policy(|policy| policy.verbose_enabled()));
 
-        let mut invalid = StructValue::new();
+        let mut invalid = runmat_value::UnboundedStructValueBuilder::new();
         invalid
             .fields
             .insert("identifier".to_string(), Value::from(" BACKTRACE "));
@@ -963,15 +1056,21 @@ pub(crate) mod tests {
             .fields
             .insert("state".to_string(), Value::from(" OnCe "));
         let err = unwrap_error(
-            warning_builtin(vec![Value::Struct(invalid)]).expect_err("invalid special state"),
+            warning_builtin(crate::builtins::common::test_support::builtin_arguments(
+                vec![Value::Struct(invalid.finish())],
+            ))
+            .expect_err("invalid special state"),
         );
         assert_eq!(err.message(), "warning: unknown backtrace state 'once'");
     }
 
     #[test]
     fn warning_formats_wide_integer_scalars_exactly() {
-        let formatted =
-            format_variadic("%u", &[Value::Int(IntValue::U64(u64::MAX))]).expect("format integer");
+        let formatted = crate::builtins::common::format::format_variadic(
+            "%u",
+            &[Value::Int(IntValue::U64(u64::MAX))],
+        )
+        .expect("format integer");
         assert_eq!(formatted, u64::MAX.to_string());
     }
 
@@ -984,8 +1083,10 @@ pub(crate) mod tests {
                 .expect("integer values"),
         );
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        let error =
-            warning_builtin(vec![Value::from("%u %u"), values]).expect_err("array formatting gate");
+        let error = warning_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::from("%u %u"), values],
+        ))
+        .expect_err("array formatting gate");
         assert_eq!(
             error.identifier(),
             Some("RunMat:compatibility:WarningIntegerArrayFormattingExtension")

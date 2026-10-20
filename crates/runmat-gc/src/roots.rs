@@ -402,7 +402,7 @@ impl Default for RootScanner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_value::{Closure, HandleRef, Listener, ObjectInstance, StructValue};
+    use runmat_value::{Closure, HandleRef, Listener, ObjectInstance};
 
     #[test]
     fn unregister_drops_root_after_scanner_and_admission_guards() {
@@ -455,7 +455,7 @@ mod tests {
 
     #[test]
     fn test_global_root() {
-        let values = vec![Value::Num(42.0), Value::String("test".to_string())];
+        let values = vec![Value::Num(42.0), Value::String("test".to_string().into())];
 
         let root = GlobalRoot::new(values, "test global".to_string());
         assert_eq!(root.description(), "test global");
@@ -524,11 +524,12 @@ mod tests {
                 valid: true,
             });
 
-            let mut object = ObjectInstance::new("owner".to_string());
-            object.properties.insert("h".to_string(), handle.clone());
+            let mut object = runmat_value::UnboundedObjectBuilder::new("owner");
+            object.insert("h".to_string(), handle.clone());
+            let object = object.finish();
 
-            let mut struct_value = StructValue::new();
-            struct_value.fields.insert(
+            let mut struct_value = runmat_value::UnboundedStructValueBuilder::with_capacity(2);
+            struct_value.insert(
                 "closure".to_string(),
                 Value::Closure(Closure::new(
                     "f".into(),
@@ -539,11 +540,12 @@ mod tests {
                     None,
                 )),
             );
-            struct_value
-                .fields
-                .insert("object".to_string(), Value::Object(object));
+            struct_value.insert("object".to_string(), Value::Object(object));
 
-            let root = GlobalRoot::new(vec![Value::Struct(struct_value)], "nested".to_string());
+            let root = GlobalRoot::new(
+                vec![Value::Struct(struct_value.finish())],
+                "nested".to_string(),
+            );
             let scanned = root.scan();
             let scanned_addrs: Vec<usize> = scanned.into_iter().map(ptr_addr).collect();
 
@@ -589,7 +591,7 @@ mod tests {
 
     #[test]
     fn test_variable_array_root() {
-        let vars = vec![Value::Num(42.0), Value::String("test".to_string())];
+        let vars = vec![Value::Num(42.0), Value::String("test".to_string().into())];
 
         let root = unsafe { VariableArrayRoot::new(NonNull::from(&vars), "test vars".to_string()) };
 

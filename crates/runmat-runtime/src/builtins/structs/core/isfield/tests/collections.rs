@@ -1,11 +1,11 @@
 use super::run;
-use runmat_value::{CellArray, CharArray, LogicalArray, StringArray, StructValue, Value};
+use runmat_value::{CellArray, CharArray, LogicalArray, StringArray, Value};
 
 fn structure() -> Value {
-    let mut structure = StructValue::new();
+    let mut structure = runmat_value::UnboundedStructValueBuilder::new();
     structure.fields.insert("name".into(), Value::from("Ada"));
     structure.fields.insert("score".into(), Value::Num(42.0));
-    Value::Struct(structure)
+    Value::Struct(structure.finish())
 }
 
 #[test]

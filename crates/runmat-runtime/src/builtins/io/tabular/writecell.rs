@@ -79,7 +79,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 async fn writecell_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     data: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     let mut cooperation = TabularCooperation::new(runtime.as_ref(), BUILTIN_NAME);
     if rest.is_empty() {
@@ -110,10 +110,11 @@ async fn writecell_builtin(
     }
 
     let path = resolve_path(&rest[0])?;
-    if !rest[1..].len().is_multiple_of(2) {
+    let options_args = rest.range(1..)?;
+    if !options_args.len().is_multiple_of(2) {
         return Err(writecell_error(&WRITECELL_ERROR_ARG_CONFIG));
     }
-    controls::preflight_host_options(&rest[1..])?;
+    controls::preflight_host_options(options_args.view())?;
     if let Value::Cell(cell) = &data {
         table::ensure_cell_shape(cell)?;
     }
@@ -131,7 +132,7 @@ async fn writecell_builtin(
             source,
         )
     })?;
-    let options = parse_options(runtime.as_ref(), &mut cooperation, &rest[1..]).await?;
+    let options = parse_options(runtime.as_ref(), &mut cooperation, options_args.view()).await?;
 
     let gathered = await_io(
         runtime.as_ref(),

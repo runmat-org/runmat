@@ -235,7 +235,7 @@ fn timerfind_compares_signed_and_wide_integer_user_data_exactly() {
         Value::Num(((1_u64 << 53) + 1) as f64),
     ]))
     .expect("rounded double filter");
-    assert!(matches!(no_match, Value::Cell(cell) if cell.data.is_empty()));
+    assert!(matches!(no_match, Value::Cell(cell) if cell.data().is_empty()));
 }
 
 #[test]
@@ -270,7 +270,7 @@ fn timer_dependent_setters_validate_post_construction_values() {
         panic!("expected updated timer object");
     };
     assert_eq!(
-        updated.properties.get("Tag"),
-        Some(&Value::String("batch".to_string()))
+        updated.properties().get("Tag"),
+        Some(&Value::String("batch".to_string().into()))
     );
 }

@@ -97,7 +97,7 @@ impl StrokeAxis {
     }
 
     /// Pixel offset of `value` from the axis minimum; NaN when the value can't be drawn.
-    pub fn to_px(&self, value: f64) -> f64 {
+    pub fn to_px(self, value: f64) -> f64 {
         let mapped = match (self.log, value > 0.0) {
             (true, true) => value.log10(),
             (true, false) => f64::NAN,
@@ -106,7 +106,7 @@ impl StrokeAxis {
         (mapped - self.origin) * self.px_per_unit
     }
 
-    pub fn from_px(&self, px: f32) -> f32 {
+    pub fn data_at_px(self, px: f32) -> f32 {
         let mapped = self.origin + px as f64 / self.px_per_unit;
         if self.log {
             10f64.powf(mapped) as f32
@@ -150,14 +150,14 @@ impl PixelMap {
     }
 
     /// Pixel position of a data point; `None` when it can't be drawn.
-    pub fn to_px(&self, x: f64, y: f64) -> Option<[f64; 2]> {
+    pub fn to_px(self, x: f64, y: f64) -> Option<[f64; 2]> {
         let p = [self.x.to_px(x), self.y.to_px(y)];
         (p[0].is_finite() && p[1].is_finite()).then_some(p)
     }
 
     /// Like [`Self::to_px`], but a non-positive value on a log axis lands on that axis's lower
     /// edge. Stems from a zero baseline then start at the bottom of a log axes.
-    pub fn to_px_clamped(&self, x: f64, y: f64) -> Option<[f64; 2]> {
+    pub fn to_px_clamped(self, x: f64, y: f64) -> Option<[f64; 2]> {
         let clamp = |axis: &StrokeAxis, value: f64| {
             if axis.log && value <= 0.0 {
                 0.0
@@ -169,8 +169,8 @@ impl PixelMap {
         (p[0].is_finite() && p[1].is_finite()).then_some(p)
     }
 
-    pub fn from_px(&self, p: [f32; 3]) -> [f32; 3] {
-        [self.x.from_px(p[0]), self.y.from_px(p[1]), p[2]]
+    pub fn data_at_px(self, p: [f32; 3]) -> [f32; 3] {
+        [self.x.data_at_px(p[0]), self.y.data_at_px(p[1]), p[2]]
     }
 }
 
@@ -204,7 +204,7 @@ pub(crate) fn segment_geometry(
         }
     }
     for vertex in &mut vertices {
-        vertex.position = map.from_px(vertex.position);
+        vertex.position = map.data_at_px(vertex.position);
     }
     let pipeline = if thick {
         PipelineType::Triangles

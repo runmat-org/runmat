@@ -1,6 +1,10 @@
 use std::{collections::BTreeMap, rc::Rc};
 
 use runmat_execution::ExecutableEntrypointKind;
+use runmat_execution_artifact::target_test::{
+    NativePairedProductHeader, NativeTargetTestFailure, NativeTargetTestRequest,
+    NativeTargetTestResult, NativeTargetTestStatus,
+};
 use runmat_native_executor::execute::NativeWorkspaceInput;
 use runmat_types::ProgramPointId;
 
@@ -10,22 +14,57 @@ use crate::{input::LinkedAotProcessInput, AotProcessInput};
 mod linked_selected;
 #[path = "execute/acceleration.rs"]
 mod acceleration;
+#[path = "execute/target_test.rs"]
+mod target_test;
+
+enum InvocationMode<'a> {
+    Application,
+    Test(target_test::TestInvocation<'a>),
+}
+
+impl InvocationMode<'_> {
+    fn is_test(&self) -> bool {
+        matches!(self, Self::Test(_))
+    }
+
+    fn test(&self) -> Option<&target_test::TestInvocation<'_>> {
+        match self {
+            Self::Application => None,
+            Self::Test(test) => Some(test),
+        }
+    }
+}
 
 pub fn execute(input: AotProcessInput) -> Result<(), String> {
-    execute_with_linked_authority(input, false, std::ptr::null())
+    execute_with_linked_authority(input, false, std::ptr::null(), None).map(|_| ())
 }
 
 pub(crate) fn execute_linked(input: LinkedAotProcessInput) -> Result<(), String> {
     let (input, source_service_factory) = input.into_parts();
-    execute_with_linked_authority(input, true, source_service_factory)
+    execute_with_linked_authority(input, true, source_service_factory, None).map(|_| ())
+}
+
+pub(crate) fn execute_linked_test(
+    input: LinkedAotProcessInput,
+    header: &NativePairedProductHeader,
+    request: &NativeTargetTestRequest,
+) -> Result<NativeTargetTestResult, String> {
+    let (input, source_service_factory) = input.into_parts();
+    execute_with_linked_authority(input, true, source_service_factory, Some((header, request)))?
+        .ok_or_else(|| "target-test execution omitted its receiver result".into())
 }
 
 fn execute_with_linked_authority(
     input: AotProcessInput,
     verified_link: bool,
     source_service_factory: *const std::ffi::c_void,
-) -> Result<(), String> {
-    let _console_forwarder = crate::output::install_console_forwarder();
+    test: Option<(&NativePairedProductHeader, &NativeTargetTestRequest)>,
+) -> Result<Option<NativeTargetTestResult>, String> {
+    let _console_forwarder = if test.is_some() {
+        crate::output::install_test_console_forwarder()
+    } else {
+        crate::output::install_console_forwarder()
+    };
     let assembly: runmat_native_codegen::NativeAssembly = serde_json::from_slice(&input.native_ir)
         .map_err(|error| format!("standalone Native IR is invalid: {error}"))?;
     assembly
@@ -45,6 +84,13 @@ fn execute_with_linked_authority(
     {
         return Err("standalone program manifest does not match its Native IR".into());
     }
+    let mode = if let Some((header, request)) = test {
+        InvocationMode::Test(target_test::TestInvocation::select(
+            header, request, &assembly, &program,
+        )?)
+    } else {
+        InvocationMode::Application
+    };
     let linked_selected =
         linked_selected::admit(&program, &assembly, verified_link, source_service_factory)?;
     if program.foreign_policy.is_none()
@@ -54,32 +100,9 @@ fn execute_with_linked_authority(
     {
         return Err("standalone foreign program has no captured policy".into());
     }
-    let mut native_sources = assembly
-        .functions
-        .iter()
-        .map(|function| {
-            (
-                function.id,
-                function.source,
-                function.name.as_str(),
-                function.source_role,
-            )
-        })
-        .collect::<Vec<_>>();
-    native_sources.sort_by_key(|function| function.0);
-    if native_sources.len() != program.functions.len()
-        || native_sources
-            .iter()
-            .zip(&program.functions)
-            .any(|(native, manifest)| {
-                native.0 != manifest.function
-                    || native.1 != manifest.source
-                    || native.2 != manifest.name
-                    || native.3 != manifest.role
-            })
-    {
-        return Err("standalone source/function inventory does not match its Native IR".into());
-    }
+    program
+        .validate_function_inventory(&assembly)
+        .map_err(|error| error.to_string())?;
     let ordered_resume_points: Vec<(ProgramPointId, u64)> =
         serde_json::from_slice(&input.resume_points)
             .map_err(|error| format!("standalone resume-point map is invalid: {error}"))?;
@@ -90,13 +113,14 @@ fn execute_with_linked_authority(
     if resume_points.len() != resume_point_count {
         return Err("standalone resume-point map contains duplicate identities".into());
     }
-    let entrypoint = program.entrypoint;
+    let entrypoint = mode.test().map_or(program.entrypoint, |test| test.function);
     let function = assembly
         .functions
         .iter()
         .find(|function| function.id == entrypoint)
         .ok_or_else(|| "standalone entrypoint is absent from Native IR".to_string())?;
-    if !function.abi.fixed_inputs.is_empty() || function.abi.varargin.is_some() {
+    if !mode.is_test() && (!function.abi.fixed_inputs.is_empty() || function.abi.varargin.is_some())
+    {
         return Err("standalone entrypoint requires unsupported command-line inputs".into());
     }
     acceleration::initialize_for_program(&program, &assembly, linked_selected.as_ref())?;
@@ -123,6 +147,11 @@ fn execute_with_linked_authority(
         &program.source_map,
     )
     .map_err(|error| format!("standalone source binding failed: {error}"))?;
+    let test_ledger = mode.test().map(|test| {
+        let (managed, ledger) = test.install_resources(runtime.clone());
+        runtime = managed;
+        ledger
+    });
     let local_tasks = Rc::new(runmat_runtime::context::RuntimeLocalTaskSupervisor::new());
     let ports = runtime
         .service_ports()
@@ -183,10 +212,16 @@ fn execute_with_linked_authority(
     let mut mex_guard = crate::mex::install(&runtime, mex, local_tasks.clone())?;
     let mut entrypoints = BTreeMap::new();
     for function in &assembly.functions {
+        let function_index = u32::try_from(function.id.0).map_err(|_| {
+            format!(
+                "compiled function {} exceeds the standalone resolver ABI",
+                function.id.0
+            )
+        })?;
         // SAFETY: the generated resolver has the exact declared C ABI. It
         // returns only addresses of functions emitted from this same verified
         // assembly, or null when the object is inconsistent.
-        let address = unsafe { (input.function_resolver)(function.id.0) };
+        let address = unsafe { (input.function_resolver)(function_index) };
         if address.is_null() {
             return Err(format!(
                 "standalone object cannot resolve native function {}",
@@ -232,39 +267,47 @@ fn execute_with_linked_authority(
     // Keep the original session owner through foreign teardown and terminal
     // rendering. ContextFuture performs the existing nonblocking final drain
     // after inner destruction on success, error, or abandonment.
+    let started = std::time::Instant::now();
     let result = async_runtime.block_on(local_tasks.drive_until(runtime.clone().scope(async {
-        let execution =
-            if assembly.executable_identity.entrypoint_kind == ExecutableEntrypointKind::Script {
-                let local_names = function
-                    .locals
-                    .iter()
-                    .filter_map(|local| local.binding.zip(local.name.clone()))
-                    .collect();
-                match NativeWorkspaceInput::empty_for_context(&runtime, local_names) {
-                    Ok(workspace) => {
-                        crate::program::invoke_workspace(
-                            Rc::clone(&executor),
-                            &program,
-                            entrypoint,
-                            workspace,
-                            requested_outputs,
-                            runtime.clone(),
-                        )
-                        .await
-                    }
-                    Err(error) => Err(*error),
+        let execution = if let Some(test) = mode.test() {
+            test.invoke(
+                Rc::clone(&executor),
+                &program,
+                requested_outputs,
+                runtime.clone(),
+            )
+            .await
+        } else if assembly.executable_identity.entrypoint_kind == ExecutableEntrypointKind::Script {
+            let local_names = function
+                .locals
+                .iter()
+                .filter_map(|local| local.binding.zip(local.name.clone()))
+                .collect();
+            match NativeWorkspaceInput::empty_for_context(&runtime, local_names) {
+                Ok(workspace) => {
+                    crate::program::invoke_workspace(
+                        Rc::clone(&executor),
+                        &program,
+                        entrypoint,
+                        workspace,
+                        requested_outputs,
+                        runtime.clone(),
+                    )
+                    .await
                 }
-            } else {
-                crate::program::invoke(
-                    Rc::clone(&executor),
-                    &program,
-                    entrypoint,
-                    Vec::new(),
-                    requested_outputs,
-                    runtime.clone(),
-                )
-                .await
-            };
+                Err(error) => Err(*error),
+            }
+        } else {
+            crate::program::invoke(
+                Rc::clone(&executor),
+                &program,
+                entrypoint,
+                Vec::new(),
+                requested_outputs,
+                runtime.clone(),
+            )
+            .await
+        };
         // The native producer retains result roots through cleanup callbacks
         // and terminal rendering; no second result lease is needed here.
         // Cleanup callbacks may still call MEX or native foreign services.
@@ -280,7 +323,7 @@ fn execute_with_linked_authority(
         let execution_failure = match execution {
             Ok(value) => {
                 value.with_owned(|value| {
-                    if cleanup_lifecycle.is_ok() {
+                    if !mode.is_test() && cleanup_lifecycle.is_ok() {
                         if let Some(expression) = value.expression {
                             crate::output::value(&expression);
                         } else {
@@ -292,7 +335,10 @@ fn execute_with_linked_authority(
                 });
                 None
             }
-            Err(error) => Some(execution_diagnostic(error, &runtime)),
+            Err(error) => Some((
+                target_test::classify_failure(&error),
+                execution_diagnostic(error, &runtime),
+            )),
         };
         // Retire caller-visible output ownership and admit any final callbacks
         // before foreign adapters are closed.
@@ -316,15 +362,42 @@ fn execute_with_linked_authority(
         if let Some(error) = foreign_lifecycle.error() {
             crate::output::error(&format!("standalone foreign shutdown failed: {error}"));
         }
-        if let Some(error) = execution_failure {
-            return Err(error);
+        if mode.is_test() {
+            let mut failures = Vec::new();
+            if let Err(error) = cleanup_lifecycle {
+                failures.push(error);
+            }
+            if let Err(error) = final_cleanup {
+                failures.push(error);
+            }
+            if let Err(error) = foreign_lifecycle.into_result() {
+                failures.push(format!("standalone foreign shutdown failed: {error}"));
+            }
+            if !failures.is_empty() {
+                if let Some((_, diagnostic)) = execution_failure {
+                    failures.insert(0, diagnostic);
+                }
+                return Ok(Some((
+                    NativeTargetTestStatus::Failed(NativeTargetTestFailure::ProcessFailure),
+                    failures.join("\n"),
+                )));
+            }
+            return Ok(Some(match execution_failure {
+                Some((failure, diagnostic)) => {
+                    (NativeTargetTestStatus::Failed(failure), diagnostic)
+                }
+                None => (NativeTargetTestStatus::Passed, String::new()),
+            }));
+        }
+        if let Some((_, diagnostic)) = execution_failure {
+            return Err(diagnostic);
         }
         cleanup_lifecycle?;
         final_cleanup?;
         foreign_lifecycle
             .into_result()
             .map_err(|error| format!("standalone foreign shutdown failed: {error}"))?;
-        Ok(())
+        Ok(None)
     })));
     // A rejected graceful close is Abandoned, not a reason to close the
     // callback driver while worker requests still have origin authority.
@@ -341,10 +414,30 @@ fn execute_with_linked_authority(
                 .map_err(|error| format!("standalone source evaluator retirement failed: {error}"))
         })
         .transpose();
-    execution_result?;
+    let completion = execution_result?;
     #[cfg(feature = "source-evaluation")]
-    let _ = source_retirement?;
-    Ok(())
+    let mut completion = completion;
+    #[cfg(feature = "source-evaluation")]
+    if let Err(error) = source_retirement {
+        if let Some((status, diagnostic)) = completion.as_mut() {
+            *status = NativeTargetTestStatus::Failed(NativeTargetTestFailure::ProcessFailure);
+            if !diagnostic.is_empty() {
+                diagnostic.push('\n');
+            }
+            diagnostic.push_str(&error);
+        } else {
+            return Err(error);
+        }
+    }
+    if let Some(test) = mode.test() {
+        let completion =
+            completion.ok_or_else(|| "target-test completion is absent".to_string())?;
+        let ledger = test_ledger
+            .as_ref()
+            .ok_or_else(|| "target-test managed ledger is absent".to_string())?;
+        return test.result(completion, ledger, started).map(Some);
+    }
+    Ok(None)
 }
 
 fn execution_diagnostic(

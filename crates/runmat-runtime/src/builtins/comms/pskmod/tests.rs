@@ -14,7 +14,7 @@ fn provider_execution_error_keeps_source_and_borrowed_input_live() {
         let error = block_on(super::pskmod_builtin(
             Value::GpuTensor(input.clone()),
             Value::Num(4.0),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .unwrap_err();
         assert!(std::error::Error::source(&error).is_some());
@@ -52,7 +52,13 @@ fn malformed_alias_rejection_preserves_original_allocation() {
 }
 
 fn pskmod(x: Value, order: usize, rest: Vec<Value>) -> ComplexTensor {
-    match block_on(super::pskmod_builtin(x, Value::Num(order as f64), rest)).expect("pskmod") {
+    match block_on(super::pskmod_builtin(
+        x,
+        Value::Num(order as f64),
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    ))
+    .expect("pskmod")
+    {
         Value::ComplexTensor(tensor) => tensor,
         other => panic!("expected ComplexTensor, got {other:?}"),
     }
@@ -149,7 +155,7 @@ fn pskmod_accepts_only_documented_integer_symbol_classes() {
         let err = block_on(super::pskmod_builtin(
             integer_tensor(storage, vec![1, 4]),
             Value::Num(4.0),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .expect_err("unsupported integer X class");
         assert!(err
@@ -280,7 +286,7 @@ fn pskmod_rejects_out_of_range_symbols() {
     let err = block_on(super::pskmod_builtin(
         tensor(vec![0.0, 8.0], vec![1, 2]),
         Value::Num(8.0),
-        vec![],
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
     ))
     .expect_err("expected out-of-range error");
     assert!(err.to_string().contains("range [0, 7]"));
@@ -294,7 +300,7 @@ fn pskmod_rejects_default_logical_input() {
             shape: vec![1, 2].into(),
         }),
         Value::Num(2.0),
-        vec![],
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
     ))
     .expect_err("expected logical input error");
     assert!(err.to_string().contains("InputType='bit'"));
@@ -334,7 +340,10 @@ fn pskmod_inprocess_gpu_bit_input_returns_complex_resident_output() {
         let result = block_on(super::pskmod_builtin(
             Value::GpuTensor(input_handle.clone()),
             Value::Num(4.0),
-            vec![Value::from("InputType"), Value::from("bit")],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("InputType"),
+                Value::from("bit"),
+            ]),
         ))
         .expect("gpu pskmod bit");
         let Value::GpuTensor(output_handle) = result else {
@@ -368,7 +377,7 @@ fn pskmod_gpu_enforces_integer_symbol_classes_and_output_precision() {
         let result = block_on(super::pskmod_builtin(
             Value::GpuTensor(accepted_handle),
             Value::Num(4.0),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .expect("supported integer gpuArray");
         let Value::GpuTensor(result_handle) = result else {
@@ -386,7 +395,7 @@ fn pskmod_gpu_enforces_integer_symbol_classes_and_output_precision() {
         let err = block_on(super::pskmod_builtin(
             Value::GpuTensor(rejected_handle),
             Value::Num(4.0),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .expect_err("unsupported integer gpuArray class");
         assert!(err
@@ -398,7 +407,10 @@ fn pskmod_gpu_enforces_integer_symbol_classes_and_output_precision() {
         let result = block_on(super::pskmod_builtin(
             Value::GpuTensor(single_handle),
             Value::Num(4.0),
-            vec![Value::from("OutputDataType"), Value::from("single")],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("OutputDataType"),
+                Value::from("single"),
+            ]),
         ))
         .expect("explicit single gpuArray output");
         let Value::GpuTensor(result_handle) = result else {
@@ -430,7 +442,7 @@ fn pskmod_wgpu_input_returns_complex_resident_output() {
             let result = block_on(super::pskmod_builtin(
                 Value::GpuTensor(input_handle.clone()),
                 Value::Num(4.0),
-                vec![],
+                crate::builtins::common::test_support::builtin_arguments(vec![]),
             ))
             .expect("gpu pskmod");
             let Value::GpuTensor(output_handle) = result else {
@@ -482,7 +494,10 @@ fn pskmod_wgpu_bit_input_returns_complex_resident_output() {
             let result = block_on(super::pskmod_builtin(
                 Value::GpuTensor(input_handle.clone()),
                 Value::Num(4.0),
-                vec![Value::from("InputType"), Value::from("bit")],
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::from("InputType"),
+                    Value::from("bit"),
+                ]),
             ))
             .expect("gpu pskmod bit");
             let Value::GpuTensor(output_handle) = result else {
@@ -516,7 +531,10 @@ fn pskmod_rejects_plot_constellation_true() {
     let err = block_on(super::pskmod_builtin(
         Value::Num(0.0),
         Value::Num(2.0),
-        vec![Value::from("PlotConstellation"), Value::Bool(true)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("PlotConstellation"),
+            Value::Bool(true),
+        ]),
     ))
     .expect_err("expected plot error");
     assert!(err.to_string().contains("PlotConstellation"));
@@ -618,7 +636,7 @@ fn pskmod_typed_integer_controls_follow_compatibility_mode() {
         let error = block_on(super::pskmod_builtin(
             Value::Num(0.0),
             Value::Int(IntValue::U16(4)),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .expect_err("MATLAB mode rejects typed-integer M");
         assert_eq!(
@@ -629,7 +647,10 @@ fn pskmod_typed_integer_controls_follow_compatibility_mode() {
         let error = block_on(super::pskmod_builtin(
             Value::Num(0.0),
             Value::Num(4.0),
-            vec![Value::Int(IntValue::I16(0)), Value::from("bin")],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Int(IntValue::I16(0)),
+                Value::from("bin"),
+            ]),
         ))
         .expect_err("MATLAB mode rejects typed-integer phase");
         assert_eq!(
@@ -640,7 +661,10 @@ fn pskmod_typed_integer_controls_follow_compatibility_mode() {
         let error = block_on(super::pskmod_builtin(
             Value::Num(0.0),
             Value::Num(4.0),
-            vec![Value::Num(0.0), custom()],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(0.0),
+                custom(),
+            ]),
         ))
         .expect_err("MATLAB mode rejects typed-integer custom order");
         assert_eq!(
@@ -653,7 +677,10 @@ fn pskmod_typed_integer_controls_follow_compatibility_mode() {
         assert!(block_on(super::pskmod_builtin(
             Value::Num(0.0),
             Value::Int(IntValue::U16(4)),
-            vec![Value::Int(IntValue::I16(0)), custom()],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Int(IntValue::I16(0)),
+                custom()
+            ]),
         ))
         .is_ok());
     }

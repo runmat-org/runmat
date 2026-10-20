@@ -1,3 +1,4 @@
+use super::test_arguments::{h5read_builtin, h5write_builtin};
 use futures::executor::block_on;
 use runmat_value::{ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage};
 use tempfile::tempdir;
@@ -13,16 +14,18 @@ fn h5write_and_h5read_round_trip_column_major_numeric() {
     let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
 
     block_on(h5write_builtin(
-        Value::String(path.display().to_string()),
-        Value::String("/group/data".to_string()),
+        None,
+        Value::String(path.display().to_string().into()),
+        Value::String("/group/data".to_string().into()),
         Value::Tensor(tensor),
         Vec::new(),
     ))
     .expect("write");
 
     let out = block_on(h5read_builtin(
-        Value::String(path.display().to_string()),
-        Value::String("/group/data".to_string()),
+        None,
+        Value::String(path.display().to_string().into()),
+        Value::String("/group/data".to_string().into()),
         Vec::new(),
     ))
     .expect("read");
@@ -44,16 +47,18 @@ fn hdf5_round_trips_native_single_storage() {
     let tensor = Tensor::from_f32(vec![1.25, 2.5, 3.75, 5.0], vec![2, 2]).unwrap();
 
     block_on(h5write_builtin(
-        Value::String(path.display().to_string()),
-        Value::String("/single".to_string()),
+        None,
+        Value::String(path.display().to_string().into()),
+        Value::String("/single".to_string().into()),
         Value::Tensor(tensor),
         Vec::new(),
     ))
     .expect("write single");
 
     let out = block_on(h5read_builtin(
-        Value::String(path.display().to_string()),
-        Value::String("/single".to_string()),
+        None,
+        Value::String(path.display().to_string().into()),
+        Value::String("/single".to_string().into()),
         Vec::new(),
     ))
     .expect("read single");
@@ -81,15 +86,17 @@ fn hdf5_round_trips_low_rank_exact_uint64_geometry() {
         let tensor = Tensor::new_integer(IntegerStorage::U64(values.clone()), shape.clone())
             .expect("exact uint64 input");
         block_on(h5write_builtin(
-            Value::String(path.display().to_string()),
-            Value::String(dataset.to_string()),
+            None,
+            Value::String(path.display().to_string().into()),
+            Value::String(dataset.to_string().into()),
             Value::Tensor(tensor),
             Vec::new(),
         ))
         .expect("write low-rank integer");
         let output = block_on(h5read_builtin(
-            Value::String(path.display().to_string()),
-            Value::String(dataset.to_string()),
+            None,
+            Value::String(path.display().to_string().into()),
+            Value::String(dataset.to_string().into()),
             Vec::new(),
         ))
         .expect("read low-rank integer");
@@ -118,8 +125,9 @@ fn h5write_rejects_typed_complex_integer_without_float_coercion() {
     let tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("typed complex");
 
     let err = block_on(h5write_builtin(
-        Value::String(path.display().to_string()),
-        Value::String("/data".to_string()),
+        None,
+        Value::String(path.display().to_string().into()),
+        Value::String("/data".to_string().into()),
         Value::ComplexTensor(tensor),
         Vec::new(),
     ))
@@ -187,16 +195,18 @@ fn hdf5_round_trips_all_integer_classes_without_f64_conversion() {
     for (name, storage) in cases {
         let tensor = Tensor::new_integer(storage.clone(), vec![2, 2]).expect("integer tensor");
         block_on(h5write_builtin(
-            Value::String(path.display().to_string()),
-            Value::String(format!("/{name}")),
+            None,
+            Value::String(path.display().to_string().into()),
+            Value::String(format!("/{name}").into()),
             Value::Tensor(tensor),
             Vec::new(),
         ))
         .expect("write integer dataset");
 
         let out = block_on(h5read_builtin(
-            Value::String(path.display().to_string()),
-            Value::String(format!("/{name}")),
+            None,
+            Value::String(path.display().to_string().into()),
+            Value::String(format!("/{name}").into()),
             Vec::new(),
         ))
         .expect("read integer dataset");
@@ -220,15 +230,17 @@ fn hdf5_integer_scalar_selection_and_attribute_preserve_native_types() {
     let path = dir.path().join("integer_paths.h5");
 
     block_on(h5write_builtin(
-        Value::String(path.display().to_string()),
-        Value::String("/scalar".to_string()),
+        None,
+        Value::String(path.display().to_string().into()),
+        Value::String("/scalar".to_string().into()),
         Value::Int(IntValue::U64(u64::MAX)),
         Vec::new(),
     ))
     .expect("write scalar");
     let scalar = block_on(h5read_builtin(
-        Value::String(path.display().to_string()),
-        Value::String("/scalar".to_string()),
+        None,
+        Value::String(path.display().to_string().into()),
+        Value::String("/scalar".to_string().into()),
         Vec::new(),
     ))
     .expect("read scalar");
@@ -237,8 +249,9 @@ fn hdf5_integer_scalar_selection_and_attribute_preserve_native_types() {
     let initial = Tensor::new_integer(IntegerStorage::I64(vec![1, 2, 3, 4]), vec![2, 2])
         .expect("initial tensor");
     block_on(h5write_builtin(
-        Value::String(path.display().to_string()),
-        Value::String("/selected".to_string()),
+        None,
+        Value::String(path.display().to_string().into()),
+        Value::String("/selected".to_string().into()),
         Value::Tensor(initial),
         Vec::new(),
     ))
@@ -246,8 +259,9 @@ fn hdf5_integer_scalar_selection_and_attribute_preserve_native_types() {
     let patch = Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN, i64::MAX]), vec![2, 1])
         .expect("patch tensor");
     block_on(h5write_builtin(
-        Value::String(path.display().to_string()),
-        Value::String("/selected".to_string()),
+        None,
+        Value::String(path.display().to_string().into()),
+        Value::String("/selected".to_string().into()),
         Value::Tensor(patch),
         vec![
             Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap()),
@@ -256,8 +270,9 @@ fn hdf5_integer_scalar_selection_and_attribute_preserve_native_types() {
     ))
     .expect("write integer selection");
     let selected = block_on(h5read_builtin(
-        Value::String(path.display().to_string()),
-        Value::String("/selected".to_string()),
+        None,
+        Value::String(path.display().to_string().into()),
+        Value::String("/selected".to_string().into()),
         Vec::new(),
     ))
     .expect("read selected dataset");
@@ -265,9 +280,10 @@ fn hdf5_integer_scalar_selection_and_attribute_preserve_native_types() {
             if tensor.integer_storage() == Some(&IntegerStorage::I64(vec![i64::MIN, i64::MAX, 3, 4]))));
 
     block_on(h5writeatt_builtin(
-        Value::String(path.display().to_string()),
-        Value::String("/selected".to_string()),
-        Value::String("limits".to_string()),
+        None,
+        Value::String(path.display().to_string().into()),
+        Value::String("/selected".to_string().into()),
+        Value::String("limits".to_string().into()),
         Value::Int(IntValue::U32(u32::MAX)),
     ))
     .expect("write integer attribute");
@@ -290,16 +306,18 @@ fn h5read_supports_start_count_stride_selection() {
     let path = dir.path().join("slice.h5");
     let tensor = Tensor::new((1..=12).map(|v| v as f64).collect(), vec![3, 4]).unwrap();
     block_on(h5write_builtin(
-        Value::String(path.display().to_string()),
-        Value::String("/data".to_string()),
+        None,
+        Value::String(path.display().to_string().into()),
+        Value::String("/data".to_string().into()),
         Value::Tensor(tensor),
         Vec::new(),
     ))
     .expect("write");
 
     let out = block_on(h5read_builtin(
-        Value::String(path.display().to_string()),
-        Value::String("/data".to_string()),
+        None,
+        Value::String(path.display().to_string().into()),
+        Value::String("/data".to_string().into()),
         vec![
             Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
             Value::Tensor(Tensor::new(vec![2.0, 2.0], vec![1, 2]).unwrap()),
@@ -324,8 +342,9 @@ fn h5write_supports_start_count_stride_selection() {
     let path = dir.path().join("partial_write.h5");
     let base = Tensor::zeros(vec![3, 4]);
     block_on(h5write_builtin(
-        Value::String(path.display().to_string()),
-        Value::String("/data".to_string()),
+        None,
+        Value::String(path.display().to_string().into()),
+        Value::String("/data".to_string().into()),
         Value::Tensor(base),
         Vec::new(),
     ))
@@ -333,8 +352,9 @@ fn h5write_supports_start_count_stride_selection() {
 
     let patch = Tensor::new(vec![40.0, 60.0, 70.0, 90.0], vec![2, 2]).unwrap();
     block_on(h5write_builtin(
-        Value::String(path.display().to_string()),
-        Value::String("/data".to_string()),
+        None,
+        Value::String(path.display().to_string().into()),
+        Value::String("/data".to_string().into()),
         Value::Tensor(patch),
         vec![
             Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
@@ -345,8 +365,9 @@ fn h5write_supports_start_count_stride_selection() {
     .expect("partial write");
 
     let out = block_on(h5read_builtin(
-        Value::String(path.display().to_string()),
-        Value::String("/data".to_string()),
+        None,
+        Value::String(path.display().to_string().into()),
+        Value::String("/data".to_string().into()),
         Vec::new(),
     ))
     .expect("read");
@@ -369,39 +390,45 @@ fn h5write_full_existing_dataset_preserves_attributes() {
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("rewrite_preserves_attrs.h5");
     block_on(h5write_builtin(
-        Value::String(path.display().to_string()),
-        Value::String("/data".to_string()),
+        None,
+        Value::String(path.display().to_string().into()),
+        Value::String("/data".to_string().into()),
         Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
         Vec::new(),
     ))
     .expect("initial write");
     block_on(h5writeatt_builtin(
-        Value::String(path.display().to_string()),
-        Value::String("/data".to_string()),
-        Value::String("units".to_string()),
-        Value::String("arb".to_string()),
+        None,
+        Value::String(path.display().to_string().into()),
+        Value::String("/data".to_string().into()),
+        Value::String("units".to_string().into()),
+        Value::String("arb".to_string().into()),
     ))
     .expect("write attr");
 
     block_on(h5write_builtin(
-        Value::String(path.display().to_string()),
-        Value::String("/data".to_string()),
+        None,
+        Value::String(path.display().to_string().into()),
+        Value::String("/data".to_string().into()),
         Value::Tensor(Tensor::new(vec![3.0, 4.0], vec![2, 1]).unwrap()),
         Vec::new(),
     ))
     .expect("rewrite existing");
 
     let out = block_on(h5read_builtin(
-        Value::String(path.display().to_string()),
-        Value::String("/data".to_string()),
+        None,
+        Value::String(path.display().to_string().into()),
+        Value::String("/data".to_string().into()),
         Vec::new(),
     ))
     .expect("read rewritten");
     assert!(matches!(out, Value::Tensor(t) if t.materialize_f64() == vec![3.0, 4.0]));
 
     let info = block_on(h5info_builtin(
-        Value::String(path.display().to_string()),
-        vec![Value::String("/data".to_string())],
+        Value::String(path.display().to_string().into()),
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+            "/data".to_string().into(),
+        )]),
     ))
     .expect("dataset info");
     let Value::Struct(info) = info else {
@@ -410,8 +437,8 @@ fn h5write_full_existing_dataset_preserves_attributes() {
     let Value::Cell(attributes) = info.fields.get("Attributes").unwrap() else {
         panic!("expected attributes cell");
     };
-    assert!(attributes.data.iter().any(|value| {
-            matches!(value, Value::Struct(attr) if attr.fields.get("Name") == Some(&Value::String("units".to_string())))
+    assert!(attributes.data().iter().any(|value| {
+            matches!(value, Value::Struct(attr) if attr.fields.get("Name") == Some(&Value::String("units".to_string().into())))
         }));
 }
 
@@ -421,23 +448,25 @@ fn h5writeatt_h5info_and_h5disp_report_metadata() {
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("info.h5");
     block_on(h5write_builtin(
-        Value::String(path.display().to_string()),
-        Value::String("/data".to_string()),
+        None,
+        Value::String(path.display().to_string().into()),
+        Value::String("/data".to_string().into()),
         Value::Bool(true),
         Vec::new(),
     ))
     .expect("write");
     block_on(h5writeatt_builtin(
-        Value::String(path.display().to_string()),
-        Value::String("/data".to_string()),
-        Value::String("units".to_string()),
-        Value::String("arb".to_string()),
+        None,
+        Value::String(path.display().to_string().into()),
+        Value::String("/data".to_string().into()),
+        Value::String("units".to_string().into()),
+        Value::String("arb".to_string().into()),
     ))
     .expect("write attr");
 
     let info = block_on(h5info_builtin(
-        Value::String(path.display().to_string()),
-        Vec::new(),
+        Value::String(path.display().to_string().into()),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("info");
     match info {
@@ -449,8 +478,10 @@ fn h5writeatt_h5info_and_h5disp_report_metadata() {
     }
 
     let text = block_on(h5disp_builtin(
-        Value::String(path.display().to_string()),
-        vec![Value::String("/".to_string())],
+        Value::String(path.display().to_string().into()),
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+            "/".to_string().into(),
+        )]),
     ))
     .expect("disp");
     match text {
@@ -482,8 +513,9 @@ fn h5read_rejects_unsupported_compound_dataset() {
         .expect("dataset");
 
     let err = block_on(h5read_builtin(
-        Value::String(path.display().to_string()),
-        Value::String("/compound".to_string()),
+        None,
+        Value::String(path.display().to_string().into()),
+        Value::String("/compound".to_string().into()),
         Vec::new(),
     ))
     .expect_err("compound unsupported");

@@ -24,7 +24,7 @@ impl XlsTable {
             Value::Cell(cell) => {
                 ensure_shape_2d(&cell.shape, "cell array")?;
                 checked_cell_count(cell.rows, cell.cols, "cell array")?;
-                for (index, member) in cell.data.iter().enumerate() {
+                for (index, member) in cell.data().iter().enumerate() {
                     if !matches!(member, Value::GpuTensor(_)) {
                         admit_cell_value(member)?;
                     }
@@ -32,7 +32,7 @@ impl XlsTable {
                         cooperation.completed(1024).await?;
                     }
                 }
-                cooperation.completed(cell.data.len() % 1024).await
+                cooperation.completed(cell.data().len() % 1024).await
             }
             Value::Tensor(tensor) => {
                 ensure_shape_2d(tensor.shape(), "numeric array")?;
@@ -112,7 +112,7 @@ fn admit_cell_value(value: &Value) -> BuiltinResult<()> {
     match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::String(_) => Ok(()),
         Value::CharArray(chars) if chars.rows == 1 => Ok(()),
-        Value::StringArray(strings) if strings.data.len() <= 1 => Ok(()),
+        Value::StringArray(strings) if strings.data().len() <= 1 => Ok(()),
         Value::Tensor(tensor)
             if tensor::is_scalar_tensor(tensor) || tensor::tensor_element_len(tensor) == 0 =>
         {

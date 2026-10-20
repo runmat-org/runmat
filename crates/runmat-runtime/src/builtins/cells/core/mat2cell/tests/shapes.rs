@@ -41,7 +41,7 @@ fn zero_sized_blocks() {
         other => panic!("expected cell array, got {other:?}"),
     };
     assert_eq!(cell.shape, vec![2, 2]);
-    let top_left = cell.data[0].clone();
+    let top_left = cell.data()[0].clone();
     let gathered = test_support::gather(top_left).expect("gather");
     assert_eq!(gathered.materialize_f64().len(), 0);
     assert_eq!(gathered.shape(), &[0, 1]);
@@ -59,7 +59,7 @@ fn logical_partition_vector_supported() {
         other => panic!("expected cell array, got {other:?}"),
     };
     assert_eq!(cell.shape, vec![4, 1]);
-    let third = cell.data[2].clone();
+    let third = cell.data()[2].clone();
     let gathered = test_support::gather(third).expect("gather");
     assert_eq!(gathered.shape(), &[1, 1]);
     assert_eq!(gathered.materialize_f64(), vec![3.0]);
@@ -83,12 +83,12 @@ fn char_array_partition() {
         Value::Cell(ca) => ca,
         other => panic!("expected cell array, got {other:?}"),
     };
-    let second = cell.data[1].clone();
+    let second = cell.data()[1].clone();
     match second {
         Value::CharArray(slice) => {
             assert_eq!(slice.rows, 1);
             assert_eq!(slice.cols, 2);
-            let text: String = slice.data.iter().collect();
+            let text: String = slice.data().iter().collect();
             assert_eq!(text, "o ");
         }
         other => panic!("expected CharArray, got {other:?}"),

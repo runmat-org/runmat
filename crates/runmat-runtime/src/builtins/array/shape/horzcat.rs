@@ -44,22 +44,37 @@ fn horzcat_error(message: impl Into<String>) -> RuntimeError {
 #[runtime_builtin(
     name = "horzcat",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::array::shape::horzcat"
 )]
-async fn horzcat_builtin(args: Vec<Value>) -> crate::BuiltinResult<crate::execution::RootedValue> {
+async fn horzcat_builtin(
+    context: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     if args.is_empty() {
-        return crate::execution::RootedValue::new(empty_double()?)
-            .map_err(|error| error.into_runtime_error());
+        return crate::execution::RootedValue::in_optional_context(
+            empty_double()?,
+            context.as_ref(),
+        );
     }
     if args.len() == 1 {
-        return crate::execution::RootedValue::new(args.into_iter().next().unwrap())
-            .map_err(|error| error.into_runtime_error());
+        return crate::execution::RootedValue::in_optional_context(
+            args[0].clone(),
+            context.as_ref(),
+        );
     }
 
-    let mut forwarded = Vec::with_capacity(args.len() + 1);
-    forwarded.push(Value::Int(IntValue::I32(2)));
-    forwarded.extend(args);
-    match crate::call_builtin_async("cat", &forwarded).await {
+    let prefix = crate::execution::RootedValue::in_optional_context(
+        Value::Int(IntValue::I32(2)),
+        context.as_ref(),
+    )?;
+    let forwarded = crate::builtins::common::mapped_callable::prepend_rooted_argument(
+        &args,
+        prefix,
+        context.as_ref(),
+    )
+    .await?;
+    match crate::dispatcher::call_retained_builtin_async("cat", forwarded, context.as_ref()).await {
         Ok(value) => Ok(value),
         Err(err) => Err(adapt_cat_error(err)),
     }
@@ -121,7 +136,10 @@ pub(crate) mod tests {
     use futures::executor::block_on;
 
     fn horzcat_builtin(args: Vec<Value>) -> crate::BuiltinResult<crate::execution::RootedValue> {
-        block_on(super::horzcat_builtin(args))
+        block_on(super::horzcat_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
     use crate::builtins::common::test_support;
     use runmat_value::{
@@ -198,7 +216,7 @@ pub(crate) mod tests {
             Value::CharArray(arr) => {
                 assert_eq!(arr.rows, 1);
                 assert_eq!(arr.cols, 6);
-                let text: String = arr.data.iter().copied().collect();
+                let text: String = arr.data().iter().copied().collect();
                 assert_eq!(text, "RunMat");
             }
             other => panic!("expected char array, got {other:?}"),
@@ -215,7 +233,7 @@ pub(crate) mod tests {
         match result.value() {
             Value::StringArray(arr) => {
                 assert_eq!(arr.shape, vec![1, 4]);
-                assert_eq!(arr.data, vec!["left", "right", "top", "bottom"]);
+                assert_eq!(arr.data(), vec!["left", "right", "top", "bottom"]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -236,7 +254,7 @@ pub(crate) mod tests {
         match result.value() {
             Value::StringArray(arr) => {
                 assert_eq!(arr.shape, vec![1, 3]);
-                assert_eq!(arr.data, vec!["wn = ", "6", " rad/s"]);
+                assert_eq!(arr.data(), vec!["wn = ", "6", " rad/s"]);
             }
             other => panic!("expected string array, got {other:?}"),
         }

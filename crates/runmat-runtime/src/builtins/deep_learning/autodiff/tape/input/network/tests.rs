@@ -1,4 +1,5 @@
 use super::*;
+use crate::builtins::deep_learning::arguments::DeepLearningObjectEdit as _;
 use crate::builtins::deep_learning::model::{parameters, state};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -38,10 +39,12 @@ fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
 fn layer(kind: DeepLearningLayerKind, name: &str, fields: &[(&str, Value)]) -> Value {
     let mut object = ObjectInstance::new(kind.class().owned());
     object
-        .properties
-        .insert("Name".into(), Value::String(name.into()));
+        .replace_dl_property("Name", Value::String(name.into()))
+        .expect("fixture property");
     for (key, value) in fields {
-        object.properties.insert((*key).into(), value.clone());
+        object
+            .replace_dl_property(key, value.clone())
+            .expect("fixture property");
     }
     Value::Object(object)
 }
@@ -64,7 +67,7 @@ fn data(value: &Value) -> &Tensor {
     let Value::Object(wrapper) = value else {
         panic!("dlarray wrapper expected")
     };
-    let Some(Value::Tensor(tensor)) = wrapper.properties.get("Data") else {
+    let Some(Value::Tensor(tensor)) = wrapper.properties().get("Data") else {
         panic!("tensor data expected")
     };
     tensor
@@ -164,7 +167,7 @@ fn canonical_learnables_and_recurrent_state_are_annotated_without_changing_metad
     let _activation = TapeActivation::enter(tape.clone());
     let mut expected_leaves = 0;
     for mut network in cases {
-        let initialized = network.properties.get("Initialized").cloned();
+        let initialized = network.properties().get("Initialized").cloned();
         let before_parameters = parameters::view(&network, "dlfeval").unwrap();
         let before_state = state::view(&network, "dlfeval").unwrap();
         let originals = before_parameters
@@ -177,7 +180,10 @@ fn canonical_learnables_and_recurrent_state_are_annotated_without_changing_metad
             .collect::<Vec<_>>();
         expected_leaves += originals.len() + state_originals.len();
         annotate_network_object(&mut network).unwrap();
-        assert_eq!(network.properties.get("Initialized"), initialized.as_ref());
+        assert_eq!(
+            network.properties().get("Initialized"),
+            initialized.as_ref()
+        );
         for (row, (key, original)) in parameters::view(&network, "dlfeval")
             .unwrap()
             .into_iter()
@@ -234,32 +240,34 @@ fn invalid_last_parameter_is_rejected_before_creating_any_leaf() {
             ],
         ),
     ]);
-    let original_initialized = network.properties.get("Initialized").cloned();
-    let Some(Value::Cell(layers)) = network.properties.get_mut("Layers") else {
+    let original_initialized = network.properties().get("Initialized").cloned();
+    let Some(Value::Cell(layers)) = network.fixture_dl_property_mut("Layers") else {
         panic!("Layers")
     };
-    let Value::Object(last) = &mut layers.data[1] else {
+    let Value::Object(last) =
+        &mut crate::builtins::deep_learning::tests::fixture_array_mut(layers)[1]
+    else {
         panic!("normalization layer")
     };
-    last.properties
-        .insert("Offset".into(), Value::String("invalid".into()));
+    last.replace_dl_property("Offset", Value::String("invalid".into()))
+        .expect("fixture property");
 
     let tape = Rc::new(RefCell::new(Tape::new()));
     let _activation = TapeActivation::enter(tape.clone());
     assert!(annotate_network_object(&mut network).is_err());
     assert!(tape.borrow().nodes.is_empty());
     assert_eq!(
-        network.properties.get("Initialized"),
+        network.properties().get("Initialized"),
         original_initialized.as_ref()
     );
-    let Some(Value::Cell(layers)) = network.properties.get("Layers") else {
+    let Some(Value::Cell(layers)) = network.properties().get("Layers") else {
         panic!("Layers")
     };
-    let Value::Object(last) = &layers.data[1] else {
+    let Value::Object(last) = &layers.data()[1] else {
         panic!("normalization layer")
     };
     assert_eq!(
-        last.properties.get("Offset"),
+        last.properties().get("Offset"),
         Some(&Value::String("invalid".into()))
     );
 }
@@ -291,18 +299,24 @@ fn public_learnables_setter_cannot_reuse_a_tag_after_data_replacement() {
         panic!("Learnables table expected")
     };
     let mut variables = crate::builtins::table::table_variables(table_object).unwrap();
-    let Some(Value::Cell(values)) = variables.fields.get_mut("Value") else {
+    let Some(Value::Cell(values)) =
+        crate::builtins::deep_learning::tests::fixture_field_mut(&mut variables, "Value")
+    else {
         panic!("Value column expected")
     };
-    let Value::Object(weights) = &mut values.data[0] else {
+    let Value::Object(weights) =
+        &mut crate::builtins::deep_learning::tests::fixture_array_mut(values)[0]
+    else {
         panic!("traced Weights dlarray expected")
     };
     let old_node = dlarray_object_node_id(weights).expect("original Weights tag");
-    weights.properties.insert(
-        "Data".into(),
-        Value::Tensor(Tensor::from_f32(vec![2.0; 4], vec![2, 2]).unwrap()),
-    );
-    assert!(weights.properties.contains_key(AD_NODE_PROPERTY));
+    weights
+        .replace_dl_property(
+            "Data",
+            Value::Tensor(Tensor::from_f32(vec![2.0; 4], vec![2, 2]).unwrap()),
+        )
+        .expect("fixture property");
+    assert!(weights.properties().contains_key(AD_NODE_PROPERTY));
     assert_eq!(dlarray_object_node_id(weights), None);
     let replacement =
         crate::builtins::table::table_replace_variables_like(table_object, variables).unwrap();
@@ -360,16 +374,21 @@ fn public_state_setter_detaches_edited_cell_state_without_disturbing_hidden_stat
         panic!("State table expected")
     };
     let mut variables = crate::builtins::table::table_variables(table_object).unwrap();
-    let Some(Value::Cell(values)) = variables.fields.get_mut("Value") else {
+    let Some(Value::Cell(values)) =
+        crate::builtins::deep_learning::tests::fixture_field_mut(&mut variables, "Value")
+    else {
         panic!("Value column expected")
     };
-    let Value::Object(cell) = &mut values.data[1] else {
+    let Value::Object(cell) =
+        &mut crate::builtins::deep_learning::tests::fixture_array_mut(values)[1]
+    else {
         panic!("traced CellState dlarray expected")
     };
-    cell.properties.insert(
-        "Data".into(),
+    cell.replace_dl_property(
+        "Data",
         Value::Tensor(Tensor::from_f32(vec![2.0; 3], vec![3, 1]).unwrap()),
-    );
+    )
+    .expect("fixture property");
     let replacement =
         crate::builtins::table::table_replace_variables_like(table_object, variables).unwrap();
     let Value::Object(mut updated) =
@@ -453,7 +472,7 @@ fn every_integer_last_parameter_is_rejected_before_any_earlier_leaf() {
                 "{dtype:?}: {error}"
             );
             assert!(tape.borrow().nodes.is_empty(), "{dtype:?}");
-            assert_eq!(network.properties, before.properties, "{dtype:?}");
+            assert_eq!(network.properties(), before.properties(), "{dtype:?}");
         }
     }
 }
@@ -496,7 +515,7 @@ fn every_integer_last_state_row_is_rejected_before_any_parameter_or_state_leaf()
                 "{dtype:?}: {error}"
             );
             assert!(tape.borrow().nodes.is_empty(), "{dtype:?}");
-            assert_eq!(network.properties, before.properties, "{dtype:?}");
+            assert_eq!(network.properties(), before.properties(), "{dtype:?}");
         }
     }
 }
@@ -519,7 +538,7 @@ fn uninitialized_network_preserves_its_lifecycle_and_fresh_tapes_get_fresh_leave
         ),
     ]);
     assert_eq!(
-        network.properties.get("Initialized"),
+        network.properties().get("Initialized"),
         Some(&Value::Bool(false))
     );
     for _ in 0..2 {
@@ -528,7 +547,7 @@ fn uninitialized_network_preserves_its_lifecycle_and_fresh_tapes_get_fresh_leave
         annotate_network_object(&mut network).unwrap();
         assert_eq!(tape.borrow().nodes.len(), 1);
         assert_eq!(
-            network.properties.get("Initialized"),
+            network.properties().get("Initialized"),
             Some(&Value::Bool(false))
         );
         let parameters = parameters::view(&network, "dlfeval").unwrap();
@@ -562,17 +581,20 @@ fn resident_parameter_becomes_a_tape_leaf_without_gather() {
                 ],
             ),
         ]);
-        let initialized = network.properties.get("Initialized").cloned();
+        let initialized = network.properties().get("Initialized").cloned();
         let tape = Rc::new(RefCell::new(Tape::new()));
         let _activation = TapeActivation::enter(tape.clone());
         provider.reset_telemetry();
         annotate_network_object(&mut network).expect("resident parameter leaf");
-        assert_eq!(network.properties.get("Initialized"), initialized.as_ref());
+        assert_eq!(
+            network.properties().get("Initialized"),
+            initialized.as_ref()
+        );
         let parameters = parameters::view(&network, "dlfeval").unwrap();
         let Some(Value::Object(weights)) = parameters[0].value else {
             panic!("annotated Weights dlarray");
         };
-        let Some(Value::GpuTensor(data)) = weights.properties.get("Data") else {
+        let Some(Value::GpuTensor(data)) = weights.properties().get("Data") else {
             panic!("resident Weights data");
         };
         assert_eq!(data.view_identity(), resident.view_identity());
@@ -585,7 +607,7 @@ fn resident_parameter_becomes_a_tape_leaf_without_gather() {
         let Some(Value::Object(bias)) = parameters[1].value else {
             panic!("annotated Bias dlarray");
         };
-        let Some(Value::Tensor(bias_data)) = bias.properties.get("Data") else {
+        let Some(Value::Tensor(bias_data)) = bias.properties().get("Data") else {
             panic!("native Bias data");
         };
         assert_eq!(bias_data.shape(), &[3, 1]);
@@ -642,7 +664,7 @@ fn resident_parameter_precedes_invalid_integer_without_gather_or_partial_tape() 
             .to_string()
             .contains("single or double parent storage"));
         assert!(tape.borrow().nodes.is_empty());
-        assert_eq!(network.properties, before.properties);
+        assert_eq!(network.properties(), before.properties());
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
         assert!(resident.allocation_lease().validate_live().is_ok());
     });

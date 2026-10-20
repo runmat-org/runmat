@@ -19,7 +19,7 @@ fn known_bad_format_rejects_before_resident_fid_download() {
         None,
         Value::GpuTensor(allocation.handle.clone()),
         Value::from("%z"),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect_err("invalid format");
     assert_eq!(err.identifier(), Some("RunMat:textscan:InvalidFormat"));
@@ -34,10 +34,10 @@ fn known_bad_option_rejects_before_resident_value_download() {
         None,
         Value::from("1"),
         Value::from("%f"),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("NoSuchOption"),
             Value::GpuTensor(allocation.handle.clone()),
-        ],
+        ]),
     ))
     .expect_err("invalid option");
     assert_eq!(err.identifier(), Some("RunMat:textscan:InvalidArgument"));
@@ -54,7 +54,7 @@ fn nested_resident_in_invalid_input_rejects_before_download() {
         None,
         Value::Cell(nested),
         Value::from("%f"),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect_err("cell is not text or file identifier");
     assert_eq!(err.identifier(), Some("RunMat:textscan:InvalidArgument"));

@@ -52,7 +52,7 @@ fn check_runtime(runtime: Option<&RuntimeContext>) -> BuiltinResult<()> {
 async fn ctrb_builtin(
     runtime: Option<RuntimeContext>,
     first: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     if crate::output_count::current_output_count().is_some_and(|count| count > 1) {
         return Err(argument("ctrb returns one controllability matrix"));
@@ -75,16 +75,16 @@ async fn ctrb_builtin(
     controllability(&a, &b, runtime.as_ref())
 }
 
-fn ss_pair(mut object: ObjectInstance) -> BuiltinResult<(Value, Value)> {
+fn ss_pair(object: ObjectInstance) -> BuiltinResult<(Value, Value)> {
     // Resolve both consumed properties before any provider gather. Other ss
     // metadata is irrelevant to the A/B controllability identity.
     let b = object
-        .properties
-        .remove("B")
+        .property("B")
+        .cloned()
         .ok_or_else(|| argument("ss model is missing B"))?;
     let a = object
-        .properties
-        .remove("A")
+        .property("A")
+        .cloned()
         .ok_or_else(|| argument("ss model is missing A"))?;
     Ok((a, b))
 }

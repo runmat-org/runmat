@@ -2,15 +2,13 @@ use super::*;
 use runmat_execution::identity::WorkerId;
 use runmat_execution::resource::{ResourceInventory, ResourceRequest};
 use runmat_execution::state::PoolState;
-use runmat_execution::task::RetryPolicy;
-use runmat_execution::{
-    CancellationReason, ExecutionScopeId, PoolId,
-};
+use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
+use runmat_execution::{CancellationReason, ExecutionScopeId, OutputContract, PoolId, TaskId};
 use runmat_execution_runner::port::BackendReport;
-use crate::driver::TransferFailure;
+use runmat_execution_runner::AttemptSuccess;
 use runmat_execution_runner::{
-    AttemptReport, AttemptSuccess, Driver, DriverAction, DriverCommand, DriverConfig, PoolSpec, TaskSubmission,
-    WorkerSpec,
+    AttemptReport, AttemptSuccess, Driver, DriverAction, DriverCommand, DriverConfig, PoolSpec,
+    TaskSubmission, WorkerSpec,
 };
 use std::collections::BTreeSet;
 
@@ -49,29 +47,50 @@ fn assigned() -> (Driver, AttemptRequest) {
         .unwrap();
     driver
         .handle(DriverCommand::RegisterWorker(WorkerSpec {
-            host: crate::test_fixtures::host_inventory(),
+            host: crate::test_support::host_inventory(),
             id: worker,
             pool_id: pool,
             resources: inventory,
         }))
         .unwrap();
-    let request = crate::test_fixtures::task_request(
-        "completion",
-        scope,
-        pool,
-        ResourceRequest {
-                cpu_millicores: 1000,
-                memory_bytes: 1024,
-                scratch_bytes: 1024,
-                max_wall_millis: 1000,
-                max_artifact_bytes: 1024,
-                max_egress_bytes: 0,
-                max_relay_bytes: 0,
-                accelerators: Vec::new(),
-                required_capabilities: BTreeSet::new(),
-            },
-        RetryPolicy::Never,
-    );
+    let request = TaskRequest {
+        console: None,
+        environment: runmat_execution::EnvironmentSnapshot::default(),
+        id: TaskId::derive(&[b"completion"]),
+        scope_id: scope,
+        pool_id: pool,
+        schema_version: runmat_execution::task::TASK_REQUEST_SCHEMA_VERSION,
+        executable: runmat_execution::TaskExecutableIdentity::ProgramArtifact(ArtifactId::derive(
+            &[b"completion"],
+        )),
+        host: crate::test_support::host_requirement(),
+        invocation_context: runmat_execution::ProgramInvocationContext::Direct,
+        callable: Callable::for_program(
+            "test",
+            &runmat_execution::ProgramCallable::semantic(
+                runmat_execution::ProgramFunctionId(0),
+                Some("completion".into()),
+            ),
+        ),
+        inputs: Vec::new(),
+        outputs: OutputContract {
+            owned_work: None,
+            requested_outputs: 0,
+        },
+        resources: ResourceRequest {
+            cpu_millicores: 1000,
+            memory_bytes: 1024,
+            scratch_bytes: 1024,
+            max_wall_millis: 1000,
+            max_artifact_bytes: 1024,
+            max_egress_bytes: 0,
+            max_relay_bytes: 0,
+            accelerators: Vec::new(),
+            required_capabilities: BTreeSet::new(),
+        },
+        retry: RetryPolicy::Never,
+        deadline_unix_millis: None,
+    };
     let attempt = driver
         .handle(DriverCommand::Submit(Box::new(TaskSubmission {
             request,
@@ -107,7 +126,10 @@ fn completion_publishes_result_and_history_once() {
         },
         NativeCheckpointEvidence::Durable,
     );
-    assert_eq!(completion.try_value(), Some(Err(TransferFailure::Execution("original".into()))));
+    assert_eq!(
+        completion.try_value(),
+        Some(Err(TransferFailure::Execution("original".into())))
+    );
     assert_eq!(completion.try_attempt_history(), Some(Vec::new()));
 }
 
@@ -156,8 +178,12 @@ fn committed_original_result_wins_over_a_different_raw_response() {
             },
         )))
         .unwrap();
-    let completed =
-        from_snapshot(&driver.snapshot(), &request, Err(TransferFailure::Execution("stale raw error".into()))).unwrap();
+    let completed = from_snapshot(
+        &driver.snapshot(),
+        &request,
+        Err(TransferFailure::Execution("stale raw error".into())),
+    )
+    .unwrap();
     assert_eq!(completed.result, Ok(success));
     assert_eq!(completed.evidence.as_ref().unwrap().attempts.len(), 1);
     let mut invalid = driver.snapshot();

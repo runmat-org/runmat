@@ -45,14 +45,16 @@ fn run_error_with_detail(
 
 fn value_to_string_scalar(value: &Value) -> Option<String> {
     match value {
-        Value::String(text) => Some(text.clone()),
+        Value::String(text) => Some(text.as_str().to_owned()),
         Value::CharArray(array)
             if array.rows == 1
                 && crate::builtins::common::shape::effective_rank(&array.shape) <= 2 =>
         {
-            Some(array.data.iter().collect())
+            Some(array.data().iter().collect())
         }
-        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Some(array.data()[0].as_str().to_owned())
+        }
         _ => None,
     }
 }
@@ -159,9 +161,9 @@ pub async fn resolve_run_source(value: &Value) -> BuiltinResult<RunScriptSource>
 pub async fn run_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<crate::execution::RootedValueSequence> {
-    crate::context::execute_selected_dynamic_workspace(
+    crate::context::execute_selected_dynamic_workspace_retained(
         runtime,
         runmat_builtins::DynamicWorkspaceBuiltin::Run,
         args,

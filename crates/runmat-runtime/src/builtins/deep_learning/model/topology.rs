@@ -8,7 +8,7 @@ pub(in crate::builtins) fn validate_sequential_connections(
     network: &ObjectInstance,
     function: &'static str,
 ) -> BuiltinResult<()> {
-    match network.properties.get("Connections") {
+    match network.properties().get("Connections") {
         None => Ok(()),
         Some(Value::Struct(connections)) if connections.fields.is_empty() => Ok(()),
         Some(_) => Err(unsupported_error(
@@ -24,12 +24,12 @@ pub(in crate::builtins) fn validate_forward_layers(
 ) -> BuiltinResult<()> {
     for layer in layers {
         if let Value::Object(object) = layer {
-            if ForwardLayerKind::from_identity(&object.class_name).is_none() {
+            if ForwardLayerKind::from_identity(object.class_name()).is_none() {
                 return Err(deep_learning_error(
                     function,
                     format!(
                         "{function}: layer type '{}' is not supported for RunMat forward execution",
-                        object.class_name
+                        object.class_name()
                     ),
                 ));
             }
@@ -57,7 +57,7 @@ pub(in crate::builtins) fn validate_sequential_topology(
                 format!("{function}: network layers must be layer objects"),
             ));
         };
-        let Some(kind) = ForwardLayerKind::from_identity(&object.class_name) else {
+        let Some(kind) = ForwardLayerKind::from_identity(object.class_name()) else {
             continue;
         };
         if index != 0 && kind.is_input() {

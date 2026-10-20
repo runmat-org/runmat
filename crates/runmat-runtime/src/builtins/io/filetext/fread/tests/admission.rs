@@ -106,7 +106,11 @@ fn host_controls_are_prepared_as_typed_values_once() {
         Value::Num(1.0),
         Value::from("ieee-be"),
     ];
-    let prepared = PreparedFreadCall::new(&fid, &arguments).expect("host admission");
+    let prepared = PreparedFreadCall::new(
+        &fid,
+        crate::call::FunctionArgumentView::from_slice(&arguments),
+    )
+    .expect("host admission");
     assert_eq!(
         futures::executor::block_on(prepared.resolve_fid()).unwrap(),
         3

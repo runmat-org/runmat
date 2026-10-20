@@ -2,6 +2,20 @@ use std::collections::HashSet;
 
 use super::error;
 
+mod managed;
+pub(super) use managed::ManagedPartitionPlan;
+mod index;
+pub(super) use index::column_major_coords;
+use index::{column_major_linear, row_major_coords, source_index};
+
+pub(super) trait PartitionGeometry {
+    fn output_shape(&self) -> &[usize];
+    fn slice_shape(&self) -> &[usize];
+    fn output_count(&self) -> usize;
+    fn slice_count(&self) -> usize;
+    fn source_index(&self, output: usize, slice: usize) -> crate::BuiltinResult<usize>;
+}
+
 pub(super) struct PartitionPlan {
     pub(super) output_shape: Vec<usize>,
     pub(super) slice_shape: Vec<usize>,
@@ -55,6 +69,37 @@ impl PartitionPlan {
         (0..self.output_count).map(|output_linear| self.source_indices(output_linear))
     }
 
+    /// Address one source element without allocating the coordinate and index
+    /// vectors used by the ordinary grouped iterator. An admitted output
+    /// builder can use this after preparing its complete scratch and result
+    /// owners, including when a callback is cancelled between elements.
+    pub(super) fn source_index(
+        &self,
+        output_linear: usize,
+        slice_linear: usize,
+    ) -> crate::BuiltinResult<usize> {
+        source_index(
+            &self.output_shape,
+            &self.slice_shape,
+            &self.source_shape,
+            self.output_count,
+            self.slice_count,
+            output_linear,
+            slice_linear,
+            |axis| self.source_to_slice[axis],
+        )
+    }
+
+    #[cfg(test)]
+    pub(super) fn output_count(&self) -> usize {
+        self.output_count
+    }
+
+    #[cfg(test)]
+    pub(super) fn slice_count(&self) -> usize {
+        self.slice_count
+    }
+
     fn source_indices(&self, output_linear: usize) -> crate::BuiltinResult<Vec<usize>> {
         let output = row_major_coords(output_linear, &self.output_shape);
         (0..self.slice_count)
@@ -67,6 +112,47 @@ impl PartitionPlan {
             })
             .collect()
     }
+}
+
+impl PartitionGeometry for PartitionPlan {
+    fn output_shape(&self) -> &[usize] {
+        &self.output_shape
+    }
+    fn slice_shape(&self) -> &[usize] {
+        &self.slice_shape
+    }
+    fn output_count(&self) -> usize {
+        self.output_count
+    }
+    fn slice_count(&self) -> usize {
+        self.slice_count
+    }
+    fn source_index(&self, output: usize, slice: usize) -> crate::BuiltinResult<usize> {
+        self.source_index(output, slice)
+    }
+}
+
+pub(super) fn checked_element_count(shape: &[usize]) -> crate::BuiltinResult<usize> {
+    element_count(shape)
+}
+
+pub(super) fn indexed_source(
+    geometry: &impl PartitionGeometry,
+    source_shape: &[usize],
+    output: usize,
+    slice: usize,
+    destination: impl FnMut(usize) -> Option<usize>,
+) -> crate::BuiltinResult<usize> {
+    source_index(
+        geometry.output_shape(),
+        geometry.slice_shape(),
+        source_shape,
+        geometry.output_count(),
+        geometry.slice_count(),
+        output,
+        slice,
+        destination,
+    )
 }
 
 fn axes(dimensions: &[usize], rank: usize) -> crate::BuiltinResult<Vec<usize>> {
@@ -94,46 +180,4 @@ fn element_count(shape: &[usize]) -> crate::BuiltinResult<usize> {
         .iter()
         .try_fold(1usize, |count, extent| count.checked_mul(*extent))
         .ok_or_else(|| error::internal("shape exceeds addressable storage"))
-}
-
-fn row_major_coords(mut linear: usize, shape: &[usize]) -> Vec<usize> {
-    let mut coords = vec![0; shape.len()];
-    for axis in (0..shape.len()).rev() {
-        if shape[axis] != 0 {
-            coords[axis] = linear % shape[axis];
-            linear /= shape[axis];
-        }
-    }
-    coords
-}
-
-pub(super) fn column_major_coords(mut linear: usize, shape: &[usize]) -> Vec<usize> {
-    shape
-        .iter()
-        .map(|extent| {
-            let coordinate = if *extent == 0 { 0 } else { linear % *extent };
-            if *extent != 0 {
-                linear /= *extent;
-            }
-            coordinate
-        })
-        .collect()
-}
-
-fn column_major_linear(coords: &[usize], shape: &[usize]) -> crate::BuiltinResult<usize> {
-    let mut linear = 0usize;
-    let mut stride = 1usize;
-    for (&coordinate, &extent) in coords.iter().zip(shape) {
-        linear = linear
-            .checked_add(
-                coordinate
-                    .checked_mul(stride)
-                    .ok_or_else(|| error::internal("index overflow"))?,
-            )
-            .ok_or_else(|| error::internal("index overflow"))?;
-        stride = stride
-            .checked_mul(extent)
-            .ok_or_else(|| error::internal("index overflow"))?;
-    }
-    Ok(linear)
 }

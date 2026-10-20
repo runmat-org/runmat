@@ -4,19 +4,19 @@ pub(in crate::builtins::deep_learning) fn dlarray_format_and_labels(
     value: &Value,
 ) -> (Value, Value) {
     let Value::Object(object) = value else {
-        return (Value::String(String::new()), Value::String(String::new()));
+        return (Value::string(String::new()), Value::string(String::new()));
     };
     (
         object
-            .properties
+            .properties()
             .get("Format")
             .cloned()
-            .unwrap_or_else(|| Value::String(String::new())),
+            .unwrap_or_else(|| Value::string(String::new())),
         object
-            .properties
+            .properties()
             .get("Labels")
             .cloned()
-            .unwrap_or_else(|| Value::String(String::new())),
+            .unwrap_or_else(|| Value::string(String::new())),
     )
 }
 
@@ -25,8 +25,8 @@ pub(in crate::builtins::deep_learning) fn dlarray_data(
     function: &'static str,
 ) -> BuiltinResult<Value> {
     match value {
-        Value::Object(object) if object.class_name == DLARRAY_CLASS => {
-            object.properties.get("Data").cloned().ok_or_else(|| {
+        Value::Object(object) if object.class_name().is(DLARRAY_CLASS) => {
+            object.properties().get("Data").cloned().ok_or_else(|| {
                 deep_learning_error(function, format!("{function}: dlarray is missing Data"))
             })
         }
@@ -40,8 +40,8 @@ pub(in crate::builtins::deep_learning) fn host_tensor_from_value(
     label: &str,
 ) -> BuiltinResult<Tensor> {
     match value {
-        Value::Object(object) if object.class_name == DLARRAY_CLASS => {
-            let data = object.properties.get("Data").ok_or_else(|| {
+        Value::Object(object) if object.class_name().is(DLARRAY_CLASS) => {
+            let data = object.properties().get("Data").ok_or_else(|| {
                 deep_learning_error(function, format!("{function}: dlarray is missing Data"))
             })?;
             host_tensor_from_value(data, function, label)
@@ -68,7 +68,7 @@ pub(super) struct Payload {
 impl Payload {
     pub(super) fn parse(value: Value, function: &'static str) -> BuiltinResult<Self> {
         let is_dlarray =
-            matches!(&value, Value::Object(object) if object.class_name == DLARRAY_CLASS);
+            matches!(&value, Value::Object(object) if object.class_name().is(DLARRAY_CLASS));
         let data = dlarray_data(&value, function)?;
         if crate::builtins::common::validation::value_has_native_integer_class(&data) {
             return Err(deep_learning_error(
@@ -163,16 +163,24 @@ pub(super) fn node_dtype(
         .unwrap_or(fallback)
 }
 
-pub(super) fn wrap_result(payload: &Payload, tensor: Tensor, node: Option<usize>) -> Value {
-    let mut out = ObjectInstance::new(DLARRAY_CLASS.to_string());
-    out.properties
-        .insert("Data".to_string(), Value::Tensor(tensor));
-    out.properties
-        .insert("Format".to_string(), payload.format.clone());
-    out.properties
-        .insert("Labels".to_string(), payload.labels.clone());
+pub(super) fn wrap_result(
+    payload: &Payload,
+    tensor: Tensor,
+    node: Option<usize>,
+) -> BuiltinResult<Value> {
+    let Value::Object(mut out) = super::super::object_with_identity(
+        DLARRAY_CLASS,
+        [
+            ("Data", Value::Tensor(tensor)),
+            ("Format", payload.format.clone()),
+            ("Labels", payload.labels.clone()),
+        ],
+    )?
+    else {
+        unreachable!("dlarray object constructor")
+    };
     if let Some(id) = node {
-        attach_node_to_object(&mut out, id);
+        attach_node_to_object(&mut out, id)?;
     }
-    Value::Object(out)
+    Ok(Value::Object(out))
 }

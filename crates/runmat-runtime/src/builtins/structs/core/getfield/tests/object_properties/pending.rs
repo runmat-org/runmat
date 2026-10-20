@@ -98,7 +98,7 @@ fn pending_public_getfield_restores_enclosing_session_and_drops_getter() {
     let mut work = Box::pin(getfield_builtin(
         Some(selected.clone()),
         Value::Object(ObjectInstance::new(class.clone())),
-        vec![Value::from("p")],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("p")]),
     ));
     let waker = futures::task::noop_waker();
     let mut context = Context::from_waker(&waker);
@@ -117,7 +117,7 @@ fn pending_public_getfield_restores_enclosing_session_and_drops_getter() {
     let mut cancelled_work = Box::pin(getfield_builtin(
         Some(selected),
         Value::Object(ObjectInstance::new(class)),
-        vec![Value::from("p")],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("p")]),
     ));
     assert!(matches!(
         cancelled_work.as_mut().poll(&mut context),

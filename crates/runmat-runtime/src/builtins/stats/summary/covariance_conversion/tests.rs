@@ -113,17 +113,22 @@ fn covariance_matrix_extents_preserve_rank_zero_and_vector_projection() {
     );
 
     let rank_zero = Value::Tensor(Tensor::new(vec![4.0], vec![]).expect("rank-zero tensor"));
-    let Value::Tensor(result) =
-        block_on(corrcov::corrcov_builtin(rank_zero, Vec::new())).expect("rank-zero covariance")
-    else {
+    let Value::Tensor(result) = block_on(corrcov::corrcov_builtin(
+        rank_zero,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect("rank-zero covariance") else {
         panic!("expected tensor result")
     };
     assert_eq!(result.shape(), [0, 0]);
 
     let rank_one =
         Value::Tensor(Tensor::new(vec![4.0, 2.0, 2.0, 9.0], vec![4]).expect("rank-one tensor"));
-    let error = block_on(corrcov::corrcov_builtin(rank_one, Vec::new()))
-        .expect_err("rank-one covariance must retain row-vector geometry");
+    let error = block_on(corrcov::corrcov_builtin(
+        rank_one,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect_err("rank-one covariance must retain row-vector geometry");
     assert!(error.message().contains("must be square"));
 }
 
@@ -131,7 +136,11 @@ fn covariance_matrix_extents_preserve_rank_zero_and_vector_projection() {
 fn corrcov_converts_covariance_and_returns_sigma() {
     let c = Value::Tensor(Tensor::new(vec![4.0, 2.0, 2.0, 9.0], vec![2, 2]).expect("tensor"));
     let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
-    let out = block_on(corrcov::corrcov_builtin(c, Vec::new())).expect("corrcov");
+    let out = block_on(corrcov::corrcov_builtin(
+        c,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect("corrcov");
     match out {
         Value::OutputList(values) => {
             assert_eq!(values.len(), 2);
@@ -160,9 +169,11 @@ fn corrcov_preserves_native_single_outputs() {
         Tensor::from_f32(vec![4.0, 2.0, 2.0, 9.0], vec![2, 2]).expect("single covariance"),
     );
     let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
-    let Value::OutputList(outputs) =
-        block_on(corrcov::corrcov_builtin(covariance, Vec::new())).expect("corrcov")
-    else {
+    let Value::OutputList(outputs) = block_on(corrcov::corrcov_builtin(
+        covariance,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect("corrcov") else {
         panic!("expected output list");
     };
     let [Value::Tensor(correlation), Value::Tensor(sigma)] = outputs.as_slice() else {
@@ -189,7 +200,7 @@ fn corrcov_gpu_input_returns_resident_outputs() {
         let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let out = block_on(corrcov::corrcov_builtin(
             Value::GpuTensor(covariance),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect("corrcov gpu");
         let Value::OutputList(values) = out else {
@@ -224,7 +235,7 @@ fn cov2corr_gpu_input_preserves_invalid_covariance_error() {
 
         let err = block_on(cov2corr::cov2corr_builtin(
             Value::GpuTensor(covariance),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect_err("invalid covariance");
 
@@ -246,7 +257,7 @@ fn cov2corr_gpu_extension_returns_finance_output_order() {
         let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let Value::OutputList(outputs) = block_on(cov2corr::cov2corr_builtin(
             Value::GpuTensor(covariance),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect("cov2corr gpu") else {
             panic!("expected output list");
@@ -264,9 +275,11 @@ fn cov2corr_gpu_extension_returns_finance_output_order() {
 fn cov2corr_returns_finance_output_order_and_shapes() {
     let c = Value::Tensor(Tensor::new(vec![16.0, 4.0, 4.0, 25.0], vec![2, 2]).expect("tensor"));
     let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
-    let Value::OutputList(outputs) =
-        block_on(cov2corr::cov2corr_builtin(c, Vec::new())).expect("cov2corr")
-    else {
+    let Value::OutputList(outputs) = block_on(cov2corr::cov2corr_builtin(
+        c,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect("cov2corr") else {
         panic!("expected output list");
     };
     let [Value::Tensor(sigma), Value::Tensor(correlation)] = outputs.as_slice() else {
@@ -283,9 +296,11 @@ fn covariance_conversion_preserves_empty_shapes_and_cov2corr_default_output() {
     let empty = || Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).expect("empty tensor"));
     {
         let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
-        let Value::OutputList(outputs) =
-            block_on(corrcov::corrcov_builtin(empty(), Vec::new())).expect("corrcov empty")
-        else {
+        let Value::OutputList(outputs) = block_on(corrcov::corrcov_builtin(
+            empty(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect("corrcov empty") else {
             panic!("expected output list");
         };
         let [Value::Tensor(correlation), Value::Tensor(sigma)] = outputs.as_slice() else {
@@ -296,9 +311,11 @@ fn covariance_conversion_preserves_empty_shapes_and_cov2corr_default_output() {
     }
     {
         let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
-        let Value::OutputList(outputs) =
-            block_on(cov2corr::cov2corr_builtin(empty(), Vec::new())).expect("cov2corr empty")
-        else {
+        let Value::OutputList(outputs) = block_on(cov2corr::cov2corr_builtin(
+            empty(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect("cov2corr empty") else {
             panic!("expected output list");
         };
         let [Value::Tensor(sigma), Value::Tensor(correlation)] = outputs.as_slice() else {
@@ -310,9 +327,11 @@ fn covariance_conversion_preserves_empty_shapes_and_cov2corr_default_output() {
 
     let covariance =
         Value::Tensor(Tensor::new(vec![16.0, 4.0, 4.0, 25.0], vec![2, 2]).expect("tensor"));
-    let Value::Tensor(sigma) =
-        block_on(cov2corr::cov2corr_builtin(covariance, Vec::new())).expect("cov2corr")
-    else {
+    let Value::Tensor(sigma) = block_on(cov2corr::cov2corr_builtin(
+        covariance,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect("cov2corr") else {
         panic!("expected default sigma output");
     };
     assert_eq!(sigma.shape(), [1, 2]);
@@ -322,7 +341,11 @@ fn covariance_conversion_preserves_empty_shapes_and_cov2corr_default_output() {
 #[test]
 fn corrcov_zero_variance_produces_nan_correlations() {
     let c = Value::Tensor(Tensor::new(vec![0.0, 0.0, 0.0, 9.0], vec![2, 2]).expect("tensor"));
-    let out = block_on(corrcov::corrcov_builtin(c, Vec::new())).expect("corrcov");
+    let out = block_on(corrcov::corrcov_builtin(
+        c,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect("corrcov");
     match out {
         Value::Tensor(tensor) => {
             let values = tensor.materialize_f64();
@@ -339,28 +362,48 @@ fn corrcov_zero_variance_produces_nan_correlations() {
 fn corrcov_rejects_invalid_covariance_matrix() {
     let nonsquare =
         Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![3, 2]).expect("tensor"));
-    let err = block_on(corrcov::corrcov_builtin(nonsquare, Vec::new())).unwrap_err();
+    let err = block_on(corrcov::corrcov_builtin(
+        nonsquare,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap_err();
     assert_eq!(err.identifier(), Some("RunMat:corrcov:InvalidArgument"));
     assert!(err.message().contains("square"));
 
     let negative =
         Value::Tensor(Tensor::new(vec![1.0, 0.0, 0.0, -1.0], vec![2, 2]).expect("tensor"));
-    let err = block_on(corrcov::corrcov_builtin(negative, Vec::new())).unwrap_err();
+    let err = block_on(corrcov::corrcov_builtin(
+        negative,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap_err();
     assert!(err.message().contains("nonnegative"));
 
     let asymmetric =
         Value::Tensor(Tensor::new(vec![1.0, 0.1, 0.2, 1.0], vec![2, 2]).expect("tensor"));
-    let err = block_on(corrcov::corrcov_builtin(asymmetric, Vec::new())).unwrap_err();
+    let err = block_on(corrcov::corrcov_builtin(
+        asymmetric,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap_err();
     assert!(err.message().contains("symmetric"));
 
     let one_sided_nan =
         Value::Tensor(Tensor::new(vec![1.0, 2.0, f64::NAN, 1.0], vec![2, 2]).expect("tensor"));
-    let err = block_on(corrcov::corrcov_builtin(one_sided_nan, Vec::new())).unwrap_err();
+    let err = block_on(corrcov::corrcov_builtin(
+        one_sided_nan,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap_err();
     assert!(err.message().contains("finite"));
 
     let impossible =
         Value::Tensor(Tensor::new(vec![1.0, 2.0, 2.0, 1.0], vec![2, 2]).expect("tensor"));
-    let err = block_on(corrcov::corrcov_builtin(impossible, Vec::new())).unwrap_err();
+    let err = block_on(corrcov::corrcov_builtin(
+        impossible,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap_err();
     assert!(err.message().contains("variance bounds"));
 
     let indefinite = Value::Tensor(
@@ -374,7 +417,11 @@ fn corrcov_rejects_invalid_covariance_matrix() {
         )
         .unwrap(),
     );
-    let err = block_on(corrcov::corrcov_builtin(indefinite, Vec::new())).unwrap_err();
+    let err = block_on(corrcov::corrcov_builtin(
+        indefinite,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap_err();
     assert!(err.message().contains("positive semidefinite"));
 }
 
@@ -384,7 +431,11 @@ fn corrcov_accepts_typed_integer_tensors_and_scalar_logical_extensions() {
     {
         let integer = int_tensor(IntegerStorage::U16(vec![4, 2, 2, 9]), vec![2, 2]);
         let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
-        let out = block_on(corrcov::corrcov_builtin(integer, Vec::new())).unwrap();
+        let out = block_on(corrcov::corrcov_builtin(
+            integer,
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap();
         match out {
             Value::OutputList(values) => {
                 assert_eq!(values.len(), 2);
@@ -409,7 +460,11 @@ fn corrcov_accepts_typed_integer_tensors_and_scalar_logical_extensions() {
         }
     }
 
-    let scalar = block_on(corrcov::corrcov_builtin(Value::Num(4.0), Vec::new())).unwrap();
+    let scalar = block_on(corrcov::corrcov_builtin(
+        Value::Num(4.0),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap();
     match scalar {
         Value::Num(value) => assert_close(value, 1.0),
         other => panic!("expected scalar result, got {other:?}"),
@@ -418,7 +473,11 @@ fn corrcov_accepts_typed_integer_tensors_and_scalar_logical_extensions() {
     let logical = Value::LogicalArray(
         runmat_value::LogicalArray::new(vec![1, 0, 0, 1], vec![2, 2]).expect("logical"),
     );
-    let out = block_on(corrcov::corrcov_builtin(logical, Vec::new())).unwrap();
+    let out = block_on(corrcov::corrcov_builtin(
+        logical,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap();
     match out {
         Value::Tensor(tensor) => {
             assert_eq!(tensor.numeric_dtype(), NumericDType::F64);
@@ -432,12 +491,20 @@ fn corrcov_accepts_typed_integer_tensors_and_scalar_logical_extensions() {
 fn covariance_conversion_extensions_reject_in_matlab_mode() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
     let integer = int_tensor(IntegerStorage::U16(vec![4, 2, 2, 9]), vec![2, 2]);
-    let err = block_on(corrcov::corrcov_builtin(integer.clone(), Vec::new())).unwrap_err();
+    let err = block_on(corrcov::corrcov_builtin(
+        integer.clone(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap_err();
     assert_eq!(
         err.identifier(),
         Some("RunMat:compatibility:CorrcovIntegerDataExtension")
     );
-    let err = block_on(cov2corr::cov2corr_builtin(integer, Vec::new())).unwrap_err();
+    let err = block_on(cov2corr::cov2corr_builtin(
+        integer,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap_err();
     assert_eq!(
         err.identifier(),
         Some("RunMat:compatibility:Cov2corrIntegerDataExtension")
@@ -445,19 +512,31 @@ fn covariance_conversion_extensions_reject_in_matlab_mode() {
 
     let logical =
         Value::LogicalArray(runmat_value::LogicalArray::new(vec![1, 0, 0, 1], vec![2, 2]).unwrap());
-    let err = block_on(corrcov::corrcov_builtin(logical.clone(), Vec::new())).unwrap_err();
+    let err = block_on(corrcov::corrcov_builtin(
+        logical.clone(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap_err();
     assert_eq!(
         err.identifier(),
         Some("RunMat:compatibility:CorrcovLogicalDataExtension")
     );
-    let err = block_on(cov2corr::cov2corr_builtin(logical, Vec::new())).unwrap_err();
+    let err = block_on(cov2corr::cov2corr_builtin(
+        logical,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap_err();
     assert_eq!(
         err.identifier(),
         Some("RunMat:compatibility:Cov2corrLogicalDataExtension")
     );
 
     let single = Value::Tensor(Tensor::from_f32(vec![4.0], vec![1, 1]).unwrap());
-    let err = block_on(cov2corr::cov2corr_builtin(single, Vec::new())).unwrap_err();
+    let err = block_on(cov2corr::cov2corr_builtin(
+        single,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap_err();
     assert_eq!(
         err.identifier(),
         Some("RunMat:compatibility:Cov2corrSingleDataExtension")
@@ -479,18 +558,21 @@ fn covariance_conversion_supports_all_integer_classes_in_runmat_mode() {
     ];
     for storage in storages {
         let covariance = int_tensor(storage, vec![2, 2]);
-        let Value::Tensor(correlation) =
-            block_on(corrcov::corrcov_builtin(covariance.clone(), Vec::new()))
-                .expect("integer corrcov")
-        else {
+        let Value::Tensor(correlation) = block_on(corrcov::corrcov_builtin(
+            covariance.clone(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect("integer corrcov") else {
             panic!("expected correlation tensor");
         };
         assert_eq!(correlation.numeric_dtype(), NumericDType::F64);
         assert_tensor_values(&correlation, &[1.0, 1.0 / 3.0, 1.0 / 3.0, 1.0]);
 
-        let Value::Tensor(sigma) =
-            block_on(cov2corr::cov2corr_builtin(covariance, Vec::new())).expect("integer cov2corr")
-        else {
+        let Value::Tensor(sigma) = block_on(cov2corr::cov2corr_builtin(
+            covariance,
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect("integer cov2corr") else {
             panic!("expected sigma tensor");
         };
         assert_eq!(sigma.numeric_dtype(), NumericDType::F64);
@@ -507,9 +589,11 @@ fn covariance_conversion_checks_wide_integer_symmetry_exactly() {
         IntegerStorage::U64(vec![base, base - 1, base - 1, base]),
         vec![2, 2],
     );
-    let Value::Tensor(result) =
-        block_on(corrcov::corrcov_builtin(symmetric, Vec::new())).expect("wide symmetric")
-    else {
+    let Value::Tensor(result) = block_on(corrcov::corrcov_builtin(
+        symmetric,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect("wide symmetric") else {
         panic!("expected tensor");
     };
     assert_eq!(result.shape(), [2, 2]);
@@ -518,7 +602,11 @@ fn covariance_conversion_checks_wide_integer_symmetry_exactly() {
         IntegerStorage::U64(vec![base, base - 1, base - 2, base]),
         vec![2, 2],
     );
-    let err = block_on(corrcov::corrcov_builtin(asymmetric, Vec::new())).unwrap_err();
+    let err = block_on(corrcov::corrcov_builtin(
+        asymmetric,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap_err();
     assert!(err.message().contains("symmetric"));
 }
 
@@ -533,7 +621,7 @@ fn covariance_conversion_resident_extension_gates_precede_dispatch() {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
             let err = block_on(corrcov::corrcov_builtin(
                 Value::GpuTensor(integer_handle.clone()),
-                Vec::new(),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
             ))
             .unwrap_err();
             assert_eq!(
@@ -542,7 +630,7 @@ fn covariance_conversion_resident_extension_gates_precede_dispatch() {
             );
             let err = block_on(cov2corr::cov2corr_builtin(
                 Value::GpuTensor(integer_handle.clone()),
-                Vec::new(),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
             ))
             .unwrap_err();
             assert_eq!(
@@ -554,7 +642,7 @@ fn covariance_conversion_resident_extension_gates_precede_dispatch() {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
             let result = block_on(corrcov::corrcov_builtin(
                 Value::GpuTensor(integer_handle.clone()),
-                Vec::new(),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
             ))
             .expect("resident integer gather fallback");
             assert!(matches!(result, Value::Tensor(_)));
@@ -570,7 +658,7 @@ fn covariance_conversion_resident_extension_gates_precede_dispatch() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let err = block_on(cov2corr::cov2corr_builtin(
             Value::GpuTensor(double_handle.clone()),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .unwrap_err();
         assert_eq!(
@@ -585,6 +673,10 @@ fn covariance_conversion_resident_extension_gates_precede_dispatch() {
 fn corrcov_rejects_too_many_outputs() {
     let c = Value::Tensor(Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).expect("tensor"));
     let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
-    let err = block_on(corrcov::corrcov_builtin(c, Vec::new())).unwrap_err();
+    let err = block_on(corrcov::corrcov_builtin(
+        c,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap_err();
     assert!(err.message().contains("too many output"));
 }

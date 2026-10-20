@@ -151,6 +151,10 @@ mod tests {
         let second_ref = second
             .reference(&object, ValueRefKind::ResultObject, "runmat.test.v1")
             .unwrap();
+        for reference in [&first_ref, &second_ref] {
+            assert_eq!(reference.schema_version, VALUE_PAYLOAD_SCHEMA_VERSION);
+            reference.validate(ValueLimits::default()).unwrap();
+        }
         assert_eq!(first_ref.logical_digest, second_ref.logical_digest);
         assert_ne!(first_ref.id, second_ref.id);
         first

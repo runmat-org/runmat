@@ -7,7 +7,9 @@ use runmat_value::{CharArray, Value};
 use tempfile::tempdir;
 
 fn call(args: Vec<Value>) -> BuiltinResult<Value> {
-    futures::executor::block_on(pwd_builtin(args))
+    futures::executor::block_on(pwd_builtin(
+        crate::builtins::common::test_support::builtin_arguments(args),
+    ))
 }
 
 struct DirGuard {

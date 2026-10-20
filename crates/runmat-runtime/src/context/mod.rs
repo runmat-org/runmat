@@ -7,8 +7,10 @@
 mod capability;
 mod cancellation_context;
 pub(crate) use cancellation_context::RuntimeCancellationContext;
+pub use cancellation_context::RuntimeCancellationScope;
 mod cleanup_lifecycle;
 mod callable_artifacts;
+mod current_class_product;
 mod graphics_presentation;
 #[cfg(all(feature = "gui", not(target_arch = "wasm32")))]
 mod native_graphics;
@@ -81,6 +83,7 @@ pub use callable_artifacts::{
 pub use capability::{RuntimeCapability, RuntimeCapabilityError};
 pub use catch::{ActiveCatchFuture, ActiveCatchGuard, UnboxedActiveCatchFuture};
 pub use cleanup_lifecycle::RuntimeLifecycleHost;
+pub use current_class_product::{CurrentClassProductResolution, CurrentClassProductResolver};
 pub use graphics_callbacks::{
     GraphicsBoundCallbackResponder, GraphicsCallbackDisposition, GraphicsCallbackDriveError,
     GraphicsCallbackHandler, GraphicsCallbackHostEvent, GraphicsCallbackHostFailure,
@@ -137,10 +140,12 @@ pub use preferences::{
 pub use runtime::{
     ProgramExecutionAssignmentGuard, ProgramExecutionJobGuard, ProgramSourceSelectionError,
     RuntimeContext, RuntimeContextLocalId, RuntimeExecutionStack, RuntimeExecutionStackGuard,
-    RuntimeLanguageMode, RuntimeLanguagePolicy, DEFAULT_CALLSTACK_LIMIT, DEFAULT_ERROR_NAMESPACE,
+    RuntimeLanguageMode, RuntimeLanguagePolicy, SelectedGraphFunction,
+    SelectedGraphFunctionResolver, DEFAULT_CALLSTACK_LIMIT, DEFAULT_ERROR_NAMESPACE,
 };
 pub use scope::{
-    ContextFuture, PreparedRuntimeFutureScope, PreparedRuntimeScope, RuntimeContextGuard,
+    ContextFuture, DeferredRuntimeFuture, PreparedRuntimeFutureScope, PreparedRuntimeScope,
+    RuntimeContextGuard,
 };
 pub(crate) use services::complete_process_output_requires_evidence;
 #[cfg(test)]
@@ -149,26 +154,26 @@ pub(crate) use services::test_managed_selection;
 pub use services::RuntimeProcessService;
 pub use services::{
     ForeignCall, ForeignCallCompletion, HostInteraction, NativeCapability, ParallelCapability,
-    RuntimeAccelerationService, RuntimeBaseWorkspaceService, RuntimeBuiltinService,
-    RuntimeCallRequest, RuntimeCallRouter, RuntimeCallService, RuntimeCollectiveService,
-    RuntimeDistributedCallRequest, RuntimeDistributedInvocation, RuntimeDistributedRetirement,
-    RuntimeDistributedService, RuntimeDistributedSnapshot, RuntimeErrorService,
-    RuntimeForeignService, RuntimeGraphObservationPermit, RuntimeGraphPlacementSelection,
-    RuntimeHostEffectResourceService, RuntimeHostService, RuntimeHttpService,
-    RuntimeManagedWholeWorkSelection, RuntimeNativeService, RuntimeObjectService,
-    RuntimeParallelResources, RuntimeParallelService, RuntimePlacementFeedbackDelivery,
-    RuntimePlacementFeedbackSource, RuntimePlacementService, RuntimeServiceFuture,
-    RuntimeServicePorts, RuntimeSpmdAdmission, RuntimeSpmdGangLease, RuntimeSpmdOutput,
-    RuntimeSpmdRetainedOutput, RuntimeSpmdService, RuntimeWholeWorkObservationAuthority,
-    RuntimeWholeWorkObservationPermit, RuntimeWholeWorkProbeLease, RuntimeWholeWorkSelection,
-    RuntimeWorkspaceService,
-    RuntimeAnalysisService, RuntimeProgramCallable, RuntimeProgramService, RuntimeSignalMaterializationRequest,
+    RuntimeAccelerationService, RuntimeAnalysisService, RuntimeBaseWorkspaceService,
+    RuntimeBuiltinService, RuntimeCallRequest, RuntimeCallRouter, RuntimeCallService,
+    RuntimeCollectiveService, RuntimeDistributedCallRequest, RuntimeDistributedInvocation,
+    RuntimeDistributedRetirement, RuntimeDistributedService, RuntimeDistributedSnapshot,
+    RuntimeErrorService, RuntimeForeignService, RuntimeGraphObservationPermit,
+    RuntimeGraphPlacementSelection, RuntimeHostEffectResourceService, RuntimeHostService,
+    RuntimeHttpService, RuntimeManagedWholeWorkSelection, RuntimeNativeService,
+    RuntimeObjectService, RuntimeParallelResources, RuntimeParallelService,
+    RuntimePlacementFeedbackDelivery, RuntimePlacementFeedbackSource, RuntimePlacementService,
+    RuntimeProgramCallable, RuntimeProgramService, RuntimeServiceFuture, RuntimeServicePorts,
+    RuntimeSignalMaterializationRequest, RuntimeSpmdAdmission, RuntimeSpmdGangLease,
+    RuntimeSpmdOutput, RuntimeSpmdRetainedOutput, RuntimeSpmdService,
+    RuntimeWholeWorkObservationAuthority, RuntimeWholeWorkObservationPermit,
+    RuntimeWholeWorkProbeLease, RuntimeWholeWorkSelection, RuntimeWorkspaceService,
 };
 pub use source_evaluation::{
-    execute_assignin_effect, execute_selected_dynamic_workspace, DynamicWorkspaceInvocation,
-    NumericTextEvaluation, RuntimeSourceEvaluationAuthority, RuntimeSourceEvaluationService,
-    SessionSourceEvaluation, SessionSourcePurpose, SourceEvaluationPolicy,
-    SourceEvaluationProvenance,
+    execute_assignin_effect, execute_assignin_effect_view, execute_selected_dynamic_workspace,
+    execute_selected_dynamic_workspace_retained, DynamicWorkspaceInvocation, NumericTextEvaluation,
+    RuntimeSourceEvaluationAuthority, RuntimeSourceEvaluationService, SessionSourceEvaluation,
+    SessionSourcePurpose, SourceEvaluationPolicy, SourceEvaluationProvenance,
 };
 pub(crate) use state::{RuntimeContextState, SourceState};
 pub(crate) use super_constructor::RetainedSuperConstructorTarget;

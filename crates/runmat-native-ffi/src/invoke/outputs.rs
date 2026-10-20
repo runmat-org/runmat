@@ -185,12 +185,13 @@ fn decode_structure(
             symbol: symbol.into(),
             message: format!("could not lay out structure `{name}`: {error:?}"),
         })?;
-    let mut value = runmat_value::StructValue::new();
+    let mut value =
+        runmat_value::UnboundedStructValueBuilder::with_capacity(definition.fields.len());
     for (field, offset) in definition.fields.iter().zip(offsets) {
         let field_value = decode_field(symbol, &field.ty, &bytes[offset..], metadata)?;
         value.insert(field.name.clone(), field_value);
     }
-    Ok(Value::Struct(value))
+    Ok(Value::Struct(value.finish()))
 }
 
 pub(super) fn decode_pointer_structure(

@@ -8,6 +8,8 @@
 //! rotation entirely on the device; otherwise it gathers the data, rotates on the
 //! host, and re-uploads the result so downstream operations keep GPU residency.
 
+use crate::aggregate::structure::operations as struct_ops;
+
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
@@ -37,7 +39,10 @@ fn rot90_error_with_message(
     binding_variant = "default",
     builtin_path = "crate::builtins::array::shape::rot90"
 )]
-async fn rot90_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn rot90_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &ROT90_DESCRIPTOR,
         &ROT90_ERROR_INVALID_ROTATION,
@@ -79,10 +84,13 @@ async fn rot90_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<V
             for _ in 0..steps {
                 let mut order = (0..array.shape().len()).collect::<Vec<_>>();
                 order.swap(0, 1);
-                array = array
-                    .permute(&order)
-                    .and_then(|array| array.flip(0))
-                    .map_err(|error| rot90_error_with_message(error, &ROT90_ERROR_INTERNAL))?;
+                array = struct_ops::permute(array, &order)
+                    .and_then(|array| struct_ops::flip(array, 0))
+                    .map_err(|error| {
+                        struct_ops::remap(error, |message| {
+                            rot90_error_with_message(message, &ROT90_ERROR_INTERNAL)
+                        })
+                    })?;
             }
             Ok(Value::StructArray(array))
         }
@@ -178,7 +186,7 @@ fn parse_rotation_value(value: &Value) -> crate::BuiltinResult<i64> {
         Value::Bool(flag) => Ok(if *flag { 1 } else { 0 }),
         Value::Tensor(t) => parse_tensor_rotation(t),
         Value::LogicalArray(array) => parse_logical_rotation(array),
-        Value::StringArray(sa) if sa.data.len() != 1 => Err(rot90_error_with_message(
+        Value::StringArray(sa) if sa.data().len() != 1 => Err(rot90_error_with_message(
             "rot90: rotation direction must be a scalar string",
             &ROT90_ERROR_INVALID_ROTATION,
         )),
@@ -205,9 +213,13 @@ fn parse_rotation_value(value: &Value) -> crate::BuiltinResult<i64> {
 
 fn parse_direction(value: &Value) -> crate::BuiltinResult<Option<i64>> {
     let text = match value {
-        Value::String(s) => Some(s.clone()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
+        Value::String(s) => Some(std::borrow::Cow::Borrowed(s.as_str())),
+        Value::StringArray(sa) if sa.data().len() == 1 => {
+            Some(std::borrow::Cow::Borrowed(sa.data()[0].as_str()))
+        }
+        Value::CharArray(ca) if ca.rows == 1 => Some(std::borrow::Cow::Owned(
+            ca.data().iter().collect::<String>(),
+        )),
         _ => None,
     };
     if let Some(text) = text {
@@ -318,8 +330,8 @@ fn rot90_string_array(array: StringArray, steps: usize) -> crate::BuiltinResult<
     if steps == 0 {
         return Ok(array);
     }
-    let (data, shape) = rot90_generic(&array.data, &array.shape, steps)?;
-    StringArray::new(data, shape)
+    let (data, shape) = rot90_generic(array.data(), &array.shape, steps)?;
+    StringArray::from_texts_unbounded(data, shape)
         .map_err(|e| rot90_error_with_message(format!("rot90: {e}"), &ROT90_ERROR_INTERNAL))
 }
 
@@ -349,7 +361,7 @@ fn rot90_char_array(array: CharArray, steps: usize) -> crate::BuiltinResult<Char
                 _ => (row, col),
             };
             let dst_idx = dest_row * out_cols + dest_col;
-            out[dst_idx] = array.data[src_idx];
+            out[dst_idx] = array.data()[src_idx];
         }
     }
     CharArray::new(out, out_rows, out_cols)
@@ -611,7 +623,10 @@ pub(crate) mod tests {
     use futures::executor::block_on;
 
     fn rot90_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-        block_on(super::rot90_builtin(value, rest))
+        block_on(super::rot90_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
@@ -918,7 +933,7 @@ pub(crate) mod tests {
             Value::CharArray(out) => {
                 assert_eq!(out.rows, 3);
                 assert_eq!(out.cols, 2);
-                let collected: String = out.data.iter().collect();
+                let collected: String = out.data().iter().collect();
                 assert_eq!(collected, "ntuarm");
             }
             other => panic!("expected CharArray, got {other:?}"),
@@ -942,7 +957,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
-                assert_eq!(out.data, vec!["c", "a", "d", "b"]);
+                assert_eq!(out.data(), vec!["c", "a", "d", "b"]);
             }
             other => panic!("expected StringArray, got {other:?}"),
         }

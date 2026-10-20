@@ -8,7 +8,7 @@ fn filewrite_is_gated_before_filesystem_side_effects() {
     let error = futures::executor::block_on(filewrite_builtin(
         Value::from(target.to_string_lossy().to_string()),
         Value::from("must not be written"),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect_err("strict compatibility mode must reject RunMat-native filewrite");
     assert_eq!(
@@ -245,7 +245,7 @@ fn pending_download_keeps_captured_filesystem_owner_and_cwd() {
     let mut pending = Box::pin(filewrite_builtin(
         Value::from("owner.bin"),
         Value::GpuTensor(resident.handle.clone()),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ));
     assert!(matches!(
         std::future::Future::poll(

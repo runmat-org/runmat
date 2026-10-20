@@ -1,6 +1,7 @@
 use super::{
     parameters, physical, plan, AxisPlan, GpuCapabilityReason, HostNetworkPlan, ParameterRole,
 };
+use crate::builtins::deep_learning::arguments::DeepLearningObjectEdit as _;
 use crate::builtins::deep_learning::{
     layers::{feature_input_layer_builtin, layer_normalization_layer_builtin, relu_layer_builtin},
     model::dlnetwork_builtin,
@@ -151,9 +152,19 @@ fn consumed_resident_learnables_preserve_explicit_intent_across_later_stages() {
 }
 
 fn normalization_then_relu() -> crate::execution::RootedValue {
-    let input = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
-    let normalization = block_on(layer_normalization_layer_builtin(vec![])).unwrap();
-    let relu = block_on(relu_layer_builtin(vec![])).unwrap();
+    let input = block_on(feature_input_layer_builtin(
+        Value::Num(2.0),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap();
+    let normalization = block_on(layer_normalization_layer_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap();
+    let relu = block_on(relu_layer_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap();
     block_on(dlnetwork_builtin(vec![Value::Cell(
         CellArray::new(vec![input, normalization, relu], 3, 1).unwrap(),
     )]))
@@ -204,13 +215,17 @@ fn replace_normalization_parameter(
     role: ParameterRole,
     value: Value,
 ) {
-    let Value::Cell(layers) = network.properties.get_mut("Layers").unwrap() else {
+    let Value::Cell(layers) = network.fixture_dl_property_mut("Layers").unwrap() else {
         unreachable!()
     };
-    let Value::Object(layer) = &mut layers.data[1] else {
+    let Value::Object(layer) =
+        &mut crate::builtins::deep_learning::tests::fixture_array_mut(layers)[1]
+    else {
         unreachable!()
     };
-    layer.properties.insert(role.name().into(), value);
+    layer
+        .replace_dl_property(role.name(), value)
+        .expect("fixture property");
 }
 
 #[test]
@@ -332,7 +347,8 @@ fn mixed_normalization_admits_resident_parameters_before_effects() {
             ("Format", Value::String("CB".into())),
             ("Labels", Value::String("CB".into())),
         ],
-    );
+    )
+    .expect("fixture object");
     let host = HostNetworkPlan::admit(network, &input, "forward").unwrap();
     let result = plan::admit(network, &host, host.output_axes(), "forward").unwrap();
     assert!(matches!(

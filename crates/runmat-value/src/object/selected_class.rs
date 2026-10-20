@@ -281,5 +281,15 @@ mod tests {
             ObjectInstance::new(class).persistence_payload_kind(),
             ObjectPersistencePayloadKind::PlainValue
         );
+        let mut attached = ObjectInstance::new("SelectedBase");
+        assert!(attached.try_attach_selected_class(Rc::clone(&facts)));
+        assert!(Rc::ptr_eq(
+            attached.selected_class().expect("attached facts"),
+            &facts
+        ));
+        assert!(!attached.try_attach_selected_class(Rc::clone(&facts)));
+        let mut different = ObjectInstance::new("DifferentClass");
+        assert!(!different.try_attach_selected_class(facts));
+        assert!(different.selected_class().is_none());
     }
 }

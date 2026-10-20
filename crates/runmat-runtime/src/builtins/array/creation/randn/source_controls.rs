@@ -110,13 +110,13 @@ fn keyword_is(control: ValueControlRef<'_>, expected: &str) -> bool {
     match control {
         ValueControlRef::Text(text) => text.eq_ignore_ascii_case(expected),
         ValueControlRef::Borrowed(Value::String(text)) => text.eq_ignore_ascii_case(expected),
-        ValueControlRef::Borrowed(Value::StringArray(array)) if array.data.len() == 1 => {
-            array.data[0].eq_ignore_ascii_case(expected)
+        ValueControlRef::Borrowed(Value::StringArray(array)) if array.data().len() == 1 => {
+            array.data()[0].eq_ignore_ascii_case(expected)
         }
         ValueControlRef::Borrowed(Value::CharArray(array)) if array.rows == 1 => {
-            array.data.len() == expected.len()
+            array.data().len() == expected.len()
                 && array
-                    .data
+                    .data()
                     .iter()
                     .zip(expected.chars())
                     .all(|(actual, expected)| actual.eq_ignore_ascii_case(&expected))

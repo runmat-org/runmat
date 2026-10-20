@@ -1,5 +1,5 @@
 use super::*;
-use runmat_value::{StructArray, StructValue};
+use runmat_value::StructArray;
 
 pub(super) struct PairwiseCoefficients {
     constant: f64,
@@ -20,10 +20,10 @@ pub(super) fn coeff_value(model: &PreparedModel) -> BuiltinResult<Value> {
     for col in 0..k {
         for row in 0..k {
             let coeff = pairwise_coeff(model, row, col)?;
-            let mut st = StructValue::new();
+            let mut st = runmat_value::UnboundedStructValueBuilder::new();
             st.insert(
                 "type",
-                Value::String(model.discriminant.property_name().to_string()),
+                Value::string(model.discriminant.property_name().to_string()),
             );
             st.insert("name1", labels_value(&model.classes, model.kind, &[row])?);
             st.insert("name2", labels_value(&model.classes, model.kind, &[col])?);
@@ -44,6 +44,7 @@ pub(super) fn coeff_value(model: &PreparedModel) -> BuiltinResult<Value> {
                     ),
                 );
             }
+            let st = st.finish();
             entries.push(st);
         }
     }

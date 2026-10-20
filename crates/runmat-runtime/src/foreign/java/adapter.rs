@@ -13,10 +13,7 @@ use runmat_types::{
     CapabilityRequirement, ForeignAffinity, ForeignCapability, ForeignLifetime, ForeignOwnership,
     ForeignTypeIdentity,
 };
-use runmat_value::{
-    CellArray, CharArray, ForeignRef, ForeignResourceKey, IntValue, ObjectInstance, Value,
-    WeakForeignRef,
-};
+use runmat_value::{CellArray, CharArray, ForeignRef, ForeignResourceKey, Value, WeakForeignRef};
 
 use super::super::project_retirement::ProjectRetirementAuthority;
 use super::super::{
@@ -63,7 +60,7 @@ pub struct JavaAdapter {
 }
 
 struct JavaCallbackRegistration {
-    callable: crate::execution::RetainedValueReadLease,
+    callable: crate::call::RetainedCallableTarget,
     origin: crate::context::RuntimeContextLocalId,
     context: RuntimeContext,
     foreign: std::rc::Weak<dyn crate::context::RuntimeForeignService>,
@@ -279,14 +276,15 @@ impl JavaAdapter {
 
     fn invoke_control_now(
         &self,
+        runtime: Option<&RuntimeContext>,
         call: ForeignCall,
     ) -> Result<runmat_value::ValueSequence, RuntimeError> {
         match call.symbol.as_str() {
             "status" => self
-                .status_value()
+                .status_value(runtime)
                 .and_then(super::super::single_output_sequence),
             "configure" => self
-                .configure_value(call.arguments)
+                .configure_value(runtime, call.arguments)
                 .and_then(super::super::single_output_sequence),
             _ => Err(invalid_conversion(
                 "unsupported synchronous Java control operation",
@@ -324,10 +322,11 @@ impl JavaAdapter {
     fn argument_to_java(
         &self,
         context: &RuntimeContext,
-        value: Value,
+        value: crate::call::RootedArgumentValue,
     ) -> Result<JavaValue, RuntimeError> {
-        if super::super::is_callable(&value) {
+        if super::super::is_callable(value.value()) {
             let instance = value
+                .value()
                 .callable_instance_key()
                 .expect("every callable value has a physical instance");
             if let Some((token, _)) = self.callbacks.borrow().iter().find(|(_, registration)| {
@@ -347,7 +346,16 @@ impl JavaAdapter {
                     invalid_conversion("Java callback identity space is exhausted")
                 })?,
             );
-            let callable = crate::execution::RetainedValueReadLease::prepare_owned(value, context)?;
+            let callable = match value {
+                crate::call::RootedArgumentValue::Owned(value) => {
+                    crate::call::RetainedCallableTarget::Direct(
+                        crate::execution::RetainedValueReadLease::prepare_owned(value, context)?,
+                    )
+                }
+                crate::call::RootedArgumentValue::Captured(value) => {
+                    crate::call::RetainedCallableTarget::Captured(value)
+                }
+            };
             let callback_context = context
                 .clone()
                 .with_service_ports(context.service_ports().clone().without_foreign());
@@ -362,9 +370,13 @@ impl JavaAdapter {
             );
             return Ok(JavaValue::Callback(token));
         }
-        let Value::Foreign(reference) = value else {
-            return value_to_java(value);
+        let Value::Foreign(reference) = value.value() else {
+            return match value.into_owned() {
+                Ok(value) => value_to_java(value),
+                Err(value) => super::conversion::value_ref_to_java(value.value()),
+            };
         };
+        let reference = reference.clone();
         if reference.type_identity.family != JAVA_ADAPTER_ID {
             return Err(invalid_conversion("foreign argument is not a Java object"));
         }
@@ -377,13 +389,11 @@ impl JavaAdapter {
 
     fn classpath_value(
         &self,
-        arguments: Vec<Value>,
+        layer_argument: Option<&Value>,
         snapshot: ClasspathSnapshot,
     ) -> Result<Value, RuntimeError> {
-        let layer = arguments
-            .into_iter()
-            .next()
-            .map(|value| string_argument(Some(value), "Java classpath layer"))
+        let layer = layer_argument
+            .map(|value| string_argument_ref(Some(value), "Java classpath layer"))
             .transpose()?;
         let layer = layer
             .as_deref()
@@ -406,59 +416,65 @@ impl JavaAdapter {
         .map_err(invalid_conversion)
     }
 
-    fn status_value(&self) -> Result<Value, RuntimeError> {
+    fn status_value(&self, runtime: Option<&RuntimeContext>) -> Result<Value, RuntimeError> {
         let running = self.session.borrow().is_some();
         let installation = if let Some(session) = self.session.borrow().as_ref() {
             Some(session.installation().clone())
         } else {
             discover_jvm(&self.discovery.borrow()).ok()
         };
-        let mut status =
-            ObjectInstance::new(runmat_builtins::JAVA_ENVIRONMENT_CLASS.display_name());
-        status.properties.insert(
-            "Version".into(),
-            Value::String(
-                installation
-                    .as_ref()
-                    .map(|value| value.version.raw.clone())
-                    .unwrap_or_default(),
+        let fields = [
+            (
+                "Version",
+                Value::string(
+                    installation
+                        .as_ref()
+                        .map(|value| value.version.raw.clone())
+                        .unwrap_or_default(),
+                ),
             ),
-        );
-        status.properties.insert(
-            "Home".into(),
-            Value::String(
-                installation
-                    .as_ref()
-                    .map(|value| value.home.display().to_string())
-                    .unwrap_or_default(),
+            (
+                "Home",
+                Value::string(
+                    installation
+                        .as_ref()
+                        .map(|value| value.home.display().to_string())
+                        .unwrap_or_default(),
+                ),
             ),
-        );
-        status.properties.insert(
-            "Library".into(),
-            Value::String(
-                installation
-                    .as_ref()
-                    .map(|value| value.library.display().to_string())
-                    .unwrap_or_default(),
+            (
+                "Library",
+                Value::string(
+                    installation
+                        .as_ref()
+                        .map(|value| value.library.display().to_string())
+                        .unwrap_or_default(),
+                ),
             ),
-        );
-        status.properties.insert(
-            "Status".into(),
-            Value::String(if running { "loaded" } else { "notloaded" }.into()),
-        );
-        status.properties.insert(
-            "Configuration".into(),
-            Value::String({
-                let discovery = self.discovery.borrow();
-                discovery
-                    .explicit_home
-                    .as_ref()
-                    .or(discovery.environment_home.as_ref())
-                    .map(|path| path.display().to_string())
-                    .unwrap_or_else(|| "system".into())
-            }),
-        );
-        Ok(Value::Object(status))
+            (
+                "Status",
+                Value::String(if running { "loaded" } else { "notloaded" }.into()),
+            ),
+            (
+                "Configuration",
+                Value::string({
+                    let discovery = self.discovery.borrow();
+                    discovery
+                        .explicit_home
+                        .as_ref()
+                        .or(discovery.environment_home.as_ref())
+                        .map(|path| path.display().to_string())
+                        .unwrap_or_else(|| "system".into())
+                }),
+            ),
+        ];
+        crate::execution::object::construct_object_from_borrowed_fields(
+            runtime,
+            runmat_builtins::JAVA_ENVIRONMENT_CLASS.display_name(),
+            fields.iter().map(|(name, value)| (*name, value)),
+        )
+        // Environment status has no GC edges; retain its original generation.
+        .map(|status| status.value().clone())
     }
 
     fn usejava_value(&self, arguments: Vec<Value>) -> Result<Value, RuntimeError> {
@@ -477,7 +493,11 @@ impl JavaAdapter {
         }
     }
 
-    fn configure_value(&self, arguments: Vec<Value>) -> Result<Value, RuntimeError> {
+    fn configure_value(
+        &self,
+        runtime: Option<&RuntimeContext>,
+        arguments: crate::call::RootedFunctionArguments,
+    ) -> Result<Value, RuntimeError> {
         if self.is_running() {
             return Err(invalid_conversion(
                 "jenv cannot change Java configuration after JVM startup",
@@ -488,9 +508,8 @@ impl JavaAdapter {
                 "jenv configuration requires one name-value pair",
             ));
         }
-        let mut arguments = arguments.into_iter();
-        let name = string_argument(arguments.next(), "jenv option")?;
-        let value = string_argument(arguments.next(), "jenv option value")?;
+        let name = string_argument_ref(arguments.get(0), "jenv option")?;
+        let value = string_argument_ref(arguments.get(1), "jenv option value")?;
         let control = runmat_builtins::JavaEnvironmentControl::parse(&name).ok_or_else(|| {
             invalid_conversion("jenv supports the 'Version' and 'ExecutionMode' options")
         })?;
@@ -528,7 +547,7 @@ impl JavaAdapter {
                 }
             }
         }
-        self.status_value()
+        self.status_value(runtime)
     }
 }
 
@@ -662,8 +681,11 @@ impl ForeignAdapter for JavaAdapter {
             return Box::pin(async move { ForeignCallCompletion::invoked(Err(error)) });
         }
         if matches!(call.symbol.as_str(), "status" | "configure") {
-            let result =
-                crate::foreign::runtime::root_adapter_result(self.invoke_control_now(call));
+            let result = self
+                .invoke_control_now(Some(&context), call)
+                .and_then(|sequence| {
+                    crate::execution::RootedValueSequence::in_context(sequence, &context)
+                });
             return Box::pin(async move { ForeignCallCompletion::invoked(result) });
         }
         let Some(owner) = self.self_weak.upgrade() else {
@@ -693,42 +715,6 @@ fn string_argument_ref(value: Option<&Value>, label: &str) -> Result<String, Run
         None => Err(invalid_conversion(format!(
             "{label} must be non-empty text"
         ))),
-    }
-}
-
-fn foreign_argument(value: Option<Value>) -> Result<ForeignRef, RuntimeError> {
-    match value {
-        Some(Value::Foreign(reference)) if reference.type_identity.family == JAVA_ADAPTER_ID => {
-            Ok(reference)
-        }
-        _ => Err(invalid_conversion("Java receiver must be a Java object")),
-    }
-}
-
-fn java_dimension(value: Value) -> Result<usize, RuntimeError> {
-    match value {
-        Value::Int(value) => match value {
-            IntValue::I8(value) => usize::try_from(value),
-            IntValue::I16(value) => usize::try_from(value),
-            IntValue::I32(value) => usize::try_from(value),
-            IntValue::I64(value) => usize::try_from(value),
-            IntValue::U8(value) => Ok(usize::from(value)),
-            IntValue::U16(value) => Ok(usize::from(value)),
-            IntValue::U32(value) => usize::try_from(value),
-            IntValue::U64(value) => usize::try_from(value),
-        }
-        .map_err(|_| invalid_conversion("Java array dimensions must be nonnegative integers")),
-        Value::Num(value)
-            if value.is_finite()
-                && value >= 0.0
-                && value.fract() == 0.0
-                && value <= usize::MAX as f64 =>
-        {
-            Ok(value as usize)
-        }
-        _ => Err(invalid_conversion(
-            "Java array dimensions must be nonnegative integer scalars",
-        )),
     }
 }
 

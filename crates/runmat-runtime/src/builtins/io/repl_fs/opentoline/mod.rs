@@ -26,7 +26,7 @@ const BUILTIN_NAME: &str = "opentoline";
 )]
 async fn opentoline_builtin(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     if !(2..=4).contains(&args.len()) {
         return Err(opentoline_error(

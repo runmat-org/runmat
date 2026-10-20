@@ -5,6 +5,7 @@
 
 use std::alloc::{alloc, Layout};
 use std::ops::Deref;
+use std::sync::OnceLock;
 
 use runmat_execution::resource::ExactShared;
 
@@ -16,11 +17,50 @@ use super::exact_host_numeric::{
 struct ShapePayload {
     dimensions: Vec<usize>,
     // The claim drops after dimensions. ExactShared drops its header first.
-    _retained_claim: Option<ExactHostAllocationClaim>,
+    _retained_claim: OnceLock<ExactHostAllocationClaim>,
 }
 
 #[derive(Clone, Debug)]
 pub struct SharedShape(ExactShared<ShapePayload>);
+
+/// Incrementally initializes one already-admitted final shape backing.
+/// An incomplete builder never exposes a shape to array constructors.
+#[derive(Debug)]
+pub struct SharedShapeBuilder {
+    shape: SharedShape,
+    rank: usize,
+}
+
+impl SharedShapeBuilder {
+    pub fn len(&self) -> usize {
+        self.shape.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.shape.is_empty()
+    }
+
+    pub fn expected_len(&self) -> usize {
+        self.rank
+    }
+
+    pub fn try_push(&mut self, dimension: usize) -> Result<(), usize> {
+        let dimensions = &mut self.shape.0.get_mut_unique().dimensions;
+        if dimensions.len() == self.rank {
+            return Err(dimension);
+        }
+        dimensions.push(dimension);
+        Ok(())
+    }
+
+    pub fn try_finish(self) -> Result<SharedShape, Self> {
+        if self.len() == self.rank {
+            Ok(self.shape)
+        } else {
+            Err(self)
+        }
+    }
+}
 
 /// One canonical constructor input for a fresh ordinary shape or an
 /// independently owned shape transferred from another value.
@@ -42,6 +82,22 @@ impl From<SharedShape> for HostShapeInput {
 }
 
 impl SharedShape {
+    /// Reserves the original backing and header before either allocation.
+    pub fn begin_exact(
+        rank: usize,
+        permit: &dyn ExactHostAllocationPermit,
+    ) -> Result<SharedShapeBuilder, ExactHostNumericAllocationError> {
+        let claim = permit.reserve_exact_claim(Self::requested_bytes_for_rank(rank)?)?;
+        let dimensions = super::exact_vec::exact_capacity_vec(rank)?;
+        let payload = ShapePayload {
+            dimensions,
+            _retained_claim: OnceLock::from(claim),
+        };
+        let shape = ExactShared::try_new(payload)
+            .map(Self)
+            .map_err(|_| ExactHostNumericAllocationError::AllocationFailed)?;
+        Ok(SharedShapeBuilder { shape, rank })
+    }
     /// Physical shape bytes, excluding the permit's claim-control charge.
     pub fn requested_bytes_for_rank(rank: usize) -> Result<usize, ExactHostNumericAllocationError> {
         Self::requested_bytes_for_capacity(rank)
@@ -57,7 +113,7 @@ impl SharedShape {
         let dimensions = exact_dimensions(shape)?;
         let payload = ShapePayload {
             dimensions,
-            _retained_claim: Some(claim),
+            _retained_claim: OnceLock::from(claim),
         };
         ExactShared::try_new(payload)
             .map(Self)
@@ -74,7 +130,7 @@ impl SharedShape {
         let claim = permit.reserve_exact_claim(requested)?;
         let payload = ShapePayload {
             dimensions,
-            _retained_claim: Some(claim),
+            _retained_claim: OnceLock::from(claim),
         };
         ExactShared::try_new(payload)
             .map(Self)
@@ -95,7 +151,7 @@ impl SharedShape {
     pub fn new_unmanaged(shape: Vec<usize>) -> Self {
         Self(ExactShared::new(ShapePayload {
             dimensions: shape,
-            _retained_claim: None,
+            _retained_claim: OnceLock::new(),
         }))
     }
 
@@ -105,7 +161,34 @@ impl SharedShape {
     }
 
     pub fn is_admitted(&self) -> bool {
-        self.0.get()._retained_claim.is_some()
+        self.0.get()._retained_claim.get().is_some()
+    }
+
+    pub fn unclaimed_shared_bytes(&self) -> Result<Option<usize>, ExactHostNumericAllocationError> {
+        if self.is_admitted() {
+            Ok(None)
+        } else {
+            Self::requested_bytes_for_capacity(self.0.get().dimensions.capacity()).map(Some)
+        }
+    }
+
+    /// Attach exactly one claim to the original shared physical owner. All
+    /// aliases observe promotion and retain the claim through final drop.
+    pub fn try_promote_shared_claim(
+        &self,
+        permit: &dyn ExactHostAllocationPermit,
+    ) -> Result<(), ExactHostNumericAllocationError> {
+        if self.is_admitted() {
+            return Ok(());
+        }
+        let bytes = Self::requested_bytes_for_capacity(self.0.get().dimensions.capacity())?;
+        let claim = match permit.reserve_exact_claim(bytes) {
+            Ok(claim) => claim,
+            Err(_) if self.is_admitted() => return Ok(()),
+            Err(source) => return Err(source),
+        };
+        let _ = self.0.get()._retained_claim.set(claim);
+        Ok(())
     }
 
     #[cfg(test)]
@@ -237,6 +320,12 @@ impl PartialEq<[usize]> for SharedShape {
     }
 }
 
+impl PartialEq<&[usize]> for SharedShape {
+    fn eq(&self, other: &&[usize]) -> bool {
+        self.as_slice() == *other
+    }
+}
+
 impl<const N: usize> PartialEq<[usize; N]> for SharedShape {
     fn eq(&self, other: &[usize; N]) -> bool {
         self.0.get().dimensions.as_slice() == other
@@ -304,6 +393,18 @@ mod tests {
         let live = Arc::new(AtomicUsize::new(0));
         let permit = TestPermit(live.clone());
         let expected = SharedShape::requested_bytes_for_rank(2).unwrap();
+        let mut staged = SharedShape::begin_exact(2, &permit).unwrap();
+        assert_eq!(live.load(Ordering::SeqCst), expected);
+        staged.try_push(4).unwrap();
+        let mut staged = staged.try_finish().unwrap_err();
+        assert_eq!(staged.expected_len(), 2);
+        staged.try_push(7).unwrap();
+        assert_eq!(staged.try_push(9), Err(9));
+        let staged = staged.try_finish().unwrap();
+        assert_eq!(&*staged, &[4, 7]);
+        assert_eq!(staged.capacity(), 2);
+        drop(staged);
+        assert_eq!(live.load(Ordering::SeqCst), 0);
         let source = SharedShape::new_admitted_from_slice(&[4, 7], &permit).unwrap();
         let alias = source.clone();
         assert_eq!(live.load(Ordering::SeqCst), expected);
@@ -316,6 +417,23 @@ mod tests {
         assert_eq!(dimensions.next(), None);
         assert_eq!(live.load(Ordering::SeqCst), expected);
         drop(dimensions);
+        assert_eq!(live.load(Ordering::SeqCst), 0);
+
+        let mut dimensions = Vec::with_capacity(8);
+        dimensions.extend([4, 7]);
+        let pointer = dimensions.as_ptr();
+        let expected = SharedShape::requested_bytes_for_capacity(dimensions.capacity()).unwrap();
+        let source = SharedShape::new_unmanaged(dimensions);
+        let alias = source.clone();
+        assert_eq!(source.unclaimed_shared_bytes().unwrap(), Some(expected));
+        source.try_promote_shared_claim(&permit).unwrap();
+        assert!(alias.is_admitted());
+        assert_eq!(alias.as_ptr(), pointer);
+        alias.try_promote_shared_claim(&permit).unwrap();
+        assert_eq!(live.load(Ordering::SeqCst), expected);
+        drop(source);
+        assert_eq!(live.load(Ordering::SeqCst), expected);
+        drop(alias);
         assert_eq!(live.load(Ordering::SeqCst), 0);
     }
 

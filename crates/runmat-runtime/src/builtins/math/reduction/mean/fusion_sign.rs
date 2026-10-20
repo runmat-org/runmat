@@ -283,25 +283,29 @@ mod tests {
         let single = Value::Tensor(
             Tensor::from_f32(vec![f32::NAN, -0.0, f32::INFINITY], vec![1, 3]).unwrap(),
         );
-        let included =
-            futures::executor::block_on(super::super::mean_builtin(single.clone(), vec![]))
-                .unwrap();
+        let included = futures::executor::block_on(super::super::mean_builtin(
+            single.clone(),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap();
         assert!(scalar(included).is_nan());
         let omitted = futures::executor::block_on(super::super::mean_builtin(
             single,
-            vec![Value::String("omitnan".into())],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "omitnan".into(),
+            )]),
         ))
         .unwrap();
         assert_eq!(scalar(omitted), f64::INFINITY);
         let signed_zero = futures::executor::block_on(super::super::mean_builtin(
             Value::Tensor(Tensor::from_f32(vec![-0.0, -0.0], vec![1, 2]).unwrap()),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .unwrap();
         assert_eq!(scalar(signed_zero), 0.0);
         let overflow = futures::executor::block_on(super::super::mean_builtin(
             Value::Tensor(Tensor::new(vec![f64::MAX, f64::MAX], vec![1, 2]).unwrap()),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .unwrap();
         assert_eq!(scalar(overflow), f64::INFINITY);

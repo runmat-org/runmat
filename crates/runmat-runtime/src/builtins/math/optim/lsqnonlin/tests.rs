@@ -253,7 +253,7 @@ fn lsqnonlin_multi_output_includes_diagnostics_lambda_and_jacobian() {
         },
     )))
     .expect("call-port scope");
-    let mut options = StructValue::new();
+    let mut options = runmat_value::UnboundedStructValueBuilder::new();
     options.insert("Algorithm", Value::from("levenberg-marquardt"));
     let result = block_on(runtime.scope(lsqnonlin_builtin(
         objective,
@@ -261,7 +261,7 @@ fn lsqnonlin_multi_output_includes_diagnostics_lambda_and_jacobian() {
             tensor(vec![0.0, 0.0], vec![1, 2]),
             Value::Tensor(Tensor::zeros(vec![0, 0])),
             Value::Tensor(Tensor::zeros(vec![0, 0])),
-            Value::Struct(options),
+            Value::Struct(options.finish()),
         ],
     )))
     .expect("lsqnonlin");
@@ -313,14 +313,17 @@ fn lsqnonlin_accepts_problem_struct() {
         },
     )))
     .expect("call-port scope");
-    let mut problem = StructValue::new();
+    let mut problem = runmat_value::UnboundedStructValueBuilder::new();
     problem.insert("solver", Value::from("lsqnonlin"));
     problem.insert("objective", objective);
     problem.insert("x0", tensor(vec![0.0, 0.0], vec![2, 1]));
     problem.insert("lb", tensor(vec![1.0, 2.0], vec![2, 1]));
     problem.insert("ub", tensor(vec![10.0, 10.0], vec![2, 1]));
-    let result = block_on(runtime.scope(lsqnonlin_builtin(Value::Struct(problem), Vec::new())))
-        .expect("lsqnonlin problem");
+    let result = block_on(runtime.scope(lsqnonlin_builtin(
+        Value::Struct(problem.finish()),
+        Vec::new(),
+    )))
+    .expect("lsqnonlin problem");
     match result {
         Value::OutputList(outputs) => {
             assert_eq!(outputs.len(), 2);
@@ -335,13 +338,17 @@ fn lsqnonlin_accepts_problem_struct() {
 
 #[test]
 fn lsqnonlin_problem_struct_rejects_aineq_and_bineq() {
-    let mut problem = StructValue::new();
+    let mut problem = runmat_value::UnboundedStructValueBuilder::new();
     problem.insert("solver", Value::from("lsqnonlin"));
     problem.insert("objective", Value::FunctionHandle("sin".into()));
     problem.insert("x0", Value::Num(0.0));
     problem.insert("Aineq", Value::Num(1.0));
     problem.insert("bineq", Value::Num(0.0));
-    let err = block_on(lsqnonlin_builtin(Value::Struct(problem), Vec::new())).unwrap_err();
+    let err = block_on(lsqnonlin_builtin(
+        Value::Struct(problem.finish()),
+        Vec::new(),
+    ))
+    .unwrap_err();
     assert_eq!(err.identifier(), Some("RunMat:lsqnonlin:InvalidArgument"));
     assert!(err.message().contains("constraints"));
 }

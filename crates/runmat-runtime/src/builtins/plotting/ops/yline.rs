@@ -15,7 +15,7 @@ const BUILTIN_NAME: &str = "yline";
     binding_variant = "default",
     builtin_path = "crate::builtins::plotting::yline"
 )]
-pub fn yline_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub fn yline_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &YLINE_DESCRIPTOR,
         &YLINE_ERROR_TOO_MANY_OUTPUTS,
@@ -62,12 +62,14 @@ mod tests {
     #[test]
     fn yline_supports_user_repro() {
         let _guard = setup();
-        let handle = yline_builtin(vec![
-            Value::Num(0.0),
-            Value::String("k".into()),
-            Value::String("LineWidth".into()),
-            Value::Num(1.0),
-        ])
+        let handle = yline_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![
+                Value::Num(0.0),
+                Value::String("k".into()),
+                Value::String("LineWidth".into()),
+                Value::Num(1.0),
+            ],
+        ))
         .unwrap();
         let Value::Num(handle) = handle else {
             panic!("expected scalar handle");
@@ -83,9 +85,11 @@ mod tests {
     #[test]
     fn yline_rejects_nonfinite_coordinates() {
         let _guard = setup();
-        let err = yline_builtin(vec![Value::Tensor(
-            Tensor::new_2d(vec![0.0, f64::INFINITY], 1, 2).unwrap(),
-        )])
+        let err = yline_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::Tensor(
+                Tensor::new_2d(vec![0.0, f64::INFINITY], 1, 2).unwrap(),
+            )],
+        ))
         .expect_err("nonfinite coordinates should fail");
         assert!(err.to_string().contains("finite"));
     }
@@ -95,13 +99,19 @@ mod tests {
 mod output_contract_tests {
     #[test]
     fn missing_required_input_uses_identity_diagnostic() {
-        let error = super::yline_builtin(vec![]).expect_err("missing annotation input");
+        let error = super::yline_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![],
+        ))
+        .expect_err("missing annotation input");
         assert_eq!(error.identifier(), Some("RunMat:yline:InvalidArgument"));
     }
     #[test]
     fn excessive_outputs_reject_before_argument_or_graphics_effects() {
         let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
-        let error = super::yline_builtin(vec![]).expect_err("excess outputs");
+        let error = super::yline_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![],
+        ))
+        .expect_err("excess outputs");
         assert_eq!(error.identifier(), Some("RunMat:yline:TooManyOutputs"));
     }
 }

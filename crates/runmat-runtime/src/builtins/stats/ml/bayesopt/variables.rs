@@ -1,4 +1,5 @@
 use super::*;
+use std::borrow::Cow;
 
 #[derive(Clone, Debug)]
 pub(super) struct Variable {
@@ -16,12 +17,12 @@ pub(super) enum VariableKind {
 }
 
 pub(super) fn parse_variables(value: Value) -> BuiltinResult<Vec<Variable>> {
-    let raw = match value {
-        Value::Object(object) if object.class_name.is(OPTIMIZABLE_VARIABLE_CLASS) => {
-            runmat_value::OutputListStorage::unbounded(vec![Value::Object(object)])
+    let raw = match &value {
+        Value::Object(object) if object.class_name().is(OPTIMIZABLE_VARIABLE_CLASS) => {
+            std::slice::from_ref(&value)
         }
-        Value::Cell(cell) => runmat_value::OutputListStorage::unbounded(cell.data),
-        Value::OutputList(values) => values,
+        Value::Cell(cell) => cell.data(),
+        Value::OutputList(values) => values.as_slice(),
         other => {
             return Err(bayesopt_error(
                 format!("bayesopt: variables must be optimizableVariable objects, got {other:?}"),
@@ -35,30 +36,25 @@ pub(super) fn parse_variables(value: Value) -> BuiltinResult<Vec<Variable>> {
             &ERROR_INVALID_ARGUMENT,
         ));
     }
-    let raw = raw.try_into_owned().map_err(|_| {
-        crate::sequence::sequence_error_to_runtime(
-            runmat_value::ValueSequenceError::SharedOutputStorage,
-        )
-    })?;
-    let mut names = HashSet::with_capacity(raw.as_slice().len());
-    let mut vars = Vec::with_capacity(raw.as_slice().len());
-    for value in raw {
+    let mut names = HashSet::with_capacity(raw.len());
+    let mut vars = Vec::with_capacity(raw.len());
+    for value in raw.iter() {
         let Value::Object(object) = value else {
             return Err(bayesopt_error(
                 "bayesopt: variables must be optimizableVariable objects",
                 &ERROR_INVALID_ARGUMENT,
             ));
         };
-        if !object.class_name.is(OPTIMIZABLE_VARIABLE_CLASS) {
+        if !object.class_name().is(OPTIMIZABLE_VARIABLE_CLASS) {
             return Err(bayesopt_error(
                 format!(
                     "bayesopt: expected optimizableVariable, got {}",
-                    object.class_name
+                    object.class_name()
                 ),
                 &ERROR_INVALID_ARGUMENT,
             ));
         }
-        let variable = variable_from_object(&object)?;
+        let variable = variable_from_object(object)?;
         if !names.insert(variable.name.clone()) {
             return Err(bayesopt_error(
                 format!("bayesopt: duplicate variable name '{}'", variable.name),
@@ -92,7 +88,7 @@ fn variable_from_object(object: &ObjectInstance) -> BuiltinResult<Variable> {
             &ERROR_INVALID_ARGUMENT,
         )
     })?;
-    let optimize = match object.properties.get("Optimize") {
+    let optimize = match object.properties().get("Optimize") {
         Some(Value::Bool(value)) => *value,
         Some(other) => {
             return Err(bayesopt_error(
@@ -102,7 +98,7 @@ fn variable_from_object(object: &ObjectInstance) -> BuiltinResult<Variable> {
         }
         None => true,
     };
-    let range = object.properties.get("Range").ok_or_else(|| {
+    let range = object.properties().get("Range").ok_or_else(|| {
         bayesopt_error(
             format!("bayesopt: variable '{name}' is missing Range"),
             &ERROR_INVALID_ARGUMENT,
@@ -159,22 +155,16 @@ fn variable_from_object(object: &ObjectInstance) -> BuiltinResult<Variable> {
         }
     };
     Ok(Variable {
-        name,
+        name: name.into_owned(),
         kind,
         transform,
         optimize,
     })
 }
 
-fn string_property(object: &ObjectInstance, name: &str) -> BuiltinResult<String> {
-    match object.properties.get(name) {
-        Some(Value::String(text)) => Ok(text.clone()),
-        Some(Value::StringArray(array)) if array.data.len() == 1 => Ok(array.data[0].clone()),
-        Some(Value::CharArray(chars)) if chars.rows == 1 => Ok(chars.data.iter().collect()),
-        Some(other) => Err(bayesopt_error(
-            format!("bayesopt: {name} must be a text scalar, got {other:?}"),
-            &ERROR_INVALID_ARGUMENT,
-        )),
+fn string_property<'a>(object: &'a ObjectInstance, name: &str) -> BuiltinResult<Cow<'a, str>> {
+    match object.properties().get(name) {
+        Some(value) => value_to_text(value, name),
         None => Err(bayesopt_error(
             format!("bayesopt: optimizableVariable is missing {name}"),
             &ERROR_INVALID_ARGUMENT,
@@ -215,13 +205,17 @@ fn numeric_range(value: &Value, name: &str) -> BuiltinResult<(f64, f64)> {
 
 fn categorical_range(value: &Value, name: &str) -> BuiltinResult<Vec<String>> {
     let categories = match value {
-        Value::String(text) => vec![text.clone()],
-        Value::StringArray(array) => array.data.clone(),
-        Value::CharArray(chars) if chars.rows == 1 => vec![chars.data.iter().collect()],
+        Value::String(text) => vec![text.as_str().to_owned()],
+        Value::StringArray(array) => array
+            .data()
+            .iter()
+            .map(|text| text.as_str().to_owned())
+            .collect(),
+        Value::CharArray(chars) if chars.rows == 1 => vec![chars.data().iter().collect()],
         Value::Cell(cell) => {
-            let mut out = Vec::with_capacity(cell.data.len());
-            for value in &cell.data {
-                out.push(value_to_text(value, "Range")?);
+            let mut out = Vec::with_capacity(cell.data().len());
+            for value in cell.data() {
+                out.push(value_to_text(value, "Range")?.into_owned());
             }
             out
         }
@@ -242,7 +236,7 @@ fn categorical_range(value: &Value, name: &str) -> BuiltinResult<Vec<String>> {
     }
     let mut seen = HashSet::with_capacity(categories.len());
     for category in &categories {
-        if !seen.insert(category.clone()) {
+        if !seen.insert(category.as_str()) {
             return Err(bayesopt_error(
                 format!("bayesopt: categorical Range for '{name}' contains duplicate '{category}'"),
                 &ERROR_INVALID_ARGUMENT,

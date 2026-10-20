@@ -33,8 +33,7 @@ pub(super) async fn run_timer_callbacks(
         let fired = timing.monotonic_elapsed();
         if let Some(last) = last_fire {
             let instant = fired.saturating_sub(last).as_secs_f64();
-            set_property(handle, "InstantPeriod", Value::Num(instant))?;
-            update_average_period(handle, instant, executed)?;
+            update_period_properties(runtime, handle, instant, executed)?;
         }
         last_fire = Some(fired);
         run_callback(runtime, handle, TimerCallback::Timer).await?;
@@ -43,7 +42,12 @@ pub(super) async fn run_timer_callbacks(
         }
         executed += 1;
         scheduled += 1;
-        set_property(handle, "TasksExecuted", Value::Num(executed as f64))?;
+        set_property(
+            runtime,
+            handle,
+            "TasksExecuted",
+            Value::Num(executed as f64),
+        )?;
         cooperation
             .checkpoint(1)
             .await

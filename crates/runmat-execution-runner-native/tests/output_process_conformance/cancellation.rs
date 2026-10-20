@@ -16,9 +16,28 @@ pub(super) async fn blocked_worker() {
     )
     .await
     .unwrap();
-    let request: runmat_execution_artifact::ProgramExecutionRequest =
-        serde_json::from_slice(&bytes).unwrap();
-    request.validate_for_portable_host().unwrap();
+    // This intentionally noncooperative process observes launch delivery, not
+    // execution authority: only the real worker may admit a staged graph.
+    let launch: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let launch = launch.as_object().expect("one staged launch envelope");
+    assert_eq!(launch.len(), 1);
+    let reference = launch["staged_graph_v10"]
+        .as_object()
+        .expect("actual parent-issued staged graph reference");
+    assert_eq!(reference.len(), 6);
+    for field in [
+        "artifact_id",
+        "stored_digest",
+        "stored_length",
+        "assignment",
+        "context",
+        "requested_outputs",
+    ] {
+        assert!(
+            !reference[field].is_null(),
+            "missing launch reference {field}"
+        );
+    }
     let record = runmat_execution::console::ConsoleRecord {
         sequence: 1,
         stream: runmat_execution::console::ConsoleStream::Stdout,
@@ -38,10 +57,7 @@ pub(super) async fn blocked_worker() {
         std::env::var_os(runmat_execution_runner_native::NATIVE_OBJECT_STORE_ROOT_ENV).unwrap();
     let root = Path::new(&objects).parent().unwrap();
     runmat_filesystem::NativeFsProvider
-        .atomic_replace_sync(
-            &root.join("original-worker-ready"),
-            request.artifact.id.0.bytes(),
-        )
+        .atomic_replace_sync(&root.join("original-worker-ready"), b"launch-delivered")
         .unwrap();
     // No cooperative response: the actual provider must terminate and reap the process.
     std::thread::sleep(Duration::from_secs(60));
@@ -51,13 +67,16 @@ pub(super) async fn verify(original: &NativeExecutionConfig) {
     let mut config = original.clone();
     config.worker_arguments = vec![WORKER_MARKER.into()];
     let service = NativeExecutionService::new(config.clone()).unwrap();
-    let future = service.create_future(call(1).await).unwrap();
+    let original = call(1).await;
+    let future = service.create_future(original.call.clone()).unwrap();
     let task = service.spawn(&future).unwrap();
     let root = config.store_root.join(task.scope_id.to_string());
     tokio::time::timeout(Duration::from_secs(30), async {
         while !root.join("original-worker-ready").exists() {
             assert!(matches!(
-                service.begin_await(Value::Task(task.clone())).unwrap(),
+                service
+                    .begin_await(Value::Task(task.clone().into()))
+                    .unwrap(),
                 AwaitAction::Pending(_)
             ));
             tokio::time::sleep(Duration::from_millis(10)).await;
@@ -66,11 +85,11 @@ pub(super) async fn verify(original: &NativeExecutionConfig) {
     .await
     .expect("original worker did not accept its request");
     service
-        .cancel(&Value::Task(task.clone()), CancellationReason::Quota)
+        .cancel(&Value::Task(task.clone().into()), CancellationReason::Quota)
         .unwrap();
     tokio::time::timeout(Duration::from_secs(30), async {
         loop {
-            match service.begin_await(Value::Future(future.clone())) {
+            match service.begin_await(Value::Future(future.clone().into())) {
                 Ok(AwaitAction::Pending(_)) => tokio::time::sleep(Duration::from_millis(10)).await,
                 Err(ExecutionServiceError::Cancelled) => break,
                 other => panic!("original running cancellation returned {other:?}"),
@@ -123,7 +142,7 @@ pub(super) async fn verify(original: &NativeExecutionConfig) {
         "original before termination"
     );
     service
-        .cancel(&Value::Future(future), CancellationReason::User)
+        .cancel(&Value::Future(future.into()), CancellationReason::User)
         .unwrap();
     let repeated: DriverSnapshot =
         serde_json::from_slice(&std::fs::read(root.join("checkpoints/driver.json")).unwrap())

@@ -14,6 +14,8 @@ pub(crate) use spec::__runmat_wasm_register_gpu_spec_GPU_SPEC;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+use tests::rescale_builtin;
 
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
@@ -27,8 +29,11 @@ pub(super) const BUILTIN_NAME: &str = "rescale";
     binding_variant = "default",
     builtin_path = "crate::builtins::math::elementwise::rescale"
 )]
-async fn rescale_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let raw = arguments::parse(&rest)?;
+async fn rescale_builtin_registered(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let raw = arguments::parse(rest.view())?;
     operands::ensure_integer_boundary(&value, "input").await?;
     operands::ensure_integer_boundary(&raw.lower, "lower bound").await?;
     operands::ensure_integer_boundary(&raw.upper, "upper bound").await?;

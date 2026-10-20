@@ -73,14 +73,20 @@ fn handler_context_refers_to_the_original_column_major_element() {
     let _entry = runtime.enter();
     let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 822);
     let _bound = crate::user_functions::test_support::install_bound_forwarder(binding.clone());
-    for shape in [vec![2, 2], vec![2, 2, 2]] {
+    for shape in [vec![2, 2], vec![2, 2, 2], vec![2, 3], vec![2, 3, 2]] {
         let expected_shape = shape.clone();
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             move |_, arguments, _| {
-                let [Value::Struct(context), Value::Num(value)] = arguments else {
+                let [Value::Struct(context), Value::Num(value), Value::Num(companion)] = arguments
+                else {
                     panic!("handler arguments")
                 };
                 assert_eq!(context.fields["index"], Value::Num(*value));
+                assert_eq!(
+                    *companion,
+                    100.0 + *value,
+                    "cell inputs stay in logical lockstep"
+                );
                 let Value::Tensor(indices) = &context.fields["indices"] else {
                     panic!("indices")
                 };
@@ -105,10 +111,20 @@ fn handler_context_refers_to_the_original_column_major_element() {
         let linear = (1..=shape.iter().product::<usize>())
             .map(|n| Value::Num(n as f64))
             .collect::<Vec<_>>();
+        let companion = linear
+            .iter()
+            .map(|value| {
+                let Value::Num(value) = value else {
+                    unreachable!()
+                };
+                Value::Num(100.0 + value)
+            })
+            .collect::<Vec<_>>();
         let result = call(
             Value::FunctionHandle("missing_linear_callback".into()),
             vec![
-                Value::Cell(CellArray::from_column_major(linear.clone(), shape).unwrap()),
+                Value::Cell(CellArray::from_column_major(linear.clone(), shape.clone()).unwrap()),
+                Value::Cell(CellArray::from_column_major(companion, shape).unwrap()),
                 Value::String("ErrorHandler".into()),
                 crate::user_functions::test_support::exact_local_value(
                     "position_handler",

@@ -636,9 +636,9 @@ mod tests {
         let (plans, _) = parse_polar_series_specs(vec![
             tensor(&[0.0, 1.0]),
             tensor(&[1.0, 2.0]),
-            Value::String("r--".to_string()),
+            Value::String("r--".to_string().into()),
             tensor(&[2.0, 3.0]),
-            Value::String("LineWidth".to_string()),
+            Value::String("LineWidth".to_string().into()),
             Value::Num(2.0),
         ])
         .unwrap();
@@ -761,7 +761,7 @@ mod tests {
         futures::executor::block_on(polarplot_builtin(vec![
             theta,
             rho,
-            Value::String("LineWidth".to_string()),
+            Value::String("LineWidth".to_string().into()),
             Value::Num(2.0),
         ]))
         .unwrap();

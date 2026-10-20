@@ -13,19 +13,22 @@ use super::axis_ticks::TickAxis;
 )]
 pub fn ytickformat_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     ytickformat_with_runtime(runtime.as_ref(), args)
 }
 
 #[cfg(test)]
 pub fn ytickformat_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    ytickformat_with_runtime(None, args)
+    ytickformat_with_runtime(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(args),
+    )
 }
 
 fn ytickformat_with_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &YTICKFORMAT_DESCRIPTOR,

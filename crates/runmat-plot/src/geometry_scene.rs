@@ -1184,8 +1184,10 @@ impl GeometrySceneChunk {
             return None;
         }
         let vertex_count = vertices.len();
-        let mut material = Material::default();
-        material.albedo = Vec4::ONE;
+        let material = Material {
+            albedo: Vec4::ONE,
+            ..Material::default()
+        };
         let mut chunk = Self::from_render_data(
             format!("{}:wireframe-edges", self.chunk_id),
             RenderData {

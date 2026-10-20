@@ -130,12 +130,17 @@ impl ReadTableOptions {
             .any(|variable| variable.has_value_controls())
     }
 
-    pub(in crate::builtins::table) fn parse(args: &[Value]) -> BuiltinResult<Self> {
+    pub(in crate::builtins::table) fn parse(
+        runtime: Option<&crate::context::RuntimeContext>,
+        args: crate::call::FunctionArgumentView<'_>,
+    ) -> BuiltinResult<Self> {
         let mut options = Self::default();
         let mut idx = 0usize;
         if let Some(source) = args.first() {
             if let Some(import) =
-                crate::builtins::io::tabular::import_options::ImportOptions::decode(source)?
+                crate::builtins::io::tabular::import_options::ImportOptions::decode(
+                    runtime, source,
+                )?
             {
                 options.variable_options = import.variables().to_vec();
                 options.variable_source_origin = import.source_origin();
@@ -315,7 +320,7 @@ impl ReadTableOptions {
 }
 
 pub(in crate::builtins::table) fn spreadsheet_import_options(
-    args: Vec<Value>,
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<Value> {
     if !args.len().is_multiple_of(2) {
         return Err(invalid_argument(
@@ -503,10 +508,10 @@ pub(in crate::builtins::table) fn detected_options_from_rows(
     let output_num_header_lines = detected_output_header_lines(options, header_rows_consumed);
     let output_range = detected_output_range(options.range, header_rows_consumed);
 
-    let mut out = StructValue::new();
-    out.insert("FileType", Value::String(import_file_type_label(file_type)));
+    let mut out = runmat_value::UnboundedStructValueBuilder::new();
+    out.insert("FileType", Value::string(import_file_type_label(file_type)));
     if let Some(delimiter) = delimiter {
-        out.insert("Delimiter", Value::String(delimiter_label(&delimiter)));
+        out.insert("Delimiter", Value::string(delimiter_label(&delimiter)));
     }
     out.insert("NumHeaderLines", Value::Num(output_num_header_lines as f64));
     out.insert("ReadVariableNames", Value::Bool(false));
@@ -539,15 +544,15 @@ pub(in crate::builtins::table) fn detected_options_from_rows(
     );
     out.insert(
         "VariableNamingRule",
-        Value::String(if options.preserve_variable_names {
-            "preserve".to_string()
+        Value::string(if options.preserve_variable_names {
+            "preserve"
         } else {
-            "modify".to_string()
+            "modify"
         }),
     );
     out.insert(
         "EmptyLineRule",
-        Value::String(
+        Value::string(
             match options.empty_line_rule {
                 EmptyLineRule::Skip => "skip",
                 EmptyLineRule::Read => "read",
@@ -557,7 +562,7 @@ pub(in crate::builtins::table) fn detected_options_from_rows(
     );
     out.insert(
         "TextType",
-        Value::String(
+        Value::string(
             match options.text_type {
                 TextImportType::String => "string",
                 TextImportType::Char => "char",
@@ -567,7 +572,7 @@ pub(in crate::builtins::table) fn detected_options_from_rows(
     );
     out.insert(
         "DatetimeType",
-        Value::String(
+        Value::string(
             match options.datetime_type {
                 DatetimeImportType::Datetime => "datetime",
                 DatetimeImportType::Text => "text",
@@ -576,8 +581,8 @@ pub(in crate::builtins::table) fn detected_options_from_rows(
             .to_string(),
         ),
     );
-    out.insert("Encoding", Value::String(options.encoding.clone()));
-    Ok(Value::Struct(out))
+    out.insert("Encoding", Value::string(options.encoding.clone()));
+    Ok(Value::Struct(out.finish()))
 }
 
 pub(in crate::builtins::table) fn detected_variable_type_labels(
@@ -743,13 +748,13 @@ pub(in crate::builtins::table) fn delimiter_label(delimiter: &Delimiter) -> Stri
 
 pub(in crate::builtins::table) fn sheet_value(sheet: &SheetSelector) -> Value {
     match sheet {
-        SheetSelector::Name(name) => Value::String(name.clone()),
+        SheetSelector::Name(name) => Value::string(name.clone()),
         SheetSelector::Index(index) => Value::Num((*index + 1) as f64),
     }
 }
 
 pub(in crate::builtins::table) fn range_spec_value(range: RangeSpec) -> BuiltinResult<Value> {
-    Ok(Value::String(range_spec_text(range)))
+    Ok(Value::string(range_spec_text(range)))
 }
 
 pub(in crate::builtins::table) fn range_spec_text(range: RangeSpec) -> String {
@@ -973,8 +978,8 @@ impl SpreadsheetImportOptions {
 
     fn into_struct(mut self) -> BuiltinResult<StructValue> {
         self.ensure_variable_metadata_len();
-        let mut out = StructValue::new();
-        out.insert("FileType", Value::String("spreadsheet".to_string()));
+        let mut out = runmat_value::UnboundedStructValueBuilder::new();
+        out.insert("FileType", Value::string("spreadsheet".to_string()));
         out.insert("NumVariables", Value::Num(self.num_variables as f64));
         if let Some(read_variable_names) = self.read_variable_names {
             out.insert("ReadVariableNames", Value::Bool(read_variable_names));
@@ -1003,11 +1008,11 @@ impl SpreadsheetImportOptions {
         out.insert(
             "DataRange",
             self.data_range
-                .unwrap_or_else(|| Value::String(String::new())),
+                .unwrap_or_else(|| Value::string(String::new())),
         );
         out.insert(
             "Sheet",
-            self.sheet.unwrap_or_else(|| Value::String(String::new())),
+            self.sheet.unwrap_or_else(|| Value::string(String::new())),
         );
         out.insert(
             "TreatAsMissing",
@@ -1025,16 +1030,16 @@ impl SpreadsheetImportOptions {
         );
         out.insert(
             "VariableNamingRule",
-            Value::String(if self.preserve_variable_names {
+            Value::string(if self.preserve_variable_names {
                 "preserve".to_string()
             } else {
                 "modify".to_string()
             }),
         );
-        out.insert("EmptyLineRule", Value::String(self.empty_line_rule));
-        out.insert("TextType", Value::String(self.text_type));
-        out.insert("DatetimeType", Value::String(self.datetime_type));
-        Ok(out)
+        out.insert("EmptyLineRule", Value::string(self.empty_line_rule));
+        out.insert("TextType", Value::string(self.text_type));
+        out.insert("DatetimeType", Value::string(self.datetime_type));
+        Ok(out.finish())
     }
 }
 
@@ -1254,10 +1259,10 @@ impl RangeSpec {
         match value {
             Value::String(text) => Self::parse_text(text),
             Value::CharArray(ca) if ca.rows == 1 => {
-                let text: String = ca.data.iter().collect();
+                let text: String = ca.data().iter().collect();
                 Self::parse_text(&text)
             }
-            Value::StringArray(sa) if sa.data.len() == 1 => Self::parse_text(&sa.data[0]),
+            Value::StringArray(sa) if sa.data().len() == 1 => Self::parse_text(&sa.data()[0]),
             Value::Tensor(t) if tensor_len(t) == 2 || tensor_len(t) == 4 => {
                 let len = tensor_len(t);
                 let mut indices = Vec::with_capacity(len);

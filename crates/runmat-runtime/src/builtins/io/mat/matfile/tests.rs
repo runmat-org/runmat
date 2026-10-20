@@ -1,6 +1,7 @@
 use super::super::load::read_mat_file_for_builtin;
 use super::*;
 use runmat_filesystem::{self as fs, FsProvider};
+use runmat_value::StringArray;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -14,11 +15,12 @@ fn cancelled_assignment_does_not_open_or_publish_mat_bytes() {
     let (directory, filename) = ("/selected", "/selected/cancelled.mat");
     let provider = Arc::new(fs::MemoryFsProvider::with_current_dir(directory));
     let _selected = fs::replace_provider(provider.clone());
-    let object = block_on(matfile_builtin(
+    let object_owner = block_on(matfile_builtin(
         Value::from(filename),
         vec![Value::from("Writable"), Value::Bool(true)],
     ))
     .expect("writable receiver");
+    let object = object_owner.value().clone();
     let cancellation = CancellationSource::new();
     cancellation.cancel(CancellationReason::User);
     let context = crate::context::RuntimeContext::with_cancellation(
@@ -90,7 +92,10 @@ fn finite_matfile_constructor_rejects_before_resident_writable_download() {
     let error = futures::executor::block_on(super::matfile_builtin(
         Some(finite_runtime()),
         Value::from("blocked.mat"),
-        vec![Value::from("Writable"), Value::GpuTensor(owner.resident())],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("Writable"),
+            Value::GpuTensor(owner.resident()),
+        ]),
     ))
     .expect_err("finite constructor has no complete resource producer");
     assert_eq!(
@@ -108,11 +113,12 @@ fn finite_nested_matfile_assignment_rejects_before_read_or_rhs_gather() {
     let selected = Arc::new(fs::MemoryFsProvider::with_current_dir(directory));
     let _provider = fs::replace_provider(selected.clone());
     fs::set_current_dir(directory).expect("virtual cwd");
-    let object = futures::executor::block_on(matfile_builtin(
+    let object_owner = futures::executor::block_on(matfile_builtin(
         Value::from("missing.mat"),
         vec![Value::from("Writable"), Value::Bool(true)],
     ))
     .expect("context-free writable handle");
+    let object = object_owner.value().clone();
     let owner = Box::leak(Box::new(super::super::tests::CountingProvider::new()));
     let _gpu = runmat_accelerate_api::ThreadProviderGuard::set(Some(owner));
     let subscript = crate::object::indexing::ObjectSubscriptPath::new(vec![
@@ -151,8 +157,10 @@ fn finite_matfile_member_read_rejects_before_missing_file_is_opened() {
     let selected = Arc::new(fs::MemoryFsProvider::with_current_dir(directory));
     let _provider = fs::replace_provider(selected);
     fs::set_current_dir(directory).expect("virtual cwd");
-    let object = futures::executor::block_on(matfile_builtin(Value::from("missing.mat"), vec![]))
-        .expect("context-free receiver");
+    let object_owner =
+        futures::executor::block_on(matfile_builtin(Value::from("missing.mat"), vec![]))
+            .expect("context-free receiver");
+    let object = object_owner.value().clone();
     let subscript =
         crate::object::indexing::standard_substruct_fixture_from_parts(".", Value::from("A"))
             .expect("member selector");
@@ -179,8 +187,9 @@ fn selected_outer_member_read_reports_open_failure_once() {
     let selected = Arc::new(fs::MemoryFsProvider::with_current_dir(directory));
     let _provider = fs::replace_provider(selected.clone());
     fs::set_current_dir(directory).expect("virtual cwd");
-    let object = block_on(matfile_builtin(Value::from("missing.mat"), vec![]))
+    let object_owner = block_on(matfile_builtin(Value::from("missing.mat"), vec![]))
         .expect("context-free MAT receiver");
+    let object = object_owner.value().clone();
     let witness = Witness::new(selected);
     let subscript =
         crate::object::indexing::standard_substruct_fixture_from_parts(".", Value::from("A"))
@@ -211,11 +220,12 @@ fn selected_outer_assignment_pending_drop_releases_without_publication_or_feedba
     let selected = Arc::new(PendingWriteFs::new(directory));
     let _provider = fs::replace_provider(selected.clone());
     fs::set_current_dir(directory).expect("virtual cwd");
-    let object = block_on(matfile_builtin(
+    let object_owner = block_on(matfile_builtin(
         Value::from("pending.mat"),
         vec![Value::from("Writable"), Value::Bool(true)],
     ))
     .expect("context-free writable receiver");
+    let object = object_owner.value().clone();
     let witness = Witness::new(selected.clone());
     let subscript =
         crate::object::indexing::standard_substruct_fixture_from_parts(".", Value::from("A"))
@@ -263,8 +273,16 @@ fn invalid_read_index_precedes_detached_receiver_authority() {
     assert_eq!(error.identifier(), Some("RunMat:matfile:Unsupported"));
 }
 
-async fn matfile_builtin(filename: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    super::matfile_builtin(None, filename, rest).await
+async fn matfile_builtin(
+    filename: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<crate::execution::RootedResult<Value>> {
+    super::matfile_builtin(
+        None,
+        filename,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    )
+    .await
 }
 
 async fn matfile_subsref(
@@ -314,12 +332,9 @@ fn write_sample(path: &Path) {
 }
 
 fn string_scalar(value: &str) -> Value {
-    Value::StringArray(StringArray {
-        data: vec![value.to_string()],
-        shape: vec![1, 1],
-        rows: 1,
-        cols: 1,
-    })
+    Value::StringArray(
+        StringArray::new(vec![value.into()], vec![1, 1]).expect("string scalar fixture"),
+    )
 }
 
 fn char_row(value: &str) -> Value {
@@ -331,11 +346,12 @@ fn matfile_constructs_properties_and_reads_whole_variables() {
     let _state = crate::builtins::io::mat::tests::state_guard();
     let path = unique_path("read");
     write_sample(&path);
-    let object = block_on(matfile_builtin(
-        Value::String(path.to_string_lossy().into_owned()),
+    let object_owner = block_on(matfile_builtin(
+        Value::String(path.to_string_lossy().into_owned().into()),
         vec![],
     ))
     .expect("matfile");
+    let object = object_owner.value().clone();
 
     let props = block_on(matfile_subsref(
         object.clone(),
@@ -366,27 +382,30 @@ fn matfile_accepts_text_forms_and_normalises_extension() {
     let expected_path = path_without_ext.with_extension("mat");
     let _ = std::fs::remove_file(&expected_path);
 
-    let object = block_on(matfile_builtin(
+    let object_owner = block_on(matfile_builtin(
         string_scalar(&path_without_ext.to_string_lossy()),
         vec![char_row("Writable"), Value::Num(1.0)],
     ))
     .expect("string filename and char option");
+    let object = object_owner.value().clone();
     let Value::Object(object) = object else {
         panic!("expected matfile object");
     };
     assert_eq!(
         object
-            .properties
+            .properties()
             .get(PROPERTIES_FIELD)
             .and_then(|value| match value {
                 Value::Struct(props) => props.fields.get(SOURCE_FIELD),
                 _ => None,
             }),
-        Some(&Value::String(expected_path.to_string_lossy().into_owned()))
+        Some(&Value::String(
+            expected_path.to_string_lossy().into_owned().into()
+        ))
     );
     assert_eq!(
         object
-            .properties
+            .properties()
             .get(PROPERTIES_FIELD)
             .and_then(|value| match value {
                 Value::Struct(props) => props.fields.get(WRITABLE_FIELD),
@@ -401,7 +420,7 @@ fn matfile_accepts_text_forms_and_normalises_extension() {
 #[test]
 fn repeated_writable_pairs_are_prepared_once_and_last_value_wins() {
     let _state = crate::builtins::io::mat::tests::state_guard();
-    let object = block_on(matfile_builtin(
+    let object_owner = block_on(matfile_builtin(
         Value::String("repeated.mat".into()),
         vec![
             Value::String("Writable".into()),
@@ -411,10 +430,11 @@ fn repeated_writable_pairs_are_prepared_once_and_last_value_wins() {
         ],
     ))
     .expect("repeated complete pairs");
+    let object = object_owner.value().clone();
     let Value::Object(object) = object else {
         panic!("MAT object");
     };
-    let Some(Value::Struct(properties)) = object.properties.get(PROPERTIES_FIELD) else {
+    let Some(Value::Struct(properties)) = object.properties().get(PROPERTIES_FIELD) else {
         panic!("Properties");
     };
     assert_eq!(
@@ -428,11 +448,12 @@ fn matfile_writable_assignment_replaces_and_appends_variables() {
     let _state = crate::builtins::io::mat::tests::state_guard();
     let path = unique_path("write");
     write_sample(&path);
-    let object = block_on(matfile_builtin(
-        Value::String(path.to_string_lossy().into_owned()),
+    let object_owner = block_on(matfile_builtin(
+        Value::String(path.to_string_lossy().into_owned().into()),
         vec![Value::String("Writable".into()), Value::Bool(true)],
     ))
     .expect("matfile writable");
+    let object = object_owner.value().clone();
 
     let object = block_on(matfile_subsasgn(
         object,
@@ -484,15 +505,16 @@ fn matfile_receiver_keeps_original_provider_and_cwd_after_swap() {
         .expect("replacement file");
     let _selected = fs::replace_provider(selected.clone());
     fs::set_current_dir("/selected").expect("selected cwd");
-    let object = block_on(matfile_builtin(
+    let object_owner = block_on(matfile_builtin(
         Value::String("fixture.mat".into()),
         vec![Value::String("Writable".into()), Value::Bool(true)],
     ))
     .expect("selected receiver");
+    let object = object_owner.value().clone();
     let Value::Object(ref presented) = object else {
         panic!("MAT object");
     };
-    let Some(Value::Struct(properties)) = presented.properties.get(PROPERTIES_FIELD) else {
+    let Some(Value::Struct(properties)) = presented.properties().get(PROPERTIES_FIELD) else {
         panic!("MAT Properties");
     };
     assert_eq!(
@@ -532,11 +554,12 @@ fn matfile_writable_assignment_preserves_exact_integer_storage() {
     let _state = crate::builtins::io::mat::tests::state_guard();
     let path = unique_path("integer_write");
     write_sample(&path);
-    let object = block_on(matfile_builtin(
-        Value::String(path.to_string_lossy().into_owned()),
+    let object_owner = block_on(matfile_builtin(
+        Value::String(path.to_string_lossy().into_owned().into()),
         vec![Value::String("Writable".into()), Value::Bool(true)],
     ))
     .expect("matfile writable");
+    let object = object_owner.value().clone();
     let tensor = Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN, i64::MAX]), vec![1, 2])
         .expect("integer tensor");
     let input = Value::Tensor(tensor);
@@ -568,11 +591,12 @@ fn matfile_rejects_readonly_assignment_and_partial_indexing() {
     let _state = crate::builtins::io::mat::tests::state_guard();
     let path = unique_path("readonly");
     write_sample(&path);
-    let object = block_on(matfile_builtin(
-        Value::String(path.to_string_lossy().into_owned()),
+    let object_owner = block_on(matfile_builtin(
+        Value::String(path.to_string_lossy().into_owned().into()),
         vec![],
     ))
     .expect("matfile readonly");
+    let object = object_owner.value().clone();
 
     let err = block_on(matfile_subsasgn(
         object.clone(),

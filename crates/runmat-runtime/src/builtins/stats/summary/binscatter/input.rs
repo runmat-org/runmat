@@ -2,8 +2,10 @@
 use super::*;
 use runmat_accelerate_api::GpuTensorStorage;
 
-pub(super) fn admit_host_visible(args: &[Value]) -> BuiltinResult<Option<ParsedInputs>> {
-    for value in args {
+pub(super) fn admit_host_visible(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Option<ParsedInputs>> {
+    for value in args.iter() {
         if let Value::GpuTensor(handle) = value {
             if handle.physical().storage() != GpuTensorStorage::Real {
                 return Err(invalid("binscatter: x and y must be real numeric vectors"));
@@ -17,10 +19,10 @@ pub(super) fn admit_host_visible(args: &[Value]) -> BuiltinResult<Option<ParsedI
         .iter()
         .all(|value| !matches!(value, Value::GpuTensor(_)))
     {
-        return parse_inputs(args.to_vec()).map(Some);
+        return parse_inputs(args).map(Some);
     }
     if args.len() == 2 {
-        for value in args {
+        for value in args.iter() {
             if !matches!(
                 value,
                 Value::GpuTensor(_)
@@ -108,7 +110,9 @@ fn validate_selected_host_data(value: &Value, name: &str) -> BuiltinResult<()> {
     Ok(())
 }
 
-pub(super) fn parse_inputs(mut args: Vec<Value>) -> BuiltinResult<ParsedInputs> {
+pub(super) fn parse_inputs(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<ParsedInputs> {
     if args.len() < 2 {
         return Err(invalid("binscatter: expected x and y inputs"));
     }
@@ -117,21 +121,15 @@ pub(super) fn parse_inputs(mut args: Vec<Value>) -> BuiltinResult<ParsedInputs> 
             if args.len() < 3 {
                 return Err(invalid("binscatter: expected table, xvar, and yvar"));
             }
-            let table = match args.remove(0) {
-                Value::Object(object) => object,
-                _ => unreachable!(),
-            };
-            let x_selector = args.remove(0);
-            let y_selector = args.remove(0);
-            let x_data = table_variable_numeric_data(&table, &x_selector, "xvar")?;
-            let y_data = table_variable_numeric_data(&table, &y_selector, "yvar")?;
+            let x_data = table_variable_numeric_data(object, &args[1], "xvar")?;
+            let y_data = table_variable_numeric_data(object, &args[2], "yvar")?;
             ensure_compatible_lengths(&x_data, &y_data)?;
             return Ok(ParsedInputs { x_data, y_data });
         }
     }
 
-    let x_value = args.remove(0);
-    let y_value = args.remove(0);
+    let x_value = args[0].clone();
+    let y_value = args[1].clone();
     let x_data = numeric_data_from_value(x_value, "x")?;
     let y_data = numeric_data_from_value(y_value, "y")?;
     ensure_compatible_lengths(&x_data, &y_data)?;

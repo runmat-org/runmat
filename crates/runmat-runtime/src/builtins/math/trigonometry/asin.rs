@@ -262,12 +262,12 @@ fn asin_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
 }
 
 fn asin_char_array(ca: CharArray) -> BuiltinResult<Value> {
-    if ca.data.is_empty() {
+    if ca.data().is_empty() {
         let tensor = Tensor::new(Vec::new(), vec![ca.rows, ca.cols])
             .map_err(|e| asin_error_with_detail(&ASIN_ERROR_INTERNAL, e))?;
         return Ok(tensor::tensor_into_value(tensor));
     }
-    let data: Vec<f64> = ca.data.iter().map(|&ch| ch as u32 as f64).collect();
+    let data: Vec<f64> = ca.data().iter().map(|&ch| ch as u32 as f64).collect();
     let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
         .map_err(|e| asin_error_with_detail(&ASIN_ERROR_INTERNAL, e))?;
     asin_tensor_real(tensor)

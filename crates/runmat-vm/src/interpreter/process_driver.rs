@@ -476,10 +476,10 @@ impl ProcessDriverHandle {
     ) -> Result<ProcessReplyTicket<(RootedValueSequence, RootedValues)>, RuntimeError>
     where
         F: Future<Output = SemanticReply> + 'static,
-        M: FnOnce() -> F,
+        M: FnOnce() -> F + 'static,
     {
         let scope = scope.prepare_future::<F>()?;
-        self.enqueue_typed_in_context(context, 0, move || scope.try_scope_with(make_future))
+        self.enqueue_typed_in_context(context, 0, move || Ok(scope.defer_result(make_future)))
     }
 
     fn enqueue_typed_unbounded<T: 'static>(
@@ -541,10 +541,10 @@ impl ProcessDriverHandle {
     where
         T: 'static,
         F: Future<Output = Result<T, RuntimeError>> + 'static,
-        M: FnOnce() -> F,
+        M: FnOnce() -> F + 'static,
     {
         let scope = scope.prepare_future::<F>()?;
-        self.enqueue_typed_in_context(context, 0, move || scope.try_scope_with(make_future))
+        self.enqueue_typed_in_context(context, 0, move || Ok(scope.defer_result(make_future)))
     }
 
     fn enqueue_typed_in_context<T, F, M>(

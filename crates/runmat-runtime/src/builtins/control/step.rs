@@ -77,10 +77,15 @@ fn step_error_with_message(
 
 #[runtime_builtin(
     name = "step",
+    context = true,
     binding_variant = "default",
     builtin_path = "crate::builtins::control::step"
 )]
-async fn step_builtin(sys: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn step_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    sys: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if !is_statement_form_call() && rest.len() > 1 {
         return Err(step_error_with_detail(
             &STEP_ERROR_INVALID_ARGUMENT,
@@ -98,11 +103,11 @@ async fn step_builtin(sys: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         preflight_response_model_operand(&sys, ResponseKind::Step)?;
     }
     if is_statement_form_call() {
-        plot_multiple_step_responses(sys, rest).await?;
+        plot_multiple_step_responses(runtime.as_ref(), sys, rest).await?;
         return Ok(Value::output_list(Vec::new()));
     }
 
-    let model = parse_real_model(sys, ResponseKind::Step).await?;
+    let model = parse_real_model(runtime.as_ref(), sys, ResponseKind::Step).await?;
     let time_host = gather_step_time(rest.first()).await?;
     let time = admit_time(
         time_host.as_ref(),
@@ -142,7 +147,11 @@ fn is_statement_form_call() -> bool {
 }
 
 #[cfg(feature = "plot-core")]
-async fn plot_multiple_step_responses(first_sys: Value, rest: Vec<Value>) -> BuiltinResult<()> {
+async fn plot_multiple_step_responses(
+    runtime: Option<&crate::context::RuntimeContext>,
+    first_sys: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<()> {
     let mut systems = vec![(first_sys, None)];
     let mut time_arg = None;
     for arg in rest {
@@ -193,7 +202,10 @@ async fn plot_multiple_step_responses(first_sys: Value, rest: Vec<Value>) -> Bui
     }
     let mut models = Vec::with_capacity(systems.len());
     for (system, style) in systems {
-        models.push((parse_real_model(system, ResponseKind::Step).await?, style));
+        models.push((
+            parse_real_model(runtime, system, ResponseKind::Step).await?,
+            style,
+        ));
     }
     let gathered_time = gather_step_time(time_arg.as_ref()).await?;
     let mut responses = Vec::with_capacity(models.len());
@@ -227,7 +239,11 @@ async fn plot_multiple_step_responses(first_sys: Value, rest: Vec<Value>) -> Bui
 }
 
 #[cfg(not(feature = "plot-core"))]
-async fn plot_multiple_step_responses(_first_sys: Value, _rest: Vec<Value>) -> BuiltinResult<()> {
+async fn plot_multiple_step_responses(
+    _runtime: Option<&crate::context::RuntimeContext>,
+    _first_sys: Value,
+    _rest: Vec<Value>,
+) -> BuiltinResult<()> {
     Err(crate::plotting_hooks::unavailable_presentation())
 }
 

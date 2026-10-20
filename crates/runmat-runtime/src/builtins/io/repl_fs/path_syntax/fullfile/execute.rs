@@ -4,7 +4,7 @@ use crate::BuiltinResult;
 
 const IDENTITY: &str = "fullfile";
 
-pub(super) async fn run(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn run(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &runmat_builtins::FULLFILE_DESCRIPTOR,
         &runmat_builtins::FULLFILE_ERROR_TOO_MANY_OUTPUTS,

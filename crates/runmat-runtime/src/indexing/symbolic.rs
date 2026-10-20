@@ -30,7 +30,7 @@ pub fn scalar_from_value(value: &Value) -> Result<SymbolicExpr, RuntimeError> {
 
 pub fn apply_function_reference(
     name: &str,
-    parameters: &[String],
+    parameters: &[runmat_value::Utf8Text],
     arguments: &[Value],
 ) -> Result<Value, RuntimeError> {
     if arguments.len() != parameters.len() {

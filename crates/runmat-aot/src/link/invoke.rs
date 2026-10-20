@@ -22,6 +22,77 @@ pub struct LinkedProgram {
     pub output_digest: runmat_execution::Digest,
     pub selected_build: Option<super::NativeLinkBuildIdentity>,
     pub inputs: super::NativeProgramLinkIdentity,
+    /// Path-independent selected link recipe identity, not execution or
+    /// standalone artifact identity. Ambient legacy links never issue one.
+    pub canonical_selected_plan: Option<super::CanonicalSelectedLinkReceipt>,
+    /// Issued only after the selected linker succeeds and its image is
+    /// validated and hashed. Public compatibility fields are checked against
+    /// this private receipt before any consumer may rely on them.
+    selected_image: Option<VerifiedSelectedImage>,
+}
+
+/// Proof of one completed selected image, not merely a reproducible recipe.
+/// This cannot be constructed from decoded metadata or an ambient link.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VerifiedSelectedImage {
+    canonical_plan: super::CanonicalSelectedLinkReceipt,
+    output_digest: runmat_execution::Digest,
+    product: runmat_execution::host::NativeSelectedProductBinding,
+    selected_build: super::NativeLinkBuildIdentity,
+    inputs: super::NativeProgramLinkIdentity,
+}
+
+impl VerifiedSelectedImage {
+    pub fn canonical_plan(&self) -> &super::CanonicalSelectedLinkReceipt {
+        &self.canonical_plan
+    }
+
+    pub fn output_digest(&self) -> runmat_execution::Digest {
+        self.output_digest
+    }
+
+    pub fn product(&self) -> &runmat_execution::host::NativeSelectedProductBinding {
+        &self.product
+    }
+
+    pub fn selected_build(&self) -> &super::NativeLinkBuildIdentity {
+        &self.selected_build
+    }
+
+    pub fn inputs(&self) -> &super::NativeProgramLinkIdentity {
+        &self.inputs
+    }
+}
+
+impl LinkedProgram {
+    /// Recheck mutable compatibility fields against the private completed
+    /// image proof. The path may change only if the caller independently
+    /// rehashes the bytes at that path against `output_digest()`.
+    pub fn verified_selected_image(&self) -> AotResult<Option<&VerifiedSelectedImage>> {
+        match (&self.selected_image, self.product.selected()) {
+            (None, None)
+                if self.selected_build.is_none() && self.canonical_selected_plan.is_none() =>
+            {
+                Ok(None)
+            }
+            (Some(image), Some(product))
+                if product == &image.product
+                    && self.output_digest == image.output_digest
+                    && self.selected_build.as_ref() == Some(&image.selected_build)
+                    && self.inputs == image.inputs
+                    && self.canonical_selected_plan.as_ref() == Some(&image.canonical_plan)
+                    && image.canonical_plan.record().product == image.product
+                    && image.canonical_plan.record().inputs == image.inputs
+                    && image.canonical_plan.record().build == image.selected_build =>
+            {
+                Ok(Some(image))
+            }
+            _ => Err(AotError::contract(
+                "aot.link.completed_image",
+                "linked program compatibility fields differ from completed selected image proof",
+            )),
+        }
+    }
 }
 
 pub(super) enum LinkProcessEnvironment {
@@ -118,6 +189,7 @@ pub(super) fn invoke_prepared(
             ))
         }
     }
+    plan.verify_selected_proof()?;
     let response_path = temporary.path().join("link.rsp");
     let linked_path = plan.output.clone();
     let response = super::response::encode(&plan.response_tokens, plan.driver.family)?;
@@ -196,6 +268,29 @@ pub(super) fn invoke_prepared(
         request.overwrite,
         request.keep_temps,
     )?;
+    let canonical_selected_plan = plan.selected_proof.map(|proof| proof.into_receipt());
+    let selected_image = match (
+        &canonical_selected_plan,
+        plan.product.selected(),
+        &plan.selected_build,
+    ) {
+        (Some(canonical_plan), Some(product), Some(selected_build)) => {
+            Some(VerifiedSelectedImage {
+                canonical_plan: canonical_plan.clone(),
+                output_digest,
+                product: product.clone(),
+                selected_build: selected_build.clone(),
+                inputs: plan.inputs.clone(),
+            })
+        }
+        (None, None, None) => None,
+        _ => {
+            return Err(AotError::contract(
+                "aot.link.completed_image",
+                "completed link lacks selected image construction proof",
+            ))
+        }
+    };
     Ok(LinkedProgram {
         output: request.output.clone(),
         retained_temps,
@@ -203,6 +298,8 @@ pub(super) fn invoke_prepared(
         output_digest,
         selected_build: plan.selected_build,
         inputs: plan.inputs,
+        canonical_selected_plan,
+        selected_image,
     })
 }
 

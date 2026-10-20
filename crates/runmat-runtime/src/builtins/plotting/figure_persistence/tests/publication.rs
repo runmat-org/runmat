@@ -85,7 +85,10 @@ fn cancellation_drops_a_pending_private_stage_without_publication() {
     let mut call = Box::pin(execute_savefig(
         Some(runtime),
         Some(0),
-        vec![Value::Num(figure), Value::from("/cancelled.fig")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(figure),
+            Value::from("/cancelled.fig"),
+        ]),
     ));
     await_stage(fixture.started, call.as_mut());
     source.cancel(runmat_execution::CancellationReason::User);
@@ -113,7 +116,10 @@ fn cancellation_after_remote_commit_reports_indeterminate_lost_ack() {
     let mut call = Box::pin(execute_savefig(
         Some(runtime),
         Some(0),
-        vec![Value::Num(figure), Value::from("/lost-ack.fig")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(figure),
+            Value::from("/lost-ack.fig"),
+        ]),
     ));
     await_stage(fixture.started, call.as_mut());
     assert!(

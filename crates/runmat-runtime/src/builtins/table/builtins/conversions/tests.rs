@@ -1,5 +1,32 @@
 use super::*;
+async fn table2array_builtin(value: Value) -> BuiltinResult<Value> {
+    super::table2array_builtin(None, value).await
+}
+async fn table2cell_builtin(value: Value) -> BuiltinResult<Value> {
+    super::table2cell_builtin(None, value).await
+}
+
+async fn cell2table_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let rest = crate::call::BuiltinArguments::from_borrowed(&rest, None)?;
+    super::cell2table_builtin(None, value, rest).await
+}
+
+async fn struct2table_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let rest = crate::call::BuiltinArguments::from_borrowed(&rest, None)?;
+    super::struct2table_builtin(None, value, rest).await
+}
+
+async fn table2struct_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let rest = crate::call::BuiltinArguments::from_borrowed(&rest, None)?;
+    super::table2struct_builtin(None, value, rest).await
+}
+
 use runmat_builtins::{BuiltinCompletionPolicy, BuiltinOutputMode, CELL2TABLE_DESCRIPTOR};
+
+async fn array2table_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let rest = crate::call::BuiltinArguments::from_borrowed(&rest, None)?;
+    super::array2table_builtin(None, value, rest).await
+}
 
 #[test]
 fn table2array_of_cell_variables_matches_element_cells_in_row_major_layout() {
@@ -227,10 +254,12 @@ mod cell2table_tests {
 
     #[test]
     fn struct_array_integer_fields_become_exact_homogeneous_variables() {
-        let mut first = StructValue::new();
+        let mut first = runmat_value::UnboundedStructValueBuilder::new();
         first.insert("id", Value::Int(IntValue::U64(u64::MAX)));
-        let mut second = StructValue::new();
+        let mut second = runmat_value::UnboundedStructValueBuilder::new();
         second.insert("id", Value::Int(IntValue::U64(1_u64 << 63)));
+        let second = second.finish();
+        let first = first.finish();
         let structs = runmat_value::StructArray::with_fields(
             vec!["id".into()],
             vec![first.clone(), second.clone()],

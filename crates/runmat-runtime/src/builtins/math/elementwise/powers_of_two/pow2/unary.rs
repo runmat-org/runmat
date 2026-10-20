@@ -81,13 +81,11 @@ fn transform_complex(tensor: ComplexTensor) -> BuiltinResult<Value> {
 }
 
 fn transform_characters(chars: CharArray) -> BuiltinResult<Value> {
-    let shape = vec![chars.rows, chars.cols];
     let values = chars
-        .data
-        .into_iter()
+        .iter_column_major()
         .map(|character| (character as u32 as f64).exp2())
         .collect();
-    Tensor::new(values, shape)
+    Tensor::new(values, chars.shape)
         .map(Value::Tensor)
         .map_err(errors::internal)
 }

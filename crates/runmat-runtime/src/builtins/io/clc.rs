@@ -12,7 +12,7 @@ const BUILTIN_NAME: &str = "clc";
     binding_variant = "default",
     builtin_path = "crate::builtins::io::clc"
 )]
-async fn clc_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn clc_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     if !args.is_empty() {
         return Err(argument_count_error());
     }
@@ -36,7 +36,10 @@ mod tests {
     #[test]
     fn records_clear_event_and_returns_empty_sink_value() {
         console::reset_thread_buffer();
-        let result = futures::executor::block_on(clc_builtin(Vec::new())).expect("clc");
+        let result = futures::executor::block_on(clc_builtin(
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect("clc");
         let Value::Tensor(empty) = result else {
             panic!("expected empty tensor")
         };
@@ -50,8 +53,10 @@ mod tests {
     #[test]
     fn rejects_input_without_emitting_clear_event() {
         console::reset_thread_buffer();
-        let error = futures::executor::block_on(clc_builtin(vec![Value::Num(1.0)]))
-            .expect_err("clc input must fail");
+        let error = futures::executor::block_on(clc_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
+        ))
+        .expect_err("clc input must fail");
         assert_eq!(error.message(), "clc: expected no input arguments");
         assert_eq!(error.identifier(), Some("RunMat:clc:ArgumentCount"));
         assert!(console::take_thread_buffer().is_empty());

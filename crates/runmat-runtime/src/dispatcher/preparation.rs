@@ -1,6 +1,6 @@
 //! Preparation follows the dispatcher's selected implementation authority.
+use crate::call::BuiltinArguments;
 use crate::RuntimeError;
-use runmat_value::Value;
 
 #[derive(Clone, Copy)]
 pub(super) enum SelectedBindingOrigin {
@@ -8,23 +8,28 @@ pub(super) enum SelectedBindingOrigin {
     LegacyInventory,
 }
 
-pub(super) async fn prepare_selected(
+pub(super) async fn prepare_retained_selected(
     origin: SelectedBindingOrigin,
     name: &str,
-    args: &[Value],
+    args: BuiltinArguments,
     context: Option<&crate::context::RuntimeContext>,
-) -> Result<Option<Vec<Value>>, RuntimeError> {
+) -> Result<BuiltinArguments, RuntimeError> {
     if !matches!(origin, SelectedBindingOrigin::LegacyInventory) {
-        return Ok(None);
+        return Ok(args);
     }
     let Some(context) = context else {
-        return Ok(None);
+        return Ok(args);
     };
     let Some(service) = context.service_ports().acceleration().cloned() else {
-        return Ok(None);
+        return Ok(args);
     };
-    service
-        .prepare_legacy(context.clone(), name.to_owned(), args.to_vec())
-        .await
-        .map(Some)
+    // This selected historical port genuinely requires an ordinary Vec.
+    // Its policy-checked bridge is never used by canonical/scoped bindings.
+    let ordinary = args.materialize_legacy_contiguous(Some(context))?;
+    let result = service
+        .prepare_legacy(context.clone(), name.to_owned(), ordinary)
+        .await?;
+    let prepared = crate::execution::RootedValues::in_context(result, context)?;
+    drop(args); // successor roots/publication exist before original retirement.
+    Ok(prepared.into())
 }

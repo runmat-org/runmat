@@ -109,10 +109,12 @@ fn rejected_uploads_preserve_both_operands_and_retire_only_fresh_results() {
         Injection::FreshMalformed,
     ] {
         *provider.result.lock().unwrap() = injection;
-        let error = block_on(toeplitz_builtin(vec![
-            Value::GpuTensor(c.clone()),
-            Value::GpuTensor(r.clone()),
-        ]))
+        let error = block_on(toeplitz_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::GpuTensor(c.clone()),
+                Value::GpuTensor(r.clone()),
+            ]),
+        ))
         .unwrap_err();
         assert_eq!(error.identifier(), ERROR_INTERNAL.identifier);
         assert_eq!(c.view(), &column_view);

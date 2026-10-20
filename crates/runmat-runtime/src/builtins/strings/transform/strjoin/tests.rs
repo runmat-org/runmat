@@ -18,14 +18,14 @@ fn legacy_scalar_integer_delimiter_preserves_all_integer_classes_exactly() {
     for value in values {
         let expected = format!("a{}b", value.decimal_string());
         let _mode = crate::compatibility::push_runmat_extensions_enabled(true);
-        let result = block_on(strjoin_builtin(
+        let result = block_on(strjoin_builtin_source(
             strings(&["a", "b"], vec![1, 2]),
             vec![Value::Int(value.clone())],
         ))
         .unwrap();
         assert_eq!(result, strings(&[&expected], vec![1, 1]));
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let error = block_on(strjoin_builtin(
+        let error = block_on(strjoin_builtin_source(
             strings(&["a", "b"], vec![1, 2]),
             vec![Value::Int(value)],
         ))
@@ -59,15 +59,19 @@ fn standard_vectors_cellstr_and_default_delimiters() {
     let _mode = crate::compatibility::push_runmat_extensions_enabled(false);
     let input = strings(&["a", "b", "c"], vec![3, 1]);
     assert_eq!(
-        block_on(strjoin_builtin(input.clone(), vec![])).unwrap(),
+        block_on(strjoin_builtin_source(input.clone(), vec![])).unwrap(),
         Value::String("a b c".into())
     );
     assert_eq!(
-        block_on(strjoin_builtin(input.clone(), vec![Value::from("-")])).unwrap(),
+        block_on(strjoin_builtin_source(
+            input.clone(),
+            vec![Value::from("-")]
+        ))
+        .unwrap(),
         Value::String("a-b-c".into())
     );
     assert_eq!(
-        block_on(strjoin_builtin(
+        block_on(strjoin_builtin_source(
             input,
             vec![strings(&["-", ":"], vec![1, 2])]
         ))
@@ -75,7 +79,11 @@ fn standard_vectors_cellstr_and_default_delimiters() {
         Value::String("a-b:c".into())
     );
     assert_eq!(
-        block_on(strjoin_builtin(cellstr(&["a", "b"], vec![2, 1]), vec![])).unwrap(),
+        block_on(strjoin_builtin_source(
+            cellstr(&["a", "b"], vec![2, 1]),
+            vec![]
+        ))
+        .unwrap(),
         Value::CharArray(CharArray::new_row("a b"))
     );
 }
@@ -85,17 +93,17 @@ fn rowwise_extension_preserves_matrix_column_and_character_behavior() {
     let delimiter = || vec![Value::from("-")];
     let input = strings(&["a", "c", "b", "d"], vec![2, 2]);
     assert_eq!(
-        block_on(strjoin_builtin(input, delimiter())).unwrap(),
+        block_on(strjoin_builtin_source(input, delimiter())).unwrap(),
         strings(&["a-b", "c-d"], vec![2, 1])
     );
     let column = strings(&["a", "b"], vec![2, 1]);
     assert_eq!(
-        block_on(strjoin_builtin(column.clone(), delimiter())).unwrap(),
+        block_on(strjoin_builtin_source(column.clone(), delimiter())).unwrap(),
         column
     );
     let chars = Value::CharArray(CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).unwrap());
     assert_eq!(
-        block_on(strjoin_builtin(chars, delimiter())).unwrap(),
+        block_on(strjoin_builtin_source(chars, delimiter())).unwrap(),
         strings(&["ab", "cd"], vec![2, 1])
     );
 }
@@ -107,7 +115,8 @@ fn unsupported_rank_rejects_without_silent_data_loss_in_both_modes() {
             strings(&["a", "b"], vec![1, 1, 2]),
             Value::CharArray(CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap()),
         ] {
-            let error = block_on(strjoin_builtin(value, vec![Value::from("-")])).unwrap_err();
+            let error =
+                block_on(strjoin_builtin_source(value, vec![Value::from("-")])).unwrap_err();
             assert_eq!(error.identifier(), STRJOIN_ERROR_INVALID_INPUT.identifier);
         }
     }
@@ -117,18 +126,18 @@ fn empty_modes_and_delimiter_length_are_distinct() {
     let _mode = crate::compatibility::push_runmat_extensions_enabled(true);
     let input = strings(&[], vec![0, 3]);
     assert_eq!(
-        block_on(strjoin_builtin(input.clone(), vec![])).unwrap(),
-        Value::String(String::new())
+        block_on(strjoin_builtin_source(input.clone(), vec![])).unwrap(),
+        Value::String(String::new().into())
     );
     assert_eq!(
-        block_on(strjoin_builtin(input, vec![Value::from("-")])).unwrap(),
+        block_on(strjoin_builtin_source(input, vec![Value::from("-")])).unwrap(),
         strings(&[], vec![0, 0])
     );
     assert_eq!(
-        block_on(strjoin_builtin(cellstr(&[], vec![0, 0]), vec![])).unwrap(),
+        block_on(strjoin_builtin_source(cellstr(&[], vec![0, 0]), vec![])).unwrap(),
         Value::CharArray(CharArray::new_row(""))
     );
-    let error = block_on(strjoin_builtin(
+    let error = block_on(strjoin_builtin_source(
         strings(&["a", "b"], vec![1, 2]),
         vec![strings(&["-", ":", "."], vec![1, 3])],
     ))
@@ -141,7 +150,7 @@ fn empty_modes_and_delimiter_length_are_distinct() {
 #[test]
 fn strict_matrix_numeric_provider_and_output_count_reject_before_work() {
     let _mode = crate::compatibility::push_runmat_extensions_enabled(false);
-    let error = block_on(strjoin_builtin(
+    let error = block_on(strjoin_builtin_source(
         strings(&["a", "b", "c", "d"], vec![2, 2]),
         vec![Value::from("-")],
     ))
@@ -161,7 +170,7 @@ fn strict_matrix_numeric_provider_and_output_count_reject_before_work() {
         resident,
     ] {
         assert_eq!(
-            block_on(strjoin_builtin(value, vec![]))
+            block_on(strjoin_builtin_source(value, vec![]))
                 .unwrap_err()
                 .identifier(),
             STRJOIN_ERROR_INVALID_INPUT.identifier
@@ -169,7 +178,7 @@ fn strict_matrix_numeric_provider_and_output_count_reject_before_work() {
     }
     let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     assert_eq!(
-        block_on(strjoin_builtin(Value::from("a"), vec![]))
+        block_on(strjoin_builtin_source(Value::from("a"), vec![]))
             .unwrap_err()
             .identifier(),
         STRJOIN_ERROR_TOO_MANY_OUTPUTS.identifier

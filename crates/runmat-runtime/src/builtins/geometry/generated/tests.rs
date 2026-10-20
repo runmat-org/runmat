@@ -52,7 +52,14 @@ fn translation(dx: f64, dy: f64, dz: f64) -> Value {
 }
 
 fn unit_box() -> Value {
-    block_on(geometry_box_builtin(vec![num(1.0), num(1.0), num(1.0)])).unwrap()
+    block_on(geometry_box_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            num(1.0),
+            num(1.0),
+            num(1.0),
+        ]),
+    ))
+    .unwrap()
 }
 
 fn last_operation(value: &Value) -> GeometryFeatureOperation {
@@ -85,29 +92,54 @@ fn literals(values: &[GeometryScalarExpression]) -> Vec<f64> {
 
 #[test]
 fn typed_builder_composes_regions_and_crosses_the_portable_value_boundary() {
-    let stock = block_on(geometry_box_builtin(vec![num(0.08), num(0.008), num(0.05)])).unwrap();
-    let hole = block_on(geometry_cylinder_builtin(vec![
-        num(0.005),
-        num(0.008),
-        vector([0.0, 1.0, 0.0]),
-        vector([0.015, 0.0, 0.015]),
-    ]))
+    let stock = block_on(geometry_box_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            num(0.08),
+            num(0.008),
+            num(0.05),
+        ]),
+    ))
     .unwrap();
-    let hole_region = block_on(geometry_faces_introduced_by_builtin(vec![hole.clone()])).unwrap();
-    let finished = block_on(geometry_subtract_builtin(vec![stock, hole])).unwrap();
-    let body_region = block_on(geometry_solid_builtin(vec![finished.clone()])).unwrap();
-    let generated = block_on(geometry_finish_builtin(vec![finished])).unwrap();
-    let generated = block_on(geometry_with_region_builtin(vec![
-        generated,
-        Value::String("body".into()),
-        body_region,
-    ]))
+    let hole = block_on(geometry_cylinder_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            num(0.005),
+            num(0.008),
+            vector([0.0, 1.0, 0.0]),
+            vector([0.015, 0.0, 0.015]),
+        ]),
+    ))
     .unwrap();
-    let generated = block_on(geometry_with_region_builtin(vec![
-        generated,
-        Value::String("hole_wall".into()),
-        hole_region,
-    ]))
+    let hole_region = block_on(geometry_faces_introduced_by_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![hole.clone()]),
+    ))
+    .unwrap();
+    let finished = block_on(geometry_subtract_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![stock, hole]),
+    ))
+    .unwrap();
+    let body_region = block_on(geometry_solid_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![finished.clone()]),
+    ))
+    .unwrap();
+    let generated = block_on(geometry_finish_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![finished]),
+    ))
+    .unwrap();
+    let generated = block_on(geometry_with_region_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            generated,
+            Value::String("body".into()),
+            body_region,
+        ]),
+    ))
+    .unwrap();
+    let generated = block_on(geometry_with_region_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            generated,
+            Value::String("hole_wall".into()),
+            hole_region,
+        ]),
+    ))
     .unwrap();
 
     let product = generated_from_value(&generated, "test").unwrap();
@@ -134,24 +166,36 @@ fn typed_builder_composes_regions_and_crosses_the_portable_value_boundary() {
 #[test]
 fn duplicate_region_names_and_untyped_values_fail_closed() {
     let feature = unit_box();
-    let region = block_on(geometry_solid_builtin(vec![feature.clone()])).unwrap();
-    let generated = block_on(geometry_finish_builtin(vec![feature])).unwrap();
-    let generated = block_on(geometry_with_region_builtin(vec![
-        generated,
-        Value::String("body".into()),
-        region.clone(),
-    ]))
+    let region = block_on(geometry_solid_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![feature.clone()]),
+    ))
     .unwrap();
-    assert_eq!(
-        identifier(block_on(geometry_with_region_builtin(vec![
+    let generated = block_on(geometry_finish_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![feature]),
+    ))
+    .unwrap();
+    let generated = block_on(geometry_with_region_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
             generated,
             Value::String("body".into()),
-            region,
-        ]))),
+            region.clone(),
+        ]),
+    ))
+    .unwrap();
+    assert_eq!(
+        identifier(block_on(geometry_with_region_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                generated,
+                Value::String("body".into()),
+                region,
+            ])
+        ))),
         "RunMat:geometry:withRegion:InvalidInput"
     );
     assert_eq!(
-        identifier(block_on(geometry_finish_builtin(vec![num(1.0)]))),
+        identifier(block_on(geometry_finish_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![num(1.0)])
+        ))),
         "RunMat:geometry:finish:InvalidInput"
     );
 }
@@ -160,14 +204,18 @@ fn duplicate_region_names_and_untyped_values_fail_closed() {
 fn instances_require_explicit_affine_occurrences() {
     let feature = unit_box();
     assert_eq!(
-        identifier(block_on(geometry_instance_builtin(vec![feature.clone()]))),
+        identifier(block_on(geometry_instance_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![feature.clone()])
+        ))),
         "RunMat:geometry:instance:InvalidInput"
     );
-    let instance = block_on(geometry_instance_builtin(vec![
-        feature,
-        translation(0.0, 0.0, 0.0),
-        translation(2.0, 0.0, 0.0),
-    ]))
+    let instance = block_on(geometry_instance_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            feature,
+            translation(0.0, 0.0, 0.0),
+            translation(2.0, 0.0, 0.0),
+        ]),
+    ))
     .unwrap();
     let GeometryFeatureOperation::Instance { transforms, .. } = last_operation(&instance) else {
         panic!("expected instance");
@@ -184,10 +232,9 @@ fn transform_converts_matlab_matrices_to_the_row_major_contract() {
         [0.0, 0.0, 1.0, 0.3],
         [0.0, 0.0, 0.0, 1.0],
     ]);
-    let moved = block_on(geometry_transform_builtin(vec![
-        unit_box(),
-        rotate_and_move,
-    ]))
+    let moved = block_on(geometry_transform_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![unit_box(), rotate_and_move]),
+    ))
     .unwrap();
     let GeometryFeatureOperation::Transform { matrix, .. } = last_operation(&moved) else {
         panic!("expected transform");
@@ -212,23 +259,26 @@ fn transform_rejects_non_affine_and_wrongly_shaped_matrices() {
         [0.5, 0.0, 0.0, 1.0],
     ]);
     assert_eq!(
-        identifier(block_on(geometry_transform_builtin(vec![
-            unit_box(),
-            projective
-        ]))),
+        identifier(block_on(geometry_transform_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![unit_box(), projective])
+        ))),
         "RunMat:geometry:transform:InvalidInput"
     );
     let flat = Value::Tensor(Tensor::new(vec![0.0; 16], vec![1, 16]).unwrap());
     assert_eq!(
-        identifier(block_on(geometry_transform_builtin(vec![unit_box(), flat]))),
+        identifier(block_on(geometry_transform_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![unit_box(), flat])
+        ))),
         "RunMat:geometry:transform:InvalidInput"
     );
     let not_affine_instance = matrix([[0.0; 4]; 4]);
     assert_eq!(
-        identifier(block_on(geometry_instance_builtin(vec![
-            unit_box(),
-            not_affine_instance
-        ]))),
+        identifier(block_on(geometry_instance_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                unit_box(),
+                not_affine_instance
+            ])
+        ))),
         "RunMat:geometry:instance:InvalidInput"
     );
 }
@@ -237,68 +287,107 @@ fn transform_rejects_non_affine_and_wrongly_shaped_matrices() {
 fn errors_report_the_calling_builtin_identifier() {
     // Feature-graph contract violation.
     assert_eq!(
-        identifier(block_on(geometry_box_builtin(vec![
-            num(1.0),
-            num(0.0),
-            num(1.0)
-        ]))),
+        identifier(block_on(geometry_box_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                num(1.0),
+                num(0.0),
+                num(1.0)
+            ])
+        ))),
         "RunMat:geometry:box:InvalidInput"
     );
     assert_eq!(
-        identifier(block_on(geometry_cylinder_builtin(vec![
-            num(0.01),
-            num(0.02),
-            vector([0.0, 0.0, 0.0]),
-            vector([0.0, 0.0, 0.0]),
-        ]))),
+        identifier(block_on(geometry_cylinder_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                num(0.01),
+                num(0.02),
+                vector([0.0, 0.0, 0.0]),
+                vector([0.0, 0.0, 0.0]),
+            ])
+        ))),
         "RunMat:geometry:cylinder:InvalidInput"
     );
     // Arity.
     assert_eq!(
-        identifier(block_on(geometry_box_builtin(vec![num(1.0), num(1.0)]))),
+        identifier(block_on(geometry_box_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![num(1.0), num(1.0)])
+        ))),
         "RunMat:geometry:box:InvalidInput"
     );
     assert_eq!(
-        identifier(block_on(geometry_solid_builtin(vec![]))),
+        identifier(block_on(geometry_solid_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![])
+        ))),
         "RunMat:geometry:solid:InvalidInput"
     );
     // Scalar conversion.
     assert_eq!(
-        identifier(block_on(geometry_box_builtin(vec![
-            Value::Bool(true),
-            num(1.0),
-            num(1.0)
-        ]))),
+        identifier(block_on(geometry_box_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Bool(true),
+                num(1.0),
+                num(1.0)
+            ])
+        ))),
         "RunMat:geometry:box:InvalidInput"
     );
     assert_eq!(
-        identifier(block_on(geometry_sphere_builtin(vec![
-            Value::String("r".into()),
-            vector([0.0, 0.0, 0.0]),
-        ]))),
+        identifier(block_on(geometry_sphere_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("r".into()),
+                vector([0.0, 0.0, 0.0]),
+            ])
+        ))),
         "RunMat:geometry:sphere:InvalidInput"
     );
     // Edge selection that names a feature outside the target graph.
-    let other = block_on(geometry_box_builtin(vec![num(2.0), num(2.0), num(2.0)])).unwrap();
-    let edges = block_on(geometry_edges_builtin(vec![other])).unwrap();
+    let other = block_on(geometry_box_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            num(2.0),
+            num(2.0),
+            num(2.0),
+        ]),
+    ))
+    .unwrap();
+    let edges = block_on(geometry_edges_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![other]),
+    ))
+    .unwrap();
     assert_eq!(
-        identifier(block_on(geometry_fillet_builtin(vec![
-            unit_box(),
-            edges,
-            num(0.1)
-        ]))),
+        identifier(block_on(geometry_fillet_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                unit_box(),
+                edges,
+                num(0.1)
+            ])
+        ))),
         "RunMat:geometry:fillet:InvalidInput"
     );
     // Region output that names a feature outside the finished part.
-    let part = block_on(geometry_finish_builtin(vec![unit_box()])).unwrap();
-    let foreign = block_on(geometry_box_builtin(vec![num(3.0), num(3.0), num(3.0)])).unwrap();
-    let foreign = block_on(geometry_solid_builtin(vec![foreign])).unwrap();
+    let part = block_on(geometry_finish_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![unit_box()]),
+    ))
+    .unwrap();
+    let foreign = block_on(geometry_box_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            num(3.0),
+            num(3.0),
+            num(3.0),
+        ]),
+    ))
+    .unwrap();
+    let foreign = block_on(geometry_solid_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![foreign]),
+    ))
+    .unwrap();
     assert_eq!(
-        identifier(block_on(geometry_with_region_builtin(vec![
-            part,
-            Value::String("x".into()),
-            foreign,
-        ]))),
+        identifier(block_on(geometry_with_region_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                part,
+                Value::String("x".into()),
+                foreign,
+            ])
+        ))),
         "RunMat:geometry:withRegion:InvalidInput"
     );
 }
@@ -306,49 +395,63 @@ fn errors_report_the_calling_builtin_identifier() {
 #[test]
 fn integer_scalars_are_admitted_and_integer_vectors_rejected() {
     let integer = |value: i32| Value::Int(IntValue::I32(value));
-    assert!(block_on(geometry_box_builtin(vec![
-        integer(1),
-        integer(2),
-        integer(3)
-    ]))
+    assert!(block_on(geometry_box_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            integer(1),
+            integer(2),
+            integer(3)
+        ])
+    ))
     .is_ok());
     let integer_axis =
         Value::Tensor(Tensor::new_integer(IntegerStorage::I32(vec![0, 0, 1]), vec![1, 3]).unwrap());
     assert_eq!(
-        identifier(block_on(geometry_cylinder_builtin(vec![
-            num(0.01),
-            num(0.02),
-            integer_axis,
-            vector([0.0, 0.0, 0.0]),
-        ]))),
+        identifier(block_on(geometry_cylinder_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                num(0.01),
+                num(0.02),
+                integer_axis,
+                vector([0.0, 0.0, 0.0]),
+            ])
+        ))),
         "RunMat:geometry:cylinder:InvalidInput"
     );
 }
 
 #[test]
 fn sphere_and_booleans_record_typed_operations() {
-    let ball = block_on(geometry_sphere_builtin(vec![
-        num(0.02),
-        vector([0.0, 0.0, 0.0]),
-    ]))
+    let ball = block_on(geometry_sphere_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            num(0.02),
+            vector([0.0, 0.0, 0.0]),
+        ]),
+    ))
     .unwrap();
     assert!(matches!(
         last_operation(&ball),
         GeometryFeatureOperation::Sphere { .. }
     ));
-    let slab = block_on(geometry_cylinder_builtin(vec![
-        num(0.02),
-        num(0.02),
-        vector([0.0, 0.0, 1.0]),
-        vector([0.0, 0.0, 0.0]),
-    ]))
+    let slab = block_on(geometry_cylinder_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            num(0.02),
+            num(0.02),
+            vector([0.0, 0.0, 1.0]),
+            vector([0.0, 0.0, 0.0]),
+        ]),
+    ))
     .unwrap();
-    let dome = block_on(geometry_intersect_builtin(vec![ball.clone(), slab.clone()])).unwrap();
+    let dome = block_on(geometry_intersect_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![ball.clone(), slab.clone()]),
+    ))
+    .unwrap();
     let GeometryFeatureOperation::Intersect { operands } = last_operation(&dome) else {
         panic!("expected intersect");
     };
     assert_eq!(operands.len(), 2);
-    let fused = block_on(geometry_union_builtin(vec![ball.clone(), slab, ball])).unwrap();
+    let fused = block_on(geometry_union_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![ball.clone(), slab, ball]),
+    ))
+    .unwrap();
     let GeometryFeatureOperation::Union { operands } = last_operation(&fused) else {
         panic!("expected union");
     };
@@ -359,7 +462,9 @@ fn sphere_and_booleans_record_typed_operations() {
         3
     );
     assert_eq!(
-        identifier(block_on(geometry_union_builtin(vec![unit_box()]))),
+        identifier(block_on(geometry_union_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![unit_box()])
+        ))),
         "RunMat:geometry:union:InvalidInput"
     );
 }
@@ -369,17 +474,26 @@ fn face_and_edge_selections_carry_role_cardinality_and_lineage() {
     let stock = unit_box();
     for (value, role, introduced) in [
         (
-            block_on(geometry_faces_builtin(vec![stock.clone()])).unwrap(),
+            block_on(geometry_faces_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![stock.clone()]),
+            ))
+            .unwrap(),
             GeometryRegionRole::Face,
             false,
         ),
         (
-            block_on(geometry_edges_builtin(vec![stock.clone()])).unwrap(),
+            block_on(geometry_edges_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![stock.clone()]),
+            ))
+            .unwrap(),
             GeometryRegionRole::Edge,
             false,
         ),
         (
-            block_on(geometry_edges_introduced_by_builtin(vec![stock.clone()])).unwrap(),
+            block_on(geometry_edges_introduced_by_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![stock.clone()]),
+            ))
+            .unwrap(),
             GeometryRegionRole::Edge,
             true,
         ),
@@ -399,43 +513,66 @@ fn face_and_edge_selections_carry_role_cardinality_and_lineage() {
 #[test]
 fn full_feature_builder_surface_preserves_typed_dependencies_and_selections() {
     let stock = unit_box();
-    let profile = block_on(geometry_box_builtin(vec![num(0.25), num(0.25), num(0.1)])).unwrap();
-    let extruded = block_on(geometry_extrude_builtin(vec![
-        profile.clone(),
-        num(0.5),
-        vector([0.0, 0.0, 1.0]),
-    ]))
+    let profile = block_on(geometry_box_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            num(0.25),
+            num(0.25),
+            num(0.1),
+        ]),
+    ))
     .unwrap();
-    let revolved = block_on(geometry_revolve_builtin(vec![
-        profile.clone(),
-        vector([0.0, 1.0, 0.0]),
-        vector([-1.0, 0.0, 0.0]),
-        num(std::f64::consts::PI),
-    ]))
+    let extruded = block_on(geometry_extrude_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            profile.clone(),
+            num(0.5),
+            vector([0.0, 0.0, 1.0]),
+        ]),
+    ))
     .unwrap();
-    let holed = block_on(geometry_hole_builtin(vec![
-        stock.clone(),
-        num(0.1),
-        num(1.0),
-        vector([0.0, 0.0, 1.0]),
-        vector([0.5, 0.5, 0.0]),
-    ]))
+    let revolved = block_on(geometry_revolve_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            profile.clone(),
+            vector([0.0, 1.0, 0.0]),
+            vector([-1.0, 0.0, 0.0]),
+            num(std::f64::consts::PI),
+        ]),
+    ))
     .unwrap();
-    let pocketed = block_on(geometry_pocket_builtin(vec![
-        stock.clone(),
-        profile,
-        num(0.1),
-        vector([0.0, 0.0, 1.0]),
-    ]))
+    let holed = block_on(geometry_hole_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            stock.clone(),
+            num(0.1),
+            num(1.0),
+            vector([0.0, 0.0, 1.0]),
+            vector([0.5, 0.5, 0.0]),
+        ]),
+    ))
     .unwrap();
-    let edges = block_on(geometry_edges_builtin(vec![stock.clone()])).unwrap();
-    let filleted = block_on(geometry_fillet_builtin(vec![
-        stock.clone(),
-        edges.clone(),
-        num(0.05),
-    ]))
+    let pocketed = block_on(geometry_pocket_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            stock.clone(),
+            profile,
+            num(0.1),
+            vector([0.0, 0.0, 1.0]),
+        ]),
+    ))
     .unwrap();
-    let chamfered = block_on(geometry_chamfer_builtin(vec![stock, edges, num(0.05)])).unwrap();
+    let edges = block_on(geometry_edges_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![stock.clone()]),
+    ))
+    .unwrap();
+    let filleted = block_on(geometry_fillet_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            stock.clone(),
+            edges.clone(),
+            num(0.05),
+        ]),
+    ))
+    .unwrap();
+    let chamfered = block_on(geometry_chamfer_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![stock, edges, num(0.05)]),
+    ))
+    .unwrap();
 
     for (value, expected) in [
         (extruded, "extrude"),

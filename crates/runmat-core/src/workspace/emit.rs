@@ -52,7 +52,7 @@ pub(crate) fn format_type_info(value: &Value) -> String {
             }
         }
         Value::CharArray(ca) => {
-            if ca.data.len() == 1 {
+            if ca.data().len() == 1 {
                 "char".to_string()
             } else {
                 format!(
@@ -104,10 +104,10 @@ pub(crate) fn format_type_info(value: &Value) -> String {
             }
         }
         Value::Cell(cells) => {
-            if cells.data.len() == 1 {
+            if cells.data().len() == 1 {
                 "1x1 cell".to_string()
             } else {
-                format!("{}x1 cell array", cells.data.len())
+                format!("{}x1 cell array", cells.data().len())
             }
         }
         Value::Struct(_) => "scalar struct".to_string(),
@@ -327,9 +327,9 @@ mod tests {
     use runmat_value::{StructArray, StructValue, SymbolicArray, SymbolicExpr};
 
     fn structure(payload: f64) -> StructValue {
-        let mut value = StructValue::new();
+        let mut value = runmat_value::UnboundedStructValueBuilder::with_capacity(1);
         value.insert("payload", Value::Num(payload));
-        value
+        value.finish()
     }
 
     #[test]

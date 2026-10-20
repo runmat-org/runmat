@@ -137,7 +137,7 @@ pub(super) fn abs_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
 
 pub(super) fn abs_char_array(ca: CharArray) -> BuiltinResult<Value> {
     let data = ca
-        .data
+        .data()
         .iter()
         .map(|&ch| ch as u32 as f64)
         .collect::<Vec<_>>();

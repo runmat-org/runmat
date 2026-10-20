@@ -198,7 +198,7 @@ fn properties(names: &[&str]) -> HashMap<runmat_types::MemberName, RuntimeProper
                     is_dependent: false,
                     get_access: MemberAccess::Public,
                     set_access: MemberAccess::Private,
-                    default_value: Some(Value::String(String::new())),
+                    default_value: Some(Value::string(String::new())),
                 },
             )
         })

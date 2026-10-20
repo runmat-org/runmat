@@ -246,8 +246,14 @@ mod tests {
 
     use super::validate_accelerator_allocation;
 
-    fn accelerator(class: &str, minimum_allocation_bytes: u64) -> AcceleratorRequest {
-        crate::test_fixtures::accelerator_request(class, minimum_allocation_bytes)
+    fn accelerator(class: &str, memory_bytes_each: u64) -> AcceleratorRequest {
+        AcceleratorRequest {
+            class: runmat_execution::resource::AcceleratorClass::new(class).unwrap(),
+            count: 1,
+            minimum_allocation_bytes: memory_bytes_each,
+            provider: None,
+            required_features: Default::default(),
+        }
     }
 
     #[test]

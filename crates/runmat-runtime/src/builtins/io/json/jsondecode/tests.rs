@@ -127,7 +127,7 @@ fn jsondecode_string_array() {
             assert_eq!(array.rows, 1);
             assert_eq!(array.cols, 3);
             assert_eq!(
-                array.data,
+                array.data(),
                 vec![
                     String::from("alpha"),
                     String::from("beta"),
@@ -194,7 +194,10 @@ fn jsondecode_array_of_objects_returns_typed_column_vector() {
     };
     assert_eq!(array.shape(), [2, 1]);
     assert_eq!(
-        array.field_names().cloned().collect::<Vec<_>>(),
+        array
+            .field_names()
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>(),
         ["id", "name"]
     );
     assert_eq!(
@@ -274,10 +277,7 @@ fn jsondecode_heterogeneous_object_fields_remain_a_cell() {
         panic!("expected cell array");
     };
     assert_eq!(cell.shape, [2, 1]);
-    assert!(matches!(
-        cell.data.as_slice(),
-        [Value::Struct(_), Value::Struct(_)]
-    ));
+    assert!(matches!(cell.data(), [Value::Struct(_), Value::Struct(_)]));
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -294,7 +294,7 @@ fn json_object_array_schema_uses_deterministic_canonical_key_order() {
     };
     assert_eq!(array.shape(), [2, 1, 1]);
     assert_eq!(
-        array.field_names().map(String::as_str).collect::<Vec<_>>(),
+        array.field_names().collect::<Vec<_>>(),
         ["alpha", "zeta", "ä"]
     );
 }
@@ -335,8 +335,10 @@ fn jsondecode_rejects_multirow_char_input() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn jsondecode_accepts_string_input() {
-    let result =
-        block_on(jsondecode_builtin(Value::String("[1,2]".to_string()))).expect("jsondecode");
+    let result = block_on(jsondecode_builtin(Value::String(
+        "[1,2]".to_string().into(),
+    )))
+    .expect("jsondecode");
     match result {
         Value::Tensor(tensor) => {
             assert_eq!(tensor.shape(), &[2]);

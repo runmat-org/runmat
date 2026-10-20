@@ -89,7 +89,7 @@ impl RuntimeExecutionServices for PendingWriterService {
 
     fn claim_next_task_result(
         &self,
-        _: &[TaskHandle],
+        _: &[runmat_value::SharedTaskHandle],
     ) -> Result<TaskResultClaim, ExecutionServiceError> {
         Err(ExecutionServiceError::UnknownHandle)
     }
@@ -104,7 +104,7 @@ impl RuntimeExecutionServices for PendingWriterService {
 
     fn complete_future(
         &self,
-        _: &FutureHandle,
+        _: crate::execution::FutureCompletionRef<'_>,
         _: Result<RootedValueSequence, ExecutionServiceError>,
     ) -> Result<(), ExecutionServiceError> {
         Err(ExecutionServiceError::UnknownHandle)
@@ -139,7 +139,7 @@ fn actual_csvwrite_future_abandons_during_writer_without_publication() {
         Some(runtime),
         Value::from("partial.csv"),
         Value::Num(1.0),
-        vec![],
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
     ));
     let waker = futures::task::noop_waker();
     assert!(matches!(
@@ -154,7 +154,7 @@ fn actual_csvwrite_future_abandons_during_writer_without_publication() {
         None,
         Value::from("partial.csv"),
         Value::Num(9.0),
-        vec![],
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
     ))
     .expect("subsequent write retains selected owner");
     assert!(matches!(returned, Value::Num(2.0)));

@@ -253,16 +253,16 @@ pub fn spec_from_request(filter: &FspecialFilter) -> FspecialFilterSpec {
 async fn fspecial_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     kind: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
-    ensure_fspecial_extensions_enabled(&kind, &rest)?;
+    ensure_fspecial_extensions_enabled(&kind, rest.view())?;
     if should_materialize_on_gpu() {
         crate::compatibility::ensure_builtin_extension_enabled(
             &FSPECIAL_RESIDENT_OUTPUT_EXTENSION,
             NAME,
         )?;
     }
-    let spec = build_filter_spec(&kind, &rest)?;
+    let spec = build_filter_spec(&kind, rest.view())?;
     let materialize_on_gpu = should_materialize_on_gpu();
     let mut selected = placement::select(runtime.as_ref(), &spec, materialize_on_gpu)?;
     let tensor = spec.generate_tensor()?;
@@ -308,7 +308,10 @@ async fn fspecial_builtin(
     result
 }
 
-fn ensure_fspecial_extensions_enabled(kind: &Value, rest: &[Value]) -> BuiltinResult<()> {
+fn ensure_fspecial_extensions_enabled(
+    kind: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     let filter_kind = parse_filter_kind(kind)?;
     if matches!(filter_kind, FilterKind::Unsharp) {
         crate::compatibility::ensure_builtin_extension_enabled(&FSPECIAL_UNSHARP_EXTENSION, NAME)?;
@@ -346,7 +349,10 @@ fn is_nondouble_numeric_value(value: &Value) -> bool {
     ) || matches!(value, Value::Tensor(tensor) if tensor.numeric_dtype() != NumericDType::F64)
 }
 
-fn build_filter_spec(kind: &Value, rest: &[Value]) -> BuiltinResult<FspecialFilterSpec> {
+fn build_filter_spec(
+    kind: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<FspecialFilterSpec> {
     let filter_kind = parse_filter_kind(kind)?;
     match filter_kind {
         FilterKind::Average => {

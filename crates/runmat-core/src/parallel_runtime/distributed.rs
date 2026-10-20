@@ -156,7 +156,7 @@ impl RuntimeDistributedService for CoreDistributedService {
 
     fn inspect(
         &self,
-        handle: DistributedValueHandle,
+        handle: runmat_value::SharedDistributedHandle,
     ) -> RuntimeServiceFuture<Result<RuntimeDistributedSnapshot, RuntimeError>> {
         let result = self
             .store
@@ -169,7 +169,7 @@ impl RuntimeDistributedService for CoreDistributedService {
 
     fn export_local(
         &self,
-        handle: DistributedValueHandle,
+        handle: runmat_value::SharedDistributedHandle,
         rank: LabRank,
     ) -> RuntimeServiceFuture<Result<runmat_execution::DistributedShardSnapshot, RuntimeError>>
     {
@@ -183,7 +183,7 @@ impl RuntimeDistributedService for CoreDistributedService {
 
     fn local_part(
         &self,
-        handle: DistributedValueHandle,
+        handle: runmat_value::SharedDistributedHandle,
         rank: LabRank,
     ) -> RuntimeServiceFuture<Result<runmat_runtime::execution::RootedValue, RuntimeError>> {
         let result = self
@@ -200,7 +200,7 @@ impl RuntimeDistributedService for CoreDistributedService {
 
     fn materialize(
         &self,
-        handle: DistributedValueHandle,
+        handle: runmat_value::SharedDistributedHandle,
     ) -> RuntimeServiceFuture<Result<runmat_runtime::execution::RootedValue, RuntimeError>> {
         let parts = self.store.borrow().cloned_parts(&handle).map_err(error);
         Box::pin(materialize(handle, parts))
@@ -208,7 +208,7 @@ impl RuntimeDistributedService for CoreDistributedService {
 
     fn redistribute(
         &self,
-        handle: DistributedValueHandle,
+        handle: runmat_value::SharedDistributedHandle,
         scheme: DistributionScheme,
     ) -> RuntimeServiceFuture<Result<DistributedValueHandle, RuntimeError>> {
         let parts = self.store.borrow().cloned_parts(&handle).map_err(error);
@@ -224,7 +224,7 @@ impl RuntimeDistributedService for CoreDistributedService {
                 generation,
                 DistributedValueContract {
                     id: handle.contract,
-                    value: handle.value,
+                    value: handle.value.clone(),
                     construction: runmat_types::DistributedConstruction::Fixed {
                         scheme: scheme.clone(),
                     },
@@ -234,7 +234,7 @@ impl RuntimeDistributedService for CoreDistributedService {
                 },
                 input,
                 scheme,
-                handle.pool,
+                handle.pool.clone(),
                 handle.partition_count.0,
             )
             .await
@@ -410,7 +410,7 @@ impl RuntimeDistributedService for CoreDistributedService {
                         .insert_local_coordinated(handle.clone(), layouts.clone(), output)
                         .map_err(error)?;
                 }
-                values.push(Value::Distributed(Box::new(handle)));
+                values.push(Value::Distributed(handle.into()));
             }
             runmat_value::ValueSequence::comma_separated(values)
                 .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
@@ -419,7 +419,7 @@ impl RuntimeDistributedService for CoreDistributedService {
 
     fn composite_entry(
         &self,
-        handle: runmat_execution::CompositeHandle,
+        handle: runmat_value::SharedCompositeHandle,
         rank: LabRank,
     ) -> RuntimeServiceFuture<Result<Option<runmat_runtime::execution::RootedValue>, RuntimeError>>
     {
@@ -594,7 +594,7 @@ fn invoke_scalar_like_prototype(
                     .map_err(error)?;
             }
         }
-        Ok(Value::Distributed(Box::new(handle)))
+        Ok(Value::Distributed(handle.into()))
     })
 }
 
@@ -766,7 +766,7 @@ async fn build_worker_value(
 }
 
 async fn materialize(
-    handle: DistributedValueHandle,
+    handle: runmat_value::SharedDistributedHandle,
     parts: Result<Vec<OwnedPartition>, RuntimeError>,
 ) -> Result<runmat_runtime::execution::RootedValue, RuntimeError> {
     if !handle.materializable {

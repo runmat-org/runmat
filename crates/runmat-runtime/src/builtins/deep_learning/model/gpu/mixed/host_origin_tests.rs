@@ -1,9 +1,8 @@
 use super::{host_origin, HostNetworkPlan};
+use crate::builtins::deep_learning::arguments::DeepLearningObjectEdit as _;
+use crate::builtins::deep_learning::tests::fully_connected_layer_builtin;
 use crate::builtins::deep_learning::{
-    layers::{
-        feature_input_layer_builtin, fully_connected_layer_builtin,
-        layer_normalization_layer_builtin, relu_layer_builtin,
-    },
+    layers::{feature_input_layer_builtin, layer_normalization_layer_builtin, relu_layer_builtin},
     model::dlnetwork_builtin,
 };
 use futures::executor::block_on;
@@ -79,9 +78,19 @@ impl AccelProvider for AdmissionProbe {
 }
 
 fn network() -> crate::execution::RootedValue {
-    let input = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
-    let normalization = block_on(layer_normalization_layer_builtin(vec![])).unwrap();
-    let relu = block_on(relu_layer_builtin(vec![])).unwrap();
+    let input = block_on(feature_input_layer_builtin(
+        Value::Num(2.0),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap();
+    let normalization = block_on(layer_normalization_layer_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap();
+    let relu = block_on(relu_layer_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap();
     block_on(dlnetwork_builtin(vec![Value::Cell(
         CellArray::new(vec![input, normalization, relu], 3, 1).unwrap(),
     )]))
@@ -89,8 +98,13 @@ fn network() -> crate::execution::RootedValue {
 }
 
 fn dense_relu_network() -> crate::execution::RootedValue {
-    let input = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
+    let input = block_on(feature_input_layer_builtin(
+        Value::Num(2.0),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap();
     let dense = block_on(fully_connected_layer_builtin(
+        None,
         Value::Num(1.0),
         vec![
             Value::String("Weights".into()),
@@ -100,7 +114,10 @@ fn dense_relu_network() -> crate::execution::RootedValue {
         ],
     ))
     .unwrap();
-    let relu = block_on(relu_layer_builtin(vec![])).unwrap();
+    let relu = block_on(relu_layer_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap();
     block_on(dlnetwork_builtin(vec![Value::Cell(
         CellArray::new(vec![input, dense, relu], 3, 1).unwrap(),
     )]))
@@ -116,38 +133,46 @@ fn network_object(owner: &crate::execution::RootedValue) -> &runmat_value::Objec
 
 fn with_explicit_weights(network: &mut runmat_value::ObjectInstance, weights: GpuTensorHandle) {
     use crate::builtins::deep_learning::model::parameters::ParameterRole;
-    let Value::Cell(layers) = network.properties.get_mut("Layers").unwrap() else {
+    let Value::Cell(layers) = network.fixture_dl_property_mut("Layers").unwrap() else {
         panic!("network must retain Layers")
     };
-    let Value::Object(dense) = &mut layers.data[1] else {
+    let Value::Object(dense) =
+        &mut crate::builtins::deep_learning::tests::fixture_array_mut(layers)[1]
+    else {
         panic!("second layer must be fully connected")
     };
-    dense.properties.insert(
-        ParameterRole::Weights.name().into(),
-        Value::GpuTensor(
-            weights
-                .with_provenance(GpuHandleProvenance::Explicit)
-                .unwrap(),
-        ),
-    );
+    dense
+        .replace_dl_property(
+            ParameterRole::Weights.name(),
+            Value::GpuTensor(
+                weights
+                    .with_provenance(GpuHandleProvenance::Explicit)
+                    .unwrap(),
+            ),
+        )
+        .expect("fixture property");
 }
 
 fn with_explicit_scale(network: &mut runmat_value::ObjectInstance, scale: GpuTensorHandle) {
     use crate::builtins::deep_learning::model::parameters::ParameterRole;
-    let Value::Cell(layers) = network.properties.get_mut("Layers").unwrap() else {
+    let Value::Cell(layers) = network.fixture_dl_property_mut("Layers").unwrap() else {
         panic!("network must retain Layers")
     };
-    let Value::Object(normalization) = &mut layers.data[1] else {
+    let Value::Object(normalization) =
+        &mut crate::builtins::deep_learning::tests::fixture_array_mut(layers)[1]
+    else {
         panic!("second layer must be normalization")
     };
-    normalization.properties.insert(
-        ParameterRole::Scale.name().into(),
-        Value::GpuTensor(
-            scale
-                .with_provenance(GpuHandleProvenance::Explicit)
-                .unwrap(),
-        ),
-    );
+    normalization
+        .replace_dl_property(
+            ParameterRole::Scale.name(),
+            Value::GpuTensor(
+                scale
+                    .with_provenance(GpuHandleProvenance::Explicit)
+                    .unwrap(),
+            ),
+        )
+        .expect("fixture property");
 }
 
 #[test]
@@ -532,22 +557,26 @@ fn explicit_resident_parameter_precision_rejects_before_query_or_upload() {
     let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
     let network_owner = network();
     let mut network = network_object(&network_owner).clone();
-    let Value::Cell(layers) = network.properties.get_mut("Layers").unwrap() else {
+    let Value::Cell(layers) = network.fixture_dl_property_mut("Layers").unwrap() else {
         panic!("network must retain Layers")
     };
-    let Value::Object(normalization) = &mut layers.data[1] else {
+    let Value::Object(normalization) =
+        &mut crate::builtins::deep_learning::tests::fixture_array_mut(layers)[1]
+    else {
         panic!("second layer must be normalization")
     };
-    normalization.properties.insert(
-        ParameterRole::Scale.name().into(),
-        Value::GpuTensor(
-            scale
-                .handle
-                .clone()
-                .with_provenance(GpuHandleProvenance::Explicit)
-                .unwrap(),
-        ),
-    );
+    normalization
+        .replace_dl_property(
+            ParameterRole::Scale.name(),
+            Value::GpuTensor(
+                scale
+                    .handle
+                    .clone()
+                    .with_provenance(GpuHandleProvenance::Explicit)
+                    .unwrap(),
+            ),
+        )
+        .expect("fixture property");
     let input = Value::Tensor(Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap());
     let host = HostNetworkPlan::admit(&network, &input, "forward").unwrap();
     let result = host_origin::admit_host_route(&host, host.output_axes(), provider);

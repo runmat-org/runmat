@@ -5,10 +5,12 @@ mod core;
 mod regex;
 mod search;
 mod transform;
+mod text_analytics;
 
 pub use self::core::*;
 pub use self::regex::*;
 pub use self::search::*;
+pub use self::text_analytics::*;
 pub use self::transform::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
@@ -16,4 +18,5 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     regex::extend_entries(values);
     search::extend_entries(values);
     transform::extend_entries(values);
+    text_analytics::extend_entries(values);
 }

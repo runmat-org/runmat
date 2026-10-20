@@ -4,20 +4,27 @@ mod callable;
 mod display;
 mod exception;
 mod foreign;
+mod immutable_metadata;
+mod execution_metadata;
 mod numeric;
 mod numeric_spacing;
 mod object;
-mod output_list_storage;
+mod exact_array_storage;
+mod exact_ordered_map;
 mod sequence;
 mod shared_value_generation;
+mod shared_class_identity;
 pub mod symbolic;
 mod trace;
 mod transient;
+mod utf8_text;
 mod value;
 
 pub use aggregate::{
-    CellArray, StructArray, StructArrayAdmission, StructArrayOperand, StructElementRef,
-    StructFieldsRef, StructValue, ValidatedStructArrayParts,
+    CellArray, StructArray, StructArrayAdmission, StructArrayBuilder, StructArrayConstructionError,
+    StructArrayFieldError, StructArrayOperand, StructArrayQuote, StructElementRef,
+    StructFieldInsertError, StructFieldsRef, StructValue, StructValueBuilder,
+    UnboundedStructArrayBuilder, UnboundedStructValueBuilder, ValidatedStructArrayParts,
 };
 pub use array::{
     exact_capacity_vec, exact_capacity_vec_from_slice, exact_capacity_vec_with, host_copy_metrics,
@@ -25,26 +32,45 @@ pub use array::{
     ComplexTensor, ComplexTensorAdmission, ExactHostAllocationClaim, ExactHostAllocationPermit,
     ExactHostAllocationReservation, ExactHostComplexTensorAllocation,
     ExactHostIntegerComplexTensorAllocation, ExactHostLogicalTensorAllocation,
-    ExactHostNumericAllocation, ExactHostNumericAllocationError, ExactHostTensor2dAllocation,
-    ExactHostTensorAllocation, HostAllocationProvenance, HostAllocationRelease, HostComplexBuffer,
-    HostCopyMetrics, HostCopyReason, HostIndexBuffer, HostLogicalBuffer, HostNumericBuffer,
-    HostShapeInput, IntegerComplexStorage, LogicalArray, NumericTensorAdmission, SharedShape,
-    SharedShapeIntoIter, SparseCscValidation, SparseTensor, StringArray, SymbolicArray, Tensor,
-    ValidatedComplexTensorParts, ValidatedNumericTensorParts, ValidatedSparseCscParts,
+    ExactHostNumericAllocation, ExactHostNumericAllocationError, ExactHostSparseClass,
+    ExactHostSparseTensorAllocation, ExactHostTensor2dAllocation, ExactHostTensorAllocation,
+    HostAllocationProvenance, HostAllocationRelease, HostComplexBuffer, HostCopyMetrics,
+    HostCopyReason, HostIndexBuffer, HostLogicalBuffer, HostNumericBuffer, HostShapeInput,
+    IntegerComplexStorage, LogicalArray, NumericTensorAdmission, PreparedExactSparseTensor,
+    SharedShape, SharedShapeBuilder, SharedShapeIntoIter, SparseCscValidation, SparseTensor,
+    StringArray, SymbolicArray, Tensor, ValidatedComplexTensorParts, ValidatedNumericTensorParts,
+    ValidatedSparseCscParts,
 };
 pub use callable::{
     BoundFunctionAuthority, BoundFunctionBinding, BoundFunctionHandle, BoundFunctionHandleData,
-    CallableInstanceId, CallableInstanceKey, Closure, ClosureData, FunctionDefinitionLease,
-    FunctionDefinitionOwner, LexicalEnvironment, LocalExport, NamedFunctionHandle,
-    SelectedNativeFunctionLease, SelectedReceiverDeclarationKey, SelectedReceiverDeclarationSeal,
-    SelectedStaticSiteBinding, StaticSiteDefinitionLease,
+    CallableInstanceId, CallableInstanceKey, Closure, ClosureData, ClosureHeaderError,
+    FunctionDefinitionLease, FunctionDefinitionOwner, LexicalEnvironment, LocalExport,
+    NamedFunctionHandle, SelectedNativeFunctionLease, SelectedReceiverDeclarationKey,
+    SelectedReceiverDeclarationSeal, SelectedStaticSiteBinding, StaticSiteDefinitionLease,
 };
 pub use display::{
     format_number, get_display_format, select_display_format_owner, set_display_format,
     DisplayFormatOwner, DisplayFormatSelectionGuard, FormatMode,
 };
-pub use exception::{MException, MExceptionParts};
-pub use foreign::{ForeignRef, ForeignResourceKey, ForeignResourceRelease, WeakForeignRef};
+pub use exact_array_storage::{
+    ExactArrayAdoptionError, ExactArrayClaimPromotionError, ExactArrayInitializationError,
+    ExactArrayIntoIter, ExactArrayMutationError, ExactArrayStorage, ExactArrayStorageBuilder,
+    ExactCharIntoIter, OutputListInitializationError, OutputListIntoIter, OutputListStorage,
+    OutputListStorageBuilder, OwnedExactArrayValues, OwnedOutputListValues, RetainedArrayValue,
+    RetainedArrayValueError,
+};
+pub use exact_ordered_map::{
+    ExactOrderedMap, ExactOrderedMapBuilder, ExactOrderedMapQuote, MapInsertError,
+    MapInsertErrorKind, OrderedMapEntry, OwnedOrderedMapEntries, UnboundedOrderedMapBuilder,
+};
+pub use exception::{ExceptionStack, MException, MExceptionParts};
+pub use execution_metadata::{
+    ExecutionMetadataQuoteError, SharedCompositeHandle, SharedDistributedHandle,
+    SharedFutureHandle, SharedJobHandle, SharedTaskHandle,
+};
+pub use foreign::{
+    ForeignRef, ForeignRefData, ForeignResourceKey, ForeignResourceRelease, WeakForeignRef,
+};
 pub use numeric::{
     divide_complex_f32, divide_complex_f64, IntValue, IntegerStorage, NumericDType, NumericScalar,
     NumericStorage, NumericStorageView, NumericStorageViewMut,
@@ -52,27 +78,31 @@ pub use numeric::{
 pub use numeric_spacing::{spacing_f32, spacing_f64};
 pub use object::{
     ContainersMapEntry, ContainersMapKey, ContainersMapKeyType, ContainersMapStorage,
-    ContainersMapValueClass, ContainersMapValueType, DynamicPropertyDef,
-    GraphicsCallbackDisposition, GraphicsCallbackHostFailure, GraphicsCallbackIngressFailure,
-    GraphicsCallbackKind, GraphicsCallbackResult, GraphicsCallbackRolePayload,
-    GraphicsReceiverKind, GraphicsReceiverRef, GraphicsSceneLease, HandleRef, Listener,
-    MemmapElementType, MemmapFieldState, MemmapFormatPresentationState, MemmapReceiverAuthority,
-    MemmapReceiverState, ObjectArray, ObjectArrayAdmission, ObjectInstance,
-    ObjectPersistencePayloadKind, SelectedObjectClassFacts, SelectedObjectMethod,
-    SelectedReceiverClassDeclaration, SelectedReceiverDeclarations,
-    SelectedReceiverMethodDeclaration, SelectedReceiverPropertyDeclaration,
-    ValidatedObjectArrayParts,
-};
-pub use output_list_storage::{
-    OutputListInitializationError, OutputListIntoIter, OutputListStorage, OwnedOutputListValues,
+    ContainersMapValueClass, ContainersMapValueType, DynamicPropertyAdmissionError,
+    DynamicPropertyDef, ExactObjectBuilder, ExactObjectQuote, GraphicsCallbackDisposition,
+    GraphicsCallbackHostFailure, GraphicsCallbackIngressFailure, GraphicsCallbackKind,
+    GraphicsCallbackResult, GraphicsCallbackRolePayload, GraphicsReceiverKind, GraphicsReceiverRef,
+    GraphicsSceneLease, HandleRef, Listener, MemmapElementType, MemmapFieldState,
+    MemmapFormatPresentationState, MemmapReceiverAuthority, MemmapReceiverState, ObjectArray,
+    ObjectArrayAdmission, ObjectArrayBuildError, ObjectArrayBuilder, ObjectArrayElementError,
+    ObjectArrayQuote, ObjectClassPreparationError, ObjectEditInput, ObjectEditPreparationError,
+    ObjectInstance, ObjectPersistencePayloadKind, PreparedObjectClassName,
+    SelectedObjectClassFacts, SelectedObjectMethod, SelectedReceiverClassDeclaration,
+    SelectedReceiverDeclarations, SelectedReceiverMethodDeclaration,
+    SelectedReceiverPropertyDeclaration, UnboundedObjectBuilder, ValidatedObjectArrayParts,
 };
 pub use runmat_types::{ForeignAffinity, ForeignLifetime, ForeignOwnership, ForeignTypeIdentity};
 pub use sequence::{
     validate_output_count, ValueSequence, ValueSequenceError, ValueSequenceKind,
     MAX_VALUE_SEQUENCE_OUTPUTS,
 };
-pub use shared_value_generation::SharedValueGeneration;
-pub use symbolic::{SymbolicExpr, SymbolicFunction};
+pub use shared_class_identity::{SharedClassIdentity, SharedClassIdentityAdmissionError};
+pub use shared_value_generation::{
+    CallableGenerationInput, CallableGenerationPrepareError, CallableGenerationQuote,
+    SharedValueGeneration,
+};
+pub use symbolic::{SymbolicExpr, SymbolicFunction, SymbolicList};
 pub use trace::ValueTraceWorkspace;
 pub use transient::{validate_no_transient_sequence, TransientValueError};
+pub use utf8_text::{Utf8Text, Utf8TextAdmissionError, Utf8TextExactCopy};
 pub use value::Value;

@@ -3,10 +3,12 @@ use futures::executor::block_on;
 
 #[test]
 fn bitwise_uint32_scalars_preserve_uint32() {
-    let out = block_on(bitor_builtin(vec![
-        Value::Int(IntValue::U32(0b0101)),
-        Value::Int(IntValue::U32(0b0011)),
-    ]))
+    let out = block_on(bitor_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Int(IntValue::U32(0b0101)),
+            Value::Int(IntValue::U32(0b0011)),
+        ]),
+    ))
     .expect("bitor");
     assert_eq!(out, Value::Int(IntValue::U32(0b0111)));
 }
@@ -15,10 +17,12 @@ fn bitwise_uint32_scalars_preserve_uint32() {
 fn bitand_broadcasts_tensor_and_scalar() {
     let tensor =
         Tensor::new_with_dtype(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], NumericDType::U32).unwrap();
-    let out = block_on(bitand_builtin(vec![
-        Value::Tensor(tensor),
-        Value::Int(IntValue::U32(1)),
-    ]))
+    let out = block_on(bitand_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Tensor(tensor),
+            Value::Int(IntValue::U32(1)),
+        ]),
+    ))
     .expect("bitand");
     match out {
         Value::Tensor(t) => {
@@ -36,10 +40,12 @@ fn bitand_broadcasts_tensor_and_scalar() {
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn logical_rank_one_input_uses_canonical_broadcast_shape_and_raw_logical_output() {
     let input = LogicalArray::new(vec![1, 0], vec![2]).expect("rank-one logical");
-    let Value::LogicalArray(output) = block_on(bitand_builtin(vec![
-        Value::LogicalArray(input),
-        Value::Bool(true),
-    ]))
+    let Value::LogicalArray(output) = block_on(bitand_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::LogicalArray(input),
+            Value::Bool(true),
+        ]),
+    ))
     .expect("logical bitand") else {
         panic!("expected logical array");
     };
@@ -66,22 +72,26 @@ fn binary_bitwise_sparse_operands_preserve_or_materialize_by_zero_semantics() {
     )
     .expect("right sparse");
 
-    let Value::SparseTensor(and) = block_on(bitand_builtin(vec![
-        Value::SparseTensor(left.clone()),
-        Value::SparseTensor(right.clone()),
-        Value::String("uint8".to_string()),
-    ]))
+    let Value::SparseTensor(and) = block_on(bitand_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::SparseTensor(left.clone()),
+            Value::SparseTensor(right.clone()),
+            Value::String("uint8".to_string().into()),
+        ]),
+    ))
     .expect("sparse bitand") else {
         panic!("bitand of sparse operands preserves CSC storage");
     };
     assert_eq!(and.get(0, 0), Some(2.0));
     assert_eq!(and.nnz(), 1);
 
-    let Value::SparseTensor(or) = block_on(bitor_builtin(vec![
-        Value::SparseTensor(left.clone()),
-        Value::SparseTensor(right),
-        Value::String("uint8".to_string()),
-    ]))
+    let Value::SparseTensor(or) = block_on(bitor_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::SparseTensor(left.clone()),
+            Value::SparseTensor(right),
+            Value::String("uint8".to_string().into()),
+        ]),
+    ))
     .expect("sparse bitor") else {
         panic!("bitor of sparse operands preserves CSC storage");
     };
@@ -89,11 +99,13 @@ fn binary_bitwise_sparse_operands_preserve_or_materialize_by_zero_semantics() {
     assert_eq!(or.get(1, 1), Some(10.0));
     assert_eq!(or.nnz(), 3);
 
-    let Value::Tensor(xor) = block_on(bitxor_builtin(vec![
-        Value::SparseTensor(left),
-        Value::Num(1.0),
-        Value::String("uint8".to_string()),
-    ]))
+    let Value::Tensor(xor) = block_on(bitxor_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::SparseTensor(left),
+            Value::Num(1.0),
+            Value::String("uint8".to_string().into()),
+        ]),
+    ))
     .expect("sparse xor nonzero scalar") else {
         panic!("xor with a nonzero scalar materializes implicit zeros");
     };
@@ -115,11 +127,13 @@ fn binary_bitwise_sparse_dense_and_broadcast_forms_use_zero_aware_output_storage
     .expect("sparse");
     let dense =
         Tensor::new(vec![0b0011 as f64, 0.0, 0.0, 0b1111 as f64], vec![2, 2]).expect("dense");
-    let Value::SparseTensor(and) = block_on(bitand_builtin(vec![
-        Value::SparseTensor(sparse.clone()),
-        Value::Tensor(dense),
-        Value::String("uint8".to_string()),
-    ]))
+    let Value::SparseTensor(and) = block_on(bitand_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::SparseTensor(sparse.clone()),
+            Value::Tensor(dense),
+            Value::String("uint8".to_string().into()),
+        ]),
+    ))
     .expect("sparse dense bitand") else {
         panic!("bitand keeps sparse output because zero is annihilating");
     };
@@ -127,11 +141,13 @@ fn binary_bitwise_sparse_dense_and_broadcast_forms_use_zero_aware_output_storage
     assert_eq!(and.get(1, 1), Some(10.0));
     assert_eq!(and.nnz(), 2);
 
-    let Value::Tensor(or) = block_on(bitor_builtin(vec![
-        Value::SparseTensor(sparse),
-        Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![2, 1]).expect("broadcast dense")),
-        Value::String("uint8".to_string()),
-    ]))
+    let Value::Tensor(or) = block_on(bitor_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::SparseTensor(sparse),
+            Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![2, 1]).expect("broadcast dense")),
+            Value::String("uint8".to_string().into()),
+        ]),
+    ))
     .expect("sparse dense bitor") else {
         panic!("bitor materializes when broadcast dense values make implicit zeros nonzero");
     };
@@ -152,25 +168,31 @@ fn binary_bitwise_rejects_runmat_typed_sparse_integer_extension() {
         IntegerStorage::U8(vec![1]),
     )
     .expect("typed sparse");
-    let error = block_on(bitand_builtin(vec![
-        Value::SparseTensor(typed),
-        Value::Num(1.0),
-    ]))
+    let error = block_on(bitand_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::SparseTensor(typed),
+            Value::Num(1.0),
+        ]),
+    ))
     .expect_err("typed sparse is not a MATLAB sparse integer representation");
     assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
 }
 
 #[test]
 fn binary_bitwise_rejects_mixed_integer_classes() {
-    let forward = block_on(bitor_builtin(vec![
-        Value::Int(IntValue::U8(1)),
-        Value::Int(IntValue::U32(256)),
-    ]))
+    let forward = block_on(bitor_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Int(IntValue::U8(1)),
+            Value::Int(IntValue::U32(256)),
+        ]),
+    ))
     .expect_err("mixed integer classes must fail");
-    let reverse = block_on(bitor_builtin(vec![
-        Value::Int(IntValue::U32(256)),
-        Value::Int(IntValue::U8(1)),
-    ]))
+    let reverse = block_on(bitor_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Int(IntValue::U32(256)),
+            Value::Int(IntValue::U8(1)),
+        ]),
+    ))
     .expect_err("mixed integer classes must fail");
 
     assert_eq!(forward.identifier(), ERROR_INVALID_INPUT.identifier);
@@ -206,15 +228,22 @@ fn bitwise_preserves_all_native_integer_scalar_classes() {
         ),
     ];
     for (left, right, expected) in cases {
-        let actual =
-            block_on(bitand_builtin(vec![Value::Int(left), Value::Int(right)])).expect("bitand");
+        let actual = block_on(bitand_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Int(left),
+                Value::Int(right),
+            ]),
+        ))
+        .expect("bitand");
         assert_eq!(actual, Value::Int(expected));
     }
 
-    let high = block_on(bitor_builtin(vec![
-        Value::Int(IntValue::U64(1_u64 << 63)),
-        Value::Int(IntValue::U64(1_u64 << 60)),
-    ]))
+    let high = block_on(bitor_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Int(IntValue::U64(1_u64 << 63)),
+            Value::Int(IntValue::U64(1_u64 << 60)),
+        ]),
+    ))
     .expect("uint64 high-bit bitor");
     assert_eq!(
         high,
@@ -251,8 +280,13 @@ fn bitxor_preserves_all_native_integer_scalar_classes() {
         ),
     ];
     for (left, right, expected) in cases {
-        let actual =
-            block_on(bitxor_builtin(vec![Value::Int(left), Value::Int(right)])).expect("bitxor");
+        let actual = block_on(bitxor_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Int(left),
+                Value::Int(right),
+            ]),
+        ))
+        .expect("bitxor");
         assert_eq!(actual, Value::Int(expected));
     }
 }
@@ -261,10 +295,12 @@ fn bitxor_preserves_all_native_integer_scalar_classes() {
 fn bitxor_broadcasts_exact_uint64_storage_without_losing_high_bits() {
     let left = Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]), vec![1, 2])
         .expect("left");
-    let Value::Tensor(output) = block_on(bitxor_builtin(vec![
-        Value::Tensor(left),
-        Value::Int(IntValue::U64(1_u64 << 60)),
-    ]))
+    let Value::Tensor(output) = block_on(bitxor_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Tensor(left),
+            Value::Int(IntValue::U64(1_u64 << 60)),
+        ]),
+    ))
     .expect("bitxor") else {
         panic!("expected tensor result");
     };
@@ -292,17 +328,21 @@ fn bitxor_follows_binary_integer_class_rules_and_is_registered() {
         Value::Int(IntValue::U8(0b1100))
     );
     assert_eq!(
-        block_on(bitxor_builtin(vec![
-            Value::Int(IntValue::U16(0b1010)),
-            Value::Num(6.0),
-        ]))
+        block_on(bitxor_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Int(IntValue::U16(0b1010)),
+                Value::Num(6.0),
+            ])
+        ))
         .expect("scalar double bitxor"),
         Value::Int(IntValue::U16(0b1100))
     );
-    let error = block_on(bitxor_builtin(vec![
-        Value::Int(IntValue::U8(1)),
-        Value::Int(IntValue::U16(1)),
-    ]))
+    let error = block_on(bitxor_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Int(IntValue::U8(1)),
+            Value::Int(IntValue::U16(1)),
+        ]),
+    ))
     .expect_err("mixed integer classes must fail");
     assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
 }
@@ -313,10 +353,12 @@ fn bitwise_native_integer_arrays_preserve_exact_64_bit_storage() {
         .expect("left");
     let right = Tensor::new_integer(IntegerStorage::U64(vec![1_u64 << 60, u64::MAX]), vec![1, 2])
         .expect("right");
-    let Value::Tensor(output) = block_on(bitand_builtin(vec![
-        Value::Tensor(left),
-        Value::Tensor(right),
-    ]))
+    let Value::Tensor(output) = block_on(bitand_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Tensor(left),
+            Value::Tensor(right),
+        ]),
+    ))
     .expect("bitand") else {
         panic!("expected tensor result");
     };

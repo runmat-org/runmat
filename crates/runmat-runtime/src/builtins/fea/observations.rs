@@ -62,9 +62,12 @@ fn absent_typed_value(builtin: &'static str, class_name: &'static str) -> Builti
     if let Value::Object(object) = &mut value {
         let empty = Tensor::new(Vec::new(), vec![0, 0])
             .map_err(|message| builtin_error(builtin, &ERROR_INTERNAL, message))?;
-        object
-            .properties
-            .insert(VALUE_FIELD[0].to_string(), Value::Tensor(empty));
+        crate::builtins::fea::object_api::replace(
+            builtin,
+            object,
+            VALUE_FIELD[0],
+            Value::Tensor(empty),
+        )?;
     }
     Ok(value)
 }
@@ -76,9 +79,9 @@ fn optional_typed_value<T: DeserializeOwned>(
     value: &Value,
 ) -> BuiltinResult<Option<T>> {
     if let Value::Object(object) = value {
-        if object.class_name.display_name() == class_name
+        if object.class_name().display_name() == class_name
             && object
-                .properties
+                .properties()
                 .get(VALUE_FIELD[0])
                 .is_none_or(|payload| matches!(payload, Value::Tensor(tensor) if tensor.len() == 0))
         {

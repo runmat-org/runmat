@@ -78,7 +78,7 @@ fn erf_error_with_detail(
     binding_variant = "default",
     builtin_path = "crate::builtins::math::elementwise::error_functions::erf"
 )]
-async fn erf_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn erf_builtin(value: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     reject_excess_outputs()?;
     if !rest.is_empty() {
         return Err(erf_error_with_detail(
@@ -230,7 +230,10 @@ pub(crate) mod tests {
     };
 
     fn erf_builtin(value: Value) -> BuiltinResult<Value> {
-        block_on(super::erf_builtin(value, Vec::new()))
+        block_on(super::erf_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
     }
 
     fn approx_eq(got: f64, expected: f64, tol: f64) {

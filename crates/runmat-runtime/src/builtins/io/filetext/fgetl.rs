@@ -73,9 +73,9 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 async fn fgetl_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     fid: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
-    let eval = evaluate_in(runtime.as_ref(), &fid, &rest).await?;
+    let eval = evaluate_in(runtime.as_ref(), &fid, rest.view()).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Value::output_list(Vec::new()));
@@ -110,13 +110,18 @@ impl FgetlEval {
 }
 
 pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FgetlEval> {
-    evaluate_in(None, fid_value, rest).await
+    evaluate_in(
+        None,
+        fid_value,
+        crate::call::FunctionArgumentView::from_slice(rest),
+    )
+    .await
 }
 
 pub async fn evaluate_in(
     runtime: Option<&crate::context::RuntimeContext>,
     fid_value: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<FgetlEval> {
     if !rest.is_empty() {
         return Err(fgetl_error_with_detail(

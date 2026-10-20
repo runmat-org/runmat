@@ -102,15 +102,15 @@ pub(super) struct AdmittedControls {
 }
 
 impl AdmittedControls {
-    pub(super) fn encode(rest: Vec<Value>) -> Self {
+    pub(super) fn encode(rest: crate::call::BuiltinArguments) -> Self {
         Self::admit(EncodingFlavor::Encode, rest)
     }
 
-    pub(super) fn decode(rest: Vec<Value>) -> Self {
+    pub(super) fn decode(rest: crate::call::BuiltinArguments) -> Self {
         Self::admit(EncodingFlavor::Decode, rest)
     }
 
-    fn admit(flavor: EncodingFlavor, rest: Vec<Value>) -> Self {
+    fn admit(flavor: EncodingFlavor, rest: crate::call::BuiltinArguments) -> Self {
         let name = flavor.name();
         let allow_classes = flavor == EncodingFlavor::Encode;
         let contains_explicit_gpu = rest

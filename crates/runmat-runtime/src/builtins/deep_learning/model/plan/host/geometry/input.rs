@@ -35,7 +35,7 @@ impl ChannelPolicy {
     pub(super) fn for_layers(layers: &[Value]) -> Self {
         if layers.iter().skip(1).any(|layer| {
             matches!(layer, Value::Object(object)
-                if K::from_identity(&object.class_name) == Some(K::GlobalAveragePooling1D))
+                if K::from_identity(object.class_name()) == Some(K::GlobalAveragePooling1D))
         }) {
             Self::SingletonForGlobalPooling
         } else {
@@ -53,9 +53,9 @@ pub(super) fn metadata<'a>(
     function: &'static str,
 ) -> BuiltinResult<(&'a [usize], NumericDType, String, InputPayloadKind)> {
     let format = match input {
-        Value::Object(object) if object.class_name.is(DLARRAY_CLASS) => {
-            match object.properties.get("Format") {
-                Some(Value::String(value)) => value.clone(),
+        Value::Object(object) if object.class_name().is(DLARRAY_CLASS) => {
+            match object.properties().get("Format") {
+                Some(Value::String(value)) => value.to_string(),
                 None => String::new(),
                 _ => return Err(fail(function, "dlarray Format must be text")),
             }
@@ -152,7 +152,7 @@ pub(super) fn kind(
     function: &'static str,
 ) -> BuiltinResult<DeepLearningInputKind> {
     let value = first
-        .properties
+        .properties()
         .get(P::InputSize.canonical_name())
         .ok_or_else(|| {
             fail(

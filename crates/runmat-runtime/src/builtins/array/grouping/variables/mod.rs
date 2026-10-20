@@ -5,6 +5,7 @@ mod column;
 mod labels;
 mod numeric;
 mod observations;
+mod retained;
 mod temporal;
 mod text;
 

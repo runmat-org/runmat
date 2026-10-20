@@ -122,7 +122,13 @@ async fn completed_attempt_releases_its_worker_reservation_once_inner() {
         graph_programs: Default::default(),
         graph_cache: Default::default(),
     };
-    reserve_attempt_capacity(&inventory(), &mut state.allocated, &resources, &Default::default()).unwrap();
+    reserve_attempt_capacity(
+        &inventory(),
+        &mut state.allocated,
+        &resources,
+        &Default::default(),
+    )
+    .unwrap();
     let (_finished_sender, finished) = tokio::sync::watch::channel(false);
     state.attempts.insert(
         attempt_id,

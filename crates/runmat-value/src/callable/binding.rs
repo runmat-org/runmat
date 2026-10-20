@@ -197,6 +197,7 @@ pub enum BoundFunctionAuthority {
 /// Runtime owner supplies the actual invocation implementation; Value never
 /// depends on a compiler, executor or runtime context.
 pub trait SelectedNativeFunctionLease: std::fmt::Debug + std::any::Any {
+    fn compiled_function(&self) -> runmat_types::FunctionId;
     fn origin(&self) -> FunctionBindingOrigin;
     fn is_live(&self) -> bool;
     fn as_any(&self) -> &dyn std::any::Any;
@@ -248,18 +249,16 @@ impl BoundFunctionBinding {
     }
 
     pub fn selected_native(
-        function: usize,
+        function: runmat_types::FunctionId,
         lease: std::rc::Rc<dyn SelectedNativeFunctionLease>,
     ) -> Option<Self> {
-        (lease.is_live() && u32::try_from(function).ok() == Some(lease.origin().function.0)).then(
-            || Self {
-                function,
-                authority: BoundFunctionAuthority::SelectedNative {
-                    origin: lease.origin(),
-                    lease,
-                },
+        (lease.is_live() && lease.compiled_function() == function).then(|| Self {
+            function: function.0,
+            authority: BoundFunctionAuthority::SelectedNative {
+                origin: lease.origin(),
+                lease,
             },
-        )
+        })
     }
 }
 
@@ -536,11 +535,15 @@ mod tests {
 
     #[derive(Debug)]
     struct TestSelectedNativeLease {
+        compiled_function: runmat_types::FunctionId,
         origin: FunctionBindingOrigin,
         live: Rc<Cell<bool>>,
     }
 
     impl SelectedNativeFunctionLease for TestSelectedNativeLease {
+        fn compiled_function(&self) -> runmat_types::FunctionId {
+            self.compiled_function
+        }
         fn origin(&self) -> FunctionBindingOrigin {
             self.origin
         }
@@ -562,20 +565,32 @@ mod tests {
         };
         let live = Rc::new(Cell::new(true));
         let lease: Rc<dyn SelectedNativeFunctionLease> = Rc::new(TestSelectedNativeLease {
+            compiled_function: runmat_types::FunctionId(77),
             origin,
             live: Rc::clone(&live),
         });
-        assert!(BoundFunctionBinding::selected_native(8, Rc::clone(&lease)).is_none());
-        let binding = BoundFunctionBinding::selected_native(7, Rc::clone(&lease))
-            .expect("selected target is live and exact");
+        assert!(BoundFunctionBinding::selected_native(
+            runmat_types::FunctionId(7),
+            Rc::clone(&lease)
+        )
+        .is_none());
+        let binding =
+            BoundFunctionBinding::selected_native(runmat_types::FunctionId(77), Rc::clone(&lease))
+                .expect("selected target is live and exact");
         assert!(matches!(
             &binding.authority,
             BoundFunctionAuthority::SelectedNative { .. }
         ));
         assert_eq!(binding.authority.portable_origin(), None);
+        assert_eq!(binding.function, 77);
+        assert!(
+            matches!(&binding.authority, BoundFunctionAuthority::SelectedNative { origin: selected, .. } if *selected == origin)
+        );
         assert_eq!(binding.authority.export_origin(&Weak::new()), None);
         live.set(false);
-        assert!(BoundFunctionBinding::selected_native(7, lease).is_none());
+        assert!(
+            BoundFunctionBinding::selected_native(runmat_types::FunctionId(77), lease).is_none()
+        );
     }
     #[test]
     fn local_authority_expires_and_never_becomes_portable() {

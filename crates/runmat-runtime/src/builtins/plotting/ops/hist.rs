@@ -1276,7 +1276,7 @@ fn parse_hist_normalization(arg: Option<Value>) -> BuiltinResult<HistNormalizati
         None => Ok(HistNormalization::Count),
         Some(Value::String(s)) => parse_norm_string(&s),
         Some(Value::CharArray(chars)) => {
-            let text: String = chars.data.iter().collect();
+            let text: String = chars.data().iter().collect();
             parse_norm_string(&text)
         }
         Some(value) => {
@@ -1304,8 +1304,8 @@ fn parse_norm_string(text: &str) -> BuiltinResult<HistNormalization> {
 
 fn value_as_string(value: &Value) -> Option<String> {
     match value {
-        Value::String(s) => Some(s.clone()),
-        Value::CharArray(chars) => Some(chars.data.iter().collect()),
+        Value::String(s) => Some(s.as_str().to_owned()),
+        Value::CharArray(chars) => Some(chars.data().iter().collect()),
         _ => None,
     }
 }

@@ -15,11 +15,11 @@ pub(super) mod initial_fields;
 #[test]
 fn typed_study_root_binds_bounded_accelerators_to_the_planned_backend() {
     let request = runmat_execution::resource::AcceleratorRequest {
-        class: crate::test_fixtures::accelerator_class("gpu.test"),
+        class: runmat_execution::resource::AcceleratorClass::new("gpu.test").unwrap(),
         count: 1,
         minimum_allocation_bytes: 1024,
-            provider: None,
-            required_features: Default::default(),
+        provider: None,
+        required_features: Default::default(),
     };
     assert!(validate_accelerator_requests(
         runmat_analysis_fea::ComputeBackend::Cpu,

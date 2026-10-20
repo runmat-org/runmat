@@ -43,14 +43,17 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::array::introspection::size"
 )]
-async fn size_builtin(value: Value, selectors: Vec<Value>) -> BuiltinResult<Value> {
+async fn size_builtin(
+    value: Value,
+    selectors: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     let dimensions = VisibleDimensions::from_value(&value)
         .await
         .map_err(|detail| descriptor_error(&runmat_builtins::SIZE_ERROR_INTERNAL, detail))?;
     if selectors.is_empty() {
         return unselected_size(&dimensions);
     }
-    let selectors = parse_dimension_arguments(&selectors, EmptySelectorPolicy::Allow)
+    let selectors = parse_dimension_arguments(selectors.view(), EmptySelectorPolicy::Allow)
         .map_err(selector_error)?;
     let values = selectors
         .values()
@@ -160,6 +163,9 @@ mod tests {
     use runmat_value::{CellArray, IntegerStorage, Tensor};
 
     fn call(value: Value, selectors: Vec<Value>) -> BuiltinResult<Value> {
+        let selectors = crate::execution::RootedValues::new(selectors)
+            .expect("ordinary size fixture arguments")
+            .into();
         block_on(size_builtin(value, selectors))
     }
 

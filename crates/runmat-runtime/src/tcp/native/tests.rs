@@ -371,8 +371,13 @@ fn authentic_repeated_close_is_zero_and_server_scope_closes_accepted_children() 
         accepted.authority.lifetime,
         std::sync::Arc::new(ForgedRelease),
     );
-    let mut changed_lifetime = accepted.authority.clone();
-    changed_lifetime.lifetime = runmat_types::ForeignLifetime::Session;
+    let changed_lifetime = runmat_value::ForeignRef::detached(
+        accepted.authority.resource_key(),
+        accepted.authority.type_identity.clone(),
+        accepted.authority.ownership,
+        accepted.authority.affinity,
+        runmat_types::ForeignLifetime::Session,
+    );
     let foreign_runtime = crate::context::RuntimeContext::new(std::rc::Rc::new(
         crate::execution::RuntimeExecutionService::new(),
     ));

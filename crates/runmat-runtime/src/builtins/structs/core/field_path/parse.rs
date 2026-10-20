@@ -3,7 +3,7 @@ use crate::builtins::common::tensor;
 use runmat_value::{NumericScalar, Value};
 
 pub(in crate::builtins::structs::core) fn parse(
-    arguments: Vec<Value>,
+    arguments: crate::call::BuiltinArguments,
     builtin: &str,
 ) -> Result<FieldPath, PathError> {
     if arguments.is_empty() {
@@ -55,7 +55,7 @@ fn parse_selector(
     let Value::Cell(cell) = value else {
         unreachable!("selector shape checked by caller")
     };
-    if cell.data.is_empty() {
+    if cell.data().is_empty() {
         return Err(error(
             PathErrorKind::EmptySelector,
             "index cell must contain at least one element",
@@ -77,11 +77,11 @@ fn parse_component(
         Value::Bool(value) => Ok(IndexComponent::Logical(vec![u8::from(*value)])),
         Value::LogicalArray(array) => Ok(IndexComponent::Logical(array.data.to_vec())),
         Value::CharArray(array) => {
-            parse_text(&array.data.iter().collect::<String>(), uses_textual_index)
+            parse_text(&array.data().iter().collect::<String>(), uses_textual_index)
         }
         Value::String(text) => parse_text(text, uses_textual_index),
-        Value::StringArray(array) if array.data.len() == 1 => {
-            parse_text(&array.data[0], uses_textual_index)
+        Value::StringArray(array) if array.data().len() == 1 => {
+            parse_text(&array.data()[0], uses_textual_index)
         }
         Value::Tensor(array) if array.len() != 1 => {
             let indices = if let Some(result) =
@@ -173,9 +173,9 @@ pub(super) fn parse_float(value: f64) -> Result<usize, PathError> {
 
 fn parse_field_name(value: Value) -> Result<String, PathError> {
     match value {
-        Value::String(value) => Ok(value),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
-        Value::CharArray(array) if array.rows == 1 => Ok(array.data.iter().collect()),
+        Value::String(value) => Ok(value.to_string()),
+        Value::StringArray(array) if array.data().len() == 1 => Ok(array.data()[0].to_string()),
+        Value::CharArray(array) if array.rows == 1 => Ok(array.data().iter().collect()),
         _ => Err(error(
             PathErrorKind::FieldName,
             "field names must be scalar strings or character row vectors",

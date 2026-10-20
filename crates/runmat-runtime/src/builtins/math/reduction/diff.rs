@@ -647,7 +647,7 @@ fn diff_char_array(chars: CharArray, order: usize, dim: Option<usize>) -> Builti
         return Ok(Value::CharArray(chars));
     }
     let shape = vec![chars.rows, chars.cols];
-    let data: Vec<f64> = chars.data.iter().map(|&ch| ch as u32 as f64).collect();
+    let data: Vec<f64> = chars.data().iter().map(|&ch| ch as u32 as f64).collect();
     let tensor = Tensor::new(data, shape).map_err(|e| diff_internal_error(format!("diff: {e}")))?;
     diff_tensor_host(tensor, order, dim).map(tensor::tensor_into_value)
 }

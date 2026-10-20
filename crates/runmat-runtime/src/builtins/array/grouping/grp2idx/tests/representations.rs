@@ -68,11 +68,11 @@ async fn character_matrix_treats_each_row_as_one_label() {
 #[tokio::test]
 async fn categorical_order_retains_unobserved_categories() {
     let mut categorical = ObjectInstance::new(runmat_types::standard::CATEGORICAL.to_string());
-    categorical.properties.insert(
+    categorical.replace_property_unbounded(
         "Codes".into(),
         Value::Tensor(Tensor::new(vec![2.0, 2.0, f64::NAN], vec![3, 1]).unwrap()),
     );
-    categorical.properties.insert(
+    categorical.replace_property_unbounded(
         "Categories".into(),
         Value::StringArray(
             StringArray::new(
@@ -82,9 +82,7 @@ async fn categorical_order_retains_unobserved_categories() {
             .unwrap(),
         ),
     );
-    categorical
-        .properties
-        .insert("Ordinal".into(), Value::Bool(false));
+    categorical.replace_property_unbounded("Ordinal".into(), Value::Bool(false));
 
     let values = outputs(execute::apply(Value::Object(categorical)).await.unwrap());
     let Value::Tensor(g) = &values[0] else {
@@ -97,7 +95,7 @@ async fn categorical_order_retains_unobserved_categories() {
     let Value::Object(levels) = &values[2] else {
         panic!("expected categorical levels")
     };
-    let Value::Tensor(codes) = &levels.properties["Codes"] else {
+    let Value::Tensor(codes) = &levels.properties()["Codes"] else {
         panic!("expected codes")
     };
     assert_eq!(codes.materialize_f64(), vec![1.0, 2.0, 3.0]);
@@ -106,6 +104,7 @@ async fn categorical_order_retains_unobserved_categories() {
 #[tokio::test]
 async fn datetime_groups_use_first_appearance_and_preserve_datetime_levels() {
     let input = crate::builtins::datetime::datetime_object_from_serial_tensor(
+        None,
         Tensor::new(vec![738_522.0, 738_156.0, 738_522.0], vec![3, 1]).unwrap(),
         "dd-MMM-yyyy",
     )
@@ -127,6 +126,7 @@ async fn datetime_groups_use_first_appearance_and_preserve_datetime_levels() {
 #[tokio::test]
 async fn duration_groups_use_first_appearance_and_preserve_duration_levels() {
     let input = crate::builtins::duration::duration_object_from_days_tensor(
+        None,
         Tensor::new(vec![2.0, 1.0, 2.0], vec![3, 1]).unwrap(),
         "hh:mm:ss",
     )

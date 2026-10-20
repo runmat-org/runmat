@@ -1,6 +1,6 @@
 use super::*;
 use crate::execution::RootedValueLease;
-use runmat_value::{CellArray, HandleRef, StructValue};
+use runmat_value::{CellArray, HandleRef};
 
 fn target(handle: runmat_gc::GcHandle) -> Value {
     Value::HandleObject(HandleRef {
@@ -11,9 +11,9 @@ fn target(handle: runmat_gc::GcHandle) -> Value {
 }
 
 fn nested_struct(handle: runmat_gc::GcHandle) -> Value {
-    let mut fields = StructValue::new();
+    let mut fields = runmat_value::UnboundedStructValueBuilder::new();
     fields.insert("Target", target(handle));
-    Value::Struct(fields)
+    Value::Struct(fields.finish())
 }
 
 fn nested_cell(handle: runmat_gc::GcHandle) -> Value {
@@ -76,17 +76,17 @@ fn selected_nested_rhs_retains_targets_through_publication_failure_and_abandonme
             let Value::Cell(selected_a) = &plan.right_values.values()[0] else {
                 panic!("expected selected A cell")
             };
-            let Value::Struct(first_row) = &selected_a.data[0] else {
+            let Value::Struct(first_row) = &selected_a.data()[0] else {
                 panic!("expected nested A struct")
             };
             assert_eq!(first_row.fields["Target"], target(first_handle));
             let Value::Cell(selected_b) = &plan.right_values.values()[1] else {
                 panic!("expected selected B cell")
             };
-            let Value::Cell(first_nested) = &selected_b.data[0] else {
+            let Value::Cell(first_nested) = &selected_b.data()[0] else {
                 panic!("expected nested B cell")
             };
-            assert_eq!(first_nested.data[0], target(first_handle));
+            assert_eq!(first_nested.data()[0], target(first_handle));
             runmat_gc::gc_collect_major().expect("collect after original inputs retire");
             assert!(runmat_gc::gc_clone_value(&first_handle).is_ok());
             assert!(runmat_gc::gc_clone_value(&second_handle).is_ok());

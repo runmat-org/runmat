@@ -52,13 +52,15 @@ pub(crate) struct ParsedResponseModel {
 }
 
 pub(crate) async fn parse_real_model(
+    runtime: Option<&crate::context::RuntimeContext>,
     value: Value,
     kind: ResponseKind,
 ) -> BuiltinResult<RealTfModel> {
-    Ok(parse_admitted_model(value, kind).await?.real)
+    Ok(parse_admitted_model(runtime, value, kind).await?.real)
 }
 
 pub(crate) async fn parse_admitted_model(
+    runtime: Option<&crate::context::RuntimeContext>,
     value: Value,
     kind: ResponseKind,
 ) -> BuiltinResult<ParsedResponseModel> {
@@ -82,7 +84,7 @@ pub(crate) async fn parse_admitted_model(
     ];
     for name in CONSUMED {
         let value = object
-            .properties
+            .properties()
             .get(name)
             .expect("preflight required property");
         if matches!(value, Value::GpuTensor(_)) {
@@ -91,7 +93,19 @@ pub(crate) async fn parse_admitted_model(
             if matches!(name, "Numerator" | "Denominator") {
                 preflight_real_coefficients(&gathered, name, kind)?;
             }
-            object.properties.insert(name.into(), gathered);
+            crate::execution::object::replacement::replace_property(
+                runtime,
+                &mut object,
+                name,
+                gathered,
+                |detail, source| {
+                    build_runtime_error(format!("{builtin}: {detail}"))
+                        .with_builtin(builtin)
+                        .with_source(source)
+                        .build()
+                },
+                |detail| build_runtime_error(detail).with_builtin(builtin).build(),
+            )?;
         }
     }
     let model = TfModel::from_value_async(Value::Object(object), builtin).await?;
@@ -121,7 +135,7 @@ pub(crate) fn preflight_response_model_operand(
         "OutputDelay",
     ] {
         if let Some(value) = object
-            .properties
+            .properties()
             .get(name)
             .filter(|value| !matches!(value, Value::GpuTensor(_)))
         {
@@ -133,7 +147,7 @@ pub(crate) fn preflight_response_model_operand(
     }
     for name in ["InputDelay", "OutputDelay"] {
         if let Some(value) = object
-            .properties
+            .properties()
             .get(name)
             .filter(|value| !matches!(value, Value::GpuTensor(_)))
         {

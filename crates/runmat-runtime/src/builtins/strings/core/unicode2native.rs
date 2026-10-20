@@ -72,7 +72,10 @@ fn remap_unicode2native_flow(err: RuntimeError) -> RuntimeError {
     binding_variant = "default",
     builtin_path = "crate::builtins::strings::core::unicode2native"
 )]
-async fn unicode2native_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn unicode2native_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &UNICODE2NATIVE_DESCRIPTOR,
         &UNICODE2NATIVE_ERROR_TOO_MANY_OUTPUTS,
@@ -321,11 +324,13 @@ fn encode_utf32(text: &str, little_endian: bool, bom: bool) -> BuiltinResult<Vec
     Ok(bytes)
 }
 
-fn value_to_text_scalar(value: &Value) -> BuiltinResult<String> {
+fn value_to_text_scalar(value: &Value) -> BuiltinResult<std::borrow::Cow<'_, str>> {
     match value {
-        Value::String(text) => Ok(text.clone()),
+        Value::String(text) => Ok(std::borrow::Cow::Borrowed(text.as_str())),
         Value::StringArray(array) => string_array_scalar(array),
-        Value::CharArray(array) if array.rows <= 1 => Ok(char_row_or_empty(array)),
+        Value::CharArray(array) if array.rows <= 1 => {
+            Ok(std::borrow::Cow::Owned(char_row_or_empty(array)))
+        }
         Value::CharArray(_) => Err(unicode2native_error_with_message(
             "unicode2native: character input must be a row vector",
             &UNICODE2NATIVE_ERROR_INVALID_INPUT,
@@ -334,11 +339,13 @@ fn value_to_text_scalar(value: &Value) -> BuiltinResult<String> {
     }
 }
 
-fn value_to_encoding_name(value: &Value) -> BuiltinResult<String> {
+fn value_to_encoding_name(value: &Value) -> BuiltinResult<std::borrow::Cow<'_, str>> {
     match value {
-        Value::String(text) => Ok(text.clone()),
+        Value::String(text) => Ok(std::borrow::Cow::Borrowed(text.as_str())),
         Value::StringArray(array) => string_array_scalar(array),
-        Value::CharArray(array) if array.rows <= 1 => Ok(char_row_or_empty(array)),
+        Value::CharArray(array) if array.rows <= 1 => {
+            Ok(std::borrow::Cow::Owned(char_row_or_empty(array)))
+        }
         Value::CharArray(_) => Err(unicode2native_error_with_message(
             "unicode2native: encoding must be a character row vector",
             &UNICODE2NATIVE_ERROR_INVALID_ENCODING,
@@ -350,9 +357,9 @@ fn value_to_encoding_name(value: &Value) -> BuiltinResult<String> {
     }
 }
 
-fn string_array_scalar(array: &StringArray) -> BuiltinResult<String> {
-    if array.data.len() == 1 {
-        Ok(array.data[0].clone())
+fn string_array_scalar(array: &StringArray) -> BuiltinResult<std::borrow::Cow<'_, str>> {
+    if array.data().len() == 1 {
+        Ok(std::borrow::Cow::Borrowed(array.data()[0].as_str()))
     } else {
         Err(unicode2native_error_with_message(
             "unicode2native: string input must be scalar",
@@ -388,7 +395,10 @@ pub(crate) mod tests {
     use runmat_value::NumericDType;
 
     fn unicode2native_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::unicode2native_builtin(value, rest))
+        block_on(super::unicode2native_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     fn tensor_bytes(value: Value) -> (Vec<u8>, Vec<usize>, NumericDType) {
@@ -539,8 +549,9 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unicode2native_empty_text_preserves_uint8_empty_row() {
-        let (bytes, shape, dtype) =
-            tensor_bytes(unicode2native_builtin(Value::String(String::new()), vec![]).unwrap());
+        let (bytes, shape, dtype) = tensor_bytes(
+            unicode2native_builtin(Value::String(String::new().into()), vec![]).unwrap(),
+        );
         assert!(bytes.is_empty());
         assert_eq!(shape, vec![1, 0]);
         assert_eq!(dtype, NumericDType::U8);

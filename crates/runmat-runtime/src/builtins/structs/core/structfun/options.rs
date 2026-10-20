@@ -1,4 +1,4 @@
-use runmat_value::{StringArray, Value};
+use runmat_value::Value;
 
 use super::callback::Callable;
 use super::error;
@@ -9,7 +9,7 @@ pub(super) struct Options {
 }
 
 impl Options {
-    pub(super) fn parse(values: Vec<Value>) -> crate::BuiltinResult<Self> {
+    pub(super) fn parse(values: crate::call::BuiltinArguments) -> crate::BuiltinResult<Self> {
         if !values.len().is_multiple_of(2) {
             return Err(error::invalid(
                 "structfun: optional arguments must be name-value pairs",
@@ -40,13 +40,13 @@ fn option_name(value: Value) -> crate::BuiltinResult<String> {
     match value {
         Value::String(value) => Ok(value.trim().to_ascii_lowercase()),
         Value::CharArray(value) if value.rows == 1 => Ok(value
-            .data
+            .data()
             .iter()
             .collect::<String>()
             .trim()
             .to_ascii_lowercase()),
-        Value::StringArray(StringArray { data, .. }) if data.len() == 1 => {
-            Ok(data[0].trim().to_ascii_lowercase())
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(array.data()[0].trim().to_ascii_lowercase())
         }
         _ => Err(error::invalid(
             "structfun: option names must be character rows or string scalars",
@@ -61,9 +61,9 @@ fn boolean(value: Value) -> crate::BuiltinResult<bool> {
         Value::Int(value) => Ok(!value.is_zero()),
         Value::String(value) => boolean_text(&value),
         Value::CharArray(value) if value.rows == 1 => {
-            boolean_text(&value.data.iter().collect::<String>())
+            boolean_text(&value.data().iter().collect::<String>())
         }
-        Value::StringArray(StringArray { data, .. }) if data.len() == 1 => boolean_text(&data[0]),
+        Value::StringArray(array) if array.data().len() == 1 => boolean_text(&array.data()[0]),
         _ => Err(boolean_error()),
     }
 }

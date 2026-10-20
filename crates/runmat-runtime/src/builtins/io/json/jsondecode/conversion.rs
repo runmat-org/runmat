@@ -16,13 +16,13 @@ pub(crate) fn value_from_json(value: &JsonValue) -> BuiltinResult<Value> {
 }
 
 fn decode_json_object(map: &serde_json::Map<String, JsonValue>) -> BuiltinResult<Value> {
-    let mut struct_value = StructValue::new();
+    let mut struct_value = runmat_value::UnboundedStructValueBuilder::new();
     for (key, val) in map {
         struct_value
             .fields
             .insert(key.clone(), value_from_json(val)?);
     }
-    Ok(Value::Struct(struct_value))
+    Ok(Value::Struct(struct_value.finish()))
 }
 
 fn parse_json_number(number: &serde_json::Number) -> BuiltinResult<f64> {
@@ -128,7 +128,7 @@ fn parse_struct_array(values: &[JsonValue]) -> BuiltinResult<Option<Value>> {
     let Some(first) = leaves.first().and_then(|value| value.as_object()) else {
         return Ok(None);
     };
-    let field_names = first.keys().cloned().collect::<Vec<_>>();
+    let field_names = first.keys().map(ToOwned::to_owned).collect::<Vec<_>>();
     let expected = field_names.iter().collect::<std::collections::HashSet<_>>();
     let mut row_major = Vec::with_capacity(leaves.len());
     for leaf in leaves {
@@ -140,10 +140,11 @@ fn parse_struct_array(values: &[JsonValue]) -> BuiltinResult<Option<Value>> {
         {
             return Ok(None);
         }
-        let mut structure = StructValue::new();
+        let mut structure = runmat_value::UnboundedStructValueBuilder::new();
         for name in &field_names {
             structure.insert(name.clone(), value_from_json(&object[name])?);
         }
+        let structure = structure.finish();
         row_major.push(structure);
     }
     let shape = if json_shape.len() == 1 {

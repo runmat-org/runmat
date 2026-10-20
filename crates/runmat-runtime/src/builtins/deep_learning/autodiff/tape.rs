@@ -1,4 +1,5 @@
 use super::*;
+use crate::builtins::deep_learning::arguments::DeepLearningObjectEdit as _;
 use std::rc::Weak;
 mod input;
 mod provenance;
@@ -11,20 +12,19 @@ use provenance::DataProvenance;
 pub(super) const AD_NODE_PROPERTY: &str = "__runmat_ad_node";
 pub(super) const AD_TAPE_PROPERTY: &str = "__runmat_ad_tape";
 
-pub(super) fn attach_node_to_object(object: &mut ObjectInstance, node: usize) {
+pub(super) fn attach_node_to_object(object: &mut ObjectInstance, node: usize) -> BuiltinResult<()> {
     let tape_id = active_tape()
         .expect("recorded node requires active tape")
         .borrow()
         .id;
-    object.properties.insert(
-        AD_NODE_PROPERTY.into(),
+    object.replace_dl_property(
+        AD_NODE_PROPERTY,
         Value::Int(IntValue::U64(
             u64::try_from(node).expect("node index fits u64"),
         )),
-    );
-    object
-        .properties
-        .insert(AD_TAPE_PROPERTY.into(), Value::Int(IntValue::U64(tape_id)));
+    )?;
+    object.replace_dl_property(AD_TAPE_PROPERTY, Value::Int(IntValue::U64(tape_id)))?;
+    Ok(())
 }
 static NEXT_TAPE_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -256,7 +256,7 @@ pub(in crate::builtins::deep_learning) fn tape_is_active() -> bool {
 pub(in crate::builtins::deep_learning) async fn with_tape_context(
     runtime: Option<&crate::context::RuntimeContext>,
     function: Value,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
     requested_outputs: usize,
 ) -> BuiltinResult<crate::execution::RootedValue> {
     let _input_roots = crate::execution::RootedValueLease::for_values(
@@ -270,22 +270,16 @@ pub(in crate::builtins::deep_learning) async fn with_tape_context(
     TapeFuture {
         tape,
         future: Some(Box::pin(async move {
-            let prepared = prepare_tape_inputs(args)?;
-            match selected_runtime.as_ref() {
-                Some(runtime) => {
-                    crate::call_feval_async_with_outputs_in_context(
-                        runtime,
-                        function,
-                        &prepared,
-                        requested_outputs,
-                    )
-                    .await
-                }
-                None => {
-                    crate::call_feval_async_with_outputs(function, &prepared, requested_outputs)
-                        .await
-                }
-            }
+            let prepared = prepare_tape_inputs(&args, selected_runtime.as_ref()).await?;
+            crate::call::feval::invoke_retained(
+                selected_runtime.as_ref(),
+                function,
+                prepared,
+                requested_outputs,
+                None,
+            )
+            .await
+            .and_then(crate::call::arguments::project_rooted_legacy_builtin_value_abi)
         })),
     }
     .await
@@ -302,21 +296,21 @@ pub(super) fn dlarray_object_node_id(object: &ObjectInstance) -> Option<usize> {
     let tape = active_tape()?;
     let tape = tape.borrow();
     let tape_id = tape.id;
-    if object.class_name != DLARRAY_CLASS {
+    if !object.class_name().is(DLARRAY_CLASS) {
         return None;
     }
-    if object.properties.get(AD_TAPE_PROPERTY) != Some(&Value::Int(IntValue::U64(tape_id))) {
+    if object.properties().get(AD_TAPE_PROPERTY) != Some(&Value::Int(IntValue::U64(tape_id))) {
         return None;
     }
     let id = object
-        .properties
+        .properties()
         .get(AD_NODE_PROPERTY)
         .and_then(|value| match value {
             Value::Int(IntValue::U64(id)) => usize::try_from(*id).ok(),
             _ => None,
         })?;
     let node = tape.nodes.get(id)?;
-    let data = object.properties.get("Data")?;
+    let data = object.properties().get("Data")?;
     node.provenance.matches(data, &node.value).then_some(id)
 }
 

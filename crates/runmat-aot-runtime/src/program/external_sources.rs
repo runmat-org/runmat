@@ -15,7 +15,7 @@ pub(super) struct InstalledExternalSources {
     /// Kept by function ID, not display name, so retired sources still reach
     /// the bound-call liveness check instead of falling through to an ID call.
     pub(super) scoped_bindings:
-        Rc<HashMap<runmat_types::ProgramFunctionId, runmat_value::BoundFunctionBinding>>,
+        Rc<HashMap<runmat_types::FunctionId, runmat_value::BoundFunctionBinding>>,
 }
 
 pub(super) fn install(
@@ -24,18 +24,17 @@ pub(super) fn install(
     runtime: &RuntimeContext,
     functions: &[user_functions::SourceFunctionInfo],
 ) -> Result<InstalledExternalSources, Box<runmat_runtime::RuntimeError>> {
-    let Some(binding) = program.product.selected() else {
-        return Ok(InstalledExternalSources {
-            guard: user_functions::install_execution_source_resolver(None)?,
-            scoped_bindings: Rc::new(HashMap::new()),
-        });
-    };
     let owner = runmat_runtime::source_context::SelectedProgramSourceOwner::capture(
         runtime,
         &program.source_map,
     )
     .map_err(native_error)?;
-    let product = binding.fingerprint().map_err(native_error)?;
+    let product = program
+        .product
+        .selected()
+        .map(|binding| binding.fingerprint())
+        .transpose()
+        .map_err(native_error)?;
     let by_function = Arc::new(
         functions
             .iter()
@@ -45,11 +44,11 @@ pub(super) fn install(
     let mut external = HashMap::new();
     let mut scoped_bindings = HashMap::new();
     let retained_program = Arc::new(program.clone());
+    // Every linked program issues exact native leases. A selected product
+    // additionally supplies the authority required to export a static link.
     for info in functions {
         let function = executor
-            .function_metadata(runmat_types::ProgramFunctionId(
-                u32::try_from(info.function).map_err(native_error)?,
-            ))
+            .function_metadata(runmat_types::FunctionId(info.function))
             .ok_or_else(|| native_error("selected source has no linked native function"))?;
         if function.source_role != info.role || function.name != info.name {
             return Err(Box::new(native_error(
@@ -65,6 +64,9 @@ pub(super) fn install(
         let call_executor = Rc::clone(&executor);
         let call_program = Arc::clone(&retained_program);
         let call_function = function.id;
+        let call_origin =
+            FunctionBindingOrigin::from_revision(executor.program_revision(), function.portable_id)
+                .map_err(native_error)?;
         let invoke: Rc<user_functions::SelectedExternalInvocation> = Rc::new(
             move |runtime, arguments, requested_outputs, lexical_environment| {
                 let executor = Rc::clone(&call_executor);
@@ -98,7 +100,11 @@ pub(super) fn install(
             product,
             program.native_ir_digest,
             native_function,
-            invoke,
+            user_functions::LinkedNativeInvocation {
+                compiled_function: call_function,
+                origin: call_origin,
+                invoke,
+            },
         )
         .ok_or_else(|| native_error("linked source differs from its issued native function"))?;
         let scoped_binding = target

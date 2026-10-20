@@ -76,17 +76,21 @@ fn one_public_step(single: bool, bidirectional: bool, trainnet: bool) {
         Value::String("BiasLearnRateFactor".into()),
         Value::Tensor(Tensor::new(gate_factors.clone(), vec![1, gate_factors.len()]).unwrap()),
     ];
-    let input_layer = block_on(sequence_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
+    let input_layer = block_on(sequence_input_layer_builtin(
+        Value::Num(2.0),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap();
     let recurrent = if bidirectional {
         block_on(bilstm_layer_builtin(
             Value::Num(units as f64),
-            recurrent_options,
+            crate::builtins::common::test_support::builtin_arguments(recurrent_options),
         ))
         .unwrap()
     } else {
         block_on(lstm_layer_builtin(
             Value::Num(units as f64),
-            recurrent_options,
+            crate::builtins::common::test_support::builtin_arguments(recurrent_options),
         ))
         .unwrap()
     };
@@ -98,7 +102,7 @@ fn one_public_step(single: bool, bidirectional: bool, trainnet: bool) {
         panic!("expected dlnetwork")
     };
     let initial_state = initial
-        .properties
+        .properties()
         .get(state_storage_property())
         .unwrap()
         .clone();
@@ -107,13 +111,17 @@ fn one_public_step(single: bool, bidirectional: bool, trainnet: bool) {
         vec![2, 3, 1],
         single,
     ));
-    let predictor = block_on(dlarray_builtin(input, vec![Value::String("CBT".into())])).unwrap();
+    let predictor = block_on(dlarray_builtin(
+        input,
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::String("CBT".into())]),
+    ))
+    .unwrap();
     // Unformatted regression targets are observation-major; the trainer
     // projects this geometry into the formatted network output axes.
     let target = Value::Tensor(native(vec![1.0; channels * 3], vec![3, channels], single));
     let options = block_on(training_options_builtin(
         Value::String("sgdm".into()),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::String("MaxEpochs".into()),
             Value::Num(1.0),
             Value::String("MiniBatchSize".into()),
@@ -124,7 +132,7 @@ fn one_public_step(single: bool, bidirectional: bool, trainnet: bool) {
             Value::Num(0.0),
             Value::String("Shuffle".into()),
             Value::String("never".into()),
-        ],
+        ]),
     ))
     .unwrap();
     let trained = if trainnet {
@@ -136,22 +144,24 @@ fn one_public_step(single: bool, bidirectional: bool, trainnet: bool) {
             options,
         ]))
     } else {
-        block_on(train_network_builtin(vec![
-            predictor,
-            target,
-            network.value().clone(),
-            options,
-        ]))
+        block_on(train_network_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                predictor,
+                target,
+                network.value().clone(),
+                options,
+            ]),
+        ))
     }
     .unwrap();
     let Value::Object(trained) = trained.value() else {
         panic!("expected trained network")
     };
     assert_eq!(
-        trained.properties.get(state_storage_property()),
+        trained.properties().get(state_storage_property()),
         Some(&initial_state)
     );
-    let Some(Value::Struct(info)) = trained.properties.get("TrainingInfo") else {
+    let Some(Value::Struct(info)) = trained.properties().get("TrainingInfo") else {
         panic!("expected public training information")
     };
     assert_eq!(info.fields.get("Iteration"), Some(&Value::Num(1.0)));

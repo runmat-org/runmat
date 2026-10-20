@@ -6,15 +6,15 @@ pub(super) fn apply_hgload_overrides(
 ) -> BuiltinResult<Value> {
     let mut cells = Vec::with_capacity(handles.len());
     for handle in handles {
-        let mut old = StructValue::new();
+        let mut old = runmat_value::UnboundedStructValueBuilder::new();
         if let Some(overrides) = overrides {
             let mut set_args = Vec::new();
             for (name, value) in &overrides.fields {
                 if let Ok(previous) =
                     get_properties(PlotHandle::Figure(*handle), Some(name), HGLOAD)
                 {
-                    old.insert(name.clone(), previous);
-                    set_args.push(Value::String(name.clone()));
+                    old.insert(name, previous);
+                    set_args.push(Value::string(name));
                     set_args.push(value.clone());
                 }
             }
@@ -22,7 +22,7 @@ pub(super) fn apply_hgload_overrides(
                 set_properties(PlotHandle::Figure(*handle), &set_args, HGLOAD)?;
             }
         }
-        cells.push(Value::Struct(old));
+        cells.push(Value::Struct(old.finish()));
     }
     CellArray::new(cells, 1, handles.len())
         .map(Value::Cell)
@@ -45,9 +45,9 @@ pub(super) fn handles_value(handles: &[FigureHandle]) -> Value {
 
 pub(super) fn scalar_string(value: &Value, builtin: &'static str) -> BuiltinResult<String> {
     match value {
-        Value::String(s) => Ok(s.clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
+        Value::String(s) => Ok(s.as_str().to_owned()),
+        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data().iter().collect()),
+        Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].as_str().to_owned()),
         Value::CharArray(_) => Err(persistence_error(
             &ERROR_INVALID_ARGUMENT,
             builtin,

@@ -160,7 +160,7 @@ fn preparation_failure_and_alias_rejection_retire_only_owned_temporaries() {
         let request = Request::new(
             &Value::GpuTensor(original.handle.clone()),
             &Value::Num(1.0),
-            &[],
+            crate::call::FunctionArgumentView::from_slice(&[]),
         )
         .unwrap();
         let output = request.try_evaluate(

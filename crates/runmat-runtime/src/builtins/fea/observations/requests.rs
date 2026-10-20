@@ -62,7 +62,8 @@ fn observation(
 macro_rules! observation_builtin {
     ($function:ident, $name:literal, $descriptor:ident, $form:expr) => {
         #[runtime_builtin(name = $name, binding_variant = "default", builtin_path = "crate::builtins::fea::observations::requests")]
-        pub async fn $function(args: Vec<Value>) -> BuiltinResult<Value> {
+        pub async fn $function(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
             study_outputs(&$descriptor, $name)?;
             observation($name, args, $form)
         }

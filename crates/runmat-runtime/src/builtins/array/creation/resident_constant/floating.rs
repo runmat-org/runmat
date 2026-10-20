@@ -82,6 +82,24 @@ pub(in super::super) fn floating_constant(
         false,
         &protected,
     )?;
-    let output = gpu_helpers::propagate_owned_output_provenance(output, prototype)?;
+    let output = if let Some(prototype) = prototype {
+        gpu_helpers::propagate_owned_output_provenance(output, [prototype])?
+    } else {
+        // This branch is reached only by the explicit `gpuArray` constructor
+        // form. A `like` form always carries its prototype above and inherits
+        // that handle's intent instead.
+        match output.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit) {
+            Ok(explicit) => explicit,
+            Err(source) => {
+                let error = build_runtime_error(format!(
+                    "{name}: cannot preserve explicit gpuArray output intent: {source}"
+                ))
+                .with_builtin(name)
+                .with_source(source)
+                .build();
+                return Err(gpu_helpers::reject_gpu_output(output, error));
+            }
+        }
+    };
     Ok(output)
 }

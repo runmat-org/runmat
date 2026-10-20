@@ -65,11 +65,14 @@ fn register(class: StaticClassIdentity, names: &[&str]) {
             },
         );
     }
-    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-        events: Default::default(),
-        name: class.into(),
-        parent: None,
-        properties,
-        methods: HashMap::new(),
-    });
+    crate::class_registry::register_builtin_class(
+        class,
+        crate::class_registry::RuntimeClass {
+            events: Default::default(),
+            name: class.into(),
+            parent: None,
+            properties,
+            methods: HashMap::new(),
+        },
+    );
 }

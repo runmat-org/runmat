@@ -233,8 +233,8 @@ async fn execute_parfor_serial(
                 bytecode: &owner,
                 bytecode_owner: Some(owner.clone()),
                 region: executable,
-                inputs,
-                iterations,
+                inputs: inputs.into(),
+                iterations: iterations.into(),
                 input_roots,
                 randomness,
                 mode: crate::interpreter::runner::ParforTaskMode::Sequential,
@@ -388,7 +388,9 @@ async fn execute_parfor_tasks(
                 },
                 retry: runmat_execution::RetryPolicy::IdempotentInfrastructure,
                 program_revision: None,
-                environment: runmat_runtime::execution::capture_deferred_environment(&context.runtime)?,
+                environment: runmat_runtime::execution::capture_deferred_environment(
+                    &context.runtime,
+                )?,
                 console: context
                     .runtime
                     .service_ports()
@@ -405,7 +407,7 @@ async fn execute_parfor_tasks(
                 // did not issue a task handle. Retire that future as well as
                 // the earlier submissions owned by the group.
                 let _ = context.runtime.execution().cancel(
-                    &Value::Future(future),
+                    &Value::Future(future.into()),
                     runmat_execution::CancellationReason::DependencyFailed,
                 );
                 return Err(execution_error(error));
@@ -631,13 +633,13 @@ async fn assemble_sliced_results(
                 "parallel task did not return its typed result envelope",
             ));
         };
-        if result.data.len() != output_variables.len() {
+        if result.data().len() != output_variables.len() {
             return Err(crate::interpreter::errors::mex(
                 "ParallelTaskOutput",
                 "parallel task result does not match its compiler-owned output layout",
             ));
         }
-        for (variable, worker_value) in output_variables.iter().zip(&result.data) {
+        for (variable, worker_value) in output_variables.iter().zip(result.data()) {
             match &variable.contract.role {
                 runmat_types::ParallelVariableRole::Sliced { access } => {
                     let Some(destination) = vars.get(variable.slot).map(|value| value.clone())
@@ -650,7 +652,8 @@ async fn assemble_sliced_results(
                     let offset_value = slice_offset_value(executable, *access, vars)?;
                     let mut assembled = destination;
                     for iteration in &iterations[chunk.start..chunk.start + chunk.len] {
-                        assembled = runmat_runtime::parallel::assembly::merge_slice(
+                        assembled = runmat_runtime::parallel::assembly::merge_slice_in_context(
+                            runtime,
                             assembled,
                             worker_value,
                             *access,
@@ -673,7 +676,7 @@ async fn assemble_sliced_results(
                             "parallel reduction task did not return per-iteration contributions",
                         ));
                     };
-                    if contributions.data.len() != chunk.len {
+                    if contributions.data().len() != chunk.len {
                         return Err(crate::interpreter::errors::mex(
                             "ParallelTaskOutput",
                             "parallel reduction task returned the wrong contribution count",
@@ -688,7 +691,7 @@ async fn assemble_sliced_results(
                     };
                     let mut accumulator = runmat_runtime::execution::RootedValue::new(accumulator)
                         .map_err(|error| error.into_runtime_error())?;
-                    for contribution in &contributions.data {
+                    for contribution in contributions.data() {
                         accumulator = runmat_runtime::parallel::reduction::combine_in_context(
                             Some(runtime),
                             *operator,

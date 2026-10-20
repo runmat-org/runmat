@@ -154,15 +154,20 @@ fn binary_scaling_broadcasts_and_preserves_complex_single() {
 
 #[test]
 fn character_and_logical_inputs_enter_the_double_domain() {
-    let chars = CharArray::new("AB".chars().collect(), 1, 2).expect("chars");
+    let chars =
+        CharArray::new_with_shape("abcdefgh".chars().collect(), vec![2, 2, 2]).expect("chars");
     let Value::Tensor(output) = call(Value::CharArray(chars), vec![]).expect("character pow2")
     else {
         panic!("expected tensor");
     };
     assert_eq!(
         output.materialize_f64(),
-        vec![65.0_f64.exp2(), 66.0_f64.exp2()]
+        "acbdegfh"
+            .chars()
+            .map(|character| (character as u32 as f64).exp2())
+            .collect::<Vec<_>>()
     );
+    assert_eq!(output.shape(), &[2, 2, 2]);
     assert_eq!(
         call(Value::Bool(true), vec![]).expect("logical"),
         Value::Num(2.0)

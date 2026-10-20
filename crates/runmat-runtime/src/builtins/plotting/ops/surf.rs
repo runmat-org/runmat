@@ -10,11 +10,6 @@ use runmat_value::Value;
 #[cfg(test)]
 use runmat_value::{IntegerStorage, Tensor};
 
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
-
 use super::common::{
     surface_matrix_dimensions, tensor_to_surface_grid_matlab_xy, SurfaceDataInput,
 };
@@ -30,7 +25,6 @@ use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{parse_surface_style_args, SurfaceStyle, SurfaceStyleDefaults};
 use crate::build_runtime_error;
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use std::convert::TryFrom;
 use std::sync::Arc;
 
@@ -41,9 +35,9 @@ mod color_input;
 
 const BUILTIN_NAME: &str = "surf";
 
-pub use runmat_builtins::{
-    SURF_DESCRIPTOR, SURF_ERROR_INTERNAL, SURF_ERROR_INVALID_ARGUMENT, SURF_INTEGER_CAPABILITIES,
-};
+#[cfg(test)]
+use runmat_builtins::{SURF_DESCRIPTOR, SURF_INTEGER_CAPABILITIES};
+pub use runmat_builtins::{SURF_ERROR_INTERNAL, SURF_ERROR_INVALID_ARGUMENT};
 
 fn surf_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
@@ -71,49 +65,12 @@ fn map_surf_internal(err: RuntimeError) -> RuntimeError {
     surf_error_with_detail(&SURF_ERROR_INTERNAL, err.message)
 }
 
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::surf")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "surf",
-    op_kind: GpuOpKind::PlotRender,
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    // Plotting is a sink: it does not participate in fusion, but it *can* consume GPU-resident
-    // tensors directly (zero-copy) when the renderer shares the provider WGPU context.
-    // Do not force implicit gathers here; that defeats GPU-resident workloads.
-    residency: ResidencyPolicy::InheritInputs,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Surface rendering runs on the host/WebGPU pipeline; gpuArray inputs may remain on device when a shared WGPU context is available.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::plotting::surf")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "surf",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "surf terminates fusion graphs and performs rendering.",
-};
-
 #[runtime_builtin(
     name = "surf",
-    category = "plotting",
-    summary = "Create 3-D surface plots from grid or mesh data.",
-    keywords = "surf,plotting,3d,surface",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
-    descriptor(crate::builtins::plotting::surf::SURF_DESCRIPTOR),
-    integer_capabilities(crate::builtins::plotting::surf::SURF_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::plotting::surf"
 )]
-pub async fn surf_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+pub async fn surf_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<f64> {
     let color_input::ParsedSurfaceInput {
         x,
         y,
@@ -143,7 +100,7 @@ pub async fn surf_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let style = Arc::new(
         parse_surface_style_args(
             "surf",
-            &rest,
+            rest.view(),
             SurfaceStyleDefaults::new(
                 ColorMap::Parula,
                 ShadingMode::Smooth,
@@ -520,9 +477,24 @@ pub(crate) fn build_color_lut(colormap: &ColorMap, samples: usize, alpha: f32) -
 
 #[cfg(test)]
 pub(crate) mod tests {
+    async fn surf_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
+        super::surf_builtin(crate::call::BuiltinArguments::from_borrowed(&args, None)?).await
+    }
+
+    fn parse_surface_call_args_matlab_xy(
+        args: Vec<Value>,
+        builtin: &'static str,
+    ) -> BuiltinResult<(Value, Value, Value, crate::call::BuiltinArguments)> {
+        super::parse_surface_call_args_matlab_xy(
+            crate::call::BuiltinArguments::from_borrowed(&args, None)?,
+            builtin,
+        )
+    }
+
     use super::*;
     use crate::builtins::plotting::get::get_builtin;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
+    use crate::builtins::plotting::type_resolvers::handle_scalar_type;
     use crate::builtins::plotting::{clear_figure, reset_hold_state_for_run};
     use runmat_builtins::{ResolveContext, Type};
 
@@ -532,36 +504,46 @@ pub(crate) mod tests {
         let c = Value::Tensor(Tensor::new(vec![0.0, 1.0, 1.0, 0.0], vec![2, 2]).unwrap());
         let color_input::ParsedSurfaceInput {
             color, rest: style, ..
-        } = color_input::parse(vec![z.clone(), c.clone()]).unwrap();
+        } = color_input::parse(crate::builtins::common::test_support::builtin_arguments(
+            vec![z.clone(), c.clone()],
+        ))
+        .unwrap();
         assert!(matches!(color, Some(Value::Tensor(_))));
         assert!(style.is_empty());
         let color_input::ParsedSurfaceInput {
             color, rest: style, ..
-        } = color_input::parse(vec![
-            z.clone(),
-            c.clone(),
-            Value::String("EdgeColor".into()),
-            Value::String("none".into()),
-        ])
+        } = color_input::parse(crate::builtins::common::test_support::builtin_arguments(
+            vec![
+                z.clone(),
+                c.clone(),
+                Value::String("EdgeColor".into()),
+                Value::String("none".into()),
+            ],
+        ))
         .unwrap();
         assert!(color.is_some());
         assert_eq!(style.len(), 2);
         let axes = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2]).unwrap());
         let color_input::ParsedSurfaceInput {
             color, rest: style, ..
-        } = color_input::parse(vec![axes.clone(), axes.clone(), z.clone()]).unwrap();
+        } = color_input::parse(crate::builtins::common::test_support::builtin_arguments(
+            vec![axes.clone(), axes.clone(), z.clone()],
+        ))
+        .unwrap();
         assert!(color.is_none());
         assert!(style.is_empty());
         let color_input::ParsedSurfaceInput {
             color, rest: style, ..
-        } = color_input::parse(vec![
-            axes.clone(),
-            axes,
-            z,
-            c,
-            Value::String("EdgeColor".into()),
-            Value::String("none".into()),
-        ])
+        } = color_input::parse(crate::builtins::common::test_support::builtin_arguments(
+            vec![
+                axes.clone(),
+                axes,
+                z,
+                c,
+                Value::String("EdgeColor".into()),
+                Value::String("none".into()),
+            ],
+        ))
         .unwrap();
         assert!(matches!(color, Some(Value::Tensor(_))));
         assert_eq!(style.len(), 2);
@@ -592,7 +574,7 @@ pub(crate) mod tests {
     fn parametric_cpu_surface_preserves_low_rank_grid_geometry() {
         let style = parse_surface_style_args(
             BUILTIN_NAME,
-            &[],
+            crate::call::FunctionArgumentView::from_slice(&[]),
             SurfaceStyleDefaults::new(
                 ColorMap::Parula,
                 ShadingMode::Smooth,
@@ -692,15 +674,13 @@ pub(crate) mod tests {
             Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("square surface"),
         )]));
         assert!(out.is_ok() || out.is_err());
-        let (x, y, z, rest) =
-            crate::builtins::plotting::op_common::surface_inputs::parse_surface_call_args_matlab_xy(
-                vec![Value::Tensor(
-                    Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2])
-                        .expect("square surface"),
-                )],
-                BUILTIN_NAME,
-            )
-            .unwrap();
+        let (x, y, z, rest) = parse_surface_call_args_matlab_xy(
+            vec![Value::Tensor(
+                Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("square surface"),
+            )],
+            BUILTIN_NAME,
+        )
+        .unwrap();
         assert!(rest.is_empty());
         assert_eq!(
             Tensor::try_from(&x).unwrap().materialize_f64(),
@@ -718,18 +698,14 @@ pub(crate) mod tests {
 
     #[test]
     fn surf_z_only_shorthand_uses_matlab_xy_for_non_square_grid() {
-        let (x, y, _, rest) =
-            crate::builtins::plotting::op_common::surface_inputs::parse_surface_call_args_matlab_xy(
-                vec![Value::Tensor(
-                    Tensor::new(
-                        (1..=12).map(|v| v as f64).collect(),
-                        vec![3, 4],
-                    )
+        let (x, y, _, rest) = parse_surface_call_args_matlab_xy(
+            vec![Value::Tensor(
+                Tensor::new((1..=12).map(|v| v as f64).collect(), vec![3, 4])
                     .expect("nonsquare surface"),
-                )],
-                BUILTIN_NAME,
-            )
-            .unwrap();
+            )],
+            BUILTIN_NAME,
+        )
+        .unwrap();
         assert!(rest.is_empty());
         assert_eq!(
             Tensor::try_from(&x).unwrap().materialize_f64(),

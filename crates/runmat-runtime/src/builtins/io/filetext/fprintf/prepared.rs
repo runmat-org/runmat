@@ -4,21 +4,24 @@ use super::admission::{
 use super::target::{match_stream_label, parse_fid, target_from_fid, OutputTarget, SpecialStream};
 use super::*;
 use runmat_builtins::{FPRINTF_ERROR_INVALID_INPUT, FPRINTF_STREAM_LABEL_EXTENSION};
+use runmat_value::Utf8Text;
+mod cache;
+use cache::Cache;
 
 pub(super) struct PreparedFprintfCall {
     pub(super) target: OutputTarget,
-    pub(super) format: String,
-    pub(super) data_args: Vec<Value>,
+    pub(super) format: Utf8Text,
+    pub(super) data_args: crate::call::BuiltinArguments,
 }
 
 enum FormatPlan {
-    Host { index: usize, text: String },
+    Host { index: usize, text: Utf8Text },
     Resident { index: usize },
 }
 
 pub(super) async fn prepare(
     runtime: Option<&crate::context::RuntimeContext>,
-    args: &[Value],
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<PreparedFprintfCall> {
     if args.is_empty() {
         return Err(fprintf_error_with_detail(
@@ -26,16 +29,16 @@ pub(super) async fn prepare(
             "not enough input arguments",
         ));
     }
-    let mut staged = vec![None; args.len()];
+    let mut staged = Cache::new(args.len(), runtime)?;
     let mut start = 0;
     let (format_index, format) = loop {
-        let plan = next_format(args, start)?.ok_or_else(|| {
+        let plan = next_format(args.view(), start)?.ok_or_else(|| {
             fprintf_error_with_detail(&FPRINTF_ERROR_INVALID_INPUT, "missing format string")
         })?;
         match plan {
             FormatPlan::Host { index, text } => break (index, text),
             FormatPlan::Resident { index } => {
-                validate_unambiguous_host_target(runtime, args, index)?;
+                validate_unambiguous_host_target(runtime, args.view(), index)?;
                 let host = super::super::cooperation::await_io(
                     runtime,
                     BUILTIN_NAME,
@@ -46,7 +49,7 @@ pub(super) async fn prepare(
                     coerce_to_format_string(&host),
                     &FPRINTF_ERROR_INVALID_INPUT,
                 )?;
-                staged[index] = Some(host);
+                staged.put(index, host)?;
                 if let Some(Value::String(text)) = text {
                     break (index, text);
                 }
@@ -55,14 +58,20 @@ pub(super) async fn prepare(
         }
     };
 
-    let (target_index, target) = select_target(runtime, args, format_index, &mut staged).await?;
-    let mut data_args = Vec::with_capacity(args.len().saturating_sub(1));
-    for (index, value) in args.iter().enumerate() {
-        if index == format_index || target_index == Some(index) {
-            continue;
+    let (target_index, target) =
+        select_target(runtime, args.view(), format_index, &mut staged).await?;
+    staged.checkpoint()?;
+    let count = args.len() - 1 - usize::from(target_index.is_some());
+    let mut cursor = 0usize;
+    let data_args = args.try_map_preserving_roots(count, runtime, |_, source| {
+        while cursor == format_index || target_index == Some(cursor) {
+            cursor += 1;
         }
-        data_args.push(staged[index].take().unwrap_or_else(|| value.clone()));
-    }
+        let index = cursor;
+        cursor += 1;
+        Ok(staged.take(index).unwrap_or_else(|| source[index].clone()))
+    })?;
+    staged.checkpoint()?;
     Ok(PreparedFprintfCall {
         target,
         format,
@@ -72,7 +81,7 @@ pub(super) async fn prepare(
 
 fn validate_unambiguous_host_target(
     runtime: Option<&crate::context::RuntimeContext>,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     format_index: usize,
 ) -> BuiltinResult<()> {
     // A stream label encountered before a later actual format would outrank a
@@ -102,7 +111,10 @@ fn validate_unambiguous_host_target(
     Ok(())
 }
 
-fn next_format(args: &[Value], start: usize) -> BuiltinResult<Option<FormatPlan>> {
+fn next_format(
+    args: crate::call::FunctionArgumentView<'_>,
+    start: usize,
+) -> BuiltinResult<Option<FormatPlan>> {
     for (index, value) in args.iter().enumerate().skip(start) {
         if match_stream_label(value).is_some() {
             crate::compatibility::ensure_builtin_extension_enabled(
@@ -129,9 +141,9 @@ fn next_format(args: &[Value], start: usize) -> BuiltinResult<Option<FormatPlan>
 
 async fn select_target(
     runtime: Option<&crate::context::RuntimeContext>,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     format_index: usize,
-    staged: &mut [Option<Value>],
+    staged: &mut Cache<'_>,
 ) -> BuiltinResult<(Option<usize>, OutputTarget)> {
     for (index, value) in args.iter().enumerate().take(format_index) {
         if let Some(stream) = match_stream_label(value) {
@@ -147,13 +159,13 @@ async fn select_target(
             continue;
         }
         preflight_fid(value)?;
-        let host = match staged[index].as_ref() {
+        let host = match staged.get(index) {
             Some(host) => host.clone(),
             None if matches!(value, Value::GpuTensor(_)) => {
                 let host =
                     super::super::cooperation::await_io(runtime, BUILTIN_NAME, gather_value(value))
                         .await??;
-                staged[index] = Some(host.clone());
+                staged.put(index, host.clone())?;
                 host
             }
             None => value.clone(),
@@ -172,6 +184,6 @@ async fn select_target(
 
 #[cfg(test)]
 pub(super) fn preflight_special_roles(args: &[Value]) -> BuiltinResult<()> {
-    let _ = next_format(args, 0)?;
+    let _ = next_format(crate::call::FunctionArgumentView::from_slice(args), 0)?;
     Ok(())
 }

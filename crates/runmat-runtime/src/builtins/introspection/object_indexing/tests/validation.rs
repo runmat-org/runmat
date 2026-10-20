@@ -43,7 +43,7 @@ fn default_brace_rejects_invalid_numeric_subscripts() {
         let err = call_err(
             target.clone(),
             descriptor,
-            Value::String("Statement".to_string()),
+            Value::String("Statement".to_string().into()),
         );
         assert_eq!(
             err.identifier(),
@@ -57,7 +57,11 @@ fn default_brace_rejects_unvalidated_subscript_containers() {
     let target = cell(vec![Value::Num(1.0), Value::Num(2.0)]);
     let selector = cell(vec![Value::Num(1.0)]);
     let descriptor = substruct(crate::OBJECT_INDEX_BRACE, cell(vec![selector]));
-    let err = call_err(target, descriptor, Value::String("Statement".to_string()));
+    let err = call_err(
+        target,
+        descriptor,
+        Value::String("Statement".to_string().into()),
+    );
     assert_eq!(
         err.identifier(),
         Some("RunMat:numArgumentsFromSubscript:InvalidSubstruct")
@@ -98,7 +102,7 @@ fn invalid_context_has_stable_identifier() {
     let err = block_on(num_arguments_from_subscript_builtin(
         target,
         descriptor,
-        Value::String("Loop".to_string()),
+        Value::String("Loop".to_string().into()),
     ))
     .expect_err("invalid context should fail");
     assert_eq!(

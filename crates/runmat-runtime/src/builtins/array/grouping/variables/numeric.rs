@@ -1,4 +1,4 @@
-use runmat_value::{LogicalArray, Tensor, Value};
+use runmat_value::{LogicalArray, NumericStorage, Tensor, Value};
 
 use crate::builtins::common::tensor as tensor_utils;
 
@@ -18,15 +18,17 @@ pub(super) fn tensor_columns(
     }
     let rows = value.rows();
     let columns = value.cols();
-    let storage = value
-        .into_numeric_storage()
-        .map_err(|error| error.to_string())?;
     (0..columns)
         .map(|column| {
-            let indices = (0..rows).map(|row| row + column * rows).collect::<Vec<_>>();
-            let storage = storage
-                .gather(&indices)
-                .map_err(|error| error.to_string())?;
+            let mut storage = NumericStorage::zeros(value.numeric_dtype(), rows);
+            for row in 0..rows {
+                let element = value
+                    .numeric_value_at(row + column * rows)
+                    .ok_or_else(|| "numeric array shape does not match its storage".to_string())?;
+                storage
+                    .set_value(row, element)
+                    .map_err(|error| error.to_string())?;
+            }
             let value = Tensor::from_numeric_storage(storage, vec![rows, 1])
                 .map_err(|error| error.to_string())?;
             GroupColumn::vector(format!("{name}{}", column + 1), Value::Tensor(value))

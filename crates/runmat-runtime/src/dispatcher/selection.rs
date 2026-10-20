@@ -127,7 +127,8 @@ pub fn observe_builtin_dispatch_target(
     let name = resolved.canonical;
     let registered = select_registered_builtin(name, Some(context))?;
     if let Some(selected) =
-        select_instance_method(name, args)?.filter(|selected| selected.has_executable_route())
+        select_instance_method(name, crate::call::FunctionArgumentView::from_slice(args))?
+            .filter(|selected| selected.has_executable_route())
     {
         return Ok(Some(ObservedBuiltinDispatchTarget::InstanceMethod {
             owner: selected.owner,
@@ -179,14 +180,14 @@ impl SelectedInstanceMethod {
 /// semantic/builtin routes consumed by both execution and import observation.
 pub(super) fn select_instance_method(
     method_name: &str,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> Result<Option<SelectedInstanceMethod>, RuntimeError> {
     let Some(receiver) = args.first() else {
         return Ok(None);
     };
     let class_name = match receiver {
-        Value::Object(object) => &object.class_name,
-        Value::HandleObject(handle) => &handle.class_name,
+        Value::Object(object) => object.class_name(),
+        Value::HandleObject(handle) => &*handle.class_name,
         _ => return Ok(None),
     };
     let method_identity = runmat_types::MethodName::from(method_name);

@@ -81,8 +81,7 @@ async fn cospi_builtin(value: Value) -> BuiltinResult<Value> {
 
 fn cospi_char_array(array: CharArray) -> BuiltinResult<Value> {
     let data = array
-        .data
-        .into_iter()
+        .iter_column_major()
         .map(|value| if u32::from(value) % 2 == 0 { 1.0 } else { -1.0 })
         .collect();
     let tensor = Tensor::new(data, array.shape)
@@ -437,7 +436,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[cfg_attr(not(target_arch = "wasm32"), test)]
     fn strings_are_rejected() {
-        let err = call(Value::String("0.5".to_string())).unwrap_err();
+        let err = call(Value::String("0.5".to_string().into())).unwrap_err();
         assert_eq!(err.identifier.as_deref(), Some("RunMat:cospi:InvalidInput"));
     }
 }

@@ -30,7 +30,7 @@ impl PrintRequest {
 }
 
 pub(super) fn parse_print_args(
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     selected_figure: FigureHandle,
 ) -> BuiltinResult<PrintRequest> {
     if args.is_empty() {
@@ -108,7 +108,9 @@ pub(super) fn parse_print_args(
     })
 }
 
-pub(super) fn preflight_host_arguments(args: &[Value]) -> BuiltinResult<Option<PathBuf>> {
+pub(super) fn preflight_host_arguments(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Option<PathBuf>> {
     if args.is_empty() {
         return Err(print_error_with_detail(
             &PRINT_ERROR_INVALID_INPUT,
@@ -266,13 +268,13 @@ fn has_extension(path: &Path, expected: &str) -> bool {
 
 fn string_arg(value: &Value) -> BuiltinResult<String> {
     match value {
-        Value::String(s) => Ok(s.clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
+        Value::String(s) => Ok(s.as_str().to_owned()),
+        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data().iter().collect()),
         Value::CharArray(_) => Err(print_error_with_detail(
             &PRINT_ERROR_INVALID_INPUT,
             "character vector arguments must be 1-by-N",
         )),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
+        Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].as_str().to_owned()),
         Value::StringArray(_) => Err(print_error_with_detail(
             &PRINT_ERROR_INVALID_INPUT,
             "string array arguments must be scalar",

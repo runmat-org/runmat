@@ -459,9 +459,11 @@ fn empty_value() -> Value {
 
 fn text_value(value: &Value) -> Option<String> {
     match value {
-        Value::String(text) => Some(text.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
-        Value::CharArray(array) if array.rows == 1 => Some(array.data.iter().collect()),
+        Value::String(text) => Some(text.as_str().to_owned()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Some(array.data()[0].as_str().to_owned())
+        }
+        Value::CharArray(array) if array.rows == 1 => Some(array.data().iter().collect()),
         _ => None,
     }
 }
@@ -490,7 +492,7 @@ fn nonnegative_platform_usize(value: f64) -> Option<usize> {
 }
 
 fn stack_struct(frame: &crate::debug_context::DebugFrameInfo, complete_names: bool) -> StructValue {
-    let mut st = StructValue::new();
+    let mut st = runmat_value::UnboundedStructValueBuilder::new();
     let file = if complete_names {
         frame.file.clone()
     } else {
@@ -500,10 +502,10 @@ fn stack_struct(frame: &crate::debug_context::DebugFrameInfo, complete_names: bo
             .unwrap_or(&frame.file)
             .to_string()
     };
-    st.insert("file", Value::String(file));
-    st.insert("name", Value::String(frame.function.clone()));
+    st.insert("file", Value::string(file));
+    st.insert("name", Value::string(frame.function.clone()));
     st.insert("line", Value::Num(frame.line as f64));
-    st
+    st.finish()
 }
 
 fn cell_column(values: Vec<Value>) -> BuiltinResult<Value> {
@@ -794,7 +796,7 @@ pub(crate) fn dispatch_getcallinfo(args: Vec<Value>) -> BuiltinResult<Value> {
     if !args.is_empty() {
         return Err(debug_error("getcallinfo", &DEBUG_ERROR_TOO_MANY_INPUTS, ""));
     }
-    let mut info = StructValue::new();
+    let mut info = runmat_value::UnboundedStructValueBuilder::new();
     let current = crate::debug_context::current_frames()
         .into_iter()
         .next()
@@ -803,11 +805,11 @@ pub(crate) fn dispatch_getcallinfo(args: Vec<Value>) -> BuiltinResult<Value> {
             file: String::new(),
             line: 0,
         });
-    info.insert("name", Value::String(current.function));
-    info.insert("file", Value::String(current.file));
+    info.insert("name", Value::string(current.function));
+    info.insert("file", Value::string(current.file));
     info.insert("line", Value::Num(current.line as f64));
     info.insert("stack", stack_value(0, false)?);
-    Ok(Value::Struct(info))
+    Ok(Value::Struct(info.finish()))
 }
 
 #[runtime_builtin(
@@ -930,7 +932,7 @@ mod tests {
         let Value::Cell(cell) = value else {
             panic!("expected cell row, got {value:?}");
         };
-        cell.data.len()
+        cell.data().len()
     }
 
     fn stack_len(value: &Value) -> usize {
@@ -1086,8 +1088,8 @@ mod tests {
         let path = dir.path().join("demo_dbtype.m");
         std::fs::write(&path, "a = 1;\nb = 2;\nc = 3;\n").expect("write source");
         let result = futures::executor::block_on(dispatch_dbtype(vec![
-            Value::String(path.to_string_lossy().to_string()),
-            Value::String("2:3".to_string()),
+            Value::String(path.to_string_lossy().to_string().into()),
+            Value::String("2:3".to_string().into()),
         ]))
         .expect("dbtype");
         assert!(matches!(result, Value::Tensor(t) if t.materialize_f64().is_empty()));

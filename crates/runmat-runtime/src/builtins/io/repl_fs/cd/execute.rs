@@ -6,7 +6,7 @@ use super::super::working_directory;
 
 const BUILTIN_NAME: &str = "cd";
 
-pub(super) async fn run(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn run(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     match args.len() {
         0 => current(),
         1 => change(args.into_iter().next().expect("one cd argument")).await,

@@ -457,9 +457,9 @@ fn function_file_localfunctions_excludes_primary_at_public_call_boundary() {
         let Some(runmat_value::Value::Cell(handles)) = variables.get("selected_handles") else {
             panic!("localfunctions must return a cell");
         };
-        assert_eq!(handles.data.len(), 1);
+        assert_eq!(handles.data().len(), 1);
         assert!(matches!(
-            &handles.data[0],
+            &handles.data()[0],
             runmat_value::Value::BoundFunctionHandle(handle)
                 if handle.name == "child_local"
                     && handle.source_role == runmat_types::FunctionSourceRole::Local
@@ -489,7 +489,7 @@ fn repeated_captured_definition_survives_workspace_growth() {
                 .resolve_name(name)
                 .expect("definition remains published");
             let mut next = second.get(next_id).unwrap().clone();
-            next.rebind_identity(*id, runmat_types::ProgramFunctionId(id.0 as u32));
+            next.rebind_identity(*id);
             let before = super::fingerprint(original).unwrap();
             let after = super::fingerprint(&next).unwrap();
             assert_eq!(

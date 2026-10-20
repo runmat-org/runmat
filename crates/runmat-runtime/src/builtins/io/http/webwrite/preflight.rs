@@ -3,7 +3,7 @@
 use super::*;
 
 pub(super) fn preflight_host_arguments(
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     prepared_api_key: Option<&super::super::api_key::PreparedApiKey>,
 ) -> BuiltinResult<super::super::request_options::PreparedRequestNames> {
     use super::super::request_options::{PreparedRequestNames, RequestOptionName};
@@ -28,7 +28,7 @@ pub(super) fn preflight_host_arguments(
             let field = RequestOptionName::decode(name);
             prepared_names
                 .struct_fields
-                .push((name.clone(), field.clone()));
+                .push((name.to_owned(), field.clone()));
             if !crate::dispatcher::value_contains_gpu(value) {
                 process_name_value_pair(&field, value, &mut options, &mut query)?;
             }

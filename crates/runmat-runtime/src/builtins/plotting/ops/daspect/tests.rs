@@ -15,7 +15,7 @@ fn daspect_query_output_count_rejects_before_default_state_creation() {
     state::reset_plot_state();
     let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     assert_eq!(
-        daspect_builtin(vec![]).unwrap_err().identifier(),
+        daspect_builtin_source(vec![]).unwrap_err().identifier(),
         Some("RunMat:daspect:TooManyOutputs")
     );
     assert!(state::current_figure_handle_if_exists().is_none());
@@ -31,7 +31,7 @@ fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
 
 fn set_daspect(args: Vec<Value>) -> BuiltinResult<Value> {
     let _output = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
-    daspect_builtin(args)
+    daspect_builtin_source(args)
 }
 
 #[test]
@@ -47,8 +47,8 @@ fn daspect_descriptor_and_runtime_keep_setters_outputless() {
     );
 
     let _guard = setup();
-    let error =
-        daspect_builtin(vec![ratio(&[1.0, 2.0, 1.0])]).expect_err("setter output must reject");
+    let error = daspect_builtin_source(vec![ratio(&[1.0, 2.0, 1.0])])
+        .expect_err("setter output must reject");
     assert!(error.message().contains("do not return"));
     assert_eq!(
         set_daspect(vec![ratio(&[1.0, 2.0, 1.0])]).unwrap(),
@@ -65,7 +65,7 @@ fn daspect_queries_sets_ratio_and_mode() {
         Value::output_list(Vec::new())
     );
     assert_eq!(
-        daspect_builtin(vec![Value::String("mode".into())]).unwrap(),
+        daspect_builtin_source(vec![Value::String("mode".into())]).unwrap(),
         Value::String("manual".into())
     );
     assert_eq!(
@@ -103,11 +103,11 @@ fn daspect_explicit_axes_does_not_change_current_axes() {
     )
     .unwrap();
     set_daspect(vec![Value::Num(ax1), ratio(&[3.0, 1.0, 1.0])]).unwrap();
-    let current = daspect_builtin(Vec::new()).unwrap();
+    let current = daspect_builtin_source(Vec::new()).unwrap();
     assert_eq!(tensor_data(current), vec![1.0, 1.0, 1.0]);
-    let left = daspect_builtin(vec![Value::Num(ax1)]).unwrap();
+    let left = daspect_builtin_source(vec![Value::Num(ax1)]).unwrap();
     assert_eq!(tensor_data(left), vec![3.0, 1.0, 1.0]);
-    let right = daspect_builtin(vec![Value::Num(ax2)]).unwrap();
+    let right = daspect_builtin_source(vec![Value::Num(ax2)]).unwrap();
     assert_eq!(tensor_data(right), vec![1.0, 1.0, 1.0]);
 }
 
@@ -161,7 +161,7 @@ fn daspect_accepts_all_documented_integer_ratio_classes() {
             Value::output_list(Vec::new())
         );
         assert_eq!(
-            tensor_data(daspect_builtin(Vec::new()).unwrap()),
+            tensor_data(daspect_builtin_source(Vec::new()).unwrap()),
             vec![1.0, 2.0, 3.0]
         );
     }
@@ -208,7 +208,7 @@ fn daspect_rank_one_ratio_is_admitted_but_rank_zero_is_not() {
         Value::output_list(Vec::new())
     );
     assert_eq!(
-        tensor_data(daspect_builtin(Vec::new()).unwrap()),
+        tensor_data(daspect_builtin_source(Vec::new()).unwrap()),
         vec![1.0, 2.0, 3.0]
     );
 }
@@ -265,15 +265,15 @@ fn daspect_numeric_axes_alias_is_compatibility_gated() {
     };
     let alias = Value::Int(runmat_value::IntValue::U64(ax as u64));
     let strict = crate::compatibility::push_runmat_extensions_enabled(false);
-    let error = daspect_builtin(vec![alias.clone()]).expect_err("numeric axes alias gate");
+    let error = daspect_builtin_source(vec![alias.clone()]).expect_err("numeric axes alias gate");
     assert_eq!(
         error.identifier(),
         DASPECT_NUMERIC_AXES_ALIAS_EXTENSION.error_identifier
     );
     drop(strict);
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-    assert!(daspect_builtin(vec![alias]).is_ok());
-    assert!(daspect_builtin(vec![Value::Num(ax + 0.5)]).is_err());
+    assert!(daspect_builtin_source(vec![alias]).is_ok());
+    assert!(daspect_builtin_source(vec![Value::Num(ax + 0.5)]).is_err());
 }
 
 fn ratio(values: &[f64]) -> Value {

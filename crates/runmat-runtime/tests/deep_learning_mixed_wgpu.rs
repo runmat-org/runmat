@@ -139,7 +139,7 @@ fn public_nonsquare_cb_normalization_then_dense_stays_resident_and_matches_oracl
             let Value::Object(output) = output.value() else {
                 panic!("formatted dlarray output expected")
             };
-            let Some(Value::GpuTensor(data)) = output.properties.get("Data") else {
+            let Some(Value::GpuTensor(data)) = output.properties().get("Data") else {
                 panic!("explicit input must retain resident output")
             };
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
@@ -159,7 +159,7 @@ fn public_nonsquare_cb_normalization_then_dense_stays_resident_and_matches_oracl
             );
             assert_eq!(data.shape(), [1, 3]);
             assert_eq!(
-                output.properties.get("Format"),
+                output.properties().get("Format"),
                 Some(&Value::String("CB".into()))
             );
             let gathered = block_on(provider.download_numeric(data)).unwrap();

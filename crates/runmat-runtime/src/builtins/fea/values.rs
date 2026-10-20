@@ -72,10 +72,10 @@ macro_rules! scalar_quantity_builtin {
         $class:expr, $field:literal, $scale:expr, $offset:expr
     ) => {
         #[runtime_builtin(
-                            name = $builtin_name,
-                            binding_variant = "default",
-                            builtin_path = "crate::builtins::fea::values"
-                        )]
+                                            name = $builtin_name,
+                                            binding_variant = "default",
+                                            builtin_path = "crate::builtins::fea::values"
+                                        )]
         pub async fn $function(value: Value) -> BuiltinResult<Value> {
             let value = finite_numeric_scalar($builtin_name, &value, "value")?;
             quantity_to_value($builtin_name, $class, $field, value * $scale + $offset)
@@ -329,10 +329,10 @@ macro_rules! vector_quantity_builtin {
         $function:ident, $builtin_name:literal, $class:expr, $scale:expr
     ) => {
         #[runtime_builtin(
-                            name = $builtin_name,
-                            binding_variant = "default",
-                            builtin_path = "crate::builtins::fea::values"
-                        )]
+                                            name = $builtin_name,
+                                            binding_variant = "default",
+                                            builtin_path = "crate::builtins::fea::values"
+                                        )]
         pub async fn $function(value: Value) -> BuiltinResult<Value> {
             let components = finite_numeric_vector3($builtin_name, &value, "components")?;
             let components = components.map(|value| value * $scale);
@@ -564,14 +564,18 @@ fn quantity_methods(class_name: &str) -> HashMap<MethodName, RuntimeMethod> {
 fn validate_quantity_object(object: &ObjectInstance) -> Result<(), String> {
     let fields = quantity_schemas()
         .into_iter()
-        .find(|(class_name, _, _)| *class_name == object.class_name.display_name())
+        .find(|(class_name, _, _)| *class_name == object.class_name().display_name())
         .map(|(_, _, fields)| fields)
-        .ok_or_else(|| format!("unknown FEA quantity class `{}`", object.class_name))?;
-    let Some(value) = object.properties.get(fields[0]) else {
-        return Err(format!("{} is missing `{}`", object.class_name, fields[0]));
+        .ok_or_else(|| format!("unknown FEA quantity class `{}`", object.class_name()))?;
+    let Some(value) = object.properties().get(fields[0]) else {
+        return Err(format!(
+            "{} is missing `{}`",
+            object.class_name(),
+            fields[0]
+        ));
     };
-    if object.class_name.display_name() == POSITION_CLASS
-        || object.class_name.display_name() == TRANSLATION_CLASS
+    if object.class_name().display_name() == POSITION_CLASS
+        || object.class_name().display_name() == TRANSLATION_CLASS
     {
         finite_numeric_vector3("FEA vector quantity", value, "components")
             .map(|_| ())
@@ -579,7 +583,7 @@ fn validate_quantity_object(object: &ObjectInstance) -> Result<(), String> {
     } else {
         let value = finite_numeric_scalar("FEA quantity", value, fields[0])
             .map_err(|error| error.message().to_string())?;
-        validate_quantity_range(object.class_name.display_name(), value)
+        validate_quantity_range(object.class_name().display_name(), value)
     }
 }
 
@@ -627,9 +631,9 @@ pub(super) fn quantity_to_value(
     validate_quantity_range(class_name, value)
         .map_err(|message| builtin_error(builtin, &ERROR_INPUT, message))?;
     ensure_quantity_classes_registered();
-    let mut object = ObjectInstance::new(class_name);
-    object.properties.insert(field.into(), Value::Num(value));
-    Ok(Value::Object(object))
+    let mut object = crate::builtins::fea::object_api::ordinary_builder(builtin, class_name)?;
+    object.insert(field.into(), Value::Num(value));
+    Ok(Value::Object(object.finish()))
 }
 
 fn vector_quantity_to_value(
@@ -638,7 +642,7 @@ fn vector_quantity_to_value(
     coordinates: [f64; 3],
 ) -> BuiltinResult<Value> {
     ensure_quantity_classes_registered();
-    let mut object = ObjectInstance::new(class_name);
+    let mut object = crate::builtins::fea::object_api::ordinary_builder(builtin, class_name)?;
     let tensor = Tensor::new_2d(coordinates.to_vec(), 1, 3).map_err(|error| {
         builtin_error(
             builtin,
@@ -646,10 +650,8 @@ fn vector_quantity_to_value(
             format!("failed to construct dimensioned vector: {error}"),
         )
     })?;
-    object
-        .properties
-        .insert("meters".into(), Value::Tensor(tensor));
-    Ok(Value::Object(object))
+    object.insert("meters".into(), Value::Tensor(tensor));
+    Ok(Value::Object(object.finish()))
 }
 
 pub(super) fn quantity_scalar(
@@ -665,14 +667,14 @@ pub(super) fn quantity_scalar(
             format!("expected {class_name}"),
         ));
     };
-    if object.class_name.display_name() != class_name {
+    if object.class_name().display_name() != class_name {
         return Err(builtin_error(
             builtin,
             &ERROR_INPUT,
-            format!("expected {class_name}, got {}", object.class_name),
+            format!("expected {class_name}, got {}", object.class_name()),
         ));
     }
-    let value = object.properties.get(field).ok_or_else(|| {
+    let value = object.properties().get(field).ok_or_else(|| {
         builtin_error(
             builtin,
             &ERROR_INPUT,
@@ -703,14 +705,14 @@ fn vector_quantity(
             format!("expected {class_name}"),
         ));
     };
-    if object.class_name.display_name() != class_name {
+    if object.class_name().display_name() != class_name {
         return Err(builtin_error(
             builtin,
             &ERROR_INPUT,
-            format!("expected {class_name}, got {}", object.class_name),
+            format!("expected {class_name}, got {}", object.class_name()),
         ));
     }
-    let coordinates = object.properties.get("meters").ok_or_else(|| {
+    let coordinates = object.properties().get("meters").ok_or_else(|| {
         builtin_error(
             builtin,
             &ERROR_INPUT,
@@ -954,7 +956,7 @@ mod tests {
         let Value::Object(object) = value else {
             panic!("expected position object")
         };
-        let Some(Value::Tensor(coordinates)) = object.properties.get("meters") else {
+        let Some(Value::Tensor(coordinates)) = object.properties().get("meters") else {
             panic!("expected coordinate tensor")
         };
         assert_eq!(coordinates.shape(), vec![1, 3]);

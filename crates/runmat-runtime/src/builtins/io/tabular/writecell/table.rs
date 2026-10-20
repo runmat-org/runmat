@@ -53,7 +53,7 @@ impl CellTable {
         };
         ensure_cell_shape(&cell)?;
 
-        let mut data = Vec::with_capacity(cell.data.len());
+        let mut data = Vec::with_capacity(cell.data().len());
         for row in 0..cell.rows {
             for col in 0..cell.cols {
                 let value = cell.get(row, col).map_err(|message| {
@@ -93,7 +93,7 @@ pub(super) fn cell_value_from_value(value: Value) -> BuiltinResult<CellValue> {
         Value::Num(n) => Ok(CellValue::Number(n)),
         Value::Int(i) => Ok(CellValue::Integer(i)),
         Value::Bool(b) => Ok(CellValue::Boolean(b)),
-        Value::String(s) => Ok(CellValue::Text(s)),
+        Value::String(s) => Ok(CellValue::Text(s.into_string_unbounded())),
         value @ (Value::CharArray(_) | Value::StringArray(_))
             if crate::builtins::common::validation::value_is_text_scalar(&value) =>
         {
@@ -102,7 +102,7 @@ pub(super) fn cell_value_from_value(value: Value) -> BuiltinResult<CellValue> {
                     .expect("admitted scalar text"),
             ))
         }
-        Value::StringArray(sa) if sa.data.is_empty() => Ok(CellValue::Empty),
+        Value::StringArray(sa) if sa.data().is_empty() => Ok(CellValue::Empty),
         Value::Tensor(tensor) if tensor::is_scalar_tensor(&tensor) => {
             scalar_tensor_cell_value(&tensor)
         }

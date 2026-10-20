@@ -131,14 +131,16 @@ fn classify(value: &runmat_value::Value) -> RunMatValueKind {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_value::{CellArray, StructArray, StructValue, Value};
+    use runmat_value::{CellArray, StructArray, Value};
 
     #[test]
     fn extension_value_kind_does_not_alias_structure_arrays_with_scalar_structures() {
-        let mut first = StructValue::new();
+        let mut first = runmat_value::UnboundedStructValueBuilder::new();
         first.insert("payload", Value::Num(1.0));
-        let mut second = StructValue::new();
+        let mut second = runmat_value::UnboundedStructValueBuilder::new();
         second.insert("payload", Value::Num(2.0));
+        let second = second.finish();
+        let first = first.finish();
         let array = StructArray::with_fields(
             vec!["payload".into()],
             vec![first.clone(), second.clone()],

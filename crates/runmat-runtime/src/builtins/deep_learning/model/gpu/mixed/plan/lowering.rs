@@ -202,7 +202,7 @@ fn lower_for_purpose(
             "physical input differs from admitted axes",
         ));
     }
-    let Some(Value::Cell(layers)) = network.properties.get("Layers") else {
+    let Some(Value::Cell(layers)) = network.properties().get("Layers") else {
         unreachable!("host plan admitted Layers")
     };
     let mut physical = host.input_axes().clone();
@@ -364,11 +364,11 @@ fn lower_for_purpose(
                     .with_layout(GpuTensorLayout::Contiguous);
             }
             Controls::Recurrent(_) => {
-                let Value::Object(layer) = &layers.data[step.index] else {
+                let Value::Object(layer) = &layers.data()[step.index] else {
                     unreachable!("host plan admitted layer objects")
                 };
                 return Ok(Some(Err(GpuCapabilityReason::Layer(
-                    layer.class_name.clone(),
+                    layer.class_name().clone(),
                 ))));
             }
         }

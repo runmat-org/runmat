@@ -36,7 +36,7 @@ pub(in crate::builtins::array::introspection) enum DimensionSelectorError {
 }
 
 pub(in crate::builtins::array::introspection) fn parse_dimension_arguments(
-    arguments: &[Value],
+    arguments: crate::call::FunctionArgumentView<'_>,
     empty_policy: EmptySelectorPolicy,
 ) -> Result<DimensionSelectors, DimensionSelectorError> {
     let form = if arguments.len() == 1 && matches!(arguments[0], Value::Tensor(_)) {
@@ -130,9 +130,11 @@ mod tests {
         let wide = 9_007_199_254_740_993_u64;
         let tensor = Tensor::new_integer(IntegerStorage::U64(vec![1, wide]), vec![1, 2])
             .expect("selector tensor");
-        let parsed =
-            parse_dimension_arguments(&[Value::Tensor(tensor)], EmptySelectorPolicy::Allow)
-                .expect("selectors");
+        let parsed = parse_dimension_arguments(
+            crate::call::FunctionArgumentView::from_slice(&[Value::Tensor(tensor)]),
+            EmptySelectorPolicy::Allow,
+        )
+        .expect("selectors");
         assert_eq!(parsed.values(), &[1, wide]);
     }
 
@@ -141,7 +143,10 @@ mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("selector tensor");
         assert_eq!(
             parse_dimension_arguments(
-                &[Value::Num(1.0), Value::Tensor(tensor)],
+                crate::call::FunctionArgumentView::from_slice(&[
+                    Value::Num(1.0),
+                    Value::Tensor(tensor)
+                ]),
                 EmptySelectorPolicy::Allow,
             ),
             Err(DimensionSelectorError::VectorInScalarList)

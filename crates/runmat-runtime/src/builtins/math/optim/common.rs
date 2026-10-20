@@ -1,6 +1,6 @@
 use runmat_builtins::BuiltinExtensionDescriptor;
 use runmat_builtins::OptimSolver;
-use runmat_value::{CharArray, StructValue, Tensor, Value};
+use runmat_value::{StructValue, Tensor, Value};
 
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, BuiltinResult, GpuGatherRetry, RuntimeError};
@@ -70,7 +70,7 @@ pub(crate) fn preflight_real_array(
     Ok(())
 }
 
-fn canonicalize_callback_handle(handle: &Value) -> Value {
+fn canonicalize_callback_handle(handle: &Value) -> BuiltinResult<Value> {
     crate::canonicalize_callback_handle_for_semantic_resolution(handle.clone())
 }
 
@@ -78,7 +78,7 @@ pub(crate) async fn call_function(
     handle: &Value,
     args: impl AsRef<[Value]>,
 ) -> BuiltinResult<crate::execution::RootedValue> {
-    let callback = canonicalize_callback_handle(handle);
+    let callback = canonicalize_callback_handle(handle)?;
     crate::call_feval_async_with_outputs(callback, args.as_ref(), 1).await
 }
 
@@ -591,9 +591,9 @@ pub(crate) fn vector_to_value(
 
 pub(crate) fn field_name(value: &Value) -> BuiltinResult<String> {
     match value {
-        Value::String(s) => Ok(s.clone()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
-        Value::CharArray(CharArray { data, rows: 1, .. }) => Ok(data.iter().collect()),
+        Value::String(s) => Ok(s.as_str().to_owned()),
+        Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].as_str().to_owned()),
+        Value::CharArray(array) if array.rows == 1 => Ok(array.data().iter().collect()),
         other => Err(optim_error(
             "optimset",
             format!("optimset: option names must be strings, got {other:?}"),
@@ -738,9 +738,9 @@ pub(crate) fn option_string_value(
     };
     match value {
         Value::String(s) => Ok(s.to_ascii_lowercase()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].to_ascii_lowercase()),
-        Value::CharArray(CharArray { data, rows: 1, .. }) => {
-            Ok(data.iter().collect::<String>().to_ascii_lowercase())
+        Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].to_ascii_lowercase()),
+        Value::CharArray(array) if array.rows == 1 => {
+            Ok(array.data().iter().collect::<String>().to_ascii_lowercase())
         }
         other => Err(optim_error(
             "optim",
@@ -775,17 +775,16 @@ mod tests {
     };
     use futures::executor::block_on;
     use runmat_builtins::OptimOptionField;
-    use runmat_value::{
-        CharArray, Closure, IntegerStorage, StringArray, StructValue, Tensor, Value,
-    };
+    use runmat_value::{CharArray, Closure, IntegerStorage, StringArray, Tensor, Value};
     use std::sync::Arc;
 
     #[test]
     fn scalar_option_fields_decode_public_aliases_to_one_typed_control_plan() {
-        let mut options = StructValue::new();
+        let mut options = runmat_value::UnboundedStructValueBuilder::new();
         options.insert("StepTolerance", Value::Num(0.125));
         options.insert("MAXITER", Value::Num(17.0));
-        options.insert("Display", Value::String("iter".to_string()));
+        options.insert("Display", Value::String("iter".to_string().into()));
+        let options = options.finish();
         let admitted = ScalarOptionFields::from_struct(Some(&options));
         assert!(matches!(admitted.get(OptimOptionField::TolX), Some(Value::Num(v)) if *v == 0.125));
         assert!(
@@ -946,8 +945,9 @@ mod tests {
     #[test]
     fn option_usize_reads_typed_integer_storage_exactly() {
         let max_iter = Tensor::new_integer(IntegerStorage::U16(vec![37]), vec![1, 1]).unwrap();
-        let mut options = StructValue::new();
+        let mut options = runmat_value::UnboundedStructValueBuilder::new();
         options.insert("MaxIter", Value::Tensor(max_iter));
+        let options = options.finish();
 
         assert_eq!(
             option_usize("optim_test", Some(&options), "MaxIter", 400).unwrap(),
@@ -958,8 +958,9 @@ mod tests {
     #[test]
     fn option_usize_rejects_negative_typed_integer_storage_exactly() {
         let max_iter = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).unwrap();
-        let mut options = StructValue::new();
+        let mut options = runmat_value::UnboundedStructValueBuilder::new();
         options.insert("MaxIter", Value::Tensor(max_iter));
+        let options = options.finish();
 
         assert!(option_usize("optim_test", Some(&options), "MaxIter", 400).is_err());
     }
@@ -968,8 +969,9 @@ mod tests {
     fn option_usize_accepts_wide_typed_integer_storage_despite_poisoned_mirror() {
         let wide = 9_007_199_254_740_993_u64;
         let max_iter = Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).unwrap();
-        let mut options = StructValue::new();
+        let mut options = runmat_value::UnboundedStructValueBuilder::new();
         options.insert("MaxIter", Value::Tensor(max_iter));
+        let options = options.finish();
 
         let parsed = option_usize("optim_test", Some(&options), "MaxIter", 400);
         if let Ok(expected) = usize::try_from(wide) {
@@ -984,7 +986,9 @@ mod tests {
         assert!(ScalarOptionFields::from_struct(None)
             .count_product_default("fsolve", field, 100, usize::MAX)
             .is_err());
+        let mut options = runmat_value::UnboundedStructValueBuilder::from_structure(options);
         options.insert("MaxFunEvals", Value::Int(runmat_value::IntValue::U64(17)));
+        let options = options.finish();
         assert_eq!(
             ScalarOptionFields::from_struct(Some(&options))
                 .count_product_default("fsolve", field, 100, usize::MAX)
@@ -995,8 +999,9 @@ mod tests {
 
     #[test]
     fn option_usize_rejects_fractional_and_unrepresentable_double_values() {
-        let mut options = StructValue::new();
+        let mut options = runmat_value::UnboundedStructValueBuilder::new();
         options.insert("MaxIter", Value::Num(3.5));
+        let mut options = options.finish();
         assert!(option_usize("optim_test", Some(&options), "MaxIter", 400).is_err());
 
         let boundary = if usize::BITS == 64 {
@@ -1004,7 +1009,9 @@ mod tests {
         } else {
             (usize::MAX as f64) + 1.0
         };
-        options.insert("MaxIter", Value::Num(boundary));
+        options
+            .try_replace_unique("MaxIter", Value::Num(boundary))
+            .expect("fresh unique options");
         assert!(option_usize("optim_test", Some(&options), "MaxIter", 400).is_err());
     }
 
@@ -1015,7 +1022,8 @@ mod tests {
                 (name == "decay").then_some(42)
             })))
             .expect("call-port scope");
-        let canonical = canonicalize_callback_handle(&Value::FunctionHandle("decay".into()));
+        let canonical =
+            canonicalize_callback_handle(&Value::FunctionHandle("decay".into())).unwrap();
         assert_eq!(
             canonical,
             Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
@@ -1038,7 +1046,8 @@ mod tests {
             })))
             .expect("call-port scope");
         let canonical =
-            canonicalize_callback_handle(&Value::ExternalFunctionHandle("pkg.decay".into()));
+            canonicalize_callback_handle(&Value::ExternalFunctionHandle("pkg.decay".into()))
+                .unwrap();
         assert_eq!(
             canonical,
             Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
@@ -1061,7 +1070,7 @@ mod tests {
             })))
             .expect("call-port scope");
         let raw = Value::ExternalFunctionHandle("pkg..decay".into());
-        let canonical = canonicalize_callback_handle(&raw);
+        let canonical = canonicalize_callback_handle(&raw).unwrap();
         assert_eq!(canonical, raw);
     }
 
@@ -1072,7 +1081,8 @@ mod tests {
                 (name == "decay").then_some(45)
             })))
             .expect("call-port scope");
-        let canonical = canonicalize_callback_handle(&Value::String("@decay".to_string()));
+        let canonical =
+            canonicalize_callback_handle(&Value::String("@decay".to_string().into())).unwrap();
         assert_eq!(
             canonical,
             Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
@@ -1094,7 +1104,8 @@ mod tests {
                 (name == "decay").then_some(145)
             })))
             .expect("call-port scope");
-        let canonical = canonicalize_callback_handle(&Value::String("  @decay  ".to_string()));
+        let canonical =
+            canonicalize_callback_handle(&Value::String("  @decay  ".to_string().into())).unwrap();
         assert_eq!(
             canonical,
             Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
@@ -1118,7 +1129,8 @@ mod tests {
             .expect("call-port scope");
         let canonical = canonicalize_callback_handle(&Value::StringArray(
             StringArray::new(vec!["@pkg.decay".to_string()], vec![1, 1]).expect("string array"),
-        ));
+        ))
+        .unwrap();
         assert_eq!(
             canonical,
             Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
@@ -1142,7 +1154,8 @@ mod tests {
             .expect("call-port scope");
         let canonical = canonicalize_callback_handle(&Value::StringArray(
             StringArray::new(vec!["  @pkg.decay  ".to_string()], vec![1, 1]).expect("string array"),
-        ));
+        ))
+        .unwrap();
         assert_eq!(
             canonical,
             Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
@@ -1165,7 +1178,7 @@ mod tests {
             })))
             .expect("call-port scope");
         let canonical =
-            canonicalize_callback_handle(&Value::CharArray(CharArray::new_row("@decay")));
+            canonicalize_callback_handle(&Value::CharArray(CharArray::new_row("@decay"))).unwrap();
         assert_eq!(
             canonical,
             Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
@@ -1188,7 +1201,8 @@ mod tests {
             })))
             .expect("call-port scope");
         let canonical =
-            canonicalize_callback_handle(&Value::CharArray(CharArray::new_row("  @decay  ")));
+            canonicalize_callback_handle(&Value::CharArray(CharArray::new_row("  @decay  ")))
+                .unwrap();
         assert_eq!(
             canonical,
             Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
@@ -1216,9 +1230,9 @@ mod tests {
             binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
-            captures: vec![Value::Num(9.0)],
+            captures: vec![Value::Num(9.0)].into(),
         }));
-        let canonical = canonicalize_callback_handle(&raw);
+        let canonical = canonicalize_callback_handle(&raw).unwrap();
         assert_eq!(
             canonical,
             Value::Closure(Closure::from_data(runmat_value::ClosureData {
@@ -1227,7 +1241,7 @@ mod tests {
                 binding: Some(runmat_value::BoundFunctionBinding::unavailable(48)),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
-                captures: vec![Value::Num(9.0)],
+                captures: vec![Value::Num(9.0)].into(),
             }))
         );
     }
@@ -1240,9 +1254,9 @@ mod tests {
             binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
-            captures: vec![Value::Num(9.0)],
+            captures: vec![Value::Num(9.0)].into(),
         }));
-        let canonical = canonicalize_callback_handle(&raw);
+        let canonical = canonicalize_callback_handle(&raw).unwrap();
         assert_eq!(canonical, raw);
     }
 }

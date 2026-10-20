@@ -1,5 +1,10 @@
 use super::*;
 
+static GRAPH_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
+    crate::class_registry::ClassRegistration::new(GRAPH_CLASS);
+static DIGRAPH_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
+    crate::class_registry::ClassRegistration::new(DIGRAPH_CLASS);
+
 #[derive(Clone, Copy)]
 pub(super) enum TriangleMode {
     Full,
@@ -8,11 +13,8 @@ pub(super) enum TriangleMode {
 }
 
 pub(super) fn ensure_graph_classes_registered() {
-    static REGISTER: OnceLock<()> = OnceLock::new();
-    REGISTER.get_or_init(|| {
-        register_graph_class(GRAPH_CLASS);
-        register_graph_class(DIGRAPH_CLASS);
-    });
+    GRAPH_CLASS_REGISTERED.ensure(|| register_graph_class(GRAPH_CLASS));
+    DIGRAPH_CLASS_REGISTERED.ensure(|| register_graph_class(DIGRAPH_CLASS));
 }
 
 pub(super) fn register_graph_class(name: runmat_types::StaticClassIdentity) {
@@ -31,11 +33,15 @@ pub(super) fn register_graph_class(name: runmat_types::StaticClassIdentity) {
             },
         );
     }
-    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-        events: Default::default(),
-        name: name.into(),
-        parent: None,
-        properties,
-        methods: HashMap::<runmat_types::MethodName, crate::class_registry::RuntimeMethod>::new(),
-    });
+    crate::class_registry::register_builtin_class(
+        name,
+        crate::class_registry::RuntimeClass {
+            events: Default::default(),
+            name: name.into(),
+            parent: None,
+            properties,
+            methods: HashMap::<runmat_types::MethodName, crate::class_registry::RuntimeMethod>::new(
+            ),
+        },
+    );
 }

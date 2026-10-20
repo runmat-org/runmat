@@ -1,5 +1,7 @@
 use runmat_builtins::RelationalOperator;
-use runmat_value::{CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
+use runmat_value::{
+    CharArray, ComplexTensor, ExactArrayStorage, LogicalArray, StringArray, Tensor, Utf8Text, Value,
+};
 
 use crate::builtins::common::broadcast::{broadcast_index, broadcast_shapes, compute_strides};
 use crate::builtins::common::tensor;
@@ -9,11 +11,11 @@ use super::errors::{runtime_error, ComparisonError};
 pub(super) enum Operand {
     Numeric(Buffer<f64>),
     Complex(Buffer<(f64, f64)>),
-    Text(Buffer<String>),
+    Text(Buffer<Utf8Text>),
 }
 
 pub(super) struct Buffer<T> {
-    data: Vec<T>,
+    data: ExactArrayStorage<T>,
     shape: Vec<usize>,
 }
 
@@ -43,7 +45,7 @@ impl Buffer<f64> {
     fn from_tensor(value: Tensor) -> Self {
         let shape = value.shape().to_vec();
         Self {
-            data: tensor::tensor_into_values_f64(value),
+            data: ExactArrayStorage::unbounded(tensor::tensor_into_values_f64(value)),
             shape,
         }
     }
@@ -51,23 +53,24 @@ impl Buffer<f64> {
     fn from_logical(value: LogicalArray) -> Self {
         Self {
             shape: value.shape.to_vec(),
-            data: value
-                .data
-                .into_iter()
-                .map(|item| f64::from(u8::from(item != 0)))
-                .collect(),
+            data: ExactArrayStorage::unbounded(
+                value
+                    .data
+                    .into_iter()
+                    .map(|item| f64::from(u8::from(item != 0)))
+                    .collect(),
+            ),
         }
     }
 
     fn from_chars(value: CharArray) -> Self {
         let ordered = value
-            .to_column_major()
-            .into_iter()
+            .iter_column_major()
             .map(|character| character as u32 as f64)
             .collect();
         Self {
-            data: ordered,
-            shape: value.shape,
+            data: ExactArrayStorage::unbounded(ordered),
+            shape: value.shape.to_vec(),
         }
     }
 }
@@ -76,17 +79,18 @@ impl Buffer<(f64, f64)> {
     fn from_complex(value: ComplexTensor) -> Self {
         let shape = value.shape().to_vec();
         Self {
-            data: value.materialize_f64(),
+            data: ExactArrayStorage::unbounded(value.materialize_f64()),
             shape,
         }
     }
 }
 
-impl Buffer<String> {
+impl Buffer<Utf8Text> {
     fn from_strings(value: StringArray) -> Self {
+        let (data, shape, _, _) = value.into_parts();
         Self {
-            data: value.data,
-            shape: value.shape,
+            data,
+            shape: shape.to_vec(),
         }
     }
 }
@@ -94,7 +98,7 @@ impl Buffer<String> {
 impl<T> Buffer<T> {
     fn scalar(value: T) -> Self {
         Self {
-            data: vec![value],
+            data: ExactArrayStorage::unbounded(vec![value]),
             shape: vec![1, 1],
         }
     }
@@ -176,7 +180,7 @@ fn logical_value(
 
 fn promote_real(value: Buffer<f64>) -> Buffer<(f64, f64)> {
     Buffer {
-        data: value.data.into_iter().map(|real| (real, 0.0)).collect(),
+        data: ExactArrayStorage::unbounded(value.data.iter().map(|real| (*real, 0.0)).collect()),
         shape: value.shape,
     }
 }

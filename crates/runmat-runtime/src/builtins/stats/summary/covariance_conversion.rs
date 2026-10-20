@@ -39,7 +39,7 @@ use validation::validate_integer_covariance_structure;
 async fn covariance_tensor(
     name: &'static str,
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Tensor> {
     if !rest.is_empty() {
         return Err(conversion_error(
@@ -103,7 +103,7 @@ async fn covariance_conversion_builtin(
     kind: ConversionKind,
     name: &'static str,
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     if !rest.is_empty() {
         return Err(conversion_error(
@@ -124,7 +124,7 @@ async fn covariance_conversion_builtin(
     if let Some(eval) = try_covariance_gpu(name, &value)? {
         return eval.output(kind, name);
     }
-    let covariance = covariance_tensor(name, value, Vec::new()).await?;
+    let covariance = covariance_tensor(name, value, rest).await?;
     let (r, sigma) = covariance_to_correlation(name, covariance)?;
     output_values(kind, name, r, sigma)
 }
@@ -168,7 +168,10 @@ pub mod corrcov {
         binding_variant = "default",
         builtin_path = "crate::builtins::stats::summary::covariance_conversion::corrcov"
     )]
-    pub(crate) async fn corrcov_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    pub(crate) async fn corrcov_builtin(
+        value: Value,
+        rest: crate::call::BuiltinArguments,
+    ) -> BuiltinResult<Value> {
         covariance_conversion_builtin(ConversionKind::Corrcov, "corrcov", value, rest).await
     }
 }
@@ -212,7 +215,10 @@ pub mod cov2corr {
         binding_variant = "default",
         builtin_path = "crate::builtins::stats::summary::covariance_conversion::cov2corr"
     )]
-    pub(crate) async fn cov2corr_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    pub(crate) async fn cov2corr_builtin(
+        value: Value,
+        rest: crate::call::BuiltinArguments,
+    ) -> BuiltinResult<Value> {
         covariance_conversion_builtin(ConversionKind::Cov2corr, "cov2corr", value, rest).await
     }
 }

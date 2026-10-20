@@ -9,6 +9,9 @@ use runmat_value::Value;
 
 use crate::ExecutableUnit;
 
+mod inputs;
+pub(super) use inputs::Inputs;
+
 #[cfg(all(test, not(target_arch = "wasm32")))]
 thread_local! {
     static NATIVE_LEXICAL_COMPLETIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
@@ -26,10 +29,9 @@ pub(super) fn native_lexical_completions() -> usize {
 
 struct DeoptimizationInvocation {
     executor: Rc<NativeExecutor>,
-    function: runmat_types::ProgramFunctionId,
-    captures: Vec<runmat_runtime::call::lexical::LexicalCapture>,
+    function: runmat_types::FunctionId,
     lexical_environment: Option<runmat_value::LexicalEnvironment>,
-    arguments: Vec<Value>,
+    inputs: Inputs,
     requested_outputs: usize,
     runtime: runmat_runtime::context::RuntimeContext,
     dynamic_admission: Option<runmat_vm::DynamicEvalAdmissionPort>,
@@ -40,10 +42,9 @@ struct DeoptimizationInvocation {
 
 pub(super) struct DeoptimizationRequest {
     pub executor: Rc<NativeExecutor>,
-    pub function: runmat_types::ProgramFunctionId,
-    pub captures: Vec<runmat_runtime::call::lexical::LexicalCapture>,
+    pub function: runmat_types::FunctionId,
     pub lexical_environment: Option<runmat_value::LexicalEnvironment>,
-    pub arguments: Vec<Value>,
+    pub inputs: Inputs,
     pub requested_outputs: usize,
     pub runtime: runmat_runtime::context::RuntimeContext,
     pub dynamic_admission: Option<runmat_vm::DynamicEvalAdmissionPort>,
@@ -55,19 +56,20 @@ pub(super) async fn invoke(
     unit: &ExecutableUnit,
     request: DeoptimizationRequest,
 ) -> Result<RootedNativeExecution, runmat_runtime::RuntimeError> {
-    let roots = runmat_runtime::execution::RootedValueLease::for_values(
-        request
-            .arguments
-            .iter()
-            .chain(request.captures.iter().map(|capture| &capture.value))
-            .chain(
-                request
-                    .workspace
-                    .iter()
-                    .flat_map(|workspace| workspace.profile_values()),
-            ),
-    )
-    .map_err(|error| error.into_runtime_error())?;
+    let roots = match &request.inputs {
+        Inputs::Source { .. } => Some(
+            runmat_runtime::execution::RootedValueLease::for_values(
+                request.inputs.source_values().chain(
+                    request
+                        .workspace
+                        .iter()
+                        .flat_map(|workspace| workspace.profile_values()),
+                ),
+            )
+            .map_err(|error| error.into_runtime_error())?,
+        ),
+        Inputs::Retained(_) => None,
+    };
     let environment_roots = request
         .lexical_environment
         .as_ref()
@@ -83,12 +85,11 @@ pub(super) async fn invoke(
         ..DeoptimizationPolicy::default()
     };
     let selected = runtime.clone();
-    let invocation = DeoptimizationInvocation {
+    let make_invocation = move |inputs| DeoptimizationInvocation {
         executor: request.executor,
         function: request.function,
-        captures: request.captures,
         lexical_environment: request.lexical_environment,
-        arguments: request.arguments,
+        inputs,
         requested_outputs: request.requested_outputs,
         runtime: selected,
         dynamic_admission: request.dynamic_admission,
@@ -96,19 +97,42 @@ pub(super) async fn invoke(
         osr: request.osr,
         workspace: request.workspace,
     };
-    if placement.is_direct() {
-        let _roots = roots;
-        let _environment_roots = environment_roots;
-        return runtime.scope(invoke_with_policy(unit, invocation)).await;
+    match request.inputs {
+        Inputs::Retained(arguments) => {
+            let unit = unit.clone();
+            runmat_runtime::context::run_rooted_function_native_continuation(
+                &runtime,
+                placement,
+                arguments,
+                move |arguments| async move {
+                    let _environment_roots = environment_roots;
+                    invoke_with_policy(&unit, make_invocation(Inputs::Retained(arguments))).await
+                },
+            )
+            .await
+        }
+        source @ Inputs::Source { .. } => {
+            let invocation = make_invocation(source);
+            let roots = roots.expect("source ingress acquired its own registration");
+            if placement.is_direct() {
+                let _roots = roots;
+                let _environment_roots = environment_roots;
+                return runtime.scope(invoke_with_policy(unit, invocation)).await;
+            }
+            let unit = unit.clone();
+            runmat_runtime::context::run_native_continuation(
+                &runtime,
+                placement,
+                roots,
+                async move {
+                    let _environment_roots = environment_roots;
+                    invoke_with_policy(&unit, invocation).await
+                },
+            )
+            .await
+        }
     }
-    let unit = unit.clone();
-    runmat_runtime::context::run_native_continuation(&runtime, placement, roots, async move {
-        let _environment_roots = environment_roots;
-        invoke_with_policy(&unit, invocation).await
-    })
-    .await
 }
-
 async fn invoke_with_policy(
     unit: &ExecutableUnit,
     invocation: DeoptimizationInvocation,
@@ -116,9 +140,8 @@ async fn invoke_with_policy(
     let DeoptimizationInvocation {
         executor,
         function,
-        captures,
         lexical_environment,
-        arguments,
+        inputs,
         requested_outputs,
         runtime,
         dynamic_admission,
@@ -126,7 +149,7 @@ async fn invoke_with_policy(
         osr,
         workspace,
     } = invocation;
-    if workspace.is_some() && (!captures.is_empty() || lexical_environment.is_some()) {
+    if workspace.is_some() && (inputs.has_captures() || lexical_environment.is_some()) {
         return Err(super::error::stage(
             "NativeWorkspace",
             "interactive entrypoints cannot carry lexical captures or an activation",
@@ -139,21 +162,39 @@ async fn invoke_with_policy(
         .map(runmat_runtime::call::lexical::root_environment)
         .transpose()?;
     let had_lexical_environment = lexical_environment.is_some();
-    let invocation = executor
-        .begin_request_with_environment(
-            runmat_native_executor::NativeInvocationRequest {
+    let invocation = match inputs {
+        Inputs::Source {
+            captures,
+            arguments,
+        } => executor
+            .begin_request_with_environment(
+                runmat_native_executor::NativeInvocationRequest {
+                    function,
+                    captures,
+                    arguments,
+                    requested_outputs,
+                    runtime: runtime.clone(),
+                    deoptimization: policy,
+                    osr_target: osr,
+                    workspace,
+                },
+                lexical_environment,
+            )
+            .map_err(super::error::from_native_executor_error)?,
+        Inputs::Retained(arguments) => executor
+            .begin_rooted_request_async(runmat_native_executor::RootedNativeInvocationRequest {
                 function,
-                captures,
                 arguments,
                 requested_outputs,
                 runtime: runtime.clone(),
+                lexical_environment,
                 deoptimization: policy,
                 osr_target: osr,
                 workspace,
-            },
-            lexical_environment,
-        )
-        .map_err(super::error::from_native_executor_error)?;
+            })
+            .await
+            .map_err(super::error::from_native_executor_error)?,
+    };
     drive_prepared_invocation(
         unit,
         invocation,
@@ -261,7 +302,7 @@ async fn resume_interpreter(
     lexical_environment: Option<runmat_value::LexicalEnvironment>,
     dynamic_admission: Option<runmat_vm::DynamicEvalAdmissionPort>,
 ) -> Result<RootedNativeExecution, runmat_runtime::RuntimeError> {
-    let function_id = runmat_hir::FunctionId(frame.function.0 as usize);
+    let function_id = frame.function;
     let layout = unit
         .vm_layout()
         .functions
@@ -568,9 +609,11 @@ mod tests {
             super::DeoptimizationInvocation {
                 executor: compiled.executor,
                 function: compiled.entrypoint,
-                captures: Vec::new(),
                 lexical_environment: None,
-                arguments: vec![Value::Num(81.0)],
+                inputs: super::Inputs::Source {
+                    captures: Vec::new(),
+                    arguments: vec![Value::Num(81.0)],
+                },
                 requested_outputs: 2,
                 runtime,
                 dynamic_admission: None,
@@ -629,9 +672,7 @@ mod tests {
                 .expect("bind selected nested source");
             let owned_bindings = unit
                 .mir()
-                .lexical_environment_projection(runmat_hir::FunctionId(
-                    compiled.entrypoint.0 as usize,
-                ))
+                .lexical_environment_projection(compiled.entrypoint)
                 .expect("canonical nested ownership projection")
                 .owned;
             assert_eq!(owned_bindings.len(), 1, "only shared is an owned cell");
@@ -676,7 +717,14 @@ mod tests {
                                 target,
                                 runmat_runtime::native::NativeResumeKind::INTERPRETER
                             );
-                            assert_eq!(frame.site.point.function, compiled.entrypoint);
+                            assert_eq!(frame.function, compiled.entrypoint);
+                            assert_eq!(
+                                frame.site.point.function,
+                                unit.analysis()
+                                    .function_for_local(compiled.entrypoint)
+                                    .expect("compiled entry portable identity")
+                                    .function
+                            );
                             assert!(frame.site.bytecode_pc.is_some());
                             assert_eq!(frame.site.source, selected_source.source);
                             assert_eq!(frame.site.span, selected_source.span);
@@ -733,9 +781,11 @@ mod tests {
                 super::DeoptimizationInvocation {
                     executor: compiled.executor,
                     function: compiled.entrypoint,
-                    captures: Vec::new(),
                     lexical_environment: Some(parent.clone()),
-                    arguments: vec![Value::Num(5.0)],
+                    inputs: super::Inputs::Source {
+                        captures: Vec::new(),
+                        arguments: vec![Value::Num(5.0)],
+                    },
                     requested_outputs: 2,
                     runtime,
                     dynamic_admission: None,

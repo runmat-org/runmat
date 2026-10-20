@@ -33,7 +33,7 @@ fn admission_error(context: &RuntimeContext, cause: HostAllocationError) -> crat
         .build()
 }
 
-fn rank_hint(args: &[Value]) -> BuiltinResult<usize> {
+fn rank_hint(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<usize> {
     if args.len() != 1 {
         return Ok(args.len());
     }
@@ -78,7 +78,10 @@ fn rank_hint(args: &[Value]) -> BuiltinResult<usize> {
 }
 
 impl ReshapeDimensions {
-    pub(super) fn prepare(context: &RuntimeContext, args: &[Value]) -> BuiltinResult<Option<Self>> {
+    pub(super) fn prepare(
+        context: &RuntimeContext,
+        args: crate::call::FunctionArgumentView<'_>,
+    ) -> BuiltinResult<Option<Self>> {
         if !context.service_ports().parallel().is_some_and(|parallel| {
             parallel
                 .placement_resources()
@@ -140,7 +143,7 @@ impl ReshapeDimensions {
 
     pub(super) async fn parse(
         &mut self,
-        args: &[Value],
+        args: crate::call::FunctionArgumentView<'_>,
         context: &RuntimeContext,
     ) -> BuiltinResult<()> {
         if args.len() == 1 {

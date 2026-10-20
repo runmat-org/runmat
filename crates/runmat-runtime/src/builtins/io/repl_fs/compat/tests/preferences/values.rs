@@ -1,24 +1,25 @@
 use super::*;
+use runmat_value::ObjectInstance;
 
 #[test]
 fn preferences_round_trip() {
     let runtime = preference_context();
     run(setpref_builtin(
         Some(runtime.clone()),
-        vec![
-            Value::String("runmatTest".to_string()),
-            Value::String("answer".to_string()),
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::String("runmatTest".to_string().into()),
+            Value::String("answer".to_string().into()),
             Value::Num(42.0),
-        ],
+        ]),
     ))
     .unwrap();
     assert_eq!(
         run(ispref_builtin(
             Some(runtime.clone()),
-            vec![
-                Value::String("runmatTest".to_string()),
-                Value::String("answer".to_string())
-            ]
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("runmatTest".to_string().into()),
+                Value::String("answer".to_string().into())
+            ])
         ))
         .unwrap(),
         Value::Bool(true)
@@ -26,10 +27,10 @@ fn preferences_round_trip() {
     assert_eq!(
         run(getpref_builtin(
             Some(runtime.clone()),
-            vec![
-                Value::String("runmatTest".to_string()),
-                Value::String("answer".to_string())
-            ]
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("runmatTest".to_string().into()),
+                Value::String("answer".to_string().into())
+            ])
         ))
         .unwrap(),
         Value::Num(42.0)
@@ -45,7 +46,11 @@ fn preferences_require_an_installed_application_service_and_isolate_explicit_sto
     let name = Value::String("value".into());
     let error = run(setpref_builtin(
         Some(plain),
-        vec![group.clone(), name.clone(), Value::Num(1.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            group.clone(),
+            name.clone(),
+            Value::Num(1.0),
+        ]),
     ))
     .expect_err("no ambient preference fallback");
     assert_eq!(
@@ -57,19 +62,30 @@ fn preferences_require_an_installed_application_service_and_isolate_explicit_sto
     let second = preference_context();
     run(setpref_builtin(
         Some(first.clone()),
-        vec![group.clone(), name.clone(), Value::Num(7.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            group.clone(),
+            name.clone(),
+            Value::Num(7.0),
+        ]),
     ))
     .expect("first isolated store");
     assert_eq!(
         run(ispref_builtin(
             Some(second),
-            vec![group.clone(), name.clone()]
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                group.clone(),
+                name.clone()
+            ])
         ))
         .expect("second isolated store"),
         Value::Bool(false)
     );
     assert_eq!(
-        run(getpref_builtin(Some(first), vec![group, name])).expect("first store retains value"),
+        run(getpref_builtin(
+            Some(first),
+            crate::builtins::common::test_support::builtin_arguments(vec![group, name])
+        ))
+        .expect("first store retains value"),
         Value::Num(7.0)
     );
 }
@@ -95,20 +111,27 @@ fn multi_name_setpref_and_ispref_keep_shape_and_missing_positions() {
     assert_eq!(
         run(setpref_builtin(
             Some(runtime.clone()),
-            vec![group.clone(), names.clone(), values.clone()]
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                group.clone(),
+                names.clone(),
+                values.clone()
+            ])
         ))
         .expect("set both"),
         Value::Num(0.0)
     );
     let queried = run(getpref_builtin(
         Some(runtime.clone()),
-        vec![group.clone(), names.clone()],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            group.clone(),
+            names.clone(),
+        ]),
     ))
     .expect("retrieve both");
     assert_eq!(queried, values);
     let flags = run(ispref_builtin(
         Some(runtime.clone()),
-        vec![group.clone(), names],
+        crate::builtins::common::test_support::builtin_arguments(vec![group.clone(), names]),
     ))
     .expect("query both");
     let Value::LogicalArray(flags) = flags else {
@@ -121,8 +144,11 @@ fn multi_name_setpref_and_ispref_keep_shape_and_missing_positions() {
         runmat_value::StringArray::new(vec!["first".into(), "missing".into()], vec![1, 2])
             .expect("mixed shape"),
     );
-    let flags =
-        run(ispref_builtin(Some(runtime.clone()), vec![group, mixed])).expect("mixed query");
+    let flags = run(ispref_builtin(
+        Some(runtime.clone()),
+        crate::builtins::common::test_support::builtin_arguments(vec![group, mixed]),
+    ))
+    .expect("mixed query");
     let Value::LogicalArray(flags) = flags else {
         panic!("logical array");
     };
@@ -149,20 +175,20 @@ fn getpref_persists_and_preserves_every_integer_scalar_class() {
         let preference = format!("scalar{index}");
         let created = run(getpref_builtin(
             Some(runtime.clone()),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::String("getprefIntegerScalars".into()),
-                Value::String(preference.clone()),
+                Value::String(preference.clone().into()),
                 value.clone(),
-            ],
+            ]),
         ))
         .expect("create integer preference");
         assert_eq!(created, value);
         let stored = run(getpref_builtin(
             Some(runtime.clone()),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::String("getprefIntegerScalars".into()),
-                Value::String(preference),
-            ],
+                Value::String(preference.into()),
+            ]),
         ))
         .expect("read integer preference");
         assert_eq!(stored, value);
@@ -191,20 +217,20 @@ fn getpref_preserves_every_integer_array_class_and_shape() {
         let preference = format!("array{index}");
         let created = run(getpref_builtin(
             Some(runtime.clone()),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::String("getprefIntegerArrays".into()),
-                Value::String(preference.clone()),
+                Value::String(preference.clone().into()),
                 value.clone(),
-            ],
+            ]),
         ))
         .expect("create integer array preference");
         assert_eq!(created, value);
         let stored = run(getpref_builtin(
             Some(runtime.clone()),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::String("getprefIntegerArrays".into()),
-                Value::String(preference),
-            ],
+                Value::String(preference.into()),
+            ]),
         ))
         .expect("read integer array preference");
         assert_eq!(stored, value);
@@ -217,20 +243,20 @@ fn getpref_existing_value_wins_over_default_without_conversion() {
     let existing = Value::Int(runmat_value::IntValue::U64(u64::MAX));
     run(getpref_builtin(
         Some(runtime.clone()),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::String("getprefExistingWins".into()),
             Value::String("value".into()),
             existing.clone(),
-        ],
+        ]),
     ))
     .expect("create preference");
     let result = run(getpref_builtin(
         Some(runtime.clone()),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::String("getprefExistingWins".into()),
             Value::String("value".into()),
             Value::FunctionHandle("session_function".into()),
-        ],
+        ]),
     ))
     .expect("ignored unsupported host default must not narrow existing form");
     assert_eq!(result, existing);
@@ -240,32 +266,36 @@ fn getpref_existing_value_wins_over_default_without_conversion() {
 fn getpref_preserves_arbitrary_object_values_and_zero_argument_structure() {
     let runtime = preference_context();
     let mut object = ObjectInstance::new("PreferencePayload".to_string());
-    object.properties.insert(
+    object.replace_property_unbounded(
         "revision".to_string(),
         Value::Int(runmat_value::IntValue::U64(u64::MAX)),
     );
     let value = Value::Object(object);
     let created = run(getpref_builtin(
         Some(runtime.clone()),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::String("getprefObjects".into()),
             Value::String("payload".into()),
             value.clone(),
-        ],
+        ]),
     ))
     .expect("create object preference");
     assert_eq!(created, value);
     let stored = run(getpref_builtin(
         Some(runtime.clone()),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::String("getprefObjects".into()),
             Value::String("payload".into()),
-        ],
+        ]),
     ))
     .expect("read object preference");
     assert_eq!(stored, value);
 
-    let all = run(getpref_builtin(Some(runtime.clone()), Vec::new())).expect("all preferences");
+    let all = run(getpref_builtin(
+        Some(runtime.clone()),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect("all preferences");
     let Value::Struct(all) = all else {
         panic!("expected preference structure");
     };
@@ -291,17 +321,20 @@ fn getpref_multiple_names_preserve_query_shape_and_persist_defaults() {
     );
     let created = run(getpref_builtin(
         Some(runtime.clone()),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::String("getprefMultiple".into()),
             names.clone(),
             defaults.clone(),
-        ],
+        ]),
     ))
     .expect("create multiple preferences");
     assert_eq!(created, defaults);
     let stored = run(getpref_builtin(
         Some(runtime.clone()),
-        vec![Value::String("getprefMultiple".into()), names],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::String("getprefMultiple".into()),
+            names,
+        ]),
     ))
     .expect("read multiple preferences");
     assert_eq!(stored, defaults);
@@ -315,7 +348,10 @@ fn getpref_multiple_names_preserve_query_shape_and_persist_defaults() {
     );
     let stored = run(getpref_builtin(
         Some(runtime.clone()),
-        vec![Value::String("getprefMultiple".into()), cellstr],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::String("getprefMultiple".into()),
+            cellstr,
+        ]),
     ))
     .expect("read cellstr preferences");
     let Value::Cell(stored) = stored else {

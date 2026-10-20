@@ -1,21 +1,21 @@
 use std::{any::Any, collections::BTreeMap};
 
 use runmat_runtime::native::NativeEntryPoint;
-use runmat_types::ProgramFunctionId;
+use runmat_types::FunctionId;
 
 use crate::{NativeExecutorError, NativeExecutorResult};
 
 /// Entrypoints plus the owner that keeps their executable memory alive.
 pub struct NativeExecutable {
     owner: Option<Box<dyn Any + Send>>,
-    entrypoints: BTreeMap<ProgramFunctionId, NativeEntryPoint>,
+    entrypoints: BTreeMap<FunctionId, NativeEntryPoint>,
     retained_code_bytes: u64,
 }
 
 impl NativeExecutable {
     /// Construct an executable backed by dynamically allocated code memory.
     pub fn owned(
-        entrypoints: BTreeMap<ProgramFunctionId, NativeEntryPoint>,
+        entrypoints: BTreeMap<FunctionId, NativeEntryPoint>,
         retained_code_bytes: u64,
         owner: impl Any + Send,
     ) -> NativeExecutorResult<Self> {
@@ -24,13 +24,13 @@ impl NativeExecutable {
 
     /// Construct an executable whose entrypoints are retained by the process image.
     pub fn linked(
-        entrypoints: BTreeMap<ProgramFunctionId, NativeEntryPoint>,
+        entrypoints: BTreeMap<FunctionId, NativeEntryPoint>,
     ) -> NativeExecutorResult<Self> {
         Self::new(entrypoints, 0, None)
     }
 
     fn new(
-        entrypoints: BTreeMap<ProgramFunctionId, NativeEntryPoint>,
+        entrypoints: BTreeMap<FunctionId, NativeEntryPoint>,
         retained_code_bytes: u64,
         owner: Option<Box<dyn Any + Send>>,
     ) -> NativeExecutorResult<Self> {
@@ -46,10 +46,7 @@ impl NativeExecutable {
         })
     }
 
-    pub fn entrypoint(
-        &self,
-        function: ProgramFunctionId,
-    ) -> NativeExecutorResult<NativeEntryPoint> {
+    pub fn entrypoint(&self, function: FunctionId) -> NativeExecutorResult<NativeEntryPoint> {
         self.entrypoints.get(&function).copied().ok_or_else(|| {
             NativeExecutorError::Executable(format!(
                 "compiled function {} is unavailable",
@@ -62,7 +59,7 @@ impl NativeExecutable {
         self.entrypoints.len()
     }
 
-    pub(crate) fn function_ids(&self) -> impl Iterator<Item = ProgramFunctionId> + '_ {
+    pub(crate) fn function_ids(&self) -> impl Iterator<Item = FunctionId> + '_ {
         self.entrypoints.keys().copied()
     }
 

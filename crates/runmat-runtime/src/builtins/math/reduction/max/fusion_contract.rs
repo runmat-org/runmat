@@ -18,7 +18,11 @@ fn prepare(controls: FusionReductionControls<'_>) -> FusionReductionPrepareFutur
         if !controls.supported() {
             return Ok(None);
         }
-        let ParsedCall::Reduction(parsed) = parse_call(controls.values).await? else {
+        let ParsedCall::Reduction(parsed) = parse_call(
+            crate::call::FunctionArgumentView::from_slice(controls.values),
+        )
+        .await?
+        else {
             return Ok(None);
         };
         if parsed.comparison == ComparisonMethod::Abs || parsed.linear_index {
@@ -99,9 +103,12 @@ mod tests {
         let contract = receipt(&input, &[]).unwrap();
         assert_eq!(contract.output_class, NumericClass::Single);
         assert_eq!(contract.ties, FusionReductionTies::FirstWithPositiveZero);
-        let Value::Tensor(result) =
-            futures::executor::block_on(max_builtin(None, input.clone(), vec![])).unwrap()
-        else {
+        let Value::Tensor(result) = futures::executor::block_on(max_builtin(
+            None,
+            input.clone(),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap() else {
             panic!("Single maximum");
         };
         assert!(result.materialize_f64()[0].is_sign_positive());
@@ -112,9 +119,12 @@ mod tests {
             receipt(&nan, &options).unwrap().empty,
             FusionReductionEmpty::NaN
         );
-        let Value::Tensor(result) =
-            futures::executor::block_on(max_builtin(None, nan, options.to_vec())).unwrap()
-        else {
+        let Value::Tensor(result) = futures::executor::block_on(max_builtin(
+            None,
+            nan,
+            crate::builtins::common::test_support::builtin_arguments(options.to_vec()),
+        ))
+        .unwrap() else {
             panic!("Single maximum");
         };
         assert!(result.materialize_f64()[0].is_nan());

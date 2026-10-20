@@ -54,7 +54,7 @@ impl RuntimeMexHostServices {
         crate::call_builtin_async_with_outputs_in_context(
             &self.runtime,
             "eval",
-            &[Value::String(command)],
+            &[Value::string(command)],
             0,
         )
         .await
@@ -102,13 +102,11 @@ impl RuntimeMexHostServices {
             .with_owned_async(|object| async {
                 match object {
                     Value::ObjectArray(array) => {
-                        let class_name = array.class_name().to_string();
-                        let shape = array.shape().to_vec();
-                        let mut elements = array.into_data();
-                        let selected = elements
+                        let selected = array
+                            .data()
                             .get(index)
                             .cloned()
-                            .ok_or_else(|| object_index_diagnostic(index, elements.len()))?;
+                            .ok_or_else(|| object_index_diagnostic(index, array.len()))?;
                         let selected = RootedValue::new(selected)
                             .map_err(|error| runtime_diagnostic(error.into_runtime_error()))?;
                         let updated = selected
@@ -129,18 +127,30 @@ impl RuntimeMexHostServices {
                             })
                             .await
                             .map_err(runtime_diagnostic)?;
-                        updated.try_map_owned(
-                            |updated| {
-                                elements[index] = updated;
-                                runmat_value::ObjectArray::new(class_name, elements, shape)
-                                    .map(Value::ObjectArray)
-                                    .map_err(|message| MexDiagnostic {
-                                        identifier: Some("RunMat:MEX:ObjectArray".into()),
-                                        message,
+                        updated.with_owned(|updated| {
+                            let mut output =
+                                crate::execution::object_array::ObjectArrayConstruction::new_retaining_shape(
+                                    Some(&self.runtime),
+                                    crate::execution::object_array::Class::Owner(
+                                        array.class_name_owner(),
+                                    ),
+                                    array.len(),
+                                    array.shape_owner(),
+                                    array.selected_provenance().iter(),
+                                    array.has_unselected_provenance(),
+                                )
+                                .map_err(runtime_diagnostic)?;
+                            for (ordinal, child) in array.data().iter().enumerate() {
+                                output
+                                    .push(if ordinal == index {
+                                        updated.clone()
+                                    } else {
+                                        child.clone()
                                     })
-                            },
-                            |error| runtime_diagnostic(error.into_runtime_error()),
-                        )
+                                    .map_err(runtime_diagnostic)?;
+                            }
+                            output.finish().map_err(runtime_diagnostic)
+                        })
                     }
                     object if index == 0 => value
                         .with_owned_async(|value| {
@@ -975,7 +985,7 @@ mod tests {
     fn object_callbacks_preserve_handle_identity_and_mutate_its_target() {
         runmat_gc::gc_test_context(|| {
             let mut target = ObjectInstance::new("FixtureHandle");
-            target.properties.insert("Value".into(), Value::Num(4.0));
+            target.replace_property_unbounded("Value".into(), Value::Num(4.0));
             let target_root =
                 runmat_gc::gc_allocate_rooted(Value::Object(target)).expect("root handle target");
             let handle = HandleRef {
@@ -1027,7 +1037,7 @@ mod tests {
         runmat_gc::gc_test_context(|| {
             let make_handle = |value| {
                 let mut target = ObjectInstance::new("FixtureHandle");
-                target.properties.insert("Value".into(), Value::Num(value));
+                target.replace_property_unbounded("Value".into(), Value::Num(value));
                 let target_root = runmat_gc::gc_allocate_rooted(Value::Object(target))
                     .expect("root indexed handle target");
                 (
@@ -1076,14 +1086,14 @@ mod tests {
                 let Value::Object(value) = value else {
                     panic!("first indexed target must remain an object");
                 };
-                assert_eq!(value.properties.get("Value"), Some(&Value::Num(2.0)));
+                assert_eq!(value.properties().get("Value"), Some(&Value::Num(2.0)));
             })
             .expect("inspect first indexed target");
             runmat_gc::gc_with_value(&second.target, |value| {
                 let Value::Object(value) = value else {
                     panic!("second indexed target must remain an object");
                 };
-                assert_eq!(value.properties.get("Value"), Some(&Value::Num(9.0)));
+                assert_eq!(value.properties().get("Value"), Some(&Value::Num(9.0)));
             })
             .expect("inspect second indexed target");
             drop((first_root, second_root));
@@ -1125,7 +1135,7 @@ public:
             .expect("write C++ MEX fixture");
 
             let mut target = ObjectInstance::new("FixtureHandle");
-            target.properties.insert("Value".into(), Value::Num(4.0));
+            target.replace_property_unbounded("Value".into(), Value::Num(4.0));
             let target_root =
                 runmat_gc::gc_allocate_rooted(Value::Object(target)).expect("root handle target");
             let target = target_root.handle();
@@ -1158,7 +1168,7 @@ public:
                 let Value::Object(value) = value else {
                     panic!("handle target must remain an object");
                 };
-                assert_eq!(value.properties.get("Value"), Some(&Value::Num(9.0)));
+                assert_eq!(value.properties().get("Value"), Some(&Value::Num(9.0)));
             })
             .expect("inspect updated handle target");
             drop(target_root);

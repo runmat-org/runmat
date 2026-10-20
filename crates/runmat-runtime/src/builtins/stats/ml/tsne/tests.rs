@@ -5,7 +5,7 @@ use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorView, NumericElementType,
     ThreadProviderGuard,
 };
-use runmat_value::{IntegerStorage, StructValue};
+use runmat_value::IntegerStorage;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[test]
@@ -23,7 +23,7 @@ fn registered_tsne_preserves_pre_entry_cancellation_cause() {
     let error = futures::executor::block_on(tsne_builtin_registered(
         Some(runtime),
         tensor(vec![0.0, 1.0, 2.0, 3.0], vec![2, 2]),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect_err("cancelled invocation must not prepare observations");
     assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
@@ -217,14 +217,14 @@ async fn malformed_host_visible_controls_reject_before_provider_work() {
             Value::Tensor(Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap()),
         ],
         vec![Value::from("Options"), {
-            let mut fields = StructValue::new();
+            let mut fields = runmat_value::UnboundedStructValueBuilder::new();
             fields.insert("OutputFcn", observation.clone());
-            Value::Struct(fields)
+            Value::Struct(fields.finish())
         }],
         vec![Value::from("Options"), {
-            let mut fields = StructValue::new();
+            let mut fields = runmat_value::UnboundedStructValueBuilder::new();
             fields.insert("MaxIter", Value::Num(0.0));
-            Value::Struct(fields)
+            Value::Struct(fields.finish())
         }],
     ] {
         assert!(tsne_builtin(observation.clone(), controls).await.is_err());
@@ -243,8 +243,18 @@ fn option_spellings_and_preflight_are_typed_and_preeffect() {
         Some(DistanceMetric::Seuclidean)
     );
     assert_eq!(Algorithm::from_keyword("exact"), Some(Algorithm::Exact));
-    assert!(option_headers(vec![Value::from("Distance")]).is_err());
-    assert!(option_headers(vec![Value::from("unknown"), Value::from("value")]).is_err());
+    assert!(
+        option_headers(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::from("Distance")]
+        ))
+        .is_err()
+    );
+    assert!(
+        option_headers(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::from("unknown"), Value::from("value")]
+        ))
+        .is_err()
+    );
     assert!(preflight_observations(&Value::from("not observations")).is_err());
 }
 
@@ -312,9 +322,9 @@ async fn tsne_embeds_rows_and_returns_loss() {
             Value::Num(2.0),
             Value::String("Options".into()),
             {
-                let mut options = StructValue::new();
+                let mut options = runmat_value::UnboundedStructValueBuilder::new();
                 options.insert("MaxIter", Value::Num(50.0));
-                Value::Struct(options)
+                Value::Struct(options.finish())
             },
         ],
     )
@@ -359,9 +369,9 @@ async fn tsne_removes_nan_rows_and_honors_num_dimensions() {
             Value::Tensor(Tensor::new(vec![0.0; 12], vec![4, 3]).unwrap()),
             Value::String("Options".into()),
             {
-                let mut options = StructValue::new();
+                let mut options = runmat_value::UnboundedStructValueBuilder::new();
                 options.insert("MaxIter", Value::Num(2.0));
-                Value::Struct(options)
+                Value::Struct(options.finish())
             },
         ],
     )
@@ -390,9 +400,9 @@ async fn tsne_supports_standardize_pca_and_cosine_distance() {
             Value::String("cosine".into()),
             Value::String("Options".into()),
             {
-                let mut options = StructValue::new();
+                let mut options = runmat_value::UnboundedStructValueBuilder::new();
                 options.insert("MaxIter", Value::Num(5.0));
-                Value::Struct(options)
+                Value::Struct(options.finish())
             },
         ],
     )
@@ -426,12 +436,12 @@ async fn tsne_reads_typed_integer_data_initial_y_and_options_exactly() {
             poisoned_int_tensor(IntegerStorage::I16(vec![0; 8]), vec![4, 2]),
             Value::String("Options".into()),
             {
-                let mut options = StructValue::new();
+                let mut options = runmat_value::UnboundedStructValueBuilder::new();
                 options.insert(
                     "MaxIter",
                     cleared_int_tensor(IntegerStorage::U16(vec![2]), vec![1, 1]),
                 );
-                Value::Struct(options)
+                Value::Struct(options.finish())
             },
         ],
     )
@@ -452,7 +462,10 @@ fn tsne_gates_integer_roles_and_explicit_residency_before_gather() {
         error.identifier(),
         Some("RunMat:compatibility:TsneIntegerDataExtension")
     );
-    let headers = option_headers(vec![Value::from("NumDimensions"), integer]).unwrap();
+    let headers = option_headers(crate::builtins::common::test_support::builtin_arguments(
+        vec![Value::from("NumDimensions"), integer],
+    ))
+    .unwrap();
     let error =
         ensure_tsne_extensions(&Value::Num(1.0), &headers).expect_err("integer option must gate");
     assert_eq!(
@@ -572,9 +585,9 @@ async fn tsne_rejects_unbounded_resource_options() {
     let err = tsne_builtin(
         tensor(vec![0.0, 1.0, 2.0, 3.0], vec![2, 2]),
         vec![Value::String("Options".into()), {
-            let mut options = StructValue::new();
+            let mut options = runmat_value::UnboundedStructValueBuilder::new();
             options.insert("MaxIter", Value::Num(1.0e20));
-            Value::Struct(options)
+            Value::Struct(options.finish())
         }],
     )
     .await

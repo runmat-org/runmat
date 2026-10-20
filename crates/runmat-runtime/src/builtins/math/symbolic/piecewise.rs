@@ -127,7 +127,7 @@ mod tests {
     fn rejects_nonconvertible_arguments() {
         let err = block_on(piecewise_builtin(vec![
             Value::Symbolic(SymbolicExpr::variable("x")),
-            Value::String("unsupported".to_string()),
+            Value::String("unsupported".to_string().into()),
         ]))
         .expect_err("piecewise unsupported argument should fail");
 

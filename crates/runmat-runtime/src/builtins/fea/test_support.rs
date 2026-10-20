@@ -12,38 +12,10 @@ pub(super) fn load_stl_fixture(path: &std::path::Path, x: f64) -> Value {
     )
     .expect("STL fixture should write");
     block_on(geometry_load_builtin(
-        Value::String(path.to_string_lossy().to_string()),
-        Vec::new(),
+        Value::String(path.to_string_lossy().to_string().into()),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
     ))
     .expect("geometry should load")
-}
-
-/// Class-registry method lookup by public spelling, for registration tests.
-pub(crate) fn lookup_method(
-    class_name: &str,
-    method: &str,
-) -> Option<(
-    crate::class_registry::RuntimeMethod,
-    runmat_types::ClassIdentity,
-)> {
-    crate::class_registry::lookup_method(
-        &runmat_types::ClassIdentity::from(class_name),
-        &runmat_types::MethodName::from(method),
-    )
-}
-
-/// Class-registry property lookup by public spelling, for registration tests.
-pub(crate) fn lookup_property(
-    class_name: &str,
-    property: &str,
-) -> Option<(
-    crate::class_registry::RuntimeProperty,
-    runmat_types::ClassIdentity,
-)> {
-    crate::class_registry::lookup_property(
-        &runmat_types::ClassIdentity::from(class_name),
-        &runmat_types::MemberName::from(property),
-    )
 }
 
 /// A closure whose bound function has a published portable origin, so FEA

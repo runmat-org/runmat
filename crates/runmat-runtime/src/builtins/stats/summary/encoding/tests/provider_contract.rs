@@ -108,7 +108,7 @@ fn known_invalid_encoding_calls_do_not_download_from_registered_owner() {
         let error = block_on(onehotencode_builtin(
             resident(),
             Value::Num(0.0),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .unwrap_err();
         assert_eq!(
@@ -122,11 +122,11 @@ fn known_invalid_encoding_calls_do_not_download_from_registered_owner() {
         let error = block_on(onehotencode_builtin(
             classes(),
             Value::Num(2.0),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 resident(),
                 Value::from("NotAnEncodingOption"),
                 Value::from("double"),
-            ],
+            ]),
         ))
         .unwrap_err();
         assert!(error.message().contains("unsupported option"), "{error}");
@@ -135,7 +135,7 @@ fn known_invalid_encoding_calls_do_not_download_from_registered_owner() {
             resident(),
             classes(),
             Value::Num(0.0),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .unwrap_err();
         assert_eq!(
@@ -150,12 +150,12 @@ fn known_invalid_encoding_calls_do_not_download_from_registered_owner() {
             encoded(),
             classes(),
             Value::Num(1.0),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 resident(),
                 Value::from("double"),
                 Value::from("NotAnEncodingOption"),
                 Value::from("double"),
-            ],
+            ]),
         ))
         .unwrap_err();
         assert!(error.message().contains("unsupported option"), "{error}");
@@ -173,7 +173,10 @@ fn known_invalid_encoding_calls_do_not_download_from_registered_owner() {
         let error = block_on(onehotencode_builtin(
             resident(),
             Value::Num(2.0),
-            vec![Value::from("OutputType"), Value::from("double")],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("OutputType"),
+                Value::from("double"),
+            ]),
         ))
         .unwrap_err();
         assert_eq!(
@@ -185,7 +188,10 @@ fn known_invalid_encoding_calls_do_not_download_from_registered_owner() {
             resident(),
             classes(),
             Value::Num(1.0),
-            vec![Value::from("OutputType"), Value::from("double")],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("OutputType"),
+                Value::from("double"),
+            ]),
         ))
         .unwrap_err();
         assert_eq!(
@@ -203,7 +209,7 @@ fn known_invalid_encoding_calls_do_not_download_from_registered_owner() {
         let error = block_on(onehotencode_builtin(
             explicit.clone(),
             Value::Num(2.0),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .unwrap_err();
         assert_eq!(
@@ -214,7 +220,7 @@ fn known_invalid_encoding_calls_do_not_download_from_registered_owner() {
             explicit,
             classes(),
             Value::Num(1.0),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .unwrap_err();
         assert_eq!(
@@ -253,7 +259,11 @@ fn encoding_download_failures_keep_cause_retry_and_caller_lease() {
         &allocation,
     );
     assert_failed_download(
-        block_on(onehotencode_builtin(resident(), Value::Num(2.0), vec![])),
+        block_on(onehotencode_builtin(
+            resident(),
+            Value::Num(2.0),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        )),
         EncodingBuiltin::OnehotEncode,
         2,
         provider,
@@ -264,7 +274,7 @@ fn encoding_download_failures_keep_cause_retry_and_caller_lease() {
             resident(),
             classes(),
             Value::Num(1.0),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         )),
         EncodingBuiltin::OnehotDecode,
         3,
@@ -275,7 +285,7 @@ fn encoding_download_failures_keep_cause_retry_and_caller_lease() {
         block_on(onehotencode_builtin(
             labels(),
             Value::Num(2.0),
-            vec![resident()],
+            crate::builtins::common::test_support::builtin_arguments(vec![resident()]),
         )),
         EncodingBuiltin::OnehotEncode,
         4,
@@ -287,7 +297,7 @@ fn encoding_download_failures_keep_cause_retry_and_caller_lease() {
             encoded(),
             classes(),
             Value::Num(1.0),
-            vec![resident()],
+            crate::builtins::common::test_support::builtin_arguments(vec![resident()]),
         )),
         EncodingBuiltin::OnehotDecode,
         5,

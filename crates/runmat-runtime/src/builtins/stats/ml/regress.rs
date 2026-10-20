@@ -60,7 +60,11 @@ struct CoefficientSolve {
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::ml::regress"
 )]
-async fn regress_builtin(y: Value, x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn regress_builtin(
+    y: Value,
+    x: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(invalid("regress: accepts at most one alpha argument"));
     }

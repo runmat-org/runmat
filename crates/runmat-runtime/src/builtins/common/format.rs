@@ -4,7 +4,7 @@ use std::char;
 use std::iter::Peekable;
 use std::str::Chars;
 
-use runmat_value::{IntValue, IntegerStorage, LogicalArray, StringArray, Value};
+use runmat_value::{IntValue, IntegerStorage, LogicalArray, Value};
 
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
@@ -19,12 +19,16 @@ const FORMAT_UNSUPPORTED_SPECIFIER_IDENTIFIER: &str = "RunMat:format:Unsupported
 /// Stateful cursor over formatting arguments.
 #[derive(Debug)]
 pub struct ArgCursor<'a> {
-    args: &'a [Value],
+    args: crate::call::FunctionArgumentView<'a>,
     index: usize,
 }
 
 impl<'a> ArgCursor<'a> {
     pub fn new(args: &'a [Value]) -> Self {
+        Self::from_arguments(crate::call::FunctionArgumentView::from_slice(args))
+    }
+
+    pub fn from_arguments(args: crate::call::FunctionArgumentView<'a>) -> Self {
         Self { args, index: 0 }
     }
 
@@ -135,7 +139,14 @@ impl FormatSummary {
 /// subset required by MATLAB builtins. It is intentionally strict: errors are
 /// reported when format specifiers cannot be satisfied by the provided arguments.
 pub fn format_variadic(fmt: &str, args: &[Value]) -> BuiltinResult<String> {
-    let mut cursor = ArgCursor::new(args);
+    format_variadic_arguments(fmt, crate::call::FunctionArgumentView::from_slice(args))
+}
+
+pub fn format_variadic_arguments(
+    fmt: &str,
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<String> {
+    let mut cursor = ArgCursor::from_arguments(args);
     let step = format_variadic_with_cursor(fmt, &mut cursor)?;
     Ok(step.output)
 }
@@ -793,15 +804,15 @@ pub(crate) fn complex_to_string(re: f64, im: f64) -> String {
 
 fn value_to_string(value: &Value) -> BuiltinResult<String> {
     match value {
-        Value::String(s) => Ok(s.clone()),
+        Value::String(s) => Ok(s.as_str().to_owned()),
         Value::CharArray(ca) => {
-            let mut s = String::with_capacity(ca.data.len());
-            for ch in &ca.data {
+            let mut s = String::with_capacity(ca.data().len());
+            for ch in ca.data() {
                 s.push(*ch);
             }
             Ok(s)
         }
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
+        Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].as_str().to_owned()),
         Value::Num(n) => Ok(number_to_string(*n)),
         Value::Int(i) => Ok(int_value_to_decimal(i)),
         Value::Bool(b) => Ok(if *b { "true" } else { "false" }.to_string()),
@@ -818,7 +829,7 @@ fn value_to_char(value: &Value) -> BuiltinResult<char> {
             format_error("sprintf: %c conversion requires non-empty character input")
         }),
         Value::CharArray(ca) => ca
-            .data
+            .data()
             .first()
             .copied()
             .ok_or_else(|| format_error("sprintf: %c conversion requires non-empty char input")),
@@ -908,16 +919,16 @@ fn group_float_mantissa(text: &str) -> String {
 /// is a character row vector or string scalar.
 pub fn extract_format_string(value: &Value, context: &str) -> BuiltinResult<String> {
     match value {
-        Value::String(s) => Ok(s.clone()),
+        Value::String(s) => Ok(s.as_str().to_owned()),
         Value::CharArray(ca) => {
             if ca.rows != 1 {
                 return Err(format_error(format!(
                     "{context}: formatSpec must be a character row vector or string scalar"
                 )));
             }
-            Ok(ca.data.iter().collect())
+            Ok(ca.data().iter().collect())
         }
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
+        Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].as_str().to_owned()),
         _ => Err(format_error(format!(
             "{context}: formatSpec must be a character row vector or string scalar"
         ))),
@@ -1007,6 +1018,15 @@ pub fn decode_escape_sequences(context: &str, input: &str) -> BuiltinResult<Stri
 /// printf-style formatting. Arrays are traversed in column-major order and GPU
 /// tensors are gathered back to the host.
 pub async fn flatten_arguments(args: &[Value], context: &str) -> BuiltinResult<Vec<Value>> {
+    flatten_argument_elements(crate::call::FunctionArgumentView::from_slice(args), context).await
+}
+
+/// Expand numerical/text elements for formatting, borrowing the original
+/// logical argument segments. This is formatting scratch, not a new call ABI.
+pub async fn flatten_argument_elements(
+    args: crate::call::FunctionArgumentView<'_>,
+    context: &str,
+) -> BuiltinResult<Vec<Value>> {
     let mut flattened = Vec::new();
     for value in args {
         let gathered = gather_if_needed_async(value)
@@ -1029,8 +1049,8 @@ async fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> 
             output.push(value);
         }
         Value::SymbolicArray(array) => {
-            for expr in array.data {
-                output.push(Value::Symbolic(expr));
+            for expr in array.data() {
+                output.push(Value::Symbolic(expr.clone()));
             }
         }
         Value::Tensor(tensor) => {
@@ -1048,7 +1068,7 @@ async fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> 
         Value::ComplexTensor(tensor) => {
             if tensor.integer_storage().is_some() {
                 for index in 0..tensor::complex_tensor_element_len(&tensor) {
-                    output.push(Value::String(tensor.format_element(index)));
+                    output.push(Value::string(tensor.format_element(index)));
                 }
             } else {
                 for &(re, im) in &tensor.materialize_f64() {
@@ -1061,21 +1081,20 @@ async fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> 
                 output.push(Value::Bool(byte != 0));
             }
         }
-        Value::StringArray(StringArray { data, .. }) => {
-            for s in data {
-                output.push(Value::String(s));
-            }
-        }
+        Value::StringArray(array) => match array.into_parts().0.try_into_owned() {
+            Ok(data) => output.extend(data.into_iter().map(Value::String)),
+            Err(data) => output.extend(data.iter().cloned().map(Value::String)),
+        },
         Value::CharArray(ca) => {
             if ca.rows == 1 {
-                output.push(Value::String(ca.data.iter().collect()));
+                output.push(Value::string(ca.data().iter().collect::<String>()));
             } else {
                 for row in 0..ca.rows {
                     let mut line = String::with_capacity(ca.cols);
                     for col in 0..ca.cols {
-                        line.push(ca.data[row * ca.cols + col]);
+                        line.push(ca.data()[row * ca.cols + col]);
                     }
-                    output.push(Value::String(line));
+                    output.push(Value::string(line));
                 }
             }
         }
@@ -1083,7 +1102,7 @@ async fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> 
             for col in 0..cell.cols {
                 for row in 0..cell.rows {
                     let idx = row * cell.cols + col;
-                    let inner = cell.data[idx].clone();
+                    let inner = cell.data()[idx].clone();
                     let gathered = gather_if_needed_async(&inner)
                         .await
                         .map_err(|flow| map_control_flow_with_context(flow, context))?;

@@ -17,7 +17,7 @@ impl<'a> Iterator for CellLeaves<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         while let Some(value) = self.pending.pop() {
             if let runmat_value::Value::Cell(cell) = value {
-                self.pending.extend(cell.data.iter().rev());
+                self.pending.extend(cell.data().iter().rev());
             } else {
                 return Some(value);
             }

@@ -6,7 +6,9 @@ use futures::executor::block_on;
 use runmat_value::Value;
 
 fn run(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    block_on(super::cell_builtin(args))
+    block_on(super::cell_builtin(
+        crate::builtins::common::test_support::builtin_arguments(args),
+    ))
 }
 
 fn output(args: Vec<Value>, shape: &[usize]) -> runmat_value::CellArray {

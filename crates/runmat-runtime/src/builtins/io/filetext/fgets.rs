@@ -76,9 +76,9 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 async fn fgets_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     fid: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
-    let eval = evaluate_in(runtime.as_ref(), &fid, &rest).await?;
+    let eval = evaluate_in_view(runtime.as_ref(), &fid, rest.view()).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Value::output_list(Vec::new()));
@@ -126,6 +126,19 @@ pub async fn evaluate_in(
     runtime: Option<&crate::context::RuntimeContext>,
     fid_value: &Value,
     rest: &[Value],
+) -> BuiltinResult<FgetsEval> {
+    evaluate_in_view(
+        runtime,
+        fid_value,
+        crate::call::FunctionArgumentView::from_slice(rest),
+    )
+    .await
+}
+
+pub async fn evaluate_in_view(
+    runtime: Option<&crate::context::RuntimeContext>,
+    fid_value: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<FgetsEval> {
     if rest.len() > 1 {
         return Err(fgets_error_with_detail(
@@ -372,7 +385,7 @@ fn parse_fid(value: &Value) -> BuiltinResult<i32> {
     }
 }
 
-async fn parse_nchar(args: &[Value]) -> BuiltinResult<Option<usize>> {
+async fn parse_nchar(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<Option<usize>> {
     if args.is_empty() {
         return Ok(None);
     }

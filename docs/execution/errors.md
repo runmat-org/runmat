@@ -31,6 +31,8 @@ flowchart TD
 
 Compile-stage failures do not enter MATLAB `try`/`catch`; they occur before bytecode execution. `try`/`catch` handles `RuntimeError` values raised during VM or JIT execution.
 
+Static analysis can identify a failing value operation, such as multiplication with incompatible matrix dimensions. `runmat check` and editor diagnostics still report that error. Executable compilation retains the operation's runtime check rather than rejecting the entire program: an enclosing `try`/`catch`, including one in a caller, can handle the failure. Syntax errors and failures that prevent lowering or compilation remain compile-stage errors.
+
 ## `RunError`
 
 `runmat-core` exposes four failure stages through `RunError`:

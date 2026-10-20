@@ -17,23 +17,35 @@ pub(super) async fn datetick_builtin(args: Vec<Value>) -> crate::BuiltinResult<V
 #[runmat_macros::runtime_builtin(
     name = "datetime.subsref",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::datetime"
 )]
 pub(super) async fn datetime_subsref(
+    runtime: Option<crate::context::RuntimeContext>,
     obj: Value,
     subscript: Value,
 ) -> crate::BuiltinResult<RootedValue> {
     let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
-    crate::object::protocol::execute_owned_subsref(obj, path, datetime_read_step, None).await
+    crate::object::protocol::execute_owned_subsref_with_context(
+        runtime.as_ref(),
+        obj,
+        path,
+        |obj, step| datetime_read_step(runtime.as_ref(), obj, step),
+        None,
+    )
+    .await
 }
 
 pub(super) async fn datetime_read_step(
+    runtime: Option<&crate::context::RuntimeContext>,
     obj: Value,
     step: crate::object::indexing::ObjectSubscript,
 ) -> crate::BuiltinResult<RootedValue> {
     let payload = step.selector_value()?;
     match step.kind() {
-        crate::object::indexing::ObjectIndexKind::Paren => datetime_indexing(obj, payload).await,
+        crate::object::indexing::ObjectIndexKind::Paren => {
+            datetime_indexing(runtime, obj, payload).await
+        }
         crate::object::indexing::ObjectIndexKind::Member => {
             let Value::Object(object) = obj else {
                 return Err(datetime_error(
@@ -42,7 +54,7 @@ pub(super) async fn datetime_read_step(
             };
             let field = scalar_text(&payload, "field selector")?;
             match field.as_str() {
-                FORMAT_FIELD => RootedValue::new(Value::String(format_for_object(&object)))
+                FORMAT_FIELD => RootedValue::new(Value::string(format_for_object(&object)))
                     .map_err(|error| error.into_runtime_error()),
                 _ => Err(datetime_error(format!(
                     "datetime.subsref: unsupported datetime property '{field}'"
@@ -58,24 +70,31 @@ pub(super) async fn datetime_read_step(
 #[runmat_macros::runtime_builtin(
     name = "datetime.subsasgn",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::datetime"
 )]
 pub(super) async fn datetime_subsasgn(
+    runtime: Option<crate::context::RuntimeContext>,
     obj: Value,
     subscript: Value,
     rhs: Value,
 ) -> crate::BuiltinResult<RootedValue> {
     let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
-    crate::object::protocol::execute_owned_subsasgn(
+    let runtime_ref = runtime.as_ref();
+    crate::object::protocol::execute_owned_subsasgn_with_context(
+        runtime_ref,
         obj,
         path,
         vec![rhs],
-        datetime_read_step,
-        |obj, step, mut values| async move {
-            let rhs = values
-                .pop()
-                .ok_or_else(|| datetime_error("datetime.subsasgn: assignment value is missing"))?;
-            datetime_write_step(obj, step, rhs).await
+        |obj, step| datetime_read_step(runtime_ref, obj, step),
+        |obj, step, mut values| {
+            let runtime = runtime_ref;
+            async move {
+                let rhs = values.pop().ok_or_else(|| {
+                    datetime_error("datetime.subsasgn: assignment value is missing")
+                })?;
+                datetime_write_step(runtime, obj, step, rhs).await
+            }
         },
         None,
     )
@@ -83,6 +102,7 @@ pub(super) async fn datetime_subsasgn(
 }
 
 pub(super) async fn datetime_write_step(
+    runtime: Option<&crate::context::RuntimeContext>,
     obj: Value,
     step: crate::object::indexing::ObjectSubscript,
     rhs: Value,
@@ -99,9 +119,22 @@ pub(super) async fn datetime_write_step(
             match field.as_str() {
                 FORMAT_FIELD => {
                     let text = scalar_text(&rhs, "Format value")?;
-                    object
-                        .properties
-                        .insert(FORMAT_FIELD.to_string(), Value::String(text));
+                    let text = crate::call::argument_text::copy_str(&text, runtime)?;
+                    crate::execution::object::replacement::replace_property(
+                        runtime,
+                        &mut object,
+                        FORMAT_FIELD,
+                        Value::String(text),
+                        |message, source| {
+                            crate::context::host_allocation::host_allocation_runtime_error(
+                                runtime,
+                                "RunMat:datetime:PropertyAllocation",
+                                message,
+                                source,
+                            )
+                        },
+                        datetime_error,
+                    )?;
                     Ok(Value::Object(object))
                 }
                 _ => Err(datetime_error(format!(
@@ -113,7 +146,7 @@ pub(super) async fn datetime_write_step(
             "datetime.subsasgn: only member assignment is supported",
         )),
     }?;
-    RootedValue::new(value).map_err(|error| error.into_runtime_error())
+    RootedValue::in_optional_context(value, runtime)
 }
 
 pub(super) fn datetime_binary_serials(
@@ -222,7 +255,12 @@ pub(super) async fn datetime_plus(lhs: Value, rhs: Value) -> crate::BuiltinResul
         let (months, days) = calendar_duration_tensors_from_value(&rhs)?;
         let (serials, shape) =
             apply_calendar_duration_to_serials(&lhs_serials, &months, &days, 1.0, "plus")?;
-        return datetime_object_from_serials(serials, shape, datetime_format_from_value(&lhs));
+        return datetime_object_from_serials(
+            None,
+            serials,
+            shape,
+            datetime_format_from_value(&lhs),
+        );
     }
     let rhs_numeric = if crate::builtins::duration::is_duration_object(&rhs) {
         crate::builtins::duration::duration_tensor_from_duration_value(&rhs)?
@@ -236,7 +274,7 @@ pub(super) async fn datetime_plus(lhs: Value, rhs: Value) -> crate::BuiltinResul
         .zip(right.iter())
         .map(|(a, b)| a + b)
         .collect::<Vec<_>>();
-    datetime_object_from_serials(serials, shape, datetime_format_from_value(&lhs))
+    datetime_object_from_serials(None, serials, shape, datetime_format_from_value(&lhs))
 }
 
 #[runmat_macros::runtime_builtin(
@@ -251,7 +289,7 @@ pub(super) async fn datetime_minus(lhs: Value, rhs: Value) -> crate::BuiltinResu
             let (months, days) = calendar_duration_tensors_from_value(&rhs)?;
             let (serials, shape) =
                 apply_calendar_duration_to_serials(&lhs_serials, &months, &days, -1.0, "minus")?;
-            datetime_object_from_serials(serials, shape, datetime_format_from_value(&lhs))
+            datetime_object_from_serials(None, serials, shape, datetime_format_from_value(&lhs))
         }
         _ if crate::builtins::duration::is_duration_object(&rhs) => {
             let rhs_days = crate::builtins::duration::duration_tensor_from_duration_value(&rhs)?;
@@ -262,7 +300,7 @@ pub(super) async fn datetime_minus(lhs: Value, rhs: Value) -> crate::BuiltinResu
                 .zip(right.iter())
                 .map(|(a, b)| a - b)
                 .collect::<Vec<_>>();
-            datetime_object_from_serials(serials, shape, datetime_format_from_value(&lhs))
+            datetime_object_from_serials(None, serials, shape, datetime_format_from_value(&lhs))
         }
         Value::Object(obj) if obj.is_class(DATETIME_CLASS) => {
             let rhs_serials = serial_tensor_for_object(obj)?;
@@ -284,12 +322,13 @@ pub(super) async fn datetime_minus(lhs: Value, rhs: Value) -> crate::BuiltinResu
                 .zip(right.iter())
                 .map(|(a, b)| a - b)
                 .collect::<Vec<_>>();
-            datetime_object_from_serials(serials, shape, datetime_format_from_value(&lhs))
+            datetime_object_from_serials(None, serials, shape, datetime_format_from_value(&lhs))
         }
     }
 }
 
 pub(super) fn combine_calendar_durations(
+    runtime: Option<&crate::context::RuntimeContext>,
     lhs: &Value,
     rhs: &Value,
     sign: f64,
@@ -324,7 +363,7 @@ pub(super) fn combine_calendar_durations(
         .zip(right_days.iter())
         .map(|(left, right)| left + sign * right)
         .collect::<Vec<_>>();
-    calendar_duration_object_from_components(months, days, shape)
+    calendar_duration_object_from_components(runtime, months, days, shape)
 }
 
 #[runmat_macros::runtime_builtin(
@@ -337,9 +376,14 @@ pub(super) async fn calendar_duration_plus(lhs: Value, rhs: Value) -> crate::Bui
         let rhs_serials = serials_from_datetime_value(&rhs)?;
         let (serials, shape) =
             apply_calendar_duration_to_serials(&rhs_serials, &months, &days, 1.0, "plus")?;
-        return datetime_object_from_serials(serials, shape, datetime_format_from_value(&rhs));
+        return datetime_object_from_serials(
+            None,
+            serials,
+            shape,
+            datetime_format_from_value(&rhs),
+        );
     }
-    combine_calendar_durations(&lhs, &rhs, 1.0, "plus")
+    combine_calendar_durations(None, &lhs, &rhs, 1.0, "plus")
 }
 
 #[runmat_macros::runtime_builtin(
@@ -347,7 +391,7 @@ pub(super) async fn calendar_duration_plus(lhs: Value, rhs: Value) -> crate::Bui
     builtin_path = "crate::builtins::datetime"
 )]
 pub(super) async fn calendar_duration_minus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    combine_calendar_durations(&lhs, &rhs, -1.0, "minus")
+    combine_calendar_durations(None, &lhs, &rhs, -1.0, "minus")
 }
 
 #[runmat_macros::runtime_builtin(

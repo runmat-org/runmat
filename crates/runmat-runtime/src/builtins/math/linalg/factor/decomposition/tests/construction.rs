@@ -38,8 +38,8 @@ fn triangular_flag_ignores_opposite_triangle() {
     let b = tensor(&[8.0, 12.0], 2, 1);
     let d = call_constructor(vec![
         a,
-        Value::String("triangular".to_string()),
-        Value::String("upper".to_string()),
+        Value::String("triangular".to_string().into()),
+        Value::String("upper".to_string().into()),
     ])
     .expect("decomposition");
 
@@ -54,7 +54,8 @@ fn triangular_flag_ignores_opposite_triangle() {
 fn chol_type_rejects_non_positive_definite_matrix() {
     let a = tensor(&[1.0, 0.0, 0.0, -1.0], 2, 2);
 
-    let err = call_constructor(vec![a, Value::String("chol".to_string())]).expect_err("chol error");
+    let err = call_constructor(vec![a, Value::String("chol".to_string().into())])
+        .expect_err("chol error");
 
     assert!(err.message().contains("positive definite"));
 }
@@ -65,8 +66,8 @@ fn chol_lower_flag_uses_lower_triangle_as_hermitian_matrix() {
     let b = tensor(&[5.0, 4.0], 2, 1);
     let d = call_constructor(vec![
         a,
-        Value::String("chol".to_string()),
-        Value::String("lower".to_string()),
+        Value::String("chol".to_string().into()),
+        Value::String("lower".to_string().into()),
     ])
     .expect("chol decomposition");
 
@@ -91,7 +92,8 @@ fn sparse_inputs_are_rejected_until_sparse_solves_exist() {
 fn unsupported_decomposition_types_are_rejected() {
     let a = tensor(&[1.0, 0.0, 0.0, 1.0], 2, 2);
 
-    let err = call_constructor(vec![a, Value::String("banded".to_string())]).expect_err("type");
+    let err =
+        call_constructor(vec![a, Value::String("banded".to_string().into())]).expect_err("type");
 
     assert!(err.message().contains("unsupported decomposition type"));
 }

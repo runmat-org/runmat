@@ -31,9 +31,9 @@ fn n_dimensional_string_array_preserves_shape() {
 
 #[test]
 fn empty_string_scalar_and_array_have_distinct_shapes() {
-    let scalar = cell(call(Value::String(String::new())).unwrap());
+    let scalar = cell(call(Value::String(String::new().into())).unwrap());
     assert_eq!(scalar.shape, vec![1, 1]);
-    let Value::CharArray(text) = &scalar.data[0] else {
+    let Value::CharArray(text) = &scalar.data()[0] else {
         panic!("expected character array");
     };
     assert_eq!(text.shape, vec![1, 0]);
@@ -41,5 +41,5 @@ fn empty_string_scalar_and_array_have_distinct_shapes() {
     let array = StringArray::new(Vec::new(), vec![0, 2]).unwrap();
     let empty = cell(call(Value::StringArray(array)).unwrap());
     assert_eq!(empty.shape, vec![0, 2]);
-    assert!(empty.data.is_empty());
+    assert!(empty.data().is_empty());
 }

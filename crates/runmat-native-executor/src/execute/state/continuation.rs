@@ -185,7 +185,7 @@ impl HostState {
         target
             .validate()
             .map_err(|error| NativeExecutorError::Host(error.to_string()))?;
-        if target.function != self.function.id.0
+        if target.function != self.function.portable_id.0
             || !self
                 .function
                 .expected_sites
@@ -262,6 +262,14 @@ impl HostState {
         frame: &runmat_native_codegen::NativeFrameState,
         site: &runmat_native_codegen::NativeMirSite,
     ) -> NativeExecutorResult<MaterializedFrame> {
+        if frame.point.function != self.function.portable_id
+            || site.point.function != self.function.portable_id
+        {
+            return Err(NativeExecutorError::Host(
+                "native deoptimization frame differs from the active function's portable owner"
+                    .into(),
+            ));
+        }
         if self.deoptimization_transients_live() {
             return Err(NativeExecutorError::Host(
                 "native deoptimization cannot materialize while contextual execution state is live"
@@ -275,6 +283,7 @@ impl HostState {
         let mut materialized = MaterializedFrame::from_native(
             frame,
             NativeMaterializationContext {
+                compiled_function: self.function.id,
                 phase: site.phase,
                 ordinal: site.ordinal,
                 bytecode_pc,
@@ -452,7 +461,7 @@ impl HostState {
                 NativeExecutorError::Host("native resume block has no verified site".into())
             })?;
         Ok(runmat_runtime::native::NativeSiteRequest {
-            function: self.function.id.0,
+            function: self.function.portable_id.0,
             block: site.point.block,
             position: site.point.position,
             phase: native_site_phase(site.phase),

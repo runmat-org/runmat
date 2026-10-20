@@ -39,29 +39,96 @@ fn preserves_exact_wide_integer_labels() {
 
 #[test]
 fn multiple_grouping_vectors_return_one_label_column_each() {
-    let groups = Value::Cell(
-        CellArray::new(
-            vec![
-                Value::StringArray(
-                    StringArray::new(vec!["b".into(), "a".into(), "b".into()], vec![3, 1]).unwrap(),
-                ),
-                Value::LogicalArray(LogicalArray::new(vec![1, 0, 1], vec![3, 1]).unwrap()),
-            ],
-            1,
-            2,
-        )
-        .unwrap(),
-    );
-    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
-    let outputs = output_list(call(groups, Vec::new()).unwrap());
-    let Value::Cell(labels) = &outputs[1] else {
-        panic!("expected one label vector per grouping role");
-    };
-    assert_eq!((labels.rows, labels.cols), (1, 2));
-    assert!(matches!(&labels.data[0], Value::StringArray(values) if values.data == ["a", "b"]));
-    assert!(
-        matches!(&labels.data[1], Value::LogicalArray(values) if values.data.as_slice() == [0, 1])
-    );
+    for (shared, cellstr) in [(false, false), (true, false), (true, true)] {
+        let text = if cellstr {
+            Value::Cell(
+                CellArray::new(
+                    ['b', 'a', 'b']
+                        .into_iter()
+                        .map(|character| {
+                            Value::CharArray(
+                                runmat_value::CharArray::new(vec![character], 1, 1).unwrap(),
+                            )
+                        })
+                        .collect(),
+                    3,
+                    1,
+                )
+                .unwrap(),
+            )
+        } else {
+            Value::StringArray(
+                StringArray::new(vec!["b".into(), "a".into(), "b".into()], vec![3, 1]).unwrap(),
+            )
+        };
+        let values = vec![
+            text,
+            Value::LogicalArray(LogicalArray::new(vec![1, 0, 1], vec![3, 1]).unwrap()),
+        ];
+        let backing = if shared {
+            runmat_value::OutputListStorage::shared_unbounded(values)
+        } else {
+            runmat_value::OutputListStorage::unbounded(values)
+        };
+        // Keep a second shared owner alive to exercise retained child access,
+        // rather than the unique move-out path.
+        let retained = shared.then(|| backing.clone());
+        let groups = Value::Cell(
+            CellArray::from_shared_storage(
+                backing,
+                runmat_value::SharedShape::new_unmanaged(vec![1, 2]),
+            )
+            .unwrap(),
+        );
+        if let Some(retained) = &retained {
+            let columns = crate::builtins::array::grouping::variables::columns_from_value(
+                "Group",
+                groups.clone(),
+                false,
+            )
+            .unwrap();
+            assert!(std::ptr::eq(columns[0].value(), &retained[0]));
+        }
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
+        let outputs = output_list(call(groups, Vec::new()).unwrap());
+        let Value::Cell(labels) = &outputs[1] else {
+            panic!("expected one label vector per grouping role");
+        };
+        assert_eq!((labels.rows, labels.cols), (1, 2));
+        if cellstr {
+            let Value::Cell(values) = &labels.data()[0] else {
+                panic!("cellstr labels must retain their class");
+            };
+            assert_eq!((values.rows, values.cols), (2, 1));
+            for (value, expected) in values.data().iter().zip(['a', 'b']) {
+                assert!(matches!(value, Value::CharArray(chars) if chars.data() == [expected]));
+            }
+        } else {
+            assert!(
+                matches!(&labels.data()[0], Value::StringArray(values) if values.data() == ["a", "b"])
+            );
+        }
+        assert!(
+            matches!(&labels.data()[1], Value::LogicalArray(values) if values.data.as_slice() == [0, 1])
+        );
+        assert!(
+            matches!(&outputs[0], Value::Tensor(values) if values.materialize_f64() == [1.0, 2.0])
+        );
+        if let Some(retained) = retained {
+            if cellstr {
+                let Value::Cell(values) = &retained[0] else {
+                    panic!("original shared cellstr must remain intact");
+                };
+                for (value, expected) in values.data().iter().zip(['b', 'a', 'b']) {
+                    assert!(matches!(value, Value::CharArray(chars) if chars.data() == [expected]));
+                }
+            } else {
+                assert!(
+                    matches!(&retained[0], Value::StringArray(values) if values.data() == ["b", "a", "b"])
+                );
+            }
+        }
+    }
 }
 
 #[test]

@@ -230,7 +230,7 @@ fn mixed_cell_groups_keep_typed_identity_until_rendering() {
             vec![
                 Value::Int(IntValue::U64(1)),
                 Value::String("1".into()),
-                Value::String(String::new()),
+                Value::String(String::new().into()),
                 Value::String("Data".into()),
             ],
             4,
@@ -273,7 +273,7 @@ fn wide_integer_groups_do_not_round_or_merge_with_text() {
             CellArray::new(
                 vec![
                     Value::Int(IntValue::U64(wide)),
-                    Value::String(wide.to_string()),
+                    Value::String(wide.to_string().into()),
                 ],
                 2,
                 1,

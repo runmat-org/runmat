@@ -252,7 +252,7 @@ fn summarize_value(
             }
         }
         Value::Cell(cell) => {
-            for element in &cell.data {
+            for element in cell.data() {
                 summarize_value(element, summary, visited_gpu, visited_handles);
             }
         }
@@ -267,7 +267,7 @@ fn summarize_value(
             });
         }
         Value::Object(value) => {
-            for element in value.properties.values() {
+            for element in value.properties().values() {
                 summarize_value(element, summary, visited_gpu, visited_handles);
             }
         }
@@ -360,7 +360,7 @@ mod tests {
     use runmat_accelerate_api::{
         test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
     };
-    use runmat_value::{CellArray, StructArray, StructValue, Tensor};
+    use runmat_value::{CellArray, StructArray, Tensor};
 
     use super::*;
 
@@ -422,10 +422,10 @@ mod tests {
         let gpu = allocation.handle;
         let device = gpu.device_id();
         let element = |host: Value, resident: Value| {
-            let mut value = StructValue::new();
+            let mut value = runmat_value::UnboundedStructValueBuilder::with_capacity(2);
             value.insert("host", host);
             value.insert("resident", resident);
-            value
+            value.finish()
         };
         let array = StructArray::with_fields(
             vec!["host".into(), "resident".into()],

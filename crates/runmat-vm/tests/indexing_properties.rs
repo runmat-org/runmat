@@ -451,7 +451,7 @@ fn object_without_subsref_uses_default_parenthesis_indexing() {
     "#;
     let values = execute_source(program).expect("default object indexing");
     assert!(values.iter().any(
-        |value| matches!(value, runmat_value::Value::Object(object) if object.class_name.is(runmat_types::StaticClassIdentity::new("NoIdx")))
+        |value| matches!(value, runmat_value::Value::Object(object) if object.class_name().is(runmat_types::StaticClassIdentity::new("NoIdx")))
     ));
 }
 
@@ -487,9 +487,13 @@ fn cell_paren_range_end_and_colon_semantics() {
             _ => None,
         })
         .expect("expected B cell with row-vector shape");
-    assert_eq!(b.data.len(), 2);
-    assert!(matches!(&b.data[0], runmat_value::Value::Num(n) if (*n - 20.0).abs() < f64::EPSILON));
-    assert!(matches!(&b.data[1], runmat_value::Value::Num(n) if (*n - 30.0).abs() < f64::EPSILON));
+    assert_eq!(b.data().len(), 2);
+    assert!(
+        matches!(&b.data()[0], runmat_value::Value::Num(n) if (*n - 20.0).abs() < f64::EPSILON)
+    );
+    assert!(
+        matches!(&b.data()[1], runmat_value::Value::Num(n) if (*n - 30.0).abs() < f64::EPSILON)
+    );
 
     let c_final = vars
         .iter()
@@ -498,18 +502,18 @@ fn cell_paren_range_end_and_colon_semantics() {
             _ => None,
         })
         .expect("expected final C cell");
-    assert_eq!(c_final.data.len(), 4);
+    assert_eq!(c_final.data().len(), 4);
     assert!(
-        matches!(&c_final.data[0], runmat_value::Value::Num(n) if (*n - 10.0).abs() < f64::EPSILON)
+        matches!(&c_final.data()[0], runmat_value::Value::Num(n) if (*n - 10.0).abs() < f64::EPSILON)
     );
     assert!(
-        matches!(&c_final.data[1], runmat_value::Value::Num(n) if (*n - 200.0).abs() < f64::EPSILON)
+        matches!(&c_final.data()[1], runmat_value::Value::Num(n) if (*n - 200.0).abs() < f64::EPSILON)
     );
     assert!(
-        matches!(&c_final.data[2], runmat_value::Value::Num(n) if (*n - 300.0).abs() < f64::EPSILON)
+        matches!(&c_final.data()[2], runmat_value::Value::Num(n) if (*n - 300.0).abs() < f64::EPSILON)
     );
     assert!(
-        matches!(&c_final.data[3], runmat_value::Value::Num(n) if (*n - 40.0).abs() < f64::EPSILON)
+        matches!(&c_final.data()[3], runmat_value::Value::Num(n) if (*n - 40.0).abs() < f64::EPSILON)
     );
 
     let d = vars
@@ -521,7 +525,7 @@ fn cell_paren_range_end_and_colon_semantics() {
         })
         .expect("expected D cell");
     assert_eq!(d.shape, vec![4, 1]);
-    assert_eq!(d.data.len(), 4);
+    assert_eq!(d.data().len(), 4);
 }
 
 #[test]
@@ -538,7 +542,7 @@ fn cell_brace_assignment_preserves_copied_cell_values() {
         .find_map(|value| match value {
             runmat_value::Value::Cell(cell)
                 if cell.shape == vec![1, 3]
-                    && matches!(&cell.data[1], runmat_value::Value::Num(n) if (*n - 20.0).abs() < f64::EPSILON) =>
+                    && matches!(&cell.data()[1], runmat_value::Value::Num(n) if (*n - 20.0).abs() < f64::EPSILON) =>
             {
                 Some(cell.clone())
             }
@@ -546,10 +550,10 @@ fn cell_brace_assignment_preserves_copied_cell_values() {
         })
         .expect("expected copied cell with preserved second element");
     assert!(
-        matches!(&copied.data[0], runmat_value::Value::Num(n) if (*n - 10.0).abs() < f64::EPSILON)
+        matches!(&copied.data()[0], runmat_value::Value::Num(n) if (*n - 10.0).abs() < f64::EPSILON)
     );
     assert!(
-        matches!(&copied.data[2], runmat_value::Value::Num(n) if (*n - 30.0).abs() < f64::EPSILON)
+        matches!(&copied.data()[2], runmat_value::Value::Num(n) if (*n - 30.0).abs() < f64::EPSILON)
     );
 
     let updated = vars
@@ -557,7 +561,7 @@ fn cell_brace_assignment_preserves_copied_cell_values() {
         .find_map(|value| match value {
             runmat_value::Value::Cell(cell)
                 if cell.shape == vec![1, 3]
-                    && matches!(&cell.data[1], runmat_value::Value::Num(n) if (*n - 200.0).abs() < f64::EPSILON) =>
+                    && matches!(&cell.data()[1], runmat_value::Value::Num(n) if (*n - 200.0).abs() < f64::EPSILON) =>
             {
                 Some(cell.clone())
             }
@@ -565,9 +569,9 @@ fn cell_brace_assignment_preserves_copied_cell_values() {
         })
         .expect("expected updated cell with replaced second element");
     assert!(
-        matches!(&updated.data[0], runmat_value::Value::Num(n) if (*n - 10.0).abs() < f64::EPSILON)
+        matches!(&updated.data()[0], runmat_value::Value::Num(n) if (*n - 10.0).abs() < f64::EPSILON)
     );
     assert!(
-        matches!(&updated.data[2], runmat_value::Value::Num(n) if (*n - 30.0).abs() < f64::EPSILON)
+        matches!(&updated.data()[2], runmat_value::Value::Num(n) if (*n - 30.0).abs() < f64::EPSILON)
     );
 }

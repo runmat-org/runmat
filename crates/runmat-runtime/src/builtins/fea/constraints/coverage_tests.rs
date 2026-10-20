@@ -57,8 +57,8 @@ impl Block {
         let path = dir.path().join("block.obj");
         std::fs::write(&path, BLOCK_OBJ).unwrap();
         let asset = block_on(geometry_load_builtin(
-            Value::String(path.to_string_lossy().to_string()),
-            Vec::new(),
+            Value::String(path.to_string_lossy().to_string().into()),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect("block geometry should load");
         Self { _dir: dir, asset }
@@ -71,7 +71,7 @@ impl Block {
 
 fn class_of(value: &Value) -> String {
     match value {
-        Value::Object(object) => object.class_name.display_name().to_string(),
+        Value::Object(object) => object.class_name().display_name().to_string(),
         other => panic!("expected an object, got {other:?}"),
     }
 }
@@ -80,17 +80,22 @@ fn kind_key(value: &Value) -> String {
     let Value::Object(object) = value else {
         panic!("expected an object")
     };
-    let Some(Value::Struct(constraint)) = object.properties.get("constraint") else {
+    let Some(Value::Struct(constraint)) = object.properties().get("constraint") else {
         panic!("expected a constraint payload")
     };
     let Some(Value::Struct(kind)) = constraint.fields.get("kind") else {
         panic!("expected a constraint kind")
     };
-    kind.fields.keys().next().cloned().expect("one kind")
+    kind.fields
+        .keys()
+        .next()
+        .map(str::to_owned)
+        .expect("one kind")
 }
 
 fn direction(components: [f64; 3]) -> Value {
     block_on(super::support::direction::direction_vector_builtin(
+        None,
         Value::Tensor(Tensor::new_2d(components.to_vec(), 1, 3).unwrap()),
     ))
     .unwrap()
@@ -116,6 +121,7 @@ fn every_region_constraint_method_builds_its_family_kind() {
     let velocity =
         Value::Cell(CellArray::new(vec![speed(1.5), speed(0.0), speed(0.0)], 1, 3).unwrap());
     let hub = block_on(reference_point_from_coordinates_builtin(
+        None,
         "hub".into(),
         origin(),
     ))
@@ -255,7 +261,7 @@ fn every_region_constraint_method_builds_its_family_kind() {
 #[test]
 fn paired_tie_and_periodic_methods_cover_thermal_and_acoustic_families() {
     let block = Block::load();
-    let pairing = || block_on(periodic_pairing_matching_builtin()).unwrap();
+    let pairing = || block_on(periodic_pairing_matching_builtin(None)).unwrap();
     let tie = block_on(thermal_tie_builtin(
         "bond".into(),
         block.region("x_min"),
@@ -268,7 +274,7 @@ fn paired_tie_and_periodic_methods_cover_thermal_and_acoustic_families() {
         "cell".into(),
         block.region("x_min"),
         block.region("x_max"),
-        block_on(periodic_transform_identity_builtin()).unwrap(),
+        block_on(periodic_transform_identity_builtin(None)).unwrap(),
         pairing(),
     ))
     .unwrap();
@@ -280,6 +286,7 @@ fn paired_tie_and_periodic_methods_cover_thermal_and_acoustic_families() {
 fn rotation_transform_and_every_structural_dof_are_typed() {
     let angle = block_on(values::rotation_degrees_builtin(Value::Num(45.0))).unwrap();
     let transform = block_on(periodic_transform_rotation_builtin(
+        None,
         origin(),
         direction([0.0, 0.0, 2.0]),
         angle,
@@ -293,6 +300,7 @@ fn rotation_transform_and_every_structural_dof_are_typed() {
     assert_eq!(axis, [0.0, 0.0, 1.0]);
     assert!((angle.radians - std::f64::consts::FRAC_PI_4).abs() < 1e-15);
     assert!(block_on(periodic_transform_rotation_builtin(
+        None,
         origin(),
         origin(),
         origin()
@@ -301,32 +309,32 @@ fn rotation_transform_and_every_structural_dof_are_typed() {
 
     let dofs = [
         (
-            block_on(structural_dof_ux_builtin()),
+            block_on(structural_dof_ux_builtin(None)),
             "fea.StructuralTranslationDof",
             0,
         ),
         (
-            block_on(structural_dof_uy_builtin()),
+            block_on(structural_dof_uy_builtin(None)),
             "fea.StructuralTranslationDof",
             1,
         ),
         (
-            block_on(structural_dof_uz_builtin()),
+            block_on(structural_dof_uz_builtin(None)),
             "fea.StructuralTranslationDof",
             2,
         ),
         (
-            block_on(structural_dof_rx_builtin()),
+            block_on(structural_dof_rx_builtin(None)),
             "fea.StructuralRotationDof",
             0,
         ),
         (
-            block_on(structural_dof_ry_builtin()),
+            block_on(structural_dof_ry_builtin(None)),
             "fea.StructuralRotationDof",
             1,
         ),
         (
-            block_on(structural_dof_rz_builtin()),
+            block_on(structural_dof_rz_builtin(None)),
             "fea.StructuralRotationDof",
             2,
         ),
@@ -338,7 +346,7 @@ fn rotation_transform_and_every_structural_dof_are_typed() {
             unreachable!()
         };
         assert_eq!(
-            object.properties.get("axis"),
+            object.properties().get("axis"),
             Some(&Value::Int(IntValue::U8(axis)))
         );
     }
@@ -348,19 +356,20 @@ fn rotation_transform_and_every_structural_dof_are_typed() {
 fn frames_build_every_class_and_reject_non_orthogonal_axes_before_construction() {
     for (value, class_name) in [
         (
-            block_on(coordinate_frame_material_builtin()),
+            block_on(coordinate_frame_material_builtin(None)),
             "fea.MaterialCoordinateFrame",
         ),
         (
-            block_on(coordinate_frame_element_builtin()),
+            block_on(coordinate_frame_element_builtin(None)),
             "fea.ElementCoordinateFrame",
         ),
         (
-            block_on(coordinate_frame_boundary_builtin()),
+            block_on(coordinate_frame_boundary_builtin(None)),
             "fea.BoundaryNormalTangentFrame",
         ),
         (
             block_on(coordinate_frame_cylindrical_builtin(
+                None,
                 "shaft".into(),
                 origin(),
                 direction([1.0, 0.0, 0.0]),
@@ -370,6 +379,7 @@ fn frames_build_every_class_and_reject_non_orthogonal_axes_before_construction()
         ),
         (
             block_on(coordinate_frame_spherical_builtin(
+                None,
                 "dome".into(),
                 origin(),
                 direction([0.0, 0.0, 1.0]),
@@ -381,6 +391,7 @@ fn frames_build_every_class_and_reject_non_orthogonal_axes_before_construction()
         assert_eq!(class_of(&value.unwrap()), class_name);
     }
     let skewed = block_on(coordinate_frame_cartesian_builtin(
+        None,
         "skew".into(),
         origin(),
         direction([1.0, 0.0, 0.0]),
@@ -393,6 +404,7 @@ fn frames_build_every_class_and_reject_non_orthogonal_axes_before_construction()
         skewed.message()
     );
     let tilted = block_on(coordinate_frame_spherical_builtin(
+        None,
         "tilted".into(),
         origin(),
         direction([0.0, 0.0, 1.0]),
@@ -410,7 +422,7 @@ fn revision(value: &Value) -> Option<Value> {
     let Value::Object(object) = value else {
         panic!("expected an object")
     };
-    object.properties.get("geometry_revision").cloned()
+    object.properties().get("geometry_revision").cloned()
 }
 
 #[test]

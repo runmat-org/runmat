@@ -495,7 +495,7 @@ fn count_nonzero_logical(logical: &LogicalArray) -> usize {
 }
 
 fn count_nonzero_char(chars: &CharArray) -> usize {
-    chars.data.iter().filter(|&&ch| ch != '\0').count()
+    chars.data().iter().filter(|&&ch| ch != '\0').count()
 }
 
 #[inline]
@@ -572,7 +572,7 @@ fn mask_from_value(value: &Value) -> BuiltinResult<Mask> {
         }),
         Value::CharArray(chars) => {
             let bits = chars
-                .data
+                .data()
                 .iter()
                 .map(|&ch| if ch != '\0' { 1u8 } else { 0u8 })
                 .collect();
@@ -841,7 +841,7 @@ fn describe_value_kind(value: &Value) -> String {
         Value::Struct(_) | Value::StructArray(_) => "struct".to_string(),
         Value::GpuTensor(_) => "GPU tensor".to_string(),
         Value::ObjectArray(array) => format!("{} object array", array.class_name()),
-        Value::Object(obj) => format!("{} object", obj.class_name),
+        Value::Object(obj) => format!("{} object", obj.class_name()),
         Value::HandleObject(h) => format!("handle object ({})", h.class_name),
         Value::Listener(l) => format!("listener for {}", l.event_name),
         Value::FunctionHandle(_)

@@ -26,12 +26,12 @@ pub fn axis_ticks_builtin(
     runtime: Option<&crate::context::RuntimeContext>,
     builtin: &'static str,
     axis: TickAxis,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    let (target, args) = prepare_axes_call(runtime, builtin, &args)?;
-    match args {
-        [] => query_ticks(builtin, axis, &target.resolve(builtin)?),
-        [value] => {
+    let (target, args) = prepare_axes_call(runtime, builtin, args.view())?;
+    match (args.len(), args.first()) {
+        (0, _) => query_ticks(builtin, axis, &target.resolve(builtin)?),
+        (1, Some(value)) => {
             if let Some(text) = value_as_string(value) {
                 match text.trim().to_ascii_lowercase().as_str() {
                     "auto" => {
@@ -260,8 +260,8 @@ fn tick_value(data: Vec<f64>) -> Value {
 
 fn value_as_string(value: &Value) -> Option<String> {
     match value {
-        Value::String(s) => Some(s.clone()),
-        Value::CharArray(chars) => Some(chars.data.iter().collect()),
+        Value::String(s) => Some(s.as_str().to_owned()),
+        Value::CharArray(chars) => Some(chars.data().iter().collect()),
         _ => None,
     }
 }

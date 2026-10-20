@@ -23,7 +23,10 @@ fn cputime_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     context = true,
     builtin_path = "crate::builtins::timing::cputime"
 )]
-fn cputime_builtin(runtime: Option<RuntimeContext>, args: Vec<Value>) -> BuiltinResult<Value> {
+fn cputime_builtin(
+    runtime: Option<RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if !args.is_empty() {
         return Err(cputime_error(&CPUTIME_ERROR_TOO_MANY_INPUTS));
     }
@@ -47,8 +50,11 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn cputime_returns_finite_nonnegative_scalar() {
-        let Value::Num(time) = cputime_builtin(Some(runtime()), Vec::new()).expect("cputime")
-        else {
+        let Value::Num(time) = cputime_builtin(
+            Some(runtime()),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        )
+        .expect("cputime") else {
             panic!("expected numeric scalar")
         };
         assert!(time.is_finite() && time >= 0.0);
@@ -58,14 +64,21 @@ mod tests {
     #[test]
     fn cputime_is_monotonic_for_current_process() {
         let runtime = runtime();
-        let Value::Num(first) = cputime_builtin(Some(runtime.clone()), Vec::new()).expect("first")
-        else {
+        let Value::Num(first) = cputime_builtin(
+            Some(runtime.clone()),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        )
+        .expect("first") else {
             panic!("expected numeric scalar")
         };
         for value in 0_u64..10_000 {
             std::hint::black_box(value.wrapping_mul(value));
         }
-        let Value::Num(second) = cputime_builtin(Some(runtime), Vec::new()).expect("second") else {
+        let Value::Num(second) = cputime_builtin(
+            Some(runtime),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        )
+        .expect("second") else {
             panic!("expected numeric scalar")
         };
         assert!(second >= first);
@@ -80,7 +93,11 @@ mod tests {
 
     #[test]
     fn cputime_rejects_inputs_before_clock_access() {
-        let error = cputime_builtin(None, vec![Value::Num(1.0)]).unwrap_err();
+        let error = cputime_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
+        )
+        .unwrap_err();
         assert_eq!(error.identifier(), CPUTIME_ERROR_TOO_MANY_INPUTS.identifier);
     }
 }

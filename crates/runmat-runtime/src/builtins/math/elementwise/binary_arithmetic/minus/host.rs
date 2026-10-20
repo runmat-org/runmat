@@ -7,9 +7,9 @@ fn scalar_real_value(value: &Value) -> Option<f64> {
         Value::LogicalArray(value) if value.data.len() == 1 => {
             Some(if value.data[0] != 0 { 1.0 } else { 0.0 })
         }
-        Value::CharArray(value) if value.data.len() == 1 => Some(
+        Value::CharArray(value) if value.data().len() == 1 => Some(
             value
-                .data
+                .data()
                 .first()
                 .map(|&character| character as u32 as f64)
                 .unwrap_or(0.0),

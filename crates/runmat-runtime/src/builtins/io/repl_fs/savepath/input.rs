@@ -7,7 +7,7 @@ pub(super) struct Request {
     pub(super) requested_outputs: Option<usize>,
 }
 
-pub(super) async fn decode(args: Vec<Value>) -> crate::BuiltinResult<Request> {
+pub(super) async fn decode(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Request> {
     if args.len() > 1 {
         return Err(super::errors::descriptor(
             &runmat_builtins::SAVEPATH_ERROR_TOO_MANY_INPUTS,
@@ -47,7 +47,7 @@ pub(super) async fn decode(args: Vec<Value>) -> crate::BuiltinResult<Request> {
 fn preflight(value: &Value) -> crate::BuiltinResult<()> {
     match value {
         Value::String(_) => Ok(()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(()),
+        Value::StringArray(array) if array.data().len() == 1 => Ok(()),
         Value::CharArray(chars) if is_row(&chars.shape) => Ok(()),
         Value::Tensor(tensor) if is_row(tensor.shape()) => require_numeric_extension(),
         Value::GpuTensor(handle) if is_row(handle.shape()) => require_numeric_extension(),
@@ -59,9 +59,9 @@ fn preflight(value: &Value) -> crate::BuiltinResult<()> {
 
 async fn decode_text(value: Value) -> crate::BuiltinResult<String> {
     match value {
-        Value::String(text) => Ok(text),
-        Value::StringArray(array) => Ok(array.data[0].clone()),
-        Value::CharArray(chars) => Ok(chars.data.iter().collect()),
+        Value::String(text) => Ok(text.into_string_unbounded()),
+        Value::StringArray(array) => Ok(array.data()[0].as_str().to_owned()),
+        Value::CharArray(chars) => Ok(chars.data().iter().collect()),
         Value::Tensor(tensor) => numeric_text(&tensor),
         value @ Value::GpuTensor(_) => {
             let gathered = crate::gather_if_needed_async(&value)

@@ -1,5 +1,6 @@
 use super::*;
 use crate::{ExecutableSource, RunMatSession};
+use runmat_types::ProgramFunctionId;
 
 async fn unit(owner: &str, offset: u8) -> ExecutableUnit {
     #[cfg(target_arch = "wasm32")]
@@ -14,7 +15,12 @@ async fn unit(owner: &str, offset: u8) -> ExecutableUnit {
 }
 
 fn function(unit: &ExecutableUnit) -> ProgramFunctionId {
-    ProgramFunctionId(unit.functions().resolve_name("entry").unwrap().0 as u32)
+    let local = unit.functions().resolve_name("entry").unwrap();
+    unit.functions().get(local).unwrap().portable_function
+}
+
+fn origin(unit: &ExecutableUnit) -> FunctionBindingOrigin {
+    FunctionBindingOrigin::from_revision(&unit.revision().program_revision, function(unit)).unwrap()
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -24,12 +30,12 @@ async fn nested_program_scope_restores_original_callable_and_rejects_expired_aut
     let inner = unit("inner-owner", 2).await;
     let service = Rc::new(SessionProgramService::default());
     assert!(service
-        .freeze_bound_callable(function(&outer), "entry")
+        .freeze_bound_callable(origin(&outer), "entry")
         .is_err());
     {
         let _outer = service.enter(&outer);
         let original = service
-            .freeze_bound_callable(function(&outer), "entry")
+            .freeze_bound_callable(origin(&outer), "entry")
             .unwrap();
         assert_eq!(
             original.executable,
@@ -40,7 +46,7 @@ async fn nested_program_scope_restores_original_callable_and_rejects_expired_aut
         {
             let _inner = service.enter(&inner);
             let active = service
-                .freeze_bound_callable(function(&inner), "entry")
+                .freeze_bound_callable(origin(&inner), "entry")
                 .unwrap();
             assert_eq!(active.owner_identity, "inner-owner");
             assert_ne!(active.source_digest, original.source_digest);
@@ -53,20 +59,26 @@ async fn nested_program_scope_restores_original_callable_and_rejects_expired_aut
         }
         assert_eq!(
             service
-                .freeze_bound_callable(function(&outer), "entry")
+                .freeze_bound_callable(origin(&outer), "entry")
                 .unwrap()
                 .executable,
             original.executable
         );
         assert!(service
-            .freeze_bound_callable(function(&outer), "foreign-name")
+            .freeze_bound_callable(origin(&outer), "foreign-name")
             .is_err());
         assert!(service
-            .freeze_bound_callable(ProgramFunctionId(u32::MAX), "entry")
+            .freeze_bound_callable(
+                FunctionBindingOrigin {
+                    function: ProgramFunctionId(u32::MAX),
+                    ..origin(&outer)
+                },
+                "entry"
+            )
             .is_err());
     }
     assert!(service
-        .freeze_bound_callable(function(&outer), "entry")
+        .freeze_bound_callable(origin(&outer), "entry")
         .is_err());
 }
 
@@ -79,7 +91,7 @@ async fn restored_product_freezes_original_analysis_source_and_function_without_
     let service = Rc::new(SessionProgramService::default());
     let _scope = service.enter(&restored);
     let captured = service
-        .freeze_bound_callable(function(&restored), "entry")
+        .freeze_bound_callable(origin(&restored), "entry")
         .unwrap();
     assert_eq!(captured.executable, envelope);
     assert_eq!(
@@ -91,11 +103,11 @@ async fn restored_product_freezes_original_analysis_source_and_function_without_
         original.revision().source_digest
     );
     assert_eq!(
-        captured.function,
-        original
-            .function_analysis(function(&original))
+        ExecutableUnit::from_portable_envelope(&captured.executable)
             .unwrap()
-            .clone()
+            .function_analysis(function(&restored))
+            .unwrap(),
+        original.function_analysis(function(&original)).unwrap()
     );
 }
 

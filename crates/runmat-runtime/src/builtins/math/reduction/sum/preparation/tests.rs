@@ -61,7 +61,7 @@ fn nansum_uses_its_own_catalog_binding_with_the_shared_typed_omit_route() {
     let output = block_on(super::super::sum_for_invocation(
         Some(&context),
         data,
-        vec![Value::from("native")],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("native")]),
         None,
         runmat_types::SumInvocation::NanSum,
     ))
@@ -80,7 +80,7 @@ fn nansum_uses_its_own_catalog_binding_with_the_shared_typed_omit_route() {
     let invalid = block_on(super::super::sum_for_invocation(
         Some(&context),
         Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
-        vec![Value::Num(0.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(0.0)]),
         None,
         runmat_types::SumInvocation::NanSum,
     ))
@@ -103,11 +103,11 @@ fn sum_prepares_only_data_after_all_controls_are_admitted() {
         Some(context.clone()),
         None,
         data(),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::Num(1.0),
             Value::from("omitnan"),
             Value::from("double"),
-        ],
+        ]),
     ))
     .unwrap();
     let Value::Tensor(result) = result.value() else {
@@ -127,11 +127,11 @@ fn sum_prepares_only_data_after_all_controls_are_admitted() {
         Some(context.clone()),
         None,
         data(),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::Num(0.0),
             Value::from("omitnan"),
             Value::from("double"),
-        ],
+        ]),
     ))
     .expect_err("invalid dimension precedes preparation");
     assert_eq!(error.identifier(), Some("RunMat:sum:InvalidArgument"));
@@ -140,7 +140,7 @@ fn sum_prepares_only_data_after_all_controls_are_admitted() {
     let delegated = block_on(super::super::sum_for_invocation(
         Some(&context),
         data(),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         Some(ReductionNaN::Omit),
         runmat_types::SumInvocation::Sum,
     ))
@@ -227,7 +227,7 @@ fn native_integer_sum_and_nansum_execute_inside_the_admitted_observation() {
         let result = block_on(super::super::sum_for_invocation(
             Some(&context),
             native(),
-            vec![Value::from("native")],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from("native")]),
             None,
             invocation,
         ))
@@ -237,7 +237,7 @@ fn native_integer_sum_and_nansum_execute_inside_the_admitted_observation() {
     let scalar = block_on(super::super::sum_for_invocation(
         Some(&context),
         Value::Int(IntValue::U64(u64::MAX)),
-        vec![Value::from("native")],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("native")]),
         None,
         runmat_types::SumInvocation::Sum,
     ))
@@ -263,7 +263,7 @@ fn native_integer_sum_and_nansum_execute_inside_the_admitted_observation() {
     let unpolled = super::super::sum_for_invocation(
         Some(&context),
         native(),
-        vec![Value::from("native")],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("native")]),
         None,
         runmat_types::SumInvocation::Sum,
     );
@@ -272,7 +272,10 @@ fn native_integer_sum_and_nansum_execute_inside_the_admitted_observation() {
     let error = block_on(super::super::sum_for_invocation(
         Some(&context),
         native(),
-        vec![Value::Num(0.0), Value::from("native")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(0.0),
+            Value::from("native"),
+        ]),
         None,
         runmat_types::SumInvocation::Sum,
     ))

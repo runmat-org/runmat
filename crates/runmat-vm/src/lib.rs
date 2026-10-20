@@ -19,8 +19,9 @@ pub use bytecode::program::{
     instruction_reference_sites, remap_reference_sites, FunctionReferenceKind,
 };
 pub use bytecode::program::{
-    SelectedExecutableProduct, SelectedLinkedNativeSite, SelectedStaticCapture,
-    SelectedStaticProductDependency, SelectedStaticProductTarget, SelectedStaticSiteOwner,
+    SelectedExecutableCode, SelectedExecutableProduct, SelectedLinkedNativeSite,
+    SelectedStaticCapture, SelectedStaticProductDependency, SelectedStaticProductTarget,
+    SelectedStaticSiteOwner,
 };
 pub use graph_schema::{
     selected_graph_code_required_schema, selected_graph_execution_required_schema,

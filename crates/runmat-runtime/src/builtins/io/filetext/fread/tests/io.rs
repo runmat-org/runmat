@@ -399,22 +399,34 @@ fn fread_public_binding_projects_zero_one_and_two_outputs() {
     let fid = Value::Num(open.as_open().unwrap().fid as f64);
     {
         let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
-        let result =
-            futures::executor::block_on(fread_builtin(None, fid.clone(), Vec::new())).unwrap();
+        let result = futures::executor::block_on(fread_builtin(
+            None,
+            fid.clone(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap();
         assert!(matches!(result, Value::OutputList(values) if values.is_empty()));
     }
     futures::executor::block_on(crate::builtins::io::filetext::frewind::evaluate(&fid)).unwrap();
     {
         let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
-        let result =
-            futures::executor::block_on(fread_builtin(None, fid.clone(), Vec::new())).unwrap();
+        let result = futures::executor::block_on(fread_builtin(
+            None,
+            fid.clone(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap();
         assert!(matches!(result, Value::OutputList(values) if values.len() == 1));
     }
     futures::executor::block_on(crate::builtins::io::filetext::frewind::evaluate(&fid)).unwrap();
     {
         let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
-        let result =
-            futures::executor::block_on(fread_builtin(None, fid.clone(), Vec::new())).unwrap();
+        let result = futures::executor::block_on(fread_builtin(
+            None,
+            fid.clone(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap();
         let Value::OutputList(values) = result else {
             panic!("two-output fread result")
         };

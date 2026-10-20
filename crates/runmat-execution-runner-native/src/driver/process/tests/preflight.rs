@@ -49,15 +49,15 @@ fn admit(driver: &LocalDriver, artifact_id: ArtifactId) -> runmat_execution_runn
         pool_id: driver.pool_id(),
         schema_version: runmat_execution::task::TASK_REQUEST_SCHEMA_VERSION,
         executable: runmat_execution::TaskExecutableIdentity::ProgramArtifact(artifact_id),
-        callable: runmat_execution::task::Callable::for_program(
+        host: crate::test_support::host_requirement(),
+        invocation_context: runmat_execution::ProgramInvocationContext::Direct,
+        callable: Callable::for_program(
             "test",
             &runmat_execution::ProgramCallable::semantic(
                 runmat_execution::ProgramFunctionId(0),
-                Some(String::from("preflight")),
+                Some("preflight".into()),
             ),
         ),
-        host: crate::test_fixtures::host_requirement(),
-        invocation_context: runmat_execution::ProgramInvocationContext::Direct,
         inputs: Vec::new(),
         outputs: OutputContract {
             owned_work: None,
@@ -67,7 +67,7 @@ fn admit(driver: &LocalDriver, artifact_id: ArtifactId) -> runmat_execution_runn
         // failures that happen before any process launches.
         resources: ResourceRequest {
             cpu_millicores: 1000,
-            memory_bytes: 512 * 1024 * 1024,
+            memory_bytes: runmat_process_host::ipc::WORKER_PARENT_MONITOR_STACK_BYTES + 1024,
             scratch_bytes: 1024,
             max_wall_millis: 10000,
             max_artifact_bytes: 1024,
@@ -118,9 +118,9 @@ fn foreign_stored_artifact_rejects_before_process_launch() {
         )
         .unwrap();
         let recipe = ProgramBuildRecipe {
-            foreign_policy: None,
             accelerators: Vec::new(),
             interop: runmat_types::InteropManifest::empty(),
+            foreign_policy: None,
             schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
             program_revision: ProgramRevision::new(
                 Digest::sha256(b"graph"),
@@ -154,24 +154,32 @@ fn foreign_stored_artifact_rejects_before_process_launch() {
         )
         .unwrap();
         let artifact_id = ArtifactId::derive(&[original.id.0.bytes()]);
-        let stored = crate::protocol::StoredProgram::Direct(Box::new(crate::protocol::StoredDirectProgram {
-            recipe: recipe.clone(),
-            artifact: if foreign {
-                ProgramArtifact::materialize(
-                    &recipe,
-                    ExecutableForm::TestAttemptV1,
-                    b"foreign".to_vec(),
-                )
-                .unwrap()
-            } else {
-                original
+        let stored = crate::protocol::StoredProgram::Direct(Box::new(
+            crate::protocol::StoredDirectProgram {
+                recipe: recipe.clone(),
+                artifact: if foreign {
+                    ProgramArtifact::materialize(
+                        &recipe,
+                        ExecutableForm::TestAttemptV1,
+                        b"foreign".to_vec(),
+                    )
+                    .unwrap()
+                } else {
+                    original
+                },
             },
-        }));
+        ));
         driver
             .artifacts
             .put(artifact_id, &serde_json::to_vec(&stored).unwrap())
             .unwrap();
-        let request = admit(&driver, artifact_id);
+        let mut request = admit(&driver, artifact_id);
+        if !foreign {
+            request.task.callable.program = runmat_execution::ProgramCallable::semantic(
+                runmat_execution::ProgramFunctionId(7),
+                None,
+            );
+        }
         let observed = execute_attempt(&driver, &request, &TaskCompletion::new());
         let error = observed.result.unwrap_err().to_string();
         assert!(
@@ -194,6 +202,54 @@ fn foreign_stored_artifact_rejects_before_process_launch() {
             .validate_against(&request)
             .unwrap();
     }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn shared_provider_preserves_prelaunch_cancellation_in_an_existing_runtime() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut config = crate::NativeExecutionConfig::for_current_executable().unwrap();
+    config.store_root = directory.path().to_path_buf();
+    config.max_workers = 1;
+    config.executable = directory.path().join("must-never-launch");
+    let driver =
+        LocalDriver::new(config, ExecutionScopeId::derive(&[b"cancel-preflight"])).unwrap();
+    let request = admit(&driver, ArtifactId::derive(&[b"missing-program"]));
+    struct CancelledControl(std::sync::atomic::AtomicBool);
+    impl crate::process_provider::ProcessControl for CancelledControl {
+        fn cancellation(&self) -> &std::sync::atomic::AtomicBool {
+            &self.0
+        }
+        fn record_progress(&self, _: crate::protocol::ProgramProgress) {
+            panic!("prelaunch cancellation cannot publish progress")
+        }
+    }
+    let completion = CancelledControl(std::sync::atomic::AtomicBool::new(true));
+    let observed = crate::process_provider::execute_attempt(
+        &crate::process_provider::NativeProcessProvider {
+            config: &driver.config,
+            artifacts: &driver.artifacts,
+            objects: &driver.objects,
+        },
+        &request,
+        &completion,
+        std::time::Instant::now(),
+    )
+    .await;
+    assert!(observed
+        .result
+        .unwrap_err()
+        .contains("cancelled before process launch"));
+    assert_eq!(
+        observed.execution.termination,
+        AttemptExecutionTermination::NotStarted
+    );
+    assert_eq!(observed.execution.local_ipc_sent_bytes, Some(0));
+    assert_eq!(observed.execution.local_ipc_received_bytes, Some(0));
+    observed
+        .unsuccessful_resources
+        .unwrap()
+        .validate_against(&request)
+        .unwrap();
 }
 
 #[test]

@@ -2,6 +2,7 @@ use crate::{NativeAssembly, NativeCodegenError, NativeCodegenResult};
 use cranelift_codegen::settings::Configurable;
 use cranelift_module::{default_libcall_names, DataDescription, Linkage, Module};
 use cranelift_object::{ObjectBuilder, ObjectModule};
+use runmat_execution_artifact::target_test::{NativePairedProductHeader, NativePairedProductRole};
 
 use super::{
     AotBuiltinBinding, AotRuntimeBindingMode, NativeObjectData, NativeObjectDataDescriptor,
@@ -44,6 +45,7 @@ pub fn emit_relocatable_object_for_runtime(
         runtime_binding_mode,
         builtin_bindings,
         runmat_execution::host::NativeProductMode::HostUnselected,
+        None,
     )
 }
 
@@ -63,6 +65,85 @@ pub fn emit_selected_relocatable_object(
         runtime_binding_mode,
         builtin_bindings,
         selected.product().clone(),
+        None,
+    )
+}
+
+pub fn emit_selected_paired_relocatable_object(
+    selected: &super::SelectedNativeProduct<'_>,
+    assembly: &NativeAssembly,
+    header: &NativePairedProductHeader,
+    embedded_data: Vec<NativeObjectData>,
+    runtime_binding_mode: AotRuntimeBindingMode,
+    builtin_bindings: Vec<AotBuiltinBinding>,
+) -> NativeCodegenResult<RelocatableNativeObject> {
+    selected.validate_assembly(assembly)?;
+    let program = embedded_data
+        .iter()
+        .find(|item| item.symbol == super::AOT_PROGRAM_SYMBOL)
+        .ok_or_else(|| {
+            NativeCodegenError::new("native.object.paired", "paired product has no AOT program")
+        })
+        .and_then(|item| super::AotProgramManifest::from_canonical_bytes(&item.bytes))?;
+    super::validate_paired_product_header(header, assembly, &program)?;
+    let native_ir = embedded_data
+        .iter()
+        .find(|item| item.symbol == super::AOT_NATIVE_IR_SYMBOL)
+        .ok_or_else(|| {
+            NativeCodegenError::new("native.object.paired", "paired product has no Native IR")
+        })?;
+    if program.native_ir_digest != runmat_execution::Digest::sha256(&native_ir.bytes) {
+        return Err(NativeCodegenError::new(
+            "native.object.paired",
+            "paired program differs from the exact embedded Native IR bytes",
+        ));
+    }
+    if native_ir.bytes.len() > 256 * 1024 * 1024 {
+        return Err(NativeCodegenError::new(
+            "native.object.paired",
+            "paired Native IR exceeds its admission bound",
+        ));
+    }
+    let embedded_assembly: NativeAssembly =
+        serde_json::from_slice(&native_ir.bytes).map_err(|error| {
+            NativeCodegenError::new(
+                "native.object.paired",
+                format!("invalid embedded Native IR: {error}"),
+            )
+        })?;
+    embedded_assembly.verify()?;
+    if embedded_assembly != *assembly {
+        return Err(NativeCodegenError::new(
+            "native.object.paired",
+            "embedded Native IR differs from the verified paired assembly",
+        ));
+    }
+    if embedded_data
+        .iter()
+        .any(|item| item.symbol == super::AOT_PAIRED_PRODUCT_SYMBOL)
+    {
+        return Err(NativeCodegenError::new(
+            "native.object.paired",
+            "paired header data symbol is reserved for the typed producer",
+        ));
+    }
+    let mut embedded_data = embedded_data;
+    embedded_data.push(super::embedded_blob(
+        super::AOT_PAIRED_PRODUCT_SYMBOL,
+        header
+            .to_canonical_bytes()
+            .map_err(|error| NativeCodegenError::new("native.object.paired", error.to_string()))?,
+        1,
+    )?);
+    let binding = selected.product().selected().expect("selected constructor");
+    emit_object(
+        assembly,
+        binding.optimization,
+        embedded_data,
+        runtime_binding_mode,
+        builtin_bindings,
+        selected.product().clone(),
+        Some(header.role),
     )
 }
 
@@ -73,6 +154,7 @@ fn emit_object(
     runtime_binding_mode: AotRuntimeBindingMode,
     mut builtin_bindings: Vec<AotBuiltinBinding>,
     product_mode: runmat_execution::host::NativeProductMode,
+    paired_role: Option<NativePairedProductRole>,
 ) -> NativeCodegenResult<RelocatableNativeObject> {
     assembly.verify()?;
     assembly.target.validate()?;
@@ -135,6 +217,16 @@ fn emit_object(
     }
 
     embedded_data.sort_by(|left, right| left.symbol.cmp(&right.symbol));
+    if paired_role.is_none()
+        && embedded_data
+            .iter()
+            .any(|item| item.symbol == super::AOT_PAIRED_PRODUCT_SYMBOL)
+    {
+        return Err(NativeCodegenError::new(
+            "native.object.paired",
+            "paired header requires the typed selected product producer",
+        ));
+    }
     if embedded_data.len() > 16
         || embedded_data
             .iter()
@@ -252,6 +344,7 @@ fn emit_object(
             builtin_resolver,
             source_service,
             &linked_data,
+            paired_role,
         )?;
     }
 

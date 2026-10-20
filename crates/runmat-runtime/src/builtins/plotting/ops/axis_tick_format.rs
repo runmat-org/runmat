@@ -23,11 +23,11 @@ pub fn axis_tick_format_builtin(
     runtime: Option<&crate::context::RuntimeContext>,
     builtin: &'static str,
     axis: TickAxis,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let (target, args) = prepare_call(runtime, builtin, args)?;
-    match args.as_slice() {
-        [] => {
+    match args.len() {
+        0 => {
             let mut targets = prepared_targets(runtime, target).into_iter();
             let first = targets.next().expect("current or nonempty admitted axes");
             if targets.next().is_some() {
@@ -38,13 +38,14 @@ pub fn axis_tick_format_builtin(
             }
             query_format(builtin, axis, &first.resolve(builtin)?)
         }
-        [value] => {
+        1 => {
+            let value = args.first().expect("one format argument");
             let format = format_from_value(value, builtin)?;
             super::op_common::axes_output::validate_setter_output(builtin)?;
             for target in prepared_targets(runtime, target) {
                 set_format(builtin, axis, &target.resolve(builtin)?, format.clone())?;
             }
-            Ok(Value::String(format))
+            Ok(Value::string(format))
         }
         _ => Err(plotting_error(
             builtin,
@@ -56,8 +57,8 @@ pub fn axis_tick_format_builtin(
 fn prepare_call(
     runtime: Option<&crate::context::RuntimeContext>,
     builtin: &'static str,
-    args: Vec<Value>,
-) -> BuiltinResult<(TickFormatTarget, Vec<Value>)> {
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<(TickFormatTarget, crate::call::BuiltinArguments)> {
     if let Some(first) = args
         .first()
         .filter(|value| matches!(value, Value::Object(_) | Value::HandleObject(_)))
@@ -67,7 +68,7 @@ fn prepare_call(
         {
             return Ok((
                 TickFormatTarget::Native(prepared.into_axes(builtin)?),
-                args.into_iter().skip(1).collect(),
+                args.into_range(1..).expect("nonempty axes arguments"),
             ));
         }
     }
@@ -91,25 +92,24 @@ fn prepared_targets(
 
 fn split_optional_axes_target(
     builtin: &'static str,
-    args: Vec<Value>,
-) -> BuiltinResult<(TickFormatTarget, Vec<Value>)> {
-    let mut iter = args.into_iter();
-    let Some(first) = iter.next() else {
-        return Ok((TickFormatTarget::Current, Vec::new()));
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<(TickFormatTarget, crate::call::BuiltinArguments)> {
+    let Some(first) = args.first() else {
+        return Ok((TickFormatTarget::Current, args));
     };
-    if let Ok(PlotHandle::Axes(handle, axes_index)) = resolve_plot_handle(&first, builtin) {
+    if let Ok(PlotHandle::Axes(handle, axes_index)) = resolve_plot_handle(first, builtin) {
         return Ok((
             TickFormatTarget::Axes(vec![(handle, axes_index)]),
-            iter.collect(),
+            args.into_range(1..).expect("nonempty axes arguments"),
         ));
     }
-    if let Some(targets) = axes_array_targets(&first) {
-        return Ok((TickFormatTarget::Axes(targets), iter.collect()));
+    if let Some(targets) = axes_array_targets(first) {
+        return Ok((
+            TickFormatTarget::Axes(targets),
+            args.into_range(1..).expect("nonempty axes arguments"),
+        ));
     }
-    let mut rest = Vec::with_capacity(iter.size_hint().0 + 1);
-    rest.push(first);
-    rest.extend(iter);
-    Ok((TickFormatTarget::Current, rest))
+    Ok((TickFormatTarget::Current, args))
 }
 
 fn axes_array_targets(value: &Value) -> Option<Vec<(super::state::FigureHandle, usize)>> {
@@ -142,7 +142,7 @@ fn query_format(
     let (x, y) =
         axis_tick_formats_snapshot_for_axes_for_property(target.authority(), handle, index)
             .map_err(|err| plotting_error_with_source(builtin, format!("{builtin}: {err}"), err))?;
-    Ok(Value::String(
+    Ok(Value::string(
         match axis {
             TickAxis::X => x,
             TickAxis::Y => y,

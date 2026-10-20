@@ -25,7 +25,7 @@ fn selected_sink_binding_projects_exact_requested_status_count() {
             name,
             &[
                 Value::Num(figure),
-                Value::String(zero_path.to_string_lossy().into_owned()),
+                Value::String(zero_path.to_string_lossy().into_owned().into()),
             ],
             0,
         ))
@@ -37,7 +37,7 @@ fn selected_sink_binding_projects_exact_requested_status_count() {
             name,
             &[
                 Value::Num(figure),
-                Value::String(one_path.to_string_lossy().into_owned()),
+                Value::String(one_path.to_string_lossy().into_owned().into()),
             ],
             1,
         ))
@@ -49,7 +49,7 @@ fn selected_sink_binding_projects_exact_requested_status_count() {
             name,
             &[
                 Value::Num(figure),
-                Value::String(rejected_path.to_string_lossy().into_owned()),
+                Value::String(rejected_path.to_string_lossy().into_owned().into()),
             ],
             2,
         ));
@@ -88,7 +88,7 @@ fn selected_sink_binding_rejects_status_in_matlab_mode_before_file_effects() {
             name,
             &[
                 Value::Num(figure),
-                Value::String(path.to_string_lossy().into_owned()),
+                Value::String(path.to_string_lossy().into_owned().into()),
             ],
             1,
         ))

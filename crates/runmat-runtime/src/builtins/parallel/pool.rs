@@ -15,8 +15,8 @@ fn active_context(operation: &str) -> crate::BuiltinResult<crate::context::Runti
     binding_variant = "default",
     builtin_path = "crate::builtins::parallel::pool"
 )]
-async fn parpool_builtin(arguments: Vec<Value>) -> crate::BuiltinResult<Value> {
-    crate::parallel::pool::ensure(&active_context("parpool")?, &arguments)
+async fn parpool_builtin(arguments: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
+    crate::parallel::pool::ensure(&active_context("parpool")?, arguments.view())
 }
 
 #[runtime_builtin(
@@ -24,6 +24,6 @@ async fn parpool_builtin(arguments: Vec<Value>) -> crate::BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::parallel::pool"
 )]
-async fn gcp_builtin(arguments: Vec<Value>) -> crate::BuiltinResult<Value> {
-    crate::parallel::pool::current(&active_context("gcp")?, &arguments)
+async fn gcp_builtin(arguments: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
+    crate::parallel::pool::current(&active_context("gcp")?, arguments.view())
 }

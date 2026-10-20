@@ -1708,7 +1708,9 @@ impl ColorMap {
         // MATLAB `pink`: sqrt((2 * gray + hot) / 3).
         let hot = self.hot_colormap(t);
         let t = t.clamp(0.0, 1.0);
-        ((Vec3::splat(2.0 * t) + hot) / 3.0).max(Vec3::ZERO).powf(0.5)
+        ((Vec3::splat(2.0 * t) + hot) / 3.0)
+            .max(Vec3::ZERO)
+            .powf(0.5)
     }
 
     /// Lines colormap (cycling through basic colors)

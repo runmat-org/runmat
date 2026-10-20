@@ -112,4 +112,4 @@ pub(crate) use self::operators::{
 };
 use self::prelude::*;
 use self::text_parsing::*;
-pub(crate) use self::timer_firing::timer_firing_serials;
+pub(crate) use self::timer_firing::timer_firing_arguments;

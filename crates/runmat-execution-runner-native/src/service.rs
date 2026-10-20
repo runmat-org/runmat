@@ -175,9 +175,12 @@ impl NativeExecutionService {
     fn future_for_value(
         &self,
         value: Value,
-    ) -> Result<Result<FutureHandle, Value>, ExecutionServiceError> {
+    ) -> Result<
+        Result<runmat_runtime::execution::FutureExecutionHandle, Value>,
+        ExecutionServiceError,
+    > {
         match value {
-            Value::Future(handle) => Ok(Ok(handle)),
+            Value::Future(handle) => Ok(Ok(handle.into())),
             Value::Task(handle) => {
                 self.validate_scope(handle.scope_id)?;
                 let state = self.state.lock().expect("native service poisoned");
@@ -188,11 +191,12 @@ impl NativeExecutionService {
                 if task.generation != handle.generation {
                     return Err(ExecutionServiceError::UnknownHandle);
                 }
-                Ok(Ok(FutureHandle {
-                    id: task.future_id,
-                    scope_id: self.scope_id,
-                    outputs: handle.outputs,
-                }))
+                Ok(Ok(
+                    runmat_runtime::execution::FutureExecutionHandle::from_task(
+                        handle,
+                        task.future_id,
+                    ),
+                ))
             }
             value => Ok(Err(value)),
         }
@@ -639,7 +643,7 @@ impl RuntimeExecutionServices for NativeExecutionService {
 
     fn claim_next_task_result(
         &self,
-        tasks: &[TaskHandle],
+        tasks: &[runmat_value::SharedTaskHandle],
     ) -> Result<TaskResultClaim, ExecutionServiceError> {
         self.sweep_completed_graph_cancellations();
         let mut state = self.state.lock().expect("native service poisoned");
@@ -808,7 +812,10 @@ impl RuntimeExecutionServices for NativeExecutionService {
         )
     }
 
-    fn await_job(&self, job: &JobHandle) -> Result<Value, ExecutionServiceError> {
+    fn await_job(
+        &self,
+        job: &runmat_value::SharedJobHandle,
+    ) -> Result<Value, ExecutionServiceError> {
         if self
             .state
             .lock()
@@ -977,7 +984,7 @@ impl RuntimeExecutionServices for NativeExecutionService {
                 state.graph_jobs.get(&handle.id).map(Rc::clone)
             };
             if let Some(record) = graph {
-                if record.handle != *handle {
+                if &record.handle != handle.as_ref() {
                     return Err(ExecutionServiceError::UnknownHandle);
                 }
                 let receipt = &record.receipt;
@@ -1144,7 +1151,7 @@ impl RuntimeExecutionServices for NativeExecutionService {
 
     fn complete_future(
         &self,
-        future: &FutureHandle,
+        future: runmat_runtime::execution::FutureCompletionRef<'_>,
         result: Result<runmat_runtime::execution::RootedValueSequence, ExecutionServiceError>,
     ) -> Result<(), ExecutionServiceError> {
         self.validate_scope(future.scope_id)?;

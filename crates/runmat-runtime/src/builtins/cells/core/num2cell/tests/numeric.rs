@@ -15,7 +15,7 @@ fn grouped_rank_one_and_nd_numeric_arrays_keep_axes_and_column_major_order() {
         panic!("grouped rank-one cell expected")
     };
     assert_eq!(grouped.shape, vec![1]);
-    let Value::Tensor(block) = &grouped.data[0] else {
+    let Value::Tensor(block) = &grouped.data()[0] else {
         panic!("grouped exact integer block expected")
     };
     assert_eq!(block.shape(), &[2]);
@@ -31,7 +31,7 @@ fn grouped_rank_one_and_nd_numeric_arrays_keep_axes_and_column_major_order() {
     };
     assert_eq!(grouped.shape, vec![1, 2, 1]);
     for (block, expected) in grouped
-        .data
+        .data()
         .iter()
         .zip([vec![1.0, 5.0, 2.0, 6.0], vec![3.0, 7.0, 4.0, 8.0]])
     {
@@ -117,7 +117,7 @@ fn character_blocks_follow_requested_dimension_order() {
         panic!("expected character block");
     };
     assert_eq!((block.rows, block.cols), (3, 2));
-    assert_eq!(block.data, vec!['a', 'b', 'c', 'd', 'e', 'f']);
+    assert_eq!(block.data(), vec!['a', 'b', 'c', 'd', 'e', 'f']);
 }
 
 #[test]
@@ -127,13 +127,13 @@ fn empty_arrays_preserve_outer_and_grouped_block_shapes() {
         panic!("expected cell");
     };
     assert_eq!(elements.shape, vec![0, 3]);
-    assert!(elements.data.is_empty());
+    assert!(elements.data().is_empty());
 
     let Value::Cell(columns) = run(Value::Tensor(empty), vec![Value::Num(1.0)]) else {
         panic!("expected grouped cells");
     };
     assert_eq!(columns.shape, vec![1, 3]);
-    for column in columns.data {
+    for column in columns.data() {
         let Value::Tensor(column) = column else {
             panic!("expected empty numeric block");
         };

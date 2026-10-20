@@ -8,7 +8,7 @@ use runmat_value::Value;
 pub(super) async fn uniform(
     result: RootedValue,
     shape: &[usize],
-    inputs: &[Value],
+    inputs: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<RootedValue> {
     if let Value::GpuTensor(handle) = result.value() {
         if handle.shape() == shape {
@@ -56,7 +56,7 @@ mod tests {
         let result = futures::executor::block_on(uniform(
             RootedValue::new(Value::Num(3.0)).unwrap(),
             &[1, 1, 1],
-            &[],
+            crate::call::FunctionArgumentView::from_slice(&[]),
         ))
         .unwrap();
         let Value::Tensor(value) = result.value() else {
@@ -73,9 +73,12 @@ mod tests {
     fn normalization_preserves_wide_integer_and_complex_single() {
         let storage = IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]);
         let input = Value::Tensor(Tensor::new_integer(storage.clone(), vec![1, 2]).unwrap());
-        let result =
-            futures::executor::block_on(uniform(RootedValue::new(input).unwrap(), &[2, 1], &[]))
-                .unwrap();
+        let result = futures::executor::block_on(uniform(
+            RootedValue::new(input).unwrap(),
+            &[2, 1],
+            crate::call::FunctionArgumentView::from_slice(&[]),
+        ))
+        .unwrap();
         let Value::Tensor(value) = result.value() else {
             panic!("integer array")
         };
@@ -83,9 +86,12 @@ mod tests {
         assert_eq!(value.shape(), &[2, 1]);
         let input =
             Value::ComplexTensor(ComplexTensor::from_f32(vec![(1.0, 2.0)], vec![1, 1]).unwrap());
-        let result =
-            futures::executor::block_on(uniform(RootedValue::new(input).unwrap(), &[1, 1, 1], &[]))
-                .unwrap();
+        let result = futures::executor::block_on(uniform(
+            RootedValue::new(input).unwrap(),
+            &[1, 1, 1],
+            crate::call::FunctionArgumentView::from_slice(&[]),
+        ))
+        .unwrap();
         let Value::ComplexTensor(value) = result.value() else {
             panic!("complex array")
         };

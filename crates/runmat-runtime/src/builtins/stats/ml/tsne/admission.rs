@@ -54,7 +54,9 @@ pub(super) enum AdmittedStatsetField {
     EmptyOutputFcnResident(Value),
 }
 
-pub(super) fn option_headers(values: Vec<Value>) -> BuiltinResult<Vec<OptionHeader>> {
+pub(super) fn option_headers(
+    values: crate::call::BuiltinArguments,
+) -> BuiltinResult<Vec<OptionHeader>> {
     if !values.len().is_multiple_of(2) {
         return Err(invalid("tsne: name-value options must be paired"));
     }
@@ -281,7 +283,7 @@ fn statset_fields(value: Value) -> BuiltinResult<Vec<AdmittedStatsetField>> {
         fields.fields.len(),
         "tsne: statset fields exceed available memory",
     )?;
-    for (name, value) in fields.fields {
+    for (name, value) in fields.into_fields_unbounded() {
         if super::options::is_empty_option_value(&value) {
             continue;
         }

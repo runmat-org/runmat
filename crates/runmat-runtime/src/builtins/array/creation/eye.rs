@@ -66,13 +66,13 @@ fn eye_type(args: &[Type], ctx: &ResolveContext) -> Type {
     binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::eye"
 )]
-async fn eye_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    ensure_eye_extensions(&rest)?;
+async fn eye_builtin(rest: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
+    ensure_eye_extensions(rest.view())?;
     let parsed = ParsedEye::parse(rest).await?;
     build_output(parsed).await
 }
 
-fn ensure_eye_extensions(args: &[Value]) -> crate::BuiltinResult<()> {
+fn ensure_eye_extensions(args: crate::call::FunctionArgumentView<'_>) -> crate::BuiltinResult<()> {
     let mut dimension_count = 0usize;
     let mut idx = 0usize;
     while idx < args.len() {
@@ -155,7 +155,7 @@ enum EyeTemplate {
 }
 
 impl ParsedEye {
-    async fn parse(args: Vec<Value>) -> Result<Self, String> {
+    async fn parse(args: crate::call::BuiltinArguments) -> Result<Self, String> {
         let mut dims: Vec<usize> = Vec::new();
         let mut saw_dims_arg = false;
         let mut shape_source: Option<Vec<usize>> = None;
@@ -613,9 +613,9 @@ fn identity_tensor(shape: &[usize]) -> Result<Tensor, String> {
 fn keyword_of(value: &Value) -> Option<String> {
     match value {
         Value::String(s) => Some(s.to_ascii_lowercase()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].to_ascii_lowercase()),
+        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].to_ascii_lowercase()),
         Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data.iter().collect();
+            let text: String = ca.data().iter().collect();
             Some(text.to_ascii_lowercase())
         }
         _ => None,
@@ -706,8 +706,8 @@ fn shape_from_value(value: &Value) -> Result<Vec<usize>, String> {
         Value::ComplexTensor(t) => Ok(t.shape().to_vec()),
         Value::LogicalArray(l) => Ok(l.shape.to_vec()),
         Value::GpuTensor(h) => Ok(h.shape().to_vec()),
-        Value::CharArray(ca) => Ok(ca.shape.clone()),
-        Value::Cell(cell) => Ok(cell.shape.clone()),
+        Value::CharArray(ca) => Ok(ca.shape().to_vec()),
+        Value::Cell(cell) => Ok(cell.shape().to_vec()),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Ok(vec![1, 1]),
         other => Err(format!("eye: unsupported prototype {other:?}")),
     }
@@ -794,7 +794,10 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eye_default_scalar() {
-        let result = block_on(eye_builtin(Vec::new())).expect("eye");
+        let result = block_on(eye_builtin(
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect("eye");
         assert_eq!(result, Value::Num(1.0));
     }
 
@@ -817,7 +820,10 @@ pub(crate) mod tests {
     #[test]
     fn eye_square_from_scalar_dimension() {
         let args = vec![Value::Num(3.0)];
-        let result = block_on(eye_builtin(args)).expect("eye");
+        let result = block_on(eye_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect("eye");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape(), &[3, 3]);
@@ -840,7 +846,10 @@ pub(crate) mod tests {
     #[test]
     fn eye_rectangular_from_two_dims() {
         let args = vec![Value::Num(2.0), Value::Num(4.0)];
-        let result = block_on(eye_builtin(args)).expect("eye");
+        let result = block_on(eye_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect("eye");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape(), &[2, 4]);
@@ -864,7 +873,10 @@ pub(crate) mod tests {
     #[test]
     fn eye_accepts_size_vector_argument() {
         let size_vec = Tensor::new(vec![2.0, 4.0], vec![1, 2]).unwrap();
-        let result = block_on(eye_builtin(vec![Value::Tensor(size_vec)])).expect("eye");
+        let result = block_on(eye_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(size_vec)]),
+        ))
+        .expect("eye");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape(), &[2, 4]);
@@ -881,7 +893,10 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eye_zero_dimension_matrix() {
-        let result = block_on(eye_builtin(vec![Value::Num(0.0)])).expect("eye");
+        let result = block_on(eye_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(0.0)]),
+        ))
+        .expect("eye");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape(), &[0, 0]);
@@ -897,7 +912,10 @@ pub(crate) mod tests {
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let args = vec![Value::Tensor(tensor.clone())];
-        let result = block_on(eye_builtin(args)).expect("eye");
+        let result = block_on(eye_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect("eye");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape(), tensor.shape());
@@ -911,7 +929,10 @@ pub(crate) mod tests {
     #[test]
     fn eye_logical_output() {
         let args = vec![Value::Num(4.0), Value::from("logical")];
-        let result = block_on(eye_builtin(args)).expect("eye");
+        let result = block_on(eye_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect("eye");
         match result {
             Value::LogicalArray(logical) => {
                 assert_eq!(logical.shape, vec![4, 4]);
@@ -934,7 +955,10 @@ pub(crate) mod tests {
     #[test]
     fn eye_like_bool_produces_logical() {
         let args = vec![Value::Num(3.0), Value::from("like"), Value::Bool(true)];
-        let result = block_on(eye_builtin(args)).expect("eye");
+        let result = block_on(eye_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect("eye");
         match result {
             Value::LogicalArray(logical) => {
                 assert_eq!(logical.shape, vec![3, 3]);
@@ -963,12 +987,14 @@ pub(crate) mod tests {
             .unwrap();
             let host = ComplexTensor::new_integer(storage, vec![1, 1]).unwrap();
             let input = gpu_helpers::upload_complex_tensor(provider, &host).unwrap();
-            let value = block_on(eye_builtin(vec![
-                Value::Num(2.0),
-                Value::Num(3.0),
-                Value::from("like"),
-                Value::GpuTensor(input.clone()),
-            ]))
+            let value = block_on(eye_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(2.0),
+                    Value::Num(3.0),
+                    Value::from("like"),
+                    Value::GpuTensor(input.clone()),
+                ]),
+            ))
             .unwrap();
             let Value::GpuTensor(output) = &value else {
                 panic!("resident paired identity")
@@ -1008,12 +1034,14 @@ pub(crate) mod tests {
                     shape: &[1, 1],
                 })
                 .unwrap();
-            let value = block_on(eye_builtin(vec![
-                Value::Num(2.0),
-                Value::Num(3.0),
-                Value::from("like"),
-                Value::GpuTensor(input.clone()),
-            ]))
+            let value = block_on(eye_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(2.0),
+                    Value::Num(3.0),
+                    Value::from("like"),
+                    Value::GpuTensor(input.clone()),
+                ]),
+            ))
             .unwrap();
             let Value::GpuTensor(output) = &value else {
                 panic!("resident logical identity")
@@ -1042,12 +1070,14 @@ pub(crate) mod tests {
 
         for storage in storages {
             let prototype = Tensor::new_integer(storage.clone(), vec![1, 1]).expect("prototype");
-            let result = block_on(eye_builtin(vec![
-                Value::Num(2.0),
-                Value::Num(3.0),
-                Value::from("like"),
-                Value::Tensor(prototype),
-            ]))
+            let result = block_on(eye_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(2.0),
+                    Value::Num(3.0),
+                    Value::from("like"),
+                    Value::Tensor(prototype),
+                ]),
+            ))
             .expect("eye like");
             let Value::Tensor(output) = result else {
                 panic!("expected integer tensor");
@@ -1060,11 +1090,13 @@ pub(crate) mod tests {
             assert_eq!(output.integer_storage(), Some(&expected));
         }
 
-        let result = block_on(eye_builtin(vec![
-            Value::Num(2.0),
-            Value::from("like"),
-            Value::Int(IntValue::I64(i64::MAX)),
-        ]))
+        let result = block_on(eye_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(2.0),
+                Value::from("like"),
+                Value::Int(IntValue::I64(i64::MAX)),
+            ]),
+        ))
         .expect("integer scalar prototype");
         let Value::Tensor(output) = result else {
             panic!("expected int64 tensor");
@@ -1089,11 +1121,13 @@ pub(crate) mod tests {
         ];
 
         for (class_name, expected) in cases {
-            let result = block_on(eye_builtin(vec![
-                Value::Num(2.0),
-                Value::Num(3.0),
-                Value::from(class_name),
-            ]))
+            let result = block_on(eye_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(2.0),
+                    Value::Num(3.0),
+                    Value::from(class_name),
+                ]),
+            ))
             .expect("eye integer class");
             let Value::Tensor(output) = result else {
                 panic!("expected integer tensor for {class_name}");
@@ -1109,7 +1143,10 @@ pub(crate) mod tests {
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let proto = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
         let args = vec![Value::Tensor(proto), Value::from("logical")];
-        let result = block_on(eye_builtin(args)).expect("eye");
+        let result = block_on(eye_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect("eye");
         match result {
             Value::LogicalArray(logical) => {
                 assert_eq!(logical.shape, vec![2, 3]);
@@ -1128,7 +1165,10 @@ pub(crate) mod tests {
             Value::from("like"),
             Value::Complex(1.0, 2.0),
         ];
-        let result = block_on(eye_builtin(args)).expect("eye");
+        let result = block_on(eye_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect("eye");
         match result {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape(), &[2, 2]);
@@ -1152,11 +1192,13 @@ pub(crate) mod tests {
             vec![1, 1],
         )
         .expect("typed complex tensor");
-        let result = block_on(eye_builtin(vec![
-            Value::Num(2.0),
-            Value::from("like"),
-            Value::ComplexTensor(prototype),
-        ]))
+        let result = block_on(eye_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(2.0),
+                Value::from("like"),
+                Value::ComplexTensor(prototype),
+            ]),
+        ))
         .expect("eye like");
         let Value::ComplexTensor(output) = result else {
             panic!("expected typed complex output");
@@ -1178,7 +1220,10 @@ pub(crate) mod tests {
     fn eye_extra_dimensions_replicate_identity() {
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let args = vec![Value::Num(2.0), Value::Num(3.0), Value::Num(2.0)];
-        let result = block_on(eye_builtin(args)).expect("eye");
+        let result = block_on(eye_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect("eye");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape(), &[2, 3, 2]);
@@ -1200,7 +1245,10 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eye_like_requires_prototype() {
-        assert!(block_on(eye_builtin(vec![Value::from("like")])).is_err());
+        assert!(block_on(eye_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from("like")])
+        ))
+        .is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1219,7 +1267,10 @@ pub(crate) mod tests {
                 Value::from("like"),
                 Value::GpuTensor(handle),
             ];
-            let result = block_on(eye_builtin(args)).expect("eye");
+            let result = block_on(eye_builtin(
+                crate::builtins::common::test_support::builtin_arguments(args),
+            ))
+            .expect("eye");
             match result {
                 Value::GpuTensor(gpu) => {
                     assert_eq!(gpu.shape(), &[2, 3]);
@@ -1246,7 +1297,12 @@ pub(crate) mod tests {
                 shape: tensor.shape(),
             };
             let prototype = provider.upload(&view).expect("upload proto");
-            let result = block_on(eye_builtin(vec![Value::GpuTensor(prototype)])).expect("eye");
+            let result = block_on(eye_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(
+                    prototype,
+                )]),
+            ))
+            .expect("eye");
             let gathered = test_support::gather(result).expect("gather gpu identity");
             assert_eq!(gathered.shape(), &[2, 2]);
             assert_eq!(gathered.materialize_f64(), vec![1.0, 0.0, 0.0, 1.0]);
@@ -1258,7 +1314,10 @@ pub(crate) mod tests {
     fn eye_like_string_first_argument() {
         let proto = Tensor::new(vec![0.0, 0.0, 0.0, 0.0], vec![2, 2]).unwrap();
         let args = vec![Value::from("like"), Value::Tensor(proto)];
-        let result = block_on(eye_builtin(args)).expect("eye");
+        let result = block_on(eye_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect("eye");
         assert!(matches!(result, Value::Num(value) if value == 1.0));
     }
 
@@ -1271,14 +1330,20 @@ pub(crate) mod tests {
             Value::from("like"),
             Value::Num(1.0),
         ];
-        assert!(block_on(eye_builtin(args)).is_err());
+        assert!(block_on(eye_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args)
+        ))
+        .is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn eye_negative_dimension_clamps_to_zero() {
         let args = vec![Value::Num(-1.0)];
-        let Value::Tensor(result) = block_on(eye_builtin(args)).expect("eye") else {
+        let Value::Tensor(result) = block_on(eye_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect("eye") else {
             panic!("expected empty tensor");
         };
         assert_eq!(result.shape(), &[0, 0]);
@@ -1289,16 +1354,21 @@ pub(crate) mod tests {
     fn eye_strict_mode_gates_implicit_and_nd_extensions() {
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let matrix = Tensor::new(vec![0.0; 4], vec![2, 2]).expect("matrix");
-        let implicit = block_on(eye_builtin(vec![Value::Tensor(matrix)])).unwrap_err();
+        let implicit = block_on(eye_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(matrix)]),
+        ))
+        .unwrap_err();
         assert_eq!(
             implicit.identifier(),
             Some("RunMat:compatibility:EyeImplicitPrototypeExtension")
         );
-        let nd = block_on(eye_builtin(vec![
-            Value::Num(2.0),
-            Value::Num(2.0),
-            Value::Num(2.0),
-        ]))
+        let nd = block_on(eye_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(2.0),
+                Value::Num(2.0),
+                Value::Num(2.0),
+            ]),
+        ))
         .unwrap_err();
         assert_eq!(
             nd.identifier(),
@@ -1308,19 +1378,26 @@ pub(crate) mod tests {
 
     #[test]
     fn eye_single_and_sparse_like_preserve_representation() {
-        let single = block_on(eye_builtin(vec![Value::Num(2.0), Value::from("single")]))
-            .expect("single eye");
+        let single = block_on(eye_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(2.0),
+                Value::from("single"),
+            ]),
+        ))
+        .expect("single eye");
         assert!(
             matches!(single, Value::Tensor(ref tensor) if tensor.numeric_dtype() == NumericDType::F32)
         );
 
         let prototype = SparseTensor::zeros_f32(3, 3);
-        let sparse = block_on(eye_builtin(vec![
-            Value::Num(2.0),
-            Value::Num(3.0),
-            Value::from("like"),
-            Value::SparseTensor(prototype),
-        ]))
+        let sparse = block_on(eye_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(2.0),
+                Value::Num(3.0),
+                Value::from("like"),
+                Value::SparseTensor(prototype),
+            ]),
+        ))
         .expect("sparse eye");
         assert!(
             matches!(sparse, Value::SparseTensor(ref value) if value.shape() == vec![2, 3] && value.numeric_dtype() == Some(NumericDType::F32) && value.nnz() == 2)
@@ -1331,7 +1408,10 @@ pub(crate) mod tests {
     #[test]
     fn eye_rejects_non_integer_dimension() {
         let args = vec![Value::Num(2.5)];
-        assert!(block_on(eye_builtin(args)).is_err());
+        assert!(block_on(eye_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args)
+        ))
+        .is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1342,7 +1422,10 @@ pub(crate) mod tests {
             wgpu_provider::register_wgpu_provider(wgpu_provider::WgpuProviderOptions::default());
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
 
-        let cpu_value = block_on(eye_builtin(vec![Value::Num(3.0)])).expect("cpu eye");
+        let cpu_value = block_on(eye_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(3.0)]),
+        ))
+        .expect("cpu eye");
         let host_proto = Tensor::zeros(vec![3, 3]);
         let view = HostTensorView {
             data: &host_proto.materialize_f64(),
@@ -1350,11 +1433,13 @@ pub(crate) mod tests {
         };
         let gpu_proto = provider.upload(&view).expect("upload proto");
 
-        let gpu_value = block_on(eye_builtin(vec![
-            Value::Num(3.0),
-            Value::from("like"),
-            Value::GpuTensor(gpu_proto),
-        ]))
+        let gpu_value = block_on(eye_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(3.0),
+                Value::from("like"),
+                Value::GpuTensor(gpu_proto),
+            ]),
+        ))
         .expect("gpu eye");
 
         let gathered = test_support::gather(gpu_value).expect("gather gpu eye");

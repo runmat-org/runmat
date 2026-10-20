@@ -66,8 +66,8 @@ pub(super) fn annotate_network_object(network: &mut ObjectInstance) -> BuiltinRe
 
     // Construct and validate the new State table before either owner commits.
     let state = model::state::stage_annotated(network, state, "dlfeval")?;
-    model::parameters::install_annotated(network, parameters);
-    model::state::install_annotated(network, state);
+    model::parameters::install_annotated(network, parameters)?;
+    model::state::install_annotated(network, state)?;
     Ok(())
 }
 
@@ -104,19 +104,22 @@ fn admit_derivative_parent(value: &Value, label: &str) -> BuiltinResult<NodeValu
 
 fn annotate_payload(value: Value, payload: NodeValue) -> BuiltinResult<Value> {
     match value {
-        Value::Object(mut object) if object.class_name == DLARRAY_CLASS => {
+        Value::Object(mut object) if object.class_name().is(DLARRAY_CLASS) => {
             annotate_dlarray_object_with_value(&mut object, payload)?;
             Ok(Value::Object(object))
         }
         value => {
-            let mut wrapper = ObjectInstance::new(DLARRAY_CLASS.to_string());
-            wrapper.properties.insert("Data".into(), value);
-            wrapper
-                .properties
-                .insert("Format".into(), Value::String(String::new()));
-            wrapper
-                .properties
-                .insert("Labels".into(), Value::String(String::new()));
+            let Value::Object(mut wrapper) = crate::builtins::deep_learning::object_with_identity(
+                DLARRAY_CLASS,
+                [
+                    ("Data", value),
+                    ("Format", Value::String("".into())),
+                    ("Labels", Value::String("".into())),
+                ],
+            )?
+            else {
+                unreachable!("dlarray constructor")
+            };
             annotate_dlarray_object_with_value(&mut wrapper, payload)?;
             Ok(Value::Object(wrapper))
         }

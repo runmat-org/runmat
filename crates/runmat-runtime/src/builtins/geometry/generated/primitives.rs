@@ -12,7 +12,8 @@ use crate::BuiltinResult;
     binding_variant = "default",
     builtin_path = "crate::builtins::geometry::generated::primitives"
 )]
-pub async fn geometry_box_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn geometry_box_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     let builtin = "geometry.box";
     let args = exactly(builtin, args, 3)?;
     primitive(
@@ -30,7 +31,10 @@ pub async fn geometry_box_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::geometry::generated::primitives"
 )]
-pub async fn geometry_cylinder_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn geometry_cylinder_builtin(
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     let builtin = "geometry.cylinder";
     let args = exactly(builtin, args, 4)?;
     primitive(
@@ -49,7 +53,8 @@ pub async fn geometry_cylinder_builtin(args: Vec<Value>) -> BuiltinResult<Value>
     binding_variant = "default",
     builtin_path = "crate::builtins::geometry::generated::primitives"
 )]
-pub async fn geometry_sphere_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn geometry_sphere_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     let builtin = "geometry.sphere";
     let args = exactly(builtin, args, 2)?;
     primitive(
@@ -66,7 +71,10 @@ pub async fn geometry_sphere_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::geometry::generated::primitives"
 )]
-pub async fn geometry_transform_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn geometry_transform_builtin(
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     let builtin = "geometry.transform";
     let args = exactly(builtin, args, 2)?;
     let graph = super::codec::feature_from_value(&args[0], builtin)?;
@@ -82,7 +90,10 @@ pub async fn geometry_transform_builtin(args: Vec<Value>) -> BuiltinResult<Value
     binding_variant = "default",
     builtin_path = "crate::builtins::geometry::generated::primitives"
 )]
-pub async fn geometry_instance_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn geometry_instance_builtin(
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     let builtin = "geometry.instance";
     let args = at_least(
         builtin,

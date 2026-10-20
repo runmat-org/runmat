@@ -51,14 +51,34 @@ fn change(
         .unwrap();
     descriptor.digest = runmat_execution::Digest::sha256(&payload.bytes);
     descriptor.encoded_length = payload.bytes.len() as u64;
-    envelope.validate().unwrap(); // Mutations remain hash-valid; hashes alone cannot establish consistency.
+    // Payload hashes are refreshed, but structural admission may now reject
+    // malformed source authority before the deeper product consistency check.
+    // Every caller still requires import itself to reject the altered product.
 }
 
 #[test]
 fn restores_original_product_and_executes_captures_helpers_and_output_ordinals() {
     let original = original();
-    assert!(original.bytecode().source_id.unwrap().0 > 0);
+    let source = original
+        .bytecode()
+        .source_id
+        .unwrap()
+        .program()
+        .expect("compiler source coordinate, not session authority");
+    let primary = original
+        .source_map()
+        .entries()
+        .iter()
+        .find(|entry| entry.source_id == source)
+        .expect("original source entry");
+    assert_eq!(primary.owner_identity, "portable-owner");
+    assert_eq!(primary.relative_path, "outer.m");
     let envelope = original.portable_envelope().unwrap();
+    assert_ne!(
+        envelope.manifest.identity.entrypoint_function.unwrap().0 as usize,
+        original.native_function_id("outer").unwrap().0,
+        "the fixture must distinguish portable ordinals from compiler coordinates"
+    );
     let cold: ExecutableUnitEnvelope =
         serde_json::from_slice(&serde_json::to_vec(&envelope).unwrap()).unwrap();
     let imported = ExecutableUnit::from_portable_envelope(&cold).unwrap();
@@ -85,16 +105,13 @@ fn restores_original_product_and_executes_captures_helpers_and_output_ordinals()
     let value =
         block_on(session.invoke_executable(&imported, invocation, &InvocationControl::default()))
             .unwrap();
-    assert_eq!(
-        value,
-        Value::OutputList(vec![Value::Num(16.0), Value::Num(20.0)])
-    );
+    assert_eq!(value.as_slice(), &[Value::Num(16.0), Value::Num(20.0)]);
 }
 
 #[test]
 fn rejects_missing_foreign_and_duplicated_source_authority_after_hash_refresh() {
     let envelope = original().portable_envelope().unwrap();
-    for mutation in 0..5 {
+    for mutation in 0..6 {
         let mut altered = envelope.clone();
         match mutation {
             0 => change(&mut altered, Kind::Bytecode, |value| {
@@ -108,12 +125,19 @@ fn rejects_missing_foreign_and_duplicated_source_authority_after_hash_refresh() 
                 value["entries"].as_array_mut().unwrap().push(repeated);
             }),
             3 => altered.manifest.identity.root_package = "foreign-owner".into(),
-            _ => change(&mut altered, Kind::SourceMap, |value| {
+            4 => change(&mut altered, Kind::SourceMap, |value| {
                 for entry in value["entries"].as_array_mut().unwrap() {
                     entry["text"] =
                         format!("{}\n% altered source", entry["text"].as_str().unwrap()).into();
                 }
             }),
+            _ => {
+                altered.manifest.identity.entrypoint_function =
+                    Some(runmat_types::ProgramFunctionId(
+                        altered.manifest.identity.entrypoint_function.unwrap().0 + 1,
+                    ));
+                altered.validate().unwrap();
+            }
         }
         assert!(ExecutableUnit::from_portable_envelope(&altered).is_err());
     }

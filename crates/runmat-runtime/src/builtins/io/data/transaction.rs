@@ -12,7 +12,7 @@ use crate::context::{host_effect::DatasetHandleOperation as Op, RuntimeContext};
 async fn data_tx_id_builtin(runtime: Option<RuntimeContext>, base: Value) -> BuiltinResult<Value> {
     let (owner, tx_id) = authority::resolve_transaction(runtime.as_ref(), &base)?;
     handle_admission::execute(runtime.as_ref(), &owner, Op::TransactionId, &[], async {
-        Ok(Value::String(tx_id))
+        Ok(Value::string(tx_id))
     })
     .await
 }
@@ -29,7 +29,7 @@ async fn data_tx_write_builtin(
     array_name: Value,
     slice: Value,
     values: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     if !rest.is_empty() {
         return Err(data_error(
@@ -128,7 +128,7 @@ async fn data_tx_set_attrs_builtin(
                         "DataTransaction.set_attrs: transaction is not open",
                     ));
                 }
-                for (k, v) in incoming.fields {
+                for (k, v) in incoming.into_fields_unbounded() {
                     tx.attrs.insert(k, v);
                 }
                 Ok(())
@@ -150,7 +150,7 @@ async fn data_tx_resize_builtin(
     base: Value,
     array_name: Value,
     new_shape: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     if !rest.is_empty() {
         return Err(data_error(
@@ -196,7 +196,7 @@ async fn data_tx_fill_builtin(
     base: Value,
     array_name: Value,
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(data_error("DataTransaction.fill expects at most one slice"));
@@ -314,7 +314,7 @@ async fn data_tx_create_array_builtin(
 async fn data_tx_commit_builtin(
     runtime: Option<RuntimeContext>,
     base: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     commit(runtime, base, rest, Op::TransactionCommit).await
 }
@@ -322,7 +322,7 @@ async fn data_tx_commit_builtin(
 async fn commit(
     runtime: Option<RuntimeContext>,
     base: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
     operation: Op,
 ) -> BuiltinResult<Value> {
     let mut identity_budget = super::handle_identity::HashBudget::new();
@@ -330,10 +330,10 @@ async fn commit(
         .iter()
         .map(|value| handle_admission::input_with_budget(value, &mut identity_budget))
         .collect::<Vec<_>>();
-    let options = match rest.as_slice() {
-        [] => None,
-        [Value::Struct(options)] => Some(options),
-        [_] => {
+    let options = match (rest.len(), rest.first()) {
+        (0, _) => None,
+        (1, Some(Value::Struct(options))) => Some(options),
+        (1, _) => {
             return Err(data_error(
                 "DataTransaction.commit: options must be a scalar struct",
             ))
@@ -542,10 +542,10 @@ async fn commit(
 async fn data_tx_commit_alias_builtin(
     runtime: Option<RuntimeContext>,
     base: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     match &base {
-        Value::Object(obj) if obj.class_name.is(runmat_builtins::DATA_TRANSACTION_CLASS) => {
+        Value::Object(obj) if obj.class_name().is(runmat_builtins::DATA_TRANSACTION_CLASS) => {
             commit(runtime, base, rest, Op::CommitAlias).await
         }
         _ => Err(data_error(
@@ -600,7 +600,7 @@ async fn data_tx_status_builtin(
                     TxnStatus::Committed => "committed",
                     TxnStatus::Aborted => "aborted",
                 };
-                Ok(Value::String(status.to_string()))
+                Ok(Value::string(status.to_string()))
             })
         },
     )

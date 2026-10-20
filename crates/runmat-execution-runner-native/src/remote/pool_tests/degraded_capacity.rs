@@ -28,7 +28,7 @@ async fn loss_below_provisioning_floor_retries_on_healthy_capacity_and_retains_p
     for id in worker_ids {
         pool.add_worker(Arc::new(FailingRouteWorker {
             spec: WorkerSpec {
-                host: crate::test_fixtures::host_inventory(),
+                host: crate::test_support::host_inventory(),
                 id,
                 pool_id,
                 resources: inventory(1_000),

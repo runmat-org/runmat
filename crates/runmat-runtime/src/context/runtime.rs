@@ -36,6 +36,9 @@ pub type SelectedStaticSiteResolver =
         GraphStaticReferenceSite,
     ) -> Result<Option<runmat_value::BoundFunctionBinding>, &'static str>;
 
+mod selected_function;
+pub use selected_function::{SelectedGraphFunction, SelectedGraphFunctionResolver};
+
 /// Process-local identity for one runtime context state allocation.
 ///
 /// This identity lets compatibility adapters partition ambient state while
@@ -130,8 +133,7 @@ pub struct RuntimeContext {
     selected_graph_program: Option<crate::execution::DeferredGraphProgram>,
     /// Call-local target admission for native MIR futures. The selected Core
     /// registry is captured without a RuntimeContext or execution service.
-    selected_graph_function_resolver:
-        Option<Rc<dyn Fn(runmat_types::FunctionId) -> Option<runmat_value::BoundFunctionBinding>>>,
+    selected_graph_function_resolver: Option<Rc<SelectedGraphFunctionResolver>>,
     /// Selected graph admission supplies one unit-local site map. The caller
     /// origin changes with the VM frame; no numeric ID or display name selects
     /// a cross-unit target.
@@ -414,10 +416,12 @@ impl RuntimeContext {
     /// The VM sets this from the exact body it entered; None denotes the
     /// selected script stream, not an arbitrary unnamed function.
     pub fn with_selected_static_caller(mut self, caller: Option<FunctionBindingOrigin>) -> Self {
-        if self.selected_static_site_resolver.is_some() {
-            self.selected_static_caller = caller;
-        }
+        self.selected_static_caller = caller;
         self
+    }
+
+    pub fn selected_static_caller(&self) -> Option<FunctionBindingOrigin> {
+        self.selected_static_caller
     }
 
     pub fn selected_static_binding(
@@ -443,9 +447,7 @@ impl RuntimeContext {
     /// resolver, preventing a nested unit from inheriting caller authority.
     pub fn with_selected_graph_function_resolver(
         mut self,
-        resolver: Rc<
-            dyn Fn(runmat_types::FunctionId) -> Option<runmat_value::BoundFunctionBinding>,
-        >,
+        resolver: Rc<SelectedGraphFunctionResolver>,
     ) -> Self {
         if self.selected_graph_program.is_some() {
             self.selected_graph_function_resolver = Some(resolver);
@@ -455,10 +457,15 @@ impl RuntimeContext {
 
     pub fn selected_graph_function_binding(
         &self,
-        function: runmat_types::FunctionId,
-    ) -> Option<runmat_value::BoundFunctionBinding> {
+        caller: runmat_types::FunctionId,
+        identity: &runmat_types::CallableIdentity,
+    ) -> Option<SelectedGraphFunction> {
         self.selected_graph_program.as_ref()?;
-        self.selected_graph_function_resolver.as_ref()?(function)
+        self.selected_graph_function_resolver.as_ref()?(caller, identity)
+    }
+
+    pub fn has_selected_graph_function_resolver(&self) -> bool {
+        self.selected_graph_function_resolver.is_some()
     }
 
     pub fn service_ports(&self) -> &RuntimeServicePorts {
@@ -596,24 +603,7 @@ impl RuntimeContext {
         caller_origin: runmat_execution::FunctionBindingOrigin,
     ) -> Result<Self, crate::RuntimeError> {
         for (index, binding) in bindings.iter().enumerate() {
-            let valid_target = match &binding.target {
-                super::RetainedSuperConstructorTarget::Bound {
-                    origin,
-                    owner,
-                    binding: target,
-                    ..
-                } => {
-                    let local = target.authority.admits_local(&self.session_lease())
-                        && target.authority.local_lease(target.function).is_some();
-                    let portable = target.authority.portable_origin() == Some(*origin)
-                        && usize::try_from(origin.function.0).ok() == Some(target.function);
-                    owner.role == runmat_types::ClassMethodRole::Constructor
-                        && !owner.is_static
-                        && (local || portable)
-                        && target.authority.export_origin(&self.session_lease()) == Some(*origin)
-                }
-                super::RetainedSuperConstructorTarget::Implicit { .. } => true,
-            };
+            let valid_target = binding.target.is_admitted_in(&self);
             if !valid_target
                 || binding.target.parent() == &binding.requesting_class
                 || binding.caller_origin != caller_origin
@@ -830,6 +820,30 @@ impl RuntimeContext {
         self.state.local_identity
     }
 
+    pub(in crate::context) fn capture_host_allocation_context(
+        &self,
+    ) -> Option<super::host_allocation::HostAllocationContext> {
+        Some(super::host_allocation::HostAllocationContext::new(
+            Rc::clone(&self.state),
+            Rc::clone(&self.cancellation),
+            Rc::clone(self.services.parallel()?),
+        ))
+    }
+
+    pub(in crate::context) fn capture_host_effect_stage_authority(
+        &self,
+    ) -> super::host_effect::HostEffectStageAuthority {
+        super::host_effect::HostEffectStageAuthority::new(
+            Rc::clone(&self.state),
+            Rc::clone(&self.cancellation),
+            Rc::clone(&self.execution),
+            self.program_revision.clone(),
+            self.services.placement().cloned(),
+            self.services.host_effect_resources().cloned(),
+            self.services.parallel().cloned(),
+        )
+    }
+
     /// Process-local, non-serialized authority for this session's lifetime.
     /// Values and foreign registries must retain only a weak copy.
     pub(crate) fn session_lease(&self) -> std::sync::Weak<()> {
@@ -897,8 +911,8 @@ impl RuntimeContext {
         let callbacks = self.state.plot_callbacks.borrow();
         let root = callbacks.get(&slot)?;
         match &root.value {
-            runmat_value::Value::String(text) => Some(text.clone()),
-            runmat_value::Value::CharArray(chars) => Some(chars.data.iter().collect()),
+            runmat_value::Value::String(text) => Some(text.as_str().to_owned()),
+            runmat_value::Value::CharArray(chars) => Some(chars.data().iter().collect()),
             _ => None,
         }
     }
@@ -928,6 +942,15 @@ impl RuntimeContext {
 
     pub fn cancellation(&self) -> CancellationToken {
         self.cancellation.borrow().clone()
+    }
+
+    /// Bind lifecycle cancellation until the returned scope retires. This
+    /// shares only the token slot, not workspace values or context projections.
+    pub fn scoped_cancellation_token(
+        &self,
+        token: CancellationToken,
+    ) -> super::RuntimeCancellationScope {
+        super::RuntimeCancellationScope::new(Rc::clone(&self.cancellation), token)
     }
 
     pub(crate) fn cancellation_context(&self) -> super::RuntimeCancellationContext {

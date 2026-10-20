@@ -343,11 +343,11 @@ fn collect_tabular_inputs(args: &[Value]) -> BuiltinResult<Option<(Vec<TabularIn
             Ok(Some((inputs, consumed)))
         }
         Some(Value::Cell(cell)) => {
-            if cell.data.is_empty() {
+            if cell.data().is_empty() {
                 return Ok(None);
             }
-            let mut inputs = Vec::with_capacity(cell.data.len());
-            for value in &cell.data {
+            let mut inputs = Vec::with_capacity(cell.data().len());
+            for value in cell.data() {
                 let Value::Object(object) = value else {
                     return Ok(None);
                 };
@@ -705,7 +705,7 @@ fn parse_options(
                 }
             }
             "color" | "linestyle" | "linewidth" | "marker" | "markersize" => {
-                style_tokens.push(Value::String(key));
+                style_tokens.push(Value::string(key));
                 style_tokens.push(args[idx + 1].clone());
             }
             other => {
@@ -840,7 +840,7 @@ pub(crate) fn get_stackedplot_property(
 ) -> BuiltinResult<Value> {
     match property.map(|p| p.to_ascii_lowercase()) {
         None => {
-            let mut st = StructValue::new();
+            let mut st = runmat_value::UnboundedStructValueBuilder::new();
             st.insert("Type", Value::String("stackedplot".into()));
             st.insert("Parent", Value::Num(state.figure.as_u32() as f64));
             st.insert(
@@ -858,8 +858,8 @@ pub(crate) fn get_stackedplot_property(
             );
             st.insert("XData", stacked_x_data_value(state)?);
             st.insert("YData", stacked_y_data_value(state)?);
-            st.insert("XLabel", Value::String(state.x_label.clone()));
-            st.insert("Title", Value::String(state.title.clone()));
+            st.insert("XLabel", Value::string(state.x_label.clone()));
+            st.insert("Title", Value::string(state.title.clone()));
             st.insert(
                 "Visible",
                 Value::String(if state.visible { "on" } else { "off" }.into()),
@@ -869,10 +869,10 @@ pub(crate) fn get_stackedplot_property(
             st.insert("LineWidth", Value::Num(state.appearance.line_width as f64));
             st.insert(
                 "LineStyle",
-                Value::String(line_style_name(state.appearance.line_style)),
+                Value::string(line_style_name(state.appearance.line_style)),
             );
             st.insert("Color", color_value(state.appearance.color)?);
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some(prop) => match prop.as_str() {
             "type" => Ok(Value::String("stackedplot".into())),
@@ -885,15 +885,15 @@ pub(crate) fn get_stackedplot_property(
             "combinematchingnames" => Ok(Value::Bool(state.combine_matching_names)),
             "xdata" => stacked_x_data_value(state),
             "ydata" => stacked_y_data_value(state),
-            "xlabel" => Ok(Value::String(state.x_label.clone())),
-            "title" => Ok(Value::String(state.title.clone())),
+            "xlabel" => Ok(Value::string(state.x_label.clone())),
+            "title" => Ok(Value::string(state.title.clone())),
             "visible" => Ok(Value::String(
                 if state.visible { "on" } else { "off" }.into(),
             )),
             "gridvisible" => Ok(on_off_value(state.grid_visible)),
             "xlimits" => limits_output(state.x_limits),
             "linewidth" => Ok(Value::Num(state.appearance.line_width as f64)),
-            "linestyle" => Ok(Value::String(line_style_name(state.appearance.line_style))),
+            "linestyle" => Ok(Value::string(line_style_name(state.appearance.line_style))),
             "color" => color_value(state.appearance.color),
             other => Err(stacked_runtime_error(
                 builtin,
@@ -946,7 +946,7 @@ pub(crate) fn apply_stackedplot_property_for_property(
         "gridvisible" => next.grid_visible = visible_bool(value)?,
         "xlimits" => next.x_limits = Some(parse_limits(value, "XLimits")?),
         "color" | "linestyle" | "linewidth" | "marker" | "markersize" => {
-            let tokens = [Value::String(key.to_string()), value.clone()];
+            let tokens = [Value::string(key.to_string()), value.clone()];
             let parsed =
                 parse_line_style_args(&tokens, &LineStyleParseOptions::generic(BUILTIN_NAME))?;
             next.appearance = merge_appearance(&next.appearance, parsed.appearance, key);
@@ -1080,7 +1080,7 @@ fn numeric_tensor_from_value(value: &Value, name: &str) -> BuiltinResult<Tensor>
         }
         Value::Object(obj) if obj.is_class(runmat_types::standard::CATEGORICAL) => {
             let codes = obj
-                .properties
+                .properties()
                 .get("Codes")
                 .ok_or_else(|| stacked_err(format!("{name}: categorical Codes are missing")))?;
             numeric_tensor_from_value(codes, name)
@@ -1187,8 +1187,12 @@ fn tensor_column_source(tensor: &Tensor, col: usize) -> BuiltinResult<(Vec<f64>,
 
 fn variable_selector(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(s) => Ok(vec![s.clone()]),
-        Value::StringArray(array) => Ok(array.data.clone()),
+        Value::String(s) => Ok(vec![s.as_str().to_owned()]),
+        Value::StringArray(array) => Ok(array
+            .data()
+            .iter()
+            .map(|text| text.as_str().to_owned())
+            .collect()),
         Value::CharArray(array) => {
             if array.rows == 1 {
                 Ok(vec![array.to_string().trim().to_string()])
@@ -1196,7 +1200,7 @@ fn variable_selector(value: &Value) -> BuiltinResult<Vec<String>> {
                 Ok((0..array.rows)
                     .map(|row| {
                         let start = row * array.cols;
-                        array.data[start..start + array.cols]
+                        array.data()[start..start + array.cols]
                             .iter()
                             .collect::<String>()
                             .trim()
@@ -1206,7 +1210,7 @@ fn variable_selector(value: &Value) -> BuiltinResult<Vec<String>> {
             }
         }
         Value::Cell(cell) => cell
-            .data
+            .data()
             .iter()
             .map(|value| text_scalar(value, "variable selector"))
             .collect(),
@@ -1386,8 +1390,8 @@ fn on_off_value(enabled: bool) -> Value {
 
 fn string_or_row_value(values: &[String]) -> BuiltinResult<Value> {
     match values.len() {
-        0 => Ok(Value::String(String::new())),
-        1 => Ok(Value::String(values[0].clone())),
+        0 => Ok(Value::string(String::new())),
+        1 => Ok(Value::string(values[0].clone())),
         _ => string_row(values.to_vec()).map(Value::StringArray),
     }
 }
@@ -1407,7 +1411,7 @@ fn source_table_value(snapshot: Option<&StackedSourceTableSnapshot>) -> BuiltinR
     let Some(snapshot) = snapshot else {
         return Ok(empty_value());
     };
-    let mut st = StructValue::new();
+    let mut st = runmat_value::UnboundedStructValueBuilder::new();
     st.insert(
         "Class",
         Value::StringArray(string_row(snapshot.classes.clone())?),
@@ -1424,7 +1428,7 @@ fn source_table_value(snapshot: Option<&StackedSourceTableSnapshot>) -> BuiltinR
                 .map_err(|err| stacked_err(format!("SourceTable: {err}")))?,
         ),
     );
-    Ok(Value::Struct(st))
+    Ok(Value::Struct(st.finish()))
 }
 
 fn matrix_from_columns(columns: &[Vec<f64>]) -> BuiltinResult<Value> {
@@ -1842,7 +1846,7 @@ mod tests {
     #[test]
     fn stackedplot_rejects_timetable_xvariable() {
         let _guard = setup();
-        let mut table = match table_from_columns(
+        let table = match table_from_columns(
             vec!["A".into()],
             vec![Tensor::new(vec![1.0, 2.0], vec![2, 1])
                 .map(Value::Tensor)
@@ -1853,13 +1857,20 @@ mod tests {
             Value::Object(object) => object,
             _ => unreachable!(),
         };
-        table.class_name = "timetable".into();
-        table.properties.insert(
+        let mut timetable = runmat_value::UnboundedObjectBuilder::with_property_capacity(
+            "timetable",
+            table.property_count() + 1,
+        );
+        for entry in table.properties().entries() {
+            timetable.insert_text(entry.key().clone(), entry.value().clone());
+        }
+        timetable.insert(
             "RowTimes".into(),
             Tensor::new(vec![10.0, 20.0], vec![2, 1])
                 .map(Value::Tensor)
                 .unwrap(),
         );
+        let table = timetable.finish();
         let err = stackedplot_builtin(vec![
             Value::Object(table),
             Value::String("A".into()),
@@ -1890,7 +1901,7 @@ mod tests {
         let handle = stackedplot_builtin(vec![table1, table2, Value::String("A".into())]).unwrap();
         let y = get_builtin(vec![Value::Num(handle), Value::String("YData".into())]).unwrap();
         match y {
-            Value::Cell(cell) => assert_eq!(cell.data.len(), 2),
+            Value::Cell(cell) => assert_eq!(cell.data().len(), 2),
             other => panic!("expected cell YData for unequal lengths, got {other:?}"),
         }
     }

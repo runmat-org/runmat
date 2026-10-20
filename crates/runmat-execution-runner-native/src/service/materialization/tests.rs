@@ -19,6 +19,12 @@ fn service_fixture() -> (tempfile::TempDir, super::NativeExecutionService) {
         executable: "/bin/sh".into(),
         worker_arguments: vec!["-c".into(), "exit 0".into()],
         max_workers: 1,
+        local_cpu_capacity_millicores: None,
+        local_memory_capacity_bytes: None,
+        worker_memory_bytes: 1024 * 1024 * 1024,
+        worker_scratch_bytes: 1024 * 1024 * 1024,
+        worker_cpu_millicores: 1_000,
+        meshing_subtask_cache_root: None,
         max_message_bytes: 64 * 1024,
         max_object_bytes: 64 * 1024,
         max_stderr_bytes: 4096,
@@ -44,8 +50,8 @@ fn admitted_program_call() -> DeferredCall {
     let program = b"unexecuted checkpoint witness".to_vec();
     let digest = runmat_execution::Digest::sha256(&program);
     DeferredCall {
-        environment: runmat_execution::EnvironmentSnapshot::default(),
         console: None,
+        environment: runmat_execution::EnvironmentSnapshot::default(),
         invocation: DeferredInvocation::Program {
             callable: runmat_execution::ProgramCallable::semantic(
                 runmat_execution::ProgramFunctionId(0),
@@ -73,8 +79,8 @@ fn fixture() -> (Mutex<State>, FutureHandle) {
     let scope_id = crate::config::fresh_scope_id(b"materialization-test", 1);
     let id = FutureId::derive(&[scope_id.bytes(), b"future"]);
     let call = DeferredCall {
-        environment: runmat_execution::EnvironmentSnapshot::default(),
         console: None,
+        environment: runmat_execution::EnvironmentSnapshot::default(),
         invocation: DeferredInvocation::callable(CallableDescriptor {
             target: CallableTarget::FevalForward(Value::Num(13.0)),
             args: vec![Value::Num(29.0)],
@@ -205,15 +211,19 @@ fn caller_completion_cannot_overwrite_a_deferred_or_accepted_future() {
         RootedValueSequence::new(runmat_value::ValueSequence::single(Value::Num(7.0)).unwrap())
             .unwrap();
     assert!(service
-        .complete_future(&future, Ok(result.clone()))
+        .complete_future((&future).into(), Ok(result.clone()))
         .is_err());
     assert!(matches!(
-        service.begin_await(Value::Future(future.clone())).unwrap(),
+        service
+            .begin_await(Value::Future(future.clone().into()))
+            .unwrap(),
         AwaitAction::ExecuteFuture { .. }
     ));
-    service.complete_future(&future, Ok(result)).unwrap();
+    service
+        .complete_future((&future).into(), Ok(result))
+        .unwrap();
     assert!(service
-        .complete_future(&future, Err(ExecutionServiceError::Cancelled))
+        .complete_future((&future).into(), Err(ExecutionServiceError::Cancelled))
         .is_err());
 }
 

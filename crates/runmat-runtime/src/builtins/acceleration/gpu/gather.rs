@@ -62,8 +62,8 @@ fn gather_error_with_message(
     binding_variant = "default",
     builtin_path = "crate::builtins::acceleration::gpu::gather"
 )]
-async fn gather_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let eval = evaluate(&args).await?;
+async fn gather_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
+    let eval = evaluate_arguments(args.view()).await?;
     let len = eval.len();
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
@@ -128,6 +128,12 @@ impl GatherResult {
 
 /// Evaluate `gather` for arbitrary argument lists and return all outputs.
 pub async fn evaluate(args: &[Value]) -> crate::BuiltinResult<GatherResult> {
+    evaluate_arguments(crate::call::FunctionArgumentView::from_slice(args)).await
+}
+
+async fn evaluate_arguments(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<GatherResult> {
     if args.is_empty() {
         return Err(gather_error(&GATHER_ERROR_NOT_ENOUGH_INPUTS).into());
     }
@@ -154,13 +160,16 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_value::{CellArray, StructValue, Tensor};
+    use runmat_value::{CellArray, Tensor};
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gather_passes_through_host_values() {
         let value = Value::Num(42.0);
-        let result = block_on(gather_builtin(vec![value.clone()])).expect("gather");
+        let result = block_on(gather_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![value.clone()]),
+        ))
+        .expect("gather");
         assert_eq!(result, value);
     }
 
@@ -180,8 +189,12 @@ pub(crate) mod tests {
             drop(handle);
             let handle = explicit;
             let lease = handle.allocation_lease().downgrade();
-            let result =
-                block_on(gather_builtin(vec![Value::GpuTensor(handle.clone())])).expect("gather");
+            let result = block_on(gather_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(
+                    handle.clone(),
+                )]),
+            ))
+            .expect("gather");
             match result {
                 Value::Tensor(host) => {
                     assert_eq!(host.shape(), tensor.shape());
@@ -190,8 +203,12 @@ pub(crate) mod tests {
                 other => panic!("expected tensor result, got {other:?}"),
             }
             assert!(runmat_accelerate_api::handle_is_explicit(&handle));
-            block_on(gather_builtin(vec![Value::GpuTensor(handle.clone())]))
-                .expect("source handle remains gatherable");
+            block_on(gather_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(
+                    handle.clone(),
+                )]),
+            ))
+            .expect("source handle remains gatherable");
             handle.release().expect("release caller lease");
             assert!(lease.acquire().is_none());
         });
@@ -208,7 +225,12 @@ pub(crate) mod tests {
                 })
                 .expect("logical producer upload");
             let lease = handle.allocation_lease().downgrade();
-            let result = block_on(gather_builtin(vec![Value::GpuTensor(handle)])).expect("gather");
+            let result = block_on(gather_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(
+                    handle,
+                )]),
+            ))
+            .expect("gather");
             match result {
                 Value::LogicalArray(logical) => {
                     assert_eq!(logical.shape, vec![2, 2]);
@@ -233,7 +255,10 @@ pub(crate) mod tests {
             let handle = provider.upload(&view).expect("upload");
             let cell = CellArray::new(vec![Value::GpuTensor(handle), Value::from("host")], 1, 2)
                 .expect("cell");
-            let result = block_on(gather_builtin(vec![Value::Cell(cell)])).expect("gather");
+            let result = block_on(gather_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::Cell(cell)]),
+            ))
+            .expect("gather");
             let Value::Cell(gathered) = result else {
                 panic!("expected cell result");
             };
@@ -261,11 +286,16 @@ pub(crate) mod tests {
                 shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
-            let mut st = StructValue::new();
+            let mut st = runmat_value::UnboundedStructValueBuilder::new();
             st.insert("data", Value::GpuTensor(handle));
             st.insert("label", Value::from("gpu result"));
 
-            let result = block_on(gather_builtin(vec![Value::Struct(st)])).expect("gather");
+            let result = block_on(gather_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::Struct(
+                    st.finish(),
+                )]),
+            ))
+            .expect("gather");
             let Value::Struct(gathered) = result else {
                 panic!("expected struct result");
             };
@@ -284,8 +314,13 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gather_returns_output_list_for_multiple_inputs() {
-        let result = block_on(gather_builtin(vec![Value::Num(1.0), Value::from("two")]))
-            .expect("gather outputs");
+        let result = block_on(gather_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(1.0),
+                Value::from("two"),
+            ]),
+        ))
+        .expect("gather outputs");
         let Value::OutputList(outputs) = result else {
             panic!("expected output list for multiple inputs");
         };
@@ -306,8 +341,10 @@ pub(crate) mod tests {
             let cell = CellArray::new(vec![Value::GpuTensor(handle.clone())], 1, 1).expect("cell");
             provider.reset_telemetry();
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-            let error = block_on(gather_builtin(vec![Value::Cell(cell)]))
-                .expect_err("recursive gather is an extension");
+            let error = block_on(gather_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::Cell(cell)]),
+            ))
+            .expect_err("recursive gather is an extension");
             assert_eq!(
                 error.identifier(),
                 Some("RunMat:compatibility:GatherRecursiveContainerExtension")
@@ -341,7 +378,10 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn gather_requires_at_least_one_argument() {
-        let err = block_on(gather_builtin(Vec::new())).expect_err("expected error");
+        let err = block_on(gather_builtin(
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect_err("expected error");
         assert_eq!(err.to_string(), GATHER_ERROR_NOT_ENOUGH_INPUTS.message);
         assert_eq!(err.identifier(), GATHER_ERROR_NOT_ENOUGH_INPUTS.identifier);
     }

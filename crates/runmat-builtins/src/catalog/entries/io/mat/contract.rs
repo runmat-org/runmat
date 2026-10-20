@@ -412,7 +412,7 @@ pub const LOAD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [
     overflow: BuiltinIntegerOverflowRule::Error,
     backend: BuiltinIntegerBackendRule::HostOnly,
     overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-    notes: "Level-5 integer tags reconstruct all eight signed/unsigned classes exactly, including nested cells, structures, sparse values, complex components, and object envelopes.",
+    notes: "Level-5 integer tags reconstruct all eight signed/unsigned classes exactly, including nested cells, structures, sparse values, complex components, and typed object records.",
 }];
 
 const WRITABLE_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =

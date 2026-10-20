@@ -16,7 +16,7 @@ pub(super) fn calendar_duration_tensor_for_object(
     obj: &ObjectInstance,
     field: &str,
 ) -> BuiltinResult<Tensor> {
-    match obj.properties.get(field) {
+    match obj.properties().get(field) {
         Some(Value::Tensor(tensor)) => Ok(tensor.clone()),
         Some(Value::Num(value)) => Tensor::new(vec![*value], vec![1, 1])
             .map_err(|err| datetime_error(format!("calendarDuration: {err}"))),
@@ -44,21 +44,25 @@ pub(crate) fn calendar_duration_tensors_from_value(
 }
 
 pub(crate) fn calendar_duration_object_from_tensors(
+    runtime: Option<&crate::context::RuntimeContext>,
     months: Tensor,
     days: Tensor,
 ) -> BuiltinResult<Value> {
     ensure_calendar_duration_class_registered();
-    let mut object = ObjectInstance::new(CALENDAR_DURATION_CLASS.to_string());
-    object
-        .properties
-        .insert(CALENDAR_MONTHS_FIELD.to_string(), Value::Tensor(months));
-    object
-        .properties
-        .insert(CALENDAR_DAYS_FIELD.to_string(), Value::Tensor(days));
-    Ok(Value::Object(object))
+    let fields = [
+        (CALENDAR_MONTHS_FIELD, Value::Tensor(months)),
+        (CALENDAR_DAYS_FIELD, Value::Tensor(days)),
+    ];
+    let object = crate::execution::object::construct_object_from_borrowed_fields(
+        runtime,
+        CALENDAR_DURATION_CLASS.display_name(),
+        fields.iter().map(|(name, value)| (*name, value)),
+    )?;
+    Ok(object.into_value_and_lease().0)
 }
 
 pub(super) fn calendar_duration_object_from_components(
+    runtime: Option<&crate::context::RuntimeContext>,
     months: Vec<f64>,
     days: Vec<f64>,
     shape: Vec<usize>,
@@ -67,7 +71,7 @@ pub(super) fn calendar_duration_object_from_components(
         .map_err(|err| datetime_error(format!("calendarDuration: {err}")))?;
     let day_tensor = Tensor::new(days, shape)
         .map_err(|err| datetime_error(format!("calendarDuration: {err}")))?;
-    calendar_duration_object_from_tensors(month_tensor, day_tensor)
+    calendar_duration_object_from_tensors(runtime, month_tensor, day_tensor)
 }
 
 pub(super) fn calendar_duration_unit_value(
@@ -129,7 +133,7 @@ pub(super) fn calendar_duration_unit_value(
         months.push(month_value);
         days.push(day_value);
     }
-    calendar_duration_object_from_components(months, days, shape)
+    calendar_duration_object_from_components(None, months, days, shape)
 }
 
 pub(super) fn add_months_clamped(
@@ -286,6 +290,7 @@ pub(crate) fn datetime_row_times_from_calendar_step(
         ));
     }
     datetime_object_from_serial_tensor(
+        None,
         Tensor::new(serials, vec![count, 1])
             .map_err(|error| datetime_error(format!("array2timetable: {error}")))?,
         datetime_format_from_value(start),
@@ -316,8 +321,8 @@ pub fn datetime_display_text(value: &Value) -> BuiltinResult<Option<String>> {
     let Some(array) = datetime_string_array(value)? else {
         return Ok(None);
     };
-    if array.data.len() == 1 {
-        return Ok(Some(array.data[0].clone()));
+    if array.data().len() == 1 {
+        return Ok(Some(array.data()[0].as_str().to_owned()));
     }
 
     let rows = array.rows;
@@ -326,7 +331,7 @@ pub fn datetime_display_text(value: &Value) -> BuiltinResult<Option<String>> {
     for col in 0..cols {
         for row in 0..rows {
             let idx = row + col * rows;
-            widths[col] = widths[col].max(array.data[idx].chars().count());
+            widths[col] = widths[col].max(array.data()[idx].chars().count());
         }
     }
 
@@ -338,7 +343,7 @@ pub fn datetime_display_text(value: &Value) -> BuiltinResult<Option<String>> {
                 line.push_str("  ");
             }
             let idx = row + col * rows;
-            let text = &array.data[idx];
+            let text = &array.data()[idx];
             line.push_str(text);
             let padding = widths[col].saturating_sub(text.chars().count());
             if padding > 0 {

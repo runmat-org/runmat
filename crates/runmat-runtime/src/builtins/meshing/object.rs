@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, HashMap};
 use runmat_geometry_core::PersistentEntityId;
 use runmat_meshing_core::{CanonicalMeshingContract, MeshingEvidence, SolverMeshArtifact};
 use runmat_types::MethodName;
-use runmat_value::{IntegerStorage, ObjectInstance, StructValue, Tensor, Value};
+use runmat_value::{IntegerStorage, ObjectInstance, Tensor, UnboundedObjectBuilder, Value};
 
 use super::{
     error, BOUNDARY_FACES_NAME, ELEMENTS_NAME, EVIDENCE_NAME, GENERATE_NAME, MESH_METHOD_NAME,
@@ -45,45 +45,46 @@ pub(super) fn mesh_object(payload: MeshPayload) -> BuiltinResult<Value> {
         .evidence
         .canonical_encode()
         .map_err(|cause| error(GENERATE_NAME, cause.to_string()))?;
-    let mut object = ObjectInstance::new(runmat_builtins::MESHING_MESH_OBJECT_CLASS);
-    object.properties.insert(
+    let mut object = UnboundedObjectBuilder::new(MESH_CLASS.to_string());
+    object.insert(
         "canonical_digest".to_string(),
-        Value::String(digest_hex(payload.artifact.canonical_digest.bytes())),
+        Value::String(digest_hex(payload.artifact.canonical_digest.bytes()).into()),
     );
-    object.properties.insert(
+    object.insert(
         "node_count".to_string(),
         Value::Int(runmat_value::IntValue::U64(
             payload.artifact.topology.nodes.len() as u64,
         )),
     );
-    object.properties.insert(
+    object.insert(
         "element_count".to_string(),
         Value::Int(runmat_value::IntValue::U64(
             payload.artifact.topology.volume_elements.len() as u64,
         )),
     );
-    object.properties.insert(
+    object.insert(
         "boundary_face_count".to_string(),
         Value::Int(runmat_value::IntValue::U64(
             payload.artifact.topology.boundary_faces.len() as u64,
         )),
     );
-    object.properties.insert(
+    object.insert(
         ARTIFACT_PROPERTY.to_string(),
         byte_tensor(artifact_bytes, GENERATE_NAME)?,
     );
-    object.properties.insert(
+    object.insert(
         EVIDENCE_PROPERTY.to_string(),
         byte_tensor(evidence_bytes, GENERATE_NAME)?,
     );
-    object.properties.insert(
+    object.insert(
         REGION_MAP_PROPERTY.to_string(),
         Value::String(
             serde_json::to_string(&payload.region_aliases)
-                .map_err(|cause| error(GENERATE_NAME, cause.to_string()))?,
+                .map_err(|cause| error(GENERATE_NAME, cause.to_string()))?
+                .into(),
         ),
     );
-    Ok(Value::Object(object))
+    Ok(Value::Object(object.finish()))
 }
 
 pub(super) fn evidence_object(evidence: MeshingEvidence) -> BuiltinResult<Value> {
@@ -91,55 +92,51 @@ pub(super) fn evidence_object(evidence: MeshingEvidence) -> BuiltinResult<Value>
     let evidence_bytes = evidence
         .canonical_encode()
         .map_err(|cause| error(EVIDENCE_NAME, cause.to_string()))?;
-    let mut object = ObjectInstance::new(runmat_builtins::MESHING_EVIDENCE_CLASS);
-    object.properties.insert(
+    let mut object = UnboundedObjectBuilder::new(EVIDENCE_CLASS.to_string());
+    object.insert(
         "artifact_digest".to_string(),
-        Value::String(digest_hex(evidence.artifact_digest.bytes())),
+        Value::String(digest_hex(evidence.artifact_digest.bytes()).into()),
     );
-    object.properties.insert(
+    object.insert(
         "stage_count".to_string(),
         Value::Int(runmat_value::IntValue::U64(evidence.stages.len() as u64)),
     );
-    object.properties.insert(
+    object.insert(
         "generated_nodes".to_string(),
         Value::Int(runmat_value::IntValue::U64(
             evidence.resources.generated_nodes,
         )),
     );
-    object.properties.insert(
+    object.insert(
         "generated_elements".to_string(),
         Value::Int(runmat_value::IntValue::U64(
             evidence.resources.generated_elements,
         )),
     );
-    object.properties.insert(
+    object.insert(
         "wall_time_ms".to_string(),
         Value::Int(runmat_value::IntValue::U64(evidence.resources.wall_time_ms)),
     );
-    object.properties.insert(
+    object.insert(
         "deterministic_seed".to_string(),
         exact(evidence.deterministic_seed),
     );
-    object.properties.insert(
+    object.insert(
         "geometry_revision".to_string(),
         exact(u64::from(evidence.geometry.geometry_revision)),
     );
-    object
-        .properties
-        .insert("resources".to_string(), resources_value(&evidence));
-    object
-        .properties
-        .insert("stages".to_string(), stages_value(&evidence)?);
-    object.properties.insert(
+    object.insert("resources".to_string(), resources_value(&evidence));
+    object.insert("stages".to_string(), stages_value(&evidence)?);
+    object.insert(
         EVIDENCE_PROPERTY.to_string(),
         byte_tensor(evidence_bytes, EVIDENCE_NAME)?,
     );
-    Ok(Value::Object(object))
+    Ok(Value::Object(object.finish()))
 }
 
 fn resources_value(evidence: &MeshingEvidence) -> Value {
     let resources = &evidence.resources;
-    let mut value = StructValue::new();
+    let mut value = runmat_value::UnboundedStructValueBuilder::new();
     for (name, count) in [
         ("generated_nodes", resources.generated_nodes),
         ("generated_elements", resources.generated_elements),
@@ -156,7 +153,7 @@ fn resources_value(evidence: &MeshingEvidence) -> Value {
     ] {
         value.insert(name, exact(count));
     }
-    Value::Struct(value)
+    Value::Struct(value.finish())
 }
 
 fn stages_value(evidence: &MeshingEvidence) -> BuiltinResult<Value> {
@@ -164,7 +161,7 @@ fn stages_value(evidence: &MeshingEvidence) -> BuiltinResult<Value> {
         .stages
         .iter()
         .map(|stage| {
-            let mut value = StructValue::new();
+            let mut value = runmat_value::UnboundedStructValueBuilder::new();
             let encoded_stage = serde_json::to_value(stage.stage)
                 .map_err(|cause| error(EVIDENCE_NAME, cause.to_string()))?;
             let name = encoded_stage.as_str().ok_or_else(|| {
@@ -173,7 +170,7 @@ fn stages_value(evidence: &MeshingEvidence) -> BuiltinResult<Value> {
                     "meshing evidence stage did not serialize as a canonical name",
                 )
             })?;
-            value.insert("stage", Value::String(name.to_string()));
+            value.insert("stage", Value::String(name.to_string().into()));
             for (name, count) in [
                 ("completed_work", stage.completed_work),
                 ("estimated_work", stage.estimated_work),
@@ -190,8 +187,8 @@ fn stages_value(evidence: &MeshingEvidence) -> BuiltinResult<Value> {
                 .invariants
                 .iter()
                 .map(|invariant| {
-                    let mut value = StructValue::new();
-                    value.insert("id", Value::String(invariant.invariant_id.clone()));
+                    let mut value = runmat_value::UnboundedStructValueBuilder::new();
+                    value.insert("id", Value::String(invariant.invariant_id.clone().into()));
                     value.insert("passed", Value::Bool(invariant.passed));
                     if let Some(measured) = invariant.measured {
                         value.insert("measured", Value::Num(measured));
@@ -200,9 +197,9 @@ fn stages_value(evidence: &MeshingEvidence) -> BuiltinResult<Value> {
                         value.insert("required", Value::Num(required));
                     }
                     if let Some(unit) = &invariant.unit {
-                        value.insert("unit", Value::String(unit.clone()));
+                        value.insert("unit", Value::String(unit.clone().into()));
                     }
-                    Value::Struct(value)
+                    Value::Struct(value.finish())
                 })
                 .collect::<Vec<_>>();
             value.insert(
@@ -210,7 +207,7 @@ fn stages_value(evidence: &MeshingEvidence) -> BuiltinResult<Value> {
                 crate::make_cell_with_shape(invariants, vec![1, stage.invariants.len()])
                     .map_err(|message| error(EVIDENCE_NAME, message))?,
             );
-            Ok(Value::Struct(value))
+            Ok(Value::Struct(value.finish()))
         })
         .collect::<BuiltinResult<Vec<_>>>()?;
     crate::make_cell_with_shape(stages, vec![1, evidence.stages.len()])
@@ -229,7 +226,7 @@ pub(super) fn payload_from_value(
         return Err(error(builtin, "expected a meshing.Mesh"));
     };
     if !object
-        .class_name
+        .class_name()
         .is(runmat_builtins::MESHING_MESH_OBJECT_CLASS)
     {
         return Err(error(builtin, format!("expected {MESH_CLASS}")));
@@ -243,7 +240,7 @@ pub(super) fn payload_from_value(
     evidence
         .validate(&artifact)
         .map_err(|cause| error(builtin, cause.to_string()))?;
-    let region_aliases = match object.properties.get(REGION_MAP_PROPERTY) {
+    let region_aliases = match object.properties().get(REGION_MAP_PROPERTY) {
         Some(Value::String(json)) => {
             serde_json::from_str(json).map_err(|cause| error(builtin, cause.to_string()))?
         }
@@ -268,7 +265,7 @@ fn bytes_property(
     property: &str,
     builtin: &'static str,
 ) -> BuiltinResult<Vec<u8>> {
-    let Some(Value::Tensor(tensor)) = object.properties.get(property) else {
+    let Some(Value::Tensor(tensor)) = object.properties().get(property) else {
         return Err(error(
             builtin,
             "meshing.Mesh is missing its canonical payload",
@@ -357,16 +354,20 @@ mod tests {
     #[test]
     fn mesh_object_rejects_corrupted_canonical_bytes() {
         let mut value = mesh_object(payload()).expect("mesh object");
-        let Value::Object(object) = &mut value else {
+        let Value::Object(object) = std::mem::replace(&mut value, Value::Num(0.0)) else {
             panic!("expected meshing.Mesh object");
         };
-        object.properties.insert(
+        let mut object = object
+            .into_unbounded_builder()
+            .expect("ordinary mesh object can enter an explicit edit");
+        object.insert(
             ARTIFACT_PROPERTY.to_string(),
             Value::Tensor(
                 Tensor::new_integer(IntegerStorage::U8(vec![0xff]), vec![1, 1])
                     .expect("invalid canonical bytes tensor"),
             ),
         );
+        value = Value::Object(object.finish());
 
         let error = payload_from_value("test", &value).expect_err("corrupt payload must fail");
         assert!(error.to_string().contains("test"));

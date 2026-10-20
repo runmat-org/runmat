@@ -94,10 +94,10 @@ async fn str2double_builtin(value: Value) -> crate::BuiltinResult<Value> {
 }
 
 fn str2double_string_array(array: StringArray) -> BuiltinResult<Value> {
-    let StringArray { data, shape, .. } = array;
+    let (data, shape, _, _) = array.into_parts();
     let mut values = Vec::with_capacity(data.len());
     for text in &data {
-        values.push(parse_numeric_scalar(text));
+        values.push(parse_numeric_scalar(text.as_str()));
     }
     let tensor =
         Tensor::new(values, shape).map_err(|_| str2double_error(&STR2DOUBLE_ERROR_INTERNAL))?;
@@ -111,7 +111,7 @@ fn str2double_char_array(array: CharArray) -> BuiltinResult<Value> {
     for row in 0..rows {
         let start = row * cols;
         let end = start + cols;
-        let row_text: String = array.data[start..end].iter().collect();
+        let row_text: String = array.data()[start..end].iter().collect();
         values.push(parse_numeric_scalar(&row_text));
     }
     let tensor = Tensor::new(values, vec![rows, 1])
@@ -120,9 +120,7 @@ fn str2double_char_array(array: CharArray) -> BuiltinResult<Value> {
 }
 
 fn str2double_cell_array(cell: CellArray) -> BuiltinResult<Value> {
-    let CellArray {
-        data, rows, cols, ..
-    } = cell;
+    let (data, _, rows, cols) = cell.into_parts();
     let mut values = Vec::with_capacity(rows * cols);
     for col in 0..cols {
         for row in 0..rows {
@@ -130,9 +128,11 @@ fn str2double_cell_array(cell: CellArray) -> BuiltinResult<Value> {
             let element: &Value = &data[idx];
             let numeric = match element {
                 Value::String(text) => parse_numeric_scalar(text),
-                Value::StringArray(sa) if sa.data.len() == 1 => parse_numeric_scalar(&sa.data[0]),
+                Value::StringArray(sa) if sa.data().len() == 1 => {
+                    parse_numeric_scalar(&sa.data()[0])
+                }
                 Value::CharArray(char_vec) if char_vec.rows == 1 => {
-                    let row_text: String = char_vec.data.iter().collect();
+                    let row_text: String = char_vec.data().iter().collect();
                     parse_numeric_scalar(&row_text)
                 }
                 Value::CharArray(_) => {

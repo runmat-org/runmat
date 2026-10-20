@@ -177,6 +177,8 @@ pub enum ShapeTransformKind {
     Dot,
     Transpose,
     Concatenate(ConcatKind),
+    BlockDiagonal,
+    RepeatElements,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -3,7 +3,7 @@ use super::{
     read_member_sequence_with_context, store_member,
 };
 use runmat_types::{ClassIdentity, MemberAccess};
-use runmat_value::{IntValue, ObjectArray, ObjectInstance, Value};
+use runmat_value::{IntValue, ObjectArray, ObjectInstance, UnboundedObjectBuilder, Value};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -29,11 +29,9 @@ fn object_array_member_access_returns_comma_separated_values_in_order() {
     let values = ["first", "second"]
         .into_iter()
         .map(|name| {
-            let mut object = ObjectInstance::new("matlab.unittest.TestResult");
-            object
-                .properties
-                .insert("Name".into(), Value::String(name.into()));
-            Value::Object(object)
+            let mut object = UnboundedObjectBuilder::new("matlab.unittest.TestResult");
+            object.insert("Name".into(), Value::String(name.into()));
+            Value::Object(object.finish())
         })
         .collect();
     let array = Value::ObjectArray(ObjectArray::row("matlab.unittest.TestResult", values).unwrap());
@@ -127,7 +125,7 @@ fn store_member_updates_inherited_static_property_owner_slot() {
     });
 
     let out = futures::executor::block_on(store_member(
-        Value::ClassRef(child_name.clone()),
+        Value::ClassRef(child_name.clone().into()),
         "version".to_string(),
         Value::Num(9.0),
         false,
@@ -135,7 +133,7 @@ fn store_member_updates_inherited_static_property_owner_slot() {
         |_old, _new| {},
     ))
     .expect("storing inherited static property via child class ref should succeed");
-    assert_eq!(out, Value::ClassRef(child_name));
+    assert_eq!(out, Value::ClassRef(child_name.into()));
     assert_eq!(
         crate::class_registry::get_static_property_value(&parent_name, "version"),
         Some(Value::Num(9.0))
@@ -270,5 +268,5 @@ fn store_member_uses_inherited_subsasgn_for_missing_property() {
     let Value::Object(obj) = &*out else {
         panic!("expected object result from inherited subsasgn");
     };
-    assert_eq!(obj.properties.get("missing"), Some(&Value::Num(13.0)));
+    assert_eq!(obj.property("missing"), Some(&Value::Num(13.0)));
 }

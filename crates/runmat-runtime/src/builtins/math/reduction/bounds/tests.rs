@@ -1,6 +1,17 @@
 use super::*;
 use runmat_value::{IntValue, IntegerStorage, Tensor};
 
+async fn evaluate_bounds(value: Value, rest: &[Value]) -> BuiltinResult<BoundsEvaluation> {
+    let rest = crate::call::BuiltinArguments::from_borrowed(rest, None)?;
+    super::evaluate_bounds(None, value, rest).await
+}
+
+async fn bounds_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let rest =
+        crate::execution::RootedValues::new(rest).map_err(|error| error.into_runtime_error())?;
+    super::bounds_builtin(None, value, rest.into()).await
+}
+
 #[tokio::test]
 async fn missing_aliases_match_nan_flags() {
     for (alias, flag) in [("omitmissing", "omitnan"), ("includemissing", "includenan")] {

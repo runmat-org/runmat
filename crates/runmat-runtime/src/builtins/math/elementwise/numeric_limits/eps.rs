@@ -19,20 +19,25 @@ mod sparse;
 )]
 pub(super) async fn eps_builtin(
     runtime: Option<RuntimeContext>,
-    arguments: Vec<Value>,
+    arguments: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         runmat_builtins::EPS_CATALOG_ENTRY.descriptor,
         &runmat_builtins::NUMERIC_LIMIT_ERROR_INVALID_SYNTAX,
         "eps",
     )?;
-    match arguments.as_slice() {
-        [Value::GpuTensor(handle)] => gpu::value(handle).await,
-        [value @ (Value::Num(_)
-        | Value::Complex(_, _)
-        | Value::Tensor(_)
-        | Value::ComplexTensor(_)
-        | Value::SparseTensor(_))] => self::value(value, runtime.as_ref()).await,
+    match (arguments.len(), arguments.first()) {
+        (1, Some(Value::GpuTensor(handle))) => gpu::value(handle).await,
+        (
+            1,
+            Some(
+                value @ (Value::Num(_)
+                | Value::Complex(_, _)
+                | Value::Tensor(_)
+                | Value::ComplexTensor(_)
+                | Value::SparseTensor(_)),
+            ),
+        ) => self::value(value, runtime.as_ref()).await,
         _ => super::execute::run(arguments, super::operation::LimitOperation::EPS),
     }
 }

@@ -110,7 +110,7 @@ impl DampingEval {
                 &DAMP_ERROR_UNSUPPORTED_MODEL,
                 format!(
                     "damp: unsupported model class '{}'; supported classes are tf and ss",
-                    object.class_name
+                    object.class_name()
                 ),
             )),
             other => Err(damp_error(
@@ -500,12 +500,11 @@ mod tests {
                         shape: &[1, 1],
                     })
                     .unwrap();
-                object
-                    .properties
-                    .insert("Denominator".into(), Value::GpuTensor(denominator));
-                object
-                    .properties
-                    .insert("Unused".into(), Value::GpuTensor(unused));
+                object.replace_property_unbounded(
+                    "Denominator".into(),
+                    Value::GpuTensor(denominator),
+                );
+                object.replace_property_unbounded("Unused".into(), Value::GpuTensor(unused));
                 provider.reset_telemetry();
 
                 let outputs = damp_outputs(Value::Object(object), 3);
@@ -544,10 +543,8 @@ mod tests {
                         shape: &[1, 1],
                     })
                     .unwrap();
-                object.properties.insert("A".into(), Value::GpuTensor(a));
-                object
-                    .properties
-                    .insert("B".into(), Value::GpuTensor(unused_b));
+                object.replace_property_unbounded("A".into(), Value::GpuTensor(a));
+                object.replace_property_unbounded("B".into(), Value::GpuTensor(unused_b));
                 provider.reset_telemetry();
 
                 let outputs = damp_outputs(Value::Object(object), 3);
@@ -569,7 +566,7 @@ mod tests {
                     shape: &[1, 1],
                 })
                 .unwrap();
-            object.properties.insert("Ts".into(), Value::GpuTensor(ts));
+            object.replace_property_unbounded("Ts".into(), Value::GpuTensor(ts));
             provider.reset_telemetry();
 
             let error = block_on(damp_builtin(Value::Object(object))).expect_err("missing A");
@@ -582,7 +579,7 @@ mod tests {
     fn damp_rejects_invalid_host_state_before_resident_sample_time_access() {
         crate::builtins::common::test_support::with_test_provider(|provider| {
             let mut object = runmat_value::ObjectInstance::new(SS_CLASS.to_string());
-            object.properties.insert(
+            object.replace_property_unbounded(
                 "A".into(),
                 Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
             );
@@ -592,7 +589,7 @@ mod tests {
                     shape: &[1, 1],
                 })
                 .unwrap();
-            object.properties.insert("Ts".into(), Value::GpuTensor(ts));
+            object.replace_property_unbounded("Ts".into(), Value::GpuTensor(ts));
             provider.reset_telemetry();
 
             let error = block_on(damp_builtin(Value::Object(object)))
@@ -629,9 +626,10 @@ mod tests {
                         shape: &[1, 2],
                     })
                     .unwrap();
-                object
-                    .properties
-                    .insert("Denominator".into(), Value::GpuTensor(denominator));
+                object.replace_property_unbounded(
+                    "Denominator".into(),
+                    Value::GpuTensor(denominator),
+                );
                 provider.reset_telemetry();
                 let _guard =
                     crate::output_count::push_output_count(Some(4)).expect("output-count scope");

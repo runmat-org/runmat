@@ -34,7 +34,7 @@ const DEFAULT_TPE: f64 = -60.;
     binding_variant = "default",
     builtin_path = "crate::builtins::math::signal::gauspuls"
 )]
-async fn gauspuls_builtin(t: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn gauspuls_builtin(t: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     if let Some(mode) = parameters::text_scalar(&t) {
         return execution::gauspuls_mode(mode, rest).await;
     }
@@ -45,8 +45,8 @@ async fn gauspuls_builtin(t: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         ));
     }
     admission::ensure_gauspuls_time_extensions(&t)?;
-    admission::ensure_gauspuls_control_extensions(&rest)?;
-    let params = parameters::parse_params(&rest).await?;
+    admission::ensure_gauspuls_control_extensions(rest.view())?;
+    let params = parameters::parse_params(rest.view()).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         return execution::gauspuls_with_output_count(t, params, out_count).await;
     }

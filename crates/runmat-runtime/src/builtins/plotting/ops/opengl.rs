@@ -5,7 +5,7 @@ use runmat_builtins::{
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{StructValue, Value};
+use runmat_value::Value;
 
 use crate::builtins::plotting::type_resolvers::get_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -154,7 +154,7 @@ fn status_for_command(command: &str) -> &'static str {
 }
 
 fn renderer_info() -> Value {
-    let mut st = StructValue::new();
+    let mut st = runmat_value::UnboundedStructValueBuilder::new();
     st.insert(
         "Version",
         Value::String("RunMat renderer compatibility".into()),
@@ -167,8 +167,8 @@ fn renderer_info() -> Value {
     st.insert("SupportsAlignVertexCenters", Value::Bool(true));
     st.insert("Software", Value::Bool(false));
     st.insert("MaxTextureSize", Value::Num(16384.0));
-    st.insert("Extensions", Value::String(String::new()));
-    Value::Struct(st)
+    st.insert("Extensions", Value::string(String::new()));
+    Value::Struct(st.finish())
 }
 
 #[cfg(test)]

@@ -1,5 +1,6 @@
 use super::tape::{NodeValue, Tape, TapeActivation, TapeFuture, TapePollAuthority};
 use super::*;
+use crate::builtins::deep_learning::arguments::DeepLearningObjectEdit as _;
 use runmat_value::{IntValue, IntegerStorage, LogicalArray, StructArray};
 use std::collections::HashMap;
 
@@ -113,7 +114,7 @@ fn traced_node_ids_are_exact_and_belong_only_to_the_active_tape() {
         panic!("dlarray")
     };
     assert_eq!(
-        object.properties.get(AD_NODE_PROPERTY),
+        object.properties().get(AD_NODE_PROPERTY),
         Some(&Value::Int(IntValue::U64(0)))
     );
     {
@@ -131,7 +132,9 @@ fn traced_node_ids_are_exact_and_belong_only_to_the_active_tape() {
         let Value::Object(object) = &mut forged else {
             panic!("dlarray")
         };
-        object.properties.insert(AD_NODE_PROPERTY.into(), id);
+        object
+            .replace_dl_property(AD_NODE_PROPERTY, id)
+            .expect("fixture property");
         assert_eq!(dlarray_node_id(&forged), None);
     }
 }
@@ -148,27 +151,31 @@ fn tape_identity_requires_original_dense_storage_class_and_shape() {
     let Value::Object(object) = &mut reshaped else {
         unreachable!()
     };
-    object.properties.insert(
-        "Data".into(),
-        Value::Tensor(tensor.clone().reshape(vec![1, 2]).unwrap()),
-    );
+    object
+        .replace_dl_property(
+            "Data",
+            Value::Tensor(tensor.clone().reshape(vec![1, 2]).unwrap()),
+        )
+        .expect("fixture property");
     assert_eq!(dlarray_node_id(&reshaped), None);
 
     let mut replaced = traced.clone();
     let Value::Object(object) = &mut replaced else {
         unreachable!()
     };
-    object.properties.insert(
-        "Data".into(),
-        Value::Tensor(Tensor::from_f32(vec![1.0, 2.0], vec![2, 1]).unwrap()),
-    );
+    object
+        .replace_dl_property(
+            "Data",
+            Value::Tensor(Tensor::from_f32(vec![1.0, 2.0], vec![2, 1]).unwrap()),
+        )
+        .expect("fixture property");
     assert_eq!(dlarray_node_id(&replaced), None);
 
     let mut changed = traced.clone();
     let Value::Object(object) = &mut changed else {
         unreachable!()
     };
-    let Some(Value::Tensor(current)) = object.properties.get_mut("Data") else {
+    let Some(Value::Tensor(current)) = object.fixture_dl_property_mut("Data") else {
         unreachable!()
     };
     current
@@ -192,15 +199,21 @@ fn low_rank_tape_gradient_preserves_source_shape_dtype_and_values() {
         )))
         .expect("traced low-rank input");
         let squared = dlarray_times_builtin(input.clone(), input.clone()).expect("square input");
-        let loss =
-            dlarray_sum_builtin(squared, vec![Value::String("all".into())]).expect("scalar loss");
-        let Value::Object(gradient) =
-            futures::executor::block_on(dlgradient_direct(loss, vec![input]))
-                .expect("low-rank gradient")
-        else {
+        let loss = dlarray_sum_builtin(
+            squared,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "all".into(),
+            )]),
+        )
+        .expect("scalar loss");
+        let Value::Object(gradient) = futures::executor::block_on(dlgradient_direct(
+            loss,
+            crate::builtins::common::test_support::builtin_arguments(vec![input]),
+        ))
+        .expect("low-rank gradient") else {
             panic!("expected gradient dlarray");
         };
-        let Some(Value::Tensor(data)) = gradient.properties.get("Data") else {
+        let Some(Value::Tensor(data)) = gradient.properties().get("Data") else {
             panic!("expected gradient tensor");
         };
         assert_eq!(data.shape(), shape.as_slice());
@@ -219,7 +232,9 @@ fn scalar_and_logical_tape_sources_preserve_exact_provenance_without_payload_sca
     let Value::Object(object) = &mut positive_zero else {
         unreachable!()
     };
-    object.properties.insert("Data".into(), Value::Num(0.0));
+    object
+        .replace_dl_property("Data", Value::Num(0.0))
+        .expect("fixture property");
     assert_eq!(dlarray_node_id(&positive_zero), None);
 
     let nan = f64::from_bits(0x7ff8_0000_0000_0042);
@@ -229,10 +244,9 @@ fn scalar_and_logical_tape_sources_preserve_exact_provenance_without_payload_sca
     let Value::Object(object) = &mut other_nan else {
         unreachable!()
     };
-    object.properties.insert(
-        "Data".into(),
-        Value::Num(f64::from_bits(0x7ff8_0000_0000_0043)),
-    );
+    object
+        .replace_dl_property("Data", Value::Num(f64::from_bits(0x7ff8_0000_0000_0043)))
+        .expect("fixture property");
     assert_eq!(dlarray_node_id(&other_nan), None);
 
     let logical = LogicalArray::new(vec![1, 0], vec![2, 1]).unwrap();
@@ -243,15 +257,17 @@ fn scalar_and_logical_tape_sources_preserve_exact_provenance_without_payload_sca
     let Value::Object(object) = &mut changed_logical else {
         unreachable!()
     };
-    object.properties.insert(
-        "Data".into(),
-        Value::LogicalArray(LogicalArray::new(vec![1, 0], vec![2, 1]).unwrap()),
-    );
+    object
+        .replace_dl_property(
+            "Data",
+            Value::LogicalArray(LogicalArray::new(vec![1, 0], vec![2, 1]).unwrap()),
+        )
+        .expect("fixture property");
     assert_eq!(dlarray_node_id(&changed_logical), None);
     let Value::Object(object) = &traced_logical else {
         unreachable!()
     };
-    let Some(Value::LogicalArray(source)) = object.properties.get("Data") else {
+    let Some(Value::LogicalArray(source)) = object.properties().get("Data") else {
         unreachable!()
     };
     assert!(source.data.shares_allocation_with(&logical.data));
@@ -266,7 +282,9 @@ fn arithmetic_detaches_an_edited_data_tag_until_explicit_reannotation() {
     let Value::Object(object) = &mut stale else {
         unreachable!()
     };
-    object.properties.insert("Data".into(), Value::Num(3.0));
+    object
+        .replace_dl_property("Data", Value::Num(3.0))
+        .expect("fixture property");
     assert_eq!(dlarray_node_id(&stale), None);
     let detached = dlarray_plus_builtin(stale.clone(), dlarray(4.0)).unwrap();
     assert_eq!(dlarray_node_id(&detached), None);
@@ -278,7 +296,9 @@ fn arithmetic_detaches_an_edited_data_tag_until_explicit_reannotation() {
 
 fn wrapped(data: Value) -> Value {
     let mut object = ObjectInstance::new(DLARRAY_CLASS.to_string());
-    object.properties.insert("Data".into(), data);
+    object
+        .replace_dl_property("Data", data)
+        .expect("fixture property");
     Value::Object(object)
 }
 
@@ -287,9 +307,9 @@ fn dlarray(value: f64) -> Value {
 }
 
 fn element(value: f64) -> StructValue {
-    let mut structure = StructValue::new();
+    let mut structure = runmat_value::UnboundedStructValueBuilder::new();
     structure.insert("payload", dlarray(value));
-    structure
+    structure.finish()
 }
 
 #[test]
@@ -297,7 +317,22 @@ fn annotation_and_gradient_preserve_typed_struct_array_shape_and_schema() {
     let _activation = TapeActivation::enter(Rc::new(RefCell::new(Tape::new())));
     let input =
         Value::StructArray(StructArray::new(vec![element(1.0), element(2.0)], vec![2, 1]).unwrap());
+    let alias = input.clone();
     let annotated = annotate_tree(input).expect("annotate structure array");
+    let (Value::StructArray(original), Value::StructArray(updated)) = (&alias, &annotated) else {
+        panic!("typed structure arrays")
+    };
+    assert_eq!(original.shape(), updated.shape());
+    assert_ne!(
+        original.field_values("payload").unwrap().as_ptr(),
+        updated.field_values("payload").unwrap().as_ptr()
+    );
+    for value in original.field_values("payload").unwrap() {
+        assert_eq!(dlarray_node_id(value), None);
+    }
+    for value in updated.field_values("payload").unwrap() {
+        assert!(dlarray_node_id(value).is_some());
+    }
     let gradient = super::gradient::gradient_tree_for_target(&annotated, &HashMap::new())
         .expect("gradient structure array");
 
@@ -305,22 +340,50 @@ fn annotation_and_gradient_preserve_typed_struct_array_shape_and_schema() {
         panic!("expected typed structure array");
     };
     assert_eq!(gradient.shape(), &[2, 1]);
-    assert_eq!(
-        gradient
-            .field_names()
-            .map(String::as_str)
-            .collect::<Vec<_>>(),
-        ["payload"]
-    );
+    assert_eq!(gradient.field_names().collect::<Vec<_>>(), ["payload"]);
     for value in gradient.field_values("payload").unwrap() {
         let Value::Object(object) = value else {
             panic!("expected gradient dlarray");
         };
-        let Value::Tensor(data) = object.properties.get("Data").unwrap() else {
+        let Value::Tensor(data) = object.properties().get("Data").unwrap() else {
             panic!("expected gradient tensor");
         };
         assert_eq!(data.materialize_f64(), [0.0]);
     }
+}
+
+#[test]
+fn cell_annotation_reuses_unique_backing_and_keeps_shared_inert_aliases() {
+    let _activation = TapeActivation::enter(Rc::new(RefCell::new(Tape::new())));
+    let input = CellArray::new_with_shape(vec![Value::Num(9.0), dlarray(2.0)], vec![1, 2, 1])
+        .expect("cell input");
+    let original = input.data().as_ptr();
+    let Value::Cell(annotated) = annotate_tree(Value::Cell(input)).expect("annotated cell") else {
+        panic!("expected cell");
+    };
+    assert_eq!(annotated.data().as_ptr(), original);
+    assert_eq!(annotated.shape(), &[1, 2, 1]);
+    assert_eq!(dlarray_node_id(&annotated.data()[1]), Some(0));
+
+    let inert = CellArray::new(vec![Value::Num(3.0)], 1, 1).expect("inert cell");
+    let alias = inert.clone();
+    let pointer = inert.data().as_ptr();
+    let Value::Cell(unchanged) = annotate_tree(Value::Cell(inert)).expect("inert alias") else {
+        panic!("expected cell");
+    };
+    assert_eq!(unchanged.data().as_ptr(), pointer);
+    assert_eq!(alias.data().as_ptr(), pointer);
+
+    let shared = CellArray::new(vec![dlarray(4.0)], 1, 1).expect("shared active Cell");
+    let original = shared.clone();
+    let Value::Cell(updated) =
+        annotate_tree(Value::Cell(shared)).expect("shared annotation destination")
+    else {
+        panic!("Cell destination")
+    };
+    assert_ne!(original.data().as_ptr(), updated.data().as_ptr());
+    assert_eq!(dlarray_node_id(&original.data()[0]), None);
+    assert!(dlarray_node_id(&updated.data()[0]).is_some());
 }
 
 #[test]
@@ -339,7 +402,7 @@ fn repeated_target_gradients_share_cached_copy_on_write_allocation() {
         let Value::Object(object) = value else {
             panic!("gradient object")
         };
-        let Some(Value::Tensor(data)) = object.properties.get("Data") else {
+        let Some(Value::Tensor(data)) = object.properties().get("Data") else {
             panic!("gradient Data")
         };
         data
@@ -363,7 +426,7 @@ fn dlarray_constructor_records_host_and_resident_tape_sources_without_gather() {
         let _activation = TapeActivation::enter(tape.clone());
         let host = futures::executor::block_on(super::super::training::dlarray_builtin(
             Value::Num(2.0),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .expect("host dlarray is tape-tracked");
         assert!(matches!(host, Value::Object(_)));
@@ -372,14 +435,14 @@ fn dlarray_constructor_records_host_and_resident_tape_sources_without_gather() {
         provider.reset_telemetry();
         let traced = futures::executor::block_on(super::super::training::dlarray_builtin(
             Value::GpuTensor(resident.clone()),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .expect("resident dlarray is tape-tracked");
         assert_eq!(dlarray_node_id(&traced), Some(1));
         let Value::Object(object) = &traced else {
             panic!("resident dlarray object");
         };
-        let Some(Value::GpuTensor(data)) = object.properties.get("Data") else {
+        let Some(Value::GpuTensor(data)) = object.properties().get("Data") else {
             panic!("resident Data");
         };
         assert_eq!(data.view_identity(), resident.view_identity());
@@ -415,7 +478,7 @@ fn dlarray_constructor_rejects_complex_resident_tape_source_before_publication()
         provider.reset_telemetry();
         let error = futures::executor::block_on(super::super::training::dlarray_builtin(
             Value::GpuTensor(complex.clone()),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .expect_err("complex resident tape source must be rejected");
         assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
@@ -438,7 +501,7 @@ fn single_matrix_product_retains_owning_input_precision() {
     let Value::Object(result) = result else {
         panic!("dlarray result")
     };
-    let Value::Tensor(data) = result.properties.get("Data").unwrap() else {
+    let Value::Tensor(data) = result.properties().get("Data").unwrap() else {
         panic!("tensor result")
     };
     assert_eq!(data.shape(), &[2, 2]);
@@ -451,16 +514,18 @@ fn single_matrix_product_retains_owning_input_precision() {
 #[test]
 fn mixed_floating_arithmetic_is_symmetric_and_keeps_dlarray_metadata() {
     let mut single = ObjectInstance::new(DLARRAY_CLASS.to_string());
-    single.properties.insert(
-        "Data".into(),
-        Value::Tensor(Tensor::from_f32(vec![1.0, 2.0], vec![1, 2]).unwrap()),
-    );
     single
-        .properties
-        .insert("Format".into(), Value::String("CB".into()));
+        .replace_dl_property(
+            "Data",
+            Value::Tensor(Tensor::from_f32(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+        )
+        .expect("fixture property");
     single
-        .properties
-        .insert("Labels".into(), Value::String("CB".into()));
+        .replace_dl_property("Format", Value::String("CB".into()))
+        .expect("fixture property");
+    single
+        .replace_dl_property("Labels", Value::String("CB".into()))
+        .expect("fixture property");
     let single = Value::Object(single);
     for output in [
         dlarray_plus_builtin(single.clone(), Value::Num(2.0)),
@@ -474,14 +539,14 @@ fn mixed_floating_arithmetic_is_symmetric_and_keeps_dlarray_metadata() {
             panic!("dlarray output")
         };
         assert_eq!(
-            output.properties.get("Format"),
+            output.properties().get("Format"),
             Some(&Value::String("CB".into()))
         );
         assert_eq!(
-            output.properties.get("Labels"),
+            output.properties().get("Labels"),
             Some(&Value::String("CB".into()))
         );
-        let Some(Value::Tensor(data)) = output.properties.get("Data") else {
+        let Some(Value::Tensor(data)) = output.properties().get("Data") else {
             panic!("dlarray data")
         };
         assert_eq!(data.numeric_dtype(), NumericDType::F32);
@@ -497,7 +562,7 @@ fn mixed_floating_arithmetic_is_symmetric_and_keeps_dlarray_metadata() {
         let Value::Object(output) = output.expect("mixed arrays") else {
             panic!("dlarray output")
         };
-        let Some(Value::Tensor(data)) = output.properties.get("Data") else {
+        let Some(Value::Tensor(data)) = output.properties().get("Data") else {
             panic!("dlarray data")
         };
         assert_eq!(data.numeric_dtype(), NumericDType::F32);
@@ -510,15 +575,19 @@ fn logical_dlarray_math_uses_explicit_double_boundary() {
     let Value::Object(added) = dlarray_plus_builtin(input.clone(), Value::Num(2.0)).unwrap() else {
         panic!("dlarray output")
     };
-    let Some(Value::Tensor(data)) = added.properties.get("Data") else {
+    let Some(Value::Tensor(data)) = added.properties().get("Data") else {
         panic!("numeric data")
     };
     assert_eq!(data.numeric_dtype(), NumericDType::F64);
     assert_eq!(data.materialize_f64(), [3.0]);
-    let Value::Object(summed) = dlarray_sum_builtin(input, vec![]).unwrap() else {
+    let Value::Object(summed) = dlarray_sum_builtin(
+        input,
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    )
+    .unwrap() else {
         panic!("dlarray output")
     };
-    let Some(Value::Tensor(data)) = summed.properties.get("Data") else {
+    let Some(Value::Tensor(data)) = summed.properties().get("Data") else {
         panic!("numeric data")
     };
     assert_eq!(data.numeric_dtype(), NumericDType::F64);
@@ -539,7 +608,10 @@ fn method_output_arity_preflights_before_resident_operand_access() {
         for result in [
             dlarray_plus_builtin(wrapped(Value::GpuTensor(resident.clone())), Value::Num(1.0)),
             dlarray_mtimes_builtin(wrapped(Value::GpuTensor(resident.clone())), Value::Num(1.0)),
-            dlarray_sum_builtin(wrapped(Value::GpuTensor(resident)), vec![]),
+            dlarray_sum_builtin(
+                wrapped(Value::GpuTensor(resident)),
+                crate::builtins::common::test_support::builtin_arguments(vec![]),
+            ),
         ] {
             let error = result.expect_err("one-output method");
             assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
@@ -556,13 +628,19 @@ fn repeated_single_target_gradients_accumulate_without_class_mismatch() {
     )))
     .unwrap();
     let product = dlarray_times_builtin(input.clone(), input.clone()).unwrap();
-    let loss = dlarray_sum_builtin(product, vec![Value::String("all".into())]).unwrap();
-    let Value::Object(gradient) = futures::executor::block_on(dlgradient_direct(loss, vec![input]))
-        .expect("repeated single gradient")
-    else {
+    let loss = dlarray_sum_builtin(
+        product,
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::String("all".into())]),
+    )
+    .unwrap();
+    let Value::Object(gradient) = futures::executor::block_on(dlgradient_direct(
+        loss,
+        crate::builtins::common::test_support::builtin_arguments(vec![input]),
+    ))
+    .expect("repeated single gradient") else {
         panic!("dlarray gradient")
     };
-    let Some(Value::Tensor(data)) = gradient.properties.get("Data") else {
+    let Some(Value::Tensor(data)) = gradient.properties().get("Data") else {
         panic!("gradient Data")
     };
     assert_eq!(data.numeric_dtype(), NumericDType::F32);
@@ -582,13 +660,19 @@ fn sum_all_accepts_character_and_string_text_with_typed_gradients() {
         )))
         .unwrap();
         let squared = dlarray_times_builtin(input.clone(), input.clone()).unwrap();
-        let loss = dlarray_sum_builtin(squared, vec![option]).unwrap();
-        let Value::Object(gradient) =
-            futures::executor::block_on(dlgradient_direct(loss, vec![input])).unwrap()
-        else {
+        let loss = dlarray_sum_builtin(
+            squared,
+            crate::builtins::common::test_support::builtin_arguments(vec![option]),
+        )
+        .unwrap();
+        let Value::Object(gradient) = futures::executor::block_on(dlgradient_direct(
+            loss,
+            crate::builtins::common::test_support::builtin_arguments(vec![input]),
+        ))
+        .unwrap() else {
             panic!("dlarray gradient")
         };
-        let Some(Value::Tensor(data)) = gradient.properties.get("Data") else {
+        let Some(Value::Tensor(data)) = gradient.properties().get("Data") else {
             panic!("gradient Data")
         };
         assert_eq!(data.numeric_dtype(), NumericDType::F32);
@@ -600,23 +684,25 @@ fn sum_all_accepts_character_and_string_text_with_typed_gradients() {
 #[test]
 fn matrix_method_supports_scalar_multiplication_but_rejects_nd_matrices() {
     let mut right = ObjectInstance::new(DLARRAY_CLASS.to_string());
-    right.properties.insert(
-        "Data".into(),
-        Value::Tensor(Tensor::from_f32(vec![1.0, 2.0], vec![1, 2]).unwrap()),
-    );
     right
-        .properties
-        .insert("Format".into(), Value::String("CB".into()));
+        .replace_dl_property(
+            "Data",
+            Value::Tensor(Tensor::from_f32(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+        )
+        .expect("fixture property");
+    right
+        .replace_dl_property("Format", Value::String("CB".into()))
+        .expect("fixture property");
     let Value::Object(result) =
         dlarray_mtimes_builtin(Value::Num(3.0), Value::Object(right)).unwrap()
     else {
         panic!("dlarray result")
     };
     assert_eq!(
-        result.properties.get("Format"),
+        result.properties().get("Format"),
         Some(&Value::String("CB".into()))
     );
-    let Some(Value::Tensor(data)) = result.properties.get("Data") else {
+    let Some(Value::Tensor(data)) = result.properties().get("Data") else {
         panic!("result Data")
     };
     assert_eq!(data.numeric_dtype(), NumericDType::F32);
@@ -661,7 +747,12 @@ fn arithmetic_rejects_mutated_native_integer_data_without_rounding() {
     for result in [
         dlarray_plus_builtin(integer_data.clone(), dlarray(1.0)),
         dlarray_mtimes_builtin(integer_data.clone(), dlarray(1.0)),
-        dlarray_sum_builtin(integer_data, vec![Value::String("all".into())]),
+        dlarray_sum_builtin(
+            integer_data,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "all".into(),
+            )]),
+        ),
         dlarray_times_builtin(wrapped(Value::Int(IntValue::U64(large))), dlarray(1.0)),
     ] {
         let error = result.expect_err("integer payload must not widen to double");
@@ -681,8 +772,11 @@ fn gradient_output_arity_rejects_before_nested_provider_access() {
         let nested = Value::Cell(CellArray::new(vec![Value::GpuTensor(resident)], 1, 1).unwrap());
         provider.reset_telemetry();
         let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
-        let error = futures::executor::block_on(dlgradient_direct(dlarray(1.0), vec![nested]))
-            .expect_err("one target cannot provide two outputs");
+        let error = futures::executor::block_on(dlgradient_direct(
+            dlarray(1.0),
+            crate::builtins::common::test_support::builtin_arguments(vec![nested]),
+        ))
+        .expect_err("one target cannot provide two outputs");
         assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
     });
@@ -693,8 +787,11 @@ fn gradient_does_not_turn_an_untraced_loss_into_a_new_leaf() {
     let tape = Rc::new(RefCell::new(Tape::new()));
     let _activation = TapeActivation::enter(tape.clone());
     let target = annotate_dlarray_value(dlarray(2.0)).expect("traced target");
-    let error = futures::executor::block_on(dlgradient_direct(dlarray(3.0), vec![target]))
-        .expect_err("loss must be produced on tape");
+    let error = futures::executor::block_on(dlgradient_direct(
+        dlarray(3.0),
+        crate::builtins::common::test_support::builtin_arguments(vec![target]),
+    ))
+    .expect_err("loss must be produced on tape");
     assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
     assert_eq!(tape.borrow().nodes.len(), 1);
 }
@@ -712,8 +809,11 @@ fn gradient_nested_resident_target_rejects_without_gather() {
         let loss = annotate_dlarray_value(dlarray(1.0)).expect("traced loss");
         let nested = Value::Cell(CellArray::new(vec![Value::GpuTensor(resident)], 1, 1).unwrap());
         provider.reset_telemetry();
-        let error = futures::executor::block_on(dlgradient_direct(loss, vec![nested]))
-            .expect_err("untraced resident target");
+        let error = futures::executor::block_on(dlgradient_direct(
+            loss,
+            crate::builtins::common::test_support::builtin_arguments(vec![nested]),
+        ))
+        .expect_err("untraced resident target");
         assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
     });
@@ -736,8 +836,8 @@ fn gradient_rejects_traced_values_mutated_to_resident_data_without_gather() {
             panic!("dlarray target")
         };
         object
-            .properties
-            .insert("Data".into(), Value::GpuTensor(resident.clone()));
+            .replace_dl_property("Data", Value::GpuTensor(resident.clone()))
+            .expect("fixture property");
 
         let mut computed = HashMap::new();
         computed.insert(target_id, Tensor::new(vec![1.0], vec![1, 1]).unwrap());
@@ -750,8 +850,8 @@ fn gradient_rejects_traced_values_mutated_to_resident_data_without_gather() {
             panic!("dlarray target")
         };
         object
-            .properties
-            .insert("Data".into(), Value::String("invalid".into()));
+            .replace_dl_property("Data", Value::String("invalid".into()))
+            .expect("fixture property");
         let error = super::gradient::gradient_tree_for_target(&target, &computed)
             .expect_err("a cached gradient cannot bypass invalid Data rejection");
         assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
@@ -761,10 +861,13 @@ fn gradient_rejects_traced_values_mutated_to_resident_data_without_gather() {
             panic!("dlarray loss")
         };
         object
-            .properties
-            .insert("Data".into(), Value::GpuTensor(resident));
-        let error = futures::executor::block_on(dlgradient_direct(resident_loss, vec![target]))
-            .expect_err("a traced loss cannot bypass edited Data provenance");
+            .replace_dl_property("Data", Value::GpuTensor(resident))
+            .expect("fixture property");
+        let error = futures::executor::block_on(dlgradient_direct(
+            resident_loss,
+            crate::builtins::common::test_support::builtin_arguments(vec![target]),
+        ))
+        .expect_err("a traced loss cannot bypass edited Data provenance");
         assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
     });

@@ -9,7 +9,7 @@ use crate::BuiltinResult;
     binding_variant = "default",
     builtin_path = "crate::builtins::math::bitwise::binary::bitxor"
 )]
-pub(crate) async fn bitxor_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(crate) async fn bitxor_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &runmat_builtins::BITXOR_DESCRIPTOR,
         &runmat_builtins::BITWISE_ERROR_INVALID_INPUT,

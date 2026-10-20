@@ -216,7 +216,11 @@ fn two_state_real_and_complex_single_products_keep_order_and_class() {
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn statement_form_still_validates_arguments() {
     let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
-    let error = block_on(ctrb_builtin(None, Value::Num(1.0), Vec::new()))
-        .expect_err("missing B must fail even when no result is requested");
+    let error = block_on(ctrb_builtin(
+        None,
+        Value::Num(1.0),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect_err("missing B must fail even when no result is requested");
     assert_eq!(error.identifier(), Some("RunMat:ctrb:InvalidArgument"));
 }

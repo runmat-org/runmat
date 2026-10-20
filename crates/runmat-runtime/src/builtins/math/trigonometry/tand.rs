@@ -116,8 +116,7 @@ async fn tand_builtin(value: Value) -> BuiltinResult<Value> {
 
 fn tand_char_array(array: CharArray) -> BuiltinResult<Value> {
     let data = array
-        .data
-        .into_iter()
+        .iter_column_major()
         .map(|value| tand_scalar(f64::from(u32::from(value))))
         .collect();
     let tensor = Tensor::new(data, array.shape)

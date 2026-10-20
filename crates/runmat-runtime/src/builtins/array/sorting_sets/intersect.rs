@@ -19,7 +19,7 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericDType,
-    NumericStorage, StringArray, Tensor, Value,
+    NumericStorage, StringArray, Tensor, Utf8Text, Value,
 };
 
 use super::{
@@ -540,19 +540,19 @@ fn intersect_host(
             intersect_string(astring, bstring, opts)
         }
         (Value::StringArray(astring), Value::String(b)) => {
-            let bstring = StringArray::new(vec![b], vec![1, 1])
+            let bstring = StringArray::from_texts_unbounded(vec![b], vec![1, 1])
                 .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
             intersect_string(astring, bstring, opts)
         }
         (Value::String(a), Value::StringArray(bstring)) => {
-            let astring = StringArray::new(vec![a], vec![1, 1])
+            let astring = StringArray::from_texts_unbounded(vec![a], vec![1, 1])
                 .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
             intersect_string(astring, bstring, opts)
         }
         (Value::String(a), Value::String(b)) => {
-            let astring = StringArray::new(vec![a], vec![1, 1])
+            let astring = StringArray::from_texts_unbounded(vec![a], vec![1, 1])
                 .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
-            let bstring = StringArray::new(vec![b], vec![1, 1])
+            let bstring = StringArray::from_texts_unbounded(vec![b], vec![1, 1])
                 .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
             intersect_string(astring, bstring, opts)
         }
@@ -1014,7 +1014,7 @@ fn intersect_char_elements(
         for row in 0..a.rows {
             let linear_idx = row + col * a.rows;
             let data_idx = row * a.cols + col;
-            let ch = a.data[data_idx];
+            let ch = a.data()[data_idx];
             let key = ch as u32;
             if seen.contains(&key) {
                 continue;
@@ -1052,7 +1052,7 @@ fn intersect_char_rows(
         let mut row_values = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r * cols + c;
-            row_values.push(b.data[idx]);
+            row_values.push(b.data()[idx]);
         }
         let key = RowCharKey::from_slice(&row_values);
         b_map.entry(key).or_insert(r);
@@ -1066,7 +1066,7 @@ fn intersect_char_rows(
         let mut row_values = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r * cols + c;
-            row_values.push(a.data[idx]);
+            row_values.push(a.data()[idx]);
         }
         let key = RowCharKey::from_slice(&row_values);
         if seen.contains(&key) {
@@ -1091,7 +1091,7 @@ fn find_char_index(array: &CharArray, target: char) -> Option<usize> {
     for col in 0..array.cols {
         for row in 0..array.rows {
             let data_idx = row * array.cols + col;
-            if array.data[data_idx] == target {
+            if array.data()[data_idx] == target {
                 return Some(row + col * array.rows);
             }
         }
@@ -1116,27 +1116,27 @@ fn intersect_string_elements(
     b: StringArray,
     opts: &IntersectOptions,
 ) -> crate::BuiltinResult<IntersectEvaluation> {
-    let mut b_map: HashMap<String, usize> = HashMap::new();
-    for (idx, value) in b.data.iter().enumerate() {
-        b_map.entry(value.clone()).or_insert(idx);
+    let mut b_map: HashMap<&str, usize> = HashMap::new();
+    for (idx, value) in b.data().iter().enumerate() {
+        b_map.entry(value.as_str()).or_insert(idx);
     }
 
-    let mut seen: HashSet<String> = HashSet::new();
+    let mut seen: HashSet<&str> = HashSet::new();
     let mut entries = Vec::<StringIntersectEntry>::new();
     let mut order_counter = 0usize;
 
-    for (idx, value) in a.data.iter().enumerate() {
-        if seen.contains(value) {
+    for (idx, value) in a.data().iter().enumerate() {
+        if seen.contains(value.as_str()) {
             continue;
         }
-        if let Some(&b_idx) = b_map.get(value) {
+        if let Some(&b_idx) = b_map.get(value.as_str()) {
             entries.push(StringIntersectEntry {
-                value: value.clone(),
+                value,
                 a_index: idx,
                 b_index: b_idx,
                 order_rank: order_counter,
             });
-            seen.insert(value.clone());
+            seen.insert(value.as_str());
             order_counter += 1;
         }
     }
@@ -1166,7 +1166,7 @@ fn intersect_string_rows(
         let mut row_values = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows_b;
-            row_values.push(b.data[idx].clone());
+            row_values.push(&b.data()[idx]);
         }
         let key = RowStringKey::from_slice(&row_values);
         b_map.entry(key).or_insert(r);
@@ -1180,7 +1180,7 @@ fn intersect_string_rows(
         let mut row_values = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows_a;
-            row_values.push(a.data[idx].clone());
+            row_values.push(&a.data()[idx]);
         }
         let key = RowStringKey::from_slice(&row_values);
         if seen.contains(&key) {
@@ -1306,16 +1306,16 @@ struct CharRowIntersectEntry {
 }
 
 #[derive(Debug)]
-struct StringIntersectEntry {
-    value: String,
+struct StringIntersectEntry<'a> {
+    value: &'a Utf8Text,
     a_index: usize,
     b_index: usize,
     order_rank: usize,
 }
 
 #[derive(Debug)]
-struct StringRowIntersectEntry {
-    row_data: Vec<String>,
+struct StringRowIntersectEntry<'a> {
+    row_data: Vec<&'a Utf8Text>,
     a_row: usize,
     b_row: usize,
     order_rank: usize,
@@ -1674,7 +1674,7 @@ fn assemble_string_intersect(
     let mut order: Vec<usize> = (0..entries.len()).collect();
     match opts.order {
         IntersectOrder::Sorted => {
-            order.sort_by(|&lhs, &rhs| entries[lhs].value.cmp(&entries[rhs].value));
+            order.sort_by(|&lhs, &rhs| entries[lhs].value.cmp(entries[rhs].value));
         }
         IntersectOrder::Stable => {
             order.sort_by_key(|&idx| entries[idx].order_rank);
@@ -1691,7 +1691,7 @@ fn assemble_string_intersect(
         ib.push((entry.b_index + 1) as f64);
     }
 
-    let value_array = StringArray::new(values, vec![order.len(), 1])
+    let value_array = StringArray::from_texts_unbounded(values, vec![order.len(), 1])
         .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
     let ia_tensor = Tensor::new(ia, vec![order.len(), 1])
         .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
@@ -1723,7 +1723,7 @@ fn assemble_string_row_intersect(
     }
 
     let rows_out = order.len();
-    let mut values = vec![String::new(); rows_out * cols];
+    let mut values = vec![Utf8Text::default(); rows_out * cols];
     let mut ia = Vec::with_capacity(rows_out);
     let mut ib = Vec::with_capacity(rows_out);
 
@@ -1737,7 +1737,7 @@ fn assemble_string_row_intersect(
         ib.push((entry.b_row + 1) as f64);
     }
 
-    let value_array = StringArray::new(values, vec![rows_out, cols])
+    let value_array = StringArray::from_texts_unbounded(values, vec![rows_out, cols])
         .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
     let ia_tensor = Tensor::new(ia, vec![rows_out, 1])
         .map_err(|e| intersect_internal_error(format!("intersect: {e}")))?;
@@ -1785,10 +1785,10 @@ impl RowCharKey {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct RowStringKey(Vec<String>);
+struct RowStringKey<'a>(Vec<&'a Utf8Text>);
 
-impl RowStringKey {
-    fn from_slice(values: &[String]) -> Self {
+impl<'a> RowStringKey<'a> {
+    fn from_slice(values: &[&'a Utf8Text]) -> Self {
         RowStringKey(values.to_vec())
     }
 }
@@ -1877,7 +1877,7 @@ fn compare_char_rows(a: &[char], b: &[char]) -> Ordering {
     Ordering::Equal
 }
 
-fn compare_string_rows(a: &[String], b: &[String]) -> Ordering {
+fn compare_string_rows(a: &[&Utf8Text], b: &[&Utf8Text]) -> Ordering {
     for (lhs, rhs) in a.iter().zip(b.iter()) {
         let ord = lhs.cmp(rhs);
         if ord != Ordering::Equal {
@@ -2273,7 +2273,7 @@ pub(crate) mod tests {
             Value::CharArray(arr) => {
                 assert_eq!(arr.rows, 2);
                 assert_eq!(arr.cols, 1);
-                assert_eq!(arr.data, vec!['b', 'c']);
+                assert_eq!(arr.data(), vec!['b', 'c']);
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -2308,7 +2308,7 @@ pub(crate) mod tests {
         match eval.values_value() {
             Value::StringArray(arr) => {
                 assert_eq!(arr.shape, vec![2, 1]);
-                assert_eq!(arr.data, vec!["orange".to_string(), "pear".to_string()]);
+                assert_eq!(arr.data(), vec!["orange".to_string(), "pear".to_string()]);
             }
             other => panic!("expected string array, got {other:?}"),
         }

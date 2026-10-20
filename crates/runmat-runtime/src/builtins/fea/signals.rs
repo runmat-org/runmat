@@ -18,8 +18,8 @@ use runmat_analysis_core::{
     SignalRepresentation, SignalShape, SignalValue, TabulatedSignal, TabulatedSignalDomain,
     Traction, VolumeFlowRate,
 };
-use runmat_execution::value::{CallableOwner, CallableValue};
 use runmat_builtins::fea_contract::policy_types::classes;
+use runmat_execution::value::{CallableOwner, CallableValue};
 use runmat_types::{MemberAccess, MemberName};
 
 // Signal class spellings are owned by the catalog's typed class identities.
@@ -28,23 +28,32 @@ pub(super) const DISPLACEMENT_SIGNAL_CLASS: &str = classes::DISPLACEMENT_SIGNAL.
 pub(super) const ROTATION_SIGNAL_CLASS: &str = classes::ROTATION_SIGNAL.display_name();
 pub(super) const VELOCITY_SIGNAL_CLASS: &str = classes::VELOCITY_SIGNAL.display_name();
 pub(super) const ACCELERATION_SIGNAL_CLASS: &str = classes::ACCELERATION_SIGNAL.display_name();
-pub(super) const ANGULAR_VELOCITY_SIGNAL_CLASS: &str = classes::ANGULAR_VELOCITY_SIGNAL.display_name();
-pub(super) const ANGULAR_ACCELERATION_SIGNAL_CLASS: &str = classes::ANGULAR_ACCELERATION_SIGNAL.display_name();
+pub(super) const ANGULAR_VELOCITY_SIGNAL_CLASS: &str =
+    classes::ANGULAR_VELOCITY_SIGNAL.display_name();
+pub(super) const ANGULAR_ACCELERATION_SIGNAL_CLASS: &str =
+    classes::ANGULAR_ACCELERATION_SIGNAL.display_name();
 pub(super) const FORCE_SIGNAL_CLASS: &str = classes::FORCE_SIGNAL.display_name();
 pub(super) const MOMENT_SIGNAL_CLASS: &str = classes::MOMENT_SIGNAL.display_name();
 pub(super) const TRACTION_SIGNAL_CLASS: &str = classes::TRACTION_SIGNAL.display_name();
 pub(super) const PRESSURE_SIGNAL_CLASS: &str = classes::PRESSURE_SIGNAL.display_name();
 pub(super) const BODY_FORCE_SIGNAL_CLASS: &str = classes::BODY_FORCE_SIGNAL.display_name();
 pub(super) const TEMPERATURE_SIGNAL_CLASS: &str = classes::TEMPERATURE_SIGNAL.display_name();
-pub(super) const TEMPERATURE_DIFFERENCE_SIGNAL_CLASS: &str = classes::TEMPERATURE_DIFFERENCE_SIGNAL.display_name();
+pub(super) const TEMPERATURE_DIFFERENCE_SIGNAL_CLASS: &str =
+    classes::TEMPERATURE_DIFFERENCE_SIGNAL.display_name();
 pub(super) const HEAT_FLUX_SIGNAL_CLASS: &str = classes::HEAT_FLUX_SIGNAL.display_name();
-pub(super) const HEAT_GENERATION_SIGNAL_CLASS: &str = classes::HEAT_GENERATION_SIGNAL.display_name();
-pub(super) const ELECTRIC_POTENTIAL_SIGNAL_CLASS: &str = classes::ELECTRIC_POTENTIAL_SIGNAL.display_name();
-pub(super) const ELECTRIC_CURRENT_SIGNAL_CLASS: &str = classes::ELECTRIC_CURRENT_SIGNAL.display_name();
-pub(super) const ELECTRIC_CHARGE_SIGNAL_CLASS: &str = classes::ELECTRIC_CHARGE_SIGNAL.display_name();
-pub(super) const CURRENT_DENSITY_SIGNAL_CLASS: &str = classes::CURRENT_DENSITY_SIGNAL.display_name();
+pub(super) const HEAT_GENERATION_SIGNAL_CLASS: &str =
+    classes::HEAT_GENERATION_SIGNAL.display_name();
+pub(super) const ELECTRIC_POTENTIAL_SIGNAL_CLASS: &str =
+    classes::ELECTRIC_POTENTIAL_SIGNAL.display_name();
+pub(super) const ELECTRIC_CURRENT_SIGNAL_CLASS: &str =
+    classes::ELECTRIC_CURRENT_SIGNAL.display_name();
+pub(super) const ELECTRIC_CHARGE_SIGNAL_CLASS: &str =
+    classes::ELECTRIC_CHARGE_SIGNAL.display_name();
+pub(super) const CURRENT_DENSITY_SIGNAL_CLASS: &str =
+    classes::CURRENT_DENSITY_SIGNAL.display_name();
 pub(super) const CHARGE_DENSITY_SIGNAL_CLASS: &str = classes::CHARGE_DENSITY_SIGNAL.display_name();
-pub(super) const MAGNETIC_VECTOR_POTENTIAL_SIGNAL_CLASS: &str = classes::MAGNETIC_VECTOR_POTENTIAL_SIGNAL.display_name();
+pub(super) const MAGNETIC_VECTOR_POTENTIAL_SIGNAL_CLASS: &str =
+    classes::MAGNETIC_VECTOR_POTENTIAL_SIGNAL.display_name();
 pub(super) const MASS_FLOW_SIGNAL_CLASS: &str = classes::MASS_FLOW_SIGNAL.display_name();
 pub(super) const VOLUME_FLOW_SIGNAL_CLASS: &str = classes::VOLUME_FLOW_SIGNAL.display_name();
 
@@ -101,10 +110,12 @@ fn callable_signal_object(
     let Value::Object(object) = &mut value else {
         unreachable!("signal_object always returns an object")
     };
-    object.properties.insert(
-        FROZEN_GENERATOR_PROPERTY.into(),
+    crate::builtins::fea::object_api::replace(
+        builtin,
+        object,
+        FROZEN_GENERATOR_PROPERTY,
         callable_to_value(builtin, callable)?,
-    );
+    )?;
     runtime_signal_from_value(builtin, &value).and_then(|runtime| {
         if runtime
             .frozen_generator
@@ -159,10 +170,10 @@ macro_rules! scalar_signal {
         $function:ident, $builtin:literal, $class:expr, $quantity:ty, $variant:path $(,)?
     ) => {
         #[runtime_builtin(
-            name = $builtin,
-            binding_variant = "default",
-            builtin_path = "crate::builtins::fea::signals"
-        )]
+                            name = $builtin,
+                            binding_variant = "default",
+                            builtin_path = "crate::builtins::fea::signals"
+                        )]
         pub async fn $function(id: String, value: Value) -> BuiltinResult<Value> {
             let value = finite_numeric_scalar($builtin, &value, "value")?;
             signal_object(
@@ -184,10 +195,10 @@ macro_rules! vector_signal {
         $function:ident, $builtin:literal, $class:expr, $quantity:ty, $variant:path $(,)?
     ) => {
         #[runtime_builtin(
-            name = $builtin,
-            binding_variant = "default",
-            builtin_path = "crate::builtins::fea::signals"
-        )]
+                            name = $builtin,
+                            binding_variant = "default",
+                            builtin_path = "crate::builtins::fea::signals"
+                        )]
         pub async fn $function(id: String, components: Value) -> BuiltinResult<Value> {
             let components = finite_numeric_vector3($builtin, &components, "components")?;
             signal_object(
@@ -384,25 +395,27 @@ pub(super) fn physical_signal_from_value(
         ));
     };
     let expected_quantity =
-        signal_class_quantity(object.class_name.display_name()).ok_or_else(|| {
+        signal_class_quantity(object.class_name().display_name()).ok_or_else(|| {
             builtin_error(
                 builtin,
                 &ERROR_INPUT,
-                format!("unsupported FEA signal class `{}`", object.class_name),
+                format!("unsupported FEA signal class `{}`", object.class_name()),
             )
         })?;
-    let mut public_object = object.clone();
-    public_object.properties.remove(FROZEN_GENERATOR_PROPERTY);
-    let payload: SignalObject = object_payload(
+    let payload: SignalObject = super::object_payload_omitting(
         builtin,
-        &Value::Object(public_object),
+        value,
         signal_class_name(expected_quantity),
+        &[FROZEN_GENERATOR_PROPERTY],
     )?;
     if payload.signal.quantity() != expected_quantity {
         return Err(builtin_error(
             builtin,
             &ERROR_INPUT,
-            format!("{} contains the wrong physical quantity", object.class_name),
+            format!(
+                "{} contains the wrong physical quantity",
+                object.class_name()
+            ),
         ));
     }
     Ok(payload.signal)
@@ -417,7 +430,7 @@ pub(super) fn runtime_signal_from_value(
         unreachable!("physical_signal_from_value accepted only an object")
     };
     let frozen_generator = object
-        .properties
+        .properties()
         .get(FROZEN_GENERATOR_PROPERTY)
         .map(|callable| frozen_generator_from_value(builtin, &signal, callable))
         .transpose()?;
@@ -645,13 +658,13 @@ fn time_sample_builtin(class_name: &str) -> &'static str {
 }
 
 fn validate_signal_object(object: &ObjectInstance) -> Result<(), String> {
-    if !matches!(object.properties.get("signal"), Some(Value::Struct(_))) {
+    if !matches!(object.properties().get("signal"), Some(Value::Struct(_))) {
         return Err(format!(
             "{}.signal must be a typed structure",
-            object.class_name
+            object.class_name()
         ));
     }
-    if let Some(callable) = object.properties.get(FROZEN_GENERATOR_PROPERTY) {
+    if let Some(callable) = object.properties().get(FROZEN_GENERATOR_PROPERTY) {
         let payload = crate::execution::value_codec::encode_inline_value(callable)
             .map_err(|error| error.to_string())?;
         if !matches!(
@@ -661,7 +674,8 @@ fn validate_signal_object(object: &ObjectInstance) -> Result<(), String> {
         ) {
             return Err(format!(
                 "{}.{} must be a portable callable",
-                object.class_name, FROZEN_GENERATOR_PROPERTY
+                object.class_name(),
+                FROZEN_GENERATOR_PROPERTY
             ));
         }
     }
@@ -868,7 +882,10 @@ mod tests {
         let Value::Object(mut object) = value else {
             unreachable!()
         };
-        object.class_name = FORCE_SIGNAL_CLASS.into();
+        object = crate::builtins::common::test_support::reclassify_object_unbounded(
+            &object,
+            FORCE_SIGNAL_CLASS,
+        );
         assert!(physical_signal_from_value("test", &Value::Object(object)).is_err());
     }
 

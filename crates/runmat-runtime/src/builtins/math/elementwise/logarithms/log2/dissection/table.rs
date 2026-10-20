@@ -13,7 +13,7 @@ pub(super) async fn evaluate(object: ObjectInstance) -> BuiltinResult<(RootedVal
     let mut names = Vec::with_capacity(variables.fields.len());
     let mut fractions = RootedValuesBuilder::with_capacity(variables.fields.len());
     let mut exponents = RootedValuesBuilder::with_capacity(variables.fields.len());
-    for (name, value) in variables.fields {
+    for (name, value) in variables.into_fields_unbounded() {
         let (fraction, exponent) = Box::pin(super::execute(value)).await.map_err(|error| {
             errors::invalid(
                 OPERATION,

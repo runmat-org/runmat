@@ -26,7 +26,7 @@ enum FigurePropertyEdit {
 impl PreparedFigureProperties {
     pub(super) fn new(
         handle: FigureHandle,
-        args: &[Value],
+        args: crate::call::FunctionArgumentView<'_>,
         builtin: &'static str,
     ) -> BuiltinResult<Self> {
         if args.is_empty() || !args.len().is_multiple_of(2) {

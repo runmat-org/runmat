@@ -38,7 +38,7 @@ fn character_array_slices_preserve_rows_columns_and_linear_order() {
     let vars = interpret(&bytecode).expect("execute character indexing");
     let has_char = |shape: &[usize], data: &[char]| {
         vars.iter().any(|value| {
-            matches!(value, Value::CharArray(chars) if chars.shape() == shape && chars.data == data)
+            matches!(value, Value::CharArray(chars) if chars.shape() == shape && chars.data() == data)
         })
     };
     assert!(has_char(&[1, 4], &['w', 'x', 'y', 'z']));
@@ -653,9 +653,9 @@ fn object_aggregate_literal_uses_typed_instruction_and_sets_properties() {
     let Value::Object(obj) = &vars[0] else {
         panic!("expected object value");
     };
-    assert_eq!(obj.class_name.display_name(), "Point");
-    assert!(matches!(obj.properties.get("x"), Some(Value::Num(v)) if *v == 1.0));
-    assert!(matches!(obj.properties.get("y"), Some(Value::Num(v)) if *v == 2.0));
+    assert_eq!(obj.class_name().display_name(), "Point");
+    assert!(matches!(obj.properties().get("x"), Some(Value::Num(v)) if *v == 1.0));
+    assert!(matches!(obj.properties().get("y"), Some(Value::Num(v)) if *v == 2.0));
 }
 
 #[test]
@@ -876,7 +876,7 @@ fn string_array_scalar_index_assignment_executes() {
         panic!("expected string array assignment result, got {updated:?}");
     };
     assert_eq!(sa.shape, vec![1, 2]);
-    assert_eq!(sa.data, vec!["a".to_string(), "z".to_string()]);
+    assert_eq!(sa.data(), vec!["a".to_string(), "z".to_string()]);
 }
 
 #[test]

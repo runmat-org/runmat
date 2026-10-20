@@ -71,7 +71,7 @@ pub(super) fn convert(
         Value::Cell(_) => Err(conversion_error("cell")),
         Value::Struct(_) | Value::StructArray(_) => Err(conversion_error("struct")),
         Value::ObjectArray(value) => Err(conversion_error(value.class_name().display_name())),
-        Value::Object(value) => Err(conversion_error(value.class_name.display_name())),
+        Value::Object(value) => Err(conversion_error(value.class_name().display_name())),
         Value::HandleObject(value) => Err(conversion_error(value.class_name.display_name())),
         Value::Listener(_) => Err(conversion_error("event.listener")),
         Value::FunctionHandle(_)
@@ -107,7 +107,7 @@ pub(super) fn parse_string_double(text: &str) -> f64 {
 pub(super) fn double_from_string_array(array: StringArray) -> BuiltinResult<Value> {
     let shape = array.shape.clone();
     let data = array
-        .data
+        .data()
         .iter()
         .map(|text| parse_string_double(text))
         .collect();
@@ -123,14 +123,14 @@ pub(super) fn double_from_logical(array: LogicalArray) -> BuiltinResult<Value> {
 }
 
 pub(super) fn double_from_symbolic_array(array: SymbolicArray) -> BuiltinResult<Value> {
-    let mut data = Vec::with_capacity(array.data.len());
-    for expr in array.data {
+    let mut data = Vec::with_capacity(array.data().len());
+    for expr in array.data() {
         data.push(
             expr.numeric_constant_value()
                 .ok_or_else(|| conversion_error("sym"))?,
         );
     }
-    Tensor::new(data, array.shape)
+    Tensor::new(data, array.shape.to_vec())
         .map(Value::Tensor)
         .map_err(|e| double_error_with_detail(&DOUBLE_ERROR_INTERNAL, e))
 }

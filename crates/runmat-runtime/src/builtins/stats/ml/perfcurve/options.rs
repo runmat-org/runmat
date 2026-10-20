@@ -2,7 +2,6 @@
 
 use super::{invalid, scalar_text, unsupported};
 use crate::BuiltinResult;
-use runmat_value::Value;
 
 pub(super) use runmat_builtins::PerfcurveOptionName as OptionName;
 
@@ -11,7 +10,7 @@ pub(super) struct OptionSlot {
     identity: Option<OptionName>,
 }
 
-pub(super) fn inspect(rest: &[Value]) -> Vec<OptionSlot> {
+pub(super) fn inspect(rest: crate::call::FunctionArgumentView<'_>) -> Vec<OptionSlot> {
     rest.chunks_exact(2)
         .map(|pair| {
             let name = scalar_text(&pair[0], "option name");
@@ -28,7 +27,10 @@ pub(super) fn identities(slots: &[OptionSlot]) -> impl Iterator<Item = Option<Op
     slots.iter().map(|slot| slot.identity)
 }
 
-pub(super) fn validate(rest: &[Value], slots: Vec<OptionSlot>) -> BuiltinResult<Vec<OptionName>> {
+pub(super) fn validate(
+    rest: crate::call::FunctionArgumentView<'_>,
+    slots: Vec<OptionSlot>,
+) -> BuiltinResult<Vec<OptionName>> {
     if !rest.len().is_multiple_of(2) {
         return Err(invalid("perfcurve: name-value options must be paired"));
     }

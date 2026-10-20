@@ -13,7 +13,7 @@ fn audioread_extensible_pcm24_in_32_uses_container_width_for_native_and_double()
         block_on(audioread_builtin(
             None,
             name.clone(),
-            vec![Value::from("native")],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from("native")]),
         ))
         .expect("native extensible PCM"),
     );
@@ -21,7 +21,14 @@ fn audioread_extensible_pcm24_in_32_uses_container_width_for_native_and_double()
         native.integer_storage(),
         Some(&IntegerStorage::I32(vec![i32::MIN, 0, 0x7fff_ff00]))
     );
-    let normalized = tensor(block_on(audioread_builtin(None, name, vec![])).expect("double PCM"));
+    let normalized = tensor(
+        block_on(audioread_builtin(
+            None,
+            name,
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .expect("double PCM"),
+    );
     assert_eq!(normalized.numeric_dtype(), NumericDType::F64);
     assert_eq!(
         normalized.materialize_f64(),
@@ -42,7 +49,7 @@ fn audioread_extensible_pcm16_in_32_preserves_left_aligned_samples() {
         block_on(audioread_builtin(
             None,
             name.clone(),
-            vec![Value::from("native")],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from("native")]),
         ))
         .expect("native extensible PCM"),
     );
@@ -50,7 +57,14 @@ fn audioread_extensible_pcm16_in_32_preserves_left_aligned_samples() {
         native.integer_storage(),
         Some(&IntegerStorage::I32(vec![i32::MIN, 0, 0x4000_0000]))
     );
-    let normalized = tensor(block_on(audioread_builtin(None, name, vec![])).expect("double PCM"));
+    let normalized = tensor(
+        block_on(audioread_builtin(
+            None,
+            name,
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .expect("double PCM"),
+    );
     assert_eq!(normalized.materialize_f64(), vec![-1.0, 0.0, 0.5]);
 }
 
@@ -62,7 +76,7 @@ fn audioread_rejects_unsupported_encoding_even_for_empty_data() {
     let error = block_on(audioread_builtin(
         None,
         Value::from(path.to_string_lossy().into_owned()),
-        vec![],
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
     ))
     .expect_err("unsupported empty coding");
     assert_eq!(

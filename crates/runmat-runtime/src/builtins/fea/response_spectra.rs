@@ -27,10 +27,13 @@ const FIELDS: &[&str] = &[
     "evidence",
 ];
 
-
-
-#[runtime_builtin(name = "fea.ResponseSpectrum.new", binding_variant = "default", builtin_path = "crate::builtins::fea::response_spectra")]
-pub async fn response_spectrum(args: Vec<Value>) -> BuiltinResult<Value> {
+#[runtime_builtin(
+    name = "fea.ResponseSpectrum.new",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::fea::response_spectra"
+)]
+pub async fn response_spectrum(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     let [id, axis, ordinates, damping, response, envelope, interpolation, extrapolation, direction, modal_combination, directional_combination, truncation, rigid_response, construction, evidence, provenance_digest] =
         <[Value; 16]>::try_from(args).map_err(|args| {
             builtin_error(
@@ -124,13 +127,13 @@ pub(super) fn ensure_response_spectrum_class_registered() {
 fn validate_object(object: &ObjectInstance) -> Result<(), String> {
     let missing = FIELDS
         .iter()
-        .filter(|field| !object.properties.contains_key(**field))
+        .filter(|field| !object.properties().contains_key(field))
         .copied()
         .collect::<Vec<_>>();
     if !missing.is_empty() {
         return Err(format!(
             "{}.{} is required",
-            object.class_name,
+            object.class_name(),
             missing.join(", ")
         ));
     }
@@ -167,7 +170,7 @@ mod tests {
         let extrapolation =
             super::super::response_spectrum_policies::choices::extrapolation_reject().await?;
         let direction = super::super::response_spectrum_policies::parameters::spectrum_direction(
-            coordinate_frame_global_builtin().await?,
+            coordinate_frame_global_builtin(None).await?,
             Tensor::new(vec![1.0, 0.0, 0.0], vec![1, 3])?.into(),
         )
         .await?;
@@ -196,24 +199,26 @@ mod tests {
             0.01.into(),
         )
         .await?;
-        response_spectrum(vec![
-            Value::String("launch".into()),
-            axis,
-            Tensor::new(vec![12.0, 18.0, 9.0], vec![1, 3])?.into(),
-            damping,
-            response,
-            envelope,
-            interpolation,
-            extrapolation,
-            direction,
-            modal,
-            directional,
-            truncation,
-            rigid_response,
-            construction,
-            evidence,
-            Value::String("sha256:launch-spectrum".into()),
-        ])
+        response_spectrum(crate::builtins::common::test_support::builtin_arguments(
+            vec![
+                Value::String("launch".into()),
+                axis,
+                Tensor::new(vec![12.0, 18.0, 9.0], vec![1, 3])?.into(),
+                damping,
+                response,
+                envelope,
+                interpolation,
+                extrapolation,
+                direction,
+                modal,
+                directional,
+                truncation,
+                rigid_response,
+                construction,
+                evidence,
+                Value::String("sha256:launch-spectrum".into()),
+            ],
+        ))
         .await
     }
 

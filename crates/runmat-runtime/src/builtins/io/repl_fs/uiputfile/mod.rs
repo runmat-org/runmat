@@ -66,14 +66,14 @@ fn host_io_error(source: std::io::Error) -> RuntimeError {
 )]
 async fn uiputfile_builtin(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &UIPUTFILE_DESCRIPTOR,
         &UIPUTFILE_ERROR_TOO_MANY_OUTPUTS,
         NAME,
     )?;
-    let options = parse_options(&args)?;
+    let options = parse_options(args.view())?;
     let request = runmat_filesystem::resolve_save_file_dialog_request(&options.request)
         .map_err(host_io_error)?;
     let selection = crate::context::select_file_save(runtime.as_ref(), request)
@@ -82,7 +82,7 @@ async fn uiputfile_builtin(
     outputs_for_selection(selection, &options)
 }
 
-fn parse_options(args: &[Value]) -> BuiltinResult<UiputfileOptions> {
+fn parse_options(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<UiputfileOptions> {
     if args.len() > 3 {
         return Err(invalid_argument(
             "expected filter, title, and defaultName".to_string(),

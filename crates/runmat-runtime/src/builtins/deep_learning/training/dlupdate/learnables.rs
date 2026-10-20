@@ -35,8 +35,12 @@ pub(super) async fn dlupdate_learnables_struct(
         let updated_values = into_owned_outputs(updated_values)?;
         let mut rebuilt = RootedValuesBuilder::with_capacity(requested_outputs);
         for value_column in updated_values {
-            let mut out = reference.clone();
-            out.insert("Value", value_column);
+            let prepared_out =
+                crate::execution::structure::replacement::record(reference, runtime)?;
+            let _source_roots = prepared_out.1;
+            let mut out = prepared_out.0;
+            out.try_replace_unique("Value", value_column)
+                .expect("learnables schema admitted Value in the private destination");
             rebuilt
                 .push(Value::Struct(out))
                 .map_err(|error| error.into_runtime_error())?;
@@ -62,7 +66,7 @@ pub(super) async fn dlupdate_table(
         .iter()
         .map(|value| match value {
             Value::Object(object) if crate::builtins::table::is_tabular_object(object) => {
-                if object.class_name != reference.class_name {
+                if object.class_name() != reference.class_name() {
                     return Err(deep_learning_error(
                         "dlupdate",
                         "dlupdate: table parameter trees must have the same tabular class",
@@ -125,8 +129,13 @@ pub(super) async fn dlupdate_table(
         let updated_values = into_owned_outputs(updated_values)?;
         let mut rebuilt = RootedValuesBuilder::with_capacity(requested_outputs);
         for value_column in updated_values {
-            let mut variables = table_variables[0].clone();
-            variables.insert("Value", value_column);
+            let prepared_variables =
+                crate::execution::structure::replacement::record(&table_variables[0], runtime)?;
+            let _source_roots = prepared_variables.1;
+            let mut variables = prepared_variables.0;
+            variables
+                .try_replace_unique("Value", value_column)
+                .expect("learnables schema admitted Value in the private destination");
             let table = crate::builtins::table::table_replace_variables_like(reference, variables)
                 .map_err(|err| deep_learning_error("dlupdate", err.to_string()))?;
             rebuilt
@@ -149,7 +158,7 @@ pub(super) async fn dlupdate_network(
         .iter()
         .map(|value| match value {
             Value::Object(object) if model::is_deep_learning_network_object(object) => {
-                if object.class_name != reference.class_name {
+                if object.class_name() != reference.class_name() {
                     return Err(deep_learning_error(
                         "dlupdate",
                         "dlupdate: dlnetwork parameter trees must have the same network class",
@@ -210,7 +219,7 @@ fn require_learnables_table(variable_names: &[String]) -> BuiltinResult<()> {
 pub(super) fn is_learnables_struct(value: &StructValue) -> bool {
     ["Layer", "Parameter", "Value"]
         .iter()
-        .all(|field| value.fields.contains_key(*field))
+        .all(|field| value.fields.contains_key(field))
 }
 
 fn require_matching_learnable_metadata(tables: &[StructValue]) -> BuiltinResult<()> {

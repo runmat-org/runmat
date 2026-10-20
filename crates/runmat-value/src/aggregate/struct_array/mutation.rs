@@ -1,10 +1,10 @@
 use super::{column_major_strides, total_len, StructArray, StructValue};
+use crate::UnboundedOrderedMapBuilder;
 use crate::Value;
-use indexmap::IndexMap;
 use std::collections::HashSet;
 
 impl StructArray {
-    pub fn grow(self, shape: Vec<usize>, fill: &StructValue) -> Result<Self, String> {
+    pub fn grow_unbounded(self, shape: Vec<usize>, fill: &StructValue) -> Result<Self, String> {
         if !fill.field_names().eq(self.fields.keys()) {
             return Err(
                 "structure array growth fill must preserve the ordered field schema".into(),
@@ -25,8 +25,7 @@ impl StructArray {
             .map(|index| remap_growth_index(index, &self.shape, &old_strides, &new_strides))
             .collect::<Result<Vec<_>, _>>()?;
         let fields =
-            self.fields
-                .into_iter()
+            self.into_columns_unbounded()
                 .map(|(name, values)| {
                     let fill_value = fill.fields.get(&name).ok_or_else(|| {
                         "structure array growth fill is missing a field".to_string()
@@ -37,12 +36,12 @@ impl StructArray {
                     }
                     Ok((name, output))
                 })
-                .collect::<Result<IndexMap<_, _>, String>>()?;
+                .collect::<Result<UnboundedOrderedMapBuilder<_>, String>>()?;
         Self::from_columns(fields, shape)
     }
 
-    pub fn replace_linear_scalar(
-        mut self,
+    pub fn replace_linear_scalar_unbounded(
+        self,
         indices: &[usize],
         replacement: StructValue,
     ) -> Result<Self, String> {
@@ -50,20 +49,23 @@ impl StructArray {
         if !replacement.field_names().eq(self.fields.keys()) {
             return Err("structure array assignment must preserve the ordered field schema".into());
         }
-        for (name, value) in replacement.fields {
-            let values = self
-                .fields
+        let shape = self.shape.to_vec();
+        let mut fields = self
+            .into_columns_unbounded()
+            .collect::<UnboundedOrderedMapBuilder<_>>();
+        for (name, value) in replacement.into_fields_unbounded() {
+            let values = fields
                 .get_mut(&name)
                 .ok_or_else(|| "structure array assignment is missing a field".to_string())?;
             for index in indices {
                 values[*index] = value.clone();
             }
         }
-        Ok(self)
+        Self::from_columns(fields, shape)
     }
 
-    pub fn replace_linear_array(
-        mut self,
+    pub fn replace_linear_array_unbounded(
+        self,
         indices: &[usize],
         replacements: Self,
     ) -> Result<Self, String> {
@@ -74,27 +76,29 @@ impl StructArray {
         if !replacements.fields.keys().eq(self.fields.keys()) {
             return Err("structure array assignment must preserve the ordered field schema".into());
         }
-        for (name, replacement_values) in replacements.fields {
-            let values = self
-                .fields
+        let shape = self.shape.to_vec();
+        let mut fields = self
+            .into_columns_unbounded()
+            .collect::<UnboundedOrderedMapBuilder<_>>();
+        for (name, replacement_values) in replacements.into_columns_unbounded() {
+            let values = fields
                 .get_mut(&name)
                 .ok_or_else(|| "structure array assignment is missing a field".to_string())?;
             for (index, value) in indices.iter().copied().zip(replacement_values) {
                 values[index] = value;
             }
         }
-        Ok(self)
+        Self::from_columns(fields, shape)
     }
 
-    pub fn remove_linear(
+    pub fn remove_linear_unbounded(
         self,
         removal: &HashSet<usize>,
         output_shape: Vec<usize>,
     ) -> Result<Value, String> {
         validate_indices(removal.iter().copied(), self.len())?;
         let fields = self
-            .fields
-            .into_iter()
+            .into_columns_unbounded()
             .map(|(name, values)| {
                 let values = values
                     .into_iter()
@@ -107,17 +111,19 @@ impl StructArray {
         Self::normalize_columns(fields, output_shape)
     }
 
-    pub fn replicate_scalar(structure: StructValue, shape: Vec<usize>) -> Result<Value, String> {
+    pub fn replicate_scalar_unbounded(
+        structure: StructValue,
+        shape: Vec<usize>,
+    ) -> Result<Value, String> {
         let length = total_len(&shape)?;
         let fields = structure
-            .fields
-            .into_iter()
+            .into_fields_unbounded()
             .map(|(name, value)| (name, vec![value; length]))
             .collect();
         Self::normalize_columns(fields, shape)
     }
 
-    pub fn grow_scalar(
+    pub fn grow_scalar_unbounded(
         structure: StructValue,
         shape: Vec<usize>,
         fill: &StructValue,
@@ -132,8 +138,7 @@ impl StructArray {
             return Err("structure array growth must produce a nonscalar array".into());
         }
         let fields = structure
-            .fields
-            .into_iter()
+            .into_fields_unbounded()
             .map(|(name, first)| {
                 let fill_value = fill
                     .fields
@@ -143,7 +148,7 @@ impl StructArray {
                 values[0] = first;
                 Ok((name, values))
             })
-            .collect::<Result<IndexMap<_, _>, String>>()?;
+            .collect::<Result<UnboundedOrderedMapBuilder<_>, String>>()?;
         Self::from_columns(fields, shape)
     }
 }

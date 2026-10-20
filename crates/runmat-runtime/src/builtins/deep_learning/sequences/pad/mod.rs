@@ -25,7 +25,7 @@ use options::{AdmittedPadOption, AdmittedPadOptions, PadOptions};
 )]
 pub(in crate::builtins::deep_learning) async fn padsequences_builtin(
     sequences: Value,
-    rest: Vec<Value>,
+    mut rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let requested_outputs = crate::output_count::current_output_count().unwrap_or(1);
     if requested_outputs > 2 {
@@ -49,7 +49,10 @@ pub(in crate::builtins::deep_learning) async fn padsequences_builtin(
     let mut parsed = AdmittedPadOptions::new();
     // Preserve the existing lowered-name sort and last-wins duplicate
     // behavior while decoding each public spelling exactly once.
-    for (spelling, value) in parse_name_values(rest[1..].to_vec(), "padsequences")? {
+    let padding_dimension = rest
+        .pop_front()
+        .expect("nonempty padsequences argument carrier");
+    for (spelling, value) in parse_name_values(rest, "padsequences")? {
         let name = PadOptionKey::parse(&spelling).ok_or_else(|| {
             deep_learning_error(
                 "padsequences",
@@ -69,8 +72,8 @@ pub(in crate::builtins::deep_learning) async fn padsequences_builtin(
     // Admit every host element and resident descriptor before the first
     // download. A malformed later host sequence must not download an earlier
     // provider-owned element.
-    let mut prepared = Vec::with_capacity(cell.data.len());
-    for item in &cell.data {
+    let mut prepared = Vec::with_capacity(cell.data().len());
+    for item in cell.data() {
         prepared.push(match item {
             Value::GpuTensor(handle) => {
                 validate_resident_sequence(handle)?;
@@ -79,32 +82,32 @@ pub(in crate::builtins::deep_learning) async fn padsequences_builtin(
             _ => Some(SequenceInput::from_value(item)?),
         });
     }
-    let host_dim = if matches!(rest[0], Value::GpuTensor(_)) {
-        validate_resident_padding_dim(&rest[0])?;
+    let host_dim = if matches!(padding_dimension, Value::GpuTensor(_)) {
+        validate_resident_padding_dim(&padding_dimension)?;
         None
     } else {
-        Some(positive_usize(&rest[0], "padsequences", "paddingDim")? - 1)
+        Some(positive_usize(&padding_dimension, "padsequences", "paddingDim")? - 1)
     };
     if let Some(dim) = host_dim {
-        admit_padding_rank(dim, &cell.data, &prepared)?;
-        preflight_uniform_shapes(&cell.data, &prepared, &parsed, dim)?;
+        admit_padding_rank(dim, cell.data(), &prepared)?;
+        preflight_uniform_shapes(cell.data(), &prepared, &parsed, dim)?;
     }
     let padding_dim = match host_dim {
         Some(dim) => dim,
         None => {
             positive_usize(
-                &gather_if_needed_async(&rest[0]).await?,
+                &gather_if_needed_async(&padding_dimension).await?,
                 "padsequences",
                 "paddingDim",
             )? - 1
         }
     };
     if host_dim.is_none() {
-        admit_padding_rank(padding_dim, &cell.data, &prepared)?;
-        preflight_uniform_shapes(&cell.data, &prepared, &parsed, padding_dim)?;
+        admit_padding_rank(padding_dim, cell.data(), &prepared)?;
+        preflight_uniform_shapes(cell.data(), &prepared, &parsed, padding_dim)?;
     }
     let mut seqs = Vec::with_capacity(prepared.len());
-    for (parsed, item) in prepared.into_iter().zip(&cell.data) {
+    for (parsed, item) in prepared.into_iter().zip(cell.data()) {
         seqs.push(match parsed {
             Some(sequence) => sequence,
             None => SequenceInput::from_value(&gather_if_needed_async(item).await?)?,
@@ -214,11 +217,11 @@ pub(in crate::builtins::deep_learning) async fn padsequences_builtin(
                 masks.push(Value::LogicalArray(mask));
             }
         }
-        let output = CellArray::new_with_shape(cells, cell.shape.clone())
+        let output = CellArray::new_with_shape(cells, cell.shape().to_vec())
             .map(Value::Cell)
             .map_err(|err| deep_learning_error("padsequences", err))?;
         if requested_outputs == 2 {
-            let mask = CellArray::new_with_shape(masks, cell.shape)
+            let mask = CellArray::new_with_shape(masks, cell.shape().to_vec())
                 .map(Value::Cell)
                 .map_err(|err| deep_learning_error("padsequences", err))?;
             return Ok(Value::output_list(vec![output, mask]));

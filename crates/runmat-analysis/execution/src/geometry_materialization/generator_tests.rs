@@ -16,8 +16,8 @@ use runmat_geometry_ops::ResolvedGeneratedGeometryRequest;
 use runmat_mir::analysis::{FunctionAnalysis, FunctionConvergence};
 use runmat_types::{
     CallableFact, CapabilitySet, EffectKind, EffectSet, InteropManifest, NumericClass,
-    NumericDomain, NumericFact, ObjectFact, ParallelManifest, ProgramFunctionId,
-    ShapeFact, StorageFact, ValueFact, ValueKindFact, INTEROP_MANIFEST_SCHEMA_VERSION,
+    NumericDomain, NumericFact, ObjectFact, ParallelManifest, ProgramFunctionId, ShapeFact,
+    StorageFact, ValueFact, ValueKindFact, INTEROP_MANIFEST_SCHEMA_VERSION,
     PARALLEL_MANIFEST_SCHEMA_VERSION, REGION_CONTRACT_SCHEMA_VERSION,
 };
 
@@ -92,7 +92,7 @@ fn analysis() -> FunctionAnalysis {
     FunctionAnalysis {
         function: ProgramFunctionId(7),
         callable: CallableFact {
-            capabilities: Default::default(),
+            capabilities: CapabilitySet::default(),
             identity: None,
             parameters: vec![numeric_scalar(), numeric_scalar()],
             parameters_complete: true,
@@ -145,6 +145,7 @@ fn executable(admitted: &AdmittedGeometryGenerator) -> ExecutableUnitEnvelope {
                 entrypoint: admitted.invocation.callable.qualified_name.clone(),
                 entrypoint_function: Some(admitted.invocation.function),
                 entrypoint_kind: ExecutableEntrypointKind::Function,
+                declaration_class: None,
                 source_digest: admitted.invocation.executable_source_digest,
             },
             revisions: ExecutableComponentRevisions {

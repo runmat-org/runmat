@@ -1,5 +1,8 @@
 //! MATLAB-compatible `string` builtin with GPU-aware conversion semantics for RunMat.
 
+use crate::builtins::strings::common::scalar_text_input;
+use crate::context::host_allocation::HostAllocationError;
+use crate::context::RuntimeContext;
 use runmat_builtins::{
     BuiltinErrorDescriptor, STRING_ENCODING_EXTENSION, STRING_ERROR_INVALID_INPUT,
     STRING_EXPLICIT_GPU_EXTENSION, STRING_FORMAT_EXTENSION,
@@ -7,7 +10,7 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CharArray, ComplexTensor, IntValue, LogicalArray, NumericScalar, SparseTensor, StringArray,
-    Tensor, Value,
+    Tensor, Utf8Text, Value,
 };
 
 use crate::builtins::common::format::{complex_to_string, format_variadic, number_to_string};
@@ -52,9 +55,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "string",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::strings::core::string"
 )]
-async fn string_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn string_builtin(
+    runtime: Option<RuntimeContext>,
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     if crate::builtins::common::validation::value_contains_explicit_gpu(&value)
         || rest
             .iter()
@@ -91,7 +99,9 @@ async fn string_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<
         let gathered_arg = gather_if_needed_async(&arg)
             .await
             .map_err(|flow| remap_string_flow(flow))?;
-        if let Some(encoding) = try_encoding_argument(&format_value, &gathered_arg)? {
+        if let Some(encoding) =
+            try_encoding_argument(runtime.as_ref(), &format_value, &gathered_arg)?
+        {
             let array = convert_to_string_array(format_value, encoding).await?;
             return Ok(Value::StringArray(array));
         }
@@ -124,7 +134,9 @@ fn is_encoding_call_shape(first: &Value, candidate: &Value) -> bool {
             return false;
         }
     }
-    value_to_scalar_text(candidate).is_some()
+    matches!(candidate, Value::String(_))
+        || matches!(candidate, Value::StringArray(array) if array.data().len() == 1)
+        || matches!(candidate, Value::CharArray(array) if array.rows <= 1)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -133,6 +145,7 @@ enum StringEncoding {
 }
 
 fn try_encoding_argument(
+    runtime: Option<&RuntimeContext>,
     first: &Value,
     candidate: &Value,
 ) -> BuiltinResult<Option<StringEncoding>> {
@@ -150,10 +163,22 @@ fn try_encoding_argument(
             return Ok(None);
         }
     }
-    let Some(text) = value_to_scalar_text(candidate) else {
+    let Some(text) = scalar_text_input(candidate, runtime, string_admission)? else {
         return Ok(None);
     };
-    parse_encoding_text(&text).map(Some)
+    parse_encoding_text(text.as_str()).map(Some)
+}
+
+fn string_admission(runtime: &RuntimeContext, cause: HostAllocationError) -> RuntimeError {
+    build_runtime_error(format!("string: host allocation: {cause}"))
+        .with_builtin("string")
+        .with_identifier(format!(
+            "{}:{}",
+            runtime.error_namespace(),
+            cause.runtime_identifier_suffix()
+        ))
+        .with_source(cause)
+        .build()
 }
 
 fn parse_encoding_text(raw: &str) -> BuiltinResult<StringEncoding> {
@@ -168,9 +193,9 @@ fn parse_encoding_text(raw: &str) -> BuiltinResult<StringEncoding> {
 }
 
 fn cell_contains_only_text_scalars(cell: &runmat_value::CellArray) -> bool {
-    cell.data.iter().all(|ptr| match &ptr {
+    cell.data().iter().all(|ptr| match &ptr {
         Value::String(_) => true,
-        Value::StringArray(sa) => sa.data.len() <= 1,
+        Value::StringArray(sa) => sa.data().len() <= 1,
         Value::CharArray(ca) => ca.rows <= 1,
         _ => false,
     })
@@ -210,12 +235,12 @@ fn text_has_format_placeholder(text: &str) -> bool {
 fn has_format_placeholders(value: &Value) -> bool {
     match value {
         Value::String(s) => text_has_format_placeholder(s),
-        Value::StringArray(sa) => sa.data.iter().any(|s| text_has_format_placeholder(s)),
+        Value::StringArray(sa) => sa.data().iter().any(|s| text_has_format_placeholder(s)),
         Value::CharArray(ca) => {
             for row in 0..ca.rows {
                 let mut row_str = String::with_capacity(ca.cols);
                 for col in 0..ca.cols {
-                    row_str.push(ca.data[row * ca.cols + col]);
+                    row_str.push(ca.data()[row * ca.cols + col]);
                 }
                 if text_has_format_placeholder(&row_str) {
                     return true;
@@ -224,7 +249,7 @@ fn has_format_placeholders(value: &Value) -> bool {
             false
         }
         Value::Cell(cell) => {
-            for ptr in &cell.data {
+            for ptr in cell.data() {
                 let element = (ptr).clone();
                 if has_format_placeholders(&element) {
                     return true;
@@ -237,13 +262,20 @@ fn has_format_placeholders(value: &Value) -> bool {
 }
 
 pub(crate) struct FormatSpecData {
-    pub(crate) specs: Vec<String>,
+    pub(crate) specs: runmat_value::ExactArrayStorage<Utf8Text>,
     pub(crate) shape: Vec<usize>,
 }
 
 struct ArgumentData {
     values: Vec<Value>,
     shape: Vec<usize>,
+}
+
+fn move_string_arguments(data: runmat_value::ExactArrayStorage<Utf8Text>) -> Vec<Value> {
+    match data.try_into_owned() {
+        Ok(values) => values.into_iter().map(Value::String).collect(),
+        Err(shared) => shared.iter().cloned().map(Value::String).collect(),
+    }
 }
 
 fn string_flow(message: impl Into<String>) -> RuntimeError {
@@ -418,26 +450,30 @@ fn resolve_target_shape(
 pub(crate) async fn extract_format_spec(value: Value) -> BuiltinResult<FormatSpecData> {
     match value {
         Value::String(s) => Ok(FormatSpecData {
-            specs: vec![s],
+            specs: runmat_value::ExactArrayStorage::unbounded(vec![s]),
             shape: vec![1, 1],
         }),
-        Value::StringArray(sa) => Ok(FormatSpecData {
-            specs: sa.data.clone(),
-            shape: sa.shape.clone(),
-        }),
+        Value::StringArray(sa) => {
+            let shape = sa.shape().to_vec();
+            Ok(FormatSpecData {
+                specs: sa.into_parts().0,
+                shape,
+            })
+        }
         Value::CharArray(ca) => {
             let array = char_array_to_string_array(ca, StringEncoding::Utf8)?;
+            let shape = array.shape().to_vec();
             Ok(FormatSpecData {
-                specs: array.data,
-                shape: array.shape,
+                specs: array.into_parts().0,
+                shape,
             })
         }
         Value::Cell(cell) => {
-            let mut specs = Vec::with_capacity(cell.data.len());
+            let mut specs = Vec::with_capacity(cell.data().len());
             for col in 0..cell.cols {
                 for row in 0..cell.rows {
                     let idx = row * cell.cols + col;
-                    let element = &cell.data[idx];
+                    let element = &cell.data()[idx];
                     let value = (element).clone();
                     let gathered = gather_if_needed_async(&value)
                         .await
@@ -449,7 +485,7 @@ pub(crate) async fn extract_format_spec(value: Value) -> BuiltinResult<FormatSpe
                 }
             }
             Ok(FormatSpecData {
-                specs,
+                specs: runmat_value::ExactArrayStorage::unbounded(specs),
                 shape: vec![cell.rows, cell.cols],
             })
         }
@@ -466,28 +502,32 @@ async fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
             values: vec![Value::String(s)],
             shape: vec![1, 1],
         }),
-        Value::StringArray(sa) => Ok(ArgumentData {
-            values: sa.data.into_iter().map(Value::String).collect(),
-            shape: sa.shape,
-        }),
+        Value::StringArray(sa) => {
+            let shape = sa.shape().to_vec();
+            Ok(ArgumentData {
+                values: move_string_arguments(sa.into_parts().0),
+                shape,
+            })
+        }
         Value::CharArray(ca) => {
             let array = char_array_to_string_array(ca, StringEncoding::Utf8)?;
+            let shape = array.shape().to_vec();
             Ok(ArgumentData {
-                values: array.data.into_iter().map(Value::String).collect(),
-                shape: array.shape,
+                values: move_string_arguments(array.into_parts().0),
+                shape,
             })
         }
         Value::Symbolic(expr) => Ok(ArgumentData {
-            values: vec![Value::String(expr.to_string())],
+            values: vec![Value::string(expr.to_string())],
             shape: vec![1, 1],
         }),
         Value::SymbolicArray(array) => Ok(ArgumentData {
             values: array
-                .data
-                .into_iter()
-                .map(|expr| Value::String(expr.to_string()))
+                .data()
+                .iter()
+                .map(|expr| Value::string(expr.to_string()))
                 .collect(),
-            shape: array.shape,
+            shape: array.shape.to_vec(),
         }),
         Value::Num(n) => Ok(ArgumentData {
             values: vec![Value::Num(n)],
@@ -519,7 +559,7 @@ async fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
             }
         }
         Value::Complex(re, im) => Ok(ArgumentData {
-            values: vec![Value::String(complex_to_string(re, im))],
+            values: vec![Value::string(complex_to_string(re, im))],
             shape: vec![1, 1],
         }),
         Value::ComplexTensor(t) => {
@@ -528,7 +568,7 @@ async fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
                 values: storage
                     .materialize_f64()
                     .into_iter()
-                    .map(|(re, im)| Value::String(complex_to_string(re, im)))
+                    .map(|(re, im)| Value::string(complex_to_string(re, im)))
                     .collect(),
                 shape: shape.to_vec(),
             })
@@ -542,19 +582,19 @@ async fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
             shape: la.shape.to_vec(),
         }),
         Value::Cell(cell) => {
-            let mut values = Vec::with_capacity(cell.data.len());
+            let mut values = Vec::with_capacity(cell.data().len());
             for col in 0..cell.cols {
                 for row in 0..cell.rows {
                     let idx = row * cell.cols + col;
-                    let element = &cell.data[idx];
+                    let element = &cell.data()[idx];
                     let value = (element).clone();
                     let gathered = gather_if_needed_async(&value)
                         .await
                         .map_err(|flow| remap_string_flow(flow))?;
                     let value = match gathered {
                         Value::String(s) => Value::String(s),
-                        Value::StringArray(sa) if sa.data.len() == 1 => {
-                            Value::String(sa.data[0].clone())
+                        Value::StringArray(sa) if sa.data().len() == 1 => {
+                            Value::String(sa.data()[0].clone())
                         }
                         Value::CharArray(ca) => {
                             if ca.rows != 1 {
@@ -563,10 +603,10 @@ async fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
                                 ));
                             }
                             let mut row_str = String::with_capacity(ca.cols);
-                            for ch in ca.data {
+                            for ch in ca.data().iter().copied() {
                                 row_str.push(ch);
                             }
-                            Value::String(row_str)
+                            Value::string(row_str)
                         }
                         Value::Num(n) => Value::Num(n),
                         Value::Int(i) => Value::Int(i),
@@ -587,15 +627,15 @@ async fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
                             }
                             Value::Num(if la.data[0] != 0 { 1.0 } else { 0.0 })
                         }
-                        Value::Complex(re, im) => Value::String(complex_to_string(re, im)),
-                        Value::Symbolic(expr) => Value::String(expr.to_string()),
+                        Value::Complex(re, im) => Value::string(complex_to_string(re, im)),
+                        Value::Symbolic(expr) => Value::string(expr.to_string()),
                         Value::ComplexTensor(t) => {
                             if !complex_tensor_is_scalar(&t) {
                                 return Err(string_flow(
                                     "string: cell format arguments must contain scalar values",
                                 ));
                             }
-                            Value::String(t.format_element(0))
+                            Value::string(t.format_element(0))
                         }
                         other => {
                             return Err(string_flow(format!(
@@ -657,13 +697,14 @@ async fn convert_to_string_array(
         return Ok(array);
     }
     match value {
-        Value::String(s) => string_scalar(s),
+        Value::String(s) => StringArray::from_texts_unbounded(vec![s], vec![1, 1])
+            .map_err(|e| string_flow(format!("string: {e}"))),
         Value::StringArray(sa) => Ok(sa),
         Value::CharArray(ca) => char_array_to_string_array(ca, encoding),
         Value::Symbolic(expr) => string_scalar(expr.to_string()),
         Value::SymbolicArray(array) => StringArray::new(
-            array.data.into_iter().map(|expr| expr.to_string()).collect(),
-            array.shape,
+            array.data().iter().map(|expr| expr.to_string()).collect(),
+            array.shape.to_vec(),
         )
         .map_err(|e| string_flow(format!("string: {e}"))),
         Value::Tensor(tensor) => tensor_to_string_array(tensor),
@@ -716,11 +757,13 @@ fn string_scalar<S: Into<String>>(text: S) -> BuiltinResult<StringArray> {
     StringArray::new(vec![text.into()], vec![1, 1]).map_err(|e| string_flow(format!("string: {e}")))
 }
 
-fn value_to_scalar_text(value: &Value) -> Option<String> {
+fn value_to_scalar_text(value: &Value) -> Option<Utf8Text> {
     match value {
         Value::String(s) => Some(s.clone()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
+        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].clone()),
+        Value::CharArray(ca) if ca.rows == 1 => {
+            Some(Utf8Text::new(ca.data().iter().collect::<String>()))
+        }
         _ => None,
     }
 }
@@ -733,7 +776,7 @@ fn char_array_to_string_array(
     for r in 0..array.rows {
         let mut row = String::with_capacity(array.cols);
         for c in 0..array.cols {
-            row.push(array.data[r * array.cols + c]);
+            row.push(array.data()[r * array.cols + c]);
         }
         rows.push(row);
     }
@@ -821,11 +864,11 @@ async fn cell_array_to_string_array(
     cell: runmat_value::CellArray,
     _encoding: StringEncoding,
 ) -> BuiltinResult<StringArray> {
-    let mut strings = Vec::with_capacity(cell.data.len());
+    let mut strings = Vec::with_capacity(cell.data().len());
     for col in 0..cell.cols {
         for row in 0..cell.rows {
             let idx = row * cell.cols + col;
-            let element = &cell.data[idx];
+            let element = &cell.data()[idx];
             let value = (element).clone();
             let gathered = gather_if_needed_async(&value)
                 .await
@@ -841,24 +884,24 @@ fn cell_element_to_string(value: &Value) -> BuiltinResult<String> {
     if let Some(array) = crate::builtins::datetime::datetime_string_array(value)
         .map_err(|err| string_flow(err.message().to_string()))?
     {
-        if array.data.len() == 1 {
-            return Ok(array.data[0].clone());
+        if array.data().len() == 1 {
+            return Ok(array.data()[0].as_str().to_owned());
         }
         return Err(string_flow("string: cell datetime values must be scalar"));
     }
     if let Some(array) = crate::builtins::duration::duration_string_array(value)
         .map_err(|err| string_flow(err.message().to_string()))?
     {
-        if array.data.len() == 1 {
-            return Ok(array.data[0].clone());
+        if array.data().len() == 1 {
+            return Ok(array.data()[0].as_str().to_owned());
         }
         return Err(string_flow("string: cell duration values must be scalar"));
     }
     match value {
-        Value::String(s) => Ok(s.clone()),
+        Value::String(s) => Ok(s.as_str().to_owned()),
         Value::StringArray(sa) => {
-            if sa.data.len() == 1 {
-                Ok(sa.data[0].clone())
+            if sa.data().len() == 1 {
+                Ok(sa.data()[0].as_str().to_owned())
             } else {
                 Err(string_flow(
                     "string: cell elements must contain string scalars, not string arrays",
@@ -867,7 +910,7 @@ fn cell_element_to_string(value: &Value) -> BuiltinResult<String> {
         }
         Value::CharArray(ca) => {
             if ca.rows == 1 {
-                Ok(ca.data.iter().collect())
+                Ok(ca.data().iter().collect())
             } else {
                 Err(string_flow(
                     "string: cell character arrays must be row vectors",
@@ -963,7 +1006,11 @@ pub(crate) mod tests {
 
     fn string_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
-        futures::executor::block_on(super::string_builtin(value, rest))
+        futures::executor::block_on(super::string_builtin(
+            None,
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     fn error_message(err: crate::RuntimeError) -> String {
@@ -977,7 +1024,7 @@ pub(crate) mod tests {
         match out {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![1, 1]);
-                assert_eq!(sa.data, vec!["42".to_string()]);
+                assert_eq!(sa.data(), vec!["42".to_string()]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -991,7 +1038,7 @@ pub(crate) mod tests {
         match out {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![2, 2]);
-                assert_eq!(sa.data, vec!["1", "2", "3", "4"]);
+                assert_eq!(sa.data(), vec!["1", "2", "3", "4"]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -1008,7 +1055,7 @@ pub(crate) mod tests {
             panic!("expected string array");
         };
         assert!(scalar.shape.is_empty());
-        assert_eq!(scalar.data, vec!["7"]);
+        assert_eq!(scalar.data(), vec!["7"]);
 
         let Value::StringArray(vector) = string_builtin(
             Value::Tensor(Tensor::new(vec![2.0, 3.0], vec![2]).unwrap()),
@@ -1018,7 +1065,7 @@ pub(crate) mod tests {
             panic!("expected string array");
         };
         assert_eq!(vector.shape, vec![2]);
-        assert_eq!(vector.data, vec!["2", "3"]);
+        assert_eq!(vector.data(), vec!["2", "3"]);
 
         let complex = ComplexTensor::new(vec![(1.5, -2.0)], Vec::new()).unwrap();
         let expected = complex.format_element(0);
@@ -1028,7 +1075,7 @@ pub(crate) mod tests {
             panic!("expected string array");
         };
         assert!(scalar.shape.is_empty());
-        assert_eq!(scalar.data, vec![expected]);
+        assert_eq!(scalar.data(), vec![expected]);
 
         let argument = futures::executor::block_on(extract_argument_data(Value::ComplexTensor(
             ComplexTensor::new(vec![(1.5, -2.0)], Vec::new()).unwrap(),
@@ -1047,7 +1094,7 @@ pub(crate) mod tests {
             panic!("expected string array");
         };
         assert_eq!(out.shape, vec![2, 2]);
-        assert_eq!(out.data, vec!["false", "true", "true", "false"]);
+        assert_eq!(out.data(), vec!["false", "true", "true", "false"]);
     }
 
     #[test]
@@ -1057,7 +1104,7 @@ pub(crate) mod tests {
         match out {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![1, 2]);
-                assert_eq!(array.data, vec!["1.25", "-2.5"]);
+                assert_eq!(array.data(), vec!["1.25", "-2.5"]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -1075,7 +1122,7 @@ pub(crate) mod tests {
         match out {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![1, 2]);
-                assert_eq!(sa.data, vec!["18446744073709551615", "9007199254740993"]);
+                assert_eq!(sa.data(), vec!["18446744073709551615", "9007199254740993"]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -1093,7 +1140,7 @@ pub(crate) mod tests {
         match out {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![1, 2]);
-                assert_eq!(sa.data, vec!["-9223372036854775808", "-9007199254740993"]);
+                assert_eq!(sa.data(), vec!["-9223372036854775808", "-9007199254740993"]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -1112,7 +1159,10 @@ pub(crate) mod tests {
         match out {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![1, 2]);
-                assert_eq!(sa.data, vec!["18446744073709551615+7i", "9007199254740993"]);
+                assert_eq!(
+                    sa.data(),
+                    vec!["18446744073709551615+7i", "9007199254740993"]
+                );
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -1126,7 +1176,7 @@ pub(crate) mod tests {
         match out {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![1, 3]);
-                assert_eq!(sa.data, vec!["true", "false", "true"]);
+                assert_eq!(sa.data(), vec!["true", "false", "true"]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -1140,7 +1190,7 @@ pub(crate) mod tests {
         match out {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![1, 1]);
-                assert_eq!(sa.data, vec!["abc"]);
+                assert_eq!(sa.data(), vec!["abc"]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -1155,7 +1205,7 @@ pub(crate) mod tests {
         match out {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![1, 2]);
-                assert_eq!(sa.data, vec!["true", "7"]);
+                assert_eq!(sa.data(), vec!["true", "7"]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -1179,7 +1229,7 @@ pub(crate) mod tests {
         match out {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![2, 2]);
-                assert_eq!(sa.data, vec!["1", "3", "2", "4"]);
+                assert_eq!(sa.data(), vec!["1", "3", "2", "4"]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -1197,7 +1247,7 @@ pub(crate) mod tests {
         match out {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![1, 1]);
-                assert_eq!(sa.data, vec!["9007199254740993"]);
+                assert_eq!(sa.data(), vec!["9007199254740993"]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -1218,7 +1268,7 @@ pub(crate) mod tests {
         match out {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![1, 1]);
-                assert_eq!(sa.data, vec![format!("1-{}i", i64::MIN.unsigned_abs())]);
+                assert_eq!(sa.data(), vec![format!("1-{}i", i64::MIN.unsigned_abs())]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -1270,7 +1320,7 @@ pub(crate) mod tests {
         match out {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![1, 1]);
-                assert_eq!(sa.data, vec!["hello"]);
+                assert_eq!(sa.data(), vec!["hello"]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -1287,7 +1337,7 @@ pub(crate) mod tests {
         match out {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![1, 1]);
-                assert_eq!(sa.data, vec!["100% Done"]);
+                assert_eq!(sa.data(), vec!["100% Done"]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -1344,7 +1394,7 @@ pub(crate) mod tests {
         match out {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![1, 1]);
-                assert_eq!(sa.data, vec![u64::MAX.to_string()]);
+                assert_eq!(sa.data(), vec![u64::MAX.to_string()]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -1387,7 +1437,7 @@ pub(crate) mod tests {
         match out {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![1, 1]);
-                assert_eq!(sa.data, vec!["7"]);
+                assert_eq!(sa.data(), vec!["7"]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -1402,7 +1452,7 @@ pub(crate) mod tests {
         match out {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![1, 3]);
-                assert_eq!(sa.data, vec!["Trial 1", "Trial 2", "Trial 3"]);
+                assert_eq!(sa.data(), vec!["Trial 1", "Trial 2", "Trial 3"]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -1420,7 +1470,7 @@ pub(crate) mod tests {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![1, 2]);
                 assert_eq!(
-                    array.data,
+                    array.data(),
                     vec![u64::MAX.to_string(), "9007199254740993".to_string()]
                 );
             }
@@ -1438,7 +1488,7 @@ pub(crate) mod tests {
         match out {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![1, 2]);
-                assert_eq!(sa.data, vec!["[5]", "Value 6"]);
+                assert_eq!(sa.data(), vec!["[5]", "Value 6"]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -1451,7 +1501,7 @@ pub(crate) mod tests {
         match out {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![1, 1]);
-                assert_eq!(sa.data, vec!["UTF-8"]);
+                assert_eq!(sa.data(), vec!["UTF-8"]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -1484,7 +1534,7 @@ pub(crate) mod tests {
             match result {
                 Value::StringArray(sa) => {
                     assert_eq!(sa.shape, vec![1, 2]);
-                    assert_eq!(sa.data, vec!["10", "20"]);
+                    assert_eq!(sa.data(), vec!["10", "20"]);
                 }
                 other => panic!("expected string array, got {other:?}"),
             }
@@ -1507,8 +1557,9 @@ pub(crate) mod tests {
             .expect("admit provenance view");
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = futures::executor::block_on(super::string_builtin(
+            None,
             Value::GpuTensor(handle),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect_err("strict mode rejects explicit GPU input before gather");
         assert_eq!(
@@ -1541,7 +1592,7 @@ pub(crate) mod tests {
         match (cpu, gpu) {
             (Value::StringArray(expect), Value::StringArray(actual)) => {
                 assert_eq!(actual.shape, expect.shape);
-                assert_eq!(actual.data, expect.data);
+                assert_eq!(actual.data(), expect.data());
             }
             other => panic!("unexpected results {other:?}"),
         }

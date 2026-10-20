@@ -28,7 +28,7 @@ pub async fn member_assignment_cardinality(
     assignment_cardinality_for_level(
         target,
         crate::object::indexing::ObjectIndexKind::Member,
-        Value::String(member),
+        Value::string(member),
     )
     .await
 }
@@ -120,10 +120,10 @@ pub(super) async fn assignment_cardinality_for_level(
     subs: Value,
 ) -> crate::BuiltinResult<usize> {
     ensure_indexing_context_classes_registered();
-    let mut level = runmat_value::StructValue::new();
-    level.insert("type", Value::String(kind.protocol_name().to_string()));
+    let mut level = runmat_value::UnboundedStructValueBuilder::new();
+    level.insert("type", Value::string(kind.protocol_name().to_string()));
     level.insert("subs", subs.clone());
-    let descriptor = Value::Struct(level);
+    let descriptor = Value::Struct(level.finish());
     let context = indexing_context_value(IndexingContext::Assignment);
     if crate::object_receiver_class_name(target).is_some() {
         if let Some(value) =

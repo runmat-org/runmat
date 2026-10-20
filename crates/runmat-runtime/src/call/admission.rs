@@ -22,10 +22,11 @@ pub(crate) fn admit_feval_target(value: &Value) -> BuiltinResult<()> {
     let text = match value {
         Value::String(text) => Some(text.as_str()),
         Value::CharArray(chars) if chars.rows == 1 => {
-            let text: String = chars.data.iter().collect();
-            return admit_text_target(&text);
+            return admit_target_characters(chars.data().iter().copied());
         }
-        Value::StringArray(strings) if strings.data.len() == 1 => Some(strings.data[0].as_str()),
+        Value::StringArray(strings) if strings.data().len() == 1 => {
+            Some(strings.data()[0].as_str())
+        }
         Value::CharArray(_) => {
             return Err(runtime_descriptor_error_with_detail(
                 "feval",
@@ -74,13 +75,19 @@ pub(crate) fn admit_feval_target(value: &Value) -> BuiltinResult<()> {
 }
 
 fn admit_text_target(text: &str) -> BuiltinResult<()> {
-    if text.trim().starts_with('@') {
+    admit_target_characters(text.chars())
+}
+
+fn admit_target_characters(characters: impl Iterator<Item = char>) -> BuiltinResult<()> {
+    let mut characters = characters.skip_while(|character| character.is_whitespace());
+    let first = characters.next();
+    if first == Some('@') {
         crate::compatibility::ensure_builtin_extension_enabled(
             &FEVAL_AT_PREFIXED_TEXT_EXTENSION,
             "feval",
         )?;
     }
-    if text_target_name(text).is_none() {
+    if first.is_none() || (first == Some('@') && characters.all(char::is_whitespace)) {
         return Err(runtime_descriptor_error(
             "feval",
             &FEVAL_ERROR_HANDLE_NAME_INVALID,

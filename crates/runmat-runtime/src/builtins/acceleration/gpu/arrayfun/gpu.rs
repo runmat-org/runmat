@@ -11,7 +11,7 @@ use runmat_value::Value;
 pub(super) async fn try_fast_path(
     context: Option<&crate::context::RuntimeContext>,
     callable: &Callable,
-    inputs: &[Value],
+    inputs: &crate::call::BuiltinArguments,
     error_handler: Option<&Callable>,
 ) -> BuiltinResult<Option<RootedValue>> {
     if error_handler.is_some()
@@ -21,7 +21,7 @@ pub(super) async fn try_fast_path(
     {
         return Ok(None);
     }
-    let Some(shape) = admission::shape(inputs)? else {
+    let Some(shape) = admission::shape(inputs.view())? else {
         return Ok(None);
     };
     // Empty mapping never invokes the callback or its domain/extension gates.
@@ -42,7 +42,7 @@ pub(super) async fn try_fast_path(
     else {
         return Ok(None);
     };
-    if !admission::equivalent(operation, identity.name, inputs) {
+    if !admission::equivalent(operation, identity.name, inputs.view()) {
         return Ok(None);
     }
     if matches!(operation, ArrayfunGpuCallback::Unary(ArrayfunGpuUnary::Log))
@@ -54,16 +54,18 @@ pub(super) async fn try_fast_path(
     }
     // Canonical dispatch owns preparation, class promotion, exact provider,
     // unsupported fallback and output admission. Never retry an execution error.
-    let result = crate::dispatcher::call_selected_builtin_async_with_outputs(
+    let result = crate::dispatcher::call_selected_retained_builtin_async_with_outputs(
         binding,
-        inputs,
+        inputs.fork(),
         1,
         context.cloned(),
     )
     .await
     .map_err(callback_error)?;
     let result = crate::dispatcher::resolve_single_sequence(result).map_err(callback_error)?;
-    normalize::uniform(result, &shape, inputs).await.map(Some)
+    normalize::uniform(result, &shape, inputs.view())
+        .await
+        .map(Some)
 }
 
 fn callback_error(error: crate::RuntimeError) -> crate::RuntimeError {

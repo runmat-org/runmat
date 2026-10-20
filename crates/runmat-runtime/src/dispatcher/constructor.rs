@@ -17,6 +17,7 @@ pub(super) enum ConstructorInvocationTarget {
 /// bound dispatch still borrow their actual contiguous arguments.
 pub(super) enum ConstructorArguments<'a> {
     Borrowed(&'a [Value]),
+    Retained(crate::call::BuiltinArguments),
     PreparedCount(usize),
 }
 
@@ -24,13 +25,18 @@ impl ConstructorArguments<'_> {
     pub(super) fn is_empty(&self) -> bool {
         match self {
             Self::Borrowed(values) => values.is_empty(),
+            Self::Retained(values) => values.is_empty(),
             Self::PreparedCount(count) => *count == 0,
         }
     }
 
-    pub(super) fn borrowed(&self) -> Result<&[Value], RuntimeError> {
+    pub(super) fn retained(
+        &self,
+        context: Option<&crate::context::RuntimeContext>,
+    ) -> Result<crate::call::BuiltinArguments, RuntimeError> {
         match self {
-            Self::Borrowed(values) => Ok(values),
+            Self::Borrowed(values) => crate::call::BuiltinArguments::from_borrowed(values, context),
+            Self::Retained(values) => Ok(values.fork()),
             Self::PreparedCount(_) => Err(build_runtime_error(
                 "prepared constructor has no borrowed argument slice",
             )
@@ -229,6 +235,57 @@ pub async fn call_bound_constructor_sequence_in_context(
                 crate::call::arguments::adapt_legacy_builtin_result,
                 |error| error.into_runtime_error(),
             )
+        })
+        .await
+}
+
+/// Rooted counterpart used by dynamic source selection. The constructor
+/// policy sees only the logical arity; the exact selected body retains the
+/// segmented callable/capture owners until its terminal invocation.
+pub async fn call_rooted_bound_constructor_sequence_in_context(
+    context: &crate::context::RuntimeContext,
+    owner: runmat_types::ClassMethodOwner,
+    binding: runmat_value::BoundFunctionBinding,
+    arguments: crate::call::RootedFunctionArguments,
+    requested_outputs: usize,
+) -> Result<crate::execution::RootedValueSequence, RuntimeError> {
+    if !binding.authority.admits_local(&context.session_lease()) {
+        return Err(
+            build_runtime_error("bound constructor belongs to another or ended session")
+                .with_identifier("RunMat:BoundFunction:UnavailableInvoker")
+                .build(),
+        );
+    }
+    let argument_count = arguments.len();
+    let selected = context.clone();
+    let invoke: PreparedConstructorInvoke = Box::new(move |runtime| {
+        Box::pin(async move {
+            crate::user_functions::try_call_rooted_bound_function_with_environment_in_context(
+                &runtime,
+                binding,
+                arguments,
+                requested_outputs,
+                None,
+            )
+            .await
+            .ok_or_else(|| {
+                build_runtime_error("selected runtime has no exact bound invoker")
+                    .with_identifier("RunMat:BoundFunction:UnavailableInvoker")
+                    .build()
+            })?
+        })
+    });
+    selected
+        .clone()
+        .scope(async move {
+            call_admitted_prepared_constructor_sequence_in_context(
+                &selected,
+                owner,
+                ConstructorArguments::PreparedCount(argument_count),
+                requested_outputs,
+                invoke,
+            )
+            .await
         })
         .await
 }

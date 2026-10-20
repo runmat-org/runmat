@@ -15,30 +15,30 @@ fn tf_object_with_delays(
     output_delay: f64,
 ) -> Value {
     let mut object = ObjectInstance::new("tf".to_string());
-    object.properties.insert(
+    object.replace_property_unbounded(
         "Numerator".to_string(),
         Value::Tensor(Tensor::new(num.clone(), vec![1, num.len()]).unwrap()),
     );
-    object.properties.insert(
+    object.replace_property_unbounded(
         "Denominator".to_string(),
         Value::Tensor(Tensor::new(den.clone(), vec![1, den.len()]).unwrap()),
     );
-    object.properties.insert(
+    object.replace_property_unbounded(
         "Variable".to_string(),
         Value::CharArray(CharArray::new_row(if ts > 0.0 { "z" } else { "s" })),
     );
-    object.properties.insert("Ts".to_string(), Value::Num(ts));
-    object
-        .properties
-        .insert("InputDelay".to_string(), Value::Num(input_delay));
-    object
-        .properties
-        .insert("OutputDelay".to_string(), Value::Num(output_delay));
+    object.replace_property_unbounded("Ts".to_string(), Value::Num(ts));
+    object.replace_property_unbounded("InputDelay".to_string(), Value::Num(input_delay));
+    object.replace_property_unbounded("OutputDelay".to_string(), Value::Num(output_delay));
     Value::Object(object)
 }
 
 fn run_impulse(system: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    block_on(impulse_builtin(system, rest))
+    block_on(impulse_builtin(
+        None,
+        system,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    ))
 }
 
 fn tensor_data(value: Value) -> Vec<f64> {
@@ -198,25 +198,21 @@ fn impulse_discrete_siso_response() {
 fn impulse_typed_integer_coefficients_and_time_cross_double_boundary_exactly() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let mut object = ObjectInstance::new("tf".to_string());
-    object.properties.insert(
+    object.replace_property_unbounded(
         "Numerator".to_string(),
         integer_tensor(IntegerStorage::U16(vec![20]), vec![1, 1]),
     );
-    object.properties.insert(
+    object.replace_property_unbounded(
         "Denominator".to_string(),
         integer_tensor(IntegerStorage::I16(vec![1, 5]), vec![1, 2]),
     );
-    object.properties.insert(
+    object.replace_property_unbounded(
         "Variable".to_string(),
         Value::CharArray(CharArray::new_row("s")),
     );
-    object.properties.insert("Ts".to_string(), Value::Num(0.0));
-    object
-        .properties
-        .insert("InputDelay".to_string(), Value::Num(0.0));
-    object
-        .properties
-        .insert("OutputDelay".to_string(), Value::Num(0.0));
+    object.replace_property_unbounded("Ts".to_string(), Value::Num(0.0));
+    object.replace_property_unbounded("InputDelay".to_string(), Value::Num(0.0));
+    object.replace_property_unbounded("OutputDelay".to_string(), Value::Num(0.0));
 
     let t = integer_tensor(IntegerStorage::U64(vec![0, 1]), vec![1, 2]);
     let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
@@ -253,25 +249,21 @@ fn impulse_time_vector_parser_ignores_poisoned_integer_mirrors_for_all_classes()
 fn impulse_scalar_final_time_reads_typed_integer_storage_length_exactly() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let mut object = ObjectInstance::new("tf".to_string());
-    object.properties.insert(
+    object.replace_property_unbounded(
         "Numerator".to_string(),
         Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
     );
-    object.properties.insert(
+    object.replace_property_unbounded(
         "Denominator".to_string(),
         Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap()),
     );
-    object.properties.insert(
+    object.replace_property_unbounded(
         "Variable".to_string(),
         Value::CharArray(CharArray::new_row("s")),
     );
-    object.properties.insert("Ts".to_string(), Value::Num(0.0));
-    object
-        .properties
-        .insert("InputDelay".to_string(), Value::Num(0.0));
-    object
-        .properties
-        .insert("OutputDelay".to_string(), Value::Num(0.0));
+    object.replace_property_unbounded("Ts".to_string(), Value::Num(0.0));
+    object.replace_property_unbounded("InputDelay".to_string(), Value::Num(0.0));
+    object.replace_property_unbounded("OutputDelay".to_string(), Value::Num(0.0));
 
     let final_time =
         Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("final time");
@@ -417,9 +409,7 @@ fn nested_resident_coefficients_are_compatibility_gated_before_download() {
         let Value::Object(mut model) = tf_object(vec![1.0], vec![1.0, 1.0], 0.0) else {
             unreachable!()
         };
-        model
-            .properties
-            .insert("Denominator".into(), Value::GpuTensor(resident.clone()));
+        model.replace_property_unbounded("Denominator".into(), Value::GpuTensor(resident.clone()));
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         provider.reset_telemetry();
         let error = run_impulse(Value::Object(model), Vec::new()).expect_err("MATLAB mode");
@@ -440,18 +430,14 @@ fn invalid_host_time_or_model_precedes_resident_coefficients() {
         let Value::Object(mut model) = tf_object(vec![1.0], vec![1.0, 1.0], 0.0) else {
             unreachable!()
         };
-        model
-            .properties
-            .insert("Denominator".into(), Value::GpuTensor(resident.clone()));
+        model.replace_property_unbounded("Denominator".into(), Value::GpuTensor(resident.clone()));
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         provider.reset_telemetry();
         let error = run_impulse(Value::Object(model.clone()), vec![Value::Num(-1.0)])
             .expect_err("invalid time");
         assert_eq!(error.identifier(), IMPULSE_ERROR_INVALID_TIME.identifier);
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
-        model
-            .properties
-            .insert("Numerator".into(), Value::Num(f64::NAN));
+        model.replace_property_unbounded("Numerator".into(), Value::Num(f64::NAN));
         provider.reset_telemetry();
         let error = run_impulse(Value::Object(model), Vec::new()).expect_err("invalid model");
         assert_eq!(error.identifier(), IMPULSE_ERROR_INVALID_MODEL.identifier);
@@ -460,12 +446,8 @@ fn invalid_host_time_or_model_precedes_resident_coefficients() {
         let Value::Object(mut delayed) = tf_object(vec![1.0], vec![1.0, 1.0], 0.0) else {
             unreachable!()
         };
-        delayed
-            .properties
-            .insert("Denominator".into(), Value::GpuTensor(resident));
-        delayed
-            .properties
-            .insert("OutputDelay".into(), Value::Num(1.0e-20));
+        delayed.replace_property_unbounded("Denominator".into(), Value::GpuTensor(resident));
+        delayed.replace_property_unbounded("OutputDelay".into(), Value::Num(1.0e-20));
         provider.reset_telemetry();
         let error = run_impulse(Value::Object(delayed), Vec::new()).expect_err("nonzero delay");
         assert_eq!(
@@ -490,7 +472,7 @@ fn tiny_nonzero_imaginary_coefficient_is_rejected() {
     let Value::Object(mut model) = tf_object(vec![1.0], vec![1.0, 1.0], 0.0) else {
         unreachable!()
     };
-    model.properties.insert(
+    model.replace_property_unbounded(
         "Numerator".into(),
         Value::ComplexTensor(
             runmat_value::ComplexTensor::new(vec![(1.0, 1.0e-20)], vec![1, 1]).unwrap(),
@@ -514,10 +496,8 @@ fn resident_wide_integer_coefficient_uses_exact_binary64_boundary() {
         let Value::Object(mut model) = tf_object(vec![1.0], vec![1.0, 1.0], 0.0) else {
             unreachable!()
         };
-        model
-            .properties
-            .insert("Numerator".into(), Value::GpuTensor(exact_handle));
-        model.properties.insert(
+        model.replace_property_unbounded("Numerator".into(), Value::GpuTensor(exact_handle));
+        model.replace_property_unbounded(
             "Denominator".into(),
             integer_tensor(
                 IntegerStorage::U64(vec![1_u64 << 63, 1_u64 << 63]),
@@ -537,9 +517,7 @@ fn resident_wide_integer_coefficient_uses_exact_binary64_boundary() {
         let inexact_handle =
             crate::builtins::common::gpu_helpers::upload_tensor(provider, &inexact)
                 .expect("inexact resident integer");
-        model
-            .properties
-            .insert("Numerator".into(), Value::GpuTensor(inexact_handle));
+        model.replace_property_unbounded("Numerator".into(), Value::GpuTensor(inexact_handle));
         let error =
             run_impulse(Value::Object(model), Vec::new()).expect_err("inexact resident integer");
         assert_eq!(

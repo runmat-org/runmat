@@ -17,7 +17,7 @@ fn control_materialization(controls: &[&Value]) -> Option<FusionProofStage> {
             Value::Tensor(value) => (u64::try_from(value.shape().len()).ok()?, 0, 0),
             Value::StringArray(value) => (
                 u64::try_from(value.shape.len()).ok()?,
-                value.data.iter().try_fold(0_u64, |total, string| {
+                value.data().iter().try_fold(0_u64, |total, string| {
                     total.checked_add(u64::try_from(string.len()).ok()?)
                 })?,
                 0,
@@ -25,7 +25,7 @@ fn control_materialization(controls: &[&Value]) -> Option<FusionProofStage> {
             Value::CharArray(value) => (
                 u64::try_from(value.shape.len()).ok()?,
                 0,
-                u64::try_from(value.data.len()).ok()?,
+                u64::try_from(value.data().len()).ok()?,
             ),
             _ => return None,
         };

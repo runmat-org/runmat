@@ -18,9 +18,9 @@ use runmat_value::Value;
 )]
 pub(in crate::builtins::io::repl_fs::file_transfer) async fn movefile_builtin(
     context: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
-    let outcome = execute::evaluate(&args, context.as_ref()).await?;
+    let outcome = execute::evaluate(args.view(), context.as_ref()).await?;
     if let Some(count) = crate::output_count::current_output_count() {
         if count == 0 {
             return outcome.without_outputs("movefile");

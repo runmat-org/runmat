@@ -32,7 +32,7 @@ impl RuntimeExecutionServices for CapturingService {
     }
     fn complete_future(
         &self,
-        future: &FutureHandle,
+        future: runmat_runtime::execution::FutureCompletionRef<'_>,
         result: Result<Value, ExecutionServiceError>,
     ) -> Result<(), ExecutionServiceError> {
         self.serial.complete_future(future, result)

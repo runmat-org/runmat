@@ -51,6 +51,29 @@ fn remap_with_policy(
     if remap.ids.is_empty() {
         return Ok(());
     }
+    let destinations = remap
+        .ids
+        .values()
+        .copied()
+        .collect::<std::collections::BTreeSet<_>>();
+    if destinations.len() != remap.ids.len()
+        || assembly
+            .functions
+            .keys()
+            .map(|id| mapped(*id, remap))
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+            != assembly.functions.len()
+        || assembly
+            .bodies
+            .keys()
+            .map(|id| mapped(*id, remap))
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+            != assembly.bodies.len()
+    {
+        return Err("MIR function rename collides with an existing local owner".into());
+    }
     let mut bodies = BTreeMap::new();
     for (function, mut body) in std::mem::take(&mut assembly.bodies) {
         body.function = mapped(function, remap);
@@ -407,33 +430,28 @@ fn remap_terminator(
         }
         MirTerminatorKind::For { iterable, .. } => remap_rvalue(iterable, remap)?,
         MirTerminatorKind::ParFor {
-            region,
             iterable,
             maximum_workers,
             ..
         } => {
-            remap_parallel_region(region, remap)?;
             remap_rvalue(iterable, remap)?;
             if let Some(maximum_workers) = maximum_workers {
                 remap_rvalue(maximum_workers, remap)?;
             }
         }
-        MirTerminatorKind::Spmd { region, header, .. } => {
-            remap_parallel_region(region, remap)?;
-            match header.as_mut() {
-                MirSpmdHeader::Default => {}
-                MirSpmdHeader::One(first) => remap_rvalue(first, remap)?,
-                MirSpmdHeader::Two(first, second) => {
-                    remap_rvalue(first, remap)?;
-                    remap_rvalue(second, remap)?;
-                }
-                MirSpmdHeader::Three(first, second, third) => {
-                    remap_rvalue(first, remap)?;
-                    remap_rvalue(second, remap)?;
-                    remap_rvalue(third, remap)?;
-                }
+        MirTerminatorKind::Spmd { header, .. } => match header.as_mut() {
+            MirSpmdHeader::Default => {}
+            MirSpmdHeader::One(first) => remap_rvalue(first, remap)?,
+            MirSpmdHeader::Two(first, second) => {
+                remap_rvalue(first, remap)?;
+                remap_rvalue(second, remap)?;
             }
-        }
+            MirSpmdHeader::Three(first, second, third) => {
+                remap_rvalue(first, remap)?;
+                remap_rvalue(second, remap)?;
+                remap_rvalue(third, remap)?;
+            }
+        },
         MirTerminatorKind::Return(values) => {
             for value in values {
                 remap_operand(value, remap);
@@ -457,27 +475,11 @@ fn remap_distributed(
     remap: &RemapContext<'_>,
 ) -> Result<(), String> {
     match operation {
-        MirDistributedOp::Create {
-            id, owner, input, ..
-        }
-        | MirDistributedOp::Codistributed {
-            id, owner, input, ..
-        }
+        MirDistributedOp::Create { input, .. }
+        | MirDistributedOp::Codistributed { input, .. }
         | MirDistributedOp::Build {
-            id,
-            owner,
-            local_part: input,
-            ..
+            local_part: input, ..
         } => {
-            remap_program_function(&mut id.function, remap)?;
-            match owner {
-                runmat_types::DistributedOwner::Client(function) => {
-                    remap_program_function(function, remap)?;
-                }
-                runmat_types::DistributedOwner::Region(region) => {
-                    remap_parallel_region(region, remap)?;
-                }
-            }
             remap_operand(input, remap);
             match operation {
                 MirDistributedOp::Codistributed { overload, .. } => match overload {
@@ -508,20 +510,6 @@ fn remap_distributed(
                     }
                 }
                 MirDistributedOp::Create { .. } => {}
-                _ => unreachable!("construction variants matched above"),
-            }
-            match operation {
-                MirDistributedOp::Codistributed {
-                    coordination: Some(coordination),
-                    ..
-                } => remap_parallel_region(&mut coordination.region, remap)?,
-                MirDistributedOp::Build { coordination, .. } => {
-                    remap_parallel_region(&mut coordination.region, remap)?;
-                }
-                MirDistributedOp::Create { .. }
-                | MirDistributedOp::Codistributed {
-                    coordination: None, ..
-                } => {}
                 _ => unreachable!("construction variants matched above"),
             }
         }
@@ -557,25 +545,6 @@ fn remap_collective(
     operation: &mut MirCollectiveOp,
     remap: &RemapContext<'_>,
 ) -> Result<(), String> {
-    remap_parallel_region(&mut operation.id_mut().region, remap)?;
     operation.for_each_operand_mut(|operand| remap_operand(operand, remap));
-    Ok(())
-}
-
-fn remap_parallel_region(
-    region: &mut runmat_types::ParallelRegionId,
-    remap: &RemapContext<'_>,
-) -> Result<(), String> {
-    remap_program_function(&mut region.0.function, remap)
-}
-
-fn remap_program_function(
-    function: &mut runmat_types::ProgramFunctionId,
-    remap: &RemapContext<'_>,
-) -> Result<(), String> {
-    let old = FunctionId(function.0 as usize);
-    let new = mapped(old, remap);
-    function.0 = u32::try_from(new.0)
-        .map_err(|_| "remapped function identity exceeds portable schema".to_string())?;
     Ok(())
 }

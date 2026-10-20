@@ -12,7 +12,7 @@ use crate::BuiltinResult;
 async fn fatal_assert_true(
     receiver: Value,
     actual: Value,
-    diagnostics: Vec<Value>,
+    diagnostics: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     shared::qualify_logical(
         "fatalAssertTrue",

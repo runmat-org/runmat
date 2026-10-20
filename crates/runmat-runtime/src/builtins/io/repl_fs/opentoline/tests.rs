@@ -12,7 +12,11 @@ fn call(args: Vec<Value>) -> BuiltinResult<Value> {
     let selected = context.clone();
     block_on(context.scope(async move {
         let _outputs = crate::output_count::push_output_count(outputs).expect("output-count scope");
-        opentoline_builtin(Some(selected), args).await
+        opentoline_builtin(
+            Some(selected),
+            crate::builtins::common::test_support::builtin_arguments(args),
+        )
+        .await
     }))
 }
 
@@ -28,13 +32,20 @@ fn navigation_delivers_exact_typed_position_and_requires_host_support() {
         Value::from("select"),
     ];
     assert_eq!(
-        block_on(opentoline_builtin(None, args.clone()))
-            .unwrap_err()
-            .identifier(),
+        block_on(opentoline_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args.clone())
+        ))
+        .unwrap_err()
+        .identifier(),
         Some("RunMat:host:DocumentInteractionUnavailable")
     );
     let (context, recorder) = crate::context::document_test_support::recording_context();
-    block_on(opentoline_builtin(Some(context), args)).unwrap();
+    block_on(opentoline_builtin(
+        Some(context),
+        crate::builtins::common::test_support::builtin_arguments(args),
+    ))
+    .unwrap();
     assert_eq!(
         *recorder.requests.borrow(),
         vec![crate::context::HostDocumentRequest::Navigate {
@@ -62,16 +73,22 @@ fn option_and_host_position_admission_precede_any_resident_download() {
         Value::from("bad-option"),
     ];
     assert_eq!(
-        block_on(opentoline_builtin(None, args))
-            .unwrap_err()
-            .identifier(),
+        block_on(opentoline_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args)
+        ))
+        .unwrap_err()
+        .identifier(),
         OPENTOLINE_ERROR_OPTION.identifier
     );
     let args = vec![Value::from("missing.m"), resident, Value::Num(-1.0)];
     assert_eq!(
-        block_on(opentoline_builtin(None, args))
-            .unwrap_err()
-            .identifier(),
+        block_on(opentoline_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args)
+        ))
+        .unwrap_err()
+        .identifier(),
         OPENTOLINE_ERROR_POSITION.identifier
     );
     let pages = Value::CharArray(
@@ -87,7 +104,7 @@ fn opentoline_resolves_file_and_returns_empty_array() {
     std::fs::write(&path, "a = 1;\nb = 2;\n").expect("write file");
 
     let result = call(vec![
-        Value::String(path.to_string_lossy().to_string()),
+        Value::String(path.to_string_lossy().to_string().into()),
         Value::Num(2.0),
     ])
     .expect("opentoline");
@@ -215,7 +232,7 @@ fn opentoline_automatically_resident_double_position_gathers_in_strict_mode() {
         let result = {
             let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
             call(vec![
-                Value::String(path.to_string_lossy().into_owned()),
+                Value::String(path.to_string_lossy().into_owned().into()),
                 Value::GpuTensor(handle.clone()),
             ])
             .expect("automatic position gathers transparently")
@@ -232,10 +249,10 @@ fn opentoline_accepts_column_and_select_option() {
     std::fs::write(&path, "abcdef\n").expect("write file");
 
     let result = call(vec![
-        Value::String(path.to_string_lossy().to_string()),
+        Value::String(path.to_string_lossy().to_string().into()),
         Value::Num(1.0),
         Value::Num(4.0),
-        Value::String("select".to_string()),
+        Value::String("select".to_string().into()),
     ])
     .expect("opentoline");
 
@@ -249,9 +266,9 @@ fn opentoline_command_form_text_line_and_column_are_supported() {
     std::fs::write(&path, "abcdef\n").expect("write file");
 
     let result = call(vec![
-        Value::String(path.to_string_lossy().to_string()),
-        Value::String("1".to_string()),
-        Value::String("3".to_string()),
+        Value::String(path.to_string_lossy().to_string().into()),
+        Value::String("1".to_string().into()),
+        Value::String("3".to_string().into()),
     ])
     .expect("opentoline");
 
@@ -261,7 +278,7 @@ fn opentoline_command_form_text_line_and_column_are_supported() {
 #[test]
 fn opentoline_rejects_missing_file() {
     let err = call(vec![
-        Value::String("definitely_missing_opentoline_target.m".to_string()),
+        Value::String("definitely_missing_opentoline_target.m".to_string().into()),
         Value::Num(1.0),
     ])
     .expect_err("missing file");
@@ -274,7 +291,7 @@ fn opentoline_rejects_invalid_positions_and_options() {
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("target.m");
     std::fs::write(&path, "abcdef\n").expect("write file");
-    let filename = Value::String(path.to_string_lossy().to_string());
+    let filename = Value::String(path.to_string_lossy().to_string().into());
 
     let err = call(vec![filename.clone(), Value::Num(0.0)]).expect_err("invalid line");
     assert_eq!(err.identifier(), Some("RunMat:opentoline:InvalidPosition"));
@@ -286,7 +303,7 @@ fn opentoline_rejects_invalid_positions_and_options() {
         filename,
         Value::Num(1.0),
         Value::Num(1.0),
-        Value::String("reuse".to_string()),
+        Value::String("reuse".to_string().into()),
     ])
     .expect_err("invalid option");
     assert_eq!(err.identifier(), Some("RunMat:opentoline:InvalidOption"));
@@ -299,7 +316,7 @@ fn opentoline_rejects_too_many_outputs() {
     std::fs::write(&path, "abcdef\n").expect("write file");
     let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let err = call(vec![
-        Value::String(path.to_string_lossy().to_string()),
+        Value::String(path.to_string_lossy().to_string().into()),
         Value::Num(1.0),
     ])
     .expect_err("too many outputs");

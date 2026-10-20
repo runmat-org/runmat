@@ -25,6 +25,11 @@ use crate::response::prepare_analysis_output_set;
 mod accuracy_import;
 #[path = "tests/host_transport.rs"]
 mod host_transport;
+#[path = "tests/host_contract.rs"]
+mod host_contract;
+pub(crate) use host_contract::{
+    contract_default_host, contract_devices, contract_host, contract_worker,
+};
 #[path = "tests/observation_history_checkpoint.rs"]
 mod observation_history_checkpoint_tests;
 
@@ -405,14 +410,15 @@ fn workload_rejects_identity_and_access_tampering() {
 #[test]
 fn worker_capability_inventory_uses_generic_execution_capabilities() {
     let formulation = digest("formulation");
-    let capabilities =
-        analysis_worker_capabilities(
-            [formulation],
-            [crate::test_fixtures::accelerator_class("gpu.compute")],
-            true,
-        );
+    let capabilities = analysis_worker_capabilities(
+        [formulation],
+        [runmat_execution::resource::AcceleratorClass::new("gpu.compute").unwrap()],
+        true,
+    );
     assert!(
-        capabilities.contains(&runmat_execution::resource::Capability::Accelerator(crate::test_fixtures::accelerator_class("gpu.compute")))
+        capabilities.contains(&runmat_execution::resource::Capability::Accelerator(
+            runmat_execution::resource::AcceleratorClass::new("gpu.compute").unwrap()
+        ))
     );
     assert!(
         capabilities.contains(&runmat_execution::resource::Capability::Custom(format!(
@@ -469,11 +475,15 @@ fn logical_task_identity_is_independent_of_pool_placement() {
         .iter()
         .map(|argument| match argument {
             runmat_execution::value::ValuePayload::Object(reference) => reference.as_ref().clone(),
-            other => panic!("analysis task inputs must remain externalized: {other:?}"),
+            runmat_execution::value::ValuePayload::Inline(_)
+            | runmat_execution::value::ValuePayload::Distributed(_)
+            | runmat_execution::value::ValuePayload::Composite(_) => {
+                panic!("analysis task inputs must be externalized object references")
+            }
         })
         .collect::<Vec<_>>();
     let context = |pool: &[u8]| AnalysisExecutionContext {
-        host: crate::test_fixtures::host_requirement(),
+        host: crate::tests::contract_default_host(),
         scope_id: ExecutionScopeId::derive(&[b"study-scope"]),
         pool_id: PoolId::derive(&[pool]),
         program_artifact_id: runmat_execution::identity::ArtifactId::derive(&[b"analysis-program"]),
@@ -560,12 +570,16 @@ fn analysis_task_retains_logical_dependencies_after_scheduler_replacement() {
         .iter()
         .map(|argument| match argument {
             runmat_execution::value::ValuePayload::Object(reference) => reference.as_ref().clone(),
-            other => unreachable!("analysis task inputs are object references: {other:?}"),
+            runmat_execution::value::ValuePayload::Inline(_)
+            | runmat_execution::value::ValuePayload::Distributed(_)
+            | runmat_execution::value::ValuePayload::Composite(_) => {
+                panic!("analysis task inputs must be externalized object references")
+            }
         })
         .collect::<Vec<_>>();
     let predecessor = AnalysisTaskIdentity::new(host.workload.identity, Vec::new()).unwrap();
     let context = AnalysisExecutionContext {
-        host: crate::test_fixtures::host_requirement(),
+        host: crate::tests::contract_default_host(),
         scope_id: ExecutionScopeId::derive(&[b"replacement-scope"]),
         pool_id: PoolId::derive(&[b"replacement-pool"]),
         program_artifact_id: runmat_execution::identity::ArtifactId::derive(&[
@@ -705,7 +719,7 @@ fn semantic_sequence_compiles_to_deterministic_parallel_scheduler_tasks() {
                 host,
                 program,
                 context: AnalysisExecutionContext {
-                    host: crate::test_fixtures::host_requirement(),
+                    host: crate::tests::contract_default_host(),
                     scope_id: ExecutionScopeId::derive(&[b"parallel-study"]),
                     pool_id: PoolId::derive(&[step_id.as_bytes()]),
                     program_artifact_id,
@@ -1676,7 +1690,9 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         .iter()
         .map(|input| match input {
             ValuePayload::Object(root) => (**root).clone(),
-            other => unreachable!("expected an object reference: {other:?}"),
+            ValuePayload::Inline(_) | ValuePayload::Distributed(_) | ValuePayload::Composite(_) => {
+                panic!("analysis task inputs must be externalized object references")
+            }
         })
         .collect::<Vec<_>>();
     let mut scheduled_resources = prepared.resource_plan.request.clone();
@@ -1684,7 +1700,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         .required_capabilities
         .extend(prepared.host.workload.generic_capabilities().unwrap());
     let execution_context = |resources| AnalysisExecutionContext {
-        host: crate::test_fixtures::host_requirement(),
+        host: crate::tests::contract_default_host(),
         scope_id: ExecutionScopeId::derive(&[b"structural-study"]),
         pool_id: PoolId::derive(&[b"structural-pool"]),
         program_artifact_id: runmat_execution::identity::ArtifactId::derive(&[
@@ -1798,7 +1814,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         task_id: submission.request.id,
         scope_id: submission.request.scope_id,
         worker_id: runmat_execution::identity::WorkerId::derive(&[b"structural-worker"]),
-        ordinal: 0,
+        ordinal: 1,
         driver_fence: 1,
         resource_assignment: Default::default(),
         task: submission.request.clone(),
@@ -1812,10 +1828,11 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         ObjectInventoryLimits::default(),
     )
     .is_err());
+    let (outputs, result_objects) = unmetered.into_values().expect("original direct outputs");
     let metered = runmat_execution_runner::AttemptSuccess::new(
         &attempt_request,
-        unmetered.values().unwrap().0.to_vec(),
-        unmetered.result_objects().to_vec(),
+        outputs,
+        result_objects,
         1,
         0,
         0,
@@ -1833,10 +1850,13 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     alternate_attempt_request.id =
         runmat_execution::identity::AttemptId::derive(&[b"alternate-structural-attempt"]);
     let alternate_unmetered = completed.attempt_success();
+    let (outputs, result_objects) = alternate_unmetered
+        .into_values()
+        .expect("original direct outputs");
     let alternate_metered = runmat_execution_runner::AttemptSuccess::new(
         &alternate_attempt_request,
-        alternate_unmetered.values().unwrap().0.to_vec(),
-        alternate_unmetered.result_objects().to_vec(),
+        outputs,
+        result_objects,
         1,
         0,
         0,
@@ -1851,10 +1871,11 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     )
     .unwrap();
     let unmetered = completed.attempt_success();
+    let (outputs, result_objects) = unmetered.into_values().expect("original direct outputs");
     let overrun_success = runmat_execution_runner::AttemptSuccess::new(
         &attempt_request,
-        unmetered.values().unwrap().0.to_vec(),
-        unmetered.result_objects().to_vec(),
+        outputs,
+        result_objects,
         prepared.resource_plan.request.max_wall_millis + 1,
         0,
         0,
@@ -2092,7 +2113,11 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             .iter()
             .map(|input| match input {
                 ValuePayload::Object(root) => (**root).clone(),
-                other => unreachable!("expected an object reference: {other:?}"),
+                ValuePayload::Inline(_)
+                | ValuePayload::Distributed(_)
+                | ValuePayload::Composite(_) => {
+                    panic!("analysis task inputs must be externalized object references")
+                }
             })
             .collect::<Vec<_>>();
         let mut resources = partition.resource_plan.request.clone();
@@ -2190,7 +2215,11 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             .iter()
             .map(|input| match input {
                 ValuePayload::Object(root) => (**root).clone(),
-                other => unreachable!("expected an object reference: {other:?}"),
+                ValuePayload::Inline(_)
+                | ValuePayload::Distributed(_)
+                | ValuePayload::Composite(_) => {
+                    panic!("analysis task inputs must be externalized object references")
+                }
             })
             .collect::<Vec<_>>();
         let mut resources = reduction.resource_plan.request.clone();
@@ -3070,11 +3099,11 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         inventory_limits: ObjectInventoryLimits::default(),
         required_capabilities: BTreeSet::new(),
         accelerator_requests: vec![runmat_execution::resource::AcceleratorRequest {
-            class: crate::test_fixtures::accelerator_class("test-gpu"),
+            class: runmat_execution::resource::AcceleratorClass::new("test-gpu").unwrap(),
             count: 1,
             minimum_allocation_bytes: 1024 * 1024 * 1024,
             provider: None,
-            required_features: Default::default(),
+            required_features: BTreeSet::new(),
         }],
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
     })
@@ -3326,11 +3355,12 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
             inventory_limits: ObjectInventoryLimits::default(),
             required_capabilities: BTreeSet::new(),
             accelerator_requests: vec![runmat_execution::resource::AcceleratorRequest {
-                class: crate::test_fixtures::accelerator_class("substituted-gpu"),
+                class: runmat_execution::resource::AcceleratorClass::new("substituted-gpu")
+                    .unwrap(),
                 count: 1,
                 minimum_allocation_bytes: 1024,
-            provider: None,
-            required_features: Default::default(),
+                provider: None,
+                required_features: BTreeSet::new(),
             }],
             local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         })

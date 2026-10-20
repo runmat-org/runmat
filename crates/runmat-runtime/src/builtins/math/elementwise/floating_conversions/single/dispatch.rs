@@ -9,7 +9,7 @@ use crate::BuiltinResult;
 pub(super) async fn execute(
     runtime: Option<&RuntimeContext>,
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<RootedValue> {
     let _inputs = RootedValueLease::for_values(std::iter::once(&value).chain(rest.iter()))
         .map_err(|cause| cause.into_runtime_error())?;
@@ -18,7 +18,7 @@ pub(super) async fn execute(
         &runmat_builtins::SINGLE_ERROR_INVALID_ARGUMENT,
         CONVERSION.name(),
     )?;
-    let template = parse_output_template(&rest)?;
+    let template = parse_output_template(rest.view())?;
     if !rest.is_empty() {
         crate::compatibility::ensure_builtin_extension_enabled(
             &SINGLE_LIKE_OUTPUT_EXTENSION,

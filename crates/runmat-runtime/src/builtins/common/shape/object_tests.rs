@@ -5,7 +5,7 @@ use runmat_value::{ObjectInstance, Tensor, Value};
 
 fn wrapper(class: StaticClassIdentity, property: &str, payload: Value) -> Value {
     let mut object = ObjectInstance::new(class);
-    object.properties.insert(property.to_owned(), payload);
+    object.replace_property_unbounded(property.to_owned(), payload);
     Value::Object(object)
 }
 
@@ -81,11 +81,11 @@ fn malformed_wrapper_storage_is_not_a_scalar_array() {
 #[test]
 fn parallel_payload_dimensions_must_agree() {
     let mut object = ObjectInstance::new(standard::CALENDAR_DURATION);
-    object.properties.insert(
+    object.replace_property_unbounded(
         runmat_builtins::CALENDAR_MONTHS_PROPERTY.into(),
         Value::Tensor(Tensor::new(vec![0.0; 2], vec![1, 2]).unwrap()),
     );
-    object.properties.insert(
+    object.replace_property_unbounded(
         runmat_builtins::CALENDAR_DAYS_PROPERTY.into(),
         Value::Tensor(Tensor::new(vec![0.0; 2], vec![1, 2]).unwrap()),
     );
@@ -93,7 +93,7 @@ fn parallel_payload_dimensions_must_agree() {
         block_on(value_dimensions(&Value::Object(object.clone()))).unwrap(),
         vec![1, 2]
     );
-    object.properties.insert(
+    object.replace_property_unbounded(
         runmat_builtins::CALENDAR_DAYS_PROPERTY.into(),
         Value::Num(0.0),
     );

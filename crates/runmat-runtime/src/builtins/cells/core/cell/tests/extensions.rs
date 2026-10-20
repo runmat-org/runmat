@@ -22,7 +22,7 @@ fn like_is_mode_gated_and_uses_prototype_shape_or_representation() {
         &[2, 2],
     );
     assert!(cells
-        .data
+        .data()
         .iter()
         .all(|value| matches!(value, Value::LogicalArray(array) if array.shape == [0, 0])));
 
@@ -38,8 +38,8 @@ fn like_is_case_insensitive_and_cell_prototypes_create_empty_cells() {
         vec![Value::Num(2.0), Value::from("LIKE"), prototype],
         &[2, 2],
     );
-    assert!(cells.data.iter().all(
-        |value| matches!(value, Value::Cell(inner) if inner.shape == [0, 0] && inner.data.is_empty())
+    assert!(cells.data().iter().all(
+        |value| matches!(value, Value::Cell(inner) if inner.shape == [0, 0] && inner.data().is_empty())
     ));
 }
 

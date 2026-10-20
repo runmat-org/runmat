@@ -53,7 +53,7 @@ fn character_format_returns_character_class_and_column_major_shape() {
         panic!("Format char must return character data");
     };
     assert_eq!(chars.shape, vec![2, 2]);
-    assert_eq!(chars.data, vec!['A', 'C', 'B', 'D']);
+    assert_eq!(chars.data(), vec!['A', 'C', 'B', 'D']);
     assert_eq!(chars.to_column_major(), vec!['A', 'B', 'C', 'D']);
 }
 
@@ -104,13 +104,7 @@ fn named_multirecord_format_retains_declared_field_order() {
     let Value::StructArray(records) = format.decode(&[1, 2, 3, 4], Some(2)).unwrap() else {
         panic!("two format records must retain structure array class");
     };
-    assert_eq!(
-        records
-            .field_names()
-            .map(String::as_str)
-            .collect::<Vec<_>>(),
-        ["zeta", "alpha"]
-    );
+    assert_eq!(records.field_names().collect::<Vec<_>>(), ["zeta", "alpha"]);
     let elements = records.into_elements();
     assert_eq!(elements.len(), 2);
     for (record, zeta, alpha) in [(&elements[0], 1, 2), (&elements[1], 3, 4)] {
@@ -133,10 +127,7 @@ fn named_multirecord_format_retains_declared_field_order() {
         panic!("empty named format must retain its structure schema");
     };
     assert_eq!(empty.shape(), &[0, 1]);
-    assert_eq!(
-        empty.field_names().map(String::as_str).collect::<Vec<_>>(),
-        ["zeta", "alpha"]
-    );
+    assert_eq!(empty.field_names().collect::<Vec<_>>(), ["zeta", "alpha"]);
 }
 
 #[test]
@@ -152,7 +143,7 @@ fn format_and_filename_errors_keep_owning_identifiers_and_causes() {
 
     let invalid_filename = futures::executor::block_on(super::super::memmapfile_builtin(
         None,
-        vec![Value::Num(7.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(7.0)]),
     ))
     .expect_err("filename must be text");
     assert_eq!(
@@ -193,7 +184,9 @@ fn selected_file_read_failure_retains_provider_cause() {
     super::super::vfs::set_current_dir(&root).unwrap();
     let missing = futures::executor::block_on(super::super::memmapfile_builtin(
         None,
-        vec![Value::String("missing.bin".into())],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+            "missing.bin".into(),
+        )]),
     ))
     .expect_err("missing selected file");
     assert_eq!(missing.identifier(), Some("RunMat:memmapfile:ReadFailed"));
@@ -224,11 +217,11 @@ fn wide_repeat_property_is_exact_without_a_large_file() {
     let wide = (1_u64 << 53) + 1;
     let Value::Object(mapped) = futures::executor::block_on(super::super::memmapfile_builtin(
         None,
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::String("one.bin".into()),
             char_value("Repeat"),
             Value::Int(IntValue::U64(wide)),
-        ],
+        ]),
     ))
     .unwrap() else {
         panic!("memmapfile object");

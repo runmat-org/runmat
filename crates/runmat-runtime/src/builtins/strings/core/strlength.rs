@@ -63,10 +63,10 @@ async fn strlength_builtin(value: Value) -> crate::BuiltinResult<Value> {
 }
 
 fn strlength_string_array(array: StringArray) -> BuiltinResult<Value> {
-    let StringArray { data, shape, .. } = array;
+    let (data, shape, _, _) = array.into_parts();
     let mut lengths = Vec::with_capacity(data.len());
     for text in &data {
-        lengths.push(string_scalar_length(text));
+        lengths.push(string_scalar_length(text.as_str()));
     }
     let tensor =
         Tensor::new(lengths, shape).map_err(|_| strlength_error(&STRLENGTH_ERROR_INTERNAL))?;
@@ -90,9 +90,7 @@ fn strlength_char_array(array: CharArray) -> BuiltinResult<Value> {
 }
 
 fn strlength_cell_array(cell: CellArray) -> BuiltinResult<Value> {
-    let CellArray {
-        data, rows, cols, ..
-    } = cell;
+    let (data, _, rows, cols) = cell.into_parts();
     let mut lengths = Vec::with_capacity(rows * cols);
     for col in 0..cols {
         for row in 0..rows {
@@ -100,7 +98,9 @@ fn strlength_cell_array(cell: CellArray) -> BuiltinResult<Value> {
             let value: &Value = &data[idx];
             let length = match value {
                 Value::String(text) => string_scalar_length(text),
-                Value::StringArray(sa) if sa.data.len() == 1 => string_scalar_length(&sa.data[0]),
+                Value::StringArray(sa) if sa.data().len() == 1 => {
+                    string_scalar_length(sa.data()[0].as_str())
+                }
                 Value::CharArray(char_vec) if char_vec.rows == 1 => char_vec.cols as f64,
                 Value::CharArray(_) => {
                     return Err(strlength_error(&STRLENGTH_ERROR_INVALID_CELL_ELEMENT));
@@ -127,7 +127,7 @@ fn trimmed_row_length(array: &CharArray, row: usize) -> usize {
     let cols = array.cols;
     let mut end = cols;
     while end > 0 {
-        let ch = array.data[row * cols + end - 1];
+        let ch = array.data()[row * cols + end - 1];
         if ch == ' ' {
             end -= 1;
         } else {

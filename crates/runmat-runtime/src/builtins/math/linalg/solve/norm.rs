@@ -101,9 +101,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::solve::norm"
 )]
-async fn norm_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    ensure_compatibility(&value, &rest)?;
-    let order = parse_order(&rest)?;
+async fn norm_builtin(value: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    ensure_compatibility(&value, rest.view())?;
+    let order = parse_order(rest.view())?;
     match order {
         NormOrder::Zero => crate::compatibility::ensure_builtin_extension_enabled(
             &NORM_ZERO_ORDER_EXTENSION,
@@ -145,7 +145,10 @@ async fn norm_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     }
 }
 
-fn ensure_compatibility(value: &Value, rest: &[Value]) -> BuiltinResult<()> {
+fn ensure_compatibility(
+    value: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     if is_typed_integer(value) {
         crate::compatibility::ensure_builtin_extension_enabled(&NORM_INTEGER_DATA_EXTENSION, NAME)?;
     }
@@ -664,7 +667,7 @@ fn nuclear_norm_complex(tensor: &ComplexTensor, rows: usize, cols: usize) -> Bui
     Ok(svd.singular_values.iter().sum())
 }
 
-fn parse_order(args: &[Value]) -> BuiltinResult<NormOrder> {
+fn parse_order(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<NormOrder> {
     match args.len() {
         0 => Ok(NormOrder::Default),
         1 => parse_order_value(&args[0]),
@@ -1306,6 +1309,9 @@ pub(crate) mod tests {
     }
 
     fn norm_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::norm_builtin(value, rest))
+        block_on(super::norm_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 }

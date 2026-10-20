@@ -49,19 +49,28 @@ fn admit_selector(value: Value, scalar: bool, name: &'static str) -> BuiltinResu
     }
 }
 
-pub(in crate::builtins::graph::domain) fn admit_scalar_selectors(
-    values: Vec<Value>,
+pub(in crate::builtins::graph::domain) fn admit_scalar_selectors<I>(
+    values: I,
     name: &'static str,
-) -> BuiltinResult<Vec<NodeSelector>> {
+) -> BuiltinResult<Vec<NodeSelector>>
+where
+    I: IntoIterator<Item = Value>,
+    I::IntoIter: ExactSizeIterator,
+{
     values
         .into_iter()
         .map(|value| admit_selector(value, true, name))
         .collect()
 }
 
-pub(in crate::builtins::graph::domain) fn admit_distance_selectors(
-    values: Vec<Value>,
-) -> BuiltinResult<Vec<NodeSelector>> {
+pub(in crate::builtins::graph::domain) fn admit_distance_selectors<I>(
+    values: I,
+) -> BuiltinResult<Vec<NodeSelector>>
+where
+    I: IntoIterator<Item = Value>,
+    I::IntoIter: ExactSizeIterator,
+{
+    let values = values.into_iter();
     if values.len() > 2 {
         return Err(graph_error(
             "distances",
@@ -69,7 +78,6 @@ pub(in crate::builtins::graph::domain) fn admit_distance_selectors(
         ));
     }
     values
-        .into_iter()
         .map(|value| admit_selector(value, false, "distances"))
         .collect()
 }

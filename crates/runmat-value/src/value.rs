@@ -10,7 +10,8 @@ pub enum Value {
     Bool(bool),
     // Logical array (N-D of booleans). Scalars use Bool.
     LogicalArray(LogicalArray),
-    String(String),
+    /// Immutable scalar UTF-8 backing; an admitted output retains its claim.
+    String(Utf8Text),
     // String array (R2016b+): N-D array of string scalars
     StringArray(StringArray),
     // Char array (single-quoted): N-D character array with 2-D row/column caches
@@ -51,27 +52,38 @@ pub enum Value {
     // Function handle with compiler/session semantic identity.
     BoundFunctionHandle(BoundFunctionHandle),
     Closure(Closure),
-    ClassRef(runmat_types::ClassIdentity),
+    ClassRef(SharedClassIdentity),
     MException(MException),
     /// Lazy executable work owned by the active runtime execution service.
-    Future(runmat_execution::FutureHandle),
+    Future(SharedFutureHandle),
     /// Scheduled work owned by the active runtime execution service.
-    Task(runmat_execution::TaskHandle),
+    Task(SharedTaskHandle),
     /// Execution pool capability owned by an execution service.
     Pool(runmat_execution::PoolHandle),
     /// Durable batch execution capability.
-    Job(runmat_execution::JobHandle),
+    Job(SharedJobHandle),
     /// A distributed array whose partitions remain owned by an execution
     /// service. The handle carries identity and fencing, never array payloads.
-    Distributed(Box<runmat_execution::DistributedValueHandle>),
+    Distributed(SharedDistributedHandle),
     /// Per-rank values retained by an SPMD gang. Entries are resolved through
     /// the owning execution service rather than embedded in the language value.
-    Composite(Box<runmat_execution::CompositeHandle>),
+    Composite(SharedCompositeHandle),
     /// Opaque resource owned by a foreign runtime host and fenced by generation.
     Foreign(ForeignRef),
 }
 
 impl Value {
+    pub fn string(text: impl Into<Utf8Text>) -> Self {
+        Self::String(text.into())
+    }
+
+    pub fn string_text(&self) -> Option<&str> {
+        match self {
+            Self::String(text) => Some(text.as_str()),
+            _ => None,
+        }
+    }
+
     pub fn output_list(values: impl Into<OutputListStorage>) -> Self {
         Self::OutputList(values.into())
     }

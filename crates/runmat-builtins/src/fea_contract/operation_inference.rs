@@ -6,11 +6,10 @@ use super::constructor_inference::{
     possible_object,
 };
 use super::identities::{
-    FEA_PLAN_CLASS, FEA_RUN_RESULT_CLASS, FEA_STUDY_CLASS, FEA_SWEEP_CLASS,
-    FEA_SWEEP_PLAN_CLASS, FEA_SWEEP_RUN_RESULT_CLASS, FEA_SWEEP_VALIDATION_CLASS,
-    FEA_TRENDS_CLASS, FEA_VALIDATION_CLASS,
+    FEA_PLAN_CLASS, FEA_RUN_RESULT_CLASS, FEA_STUDY_CLASS, FEA_SWEEP_CLASS, FEA_SWEEP_PLAN_CLASS,
+    FEA_SWEEP_RUN_RESULT_CLASS, FEA_SWEEP_VALIDATION_CLASS, FEA_TRENDS_CLASS, FEA_VALIDATION_CLASS,
 };
-use super::options::FeaStructuralOption;
+use super::options::FeaTrendsOption;
 use crate::{
     catalog::{argument_error, finish_fixed},
     BuiltinCatalogEntry,
@@ -79,7 +78,7 @@ pub fn infer_evidence(
                 ));
             }
             if let Some(name) = request.literals.literal_string_at(index) {
-                if FeaStructuralOption::decode(&name) != Some(FeaStructuralOption::WindowSize) {
+                if FeaTrendsOption::decode(&name) != Some(FeaTrendsOption::WindowSize) {
                     diagnostics.push(argument_error(
                         "RM-CATALOG-FEA-OPTION",
                         "WindowSize is the only fea.trends option",
@@ -119,7 +118,10 @@ pub fn infer_evidence(
     if request.arguments.len() != 1 {
         diagnostics.push(argument_error(
             "RM-CATALOG-FEA-ARITY",
-            format!("{} requires exactly one fea.Study or fea.Sweep", kind.name()),
+            format!(
+                "{} requires exactly one fea.Study or fea.Sweep",
+                kind.name()
+            ),
             request.arguments.len(),
         ));
     }
@@ -200,20 +202,34 @@ mod tests {
     #[test]
     fn study_and_sweep_inputs_select_their_result_classes() {
         for (kind, study, sweep) in [
-            (FeaEvidenceKind::Validate, "fea.Validation", "fea.SweepValidation"),
+            (
+                FeaEvidenceKind::Validate,
+                "fea.Validation",
+                "fea.SweepValidation",
+            ),
             (FeaEvidenceKind::Plan, "fea.Plan", "fea.SweepPlan"),
             (FeaEvidenceKind::Run, "fea.RunResult", "fea.SweepRunResult"),
         ] {
             let entry = entry(kind);
             let inferred = infer_evidence(
-                &request(vec![object_fact(FEA_STUDY_CLASS)], vec![LiteralValue::Unknown]),
+                &request(
+                    vec![object_fact(FEA_STUDY_CLASS)],
+                    vec![LiteralValue::Unknown],
+                ),
                 &entry,
                 kind,
             );
-            assert!(inferred.diagnostics.is_empty(), "{:?}", inferred.diagnostics);
+            assert!(
+                inferred.diagnostics.is_empty(),
+                "{:?}",
+                inferred.diagnostics
+            );
             assert_eq!(runtime_class(&inferred.outputs[0]).as_deref(), Some(study));
             let inferred = infer_evidence(
-                &request(vec![object_fact(FEA_SWEEP_CLASS)], vec![LiteralValue::Unknown]),
+                &request(
+                    vec![object_fact(FEA_SWEEP_CLASS)],
+                    vec![LiteralValue::Unknown],
+                ),
                 &entry,
                 kind,
             );
@@ -257,13 +273,19 @@ mod tests {
         let valid = infer_evidence(
             &request(
                 vec![ValueFact::scalar(ValueKindFact::String), uint.clone()],
-                vec![LiteralValue::String("Window-Size".into()), LiteralValue::Unknown],
+                vec![
+                    LiteralValue::String("Window-Size".into()),
+                    LiteralValue::Unknown,
+                ],
             ),
             &entry,
             FeaEvidenceKind::Trends,
         );
         assert!(valid.diagnostics.is_empty(), "{:?}", valid.diagnostics);
-        assert_eq!(runtime_class(&valid.outputs[0]).as_deref(), Some("fea.Trends"));
+        assert_eq!(
+            runtime_class(&valid.outputs[0]).as_deref(),
+            Some("fea.Trends")
+        );
         let mut matrix = uint;
         matrix.shape = ShapeFact::from(vec![Some(2), Some(1)]);
         let invalid = infer_evidence(

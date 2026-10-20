@@ -75,14 +75,20 @@ pub(crate) async fn mnrfit_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
     x: Value,
     y: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     mnrfit_in_runtime(runtime.as_ref(), x, y, rest).await
 }
 
 #[cfg(test)]
 pub(crate) async fn mnrfit_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    mnrfit_in_runtime(None, x, y, rest).await
+    mnrfit_in_runtime(
+        None,
+        x,
+        y,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    )
+    .await
 }
 
 fn check_cancellation(runtime: Option<&crate::context::RuntimeContext>) -> BuiltinResult<()> {
@@ -93,13 +99,13 @@ async fn mnrfit_in_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
     x: Value,
     y: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     check_cancellation(runtime)?;
     let mut cooperation = FitCooperation::new(runtime);
-    let inspected = options::inspect(&rest);
-    ensure_extensions(&x, &y, &rest, &inspected)?;
-    let names = options::validate(&rest, inspected)?;
+    let inspected = options::inspect(rest.view());
+    ensure_extensions(&x, &y, rest.view(), &inspected)?;
+    let names = options::validate(rest.view(), inspected)?;
     let admitted = admission::prepare(x, y, &mut cooperation).await?;
     let values = rest.into_iter().skip(1).step_by(2);
     let prepared =
@@ -128,7 +134,7 @@ async fn mnrfit_in_runtime(
 fn ensure_extensions(
     x: &Value,
     y: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     inspected: &[options::OptionSlot],
 ) -> BuiltinResult<()> {
     if is_typed_integer(x) {
@@ -220,7 +226,7 @@ fn contains_explicit_gpu(value: &Value) -> bool {
     match value {
         Value::GpuTensor(handle) => runmat_accelerate_api::handle_is_explicit(handle),
         Value::Struct(st) => st.fields.values().any(contains_explicit_gpu),
-        Value::Cell(cell) => cell.data.iter().any(contains_explicit_gpu),
+        Value::Cell(cell) => cell.data().iter().any(contains_explicit_gpu),
         _ => false,
     }
 }
@@ -267,10 +273,12 @@ async fn fit(
     })
 }
 
-fn scalar_text(value: &Value) -> Option<String> {
+fn scalar_text(value: &Value) -> Option<runmat_value::Utf8Text> {
     match value {
         Value::String(text) => Some(text.clone()),
-        Value::CharArray(chars) if chars.rows == 1 => Some(chars.data.iter().collect()),
+        Value::CharArray(chars) if chars.rows == 1 => {
+            Some(chars.data().iter().collect::<String>().into())
+        }
         _ => None,
     }
 }

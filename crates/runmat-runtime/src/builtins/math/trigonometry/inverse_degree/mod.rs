@@ -163,7 +163,7 @@ fn host(spec: &Spec, value: Value) -> BuiltinResult<Value> {
         Value::CharArray(chars) => {
             let tensor = Tensor::new(
                 chars
-                    .data
+                    .data()
                     .iter()
                     .map(|character| u32::from(*character) as f64)
                     .collect(),

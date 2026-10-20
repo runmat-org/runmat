@@ -2,7 +2,9 @@ use std::future::Future;
 
 use crate::context::host_allocation::HostAllocationError;
 use crate::context::RuntimeContext;
-use crate::execution::rooted_continuation::{admit_rooted_future, rooted_future_layout};
+use crate::execution::rooted_continuation::{
+    admit_rooted_future, admit_rooted_future_with, rooted_future_layout,
+};
 use crate::execution::RootedValueSequence;
 use crate::RuntimeError;
 
@@ -20,6 +22,23 @@ where
     F: Future<Output = Result<RootedValueSequence, RuntimeError>> + 'static,
 {
     admit_rooted_future(runtime, builtin, builtin_control_error, future)
+}
+
+/// Factory form used by generated canonical bindings. Keeping the concrete
+/// body out of the generated wrapper avoids materializing a target-sized
+/// async state on an already nested interpreter poll stack. Admission still
+/// measures that exact body type and precedes the one erased heap owner.
+#[doc(hidden)]
+#[inline(never)]
+pub fn admitted_builtin_future_with<F>(
+    runtime: Option<RuntimeContext>,
+    builtin: &'static str,
+    make_future: impl FnOnce(Option<RuntimeContext>) -> F,
+) -> RuntimeBuiltinFuture
+where
+    F: Future<Output = Result<RootedValueSequence, RuntimeError>> + 'static,
+{
+    admit_rooted_future_with(runtime, builtin, builtin_control_error, make_future)
 }
 
 /// Measure the very same generated body type used by the wrapper without
@@ -90,14 +109,15 @@ mod tests {
             .expect("root builtin input");
             initial.unroot().expect("transfer input root");
 
-            let pending = admitted_builtin_future(None, "completion_test", async move {
-                runmat_gc::gc_collect_major().expect("collect while builtin is pending");
-                assert!(runmat_gc::gc_clone_value(&handle).is_ok());
-                let sequence = ValueSequence::single(args.values()[0].clone())
-                    .map_err(crate::sequence::sequence_error_to_runtime)?;
-                RootedValueSequence::new(sequence)
-                    .map_err(ExecutionServiceError::into_runtime_error)
-            });
+            let pending =
+                admitted_builtin_future_with(None, "completion_test", move |_| async move {
+                    runmat_gc::gc_collect_major().expect("collect while builtin is pending");
+                    assert!(runmat_gc::gc_clone_value(&handle).is_ok());
+                    let sequence = ValueSequence::single(args.values()[0].clone())
+                        .map_err(crate::sequence::sequence_error_to_runtime)?;
+                    RootedValueSequence::new(sequence)
+                        .map_err(ExecutionServiceError::into_runtime_error)
+                });
             runmat_gc::gc_collect_major().expect("collect before first poll");
             assert!(runmat_gc::gc_clone_value(&handle).is_ok());
 

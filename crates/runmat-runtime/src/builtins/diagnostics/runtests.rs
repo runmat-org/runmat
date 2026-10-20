@@ -385,11 +385,13 @@ fn is_option_name(value: &Value) -> bool {
     )
 }
 
-fn value_to_string_scalar(value: &Value) -> BuiltinResult<String> {
+fn value_to_string_scalar(value: &Value) -> BuiltinResult<runmat_value::Utf8Text> {
     match value {
         Value::String(text) => Ok(text.clone()),
-        Value::CharArray(array) if array.rows == 1 => Ok(array.data.iter().collect()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::CharArray(array) if array.rows == 1 => {
+            Ok(array.data().iter().collect::<String>().into())
+        }
+        Value::StringArray(array) if array.data().len() == 1 => Ok(array.data()[0].clone()),
         other => Err(runtests_error_detail(
             &RUNTESTS_ERROR_INVALID_INPUT,
             format!("expected a string scalar or character row, got {other:?}"),
@@ -399,10 +401,16 @@ fn value_to_string_scalar(value: &Value) -> BuiltinResult<String> {
 
 fn value_to_strings(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(text) => Ok(vec![text.clone()]),
-        Value::CharArray(array) if array.rows == 1 => Ok(vec![array.data.iter().collect()]),
-        Value::StringArray(array) => Ok(array.data.clone()),
-        Value::Cell(cell) => cell.data.iter().map(value_to_string_scalar).collect(),
+        Value::String(text) => Ok(vec![text.to_string()]),
+        Value::CharArray(array) if array.rows == 1 => Ok(vec![array.data().iter().collect()]),
+        Value::StringArray(array) => Ok(array.data().iter().map(ToString::to_string).collect()),
+        Value::Cell(cell) => cell
+            .data()
+            .iter()
+            .map(|value| {
+                value_to_string_scalar(value).map(runmat_value::Utf8Text::into_string_unbounded)
+            })
+            .collect(),
         other => Err(runtests_error_detail(
             &RUNTESTS_ERROR_INVALID_INPUT,
             format!("expected a string, string array, or cell array of strings, got {other:?}"),
@@ -612,8 +620,8 @@ mod tests {
     #[test]
     fn parse_accepts_target_and_include_subfolders() {
         let opts = parse_options(vec![
-            Value::String("tests".to_string()),
-            Value::String("IncludeSubfolders".to_string()),
+            Value::String("tests".to_string().into()),
+            Value::String("IncludeSubfolders".to_string().into()),
             Value::Bool(true),
         ])
         .expect("parse options");
@@ -634,8 +642,11 @@ mod tests {
             Tensor::new_integer(IntegerStorage::U8(vec![2]), vec![1, 1])
                 .expect("scalar uint8 flag"),
         );
-        let error = parse_options(vec![Value::String("IncludeSubfolders".to_string()), flag])
-            .expect_err("invalid integer flag");
+        let error = parse_options(vec![
+            Value::String("IncludeSubfolders".to_string().into()),
+            flag,
+        ])
+        .expect_err("invalid integer flag");
         assert_eq!(error.identifier(), Some("RunMat:runtests:InvalidInput"));
         assert!(error.message().contains("0 or 1"));
     }
@@ -643,7 +654,7 @@ mod tests {
     #[test]
     fn parse_rejects_parallel_execution() {
         let err = parse_options(vec![
-            Value::String("UseParallel".to_string()),
+            Value::String("UseParallel".to_string().into()),
             Value::LogicalArray(LogicalArray::new(vec![1], vec![1, 1]).unwrap()),
         ])
         .unwrap_err();
@@ -658,7 +669,7 @@ mod tests {
         let cell = CellArray::new(
             vec![
                 Value::CharArray(CharArray::new_row("testOne")),
-                Value::String("testTwo".to_string()),
+                Value::String("testTwo".to_string().into()),
             ],
             1,
             2,

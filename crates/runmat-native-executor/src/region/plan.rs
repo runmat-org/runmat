@@ -51,13 +51,21 @@ pub(crate) fn derive_plans(
     functions: &[NativeFunction],
     regions: &[RegionContract],
 ) -> Vec<OptimizedRegionPlan> {
-    let functions = functions
-        .iter()
-        .map(|function| (function.id, function))
-        .collect::<BTreeMap<_, _>>();
+    // Portable ordinals identify points within one product, not session-wide
+    // function ownership. An ambiguous ordinal must decline optimization;
+    // selecting whichever body appeared last could run a sibling revision.
+    let mut by_portable: BTreeMap<_, Option<&NativeFunction>> = BTreeMap::new();
+    for function in functions {
+        by_portable
+            .entry(function.portable_id)
+            .and_modify(|owner| *owner = None)
+            .or_insert(Some(function));
+    }
     let mut plans = regions
         .iter()
-        .filter_map(|contract| derive_plan(functions.get(&contract.id.function)?, contract))
+        .filter_map(|contract| {
+            derive_plan(by_portable.get(&contract.id.function)?.as_ref()?, contract)
+        })
         .collect::<Vec<_>>();
     plans.sort_by_key(|plan| plan.region);
     plans

@@ -33,19 +33,22 @@ const BUILTIN_NAME: &str = "colororder";
 )]
 pub fn colororder_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     colororder_with_runtime(runtime.as_ref(), args)
 }
 
 #[cfg(test)]
 pub fn colororder_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    colororder_with_runtime(None, args)
+    colororder_with_runtime(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(args),
+    )
 }
 
 fn colororder_with_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &COLORORDER_DESCRIPTOR,
@@ -145,7 +148,7 @@ fn parse_color_order(value: &Value) -> BuiltinResult<Vec<Vec4>> {
             }
             colors_from_tensor(tensor)
         }
-        Value::StringArray(strings) => colors_from_strings(&strings.data),
+        Value::StringArray(strings) => colors_from_strings(strings.data()),
         Value::Cell(cell) => colors_from_cell(cell),
         Value::GpuTensor(_) => Err(colororder_err(
             "color arrays must be host scalars, strings, cell strings, or numeric RGB matrices",
@@ -191,8 +194,8 @@ fn colors_from_tensor(tensor: &Tensor) -> BuiltinResult<Vec<Vec4>> {
 }
 
 fn colors_from_cell(cell: &CellArray) -> BuiltinResult<Vec<Vec4>> {
-    let mut strings = Vec::with_capacity(cell.data.len());
-    for value in &cell.data {
+    let mut strings = Vec::with_capacity(cell.data().len());
+    for value in cell.data() {
         let text = value_as_string(value)
             .ok_or_else(|| colororder_err("cell color arrays must contain strings"))?;
         strings.push(text);
@@ -200,7 +203,7 @@ fn colors_from_cell(cell: &CellArray) -> BuiltinResult<Vec<Vec4>> {
     colors_from_strings(&strings)
 }
 
-fn colors_from_strings(strings: &[String]) -> BuiltinResult<Vec<Vec4>> {
+fn colors_from_strings<S: AsRef<str>>(strings: &[S]) -> BuiltinResult<Vec<Vec4>> {
     if strings.is_empty() {
         return Err(colororder_err(
             "color array must contain at least one color",
@@ -208,7 +211,7 @@ fn colors_from_strings(strings: &[String]) -> BuiltinResult<Vec<Vec4>> {
     }
     let mut colors = Vec::with_capacity(strings.len());
     for text in strings {
-        let trimmed = text.trim();
+        let trimmed = text.as_ref().trim();
         if let Some(color) = color_from_name_or_token(trimmed) {
             colors.push(color);
         } else {

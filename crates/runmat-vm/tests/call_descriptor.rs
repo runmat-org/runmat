@@ -642,7 +642,7 @@ fn single_segment_external_function_handle_uses_runtime_name_resolution() {
 #[test]
 fn feval_at_prefixed_text_forwards_to_runtime_compatibility_gate() {
     let descriptor = CallableDescriptor::from_feval_value(
-        Value::String("@pkg.remote_inc".to_string()),
+        Value::String("@pkg.remote_inc".into()),
         vec![Value::Num(2.0)],
         1,
         &FunctionRegistry::default(),
@@ -671,7 +671,7 @@ fn feval_at_handle_external_boundary_can_use_semantic_resolver() {
     .expect("call-port scope");
 
     let descriptor = CallableDescriptor::from_feval_value(
-        Value::String("@pkg.remote_inc".to_string()),
+        Value::String("@pkg.remote_inc".into()),
         vec![Value::Num(2.0)],
         1,
         &FunctionRegistry::default(),

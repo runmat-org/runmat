@@ -6,11 +6,11 @@ use std::rc::Rc;
 
 use runmat_native_ffi::{
     invoke_symbol, invoke_symbol_with_bindings, invoke_symbol_with_callbacks, prepare_header,
-    CallbackBinding, HeaderPreparation, InvocationValue, LoadedLibrary, NativePointerResource,
-    NativeType, PointerBinding,
+    CallbackBinding, HeaderPreparation, InvocationArguments, InvocationError, InvocationValue,
+    LoadedLibrary, NativePointerResource, NativeType, PointerBinding,
 };
 use runmat_process_host::private_bytes::PrivateByteLease;
-use runmat_value::{IntValue, IntegerStorage, StructValue, Tensor, Value};
+use runmat_value::{IntValue, IntegerStorage, Tensor, Value};
 
 fn compile_fixture(directory: &Path) -> Option<PathBuf> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -158,6 +158,62 @@ fn c_abi_corpus_covers_scalars_arrays_structures_and_outputs() {
         Some(InvocationValue::Value(Value::Int(IntValue::I32(9))))
     );
 
+    // A segmented borrowed source keeps the original Values in their two
+    // owners; a malformed source fails before entering the C function.
+    struct Segmented<'a> {
+        first: &'a Value,
+        second: Option<&'a Value>,
+    }
+    impl InvocationArguments for Segmented<'_> {
+        fn len(&self) -> usize {
+            2
+        }
+        fn get(&self, index: usize) -> Option<&Value> {
+            match index {
+                0 => Some(self.first),
+                1 => self.second,
+                _ => None,
+            }
+        }
+    }
+    let values = Value::Tensor(
+        Tensor::new_integer(IntegerStorage::I32(vec![3, -2, 8]), vec![1, 3])
+            .expect("typed segmented values"),
+    );
+    let count = Value::Int(IntValue::U32(3));
+    let segmented = Segmented {
+        first: &values,
+        second: Some(&count),
+    };
+    let sum = invoke_symbol_with_bindings(
+        &library,
+        prototype("fixture_sum"),
+        &segmented,
+        &metadata,
+        &[],
+        &[],
+    )
+    .expect("segmented borrowed invocation");
+    assert_eq!(
+        sum.return_value,
+        Some(InvocationValue::Value(Value::Int(IntValue::I32(9))))
+    );
+    let missing = Segmented {
+        first: &values,
+        second: None,
+    };
+    assert!(matches!(
+        invoke_symbol_with_bindings(
+            &library,
+            prototype("fixture_sum"),
+            &missing,
+            &metadata,
+            &[],
+            &[]
+        ),
+        Err(InvocationError::Argument { argument: 2, .. })
+    ));
+
     let values =
         Tensor::new_integer(IntegerStorage::I32(vec![3, -2, 8]), vec![1, 3]).expect("typed values");
     // SAFETY: only the pointer identity is observed, and `values` remains alive
@@ -175,13 +231,13 @@ fn c_abi_corpus_covers_scalars_arrays_structures_and_outputs() {
     };
     assert_eq!(address.try_to_u64(), Some(expected_address as u64));
 
-    let mut record = StructValue::new();
+    let mut record = runmat_value::UnboundedStructValueBuilder::with_capacity(2);
     record.insert("value", Value::Num(2.5));
     record.insert("tag", Value::Int(IntValue::U32(7)));
     let scaled = invoke_symbol(
         &library,
         prototype("fixture_scale"),
-        &[Value::Struct(record), Value::Num(4.0)],
+        &[Value::Struct(record.finish()), Value::Num(4.0)],
         &metadata,
     )
     .expect("structure pointer invocation");

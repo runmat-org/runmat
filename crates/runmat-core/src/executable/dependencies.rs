@@ -1,37 +1,37 @@
 //! Frozen original ownership for foreign semantic functions, shared without recompilation.
 use super::ExecutableUnit;
-use runmat_types::ProgramFunctionId;
+use runmat_types::FunctionId;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     rc::Rc,
 };
 
+mod source_projection;
+
 impl ExecutableUnit {
-    pub(crate) fn owns_callable(&self, function: ProgramFunctionId) -> bool {
+    pub(crate) fn owns_callable(&self, function: FunctionId) -> bool {
         owns_callable_parts(self.mir(), self.analysis(), self.functions(), function)
     }
 
-    pub(crate) fn original_dependencies(&self) -> &BTreeMap<ProgramFunctionId, Rc<Self>> {
+    pub(crate) fn original_dependencies(&self) -> &BTreeMap<FunctionId, Rc<Self>> {
         &self.original_dependencies
     }
 
-    pub(crate) fn foreign_functions(&self) -> Result<Vec<ProgramFunctionId>, String> {
-        self.functions()
+    pub(crate) fn foreign_functions(&self) -> Result<Vec<FunctionId>, String> {
+        Ok(self
+            .functions()
             .functions
             .keys()
-            .map(|id| {
-                u32::try_from(id.0)
-                    .map(ProgramFunctionId)
-                    .map_err(|_| "function identity exceeds portable schema".to_string())
-            })
-            .filter(|id| id.as_ref().map_or(true, |id| !self.owns_callable(*id)))
-            .collect()
+            .copied()
+            .filter(|id| !self.owns_callable(*id))
+            .collect())
     }
 
     pub(crate) fn bind_original_dependencies(
         mut self,
-        owners: &HashMap<ProgramFunctionId, Rc<Self>>,
+        owners: &HashMap<FunctionId, Rc<Self>>,
     ) -> Result<Self, String> {
+        self.reset_direct_code_cache();
         for function in self.foreign_functions()? {
             let owner = owners.get(&function).ok_or_else(|| {
                 format!(
@@ -42,7 +42,7 @@ impl ExecutableUnit {
             if !owner.owns_callable(function) {
                 return Err("dependency is not the original function owner".into());
             }
-            let id = runmat_hir::FunctionId(function.0 as usize);
+            let id = function;
             let mut projection = self
                 .functions()
                 .get(id)
@@ -53,6 +53,12 @@ impl ExecutableUnit {
                 .get(id)
                 .ok_or("original function is absent")?
                 .clone();
+            source_projection::normalize_original(
+                self.source_map(),
+                owner.source_map(),
+                &projection,
+                &mut original,
+            )?;
             // Coverage sites are scoped to the compiling caller. All executable
             // instructions, source identities, spans and ABI remain exact.
             projection.coverage_sites.clear();
@@ -101,9 +107,12 @@ impl ExecutableUnit {
                 .analysis()
                 .functions
                 .iter()
-                .find(|f| owner.owns_callable(f.function))
-                .map(|f| {
-                    let id = runmat_hir::FunctionId(f.function.0 as usize);
+                .filter_map(|f| match &f.callable.identity {
+                    Some(runmat_types::CallableIdentity::BoundFunction(id)) => Some(*id),
+                    _ => None,
+                })
+                .find(|id| owner.owns_callable(*id))
+                .map(|id| {
                     (
                         owner
                             .functions()
@@ -141,9 +150,9 @@ pub(super) fn owns_callable_parts(
     mir: &runmat_mir::MirAssembly,
     analysis: &runmat_mir::analysis::AnalysisStore,
     functions: &runmat_vm::FunctionRegistry,
-    function: ProgramFunctionId,
+    function: FunctionId,
 ) -> bool {
-    let id = runmat_hir::FunctionId(function.0 as usize);
+    let id = function;
     let Some(metadata) = mir.functions.get(&id) else {
         return false;
     };
@@ -157,7 +166,6 @@ pub(super) fn owns_callable_parts(
             .and_then(|source| source.program())
             .is_some_and(|source| source.0 == metadata.source.0)
         && analysis
-            .functions
-            .iter()
-            .any(|facts| facts.function == function)
+            .function_for_local(function)
+            .is_some_and(|facts| facts.function == bytecode.portable_function)
 }

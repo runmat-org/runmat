@@ -1,6 +1,46 @@
 use super::*;
+async fn readstruct_builtin(
+    runtime: Option<RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
+    super::readstruct_builtin(
+        runtime,
+        crate::execution::RootedValues::new(args)
+            .map_err(|error| error.into_runtime_error())?
+            .into(),
+    )
+    .await
+}
+async fn xmlwrite_builtin(
+    runtime: Option<RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
+    super::xmlwrite_builtin(
+        runtime,
+        crate::execution::RootedValues::new(args)
+            .map_err(|error| error.into_runtime_error())?
+            .into(),
+    )
+    .await
+}
 use crate::builtins::common::fs::path_to_string;
 use runmat_filesystem::FsProvider;
+
+// The DOM projection contains only XML metadata, not arbitrary GC children.
+// Preserve the old test adapter while cloning under its original root owner.
+async fn xmlread_builtin(
+    runtime: Option<RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
+    super::xmlread_builtin(
+        runtime,
+        crate::execution::RootedValues::new(args)
+            .map_err(|error| error.into_runtime_error())?
+            .into(),
+    )
+    .await
+    .map(|rooted| rooted.value().clone())
+}
 
 #[path = "tests/write_owner.rs"]
 mod write_owner;
@@ -253,21 +293,21 @@ fn xmlread_returns_lightweight_document_object() {
     .unwrap();
     let value = run(xmlread_builtin(
         None,
-        vec![Value::String(path_to_string(&path))],
+        vec![Value::String(path_to_string(&path).into())],
     ))
     .unwrap();
     match value {
         Value::Object(object) => {
-            assert_eq!(object.class_name.display_name(), "org.w3c.dom.Document");
+            assert_eq!(object.class_name().display_name(), "org.w3c.dom.Document");
             assert_eq!(
-                object.properties.get("DocumentElementName"),
+                object.property("DocumentElementName"),
                 Some(&char_value("root"))
             );
-            let Some(Value::Object(root)) = object.properties.get("DocumentElement") else {
+            let Some(Value::Object(root)) = object.property("DocumentElement") else {
                 panic!("expected DocumentElement object");
             };
-            assert_eq!(root.properties.get("TagName"), Some(&char_value("root")));
-            let Some(Value::Struct(attrs)) = root.properties.get("Attributes") else {
+            assert_eq!(root.property("TagName"), Some(&char_value("root")));
+            let Some(Value::Struct(attrs)) = root.property("Attributes") else {
                 panic!("expected attributes struct");
             };
             assert_eq!(attrs.fields.get("id"), Some(&char_value("r")));
@@ -288,7 +328,7 @@ fn readstruct_imports_xml_children_attributes_and_repeats() {
         .unwrap();
     let value = run(readstruct_builtin(
         None,
-        vec![Value::String(path_to_string(&path))],
+        vec![Value::String(path_to_string(&path).into())],
     ))
     .unwrap();
     let Value::Struct(st) = value else {
@@ -300,7 +340,7 @@ fn readstruct_imports_xml_children_attributes_and_repeats() {
         panic!("expected repeated item cell");
     };
     assert_eq!(items.rows, 2);
-    let Value::Struct(first) = &items.data[0] else {
+    let Value::Struct(first) = &items.data()[0] else {
         panic!("expected first item struct");
     };
     assert_eq!(first.fields.get("codeAttribute"), Some(&char_value("a")));
@@ -316,7 +356,7 @@ fn readstruct_supports_xml_option_aliases() {
     let value = run(readstruct_builtin(
         None,
         vec![
-            Value::String(path_to_string(&path)),
+            Value::String(path_to_string(&path).into()),
             char_value("FileType"),
             char_value("xml"),
             char_value("AttributeSuffix"),
@@ -337,15 +377,13 @@ fn readstruct_supports_xml_option_aliases() {
 #[test]
 fn xmlwrite_serializes_dom_to_string_or_file() {
     let _guard = fs_test_guard();
-    let mut root = ObjectInstance::new(XML_ELEMENT_CLASS);
-    root.properties
-        .insert("TagName".to_string(), char_value("root"));
-    let mut attrs = StructValue::new();
+    let mut root = runmat_value::UnboundedObjectBuilder::new(XML_ELEMENT_CLASS);
+    root.insert("TagName".to_string(), char_value("root"));
+    let mut attrs = runmat_value::UnboundedStructValueBuilder::new();
     attrs.insert("id", char_value("r1"));
-    root.properties
-        .insert("Attributes".to_string(), Value::Struct(attrs));
-    root.properties
-        .insert("TextContent".to_string(), char_value("hello & goodbye"));
+    root.insert("Attributes".to_string(), Value::Struct(attrs.finish()));
+    root.insert("TextContent".to_string(), char_value("hello & goodbye"));
+    let root = root.finish();
     let xml = run(xmlwrite_builtin(None, vec![Value::Object(root.clone())])).unwrap();
     assert_eq!(
         xml,
@@ -355,7 +393,10 @@ fn xmlwrite_serializes_dom_to_string_or_file() {
     let path = std::env::temp_dir().join("runmat_xmlwrite_test.xml");
     let bytes = run(xmlwrite_builtin(
         None,
-        vec![Value::String(path_to_string(&path)), Value::Object(root)],
+        vec![
+            Value::String(path_to_string(&path).into()),
+            Value::Object(root),
+        ],
     ))
     .unwrap();
     assert!(matches!(bytes, Value::Num(n) if n > 0.0));
@@ -412,7 +453,7 @@ fn encoded_xmlread_xmlwrite_xmlread_roundtrip_labels_utf8_bytes_truthfully() {
         let Value::Object(original) = &document else {
             panic!("expected decoded XML document");
         };
-        let Some(Value::String(original_text)) = original.properties.get("Text") else {
+        let Some(Value::String(original_text)) = original.property("Text") else {
             panic!("expected retained decoded source text");
         };
         assert!(original_text.contains(expected_text));
@@ -435,11 +476,11 @@ fn encoded_xmlread_xmlwrite_xmlread_roundtrip_labels_utf8_bytes_truthfully() {
         let Value::Object(object) = copied else {
             panic!("expected XML document");
         };
-        let Some(Value::Object(root)) = object.properties.get("DocumentElement") else {
+        let Some(Value::Object(root)) = object.property("DocumentElement") else {
             panic!("expected round-trip root");
         };
         assert_eq!(
-            root.properties.get("TextContent"),
+            root.property("TextContent"),
             Some(&char_value(expected_text))
         );
     }
@@ -471,12 +512,42 @@ fn document_tree_mutation_wins_over_retained_source_text() {
     else {
         panic!("expected document");
     };
-    let Some(Value::Object(element)) = document.properties.get_mut("DocumentElement") else {
+    let Some(Value::Object(element)) = document.property("DocumentElement") else {
         panic!("expected root element");
     };
-    element
-        .properties
-        .insert("TextContent".into(), char_value("changed"));
+    let mut element = element.clone();
+    crate::execution::object::replacement::replace_property(
+        None,
+        &mut element,
+        "TextContent",
+        char_value("changed"),
+        |message, source| {
+            crate::context::host_allocation::host_allocation_runtime_error(
+                None,
+                "RunMat:xmlwrite:Test",
+                message,
+                source,
+            )
+        },
+        |message| compat_error("xmlwrite", message),
+    )
+    .expect("replace original element generation");
+    crate::execution::object::replacement::replace_property(
+        None,
+        &mut document,
+        "DocumentElement",
+        Value::Object(element),
+        |message, source| {
+            crate::context::host_allocation::host_allocation_runtime_error(
+                None,
+                "RunMat:xmlwrite:Test",
+                message,
+                source,
+            )
+        },
+        |message| compat_error("xmlwrite", message),
+    )
+    .expect("publish replacement tree");
     let result = run(xmlwrite_builtin(None, vec![Value::Object(document)]))
         .expect("tree-owned serialization");
     assert_eq!(
@@ -492,7 +563,7 @@ fn xmlread_rejects_mismatched_tags() {
     std::fs::write(&path, "<root><a></root>").unwrap();
     let err = run(xmlread_builtin(
         None,
-        vec![Value::String(path_to_string(&path))],
+        vec![Value::String(path_to_string(&path).into())],
     ))
     .unwrap_err();
     assert!(err.message().contains("malformed XML"));

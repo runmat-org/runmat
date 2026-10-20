@@ -136,10 +136,10 @@ pub(super) async fn execute(
             }
             let value = match retained {
                 runmat_runtime::context::RuntimeSpmdRetainedOutput::Composite(handle) => {
-                    Value::Composite(Box::new(handle))
+                    Value::Composite(handle.into())
                 }
                 runmat_runtime::context::RuntimeSpmdRetainedOutput::Distributed(handle) => {
-                    Value::Distributed(Box::new(handle))
+                    Value::Distributed(handle.into())
                 }
             };
             crate::runtime::workspace::commit_workspace_slot_value(vars, output.slot, None, value)?;

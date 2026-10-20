@@ -33,7 +33,7 @@ pub(super) fn execute(
 }
 
 fn request_matches_function(state: &HostState, request: NativeSiteRequest) -> bool {
-    request.function == state.function.id.0
+    request.function == state.function.portable_id.0
         && state
             .function
             .blocks
@@ -57,7 +57,7 @@ fn execute_inner(
     request: NativeSiteRequest,
     exit: &mut NativeExit,
 ) -> NativeExecutorResult<NativeSiteOutcome> {
-    if request.function != state.function.id.0 {
+    if request.function != state.function.portable_id.0 {
         return Err(NativeExecutorError::Host(
             "native site function identity mismatch".into(),
         ));

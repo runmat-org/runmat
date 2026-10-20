@@ -70,16 +70,16 @@ pub(crate) fn invalidate_listener_registration(listener_id: u64) {
     });
 }
 
-fn canonicalize_listener_callback(callback: Value) -> Value {
+fn canonicalize_listener_callback(callback: Value) -> Result<Value, RuntimeError> {
     crate::canonicalize_callback_handle_for_semantic_resolution(callback)
 }
 
 fn listener_callback_is_dispatchable(callback: &Value) -> bool {
     match callback {
         Value::String(text) => !text.trim().is_empty(),
-        Value::StringArray(array) => array.data.len() == 1 && !array.data[0].trim().is_empty(),
+        Value::StringArray(array) => array.data().len() == 1 && !array.data()[0].trim().is_empty(),
         Value::CharArray(chars) if chars.rows == 1 => chars
-            .data
+            .data()
             .iter()
             .any(|character| !character.is_whitespace()),
         Value::FunctionHandle(name)
@@ -221,7 +221,7 @@ pub(crate) async fn addlistener_builtin(
                 source,
             )
         })?;
-    let callback = canonicalize_listener_callback(callback_value);
+    let callback = canonicalize_listener_callback(callback_value)?;
     let callback_root = runmat_gc::gc_allocate_rooted(callback).map_err(|source| {
         event_descriptor_error_with_source(
             "addlistener",
@@ -239,7 +239,7 @@ pub(crate) async fn addlistener_builtin(
         id,
         target: target_root.handle(),
         target_class_name,
-        event_name: event_name.clone(),
+        event_name: event_name.clone().into(),
         callback: callback_root.handle(),
         enabled: true,
         valid: true,
@@ -262,9 +262,23 @@ pub(crate) async fn addlistener_builtin(
 }
 
 pub(crate) async fn notify_builtin(
+    runtime: Option<&crate::context::RuntimeContext>,
     target: Value,
     event_name: String,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    let notification = notify_inner(runtime, target, event_name, rest);
+    match runtime {
+        Some(runtime) => runtime.scope(notification).await,
+        None => notification.await,
+    }
+}
+
+async fn notify_inner(
+    runtime: Option<&crate::context::RuntimeContext>,
+    target: Value,
+    event_name: String,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     let key_ptr: usize = match &target {
         Value::HandleObject(h) => {
@@ -344,42 +358,25 @@ pub(crate) async fn notify_builtin(
             })
         })
         .collect::<crate::BuiltinResult<Vec<_>>>()?;
-    // `rest` is a Vec<Value>, not a GC root. Enclose every payload in one
-    // traced allocation, so no collection window separates individual roots.
-    // Keep the aggregate root across every callback await and drop it when
-    // the call completes or its future is cancelled.
-    let _argument_root = if prepared.is_some() {
-        None
+    // The original argument forest survives every listener. Default EventData
+    // is the only newly constructed supplied slot; ordinary extra arguments
+    // retain their original logical segments, including captured prefixes.
+    let supplied = if rest.is_empty() {
+        let data = prepared
+            .as_ref()
+            .expect("empty notification prepares EventData");
+        crate::call::BuiltinArguments::from_borrowed(&[data.value().clone()], runtime)?
     } else {
-        let values =
-            runmat_value::CellArray::new(rest.clone(), 1, rest.len()).map_err(|source| {
-                event_descriptor_error(
-                    "notify",
-                    &runmat_builtins::NOTIFY_ERROR_ARGUMENT_LIFETIME,
-                    format!("notify: invalid callback argument container: {source}"),
-                )
-            })?;
-        Some(
-            runmat_gc::gc_allocate_rooted(Value::Cell(values)).map_err(|source| {
-                event_descriptor_error_with_source(
-                    "notify",
-                    &runmat_builtins::NOTIFY_ERROR_ARGUMENT_LIFETIME,
-                    "notify: failed to retain callback arguments",
-                    source,
-                )
-            })?,
-        )
+        rest
     };
+    let arguments = crate::call::BuiltinArguments::new(
+        supplied
+            .into_function_arguments()
+            .prepend_routing(target.clone(), runtime)?,
+    );
     for l in to_call {
         admission.recheck(target_handle)?;
         // Call callback via feval-like protocol.
-        let mut args = Vec::new();
-        args.push(target.clone());
-        if let Some(data) = prepared.as_ref() {
-            args.push(data.value().clone());
-        } else {
-            args.extend(rest.iter().cloned());
-        }
         let cbv: Value = runmat_gc::gc_clone_value(&l.callback).map_err(|source| {
             event_descriptor_error_with_source(
                 "notify",
@@ -395,7 +392,7 @@ pub(crate) async fn notify_builtin(
                 "notify: registered callback is not dispatchable",
             ));
         }
-        let _ = crate::call_feval_async_with_outputs(cbv, &args, 0)
+        let _ = crate::call::feval::invoke_retained(runtime, cbv, arguments.fork(), 0, None)
             .await
             .map_err(|mut failure| {
                 // A prior listener may already have executed. Preserve the

@@ -1,6 +1,10 @@
 //! Actual original portable outputs across process attempts and cold durable attachment.
 use runmat_core::{ExecutableSource, RunMatSession};
 use runmat_execution::resource::{Capability, ResourceRequest};
+use runmat_execution::{
+    CancellationReason, ExecutionHandleSnapshot, ExecutionScopeId, FutureHandle, PoolHandle,
+    PoolRequest, PoolSnapshot, TaskHandle, TaskResultClaim,
+};
 use runmat_execution_runner_native::supervisor::{
     run_local_supervisor, LocalSupervisorClient, LocalSupervisorConfig, SupervisorPaths,
 };
@@ -9,9 +13,11 @@ use runmat_process_host::HiddenMode;
 use runmat_runtime::execution::{
     AwaitAction, DeferredCall, DurableJobOptions, RuntimeExecutionServices,
 };
+use runmat_runtime::execution::{ExecutionServiceError, RuntimeExecutionService};
 use runmat_value::Value;
 use std::collections::BTreeSet;
 use std::time::Duration;
+use std::{cell::RefCell, rc::Rc};
 #[path = "output_process_conformance/cancellation.rs"]
 mod cancellation;
 #[path = "output_process_conformance/durable_poll.rs"]
@@ -65,11 +71,103 @@ fn main() {
     });
 }
 
-async fn call(requested_outputs: usize) -> DeferredCall {
-    let mut call = call_source(
-        requested_outputs,
-        "function [first, second] = original_output_values(); fprintf(1,'first'); fprintf(2,'middle'); clc; fprintf(1,'last'); first = 13; second = 29; end",
-    ).await;
+#[derive(Default)]
+struct CapturingService {
+    serial: RuntimeExecutionService,
+    original: RefCell<Option<(FutureHandle, DeferredCall)>>,
+}
+impl RuntimeExecutionServices for CapturingService {
+    fn scope_id(&self) -> ExecutionScopeId {
+        self.serial.scope_id()
+    }
+    fn requires_program_capture(&self) -> bool {
+        true
+    }
+    fn create_future(&self, call: DeferredCall) -> Result<FutureHandle, ExecutionServiceError> {
+        let original = call.clone();
+        let future = self.serial.create_future(call)?;
+        *self.original.borrow_mut() = Some((future.clone(), original));
+        Ok(future)
+    }
+    fn spawn(&self, future: &FutureHandle) -> Result<TaskHandle, ExecutionServiceError> {
+        self.serial.spawn(future)
+    }
+    fn begin_await(&self, value: Value) -> Result<AwaitAction, ExecutionServiceError> {
+        self.serial.begin_await(value)
+    }
+    fn complete_future(
+        &self,
+        future: runmat_runtime::execution::FutureCompletionRef<'_>,
+        result: Result<runmat_runtime::execution::RootedValueSequence, ExecutionServiceError>,
+    ) -> Result<(), ExecutionServiceError> {
+        self.serial.complete_future(future, result)
+    }
+    fn cancel(
+        &self,
+        value: &Value,
+        reason: CancellationReason,
+    ) -> Result<(), ExecutionServiceError> {
+        self.serial.cancel(value, reason)
+    }
+    fn drain_scope(&self, reason: CancellationReason) {
+        self.serial.drain_scope(reason)
+    }
+    fn current_pool(&self) -> Result<Option<PoolSnapshot>, ExecutionServiceError> {
+        self.serial.current_pool()
+    }
+    fn ensure_pool(&self, request: PoolRequest) -> Result<PoolSnapshot, ExecutionServiceError> {
+        self.serial.ensure_pool(request)
+    }
+    fn close_pool(&self, pool: &PoolHandle) -> Result<(), ExecutionServiceError> {
+        self.serial.close_pool(pool)
+    }
+    fn inspect_future(
+        &self,
+        future: &FutureHandle,
+    ) -> Result<ExecutionHandleSnapshot, ExecutionServiceError> {
+        self.serial.inspect_future(future)
+    }
+    fn inspect_task(
+        &self,
+        task: &TaskHandle,
+    ) -> Result<ExecutionHandleSnapshot, ExecutionServiceError> {
+        self.serial.inspect_task(task)
+    }
+    fn claim_next_task_result(
+        &self,
+        tasks: &[runmat_value::SharedTaskHandle],
+    ) -> Result<TaskResultClaim, ExecutionServiceError> {
+        self.serial.claim_next_task_result(tasks)
+    }
+    fn mark_task_result_read(&self, task: &TaskHandle) -> Result<(), ExecutionServiceError> {
+        self.serial.mark_task_result_read(task)
+    }
+}
+
+/// Keep the compiler's selected source issuer alive until the consumer accepts
+/// the actual call; an envelope alone is not a deferred execution authority.
+struct CapturedCall {
+    call: DeferredCall,
+    envelope: runmat_execution::ExecutableUnitEnvelope,
+    _session: RunMatSession,
+    _unit: runmat_core::ExecutableUnit,
+    runtime: runmat_runtime::context::RuntimeContext,
+}
+impl std::ops::Deref for CapturedCall {
+    type Target = DeferredCall;
+    fn deref(&self) -> &DeferredCall {
+        &self.call
+    }
+}
+impl std::ops::DerefMut for CapturedCall {
+    fn deref_mut(&mut self) -> &mut DeferredCall {
+        &mut self.call
+    }
+}
+
+async fn call(requested_outputs: usize) -> CapturedCall {
+    let mut call = call_source(requested_outputs,
+        "function [first, second] = original_output_values(); fprintf(1,'first'); fprintf(2,'middle'); clc; fprintf(1,'last'); first = 13; second = 29; end").await;
     call.console = Some(runmat_execution::console::ConsoleLimits {
         max_records: 8,
         max_text_bytes: 1000,
@@ -77,8 +175,11 @@ async fn call(requested_outputs: usize) -> DeferredCall {
     call
 }
 
-async fn call_source(requested_outputs: usize, source: &str) -> DeferredCall {
+async fn call_source(requested_outputs: usize, source: &str) -> CapturedCall {
     let mut session = RunMatSession::with_options(false, false).unwrap();
+    let service = Rc::new(CapturingService::default());
+    session.install_execution_services(service.clone());
+    let source = format!("{source}\nfunction f = fixture_capture(); f = parfeval(@original_output_values, {requested_outputs}); end");
     let unit = session
         .compile_executable_unit(
             ExecutableSource::new("original-output-owner", "original_output_values.m", source),
@@ -89,24 +190,33 @@ async fn call_source(requested_outputs: usize, source: &str) -> DeferredCall {
     let envelope = unit
         .portable_envelope_for(Some("original_output_values"))
         .unwrap();
-    let function = usize::try_from(envelope.manifest.identity.entrypoint_function.0).unwrap();
-    DeferredCall {
-        console: None,
-        environment: runmat_execution::EnvironmentSnapshot::default(),
-        function,
-        arguments: vec![],
-        requested_outputs,
-        program_revision: Some(unit.revision().program_revision.clone()),
-        program: Some(envelope.canonical_bytes().unwrap()),
-    }
-}
-
-fn expected(requested_outputs: usize) -> Value {
-    match requested_outputs {
-        0 => Value::OutputList(vec![]),
-        1 => Value::Num(13.0),
-        2 => Value::OutputList(vec![Value::Num(13.0), Value::Num(29.0)]),
-        _ => panic!("unexpected original output contract"),
+    let result = session
+        .invoke_executable(
+            &unit,
+            runmat_core::ProcedureInvocation {
+                target: runmat_core::ProcedureTarget::Function("fixture_capture".into()),
+                arguments: vec![].into(),
+                requested_outputs: 1,
+            },
+            &runmat_core::InvocationControl::default(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.as_slice().len(), 1);
+    let (_future, call) = service
+        .original
+        .borrow_mut()
+        .take()
+        .expect("compiler-selected deferred call");
+    // parfeval has reserved its actual serial task before returning the
+    // handle wrapper; the recorded call retains that selected compiler basis.
+    let runtime = session.execution_runtime_context(unit.revision().program_revision.clone());
+    CapturedCall {
+        call,
+        envelope,
+        _session: session,
+        _unit: unit,
+        runtime,
     }
 }
 
@@ -122,13 +232,20 @@ async fn witness() {
     portable_units::verify(&config).await;
     environment::verify_producer_exit(&config).await;
     for requested in [0, 1, 2] {
-        let future = service.create_future(call(requested).await).unwrap();
+        let original_call = call(requested).await;
+        let future = service.create_future(original_call.call.clone()).unwrap();
         handles::reject_altered_future(&service, &future);
         let task = service.spawn(&future).unwrap();
         handles::reject_altered_task(&service, &task);
         let value = tokio::time::timeout(Duration::from_secs(30), async {
             loop {
-                match service.begin_await(Value::Task(task.clone())).unwrap() {
+                match service
+                    .begin_await_in_context(
+                        Value::Task(task.clone().into()),
+                        &original_call.runtime,
+                    )
+                    .unwrap()
+                {
                     AwaitAction::Pending(_) => tokio::time::sleep(Duration::from_millis(10)).await,
                     AwaitAction::Completed(value) => break value,
                     other => panic!("spawned original task returned {other:?}"),
@@ -137,22 +254,27 @@ async fn witness() {
         })
         .await
         .unwrap();
-        assert_eq!(value, expected(requested));
+        assert_eq!(
+            value.as_slice(),
+            &vec![Value::Num(13.0), Value::Num(29.0)][..requested]
+        );
         service
             .cancel(
-                &Value::Future(future.clone()),
+                &Value::Future(future.clone().into()),
                 runmat_execution::CancellationReason::User,
             )
             .unwrap();
-        let AwaitAction::Completed(retained) =
-            service.begin_await(Value::Future(future.clone())).unwrap()
+        let AwaitAction::Completed(retained) = service
+            .begin_await_in_context(Value::Future(future.clone().into()), &original_call.runtime)
+            .unwrap()
         else {
             panic!("late cancellation changed accepted completion");
         };
         assert_eq!(retained, value);
+        let durable_original = call(requested).await;
         let job = service
             .submit_job(
-                call(requested).await,
+                durable_original.call.clone(),
                 DurableJobOptions {
                     idempotency_key: Some(format!("original-outputs-{requested}")),
                     retention_millis:
@@ -180,12 +302,21 @@ async fn witness() {
             }
             assert!(service
                 .cancel(
-                    &Value::Job(altered),
+                    &Value::Job(altered.into()),
                     runmat_execution::CancellationReason::Quota
                 )
                 .is_err());
         }
-        assert_eq!(service.await_job(&job).unwrap(), expected(requested));
+        let result = service
+            .begin_await_in_context(Value::Job(job.clone().into()), &durable_original.runtime)
+            .unwrap();
+        let AwaitAction::Completed(result) = result else {
+            panic!("durable await did not complete");
+        };
+        assert_eq!(
+            result.as_slice(),
+            &vec![Value::Num(13.0), Value::Num(29.0)][..requested]
+        );
         let client = LocalSupervisorClient::for_current_executable().unwrap();
         let cold = client.attach(job.id, 0, 0).await.unwrap();
         assert_eq!(cold.record.handle, job);
@@ -221,32 +352,54 @@ async fn witness() {
                 ]
             );
         }
-        let original = call(requested).await;
-        let request = runmat_vm::materialize_deferred_call(
-            &original,
+        let request = materialized_request(
+            &durable_original,
             job.outputs.clone(),
             runmat_execution_artifact::ProgramTarget::portable(format!(
-                "{}-{}-interpreter-bytecode-v1",
+                "{}-{}-interpreter-bytecode-v2",
                 std::env::consts::ARCH,
                 std::env::consts::OS
             )),
-        )
-        .unwrap();
-        cold.response
-            .expect("original response must survive cold attachment")
-            .validate_against(&request)
+        );
+        request
+            .validate_response(
+                &cold
+                    .response
+                    .expect("original response must survive cold attachment"),
+            )
             .unwrap();
         assert!(cold.resources.is_some());
         service
             .cancel(
-                &Value::Job(job.clone()),
+                &Value::Job(job.clone().into()),
                 runmat_execution::CancellationReason::Quota,
             )
             .unwrap();
-        assert_eq!(service.await_job(&job).unwrap(), expected(requested));
+        let AwaitAction::Completed(retained) = service
+            .begin_await_in_context(Value::Job(job.clone().into()), &durable_original.runtime)
+            .unwrap()
+        else {
+            panic!("late cancellation changed durable accepted completion");
+        };
+        assert_eq!(retained, result);
     }
     durable_poll::verify(&service, &config).await;
     live_prefix::verify(&service, &config, namespace.root()).await;
     drop(service);
     println!("original zero/one/multiple outputs passed isolated execution, durable await and cold task evidence");
+}
+
+fn materialized_request(
+    call: &DeferredCall,
+    outputs: runmat_execution::OutputContract,
+    target: runmat_execution_artifact::ProgramTarget,
+) -> runmat_execution_artifact::GraphExecutionRequest {
+    let (_, request, _) = runmat_vm::materialize_deferred_graph_call(
+        call,
+        outputs,
+        target,
+        runmat_execution::value::ValueLimits::default(),
+    )
+    .unwrap();
+    request
 }

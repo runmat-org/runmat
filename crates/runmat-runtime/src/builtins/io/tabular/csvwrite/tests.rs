@@ -26,7 +26,12 @@ mod cooperation;
 
 fn csvwrite_builtin(filename: Value, data: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let _provider_lock = runmat_filesystem::provider_override_lock();
-    futures::executor::block_on(super::csvwrite_builtin(None, filename, data, rest))
+    futures::executor::block_on(super::csvwrite_builtin(
+        None,
+        filename,
+        data,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    ))
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

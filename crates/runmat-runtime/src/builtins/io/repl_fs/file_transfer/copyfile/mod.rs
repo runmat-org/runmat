@@ -21,9 +21,9 @@ use runmat_value::Value;
 )]
 async fn copyfile_builtin(
     context: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
-    let outcome = execute::evaluate(&args, context.as_ref()).await?;
+    let outcome = execute::evaluate_retained(args, context.as_ref()).await?;
     if let Some(count) = crate::output_count::current_output_count() {
         if count == 0 {
             return Ok(Value::output_list(Vec::new()));

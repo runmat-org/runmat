@@ -182,7 +182,16 @@ fn append_matrix<'a, 'b>(
             MatData::Struct {
                 field_names,
                 field_values,
+            }
+            | MatData::Object {
+                field_names,
+                field_values,
+                ..
             } => {
+                if let MatData::Object { class_name, .. } = &array.data {
+                    append_tagged_bytes(bytes, MI_INT8, class_name.as_bytes(), owner, cooperation)
+                        .await?;
+                }
                 if field_values.len() != plan.children.len() {
                     return Err(owner.error(
                         MatEncodingFailure::Io,

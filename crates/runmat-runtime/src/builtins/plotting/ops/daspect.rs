@@ -19,7 +19,7 @@ const BUILTIN_NAME: &str = "daspect";
     binding_variant = "default",
     builtin_path = "crate::builtins::plotting::daspect"
 )]
-pub fn daspect_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub fn daspect_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     if requested_outputs() > 1 {
         return Err(
             crate::build_runtime_error(DASPECT_ERROR_TOO_MANY_OUTPUTS.message)
@@ -37,11 +37,12 @@ pub fn daspect_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     })
 }
 
-fn daspect_state(args: Vec<Value>) -> BuiltinResult<Value> {
+fn daspect_state(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     let (target, args) = split_optional_axes_target(args)?;
-    match args.as_slice() {
-        [] => query_ratio(target),
-        [value] => {
+    match args.len() {
+        0 => query_ratio(target),
+        1 => {
+            let value = &args[0];
             if let Some(text) = value_as_string(value) {
                 match text.trim().to_ascii_lowercase().as_str() {
                     "mode" => return query_mode(target),
@@ -78,26 +79,23 @@ fn ensure_setter_has_no_output() -> BuiltinResult<()> {
     }
 }
 
-fn split_optional_axes_target(args: Vec<Value>) -> BuiltinResult<(AxesTarget, Vec<Value>)> {
-    let mut iter = args.into_iter();
-    let Some(first) = iter.next() else {
-        return Ok((None, Vec::new()));
-    };
-    if let Some(alias) = exact_numeric_axes_alias(&first)? {
-        if let Ok(PlotHandle::Axes(handle, axes_index)) =
-            resolve_plot_handle(&Value::Num(alias), BUILTIN_NAME)
-        {
-            crate::compatibility::ensure_builtin_extension_enabled(
-                &DASPECT_NUMERIC_AXES_ALIAS_EXTENSION,
-                BUILTIN_NAME,
-            )?;
-            return Ok((Some((handle, axes_index)), iter.collect()));
+fn split_optional_axes_target(
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<(AxesTarget, crate::call::BuiltinArguments)> {
+    if let Some(first) = args.first() {
+        if let Some(alias) = exact_numeric_axes_alias(first)? {
+            if let Ok(PlotHandle::Axes(handle, axes_index)) =
+                resolve_plot_handle(&Value::Num(alias), BUILTIN_NAME)
+            {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &DASPECT_NUMERIC_AXES_ALIAS_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+                return Ok((Some((handle, axes_index)), args.into_range(1..)?));
+            }
         }
     }
-    let mut rest = Vec::with_capacity(iter.size_hint().0 + 1);
-    rest.push(first);
-    rest.extend(iter);
-    Ok((None, rest))
+    Ok((None, args))
 }
 
 fn exact_numeric_axes_alias(value: &Value) -> BuiltinResult<Option<f64>> {
@@ -171,7 +169,7 @@ fn query_mode(target: AxesTarget) -> BuiltinResult<Value> {
             })?,
         None => data_aspect_ratio_snapshot(),
     };
-    Ok(Value::String(mode))
+    Ok(Value::string(mode))
 }
 
 fn current_ratio(target: AxesTarget) -> BuiltinResult<[f64; 3]> {
@@ -205,7 +203,7 @@ fn ratio_value(ratio: [f64; 3]) -> Value {
 
 fn value_as_string(value: &Value) -> Option<String> {
     match value {
-        Value::String(s) => Some(s.clone()),
+        Value::String(s) => Some(s.as_str().to_owned()),
         Value::CharArray(chars) => chars.row_string(),
         _ => None,
     }
@@ -218,3 +216,7 @@ fn daspect_err(detail: impl AsRef<str>) -> crate::RuntimeError {
 #[cfg(test)]
 #[path = "daspect/tests.rs"]
 mod tests;
+#[cfg(test)]
+pub(crate) fn daspect_builtin_source(args: Vec<Value>) -> BuiltinResult<Value> {
+    daspect_builtin(crate::call::BuiltinArguments::from_borrowed(&args, None)?)
+}

@@ -8,20 +8,29 @@ pub fn encode<T: Serialize>(value: &T) -> io::Result<Vec<u8>> {
     let mut bytes = Vec::new();
     ciborium::into_writer(value, &mut bytes).map_err(io::Error::other)?;
     if bytes.len() > MAX_WIRE_BYTES {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "workspace request exceeds transport budget"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "workspace request exceeds transport budget",
+        ));
     }
     Ok(bytes)
 }
 
 pub fn decode<T: DeserializeOwned>(bytes: &[u8]) -> io::Result<T> {
     if bytes.len() > MAX_WIRE_BYTES {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "workspace response exceeds transport budget"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "workspace response exceeds transport budget",
+        ));
     }
     let mut reader = io::Cursor::new(bytes);
     let value = ciborium::de::from_reader_with_recursion_limit(&mut reader, 16)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
     if reader.position() != bytes.len() as u64 {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "trailing workspace response data"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "trailing workspace response data",
+        ));
     }
     Ok(value)
 }

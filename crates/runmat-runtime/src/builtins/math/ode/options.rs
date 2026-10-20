@@ -77,7 +77,7 @@ pub(super) fn parse(name: &str, value: Option<Value>) -> BuiltinResult<OdeOption
         ));
     };
     let mut selected = OdeOptionValues::default();
-    for (name, value) in options.fields {
+    for (name, value) in options.into_fields_unbounded() {
         if let Some(field) = OdeOptionField::from_public_name(&name) {
             let slot = selected.slot(field);
             if slot.is_none() {
@@ -289,18 +289,17 @@ mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::{GpuHandleProvenance, HostTensorView};
-    use runmat_value::StructValue;
 
     #[test]
     fn first_case_insensitive_option_wins_and_unknown_fields_are_ignored() {
-        let mut source = StructValue::new();
+        let mut source = runmat_value::UnboundedStructValueBuilder::new();
         source.insert("rElToL", Value::Num(0.02));
         source.insert("RelTol", Value::Num(0.03));
         source.insert(
             "ignoredMetadata",
             Value::String("not a solver operand".into()),
         );
-        let fields = parse("ode45", Some(Value::Struct(source))).unwrap();
+        let fields = parse("ode45", Some(Value::Struct(source.finish()))).unwrap();
         let options = block_on(admit(
             "ode45",
             fields,
@@ -313,10 +312,10 @@ mod tests {
 
     #[test]
     fn invalid_host_control_is_rejected_before_any_resident_transfer() {
-        let mut source = StructValue::new();
+        let mut source = runmat_value::UnboundedStructValueBuilder::new();
         source.insert("RelTol", Value::Num(-0.1));
         source.insert("MaxStep", Value::Num(0.2));
-        let fields = parse("ode23", Some(Value::Struct(source))).unwrap();
+        let fields = parse("ode23", Some(Value::Struct(source.finish()))).unwrap();
         let error = block_on(admit(
             "ode23",
             fields,
@@ -337,13 +336,13 @@ mod tests {
                 .unwrap()
                 .with_provenance(GpuHandleProvenance::Explicit)
                 .unwrap();
-            let mut source = StructValue::new();
+            let mut source = runmat_value::UnboundedStructValueBuilder::new();
             source.insert("opaqueMetadata", Value::GpuTensor(handle));
             source.insert("RelTol", Value::Num(0.02));
             let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
             let options = block_on(admit(
                 "ode45",
-                parse("ode45", Some(Value::Struct(source))).unwrap(),
+                parse("ode45", Some(Value::Struct(source.finish()))).unwrap(),
                 super::super::ode45::ODE_COMPATIBILITY_EXTENSIONS,
             ))
             .unwrap();

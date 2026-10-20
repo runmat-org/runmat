@@ -50,7 +50,7 @@ pub(super) fn keys(layers: &[Value], function: &'static str) -> BuiltinResult<Ve
                 format!("{function}: network Layers must contain layer objects"),
             ));
         };
-        let multiplier = match DeepLearningLayerKind::from_identity(&layer.class_name) {
+        let multiplier = match DeepLearningLayerKind::from_identity(layer.class_name()) {
             Some(DeepLearningLayerKind::Lstm) => 1,
             Some(DeepLearningLayerKind::Bilstm) => 2,
             Some(
@@ -69,19 +69,22 @@ pub(super) fn keys(layers: &[Value], function: &'static str) -> BuiltinResult<Ve
             None => {
                 return Err(deep_learning_error(
                     function,
-                    format!("{function}: unsupported layer class '{}'", layer.class_name),
+                    format!(
+                        "{function}: unsupported layer class '{}'",
+                        layer.class_name()
+                    ),
                 ));
             }
         };
         let has_state_inputs = layer
-            .properties
+            .properties()
             .get("HasStateInputs")
             .map(|value| logical_scalar(value, function, "HasStateInputs"))
             .transpose()?
             .unwrap_or(false);
         if has_state_inputs {
             for role in [StateRole::HiddenState, StateRole::CellState] {
-                if let Some(value) = layer.properties.get(role.name()) {
+                if let Some(value) = layer.properties().get(role.name()) {
                     let shape = super::super::parameters::numeric_payload_shape(
                         value,
                         role.name(),

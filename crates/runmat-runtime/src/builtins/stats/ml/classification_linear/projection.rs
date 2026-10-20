@@ -5,7 +5,7 @@ pub(super) fn fit_info_value(
     lambdas: &[f64],
     models: &[TrainedModel],
 ) -> BuiltinResult<Value> {
-    let mut info = StructValue::new();
+    let mut info = runmat_value::UnboundedStructValueBuilder::new();
     info.insert("Lambda", row_tensor(lambdas.to_vec())?);
     info.insert(
         "Objective",
@@ -30,16 +30,16 @@ pub(super) fn fit_info_value(
     );
     info.insert(
         "Learner",
-        Value::String(spec.options.learner.as_str().to_string()),
+        Value::string(spec.options.learner.as_str().to_string()),
     );
     info.insert(
         "Regularization",
-        Value::String(spec.options.regularization.as_str().to_string()),
+        Value::string(spec.options.regularization.as_str().to_string()),
     );
     info.insert("TerminationCode", row_tensor(vec![1.0; models.len()])?);
     info.insert(
         "TerminationStatus",
-        Value::String("Iteration limit reached or gradient tolerance satisfied".to_string()),
+        Value::string("Iteration limit reached or gradient tolerance satisfied".to_string()),
     );
-    Ok(Value::Struct(info))
+    Ok(Value::Struct(info.finish()))
 }

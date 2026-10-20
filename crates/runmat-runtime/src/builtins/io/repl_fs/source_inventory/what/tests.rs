@@ -4,7 +4,9 @@ use runmat_value::{CharArray, IntValue, Value};
 use std::sync::Arc;
 
 fn run(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    futures::executor::block_on(what_builtin(args))
+    futures::executor::block_on(what_builtin(
+        crate::builtins::common::test_support::builtin_arguments(args),
+    ))
 }
 
 fn field<'a>(value: &'a Value, name: &str) -> &'a Value {
@@ -19,13 +21,13 @@ fn names(value: &Value) -> Vec<String> {
         panic!("expected cell")
     };
     values
-        .data
+        .data()
         .iter()
         .map(|value| {
             let Value::CharArray(chars) = value else {
                 panic!("expected character row")
             };
-            chars.data.iter().collect()
+            chars.data().iter().collect()
         })
         .collect()
 }

@@ -36,7 +36,7 @@ fn selected_outer_load_revoked_during_pending_open_never_reads_or_publishes() {
     let witness = Witness::new(provider.clone());
     let mut future = Box::pin(super::load_builtin(
         Some(witness.runtime.clone()),
-        vec![Value::from(filename)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from(filename)]),
     ));
     assert!(matches!(
         super::super::tests::receipt::poll_once(future.as_mut()),
@@ -82,7 +82,7 @@ fn selected_outer_load_revoked_by_first_read_stops_decode_before_more_reads() {
         .expect("open immediately for first-read revocation");
     let error = block_on(super::load_builtin(
         Some(witness.runtime.clone()),
-        vec![Value::from(filename)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from(filename)]),
     ))
     .expect_err("first read revokes codec continuation");
     assert_eq!(
@@ -101,7 +101,8 @@ fn selected_outer_load_revoked_by_first_read_stops_decode_before_more_reads() {
 fn known_invalid_option_rejects_before_resident_preparation() {
     let _state = crate::builtins::io::mat::tests::state_guard();
     let args = [Value::from("case.mat"), Value::from("-unsupported")];
-    let error = preflight_known_options(&args).expect_err("unsupported flag");
+    let error = preflight_known_options(crate::call::FunctionArgumentView::from_slice(&args))
+        .expect_err("unsupported flag");
     assert_eq!(error.identifier(), Some("RunMat:load:InvalidOption"));
 }
 
@@ -114,7 +115,8 @@ fn regexp_followed_by_another_option_has_no_pattern() {
         Value::from("-regexp"),
         Value::from("-mat"),
     ];
-    let error = preflight_known_options(&args).expect_err("missing regexp pattern");
+    let error = preflight_known_options(crate::call::FunctionArgumentView::from_slice(&args))
+        .expect_err("missing regexp pattern");
     assert_eq!(error.identifier(), Some("RunMat:load:InvalidOption"));
 }
 
@@ -133,7 +135,7 @@ fn nested_implicit_load_does_not_inherit_outer_zero_output_workspace_mode() {
     let _presentation = crate::output_context::push_output_count(0).expect("output-count scope");
     let value = block_on(crate::dispatcher::call_builtin_async(
         "load",
-        &[Value::String(path.to_string_lossy().into_owned())],
+        &[Value::String(path.to_string_lossy().into_owned().into())],
     ))
     .expect("implicit nested load returns a struct");
     let Value::Struct(result) = value.value() else {
@@ -159,7 +161,7 @@ fn current_zero_output_load_publishes_workspace_despite_outer_captured_mode() {
     let _presentation = crate::output_context::push_output_count(1).expect("output-count scope");
     let result = block_on(crate::dispatcher::call_builtin_async_with_outputs(
         "load",
-        &[Value::String(path.to_string_lossy().into_owned())],
+        &[Value::String(path.to_string_lossy().into_owned().into())],
         0,
     ))
     .expect("zero-output statement");
@@ -458,7 +460,7 @@ fn load_string_array_roundtrip() {
             match value {
                 Value::StringArray(sa) => {
                     assert_eq!(sa.shape, vec![1, 2]);
-                    assert_eq!(sa.data, vec![String::from("foo"), String::from("bar")]);
+                    assert_eq!(sa.data(), vec![String::from("foo"), String::from("bar")]);
                 }
                 other => panic!("expected string array, got {other:?}"),
             }
@@ -483,7 +485,7 @@ fn mat_string_cell_roundtrip_decodes_utf16_surrogate_pairs() {
         panic!("expected string array from char cells");
     };
     assert_eq!(actual.shape, source.shape);
-    assert_eq!(actual.data, source.data);
+    assert_eq!(actual.data(), source.data());
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -563,7 +565,7 @@ fn load_compressed_level5_payload() {
     assert!(matches!(entries[0].1, Value::Num(123.0)));
     assert_eq!(entries[1].0, "B");
     match &entries[1].1 {
-        Value::CharArray(ca) => assert_eq!(ca.data.iter().collect::<String>(), "text"),
+        Value::CharArray(ca) => assert_eq!(ca.data().iter().collect::<String>(), "text"),
         other => panic!("expected char array, got {other:?}"),
     }
 }
@@ -768,13 +770,13 @@ fn load_save_roundtrip_preserves_nested_integer_tensors() {
         2,
     )
     .expect("cell");
-    let mut nested = StructValue::new();
+    let mut nested = runmat_value::UnboundedStructValueBuilder::new();
     nested.insert("unsigned", Value::Tensor(unsigned));
     nested.insert("values", cell);
 
     let bytes = block_on(encode_workspace_to_mat_bytes(&[(
         "nested".to_string(),
-        Value::Struct(nested),
+        Value::Struct(nested.finish()),
     )]))
     .expect("encode MAT bytes");
     let values: HashMap<_, _> = load_entries_from_bytes(bytes).into_iter().collect();
@@ -791,14 +793,14 @@ fn load_save_roundtrip_preserves_nested_integer_tensors() {
     }
     match nested.fields.get("values") {
         Some(Value::Cell(cell)) => {
-            match &cell.data[0] {
+            match &cell.data()[0] {
                 Value::Tensor(tensor) => assert_eq!(
                     tensor.integer_storage(),
                     Some(&IntegerStorage::U64(vec![1_u64 << 63, u64::MAX]))
                 ),
                 other => panic!("expected unsigned cell tensor, got {other:?}"),
             }
-            match &cell.data[1] {
+            match &cell.data()[1] {
                 Value::Tensor(tensor) => assert_eq!(
                     tensor.integer_storage(),
                     Some(&IntegerStorage::I64(vec![i64::MIN, i64::MAX]))
@@ -881,7 +883,7 @@ fn registered_load_gates_restored_sparse_integer_by_compatibility_mode() {
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("sparse_integer.mat");
     crate::builtins::common::test_support::fs::write(&path, bytes).expect("write MAT file");
-    let args = [Value::String(path.to_string_lossy().into_owned())];
+    let args = [Value::String(path.to_string_lossy().into_owned().into())];
 
     {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);

@@ -18,7 +18,8 @@ use crate::BuiltinResult;
     binding_variant = "default",
     builtin_path = "crate::builtins::geometry::generated::regions"
 )]
-pub async fn geometry_solid_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn geometry_solid_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     feature_output(
         args,
         "geometry.solid",
@@ -33,7 +34,8 @@ pub async fn geometry_solid_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::geometry::generated::regions"
 )]
-pub async fn geometry_faces_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn geometry_faces_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     feature_output(
         args,
         "geometry.faces",
@@ -48,7 +50,8 @@ pub async fn geometry_faces_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::geometry::generated::regions"
 )]
-pub async fn geometry_edges_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn geometry_edges_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     feature_output(
         args,
         "geometry.edges",
@@ -63,7 +66,10 @@ pub async fn geometry_edges_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::geometry::generated::regions"
 )]
-pub async fn geometry_faces_introduced_by_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn geometry_faces_introduced_by_builtin(
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     feature_output(
         args,
         "geometry.facesIntroducedBy",
@@ -78,7 +84,10 @@ pub async fn geometry_faces_introduced_by_builtin(args: Vec<Value>) -> BuiltinRe
     binding_variant = "default",
     builtin_path = "crate::builtins::geometry::generated::regions"
 )]
-pub async fn geometry_edges_introduced_by_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn geometry_edges_introduced_by_builtin(
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     feature_output(
         args,
         "geometry.edgesIntroducedBy",
@@ -93,7 +102,10 @@ pub async fn geometry_edges_introduced_by_builtin(args: Vec<Value>) -> BuiltinRe
     binding_variant = "default",
     builtin_path = "crate::builtins::geometry::generated::regions"
 )]
-pub async fn geometry_with_region_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn geometry_with_region_builtin(
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     let builtin = "geometry.withRegion";
     let args = exactly(builtin, args, 3)?;
     let name = text(&args[1], builtin, "name")?;

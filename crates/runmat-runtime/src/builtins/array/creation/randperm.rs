@@ -77,7 +77,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::randperm"
 )]
-async fn randperm_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn randperm_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     let parsed = ParsedRandPerm::parse(args).await?;
     if let OutputTemplate::Like(Value::GpuTensor(handle)) = &parsed.template {
         return match random::gpu_like::intent("randperm", handle)? {
@@ -161,7 +161,7 @@ enum OutputTemplate {
 }
 
 impl ParsedRandPerm {
-    async fn parse(args: Vec<Value>) -> crate::BuiltinResult<Self> {
+    async fn parse(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Self> {
         if args.is_empty() {
             return Err(builtin_error(
                 "randperm: requires at least one input argument",
@@ -394,7 +394,9 @@ pub(crate) mod tests {
     use runmat_value::IntegerStorage;
 
     fn randperm_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-        block_on(super::randperm_builtin(args))
+        block_on(super::randperm_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
 
     fn reset_rng_clean() -> impl Drop {

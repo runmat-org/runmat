@@ -88,7 +88,7 @@ struct ParsedDiagArgs {
 }
 
 impl ParsedDiagArgs {
-    async fn parse(args: Vec<Value>) -> BuiltinResult<Self> {
+    async fn parse(args: crate::call::BuiltinArguments) -> BuiltinResult<Self> {
         let mut offset: Option<isize> = None;
         let mut size_override: Option<(usize, usize)> = None;
         let mut vector_mode = false;
@@ -224,9 +224,9 @@ impl ParsedDiagArgs {
 fn keyword_of(value: &Value) -> Option<String> {
     match value {
         Value::String(s) => Some(s.to_ascii_lowercase()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].to_ascii_lowercase()),
+        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].to_ascii_lowercase()),
         Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data.iter().collect();
+            let text: String = ca.data().iter().collect();
             Some(text.to_ascii_lowercase())
         }
         _ => None,
@@ -281,13 +281,13 @@ async fn try_parse_size_override(value: &Value) -> BuiltinResult<Option<(usize, 
     binding_variant = "default",
     builtin_path = "crate::builtins::array::shape::diag"
 )]
-async fn diag_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn diag_builtin(value: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &DIAG_DESCRIPTOR,
         &DIAG_ERROR_INVALID_INPUT,
         BUILTIN_NAME,
     )?;
-    ensure_diag_compatibility(&value, &rest)?;
+    ensure_diag_compatibility(&value, rest.view())?;
     let parsed = ParsedDiagArgs::parse(rest).await?;
     if let Value::GpuTensor(handle) = value {
         return diag_resident(handle, &parsed).await;
@@ -295,7 +295,10 @@ async fn diag_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     evaluate_diag_host(value, &parsed).await
 }
 
-fn ensure_diag_compatibility(value: &Value, rest: &[Value]) -> BuiltinResult<()> {
+fn ensure_diag_compatibility(
+    value: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     let keywords: Vec<String> = rest.iter().filter_map(keyword_of).collect();
     let like_only = rest.len() == 2 && keywords.iter().any(|keyword| keyword == "like");
     if rest.iter().enumerate().any(|(index, arg)| {
@@ -770,7 +773,7 @@ fn evaluate_char(array: CharArray, args: &ParsedDiagArgs) -> BuiltinResult<Value
 
     if args.vector_mode {
         let len = rows.max(cols);
-        let data = vector_copy(&array.data, len);
+        let data = vector_copy(array.data(), len);
         let out = CharArray::new(data, len, 1)
             .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))?;
         return Ok(Value::CharArray(out));
@@ -780,7 +783,7 @@ fn evaluate_char(array: CharArray, args: &ParsedDiagArgs) -> BuiltinResult<Value
         let len = rows.max(cols);
         let (out_rows, out_cols) = vector_output_dims(len, args)?;
         let data = diag_matrix_from_vector_row_major(
-            &array.data,
+            array.data(),
             len,
             args.offset,
             out_rows,
@@ -799,7 +802,7 @@ fn evaluate_char(array: CharArray, args: &ParsedDiagArgs) -> BuiltinResult<Value
         ));
     }
 
-    let diag = diag_vector_from_matrix_row_major(&array.data, rows, cols, args.offset);
+    let diag = diag_vector_from_matrix_row_major(array.data(), rows, cols, args.offset);
     let len = diag.len();
     let out = CharArray::new(diag, len, 1)
         .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))?;
@@ -1296,7 +1299,7 @@ fn logical_array_from_value(value: Value) -> BuiltinResult<LogicalArray> {
         }
         Value::CharArray(chars) => {
             let data: Vec<u8> = chars
-                .data
+                .data()
                 .iter()
                 .map(|ch| if (*ch as u32) != 0 { 1 } else { 0 })
                 .collect();
@@ -1384,7 +1387,7 @@ fn complex_tensor_from_value(value: Value) -> BuiltinResult<ComplexTensor> {
         }
         Value::CharArray(chars) => {
             let data: Vec<(f64, f64)> = chars
-                .data
+                .data()
                 .iter()
                 .map(|ch| (*ch as u32 as f64, 0.0))
                 .collect();
@@ -1469,7 +1472,7 @@ fn integer_exact_for_float(value: &runmat_value::IntValue, dtype: NumericDType) 
 }
 
 fn char_array_to_tensor(chars: &CharArray) -> BuiltinResult<Tensor> {
-    let data: Vec<f64> = chars.data.iter().map(|ch| *ch as u32 as f64).collect();
+    let data: Vec<f64> = chars.data().iter().map(|ch| *ch as u32 as f64).collect();
     Tensor::new(data, vec![chars.rows, chars.cols])
         .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))
 }
@@ -1483,7 +1486,10 @@ mod tests {
     use runmat_value::{IntValue, IntegerComplexStorage};
 
     fn run_diag(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(diag_builtin(value, rest))
+        block_on(diag_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     fn size_vector(rows: usize, cols: usize) -> Value {
@@ -1676,7 +1682,7 @@ mod tests {
         };
         assert_eq!(matrix.rows, 2);
         assert_eq!(matrix.cols, 4);
-        assert_eq!(matrix.data, vec!['a', ' ', ' ', ' ', ' ', 'b', ' ', ' ']);
+        assert_eq!(matrix.data(), vec!['a', ' ', ' ', ' ', ' ', 'b', ' ', ' ']);
 
         let extracted = run_diag(Value::CharArray(matrix), Vec::new()).expect("diag extract");
         let Value::CharArray(vector) = extracted else {
@@ -1684,7 +1690,7 @@ mod tests {
         };
         assert_eq!(vector.rows, 2);
         assert_eq!(vector.cols, 1);
-        assert_eq!(vector.data, vec!['a', 'b']);
+        assert_eq!(vector.data(), vec!['a', 'b']);
     }
 
     #[test]

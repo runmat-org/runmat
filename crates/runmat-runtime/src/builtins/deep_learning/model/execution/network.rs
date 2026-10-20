@@ -146,11 +146,11 @@ pub(in crate::builtins::deep_learning) async fn execute_network(
                 Err(_) => {}
             }
         }
-        let Some(Value::Cell(layers)) = request.network.properties.get("Layers") else {
+        let Some(Value::Cell(layers)) = request.network.properties().get("Layers") else {
             unreachable!("whole-network admission validated Layers")
         };
         let route = gpu::admit_gpu_forward(
-            &layers.data,
+            layers.data(),
             handle,
             plan.input_axes(),
             plan.output_axes(),

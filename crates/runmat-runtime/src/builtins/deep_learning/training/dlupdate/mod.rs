@@ -37,14 +37,14 @@ fn into_owned_outputs(
 async fn dlupdate_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<RootedValue> {
     dlupdate_in_runtime(runtime.as_ref(), requested_outputs, args).await
 }
 
 #[cfg(test)]
 pub(in crate::builtins::deep_learning) async fn dlupdate_builtin(
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<RootedValue> {
     dlupdate_in_runtime(None, crate::output_count::current_output_count(), args).await
 }
@@ -52,7 +52,7 @@ pub(in crate::builtins::deep_learning) async fn dlupdate_builtin(
 async fn dlupdate_in_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<RootedValue> {
     let _argument_roots =
         RootedValueLease::for_values(args.iter()).map_err(|error| error.into_runtime_error())?;
@@ -165,7 +165,7 @@ async fn dlupdate_node(
             "dlupdate",
             format!(
                 "dlupdate: traversal for '{}' objects requires dlnetwork/model metadata infrastructure",
-                object.class_name
+                object.class_name()
             ),
         )),
         _ => {
@@ -181,7 +181,7 @@ async fn dlupdate_node(
 }
 
 fn is_leaf_object(object: &ObjectInstance) -> bool {
-    object.class_name.is(super::super::DLARRAY_CLASS)
+    object.class_name().is(super::super::DLARRAY_CLASS)
 }
 
 fn is_tree_container(value: &Value) -> bool {

@@ -26,10 +26,19 @@ pub type SelectedExternalInvocation = dyn Fn(
     Result<crate::execution::RootedValueSequence, crate::RuntimeError>,
 >;
 
+/// Identity and the existing invocation owner projected together from one
+/// verified linked Native IR body. The local coordinate never names its
+/// portable origin; source issuance independently authenticates that origin.
+pub struct LinkedNativeInvocation {
+    pub compiled_function: runmat_types::FunctionId,
+    pub origin: runmat_execution::FunctionBindingOrigin,
+    pub invoke: Rc<SelectedExternalInvocation>,
+}
+
 #[derive(Clone)]
 struct SelectedNativeInvocation {
     origin: runmat_execution::FunctionBindingOrigin,
-    function: usize,
+    function: runmat_types::FunctionId,
     source: crate::source_context::RuntimeSourceRef,
     owner: crate::source_context::SelectedProgramSourceOwner,
     invoke: Rc<SelectedExternalInvocation>,
@@ -46,6 +55,9 @@ impl std::fmt::Debug for SelectedNativeInvocation {
 }
 
 impl runmat_value::SelectedNativeFunctionLease for SelectedNativeInvocation {
+    fn compiled_function(&self) -> runmat_types::FunctionId {
+        self.function
+    }
     fn origin(&self) -> runmat_execution::FunctionBindingOrigin {
         self.origin
     }
@@ -57,6 +69,40 @@ impl runmat_value::SelectedNativeFunctionLease for SelectedNativeInvocation {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+}
+
+impl SelectedNativeInvocation {
+    fn admits(
+        &self,
+        runtime: &crate::context::RuntimeContext,
+        function: usize,
+        origin: runmat_execution::FunctionBindingOrigin,
+    ) -> bool {
+        self.origin == origin
+            && self.function.0 == function
+            && runmat_value::SelectedNativeFunctionLease::is_live(self)
+            && self.owner.session_lease().ptr_eq(&runtime.session_lease())
+    }
+}
+
+/// Validate the actual installed native owner, not only its portable label.
+pub(crate) fn selected_native_binding_admitted(
+    runtime: &crate::context::RuntimeContext,
+    binding: &runmat_value::BoundFunctionBinding,
+    origin: runmat_execution::FunctionBindingOrigin,
+) -> bool {
+    let runmat_value::BoundFunctionAuthority::SelectedNative {
+        origin: issued,
+        lease,
+    } = &binding.authority
+    else {
+        return false;
+    };
+    *issued == origin
+        && lease
+            .as_any()
+            .downcast_ref::<SelectedNativeInvocation>()
+            .is_some_and(|target| target.admits(runtime, binding.function, origin))
 }
 
 pub(super) async fn invoke_selected_native_lease(
@@ -75,14 +121,7 @@ pub(super) async fn invoke_selected_native_lease(
         ));
     };
     let target = target.clone();
-    if target.origin != origin
-        || target.function != function
-        || !runmat_value::SelectedNativeFunctionLease::is_live(&target)
-        || !target
-            .owner
-            .session_lease()
-            .ptr_eq(&runtime.session_lease())
-    {
+    if !target.admits(&runtime, function, origin) {
         return Err(crate::runtime_error::semantic_error(
             "UnavailableBoundFunction",
             "selected native binding belongs to another or ended source session",
@@ -99,10 +138,10 @@ pub struct SelectedExternalSourceTarget {
     origin: runmat_execution::FunctionBindingOrigin,
     source: crate::source_context::RuntimeSourceRef,
     owner: crate::source_context::SelectedProgramSourceOwner,
-    function: usize,
+    function: runmat_types::FunctionId,
     fixed_outputs: usize,
     has_varargout: bool,
-    selected_product: runmat_execution::Digest,
+    selected_product: Option<runmat_execution::Digest>,
     native_ir: runmat_execution::Digest,
     native_function: runmat_execution::Digest,
     source_ordinal: runmat_types::ProgramSourceId,
@@ -128,15 +167,16 @@ impl SelectedExternalSourceTarget {
         source_ordinal: runmat_types::ProgramSourceId,
         fixed_outputs: usize,
         has_varargout: bool,
-        selected_product: runmat_execution::Digest,
+        selected_product: Option<runmat_execution::Digest>,
         native_ir: runmat_execution::Digest,
         native_function: runmat_execution::Digest,
-        invoke: Rc<SelectedExternalInvocation>,
+        invocation: LinkedNativeInvocation,
     ) -> Option<Self> {
         let origin = info.binding_origin?;
         let source = runtime.program_source_ref(source_ordinal)?;
         if origin.program != runtime.program_revision()?.identity_digest().ok()?
-            || usize::try_from(origin.function.0).ok()? != info.function
+            || origin != invocation.origin
+            || info.function != invocation.compiled_function.0
             || owner.source_ordinal_for(source) != Some(source_ordinal)
             || !owner.matches_issued_source_id(source, info.source_id)
             || !owner.is_live()
@@ -147,7 +187,7 @@ impl SelectedExternalSourceTarget {
             origin,
             source,
             owner: owner.clone(),
-            function: info.function,
+            function: invocation.compiled_function,
             fixed_outputs,
             has_varargout,
             selected_product,
@@ -156,10 +196,10 @@ impl SelectedExternalSourceTarget {
             source_ordinal,
             invocation: Rc::new(SelectedNativeInvocation {
                 origin,
-                function: info.function,
+                function: invocation.compiled_function,
                 source,
                 owner: owner.clone(),
-                invoke,
+                invoke: invocation.invoke,
             }),
         })
     }
@@ -168,7 +208,7 @@ impl SelectedExternalSourceTarget {
         self.origin
     }
     pub fn function(&self) -> usize {
-        self.function
+        self.function.0
     }
     pub fn binding(&self) -> Option<runmat_value::BoundFunctionBinding> {
         runmat_value::BoundFunctionBinding::selected_native(
@@ -179,7 +219,7 @@ impl SelectedExternalSourceTarget {
     pub fn output_arity(&self) -> (usize, bool) {
         (self.fixed_outputs, self.has_varargout)
     }
-    pub fn selected_product(&self) -> runmat_execution::Digest {
+    pub fn selected_product(&self) -> Option<runmat_execution::Digest> {
         self.selected_product
     }
     pub fn native_ir(&self) -> runmat_execution::Digest {
@@ -196,13 +236,16 @@ impl SelectedExternalSourceTarget {
         caller: runmat_execution::executable::ExecutableStaticCaller,
         site: runmat_execution::value::GraphStaticReferenceSite,
     ) -> Option<runmat_execution::executable::LinkedNativeStaticImport> {
+        // An ordinary linked program owns executable native leases, but only
+        // a selected deployment product can authorize a portable static link.
+        let selected_product = self.selected_product?;
         self.is_live()
             .then_some(runmat_execution::executable::LinkedNativeStaticImport {
                 caller,
                 site,
                 target: self.origin,
                 source: self.source_ordinal,
-                selected_product: self.selected_product,
+                selected_product,
                 native_ir: self.native_ir,
                 native_function: self.native_function,
             })
@@ -449,6 +492,17 @@ pub fn resolve_binding_origin_binding_in_context(
     })
 }
 
+/// Resolve an exact origin using only this runtime's selected source facts.
+/// An explicitly absent invocation projection masks the session state; neither
+/// another active runtime nor the compatibility catalog may supply authority.
+pub fn resolve_binding_origin_binding_from_runtime(
+    runtime: &crate::context::RuntimeContext,
+    origin: runmat_execution::FunctionBindingOrigin,
+) -> Option<runmat_value::BoundFunctionBinding> {
+    let resolver = execution_facts_from_runtime(runtime)?;
+    resolve_binding_origin_binding_in_context(&resolver, origin, runtime)
+}
+
 fn unique_origin(
     catalog: &[SourceFunctionInfo],
     origin: runmat_execution::FunctionBindingOrigin,
@@ -591,20 +645,26 @@ pub fn source_functions_for(source_id: SourceId) -> Vec<SourceFunctionInfo> {
 
 fn selected_execution_facts() -> Option<Rc<ExecutionSourceFacts>> {
     if let Some(runtime) = crate::context::legacy::active() {
-        return runtime
-            .call_projection()
-            .borrow()
-            .execution_source_resolver()
-            .unwrap_or_else(|| {
-                runtime
-                    .state()
-                    .call
-                    .borrow()
-                    .execution_source_resolver
-                    .clone()
-            });
+        return execution_facts_from_runtime(&runtime);
     }
     EXECUTION_SOURCE_RESOLVER.with(|slot| slot.borrow().clone())
+}
+
+fn execution_facts_from_runtime(
+    runtime: &crate::context::RuntimeContext,
+) -> Option<Rc<ExecutionSourceFacts>> {
+    runtime
+        .selected_call_projection()
+        .borrow()
+        .execution_source_resolver()
+        .unwrap_or_else(|| {
+            runtime
+                .state()
+                .call
+                .borrow()
+                .execution_source_resolver
+                .clone()
+        })
 }
 
 fn selected_source_catalog() -> Option<Arc<Vec<SourceFunctionInfo>>> {

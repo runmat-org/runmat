@@ -96,7 +96,7 @@ fn element(value: &Value, index: usize) -> crate::BuiltinResult<Element> {
             }
         },
         Value::LogicalArray(array) => Element::Real(if array.data[index] != 0 { 1.0 } else { 0.0 }),
-        Value::CharArray(array) => Element::Real(array.data[index] as u32 as f64),
+        Value::CharArray(array) => Element::Real(array.data()[index] as u32 as f64),
         Value::Num(value) => Element::Real(*value),
         Value::Int(value) => Element::Integer(value.clone()),
         Value::Bool(value) => Element::Real(if *value { 1.0 } else { 0.0 }),

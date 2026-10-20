@@ -39,7 +39,7 @@ impl<'a> NumericRoleScanner<'a> {
                         error,
                     )
                 })?;
-                self.pending.push(cell.data.iter());
+                self.pending.push(cell.data().iter());
             }
             return Ok(true);
         }

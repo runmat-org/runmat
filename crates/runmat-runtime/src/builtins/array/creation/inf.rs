@@ -96,7 +96,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::inf"
 )]
-pub(crate) async fn inf_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub(crate) async fn inf_builtin(
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     if matches!(crate::output_count::current_output_count(), Some(count) if count > 1) {
         let error = &runmat_builtins::INF_ERROR_TOO_MANY_OUTPUTS;
         return Err(crate::build_runtime_error(error.message)
@@ -122,7 +124,7 @@ enum OutputTemplate {
 }
 
 impl ParsedInf {
-    async fn parse(args: Vec<Value>) -> crate::BuiltinResult<Self> {
+    async fn parse(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Self> {
         let mut dims: Vec<usize> = Vec::new();
         let mut saw_dims_arg = false;
         let mut like_proto: Option<Value> = None;
@@ -368,9 +370,9 @@ fn dtype_from_precision(precision: ProviderPrecision) -> NumericDType {
 fn keyword_of(value: &Value) -> Option<String> {
     match value {
         Value::String(s) => Some(s.to_ascii_lowercase()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].to_ascii_lowercase()),
+        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].to_ascii_lowercase()),
         Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data.iter().collect();
+            let text: String = ca.data().iter().collect();
             Some(text.to_ascii_lowercase())
         }
         _ => None,

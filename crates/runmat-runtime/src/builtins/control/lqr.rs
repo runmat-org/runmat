@@ -77,7 +77,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 async fn lqr_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     first: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let out_count = crate::output_count::current_output_count();
     if let Some(out_count) = out_count {
@@ -101,7 +101,7 @@ async fn lqr_builtin(
             "lqr expects (A,B,Q,R[,N]) or (sys,Q,R[,N])",
         ));
     }
-    if integer_matrix_extension_required(&first, &rest) {
+    if integer_matrix_extension_required(&first, rest.view()) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &LQR_INTEGER_MATRIX_EXTENSION,
             BUILTIN_NAME,
@@ -134,11 +134,14 @@ async fn lqr_builtin(
         .ok_or_else(|| lqr_error(&LQR_ERROR_INTERNAL, "LQR produced no gain output"))
 }
 
-fn integer_matrix_extension_required(first: &Value, rest: &[Value]) -> bool {
+fn integer_matrix_extension_required(
+    first: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> bool {
     match first {
         Value::Object(object) if object.is_class(SS_CLASS) => ["A", "B"]
             .into_iter()
-            .filter_map(|name| object.properties.get(name))
+            .filter_map(|name| object.properties().get(name))
             .chain(rest.iter())
             .any(is_typed_real_integer_matrix),
         Value::Object(_) => false,
@@ -336,7 +339,7 @@ pub(in crate::builtins::control) enum LqrDomain {
 impl LqrRequest {
     async fn parse(
         first: Value,
-        rest: Vec<Value>,
+        rest: crate::call::BuiltinArguments,
         runtime: Option<&crate::context::RuntimeContext>,
     ) -> BuiltinResult<Self> {
         match first {
@@ -353,7 +356,7 @@ impl LqrRequest {
 
     async fn from_matrices(
         a: Value,
-        rest: Vec<Value>,
+        mut rest: crate::call::BuiltinArguments,
         runtime: Option<&crate::context::RuntimeContext>,
     ) -> BuiltinResult<Self> {
         if !(3..=4).contains(&rest.len()) {
@@ -362,16 +365,15 @@ impl LqrRequest {
                 "expected lqr(A,B,Q,R) or lqr(A,B,Q,R,N)",
             ));
         }
-        let mut values = rest.into_iter();
-        let b = values.next().expect("validated B");
-        let q = values.next().expect("validated Q");
-        let r = values.next().expect("validated R");
+        let b = rest.pop_front().expect("validated B");
+        let q = rest.pop_front().expect("validated Q");
+        let r = rest.pop_front().expect("validated R");
         Self::prepare_standard_matrix(
             a,
             b,
             q,
             Some(r),
-            values.next(),
+            rest.pop_front(),
             LqrDomain::Continuous,
             RiccatiApi::Lqr,
             runtime,
@@ -380,49 +382,44 @@ impl LqrRequest {
     }
 
     async fn from_state_space_object(
-        mut object: ObjectInstance,
-        rest: Vec<Value>,
+        object: ObjectInstance,
+        mut rest: crate::call::BuiltinArguments,
         runtime: Option<&crate::context::RuntimeContext>,
     ) -> BuiltinResult<Self> {
-        let [q, r, tail @ ..] = rest.as_slice() else {
+        if !(2..=3).contains(&rest.len()) {
             return Err(lqr_error(
                 &LQR_ERROR_INVALID_ARGUMENT,
                 "expected lqr(sys,Q,R) or lqr(sys,Q,R,N)",
             ));
-        };
-        if tail.len() > 1 {
-            return Err(lqr_error(
-                &LQR_ERROR_INVALID_ARGUMENT,
-                "lqr(sys,Q,R,N) accepts at most four inputs",
-            ));
         }
+        let q = rest.get(0).expect("validated Q");
+        let r = rest.get(1).expect("validated R");
         let sample_time = scalar_property(&object, "Ts")?;
         validate_sample_time(sample_time, BUILTIN_NAME)?;
         let a_value = object
-            .properties
+            .properties()
             .get("A")
             .ok_or_else(|| lqr_error(&LQR_ERROR_INVALID_MODEL, "ss object missing A property"))?;
         let b_value = object
-            .properties
+            .properties()
             .get("B")
             .ok_or_else(|| lqr_error(&LQR_ERROR_INVALID_MODEL, "ss object missing B property"))?;
         for (label, value) in [("A", a_value), ("B", b_value), ("Q", q), ("R", r)] {
             RealMatrix::preflight(label, value, RiccatiApi::Lqr, runtime)?;
         }
-        if let [n] = tail {
+        if let Some(n) = rest.get(2) {
             RealMatrix::preflight("N", n, RiccatiApi::Lqr, runtime)?;
         }
-        let a = object.properties.remove("A").expect("preflighted A");
-        let b = object.properties.remove("B").expect("preflighted B");
-        let mut values = rest.into_iter();
-        let q = values.next().expect("validated Q");
-        let r = values.next().expect("validated R");
+        let a = object.property("A").cloned().expect("preflighted A");
+        let b = object.property("B").cloned().expect("preflighted B");
+        let q = rest.pop_front().expect("validated Q");
+        let r = rest.pop_front().expect("validated R");
         Self::prepare_standard_matrix(
             a,
             b,
             q,
             Some(r),
-            values.next(),
+            rest.pop_front(),
             if sample_time > 0.0 {
                 LqrDomain::Discrete
             } else {
@@ -606,7 +603,7 @@ fn closed_loop_poles(closed_loop: &DMatrix<f64>, api: RiccatiApi) -> BuiltinResu
 }
 
 fn scalar_property(object: &ObjectInstance, name: &'static str) -> BuiltinResult<f64> {
-    match object.properties.get(name) {
+    match object.properties().get(name) {
         Some(Value::Num(value)) => Ok(*value),
         Some(Value::Int(value)) => Ok(value.to_f64()),
         Some(Value::Tensor(tensor)) if tensor::is_scalar_tensor(tensor) => {
@@ -725,11 +722,11 @@ mod tests {
         let result = block_on(lqr_builtin(
             None,
             tensor(vec![0.0, 0.0, 1.0, 0.0], 2, 2),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 tensor(vec![0.0, 1.0], 2, 1),
                 tensor(vec![1.0, 0.0, 0.0, 1.0], 2, 2),
                 Value::Num(1.0),
-            ],
+            ]),
         ))
         .expect("lqr");
         let outputs = output_list(result);
@@ -749,7 +746,11 @@ mod tests {
         let error = block_on(lqr_builtin(
             None,
             Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![2]).unwrap()),
-            vec![Value::Num(1.0), Value::Num(1.0), Value::Num(1.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(1.0),
+                Value::Num(1.0),
+                Value::Num(1.0),
+            ]),
         ))
         .expect_err("rank-one A is a one-by-two matrix");
         assert!(error.message().contains("A must be square, got 1x2"));
@@ -762,11 +763,11 @@ mod tests {
         let result = block_on(lqr_builtin(
             None,
             integer_tensor(IntegerStorage::I16(vec![0, 0, 1, 0]), 2, 2),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 integer_tensor(IntegerStorage::I16(vec![0, 1]), 2, 1),
                 integer_tensor(IntegerStorage::U16(vec![1, 0, 0, 1]), 2, 2),
                 integer_tensor(IntegerStorage::U8(vec![1]), 1, 1),
-            ],
+            ]),
         ))
         .expect("lqr");
         let outputs = output_list(result);
@@ -784,7 +785,11 @@ mod tests {
         let host_error = block_on(lqr_builtin(
             None,
             integer_tensor(IntegerStorage::I16(vec![-1]), 1, 1),
-            vec![Value::Num(1.0), Value::Num(1.0), Value::Num(1.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(1.0),
+                Value::Num(1.0),
+                Value::Num(1.0),
+            ]),
         ))
         .expect_err("strict host integer extension gate");
         assert_eq!(
@@ -801,7 +806,11 @@ mod tests {
         let error = block_on(lqr_builtin(
             None,
             Value::GpuTensor(allocation.handle.clone()),
-            vec![Value::Num(1.0), Value::Num(1.0), Value::Num(1.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(1.0),
+                Value::Num(1.0),
+                Value::Num(1.0),
+            ]),
         ))
         .expect_err("strict integer extension gate");
         assert_eq!(
@@ -816,8 +825,12 @@ mod tests {
     #[test]
     fn invalid_arity_precedes_integer_extension_admission() {
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(false);
-        let error = block_on(lqr_builtin(None, Value::Int(IntValue::I16(1)), vec![]))
-            .expect_err("invalid call shape");
+        let error = block_on(lqr_builtin(
+            None,
+            Value::Int(IntValue::I16(1)),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .expect_err("invalid call shape");
         assert_eq!(error.identifier(), LQR_ERROR_INVALID_ARGUMENT.identifier);
     }
 
@@ -827,7 +840,11 @@ mod tests {
         let error = block_on(lqr_builtin(
             None,
             Value::Num(-1.0),
-            vec![Value::Num(1.0), Value::Num(-1.0), Value::Num(1.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(1.0),
+                Value::Num(-1.0),
+                Value::Num(1.0),
+            ]),
         ))
         .expect_err("negative Q must not succeed when no output is requested");
         assert_eq!(error.identifier(), LQR_ERROR_INVALID_DIMENSIONS.identifier);
@@ -849,7 +866,11 @@ mod tests {
             let result = block_on(lqr_builtin(
                 None,
                 Value::Num(-1.0),
-                vec![Value::Num(1.0), Value::Num(1.0), Value::Int(gain)],
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(1.0),
+                    Value::Num(1.0),
+                    Value::Int(gain),
+                ]),
             ))
             .expect("integer R accepted");
             let gain_matrix = matrix_from_value(&result);
@@ -868,11 +889,11 @@ mod tests {
             let result = block_on(lqr_builtin(
                 None,
                 Value::GpuTensor(resident),
-                vec![
+                crate::builtins::common::test_support::builtin_arguments(vec![
                     tensor(vec![0.0, 1.0], 2, 1),
                     tensor(vec![1.0, 0.0, 0.0, 1.0], 2, 2),
                     Value::Num(1.0),
-                ],
+                ]),
             ))
             .expect("resident LQR");
             assert_eq!(matrix_from_value(&result).shape(), (1, 2));
@@ -887,29 +908,33 @@ mod tests {
             let resident = crate::builtins::common::gpu_helpers::upload_tensor(provider, &a)
                 .expect("upload A");
             let mut model = ObjectInstance::new(SS_CLASS.to_string());
-            model.properties.insert("Ts".into(), Value::Num(0.0));
-            model
-                .properties
-                .insert("A".into(), Value::GpuTensor(resident.clone()));
-            model
-                .properties
-                .insert("B".into(), tensor(vec![0.0, 1.0], 2, 1));
+            model.replace_property_unbounded("Ts".into(), Value::Num(0.0));
+            model.replace_property_unbounded("A".into(), Value::GpuTensor(resident.clone()));
+            model.replace_property_unbounded("B".into(), tensor(vec![0.0, 1.0], 2, 1));
             provider.reset_telemetry();
             let result = block_on(lqr_builtin(
                 None,
                 Value::Object(model.clone()),
-                vec![tensor(vec![1.0, 0.0, 0.0, 1.0], 2, 2), Value::Num(1.0)],
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    tensor(vec![1.0, 0.0, 0.0, 1.0], 2, 2),
+                    Value::Num(1.0),
+                ]),
             ))
             .expect("resident ss LQR");
             assert_eq!(matrix_from_value(&result).shape(), (1, 2));
             assert!(provider.telemetry_snapshot().download_bytes > 0);
 
-            model.properties.remove("B");
+            crate::builtins::common::test_support::remove_object_property_unbounded(
+                &mut model, "B",
+            );
             provider.reset_telemetry();
             let error = block_on(lqr_builtin(
                 None,
                 Value::Object(model),
-                vec![tensor(vec![1.0, 0.0, 0.0, 1.0], 2, 2), Value::Num(1.0)],
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    tensor(vec![1.0, 0.0, 0.0, 1.0], 2, 2),
+                    Value::Num(1.0),
+                ]),
             ))
             .expect_err("missing B");
             assert_eq!(error.identifier(), LQR_ERROR_INVALID_MODEL.identifier);
@@ -927,11 +952,11 @@ mod tests {
             let error = block_on(lqr_builtin(
                 None,
                 Value::GpuTensor(resident),
-                vec![
+                crate::builtins::common::test_support::builtin_arguments(vec![
                     tensor(vec![0.0, 1.0], 2, 1),
                     Value::String("bad".into()),
                     Value::Num(1.0),
-                ],
+                ]),
             ))
             .expect_err("invalid Q");
             assert_eq!(error.identifier(), LQR_ERROR_UNSUPPORTED_INPUT.identifier);
@@ -945,12 +970,12 @@ mod tests {
         let result = block_on(lqr_builtin(
             None,
             tensor(vec![0.0, 0.0, 1.0, 0.0], 2, 2),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 tensor(vec![0.0, 1.0], 2, 1),
                 tensor(vec![2.0, 0.0, 0.0, 3.0], 2, 2),
                 Value::Num(2.0),
                 tensor(vec![0.25, 0.0], 2, 1),
-            ],
+            ]),
         ))
         .expect("lqr with N");
         let outputs = output_list(result);
@@ -973,17 +998,21 @@ mod tests {
     #[test]
     fn lqr_accepts_continuous_state_space_object() {
         let sys = block_on(crate::builtins::control::ss::ss_builtin(
+            None,
             tensor(vec![0.0, 0.0, 1.0, 0.0], 2, 2),
             tensor(vec![0.0, 1.0], 2, 1),
             tensor(vec![1.0, 0.0], 1, 2),
             Value::Num(0.0),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect("ss");
         let k = block_on(lqr_builtin(
             None,
             sys,
-            vec![tensor(vec![1.0, 0.0, 0.0, 1.0], 2, 2), Value::Num(1.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                tensor(vec![1.0, 0.0, 0.0, 1.0], 2, 2),
+                Value::Num(1.0),
+            ]),
         ))
         .expect("lqr(sys)");
         let k = matrix_from_value(&k);
@@ -994,18 +1023,22 @@ mod tests {
     #[test]
     fn lqr_accepts_discrete_state_space_object() {
         let sys = block_on(crate::builtins::control::ss::ss_builtin(
+            None,
             tensor(vec![1.0, 0.0, 0.1, 1.0], 2, 2),
             tensor(vec![0.005, 0.1], 2, 1),
             tensor(vec![1.0, 0.0], 1, 2),
             Value::Num(0.0),
-            vec![Value::Num(0.1)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(0.1)]),
         ))
         .expect("discrete ss");
         let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let result = block_on(lqr_builtin(
             None,
             sys,
-            vec![tensor(vec![1.0, 0.0, 0.0, 1.0], 2, 2), Value::Num(1.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                tensor(vec![1.0, 0.0, 0.0, 1.0], 2, 2),
+                Value::Num(1.0),
+            ]),
         ))
         .expect("lqr(discrete sys)");
         let outputs = output_list(result);
@@ -1033,18 +1066,24 @@ mod tests {
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let sample_time = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).unwrap();
         let sys = block_on(crate::builtins::control::ss::ss_builtin(
+            None,
             tensor(vec![1.0, 0.0, 1.0, 1.0], 2, 2),
             tensor(vec![0.0, 1.0], 2, 1),
             tensor(vec![1.0, 0.0], 1, 2),
             Value::Num(0.0),
-            vec![Value::Tensor(sample_time)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(
+                sample_time,
+            )]),
         ))
         .expect("discrete ss");
         let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let result = block_on(lqr_builtin(
             None,
             sys,
-            vec![tensor(vec![1.0, 0.0, 0.0, 1.0], 2, 2), Value::Num(1.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                tensor(vec![1.0, 0.0, 0.0, 1.0], 2, 2),
+                Value::Num(1.0),
+            ]),
         ))
         .expect("lqr(discrete sys)");
         let outputs = output_list(result);
@@ -1058,11 +1097,11 @@ mod tests {
         let err = block_on(lqr_builtin(
             None,
             tensor(vec![0.0, 0.0, 1.0, 0.0], 2, 2),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 tensor(vec![0.0, 1.0], 2, 1),
                 tensor(vec![1.0], 1, 1),
                 Value::Num(1.0),
-            ],
+            ]),
         ))
         .expect_err("dimension mismatch");
         assert_eq!(err.identifier(), LQR_ERROR_INVALID_DIMENSIONS.identifier);
@@ -1073,11 +1112,11 @@ mod tests {
         let err = block_on(lqr_builtin(
             None,
             tensor(vec![0.0, 0.0, 1.0, 0.0], 2, 2),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 tensor(vec![0.0, 1.0], 2, 1),
                 tensor(vec![1.0, 0.0, 0.0, 1.0], 2, 2),
                 Value::Num(-1.0),
-            ],
+            ]),
         ))
         .expect_err("invalid R");
         assert_eq!(err.identifier(), LQR_ERROR_INVALID_DIMENSIONS.identifier);
@@ -1089,12 +1128,12 @@ mod tests {
         let err = block_on(lqr_builtin(
             None,
             tensor(vec![0.0, 0.0, 1.0, 0.0], 2, 2),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 tensor(vec![0.0, 1.0], 2, 1),
                 tensor(vec![1.0, 0.0, 0.0, 1.0], 2, 2),
                 Value::Num(1.0),
                 tensor(vec![2.0, 0.0], 2, 1),
-            ],
+            ]),
         ))
         .expect_err("indefinite block cost");
         assert_eq!(err.identifier(), LQR_ERROR_INVALID_DIMENSIONS.identifier);
@@ -1106,8 +1145,8 @@ mod tests {
         let _guard = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         let error = block_on(lqr_builtin(
             None,
-            Value::String("not matrices".to_string()),
-            Vec::new(),
+            Value::String("not matrices".to_string().into()),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect_err("zero-output LQR still validates the call");
         assert_eq!(error.identifier(), LQR_ERROR_INVALID_ARGUMENT.identifier);

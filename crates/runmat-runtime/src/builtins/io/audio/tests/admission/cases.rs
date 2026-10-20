@@ -47,7 +47,12 @@ fn finite_missing_and_unknown_evidence_reject_both_identities_before_file_effect
                 .with_placement(Rc::new(Placement::default())),
         );
     for error in [
-        block_on(audioread_builtin(Some(no_port.clone()), value(), vec![])).unwrap_err(),
+        block_on(audioread_builtin(
+            Some(no_port.clone()),
+            value(),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap_err(),
         block_on(audioinfo_builtin(Some(no_port), value())).unwrap_err(),
     ] {
         assert_eq!(
@@ -69,8 +74,12 @@ fn finite_missing_and_unknown_evidence_reject_both_identities_before_file_effect
         )),
     ] {
         let (runtime, _, placement) = context(provider.clone(), bounds, Some(512 * 1024));
-        let err = block_on(audioread_builtin(Some(runtime.clone()), value(), vec![]))
-            .expect_err("finite decode requires complete evidence");
+        let err = block_on(audioread_builtin(
+            Some(runtime.clone()),
+            value(),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .expect_err("finite decode requires complete evidence");
         assert_eq!(
             err.identifier(),
             Some("RunMat:Placement:InsufficientResourceEvidence")
@@ -93,8 +102,12 @@ fn insufficient_known_budget_and_invalid_controls_have_zero_file_effects() {
     let (fs, _guard) = fixture();
     let provider: Arc<dyn runmat_filesystem::FsProvider> = fs.clone();
     let (runtime, resources, placement) = context(provider, known(), Some(260 * 1024 - 1));
-    let err = block_on(audioread_builtin(Some(runtime.clone()), value(), vec![]))
-        .expect_err("known demand exceeds budget");
+    let err = block_on(audioread_builtin(
+        Some(runtime.clone()),
+        value(),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .expect_err("known demand exceeds budget");
     assert_eq!(err.identifier(), Some("RunMat:Placement:ResourceLimit"));
     assert_eq!(fs.effects(), (0, 0, 0));
 
@@ -102,14 +115,14 @@ fn insufficient_known_budget_and_invalid_controls_have_zero_file_effects() {
     let err = block_on(audioread_builtin(
         Some(runtime.clone()),
         Value::Num(3.0),
-        vec![],
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
     ))
     .expect_err("invalid filename");
     assert_eq!(err.identifier(), Some("RunMat:audioread:InvalidArgument"));
     let err = block_on(audioread_builtin(
         Some(runtime.clone()),
         value(),
-        vec![Value::from("int16")],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("int16")]),
     ))
     .expect_err("invalid datatype");
     assert_eq!(err.identifier(), Some("RunMat:audioread:InvalidArgument"));
@@ -118,7 +131,12 @@ fn insufficient_known_budget_and_invalid_controls_have_zero_file_effects() {
     assert_eq!(err.identifier(), Some("RunMat:audioinfo:InvalidArgument"));
     {
         let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
-        assert!(block_on(audioread_builtin(Some(runtime.clone()), value(), vec![])).is_err());
+        assert!(block_on(audioread_builtin(
+            Some(runtime.clone()),
+            value(),
+            crate::builtins::common::test_support::builtin_arguments(vec![])
+        ))
+        .is_err());
     }
     {
         let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
@@ -136,22 +154,34 @@ fn admitted_output_forms_and_metadata_finish_one_complete_call_each() {
     let (fs, _guard) = fixture();
     let provider: Arc<dyn runmat_filesystem::FsProvider> = fs.clone();
     let (runtime, resources, placement) = context(provider, known(), Some(512 * 1024));
-    let direct = block_on(audioread_builtin(Some(runtime.clone()), value(), vec![]))
-        .expect("implicit samples");
+    let direct = block_on(audioread_builtin(
+        Some(runtime.clone()),
+        value(),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .expect("implicit samples");
     assert_eq!(tensor(direct).materialize_f64(), vec![0.0, 0.5]);
     {
         let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         assert!(output_list(
-            block_on(audioread_builtin(Some(runtime.clone()), value(), vec![]))
-                .expect("discarded output")
+            block_on(audioread_builtin(
+                Some(runtime.clone()),
+                value(),
+                crate::builtins::common::test_support::builtin_arguments(vec![])
+            ))
+            .expect("discarded output")
         )
         .is_empty());
     }
     {
         let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         let result = output_list(
-            block_on(audioread_builtin(Some(runtime.clone()), value(), vec![]))
-                .expect("one output"),
+            block_on(audioread_builtin(
+                Some(runtime.clone()),
+                value(),
+                crate::builtins::common::test_support::builtin_arguments(vec![]),
+            ))
+            .expect("one output"),
         );
         assert_eq!(result.len(), 1);
         assert_eq!(tensor(result[0].clone()).materialize_f64(), vec![0.0, 0.5]);
@@ -159,8 +189,12 @@ fn admitted_output_forms_and_metadata_finish_one_complete_call_each() {
     {
         let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let result = output_list(
-            block_on(audioread_builtin(Some(runtime.clone()), value(), vec![]))
-                .expect("two outputs"),
+            block_on(audioread_builtin(
+                Some(runtime.clone()),
+                value(),
+                crate::builtins::common::test_support::builtin_arguments(vec![]),
+            ))
+            .expect("two outputs"),
         );
         assert_eq!(result[1], Value::Num(8000.0));
     }
@@ -206,7 +240,10 @@ fn relative_source_and_typed_range_mode_reach_exact_captured_owner() {
     let result = block_on(audioread_builtin(
         Some(runtime),
         Value::from("tone.wav"),
-        vec![range, Value::from("native")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            range,
+            Value::from("native"),
+        ]),
     ))
     .expect("captured relative source");
     assert_eq!(
@@ -240,7 +277,7 @@ fn operational_error_cancel_and_pending_drop_retire_probe_without_replay() {
     let err = block_on(audioread_builtin(
         Some(runtime.clone()),
         Value::from("/audio/missing.wav"),
-        vec![],
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
     ))
     .expect_err("missing input");
     // The exact-resource test service declines unknown paths before file I/O.
@@ -253,8 +290,12 @@ fn operational_error_cancel_and_pending_drop_retire_probe_without_replay() {
     fs.inner
         .write_project_path("/audio/tone.wav", b"bad audio")
         .expect("replace fixture with malformed bytes");
-    let err = block_on(audioread_builtin(Some(runtime.clone()), value(), vec![]))
-        .expect_err("invalid source coding");
+    let err = block_on(audioread_builtin(
+        Some(runtime.clone()),
+        value(),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .expect_err("invalid source coding");
     assert_eq!(err.identifier(), Some("RunMat:audioread:UnsupportedFormat"));
     assert_eq!(placement.observations.borrow().len(), 1);
     assert_eq!(
@@ -278,7 +319,12 @@ fn operational_error_cancel_and_pending_drop_retire_probe_without_replay() {
         .clone()
         .with_cancellation_token(cancellation.token());
     cancellation.cancel(CancellationReason::User);
-    let err = block_on(audioread_builtin(Some(cancelled), value(), vec![])).expect_err("cancelled");
+    let err = block_on(audioread_builtin(
+        Some(cancelled),
+        value(),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .expect_err("cancelled");
     assert_eq!(err.identifier(), Some("RunMat:Cancelled"));
     let info_error = block_on(audioinfo_builtin(
         Some(
@@ -295,7 +341,11 @@ fn operational_error_cancel_and_pending_drop_retire_probe_without_replay() {
 
     fs.pending_open.store(true, Ordering::SeqCst);
     let opens_before = fs.effects().0;
-    let mut future = Box::pin(audioread_builtin(Some(runtime.clone()), value(), vec![]));
+    let mut future = Box::pin(audioread_builtin(
+        Some(runtime.clone()),
+        value(),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ));
     assert!(matches!(
         future
             .as_mut()
@@ -309,7 +359,11 @@ fn operational_error_cancel_and_pending_drop_retire_probe_without_replay() {
     assert_eq!(placement.observations.borrow().len(), 2);
     assert_eq!(resources.calls.get(), 4);
 
-    let never_polled = audioread_builtin(Some(runtime.clone()), value(), vec![]);
+    let never_polled = audioread_builtin(
+        Some(runtime.clone()),
+        value(),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    );
     drop(never_polled);
     assert_eq!(resources.calls.get(), 4);
     assert_eq!(fs.effects().0, opens_before + 1);

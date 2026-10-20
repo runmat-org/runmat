@@ -39,16 +39,18 @@ pub(super) fn error(
 async fn complex_builtin(
     runtime: Option<RuntimeContext>,
     real: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<RootedValue> {
     crate::output_count::validate_fixed_outputs(
         &runmat_builtins::COMPLEX_DESCRIPTOR,
         &runmat_builtins::COMPLEX_ERROR_TOO_MANY_OUTPUTS,
         "complex",
     )?;
-    match rest.as_slice() {
-        [] => preparation::unary(runtime.as_ref(), real).await,
-        [imaginary] => preparation::binary(runtime.as_ref(), real, imaginary.clone()).await,
+    match (rest.len(), rest.first()) {
+        (0, _) => preparation::unary(runtime.as_ref(), real).await,
+        (1, Some(imaginary)) => {
+            preparation::binary(runtime.as_ref(), real, imaginary.clone()).await
+        }
         _ => Err(error(
             &COMPLEX_ERROR_INVALID_ARGUMENT,
             format!("expected 1 or 2 input arguments, got {}", rest.len() + 1),

@@ -155,7 +155,7 @@ fn call_transform(permutation: bool, source: &GpuTensorHandle) -> crate::Builtin
     } else {
         block_on(repmat::repmat_builtin(
             Value::GpuTensor(source.clone()),
-            vec![control],
+            crate::builtins::common::test_support::builtin_arguments(vec![control]),
         ))
     }
 }

@@ -4,6 +4,8 @@
 //! dimensions and integrates with the acceleration layer to keep gpuArray
 //! outputs resident on the device whenever possible.
 
+use crate::aggregate::structure::operations as struct_ops;
+
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::GpuTensorHandle;
@@ -68,10 +70,7 @@ pub(super) async fn permute_builtin(value: Value, order: Value) -> crate::Builti
                 crate::builtins::common::shape::effective_rank(array.shape()),
             ).map_err(|error| super::error::declared(error, &PERMUTE_ERROR_RANK_MISMATCH))?;
             let zero_based = order_vec.iter().map(|dimension| dimension - 1).collect::<Vec<_>>();
-            array
-                .permute(&zero_based)
-                .map(Value::StructArray)
-                .map_err(|error| permute_error("permute", error))
+            struct_ops::permute(array,&zero_based).map(Value::StructArray).map_err(|error|struct_ops::remap(error,|message|permute_error("permute",message)))
         }
         Value::GpuTensor(handle) => {
             validate_rank("permute", &order_vec, handle.shape().len()).map_err(|error| super::error::declared(error, &PERMUTE_ERROR_RANK_MISMATCH))?;
@@ -355,9 +354,10 @@ pub(crate) fn permute_string_array(
     sa: StringArray,
     order: &[usize],
 ) -> crate::BuiltinResult<StringArray> {
-    let StringArray { data, shape, .. } = sa;
+    let (data, shape, _, _) = sa.into_parts();
     let (out, new_shape) = permute_generic(builtin, &data, &shape, order)?;
-    StringArray::new(out, new_shape).map_err(|e| permute_error(builtin, format!("{builtin}: {e}")))
+    StringArray::from_texts_unbounded(out, new_shape)
+        .map_err(|e| permute_error(builtin, format!("{builtin}: {e}")))
 }
 
 pub(crate) fn permute_char_array(
@@ -551,7 +551,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::{
         HostIntegerDataView, HostIntegerTensorView, HostTensorView, IntegerElementType,
     };
-    use runmat_value::{IntegerComplexStorage, IntegerStorage, StructArray, StructValue};
+    use runmat_value::{IntegerComplexStorage, IntegerStorage, StructArray};
 
     fn permute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {
         block_on(super::permute_builtin(value, order))
@@ -595,9 +595,9 @@ pub(crate) mod tests {
     #[test]
     fn permute_structure_array_adds_trailing_dimension() {
         let element = |value| {
-            let mut structure = StructValue::new();
+            let mut structure = runmat_value::UnboundedStructValueBuilder::new();
             structure.insert("payload", Value::Num(value));
-            structure
+            structure.finish()
         };
         let array = StructArray::new(vec![element(1.0), element(2.0)], vec![1, 2])
             .expect("structure array");
@@ -747,8 +747,8 @@ pub(crate) mod tests {
         match value {
             Value::StringArray(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
-                assert_eq!(out.data[0], "run");
-                assert_eq!(out.data[1], "gpu");
+                assert_eq!(out.data()[0], "run");
+                assert_eq!(out.data()[1], "gpu");
             }
             _ => panic!("expected string array"),
         }
@@ -764,7 +764,7 @@ pub(crate) mod tests {
             Value::CharArray(out) => {
                 assert_eq!(out.rows, 2);
                 assert_eq!(out.cols, 2);
-                assert_eq!(out.data.iter().collect::<String>(), "acbd");
+                assert_eq!(out.data().iter().collect::<String>(), "acbd");
             }
             _ => panic!("expected char array"),
         }

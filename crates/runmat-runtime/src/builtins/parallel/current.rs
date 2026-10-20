@@ -15,8 +15,10 @@ fn active_context(operation: &str) -> crate::BuiltinResult<crate::context::Runti
     binding_variant = "default",
     builtin_path = "crate::builtins::parallel::current"
 )]
-async fn get_current_task_builtin(arguments: Vec<Value>) -> crate::BuiltinResult<Value> {
-    require_no_arguments("getCurrentTask", &arguments)?;
+async fn get_current_task_builtin(
+    arguments: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    require_no_arguments("getCurrentTask", arguments.view())?;
     Ok(crate::parallel::current::task(&active_context(
         "getCurrentTask",
     )?))
@@ -27,8 +29,10 @@ async fn get_current_task_builtin(arguments: Vec<Value>) -> crate::BuiltinResult
     binding_variant = "default",
     builtin_path = "crate::builtins::parallel::current"
 )]
-async fn get_current_worker_builtin(arguments: Vec<Value>) -> crate::BuiltinResult<Value> {
-    require_no_arguments("getCurrentWorker", &arguments)?;
+async fn get_current_worker_builtin(
+    arguments: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    require_no_arguments("getCurrentWorker", arguments.view())?;
     Ok(crate::parallel::current::worker(&active_context(
         "getCurrentWorker",
     )?))
@@ -39,14 +43,19 @@ async fn get_current_worker_builtin(arguments: Vec<Value>) -> crate::BuiltinResu
     binding_variant = "default",
     builtin_path = "crate::builtins::parallel::current"
 )]
-async fn get_current_job_builtin(arguments: Vec<Value>) -> crate::BuiltinResult<Value> {
-    require_no_arguments("getCurrentJob", &arguments)?;
+async fn get_current_job_builtin(
+    arguments: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    require_no_arguments("getCurrentJob", arguments.view())?;
     Ok(crate::parallel::current::job(&active_context(
         "getCurrentJob",
     )?))
 }
 
-fn require_no_arguments(name: &str, arguments: &[Value]) -> crate::BuiltinResult<()> {
+fn require_no_arguments(
+    name: &str,
+    arguments: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<()> {
     if arguments.is_empty() {
         Ok(())
     } else {

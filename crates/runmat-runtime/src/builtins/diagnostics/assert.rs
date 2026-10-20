@@ -14,7 +14,7 @@ use runmat_builtins::{ASSERT_DESCRIPTOR, ASSERT_EXTENSIONS, ASSERT_INTEGER_CAPAB
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, NumericScalar, Tensor, Value};
 
-use crate::builtins::common::format::{flatten_arguments, format_variadic};
+use crate::builtins::common::format::{flatten_argument_elements, format_variadic_arguments};
 use crate::builtins::common::gpu_helpers;
 use crate::{build_runtime_error, RuntimeError};
 
@@ -71,10 +71,14 @@ where
 
 #[runtime_builtin(
     name = "assert",
+    context = true,
     binding_variant = "default",
     builtin_path = "crate::builtins::diagnostics::assert"
 )]
-async fn assert_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn assert_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     if matches!(crate::output_count::current_output_count(), Some(count) if count > 0) {
         return Err(assert_error(&ASSERT_ERROR_TOO_MANY_OUTPUTS));
     }
@@ -82,16 +86,21 @@ async fn assert_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         return Err(assert_error(&ASSERT_ERROR_NOT_ENOUGH_INPUTS));
     }
 
-    let mut iter = args.into_iter();
-    let condition_raw = iter.next().expect("checked length above");
-    let rest: Vec<Value> = iter.collect();
+    let condition_raw = args[0].clone();
+    let rest = args.into_range(1..)?;
 
-    let condition = normalize_condition_value(condition_raw).await?;
+    let normalize = normalize_condition_value(condition_raw);
+    let condition = match runtime.as_ref() {
+        Some(runtime) => runtime.scope(normalize).await,
+        None => normalize.await,
+    }?;
     match evaluate_condition(condition)? {
         ConditionOutcome::Pass => Ok(Value::Num(0.0)),
         ConditionOutcome::Fail => {
-            let payload = failure_payload(&rest).await?;
-            Err(assert_flow(&payload.identifier, payload.message))
+            let payload = failure_payload(runtime.as_ref(), &rest).await?;
+            let mut error = assert_flow(&payload.identifier, payload.message);
+            error.source = Some(Box::new(crate::runtime_error::RuntimeAssertionFailure));
+            Err(error)
         }
     }
 }
@@ -168,7 +177,7 @@ fn evaluate_condition(value: Value) -> crate::BuiltinResult<ConditionOutcome> {
             evaluate_complex_tensor(&tensor)
         }
         Value::CharArray(chars) => {
-            if !chars.data.is_empty() && chars.data.iter().all(|character| *character != '\0') {
+            if !chars.data().is_empty() && chars.data().iter().all(|character| *character != '\0') {
                 Ok(ConditionOutcome::Pass)
             } else {
                 Ok(ConditionOutcome::Fail)
@@ -266,7 +275,10 @@ struct FailurePayload {
     message: String,
 }
 
-async fn failure_payload(args: &[Value]) -> crate::BuiltinResult<FailurePayload> {
+async fn failure_payload(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: &crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<FailurePayload> {
     if args.is_empty() {
         return Ok(FailurePayload {
             identifier: assert_default_identifier().to_string(),
@@ -288,16 +300,18 @@ async fn failure_payload(args: &[Value]) -> crate::BuiltinResult<FailurePayload>
         }
         let identifier = identifier_from_value(candidate)?;
         let template = message_from_value(&args[1])?;
-        let formatting_args = normalize_formatting_arguments(&args[2..]).await?;
-        let message = format_message(&template, &formatting_args)?;
+        let formatting_args =
+            normalize_formatting_arguments(runtime, args.fork().into_range(2..)?).await?;
+        let message = format_message(&template, formatting_args.view())?;
         Ok(FailurePayload {
             identifier,
             message,
         })
     } else {
         let template = message_from_value(candidate)?;
-        let formatting_args = normalize_formatting_arguments(&args[1..]).await?;
-        let message = format_message(&template, &formatting_args)?;
+        let formatting_args =
+            normalize_formatting_arguments(runtime, args.fork().into_range(1..)?).await?;
+        let message = format_message(&template, formatting_args.view())?;
         Ok(FailurePayload {
             identifier: assert_default_identifier().to_string(),
             message,
@@ -305,25 +319,33 @@ async fn failure_payload(args: &[Value]) -> crate::BuiltinResult<FailurePayload>
     }
 }
 
-async fn normalize_formatting_arguments(args: &[Value]) -> crate::BuiltinResult<Vec<Value>> {
-    let mut normalized = Vec::with_capacity(args.len());
-    for value in args {
-        let mut flattened = flatten_arguments(std::slice::from_ref(value), BUILTIN_NAME)
-            .await
-            .map_err(|flow| {
-                remap_assert_flow(flow, &ASSERT_ERROR_INVALID_INPUT, |err| {
-                    format!("assert: {}", err.message())
-                })
-            })?;
+async fn normalize_formatting_arguments(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<crate::call::BuiltinArguments> {
+    args.try_map_preserving_roots_async(args.len(), runtime, async |index| {
+        let value = &args[index];
+        let flatten = flatten_argument_elements(
+            crate::call::FunctionArgumentView::from_slice(std::slice::from_ref(value)),
+            BUILTIN_NAME,
+        );
+        let mut flattened = match runtime {
+            Some(runtime) => runtime.scope(flatten).await,
+            None => flatten.await,
+        }
+        .map_err(|flow| {
+            remap_assert_flow(flow, &ASSERT_ERROR_INVALID_INPUT, |err| {
+                format!("assert: {}", err.message())
+            })
+        })?;
         if flattened.len() != 1 {
             return Err(assert_error_with_message(
                 "assert: each message replacement value must be a character vector, string scalar, or numeric scalar.",
                 &ASSERT_ERROR_INVALID_INPUT,
             ));
         }
-        normalized.push(flattened.remove(0));
-    }
-    Ok(normalized)
+        Ok(flattened.pop().expect("one validated formatting scalar"))
+    }).await
 }
 
 fn value_is_identifier(value: &Value) -> crate::BuiltinResult<bool> {
@@ -383,10 +405,14 @@ fn message_from_value(value: &Value) -> crate::BuiltinResult<String> {
         value,
         "assert: message text must be a string scalar or character vector.",
     )
+    .map(runmat_value::Utf8Text::into_string_unbounded)
 }
 
-fn format_message(template: &str, args: &[Value]) -> crate::BuiltinResult<String> {
-    format_variadic(template, args).map_err(|flow| {
+fn format_message(
+    template: &str,
+    args: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<String> {
+    format_variadic_arguments(template, args).map_err(|flow| {
         remap_assert_flow(flow, &ASSERT_ERROR_INVALID_INPUT, |err| {
             format!("assert: {}", err.message())
         })
@@ -404,12 +430,15 @@ fn normalize_identifier(raw: &str) -> String {
     }
 }
 
-fn string_scalar_from_value(value: &Value, context: &str) -> crate::BuiltinResult<String> {
+fn string_scalar_from_value(
+    value: &Value,
+    context: &str,
+) -> crate::BuiltinResult<runmat_value::Utf8Text> {
     match value {
         Value::String(text) => Ok(text.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::StringArray(array) if array.data().len() == 1 => Ok(array.data()[0].clone()),
         Value::CharArray(char_array) if char_array.rows == 1 => {
-            Ok(char_array.data.iter().collect::<String>())
+            Ok(char_array.data().iter().collect::<String>().into())
         }
         _ => Err(assert_error_with_message(
             context,
@@ -418,12 +447,12 @@ fn string_scalar_from_value(value: &Value, context: &str) -> crate::BuiltinResul
     }
 }
 
-fn string_scalar_opt(value: &Value) -> Option<String> {
+fn string_scalar_opt(value: &Value) -> Option<runmat_value::Utf8Text> {
     match value {
         Value::String(text) => Some(text.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
+        Value::StringArray(array) if array.data().len() == 1 => Some(array.data()[0].clone()),
         Value::CharArray(char_array) if char_array.rows == 1 => {
-            Some(char_array.data.iter().collect())
+            Some(char_array.data().iter().collect::<String>().into())
         }
         _ => None,
     }
@@ -440,7 +469,10 @@ pub(crate) mod tests {
     };
 
     fn assert_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-        block_on(super::assert_builtin(args))
+        block_on(super::assert_builtin(
+            None,
+            crate::call::BuiltinArguments::from_borrowed(&args, None)?,
+        ))
     }
 
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
@@ -503,6 +535,8 @@ pub(crate) mod tests {
             assert_builtin(vec![Value::Tensor(tensor)]).expect_err("assert should fail"),
         );
         assert_eq!(err.identifier(), Some(assert_default_identifier()));
+        assert!(std::error::Error::source(&err)
+            .is_some_and(|cause| cause.is::<crate::runtime_error::RuntimeAssertionFailure>()));
     }
 
     #[test]
@@ -581,7 +615,7 @@ pub(crate) mod tests {
         ] {
             let err = assert_builtin(vec![
                 Value::Bool(false),
-                Value::String(format.to_string()),
+                Value::String(format.to_string().into()),
                 Value::Int(value),
             ])
             .expect_err("formatted assertion should fail");
@@ -592,7 +626,7 @@ pub(crate) mod tests {
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).expect("scalar");
         let err = assert_builtin(vec![
             Value::Bool(false),
-            Value::String("%u".to_string()),
+            Value::String("%u".to_string().into()),
             Value::Tensor(scalar),
         ])
         .expect_err("formatted assertion should fail");
@@ -602,7 +636,7 @@ pub(crate) mod tests {
             Tensor::new_integer(IntegerStorage::U8(vec![1, 2]), vec![1, 2]).expect("array");
         let err = assert_builtin(vec![
             Value::Bool(false),
-            Value::String("%u".to_string()),
+            Value::String("%u".to_string().into()),
             Value::Tensor(nonscalar),
         ])
         .expect_err("format replacement arrays reject");
@@ -663,7 +697,7 @@ pub(crate) mod tests {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
             let err = assert_builtin(vec![
                 Value::Bool(false),
-                Value::String("plainMessage".to_string()),
+                Value::String("plainMessage".to_string().into()),
                 Value::Int(IntValue::I32(7)),
             ])
             .expect_err("plain text is the message form");
@@ -674,8 +708,8 @@ pub(crate) mod tests {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
             let err = assert_builtin(vec![
                 Value::Bool(false),
-                Value::String("customFailure".to_string()),
-                Value::String("failed".to_string()),
+                Value::String("customFailure".to_string().into()),
+                Value::String("failed".to_string().into()),
             ])
             .expect_err("RunMat mode admits unqualified identifier");
             assert_eq!(err.identifier(), Some("RunMat:customFailure"));
@@ -683,8 +717,8 @@ pub(crate) mod tests {
         for identifier in ["bad.segment:mnemonic", "component:9bad", "component::bad"] {
             let err = assert_builtin(vec![
                 Value::Bool(false),
-                Value::String(identifier.to_string()),
-                Value::String("failed".to_string()),
+                Value::String(identifier.to_string().into()),
+                Value::String("failed".to_string().into()),
             ])
             .expect_err("invalid qualified identifier rejects");
             assert_eq!(
@@ -944,7 +978,7 @@ pub(crate) mod tests {
             let lease = handle.allocation_lease().downgrade();
             let err = assert_builtin(vec![
                 Value::Bool(false),
-                Value::String("%u".to_string()),
+                Value::String("%u".to_string().into()),
                 Value::GpuTensor(handle.clone()),
             ])
             .expect_err("resident scalar formats");
@@ -1055,7 +1089,7 @@ pub(crate) mod tests {
         .expect("upload");
         let err = assert_builtin(vec![
             Value::Bool(false),
-            Value::String("%u".to_string()),
+            Value::String("%u".to_string().into()),
             Value::GpuTensor(handle.clone()),
         ])
         .expect_err("resident scalar formats");

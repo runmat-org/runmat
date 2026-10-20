@@ -63,7 +63,9 @@ impl OutputTemplate {
     }
 }
 
-pub(super) fn parse_output_template(args: &[Value]) -> BuiltinResult<OutputTemplate> {
+pub(super) fn parse_output_template(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<OutputTemplate> {
     if matches!(args.first(), Some(Value::CharArray(chars))
         if chars.rows != 1 || crate::builtins::common::shape::effective_rank(&chars.shape) > 2)
     {

@@ -107,7 +107,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::solve::rref"
 )]
-async fn rref_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn rref_builtin(value: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     crate::builtins::common::validation::reject_typed_complex_integer(&value, NAME)?;
     crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
         &value,
@@ -125,7 +125,7 @@ async fn rref_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         )
         .await?;
     }
-    let tol = parse_tolerance_arg(NAME, &rest).map_err(argument_error)?;
+    let tol = parse_tolerance_arg(NAME, rest.view()).map_err(argument_error)?;
     let eval = match value {
         Value::GpuTensor(handle) => rref_gpu(handle, tol).await?,
         other => rref_eval_from_value(other, tol)?,
@@ -960,6 +960,9 @@ pub(crate) mod tests {
     }
 
     fn rref_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::rref_builtin(value, rest))
+        block_on(super::rref_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 }

@@ -72,13 +72,13 @@ pub async fn value_dimensions(value: &Value) -> Result<Vec<usize>, RuntimeError>
         Value::LogicalArray(la) => normalize_shape(&la.shape),
         Value::StringArray(sa) => normalize_shape(&sa.shape),
         Value::SymbolicArray(sa) => normalize_shape(&sa.shape),
-        Value::CharArray(ca) => ca.shape.clone(),
+        Value::CharArray(ca) => ca.shape().to_vec(),
         Value::Cell(ca) => normalize_shape(&ca.shape),
         Value::StructArray(array) => normalize_shape(array.shape()),
         Value::ObjectArray(array) => normalize_shape(array.shape()),
         Value::GpuTensor(handle) => normalize_shape(handle.shape()),
         Value::Object(object) => {
-            match runmat_builtins::standard_class_array_shape(&object.class_name) {
+            match runmat_builtins::standard_class_array_shape(object.class_name()) {
                 Some(declaration) => object::dimensions(object, declaration).await?,
                 None => canonical_scalar_shape(),
             }
@@ -96,10 +96,10 @@ pub async fn value_numel(value: &Value) -> Result<usize, RuntimeError> {
         Value::SparseTensor(t) => t.rows.saturating_mul(t.cols),
         Value::ComplexTensor(t) => tensor_utils::complex_tensor_element_len(t),
         Value::LogicalArray(la) => la.data.len(),
-        Value::StringArray(sa) => sa.data.len(),
-        Value::SymbolicArray(sa) => sa.data.len(),
-        Value::CharArray(ca) => ca.data.len(),
-        Value::Cell(ca) => ca.data.len(),
+        Value::StringArray(sa) => sa.data().len(),
+        Value::SymbolicArray(sa) => sa.data().len(),
+        Value::CharArray(ca) => ca.data().len(),
+        Value::Cell(ca) => ca.data().len(),
         Value::StructArray(array) => array.len(),
         Value::ObjectArray(array) => array.len(),
         Value::GpuTensor(handle) => handle

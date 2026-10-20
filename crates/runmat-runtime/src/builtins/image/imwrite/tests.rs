@@ -89,7 +89,10 @@ fn typed_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
 }
 
 fn call(args: Vec<Value>) -> BuiltinResult<Value> {
-    block_on(imwrite_builtin(None, args))
+    block_on(imwrite_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(args),
+    ))
 }
 
 fn indexed_with_large_host_map(path: &std::path::Path) -> Vec<Value> {
@@ -100,7 +103,7 @@ fn indexed_with_large_host_map(path: &std::path::Path) -> Vec<Value> {
             vec![1500, 3],
             NumericDType::F64,
         )),
-        Value::String(path.to_string_lossy().into_owned()),
+        Value::String(path.to_string_lossy().into_owned().into()),
     ]
 }
 
@@ -109,12 +112,18 @@ fn indexed_with_large_host_map(path: &std::path::Path) -> Vec<Value> {
 fn host_preflight_keeps_exact_colormap_and_alpha_geometry_without_file_effects() {
     let image = Value::Tensor(tensor(vec![1.0], Vec::new(), NumericDType::F64));
     let row_map = Value::Tensor(tensor(vec![0.0, 0.5, 1.0], vec![1, 3], NumericDType::F64));
-    preflight::preflight_resident_argument_roles(&[image.clone(), row_map]).unwrap();
+    preflight::preflight_resident_argument_roles(crate::call::FunctionArgumentView::from_slice(&[
+        image.clone(),
+        row_map,
+    ]))
+    .unwrap();
     let vector_map = Value::Tensor(tensor(vec![0.0, 0.5, 1.0], vec![3], NumericDType::F64));
     assert_eq!(
-        preflight::preflight_resident_argument_roles(&[image.clone(), vector_map])
-            .unwrap_err()
-            .identifier(),
+        preflight::preflight_resident_argument_roles(
+            crate::call::FunctionArgumentView::from_slice(&[image.clone(), vector_map])
+        )
+        .unwrap_err()
+        .identifier(),
         IMWRITE_ERROR_INVALID_COLORMAP.identifier
     );
 
@@ -127,12 +136,23 @@ fn host_preflight_keeps_exact_colormap_and_alpha_geometry_without_file_effects()
         ]
     };
     let scalar_alpha = Value::Tensor(tensor(vec![0.5], vec![1, 1], NumericDType::F64));
-    preflight::preflight_option_text(&options(scalar_alpha), 2, "unused.png", false).unwrap();
+    preflight::preflight_option_text(
+        crate::call::FunctionArgumentView::from_slice(&options(scalar_alpha)),
+        2,
+        "unused.png",
+        false,
+    )
+    .unwrap();
     let rank_zero_alpha = Value::Tensor(tensor(vec![0.5], Vec::new(), NumericDType::F64));
     assert_eq!(
-        preflight::preflight_option_text(&options(rank_zero_alpha), 2, "unused.png", false)
-            .unwrap_err()
-            .identifier(),
+        preflight::preflight_option_text(
+            crate::call::FunctionArgumentView::from_slice(&options(rank_zero_alpha)),
+            2,
+            "unused.png",
+            false
+        )
+        .unwrap_err()
+        .identifier(),
         IMWRITE_ERROR_INVALID_OPTION.identifier
     );
 }
@@ -149,7 +169,11 @@ fn known_invalid_option_precedes_host_map_scan_and_cancellation() {
         Rc::new(RuntimeExecutionService::new()),
         cancellation.token(),
     );
-    let error = block_on(imwrite_builtin(Some(context), args)).unwrap_err();
+    let error = block_on(imwrite_builtin(
+        Some(context),
+        crate::builtins::common::test_support::builtin_arguments(args),
+    ))
+    .unwrap_err();
     assert_eq!(error.identifier(), IMWRITE_ERROR_INVALID_OPTION.identifier);
     assert!(!path.exists());
 }
@@ -159,7 +183,10 @@ fn host_map_scan_reports_cooperation_failure_before_io() {
     let directory = tempdir().unwrap();
     let path = directory.path().join("turn-failed.png");
     let args = indexed_with_large_host_map(&path);
-    preflight::preflight_resident_argument_roles(&args).unwrap();
+    preflight::preflight_resident_argument_roles(crate::call::FunctionArgumentView::from_slice(
+        &args,
+    ))
+    .unwrap();
     let turns = Rc::new(Cell::new(0));
     let counted = turns.clone();
     let cancellation = CancellationSource::new();
@@ -177,7 +204,7 @@ fn host_map_scan_reports_cooperation_failure_before_io() {
     );
     let mut cooperation = ImageCooperation::with_budget(budget, BUILTIN_NAME);
     let error = block_on(preflight::preflight_known_host_pixels(
-        &args,
+        crate::call::FunctionArgumentView::from_slice(&args),
         &mut cooperation,
     ))
     .unwrap_err();
@@ -200,7 +227,11 @@ fn builtin_context_cancellation_stops_before_file_publication() {
         Rc::new(RuntimeExecutionService::new()),
         cancellation.token(),
     );
-    let error = block_on(imwrite_builtin(Some(context), args)).unwrap_err();
+    let error = block_on(imwrite_builtin(
+        Some(context),
+        crate::builtins::common::test_support::builtin_arguments(args),
+    ))
+    .unwrap_err();
     assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
     assert!(!path.exists());
 }
@@ -227,7 +258,7 @@ fn unsupported_explicit_format_fails_before_writing() {
     let image = Value::Tensor(tensor(vec![0.0], vec![1, 1], NumericDType::F64));
     let error = call(vec![
         image,
-        Value::String(path.to_string_lossy().into_owned()),
+        Value::String(path.to_string_lossy().into_owned().into()),
         Value::String("not-an-image-format".into()),
     ])
     .unwrap_err();
@@ -242,7 +273,7 @@ fn recognized_but_unsupported_option_fails_before_writing() {
     let image = Value::Tensor(tensor(vec![0.0], vec![1, 1], NumericDType::F64));
     let error = call(vec![
         image,
-        Value::String(path.to_string_lossy().into_owned()),
+        Value::String(path.to_string_lossy().into_owned().into()),
         Value::String("Bit_Depth".into()),
         Value::Num(8.0),
     ])
@@ -262,7 +293,13 @@ fn known_invalid_geometry_and_controls_never_download_resident_image() {
     }));
     let _thread = ThreadProviderGuard::set(Some(owner));
     let dir = tempdir().unwrap();
-    let path = Value::String(dir.path().join("never.png").to_string_lossy().into_owned());
+    let path = Value::String(
+        dir.path()
+            .join("never.png")
+            .to_string_lossy()
+            .into_owned()
+            .into(),
+    );
 
     let invalid_channels = tensor(vec![0.0; 8], vec![2, 2, 2], NumericDType::F64);
     let resident =
@@ -303,7 +340,13 @@ fn known_invalid_geometry_and_controls_never_download_resident_image() {
     ] {
         let error = call(vec![
             Value::GpuTensor(resident.clone()),
-            Value::String(dir.path().join("never.gif").to_string_lossy().into_owned()),
+            Value::String(
+                dir.path()
+                    .join("never.gif")
+                    .to_string_lossy()
+                    .into_owned()
+                    .into(),
+            ),
             Value::String(name.into()),
             value,
         ])
@@ -315,7 +358,7 @@ fn known_invalid_geometry_and_controls_never_download_resident_image() {
     let png_path = dir.path().join("last_append.png");
     let error = call(vec![
         Value::GpuTensor(resident.clone()),
-        Value::String(png_path.to_string_lossy().into_owned()),
+        Value::String(png_path.to_string_lossy().into_owned().into()),
         Value::String("WriteMode".into()),
         Value::String("overwrite".into()),
         Value::String("WriteMode".into()),
@@ -374,7 +417,13 @@ fn known_invalid_geometry_and_controls_never_download_resident_image() {
     let rgb = crate::builtins::common::gpu_helpers::upload_tensor(owner, &rgb).unwrap();
     let error = call(vec![
         Value::GpuTensor(rgb),
-        Value::String(dir.path().join("rgb.gif").to_string_lossy().into_owned()),
+        Value::String(
+            dir.path()
+                .join("rgb.gif")
+                .to_string_lossy()
+                .into_owned()
+                .into(),
+        ),
     ])
     .unwrap_err();
     assert_eq!(error.identifier(), IMWRITE_ERROR_INVALID_IMAGE.identifier);
@@ -386,7 +435,7 @@ fn known_invalid_geometry_and_controls_never_download_resident_image() {
         let file = dir.path().join(format!("depth.{extension}"));
         let error = call(vec![
             Value::GpuTensor(sixteen.clone()),
-            Value::String(file.to_string_lossy().into_owned()),
+            Value::String(file.to_string_lossy().into_owned().into()),
         ])
         .unwrap_err();
         assert_eq!(error.identifier(), IMWRITE_ERROR_INVALID_IMAGE.identifier);
@@ -398,7 +447,13 @@ fn known_invalid_geometry_and_controls_never_download_resident_image() {
     let four = crate::builtins::common::gpu_helpers::upload_tensor(owner, &four).unwrap();
     let error = call(vec![
         Value::GpuTensor(four),
-        Value::String(dir.path().join("cmky.tif").to_string_lossy().into_owned()),
+        Value::String(
+            dir.path()
+                .join("cmky.tif")
+                .to_string_lossy()
+                .into_owned()
+                .into(),
+        ),
     ])
     .unwrap_err();
     assert_eq!(error.identifier(), IMWRITE_ERROR_INVALID_IMAGE.identifier);
@@ -409,7 +464,7 @@ fn known_invalid_geometry_and_controls_never_download_resident_image() {
         let file = dir.path().join(format!("alpha.{extension}"));
         let error = call(vec![
             Value::GpuTensor(resident.clone()),
-            Value::String(file.to_string_lossy().into_owned()),
+            Value::String(file.to_string_lossy().into_owned().into()),
             Value::String("Alpha".into()),
             alpha.clone(),
         ])
@@ -424,7 +479,13 @@ fn known_invalid_geometry_and_controls_never_download_resident_image() {
     assert!(block_on(owner.download_numeric(&resident)).is_ok());
 
     let reads = owner.downloads.load(Ordering::SeqCst);
-    let unpolled = imwrite_builtin(None, vec![Value::GpuTensor(resident.clone()), path.clone()]);
+    let unpolled = imwrite_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::GpuTensor(resident.clone()),
+            path.clone(),
+        ]),
+    );
     drop(unpolled);
     assert_eq!(owner.downloads.load(Ordering::SeqCst), reads);
     assert!(!dir.path().join("never.png").exists());
@@ -432,7 +493,10 @@ fn known_invalid_geometry_and_controls_never_download_resident_image() {
     owner.pending.store(true, Ordering::SeqCst);
     let mut future = Box::pin(imwrite_builtin(
         None,
-        vec![Value::GpuTensor(resident.clone()), path],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::GpuTensor(resident.clone()),
+            path,
+        ]),
     ));
     let mut context = std::task::Context::from_waker(futures::task::noop_waker_ref());
     assert!(std::future::Future::poll(future.as_mut(), &mut context).is_pending());

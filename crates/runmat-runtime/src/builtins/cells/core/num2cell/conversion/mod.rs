@@ -9,13 +9,25 @@ use runmat_value::{CellArray, Value};
 
 use super::{error, input, plan::PartitionPlan};
 
-pub(super) fn convert(value: Value, dimensions: &[usize]) -> crate::BuiltinResult<Value> {
+pub(super) fn convert_managed_strings(
+    array: runmat_value::StringArray,
+    dimensions: Option<&Value>,
+    runtime: &crate::context::RuntimeContext,
+) -> crate::BuiltinResult<Value> {
+    values::managed_strings::convert(array, dimensions, runtime)
+}
+
+pub(super) fn convert(
+    value: Value,
+    dimensions: &[usize],
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> crate::BuiltinResult<Value> {
     match input::classify(value) {
         input::Input::Numeric(array) => numeric::convert(array, dimensions),
         input::Input::Sparse(array) => sparse::convert(array, dimensions),
         input::Input::Complex(array) => complex::convert(array, dimensions),
         input::Input::Logical(array) => values::logical(array, dimensions),
-        input::Input::String(array) => values::strings(array, dimensions),
+        input::Input::String(array) => values::strings(array, dimensions, runtime),
         input::Input::Character(array) => character::convert(array, dimensions),
         input::Input::Symbolic(array) => values::symbolic(array, dimensions),
         input::Input::Cell(array) => containers::cells(array, dimensions),

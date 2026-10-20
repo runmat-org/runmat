@@ -258,20 +258,20 @@ fn append_preserves_text_output_precedence_through_vm_dispatch() {
         Value::CharArray(array)
             if array.rows == 1
                 && array.cols == 11
-                && array.data.iter().collect::<String>() == "Hello World"
+                && array.data().iter().collect::<String>() == "Hello World"
     ));
     assert!(matches!(
         &vars[1],
         Value::Cell(cell)
             if cell.shape == vec![1, 2]
-                && matches!(&cell.data[0], Value::CharArray(array) if array.data.iter().collect::<String>() == "alpha ")
-                && matches!(&cell.data[1], Value::CharArray(array) if array.data.iter().collect::<String>() == "beta ")
+                && matches!(&cell.data()[0], Value::CharArray(array) if array.data().iter().collect::<String>() == "alpha ")
+                && matches!(&cell.data()[1], Value::CharArray(array) if array.data().iter().collect::<String>() == "beta ")
     ));
     assert!(matches!(
         &vars[2],
         Value::StringArray(array)
             if array.shape == vec![2, 2]
-                && array.data == vec!["Ax", "Bx", "Ay", "By"]
+                && array.data() == vec!["Ax", "Bx", "Ay", "By"]
     ));
 }
 
@@ -900,8 +900,8 @@ fn cell_accepts_all_integer_size_classes_through_compiled_dispatch() {
             panic!("{constructor}: expected cell output, got {:?}", vars[1]);
         };
         assert_eq!(cell.shape, vec![2, 3], "{constructor}: shape");
-        assert_eq!(cell.data.len(), 6, "{constructor}: element count");
-        assert!(cell.data.iter().all(|value| matches!(
+        assert_eq!(cell.data().len(), 6, "{constructor}: element count");
+        assert!(cell.data().iter().all(|value| matches!(
             value,
             Value::Tensor(tensor)
                 if tensor.shape() == vec![0, 0]
@@ -1946,26 +1946,26 @@ fn mixed_concatenation_precedence_and_nd_shapes_flow_through_vm_dispatch() {
         &vars[2],
         Value::Cell(cell)
             if cell.shape == vec![1, 2]
-                && cell.data[0] == Value::CharArray(runmat_value::CharArray::new_row("head"))
-                && cell.data[1] == vars[0]
+                && cell.data()[0] == Value::CharArray(runmat_value::CharArray::new_row("head"))
+                && cell.data()[1] == vars[0]
     ));
     assert!(matches!(
         &vars[3],
         Value::StringArray(array)
             if array.shape == vec![1, 3]
-                && array.data == vec!["id", "9223372036854775808", "1"]
+                && array.data() == vec!["id", "9223372036854775808", "1"]
     ));
     assert!(matches!(
         &vars[4],
         Value::CharArray(array)
             if array.shape == vec![1, 2, 2]
-                && array.data.iter().collect::<String>() == "abcd"
+                && array.data().iter().collect::<String>() == "abcd"
     ));
     assert!(matches!(
         &vars[5],
         Value::Cell(cell)
             if cell.shape == vec![1, 1, 2]
-                && cell.data == vec![Value::Num(1.0), Value::Num(2.0)]
+                && cell.data() == vec![Value::Num(1.0), Value::Num(2.0)]
     ));
 
     let error =
@@ -2871,13 +2871,13 @@ fn blanks_all_integer_length_classes_execute_through_compiled_dispatch() {
         assert!(matches!(
             &vars[1],
             Value::CharArray(chars)
-                if chars.shape == vec![1, 3] && chars.data == vec![' ', ' ', ' ']
+                if chars.shape == vec![1, 3] && chars.data() == vec![' ', ' ', ' ']
         ));
     }
     let vars = execute_source("a = blanks(int16(-3));").expect("negative integer length");
     assert!(matches!(
         &vars[0],
-        Value::CharArray(chars) if chars.shape == vec![1, 0] && chars.data.is_empty()
+        Value::CharArray(chars) if chars.shape == vec![1, 0] && chars.data().is_empty()
     ));
 }
 

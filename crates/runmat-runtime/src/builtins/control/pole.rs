@@ -60,7 +60,7 @@ async fn pole_builtin(sys: Value) -> BuiltinResult<Value> {
                 "RunMat:pole:UnsupportedModel",
                 format!(
                     "pole: unsupported model class '{}'; supported classes are tf and ss",
-                    object.class_name
+                    object.class_name()
                 ),
             ));
         }
@@ -88,19 +88,15 @@ mod tests {
             let resident = crate::builtins::common::gpu_helpers::upload_tensor(provider, &a)
                 .expect("upload state matrix");
             let mut incomplete = ObjectInstance::new(SS_CLASS.to_string());
-            incomplete
-                .properties
-                .insert("A".into(), Value::GpuTensor(resident.clone()));
+            incomplete.replace_property_unbounded("A".into(), Value::GpuTensor(resident.clone()));
             provider.reset_telemetry();
             let error = block_on(pole_builtin(Value::Object(incomplete))).expect_err("missing Ts");
             assert_eq!(error.identifier(), Some("RunMat:pole:InvalidModel"));
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
 
             let mut complete = ObjectInstance::new(SS_CLASS.to_string());
-            complete
-                .properties
-                .insert("A".into(), Value::GpuTensor(resident));
-            complete.properties.insert("Ts".into(), Value::Num(0.0));
+            complete.replace_property_unbounded("A".into(), Value::GpuTensor(resident));
+            complete.replace_property_unbounded("Ts".into(), Value::Num(0.0));
             provider.reset_telemetry();
             let Value::Tensor(poles) =
                 block_on(pole_builtin(Value::Object(complete))).expect("resident A")

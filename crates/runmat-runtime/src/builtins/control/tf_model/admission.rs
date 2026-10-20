@@ -30,7 +30,7 @@ pub(super) fn preflight_host_model_properties(
     builtin: &'static str,
 ) -> BuiltinResult<()> {
     for (name, label) in [("Numerator", "numerator"), ("Denominator", "denominator")] {
-        let value = object.properties.get(name).ok_or_else(|| {
+        let value = object.properties().get(name).ok_or_else(|| {
             control_error(
                 builtin,
                 invalid_model_identifier(builtin),
@@ -51,14 +51,14 @@ pub(super) fn preflight_host_model_properties(
         }
     }
     for name in ["Ts", "InputDelay", "OutputDelay"] {
-        if let Some(value) = object.properties.get(name) {
+        if let Some(value) = object.properties().get(name) {
             if name == "Ts" {
                 admit_sample_time_property(value, builtin)?;
             } else {
                 admit_delay_property(value, name, builtin)?;
             }
         }
-        if !matches!(object.properties.get(name), Some(Value::GpuTensor(_))) {
+        if !matches!(object.properties().get(name), Some(Value::GpuTensor(_))) {
             let value = scalar_property(object, name, builtin)?;
             if name == "Ts" {
                 validate_sample_time(value, builtin)?;
@@ -68,7 +68,7 @@ pub(super) fn preflight_host_model_properties(
         }
     }
     let variable = object
-        .properties
+        .properties()
         .get("Variable")
         .filter(|value| !matches!(value, Value::GpuTensor(_)))
         .map(|value| {
@@ -76,7 +76,7 @@ pub(super) fn preflight_host_model_properties(
                 .and_then(|text| validate_variable(&text, builtin))
         })
         .transpose()?;
-    if let (Some(variable), Some(sample_time)) = (variable, object.properties.get("Ts")) {
+    if let (Some(variable), Some(sample_time)) = (variable, object.properties().get("Ts")) {
         if !matches!(sample_time, Value::GpuTensor(_)) {
             validate_variable_domain(&variable, scalar_property(object, "Ts", builtin)?, builtin)?;
         }
@@ -171,24 +171,33 @@ pub fn preflight_ss_host_properties(
     builtin: &'static str,
 ) -> BuiltinResult<()> {
     for &name in required {
-        let value = object.properties.get(name).ok_or_else(|| {
+        let value = object.properties().get(name).ok_or_else(|| {
             control_error(
                 builtin,
                 invalid_model_identifier(builtin),
                 format!("{builtin}: ss object is missing {name}"),
             )
         })?;
-        admit_ss_integer_property(value, name, builtin)?;
-        if matches!(value, Value::GpuTensor(_)) {
-            continue;
-        }
-        match name {
-            "Ts" => validate_sample_time(scalar_f64(value, name, builtin)?, builtin)?,
-            "InputDelay" | "OutputDelay" => preflight_ss_delay(value, name, builtin)?,
-            "A" => preflight_ss_state_matrix(value, builtin)?,
-            "B" | "C" | "D" => preflight_ss_matrix_value(value, name, builtin)?,
-            _ => {}
-        }
+        preflight_ss_host_value(name, value, builtin)?;
+    }
+    Ok(())
+}
+
+pub(super) fn preflight_ss_host_value(
+    name: &str,
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    admit_ss_integer_property(value, name, builtin)?;
+    if matches!(value, Value::GpuTensor(_)) {
+        return Ok(());
+    }
+    match name {
+        "Ts" => validate_sample_time(scalar_f64(value, name, builtin)?, builtin)?,
+        "InputDelay" | "OutputDelay" => preflight_ss_delay(value, name, builtin)?,
+        "A" => preflight_ss_state_matrix(value, builtin)?,
+        "B" | "C" | "D" => preflight_ss_matrix_value(value, name, builtin)?,
+        _ => {}
     }
     Ok(())
 }
@@ -352,23 +361,32 @@ mod tests {
     use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView};
     use runmat_value::{ComplexTensor, IntegerStorage, LogicalArray, Tensor};
 
+    fn ss_object(properties: impl IntoIterator<Item = (&'static str, Value)>) -> ObjectInstance {
+        let mut object = runmat_value::UnboundedObjectBuilder::new("ss");
+        for (name, value) in properties {
+            object.insert(name.to_owned(), value);
+        }
+        object.finish()
+    }
+
     #[test]
     fn generic_ss_admission_accepts_complex_logical_and_zero_delay_arrays() {
         for a in [
             Value::ComplexTensor(ComplexTensor::new(vec![(1.0, 2.0)], vec![1, 1]).unwrap()),
             Value::LogicalArray(LogicalArray::new(vec![1], vec![1, 1]).unwrap()),
         ] {
-            let mut object = ObjectInstance::new("ss".to_string());
-            object.properties.insert("A".into(), a);
-            object.properties.insert("Ts".into(), Value::Num(0.0));
-            object.properties.insert(
-                "InputDelay".into(),
-                Value::Tensor(Tensor::new(vec![0.0, 0.0], vec![1, 2]).unwrap()),
-            );
-            object.properties.insert(
-                "OutputDelay".into(),
-                Value::LogicalArray(LogicalArray::new(vec![0, 0], vec![2, 1]).unwrap()),
-            );
+            let object = ss_object([
+                ("A", a),
+                ("Ts", Value::Num(0.0)),
+                (
+                    "InputDelay",
+                    Value::Tensor(Tensor::new(vec![0.0, 0.0], vec![1, 2]).unwrap()),
+                ),
+                (
+                    "OutputDelay",
+                    Value::LogicalArray(LogicalArray::new(vec![0, 0], vec![2, 1]).unwrap()),
+                ),
+            ]);
             preflight_ss_host_properties(
                 &object,
                 &["A", "Ts", "InputDelay", "OutputDelay"],
@@ -388,8 +406,7 @@ mod tests {
             )
         };
         for name in ["A", "B", "C", "D", "Ts", "InputDelay", "OutputDelay"] {
-            let mut object = ObjectInstance::new("ss".to_string());
-            object.properties.insert(name.into(), wide());
+            let object = ss_object([(name, wide())]);
             let error = preflight_ss_host_properties(&object, &[name], "pole")
                 .expect_err("inexact consumed model property");
             assert_eq!(error.identifier(), Some("RunMat:pole:InvalidModel"));
@@ -398,8 +415,7 @@ mod tests {
             Tensor::new_integer(IntegerStorage::U64(vec![9_007_199_254_740_992]), vec![1, 1])
                 .unwrap(),
         );
-        let mut object = ObjectInstance::new("ss".to_string());
-        object.properties.insert("A".into(), exact);
+        let object = ss_object([("A", exact)]);
         preflight_ss_host_properties(&object, &["A"], "pole")
             .expect("aligned wide integer is exact");
     }
@@ -415,11 +431,7 @@ mod tests {
                     shape: &[1, 1],
                 })
                 .expect("resident integer state matrix");
-            let mut object = ObjectInstance::new("ss".to_string());
-            object
-                .properties
-                .insert("A".into(), Value::GpuTensor(resident));
-            object.properties.insert("Ts".into(), Value::Num(0.0));
+            let object = ss_object([("A", Value::GpuTensor(resident)), ("Ts", Value::Num(0.0))]);
             provider.reset_telemetry();
             let error = block_on(super::super::ss_poles_from_object_async(&object, "pole"))
                 .expect_err("integer state matrix extension disabled");
@@ -442,11 +454,7 @@ mod tests {
                     shape: &[1, 1],
                 })
                 .expect("resident integer state matrix");
-            let mut object = ObjectInstance::new("ss".to_string());
-            object
-                .properties
-                .insert("A".into(), Value::GpuTensor(resident));
-            object.properties.insert("Ts".into(), Value::Num(0.0));
+            let object = ss_object([("A", Value::GpuTensor(resident)), ("Ts", Value::Num(0.0))]);
             provider.reset_telemetry();
             let error = block_on(super::super::ss_poles_from_object_async(&object, "pole"))
                 .expect_err("inexact resident state matrix");
@@ -460,23 +468,24 @@ mod tests {
                     shape: &[1, 1],
                 })
                 .expect("resident integer state matrix");
-            object
-                .properties
-                .insert("A".into(), Value::GpuTensor(resident));
-            object.properties.insert(
-                "B".into(),
-                Value::Tensor(
-                    Tensor::new_integer(
-                        IntegerStorage::U64(vec![9_007_199_254_740_993]),
-                        vec![1, 1],
-                    )
-                    .unwrap(),
+            let object = ss_object([
+                ("A", Value::GpuTensor(resident)),
+                (
+                    "B",
+                    Value::Tensor(
+                        Tensor::new_integer(
+                            IntegerStorage::U64(vec![9_007_199_254_740_993]),
+                            vec![1, 1],
+                        )
+                        .unwrap(),
+                    ),
                 ),
-            );
+                ("Ts", Value::Num(0.0)),
+            ]);
             provider.reset_telemetry();
-            let error = block_on(super::super::gather_ss_properties(
-                object,
-                &["A", "B", "Ts"],
+            let error = block_on(super::super::gather_ss_property_values(
+                &object,
+                ["A", "B", "Ts"],
                 "pzmap",
             ))
             .expect_err("host B invalid before resident A gather");

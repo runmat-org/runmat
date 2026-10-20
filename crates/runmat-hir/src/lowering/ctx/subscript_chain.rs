@@ -6,7 +6,7 @@ enum AstSubscriptStep<'a> {
     Index(&'a [AstExpr], IndexKind),
     Member(&'a str),
     DynamicMember(&'a AstExpr),
-    DottedInvoke(&'a str, &'a [AstExpr]),
+    DottedInvoke(&'a str, &'a [AstExpr], Span),
 }
 
 impl LoweringCtx {
@@ -48,10 +48,28 @@ impl LoweringCtx {
                 AstSubscriptStep::DynamicMember(member) => {
                     crate::HirSubscriptStep::DynamicMember(self.lower_expr_semantic(member)?)
                 }
-                AstSubscriptStep::DottedInvoke(member, indices) => {
+                AstSubscriptStep::DottedInvoke(member, indices, span) => {
+                    let arguments = self.lower_dotted_invoke_arguments(indices)?;
+                    let name = qualified_name(&[member.to_owned()]);
+                    // A dotted step may select a method or invoke/index a field.
+                    // A scoped function is only its semantic fallback, not proof
+                    // that the runtime receiver will select that function.
+                    self.hir_index.calls.push(CallResolution {
+                        name: name.clone(),
+                        callee: HirCallableRef::Unresolved(name),
+                        kind: CallKind::Dynamic,
+                        syntax: CallSyntax::DottedInvoke,
+                        requested_outputs: if position == last {
+                            requested_outputs
+                        } else {
+                            RequestedOutputCount::One
+                        },
+                        span,
+                        source: Some(self.assembly.modules[self.module.0].source_id),
+                    });
                     crate::HirSubscriptStep::DottedInvoke {
                         member: MemberName(member.to_owned()),
-                        arguments: self.lower_dotted_invoke_arguments(indices)?,
+                        arguments,
                         semantic_fallback: self
                             .resolve_scoped_function_name(member)
                             .map(runmat_types::CallableIdentity::BoundFunction)
@@ -132,11 +150,11 @@ impl LoweringCtx {
                 steps.push(AstSubscriptStep::DynamicMember(member));
                 root
             }
-            AstExpr::DottedInvoke(base, member, indices, _)
+            AstExpr::DottedInvoke(base, member, indices, span)
                 if !self.dotted_invoke_is_static_boundary(base, member)? =>
             {
                 let root = self.collect_subscript_chain(base, steps)?;
-                steps.push(AstSubscriptStep::DottedInvoke(member, indices));
+                steps.push(AstSubscriptStep::DottedInvoke(member, indices, *span));
                 root
             }
             _ => expression,
@@ -176,7 +194,7 @@ impl LoweringCtx {
 impl AstSubscriptStep<'_> {
     fn contains_end(&self) -> bool {
         match self {
-            Self::Index(indices, _) | Self::DottedInvoke(_, indices) => {
+            Self::Index(indices, _) | Self::DottedInvoke(_, indices, _) => {
                 indices.iter().any(end::expr_references_end)
             }
             Self::DynamicMember(member) => end::expr_references_end(member),

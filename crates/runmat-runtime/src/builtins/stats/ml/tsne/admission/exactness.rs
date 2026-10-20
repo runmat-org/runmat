@@ -39,7 +39,7 @@ pub(in super::super) async fn ensure_exact_tsne_integer_value(
             }
             Frame::Value(Value::Cell(cell)) => {
                 pending.try_reserve(1).map_err(integer_stack_error)?;
-                pending.push(Frame::Elements(&cell.data, 0));
+                pending.push(Frame::Elements(cell.data(), 0));
             }
             Frame::Value(Value::Struct(value)) => {
                 pending.try_reserve(1).map_err(integer_stack_error)?;

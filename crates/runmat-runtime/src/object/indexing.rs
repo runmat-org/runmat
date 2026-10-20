@@ -85,7 +85,7 @@ impl ObjectIndexComponent {
     pub fn protocol_value(&self) -> Value {
         match self {
             Self::Value(value) => value.clone(),
-            Self::Colon => Value::String(OBJECT_SELECTOR_COLON.to_string()),
+            Self::Colon => Value::string(OBJECT_SELECTOR_COLON.to_string()),
         }
     }
 }
@@ -114,7 +114,7 @@ pub(crate) fn standard_substruct_fixture_from_parts(
                     "member name must be text",
                 ));
             };
-            ObjectSubscript::member(member)
+            ObjectSubscript::member(member.as_str())
         }
         OBJECT_PROTOCOL_KIND_PAREN | OBJECT_PROTOCOL_KIND_BRACE => {
             let Value::Cell(cell) = payload else {
@@ -125,8 +125,9 @@ pub(crate) fn standard_substruct_fixture_from_parts(
             };
             let selector = ObjectIndexSelector::IndexValues {
                 components: cell
-                    .data
-                    .into_iter()
+                    .data()
+                    .iter()
+                    .cloned()
                     .map(ObjectIndexComponent::from_protocol_value)
                     .collect(),
             };
@@ -148,7 +149,7 @@ pub(crate) fn standard_substruct_fixture_from_parts(
 
 pub fn class_name_from_base(base: &Value) -> Option<&runmat_types::ClassIdentity> {
     match base {
-        Value::Object(obj) => Some(&obj.class_name),
+        Value::Object(obj) => Some(obj.class_name()),
         Value::ObjectArray(array) => Some(array.class_name()),
         Value::HandleObject(handle) => Some(&handle.class_name),
         _ => None,

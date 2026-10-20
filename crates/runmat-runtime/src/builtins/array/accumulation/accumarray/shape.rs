@@ -112,9 +112,9 @@ pub(super) fn rows_and_columns(shape: &[usize]) -> (usize, usize) {
 pub(super) fn is_empty(value: &Value) -> bool {
     match value {
         Value::Tensor(tensor) => tensor_utils::tensor_element_len(tensor) == 0,
-        Value::StringArray(array) => array.data.is_empty(),
-        Value::Cell(cell) => cell.data.is_empty(),
-        Value::CharArray(chars) => chars.data.is_empty(),
+        Value::StringArray(array) => array.data().is_empty(),
+        Value::Cell(cell) => cell.data().is_empty(),
+        Value::CharArray(chars) => chars.data().is_empty(),
         _ => false,
     }
 }

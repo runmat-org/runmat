@@ -15,7 +15,9 @@ fn lowering_error(name: &str) -> crate::RuntimeError {
     binding_variant = "default",
     builtin_path = "crate::builtins::parallel::future"
 )]
-async fn parfeval_builtin(_arguments: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn parfeval_builtin(
+    _arguments: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     Err(lowering_error("parfeval"))
 }
 
@@ -24,7 +26,9 @@ async fn parfeval_builtin(_arguments: Vec<Value>) -> crate::BuiltinResult<Value>
     binding_variant = "default",
     builtin_path = "crate::builtins::parallel::future"
 )]
-async fn parfeval_on_all_builtin(_arguments: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn parfeval_on_all_builtin(
+    _arguments: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     Err(lowering_error("parfevalOnAll"))
 }
 
@@ -42,6 +46,9 @@ async fn fetch_outputs_builtin(_future: Value) -> crate::BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::parallel::future"
 )]
-async fn fetch_next_builtin(_futures: Value, _rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn fetch_next_builtin(
+    _futures: Value,
+    _rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     Err(lowering_error("fetchNext"))
 }

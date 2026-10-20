@@ -16,7 +16,7 @@ fn power_symbolic_array_with_scalar_builds_symbolic_array() {
             assert_eq!(array.shape, vec![1, 2]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
@@ -43,7 +43,7 @@ fn power_scalar_with_symbolic_array_builds_symbolic_array() {
             assert_eq!(array.shape, vec![1, 2]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
@@ -79,7 +79,7 @@ fn power_compatible_symbolic_arrays_builds_symbolic_array() {
             assert_eq!(array.shape, vec![1, 2]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
@@ -115,7 +115,7 @@ fn power_symbolic_arrays_support_singleton_expansion() {
             assert_eq!(array.shape, vec![2, 2]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),

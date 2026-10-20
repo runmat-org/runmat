@@ -172,8 +172,10 @@ async fn exact_root_retains_deferred_intent_and_derives_mesh_bound_expectations(
     let source_id = definition.source_id.as_ref().unwrap();
     let owner = source_id.package_instance.to_string();
     let mut session = runmat_core::RunMatSession::with_options(false, false).unwrap();
-    futures::executor::block_on(session.install_project_handoff(runmat_package::FrozenProjectHandoff::new(project.clone())))
-    .unwrap();
+    session
+        .install_project_handoff(runmat_package::FrozenProjectHandoff::new(project.clone()))
+        .await
+        .unwrap();
     let unit = session
         .compile_executable_unit(
             runmat_core::ExecutableSource::frozen(
@@ -304,11 +306,11 @@ fn whole_study_root_binds_accelerator_requests_to_the_authored_backend() {
     let source_digest = Digest::sha256(b"portable exact CAD source");
     let mut request = preparation("run-accelerator", source_digest, Digest::sha256(b"study"));
     request.analysis_accelerator_requests = vec![runmat_execution::resource::AcceleratorRequest {
-        class: crate::test_fixtures::accelerator_class("gpu.test"),
+        class: runmat_execution::resource::AcceleratorClass::new("gpu.test").unwrap(),
         count: 1,
         minimum_allocation_bytes: 1024,
-            provider: None,
-            required_features: Default::default(),
+        provider: None,
+        required_features: Default::default(),
     }];
     assert!(prepare_exact_structural_study_root(request).is_err());
 

@@ -8,10 +8,14 @@ use runmat_value::Value;
 #[runtime_builtin(
     name = "refline",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::stats::summary::refline"
 )]
-pub(crate) async fn refline_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    super::reference_lines::run_reference_lines(args, ReferenceLineOwner::Refline).await
+pub(crate) async fn refline_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    super::reference_lines::run_reference_lines(runtime, args, ReferenceLineOwner::Refline).await
 }
 
 #[cfg(test)]

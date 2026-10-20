@@ -53,14 +53,14 @@ pub(super) async fn execute(
     runtime: Option<&RuntimeContext>,
     config: &'static LogicalReductionConfig,
     value: Value,
-    arguments: Vec<Value>,
+    arguments: crate::call::BuiltinArguments,
 ) -> BuiltinResult<RootedValue> {
     let _inputs = RootedValueLease::for_values(std::iter::once(&value).chain(arguments.iter()))
         .map_err(|cause| cause.into_runtime_error())?;
     if matches!(crate::output_count::current_output_count(), Some(count) if count > 1) {
         return Err(config.error(config.too_many_outputs, "only one output is defined"));
     }
-    let (spec, nan_mode) = arguments::parse(config, &arguments).await?;
+    let (spec, nan_mode) = arguments::parse(config, arguments.view()).await?;
     match value {
         Value::Tensor(tensor) => {
             preparation::execute(runtime, config, tensor, arguments.len() + 1, spec, nan_mode).await

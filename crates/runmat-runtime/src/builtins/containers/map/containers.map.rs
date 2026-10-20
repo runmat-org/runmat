@@ -30,10 +30,10 @@ const BUILTIN_SUBSASGN: &str = "containers.Map.subsasgn";
 fn contains_resident_value(value: &Value) -> bool {
     match value {
         Value::GpuTensor(_) => true,
-        Value::Cell(cell) => cell.data.iter().any(contains_resident_value),
+        Value::Cell(cell) => cell.data().iter().any(contains_resident_value),
         Value::Struct(value) => value.fields.values().any(contains_resident_value),
         Value::StructArray(array) => array.any_value(contains_resident_value),
-        Value::Object(value) => value.properties.values().any(contains_resident_value),
+        Value::Object(value) => value.properties().values().any(contains_resident_value),
         Value::ObjectArray(array) => array.data().iter().any(contains_resident_value),
         Value::Closure(value) => value.captures.iter().any(contains_resident_value),
         Value::OutputList(values) => values.iter().any(contains_resident_value),
@@ -146,7 +146,9 @@ use constructor_args::{parse_constructor_args, ConstructorArgs, KeyCandidate};
     binding_variant = "default",
     builtin_path = "crate::builtins::containers::map::containers_map"
 )]
-async fn containers_map_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn containers_map_builtin(
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     if args.iter().any(contains_resident_value) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &MAP_RESIDENT_CONSTRUCTOR_EXTENSION,
@@ -184,7 +186,10 @@ async fn containers_map_keys(map: Value) -> crate::BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::containers::map::containers_map"
 )]
-async fn containers_map_values(map: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn containers_map_values(
+    map: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     let _root = root_map_receiver(&map, BUILTIN_VALUES)?;
     if rest.iter().any(contains_resident_value) {
         crate::compatibility::ensure_builtin_extension_enabled(
@@ -209,8 +214,8 @@ async fn containers_map_values(map: Value, rest: Vec<Value>) -> crate::BuiltinRe
             BUILTIN_VALUES,
         ));
     };
-    let mut keys = Vec::with_capacity(key_set.data.len());
-    for key in &key_set.data {
+    let mut keys = Vec::with_capacity(key_set.data().len());
+    for key in key_set.data() {
         keys.push(
             gather_if_needed_async(key)
                 .await
@@ -540,7 +545,7 @@ fn allocate_handle(store: MapStore, builtin: &'static str) -> BuiltinResult<Valu
     let target = runmat_gc::gc_allocate(Value::Object(storage))
         .map_err(|error| map_internal(format!("containers.Map: {error}"), builtin))?;
     Ok(Value::HandleObject(HandleRef {
-        class_name: CLASS_IDENTITY.owned(),
+        class_name: CLASS_IDENTITY.owned().into(),
         target,
         valid: true,
     }))
@@ -559,7 +564,7 @@ where
                 builtin,
             ));
         };
-        if !object.class_name.is(CLASS_IDENTITY) {
+        if !object.class_name().is(CLASS_IDENTITY) {
             return Err(map_internal(
                 "containers.Map: invalid handle class",
                 builtin,
@@ -587,7 +592,7 @@ where
                 builtin,
             ));
         };
-        if !object.class_name.is(CLASS_IDENTITY) {
+        if !object.class_name().is(CLASS_IDENTITY) {
             return Err(map_internal(
                 "containers.Map: invalid handle class",
                 builtin,
@@ -653,8 +658,8 @@ fn make_row_cell(values: Vec<Value>, builtin: &'static str) -> BuiltinResult<Val
 fn extract_key_arguments(payload: &Value, builtin: &'static str) -> BuiltinResult<Vec<Value>> {
     match payload {
         Value::Cell(cell) => {
-            let mut out = Vec::with_capacity(cell.data.len());
-            for ptr in &cell.data {
+            let mut out = Vec::with_capacity(cell.data().len());
+            for ptr in cell.data() {
                 out.push(ptr.clone());
             }
             Ok(out)
@@ -708,8 +713,8 @@ async fn collect_key_spec(
         .map_err(|err| attach_builtin_context(err, builtin))?;
     match &host {
         Value::Cell(cell) => {
-            let mut values = Vec::with_capacity(cell.data.len());
-            for ptr in &cell.data {
+            let mut values = Vec::with_capacity(cell.data().len());
+            for ptr in cell.data() {
                 values.push(
                     gather_if_needed_async(ptr)
                         .await
@@ -721,8 +726,8 @@ async fn collect_key_spec(
                 shape: vec![cell.rows, cell.cols],
             })
         }
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(KeyCollection {
-            values: vec![Value::String(sa.data[0].clone())],
+        Value::StringArray(sa) if sa.data().len() == 1 => Ok(KeyCollection {
+            values: vec![Value::String(sa.data()[0].clone())],
             shape: vec![1, 1],
         }),
         Value::CharArray(ca) if ca.rows == 1 => Ok(KeyCollection {
@@ -748,7 +753,7 @@ pub fn map_length(value: &Value) -> Option<usize> {
     if let Value::HandleObject(handle) = value {
         if crate::is_handle_valid(handle) && handle.class_name.is(CLASS_IDENTITY) {
             return runmat_gc::gc_with_value(&handle.target, |target| match target {
-                Value::Object(object) if object.class_name.is(CLASS_IDENTITY) => {
+                Value::Object(object) if object.class_name().is(CLASS_IDENTITY) => {
                     object.containers_map_payload().map(MapStore::len)
                 }
                 _ => None,

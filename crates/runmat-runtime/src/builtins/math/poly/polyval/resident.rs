@@ -22,7 +22,7 @@ impl Request {
     pub(super) fn new(
         points: &Value,
         coefficients: &Value,
-        options: &[Value],
+        options: crate::call::FunctionArgumentView<'_>,
     ) -> BuiltinResult<Self> {
         let anchor = [points, coefficients]
             .into_iter()

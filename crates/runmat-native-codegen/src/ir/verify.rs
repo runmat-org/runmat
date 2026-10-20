@@ -113,6 +113,29 @@ impl NativeAssembly {
                 "Native IR entrypoints must exist and contain the selected compiled entrypoint",
             ));
         }
+        if functions
+            .get(&self.selected_entrypoint)
+            .is_none_or(|function| {
+                function.mir_body_digest != self.selected_entrypoint_body
+                    || function.portable_id != self.selected_portable_entrypoint
+            })
+        {
+            return Err(NativeCodegenError::new(
+                "native.ir.entrypoint_body",
+                "selected entrypoint body differs from its Native IR function identity",
+            ));
+        }
+        let portable_functions = self
+            .functions
+            .iter()
+            .map(|function| function.portable_id)
+            .collect::<std::collections::BTreeSet<_>>();
+        if portable_functions.len() != self.functions.len() {
+            return Err(NativeCodegenError::new(
+                "native.ir.function_coordinates",
+                "Native IR functions repeat a portable program identity",
+            ));
+        }
         for function in &self.functions {
             verify_function(
                 function,
@@ -404,10 +427,10 @@ fn verify_function(
         }
         if block.instructions.iter().any(|instruction| {
             instruction.site.point.block != block.id.0
-                || instruction.site.point.function != function.id
+                || instruction.site.point.function != function.portable_id
                 || instruction.source.source != function.source
         }) || block.terminator.site.point.block != block.id.0
-            || block.terminator.site.point.function != function.id
+            || block.terminator.site.point.function != function.portable_id
             || block.terminator.source.source != function.source
             || block.terminator.source.span.start > block.terminator.source.span.end
         {
@@ -764,7 +787,7 @@ fn consume_sequence_local(
 }
 
 fn verify_sequence_register_flow(
-    function: runmat_types::ProgramFunctionId,
+    function: runmat_types::FunctionId,
     instructions: &[NativeInstruction],
 ) -> NativeCodegenResult<()> {
     let error = |message| {
@@ -858,7 +881,7 @@ fn verify_instruction(
             .at_point(instruction.site.point)
             .for_construct(instruction.site.construct)
     };
-    if instruction.site.point.function != function.id {
+    if instruction.site.point.function != function.portable_id {
         return Err(error(
             "native.ir.site_function",
             "instruction site belongs to another function",
@@ -1572,7 +1595,7 @@ fn verify_frame_state(
     state: &NativeFrameState,
     available: &BTreeSet<NativeValueId>,
 ) -> NativeCodegenResult<()> {
-    if state.point.function != function.id
+    if state.point.function != function.portable_id
         || !available.contains(&state.side_effect_epoch)
         || state.locals.len() != function.local_count()
         || state.locals.iter().enumerate().any(|(index, local)| {
@@ -1733,7 +1756,7 @@ fn verify_region_boundaries(
 ) -> NativeCodegenResult<()> {
     let contracts = regions
         .iter()
-        .filter(|region| region.id.function == function.id)
+        .filter(|region| region.id.function == function.portable_id)
         .map(|region| (region.id, region))
         .collect::<BTreeMap<_, _>>();
     for boundary in function
@@ -1798,7 +1821,7 @@ fn verify_region_boundaries(
         .collect::<Vec<_>>();
     let mut expected = regions
         .iter()
-        .filter(|region| region.id.function == function.id)
+        .filter(|region| region.id.function == function.portable_id)
         .flat_map(|region| {
             std::iter::once((
                 region.id,

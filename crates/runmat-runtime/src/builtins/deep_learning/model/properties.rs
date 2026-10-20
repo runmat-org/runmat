@@ -1,12 +1,14 @@
 //! Borrowed numerical layer metadata and host parameter decoding.
 use super::*;
+#[cfg(test)]
+use crate::builtins::deep_learning::arguments::DeepLearningObjectEdit as _;
 
 pub(in crate::builtins) fn feature_input_width(
     object: &ObjectInstance,
     function: &'static str,
 ) -> BuiltinResult<usize> {
     let values = object
-        .properties
+        .properties()
         .get("InputSize")
         .ok_or_else(|| deep_learning_error(function, "featureInputLayer is missing InputSize"))
         .and_then(|value| numeric_vector(value, function, "InputSize"))?;
@@ -30,7 +32,7 @@ pub(in crate::builtins) fn positive_property_usize(
     name: &str,
     function: &'static str,
 ) -> BuiltinResult<usize> {
-    let values = object.properties.get(name).ok_or_else(|| {
+    let values = object.properties().get(name).ok_or_else(|| {
         deep_learning_error(function, format!("{function}: layer is missing {name}"))
     })?;
     match positive_usize(values, function, name) {
@@ -85,12 +87,12 @@ pub(in crate::builtins) fn tensor_property_value<'a>(
     name: &str,
     function: &'static str,
 ) -> BuiltinResult<&'a Value> {
-    let mut value = object.properties.get(name).ok_or_else(|| {
+    let mut value = object.properties().get(name).ok_or_else(|| {
         deep_learning_error(function, format!("{function}: layer is missing {name}"))
     })?;
     if let Value::Object(dlarray) = value {
-        if dlarray.class_name.is(super::DLARRAY_CLASS) {
-            value = dlarray.properties.get("Data").ok_or_else(|| {
+        if dlarray.class_name().is(super::DLARRAY_CLASS) {
+            value = dlarray.properties().get("Data").ok_or_else(|| {
                 deep_learning_error(
                     function,
                     format!("{function}: {name} dlarray is missing Data"),
@@ -167,15 +169,21 @@ mod tests {
                 .class()
                 .owned(),
         );
-        layer.properties.insert("OutputSize".into(), Value::Num(1.));
-        layer.properties.insert(
-            "Weights".into(),
-            Value::Tensor(Tensor::from_f32(vec![1., 2.], vec![2]).unwrap()),
-        );
-        layer.properties.insert(
-            "Bias".into(),
-            Value::Tensor(Tensor::from_f32(vec![0.], Vec::new()).unwrap()),
-        );
+        layer
+            .replace_dl_property("OutputSize", Value::Num(1.))
+            .expect("fixture property");
+        layer
+            .replace_dl_property(
+                "Weights",
+                Value::Tensor(Tensor::from_f32(vec![1., 2.], vec![2]).unwrap()),
+            )
+            .expect("fixture property");
+        layer
+            .replace_dl_property(
+                "Bias",
+                Value::Tensor(Tensor::from_f32(vec![0.], Vec::new()).unwrap()),
+            )
+            .expect("fixture property");
         assert_eq!(
             tensor_property_shape(&layer, "Weights", "forward").unwrap(),
             &[2]
@@ -187,10 +195,12 @@ mod tests {
             fully_connected_output_width(&layer, 2, "forward").unwrap(),
             1
         );
-        layer.properties.insert(
-            "Weights".into(),
-            Value::Tensor(Tensor::from_f32(vec![1.], Vec::new()).unwrap()),
-        );
+        layer
+            .replace_dl_property(
+                "Weights",
+                Value::Tensor(Tensor::from_f32(vec![1.], Vec::new()).unwrap()),
+            )
+            .expect("fixture property");
         assert!(fully_connected_output_width(&layer, 1, "forward").is_err());
     }
 }

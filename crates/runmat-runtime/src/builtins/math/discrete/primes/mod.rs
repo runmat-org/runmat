@@ -18,7 +18,7 @@ mod sieve;
     binding_variant = "default",
     builtin_path = "crate::builtins::math::discrete::primes"
 )]
-async fn primes_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn primes_builtin(value: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     if !rest.is_empty() {
         return Err(primes_error(
             &runmat_builtins::PRIMES_ERROR_INVALID_INPUT,

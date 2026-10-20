@@ -5,19 +5,23 @@ use std::collections::BTreeMap;
 fn network() -> ObjectInstance {
     let mut layer = ObjectInstance::new(runmat_builtins::LSTM_LAYER_CLASS.owned());
     layer
-        .properties
-        .insert("Name".into(), Value::String("memory".into()));
+        .replace_dl_property("Name", Value::String("memory".into()))
+        .expect("fixture property");
     layer
-        .properties
-        .insert("NumHiddenUnits".into(), Value::Num(3.0));
-    layer.properties.insert(
-        "HiddenState".into(),
-        Value::Tensor(Tensor::from_f32(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap()),
-    );
-    layer.properties.insert(
-        "CellState".into(),
-        Value::Tensor(Tensor::from_f32(vec![4.0, 5.0, 6.0], vec![3, 1]).unwrap()),
-    );
+        .replace_dl_property("NumHiddenUnits", Value::Num(3.0))
+        .expect("fixture property");
+    layer
+        .replace_dl_property(
+            "HiddenState",
+            Value::Tensor(Tensor::from_f32(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap()),
+        )
+        .expect("fixture property");
+    layer
+        .replace_dl_property(
+            "CellState",
+            Value::Tensor(Tensor::from_f32(vec![4.0, 5.0, 6.0], vec![3, 1]).unwrap()),
+        )
+        .expect("fixture property");
     let Value::Object(network) = super::super::super::network_object(
         DLNETWORK_CLASS,
         vec![Value::Object(layer)],
@@ -34,7 +38,7 @@ fn data(value: &Value) -> &Tensor {
     let Value::Object(wrapper) = value else {
         panic!("dlarray state")
     };
-    let Some(Value::Tensor(data)) = wrapper.properties.get("Data") else {
+    let Some(Value::Tensor(data)) = wrapper.properties().get("Data") else {
         panic!("typed state Data")
     };
     data
@@ -48,8 +52,8 @@ fn returned_state_mapping_uses_typed_canonical_keys_and_preserves_payloads() {
         panic!("State table")
     };
     state_object
-        .properties
-        .insert("TapeMetadata".into(), Value::String("preserve".into()));
+        .replace_dl_property("TapeMetadata", Value::String("preserve".into()))
+        .expect("fixture property");
     let original = Value::Object(state_object);
     let before = view(&network, "forward").unwrap();
     let mut roles = Vec::new();
@@ -66,15 +70,15 @@ fn returned_state_mapping_uses_typed_canonical_keys_and_preserves_payloads() {
         panic!("mapped State table")
     };
     assert_eq!(
-        mapped_table.properties.get("TapeMetadata"),
+        mapped_table.properties().get("TapeMetadata"),
         Some(&Value::String("preserve".into()))
     );
-    let Some(Value::Cell(layers)) = network.properties.get("Layers") else {
+    let Some(Value::Cell(layers)) = network.properties().get("Layers") else {
         panic!("Layers")
     };
-    table::validate_canonical(&layers.data, &mapped, "forward").unwrap();
+    table::validate_canonical(layers.data(), &mapped, "forward").unwrap();
     let values = super::super::super::table_rows::values(mapped_table, "State", "forward").unwrap();
-    for (before, after) in before.iter().zip(&values.data) {
+    for (before, after) in before.iter().zip(values.data()) {
         assert_eq!(
             data(before.value).numeric_dtype(),
             runmat_value::NumericDType::F32
@@ -94,10 +98,12 @@ fn wrong_identity_is_rejected_before_mapper_and_failure_does_not_mutate_network(
         panic!("State table")
     };
     let mut variables = crate::builtins::table::table_variables(source).unwrap();
-    let Some(Value::StringArray(roles)) = variables.fields.get_mut("Parameter") else {
+    let Some(Value::StringArray(roles)) =
+        crate::builtins::deep_learning::tests::fixture_field_mut(&mut variables, "Parameter")
+    else {
         panic!("Parameter column")
     };
-    roles.data[1] = "Bias".into();
+    crate::builtins::deep_learning::tests::fixture_array_mut(roles)[1] = "Bias".into();
     let invalid = crate::builtins::table::table_replace_variables_like(source, variables).unwrap();
     let calls = Cell::new(0);
     assert!(map_result_values(&network, invalid, "forward", |_, value| {

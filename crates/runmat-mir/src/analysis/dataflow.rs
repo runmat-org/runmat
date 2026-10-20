@@ -1133,33 +1133,37 @@ fn diagnose_operand_read(
     };
     match state[local.0] {
         InitFact::DefinitelyAssigned | InitFact::RuntimeWorkspaceLookup => {}
-        InitFact::Unassigned => diagnostics.push(init_diagnostic(
-            "RM-MIR0001",
-            "local may be read before it is assigned",
-            "this local is read before any assignment reaches this point",
-            span,
-        )),
-        InitFact::MaybeAssigned => diagnostics.push(init_diagnostic(
-            "RM-MIR0002",
-            "local may be read before assignment on some control-flow paths",
-            "this local is not definitely assigned on every path reaching this point",
-            span,
-        )),
+        InitFact::Unassigned => {
+            diagnostics.push(init_diagnostic(UninitializedRead::Definite, span))
+        }
+        InitFact::MaybeAssigned => {
+            diagnostics.push(init_diagnostic(UninitializedRead::Possible, span))
+        }
     }
 }
 
-fn init_diagnostic(
-    code: &'static str,
-    message: &'static str,
-    label: &'static str,
-    span: Span,
-) -> MirDiagnostic {
-    let help = match code {
-        "RM-MIR0001" => "assign this local before reading it",
-        "RM-MIR0002" => "assign this local on every control-flow path before reading it",
-        _ => "ensure the local is initialized before use",
+enum UninitializedRead {
+    Definite,
+    Possible,
+}
+
+fn init_diagnostic(kind: UninitializedRead, span: Span) -> MirDiagnostic {
+    let (code, message, label, help) = match kind {
+        UninitializedRead::Definite => (
+            "RM-MIR0001",
+            "local may be read before it is assigned",
+            "this local is read before any assignment reaches this point",
+            "assign this local before reading it",
+        ),
+        UninitializedRead::Possible => (
+            "RM-MIR0002",
+            "local may be read before assignment on some control-flow paths",
+            "this local is not definitely assigned on every path reaching this point",
+            "assign this local on every control-flow path before reading it",
+        ),
     };
     MirDiagnostic::new(code, MirDiagnosticSeverity::Error, message, span)
+        .with_runtime_check()
         .with_primary_label(label)
         .with_help(help)
         .with_category("definite-assignment")

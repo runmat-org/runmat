@@ -192,20 +192,26 @@ mod tests {
             }
             .expect("complex sparse input");
             let transpose = sparse_result(
-                block_on(transpose::transpose_builtin(vec![Value::SparseTensor(
-                    source.clone(),
-                )]))
+                block_on(transpose::transpose_builtin(
+                    crate::builtins::common::test_support::builtin_arguments(vec![
+                        Value::SparseTensor(source.clone()),
+                    ]),
+                ))
                 .expect("transpose"),
             );
             let page = sparse_result(
-                block_on(pagetranspose::pagetranspose_builtin(vec![
-                    Value::SparseTensor(source.clone()),
-                ]))
+                block_on(pagetranspose::pagetranspose_builtin(
+                    crate::builtins::common::test_support::builtin_arguments(vec![
+                        Value::SparseTensor(source.clone()),
+                    ]),
+                ))
                 .expect("pagetranspose"),
             );
-            let conjugate = block_on(ctranspose::ctranspose_builtin(vec![Value::SparseTensor(
-                source,
-            )]))
+            let conjugate = block_on(ctranspose::ctranspose_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::SparseTensor(source),
+                ]),
+            ))
             .expect("ctranspose");
             let conjugate = sparse_result(conjugate.value().clone());
             for result in [&transpose, &page, &conjugate] {

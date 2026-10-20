@@ -115,7 +115,10 @@ fn compute_ifftshift_dims(shape: &[usize], dims_arg: Option<&Value>) -> BuiltinR
     binding_variant = "default",
     builtin_path = "crate::builtins::math::fft::ifftshift"
 )]
-async fn ifftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn ifftshift_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(ifftshift_error(&IFFTSHIFT_ERROR_ARG_COUNT));
     }
@@ -759,6 +762,9 @@ pub(crate) mod tests {
     }
 
     fn ifftshift_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::ifftshift_builtin(value, rest))
+        block_on(super::ifftshift_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 }

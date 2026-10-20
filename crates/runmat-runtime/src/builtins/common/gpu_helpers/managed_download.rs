@@ -1,0 +1,85 @@
+//! Exact native provider download: one quote, one staged source, one retained value.
+
+use crate::context::host_allocation::{
+    host_allocation_runtime_error, HostAllocationError, HostAllocationPlan,
+};
+use crate::context::RuntimeContext;
+use crate::{build_runtime_error, GpuGatherRetry, RuntimeError};
+use runmat_accelerate_api::GpuTensorStorage;
+use runmat_value::NumericDType;
+
+#[path = "managed_download_quote.rs"]
+mod quote;
+#[path = "managed_download_stage.rs"]
+mod stage;
+#[path = "managed_download_adoption.rs"]
+mod adoption;
+
+pub use adoption::adopt_settled_native_download;
+pub use quote::quote_exact_native_download;
+pub use stage::download_exact_native;
+
+fn invalid(message: &'static str) -> RuntimeError {
+    build_runtime_error(message)
+        .with_identifier("RunMat:Placement:InvalidHostReadback")
+        .with_gpu_gather_retry(GpuGatherRetry::Never)
+        .build()
+}
+fn admission_error(runtime: &RuntimeContext, cause: HostAllocationError) -> RuntimeError {
+    host_allocation_runtime_error(
+        Some(runtime),
+        "RunMat:Placement:HostReadback",
+        "selected numerical readback admission failed",
+        cause,
+    )
+}
+/// One source's checked physical geometry, including stage and final owner.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ExactNativeDownloadQuote {
+    pub dtype: NumericDType,
+    pub storage: GpuTensorStorage,
+    pub logical: bool,
+    pub host_workspace: u64,
+    pub payload_bytes: u64,
+    pub query_bytes: u64,
+    pub shape_bytes: u64,
+    pub callback_bytes: u64,
+    pub retained_value_upper: u64,
+    pub active_upper: u64,
+    pub precharged_output_bytes: u64,
+}
+impl ExactNativeDownloadQuote {
+    pub fn single_source_plan(self) -> Result<HostAllocationPlan, HostAllocationError> {
+        let callback = HostAllocationPlan::retained_metadata_bytes(self.callback_bytes)?;
+        HostAllocationPlan::new(
+            self.active_upper,
+            callback
+                .checked_add(self.precharged_output_bytes)
+                .ok_or(HostAllocationError::Overflow)?,
+        )
+    }
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExactDownloadPhase {
+    BeforeEffect,
+    AfterEffect,
+}
+#[derive(Debug)]
+pub struct ExactDownloadFailure {
+    pub error: RuntimeError,
+    pub phase: ExactDownloadPhase,
+}
+impl ExactDownloadFailure {
+    fn before(error: RuntimeError) -> Self {
+        Self {
+            error,
+            phase: ExactDownloadPhase::BeforeEffect,
+        }
+    }
+    fn after(error: RuntimeError) -> Self {
+        Self {
+            error,
+            phase: ExactDownloadPhase::AfterEffect,
+        }
+    }
+}

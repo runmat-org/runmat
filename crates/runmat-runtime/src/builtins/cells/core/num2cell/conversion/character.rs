@@ -28,7 +28,7 @@ pub(super) fn convert(array: CharArray, dimensions: &[usize]) -> crate::BuiltinR
                     .and_then(|offset| offset.checked_add(coords[1]))
                     .ok_or_else(|| error::internal("character slice index overflow"))?;
                 data[destination] = *array
-                    .data
+                    .data()
                     .get(source_offset)
                     .ok_or_else(|| error::internal("character index is out of bounds"))?;
             }

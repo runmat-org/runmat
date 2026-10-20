@@ -207,8 +207,8 @@ pub(in crate::builtins::deep_learning) fn annotate_outputs(
 fn attach(mut value: Value, node: usize, caller: NetworkCaller) -> BuiltinResult<Value> {
     let function = caller.function();
     if let Value::Object(object) = &mut value {
-        if object.class_name.is(DLARRAY_CLASS) {
-            if let Some(Value::GpuTensor(handle)) = object.properties.get("Data") {
+        if object.class_name().is(DLARRAY_CLASS) {
+            if let Some(Value::GpuTensor(handle)) = object.properties().get("Data") {
                 let super::super::tape::NodeValue::Resident(recorded) =
                     super::super::tape::node_value(node)?
                 else {
@@ -223,11 +223,11 @@ fn attach(mut value: Value, node: usize, caller: NetworkCaller) -> BuiltinResult
                         format!("{function}: resident result differs from its tape node"),
                     ));
                 }
-                attach_node_to_object(object, node);
+                attach_node_to_object(object, node)?;
                 return Ok(value);
             }
         }
     }
     let payload = Payload::parse(value, function)?;
-    Ok(wrap_result(&payload, payload.tensor.clone(), Some(node)))
+    wrap_result(&payload, payload.tensor.clone(), Some(node))
 }

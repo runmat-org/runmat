@@ -31,7 +31,7 @@ impl MethodKeyword {
 }
 
 pub(super) fn parse_trailing_methods(
-    args: &mut Vec<Value>,
+    args: &mut crate::call::BuiltinArguments,
 ) -> BuiltinResult<(InterpMethod, ExtrapolationMethod)> {
     let mut methods = Vec::new();
     while methods.len() < 2 {
@@ -100,8 +100,8 @@ pub(super) fn parse_extrap_method(keyword: MethodKeyword) -> BuiltinResult<Extra
 
 pub(super) fn text_from_value(value: &Value) -> Option<String> {
     match value {
-        Value::String(s) => Some(s.clone()),
-        Value::CharArray(chars) if chars.rows == 1 => Some(chars.data.iter().collect()),
+        Value::String(s) => Some(s.as_str().to_owned()),
+        Value::CharArray(chars) if chars.rows == 1 => Some(chars.data().iter().collect()),
         _ => None,
     }
 }

@@ -8,13 +8,12 @@ impl FieldNames {
     pub(super) fn as_slice(&self) -> &[String] {
         &self.0
     }
-
-    pub(super) fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
 }
 
-pub(super) fn parse(first: &Value, rest: &[Value]) -> crate::BuiltinResult<FieldNames> {
+pub(super) fn parse(
+    first: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<FieldNames> {
     if !rest.is_empty() {
         crate::compatibility::ensure_builtin_extension_enabled(
             &runmat_builtins::RMFIELD_VARIADIC_EXTENSION,
@@ -30,7 +29,7 @@ pub(super) fn parse(first: &Value, rest: &[Value]) -> crate::BuiltinResult<Field
 
 fn collect(value: &Value, context: Option<&str>) -> crate::BuiltinResult<Vec<String>> {
     match value {
-        Value::StringArray(array) if array.data.len() != 1 => string_array(array),
+        Value::StringArray(array) if array.data().len() != 1 => string_array(array),
         Value::Cell(array) => cell_array(array),
         _ => scalar(value, context).map(|name| vec![name]),
     }
@@ -38,12 +37,12 @@ fn collect(value: &Value, context: Option<&str>) -> crate::BuiltinResult<Vec<Str
 
 fn string_array(array: &StringArray) -> crate::BuiltinResult<Vec<String>> {
     array
-        .data
+        .data()
         .iter()
         .enumerate()
         .map(|(index, name)| {
             require_nonempty(
-                name.clone(),
+                name.to_string(),
                 Some(format!("string array element {}", index + 1)),
             )
         })

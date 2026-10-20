@@ -151,6 +151,7 @@ fn missing_canonical_global_replaces_an_old_frame_snapshot_with_empty() {
 fn global_deoptimization_refreshes_only_the_alias_not_a_shared_ssa_operand() {
     runmat_gc::gc_test_context(|| {
         let mut state = omitted_input_state();
+        state.function.id = runmat_types::FunctionId(77);
         let runtime = state.runtime.clone();
         let _scope = runtime.enter();
         state.declare_global(0, "x".into()).unwrap();
@@ -158,6 +159,29 @@ fn global_deoptimization_refreshes_only_the_alias_not_a_shared_ssa_operand() {
         state.set_local(0, old).unwrap();
         state.values.insert(NativeValueId(1), old);
         let terminator = state.function.blocks[0].terminator.clone();
+        state.function.expected_sites.push(terminator.site.clone());
+        let resume_request = state
+            .resume_request_for_block(state.function.entry)
+            .unwrap();
+        assert_eq!(
+            resume_request.function, 0,
+            "resume sites retain portable owner zero, not local coordinate 77"
+        );
+        let resume = runmat_runtime::native::NativeResumeState {
+            function: resume_request.function,
+            block: resume_request.block,
+            position: resume_request.position,
+            phase: resume_request.phase.0,
+            ordinal: resume_request.ordinal,
+            ..Default::default()
+        };
+        state.prepare_resume(resume).unwrap();
+        assert!(state
+            .prepare_resume(runmat_runtime::native::NativeResumeState {
+                function: 77,
+                ..resume
+            })
+            .is_err());
         let mut frame = terminator.frame_state.clone();
         frame.locals.push(NativeFrameLocal {
             local: NativeLocalId(0),
@@ -170,8 +194,14 @@ fn global_deoptimization_refreshes_only_the_alias_not_a_shared_ssa_operand() {
         let materialized = state
             .materialize_deoptimization(&frame, &terminator.site)
             .unwrap();
+        assert_eq!(materialized.function, runmat_types::FunctionId(77));
+        assert_eq!(materialized.site.point.function, ProgramFunctionId(0));
         assert_eq!(materialized.locals[0].value, Some(Value::Num(7.0)));
         assert_eq!(materialized.operands, vec![Value::Num(1.0)]);
+        frame.point.function = ProgramFunctionId(77);
+        assert!(state
+            .materialize_deoptimization(&frame, &terminator.site)
+            .is_err());
     });
 }
 
@@ -299,7 +329,9 @@ fn local_state_with(
         lexical_bindings: Vec::new(),
         inherited_storage_bindings: Vec::new(),
         creates_lexical_environment: false,
-        id: ProgramFunctionId(0),
+        id: runmat_types::FunctionId(0),
+        portable_id: ProgramFunctionId(0),
+        mir_body_digest: runmat_execution::Digest::sha256(b"fixture:native-omitted-input"),
         source: ProgramSourceId(0),
         name: "omitted_input".into(),
         source_role: runmat_types::FunctionSourceRole::Unknown,
@@ -364,7 +396,7 @@ fn local_state_with(
     HostState::new(HostStateInput {
         functions: Arc::new(vec![function.clone()]),
         function,
-        inputs: NativeFunctionInputs::Legacy(vec![]),
+        inputs: NativeFunctionInputs::legacy(vec![]),
         requested_outputs: 0,
         runtime,
         program_capture: None,

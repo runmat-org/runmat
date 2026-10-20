@@ -6,7 +6,6 @@ use runmat_builtins::{
     SHADING_STATE_OUTPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::Value;
 #[cfg(test)]
 #[path = "shading/tests.rs"]
 mod tests;
@@ -15,7 +14,7 @@ mod tests;
     binding_variant = "default",
     builtin_path = "crate::builtins::plotting::cmds::shading"
 )]
-pub fn shading_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
+pub fn shading_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<bool> {
     crate::output_count::validate_fixed_outputs(
         &SHADING_DESCRIPTOR,
         &SHADING_ERROR_OUTPUTS,

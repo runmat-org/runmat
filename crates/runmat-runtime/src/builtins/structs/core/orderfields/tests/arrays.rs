@@ -13,14 +13,7 @@ fn typed_array_preserves_shape_and_reorders_every_element() {
     };
     assert_eq!(output.shape(), [1, 1, 2]);
     for structure in output.elements() {
-        assert_eq!(
-            structure
-                .fields
-                .keys()
-                .map(String::as_str)
-                .collect::<Vec<_>>(),
-            ["a", "b"]
-        );
+        assert_eq!(structure.fields.keys().collect::<Vec<_>>(), ["a", "b"]);
     }
 }
 

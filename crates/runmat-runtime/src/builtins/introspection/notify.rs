@@ -5,12 +5,14 @@ use runmat_value::Value;
 #[runtime_builtin(
     name = "notify",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::introspection::notify"
 )]
 pub async fn notify_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     target: Value,
-    event_name: String,
-    rest: Vec<Value>,
+    event_name: runmat_value::Utf8Text,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &runmat_builtins::NOTIFY_DESCRIPTOR,
@@ -29,13 +31,35 @@ pub async fn notify_builtin(
             "notify",
         )?;
     }
-    crate::notify_builtin(target, event_name, rest).await
+    crate::notify_builtin(
+        runtime.as_ref(),
+        target,
+        event_name.as_str().to_owned(),
+        rest,
+    )
+    .await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use futures::executor::block_on;
+
+    async fn notify_builtin(
+        target: Value,
+        event_name: runmat_value::Utf8Text,
+        arguments: Vec<Value>,
+    ) -> crate::BuiltinResult<Value> {
+        super::notify_builtin(
+            None,
+            target,
+            event_name,
+            crate::execution::RootedValues::new(arguments)
+                .map_err(|error| error.into_runtime_error())?
+                .into(),
+        )
+        .await
+    }
 
     #[test]
     fn notify_is_integer_inapplicable() {

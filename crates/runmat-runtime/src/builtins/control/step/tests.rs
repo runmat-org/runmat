@@ -11,15 +11,15 @@ use runmat_value::{
 
 fn tf_object(num: Vec<f64>, den: Vec<f64>, sample_time: f64) -> Value {
     let mut object = ObjectInstance::new("tf".to_string());
-    object.properties.insert(
+    object.replace_property_unbounded(
         "Numerator".to_string(),
         Value::Tensor(Tensor::new(num.clone(), vec![1, num.len()]).unwrap()),
     );
-    object.properties.insert(
+    object.replace_property_unbounded(
         "Denominator".to_string(),
         Value::Tensor(Tensor::new(den.clone(), vec![1, den.len()]).unwrap()),
     );
-    object.properties.insert(
+    object.replace_property_unbounded(
         "Variable".to_string(),
         Value::CharArray(CharArray::new_row(if sample_time > 0.0 {
             "z"
@@ -27,20 +27,18 @@ fn tf_object(num: Vec<f64>, den: Vec<f64>, sample_time: f64) -> Value {
             "s"
         })),
     );
-    object
-        .properties
-        .insert("Ts".to_string(), Value::Num(sample_time));
-    object
-        .properties
-        .insert("InputDelay".into(), Value::Num(0.0));
-    object
-        .properties
-        .insert("OutputDelay".into(), Value::Num(0.0));
+    object.replace_property_unbounded("Ts".to_string(), Value::Num(sample_time));
+    object.replace_property_unbounded("InputDelay".into(), Value::Num(0.0));
+    object.replace_property_unbounded("OutputDelay".into(), Value::Num(0.0));
     Value::Object(object)
 }
 
 fn run_step(sys: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    block_on(step_builtin(sys, rest))
+    block_on(step_builtin(
+        None,
+        sys,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    ))
 }
 
 fn tensor_data(value: Value) -> Vec<f64> {
@@ -112,8 +110,12 @@ fn shared_step_simulation_matches_builtin_and_keeps_stepinfo_error_ownership() {
     use crate::builtins::control::response::{parse_admitted_model, ResponseKind};
 
     let sys = tf_object(vec![1.0], vec![1.0, 1.0], 0.0);
-    let parsed = block_on(parse_admitted_model(sys.clone(), ResponseKind::StepInfo))
-        .expect("one model admission");
+    let parsed = block_on(parse_admitted_model(
+        None,
+        sys.clone(),
+        ResponseKind::StepInfo,
+    ))
+    .expect("one model admission");
     assert_eq!(parsed.model.dc_gain().expect("dc gain").re, 1.0);
     let time = Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap());
     let time_spec = admit_time(
@@ -282,9 +284,7 @@ fn step_sample_time_parser_reads_native_integer_storage_for_all_classes() {
         let Value::Object(mut object) = tf_object(vec![1.0], vec![1.0, -0.5], 1.0) else {
             unreachable!()
         };
-        object
-            .properties
-            .insert("Ts".to_string(), Value::Tensor(sample_time));
+        object.replace_property_unbounded("Ts".to_string(), Value::Tensor(sample_time));
         let result =
             run_step(Value::Object(object), vec![Value::Num(2.0)]).expect("integer sample time");
         assert_eq!(tensor_data(result), vec![0.0, 1.0, 1.5]);
@@ -303,9 +303,7 @@ fn step_tf_coefficients_read_complex_typed_integer_storage_exactly() {
     let Value::Object(mut object) = tf_object(vec![2.0, 4.0], vec![1.0, 2.0, 1.0], 0.0) else {
         unreachable!()
     };
-    object
-        .properties
-        .insert("Numerator".into(), Value::ComplexTensor(tensor));
+    object.replace_property_unbounded("Numerator".into(), Value::ComplexTensor(tensor));
     assert!(run_step(Value::Object(object), vec![Value::Num(1.0)]).is_ok());
 }
 
@@ -321,9 +319,7 @@ fn step_rejects_exact_nonreal_complex_typed_integer_coefficients() {
     let Value::Object(mut object) = tf_object(vec![2.0, 4.0], vec![1.0, 2.0, 1.0], 0.0) else {
         unreachable!()
     };
-    object
-        .properties
-        .insert("Numerator".into(), Value::ComplexTensor(tensor));
+    object.replace_property_unbounded("Numerator".into(), Value::ComplexTensor(tensor));
     let err = run_step(Value::Object(object), vec![Value::Num(1.0)]).expect_err("nonreal coeff");
     assert_eq!(err.identifier(), STEP_ERROR_UNSUPPORTED_MODEL.identifier);
     assert!(err.message().contains("complex tf Numerator coefficients"));
@@ -362,18 +358,14 @@ fn invalid_host_time_and_model_precede_resident_coefficients() {
         let Value::Object(mut model) = tf_object(vec![1.0], vec![1.0, 1.0], 0.0) else {
             unreachable!()
         };
-        model
-            .properties
-            .insert("Denominator".into(), Value::GpuTensor(resident.clone()));
+        model.replace_property_unbounded("Denominator".into(), Value::GpuTensor(resident.clone()));
         provider.reset_telemetry();
         let error = run_step(Value::Object(model.clone()), vec![Value::Num(-1.0)])
             .expect_err("invalid time");
         assert_eq!(error.identifier(), STEP_ERROR_INVALID_TIME.identifier);
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
 
-        model
-            .properties
-            .insert("Numerator".into(), Value::Num(f64::NAN));
+        model.replace_property_unbounded("Numerator".into(), Value::Num(f64::NAN));
         provider.reset_telemetry();
         let error =
             run_step(Value::Object(model), Vec::new()).expect_err("invalid host coefficient");
@@ -383,12 +375,8 @@ fn invalid_host_time_and_model_precede_resident_coefficients() {
         let Value::Object(mut delayed) = tf_object(vec![1.0], vec![1.0, 1.0], 0.0) else {
             unreachable!()
         };
-        delayed
-            .properties
-            .insert("Denominator".into(), Value::GpuTensor(resident));
-        delayed
-            .properties
-            .insert("InputDelay".into(), Value::Num(1.0e-20));
+        delayed.replace_property_unbounded("Denominator".into(), Value::GpuTensor(resident));
+        delayed.replace_property_unbounded("InputDelay".into(), Value::Num(1.0e-20));
         provider.reset_telemetry();
         let error = run_step(Value::Object(delayed), Vec::new()).expect_err("nonzero delay");
         assert_eq!(error.identifier(), STEP_ERROR_UNSUPPORTED_MODEL.identifier);
@@ -405,15 +393,11 @@ fn consumed_resident_coefficient_gathers_but_unrelated_property_does_not() {
         let Value::Object(mut model) = tf_object(vec![1.0], vec![1.0, 1.0], 0.0) else {
             unreachable!()
         };
-        model
-            .properties
-            .insert("Unrelated".into(), Value::GpuTensor(resident.clone()));
+        model.replace_property_unbounded("Unrelated".into(), Value::GpuTensor(resident.clone()));
         provider.reset_telemetry();
         run_step(Value::Object(model.clone()), Vec::new()).expect("host model");
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
-        model
-            .properties
-            .insert("Denominator".into(), Value::GpuTensor(resident));
+        model.replace_property_unbounded("Denominator".into(), Value::GpuTensor(resident));
         provider.reset_telemetry();
         run_step(Value::Object(model), Vec::new()).expect("resident coefficient");
         assert!(provider.telemetry_snapshot().download_bytes > 0);
@@ -441,7 +425,7 @@ fn tiny_nonzero_imaginary_coefficient_is_not_silently_real() {
     let Value::Object(mut model) = tf_object(vec![1.0], vec![1.0, 1.0], 0.0) else {
         unreachable!()
     };
-    model.properties.insert(
+    model.replace_property_unbounded(
         "Numerator".into(),
         Value::ComplexTensor(ComplexTensor::new(vec![(1.0, 1.0e-20)], vec![1, 1]).unwrap()),
     );
@@ -459,9 +443,7 @@ fn invalid_statement_style_is_rejected_before_model_download() {
         let Value::Object(mut model) = tf_object(vec![1.0], vec![1.0, 1.0], 0.0) else {
             unreachable!()
         };
-        model
-            .properties
-            .insert("Denominator".into(), Value::GpuTensor(resident));
+        model.replace_property_unbounded("Denominator".into(), Value::GpuTensor(resident));
         let _output = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         provider.reset_telemetry();
         let error = run_step(
@@ -481,11 +463,11 @@ fn exactly_representable_wide_integer_coefficients_are_admitted() {
     let Value::Object(mut model) = tf_object(vec![1.0], vec![1.0, 1.0], 0.0) else {
         unreachable!()
     };
-    model.properties.insert(
+    model.replace_property_unbounded(
         "Numerator".into(),
         integer_tensor(IntegerStorage::U64(vec![exact]), vec![1, 1]),
     );
-    model.properties.insert(
+    model.replace_property_unbounded(
         "Denominator".into(),
         integer_tensor(IntegerStorage::U64(vec![exact, exact]), vec![1, 2]),
     );
@@ -495,7 +477,7 @@ fn exactly_representable_wide_integer_coefficients_are_admitted() {
     );
     assert!((y[1] - (1.0 - (-1.0_f64).exp())).abs() < 1.0e-5);
 
-    model.properties.insert(
+    model.replace_property_unbounded(
         "Numerator".into(),
         integer_tensor(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1]),
     );
@@ -513,10 +495,8 @@ fn tiny_nonreal_host_coefficient_precedes_resident_sample_time_download() {
         let Value::Object(mut model) = tf_object(vec![1.0], vec![1.0, 1.0], 0.0) else {
             unreachable!()
         };
-        model
-            .properties
-            .insert("Ts".into(), Value::GpuTensor(resident));
-        model.properties.insert(
+        model.replace_property_unbounded("Ts".into(), Value::GpuTensor(resident));
+        model.replace_property_unbounded(
             "Numerator".into(),
             Value::ComplexTensor(ComplexTensor::new(vec![(1.0, 1.0e-20)], vec![1, 1]).unwrap()),
         );

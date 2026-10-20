@@ -7,23 +7,31 @@ pub(super) struct ParsedDelaunay {
     pub(super) integer_topology: bool,
 }
 
-pub(super) async fn parse_constructor_args(args: Vec<Value>) -> BuiltinResult<ParsedDelaunay> {
-    preflight::constructor(&args)?;
-    let gathered = gather_values(args).await?;
-    match gathered.as_slice() {
-        [] => Ok(ParsedDelaunay {
+pub(super) async fn parse_constructor_args(
+    args: crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<ParsedDelaunay> {
+    preflight::constructor(args.view())?;
+    let gathered = gather_values(args, runtime).await?;
+    match gathered.len() {
+        0 => Ok(ParsedDelaunay {
             points: Vec::new(),
             constraints: Vec::new(),
             integer_coordinates: false,
             integer_topology: false,
         }),
-        [points] => Ok(ParsedDelaunay {
-            points: matrix_points(points, BUILTIN_NAME)?,
-            constraints: Vec::new(),
-            integer_coordinates: is_typed_integer_numeric_value(points),
-            integer_topology: false,
-        }),
-        [first, second] if constraint_form(first, second) => {
+        1 => {
+            let points = &gathered[0];
+            Ok(ParsedDelaunay {
+                points: matrix_points(points, BUILTIN_NAME)?,
+                constraints: Vec::new(),
+                integer_coordinates: is_typed_integer_numeric_value(points),
+                integer_topology: false,
+            })
+        }
+        2 if constraint_form(&gathered[0], &gathered[1]) => {
+            let first = &gathered[0];
+            let second = &gathered[1];
             let constraints = constraints_from_value(second)?;
             if !constraints.is_empty() {
                 return Err(unsupported(
@@ -37,14 +45,21 @@ pub(super) async fn parse_constructor_args(args: Vec<Value>) -> BuiltinResult<Pa
                 integer_topology: is_typed_integer_numeric_value(second),
             })
         }
-        [x, y] => Ok(ParsedDelaunay {
-            points: vector_points(x, y, BUILTIN_NAME)?,
-            constraints: Vec::new(),
-            integer_coordinates: is_typed_integer_numeric_value(x)
-                || is_typed_integer_numeric_value(y),
-            integer_topology: false,
-        }),
-        [x, y, third] => {
+        2 => {
+            let x = &gathered[0];
+            let y = &gathered[1];
+            Ok(ParsedDelaunay {
+                points: vector_points(x, y, BUILTIN_NAME)?,
+                constraints: Vec::new(),
+                integer_coordinates: is_typed_integer_numeric_value(x)
+                    || is_typed_integer_numeric_value(y),
+                integer_topology: false,
+            })
+        }
+        3 => {
+            let x = &gathered[0];
+            let y = &gathered[1];
+            let third = &gathered[2];
             if looks_like_constraints(third) {
                 let constraints = constraints_from_value(third)?;
                 if !constraints.is_empty() {
@@ -71,38 +86,43 @@ pub(super) async fn parse_constructor_args(args: Vec<Value>) -> BuiltinResult<Pa
     }
 }
 
-pub(super) async fn gather_values(args: Vec<Value>) -> BuiltinResult<Vec<Value>> {
-    let mut gathered = Vec::with_capacity(args.len());
-    for value in args {
-        gathered.push(gather_if_needed_async(&value).await?);
-    }
-    Ok(gathered)
+pub(super) async fn gather_values(
+    args: crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    crate::dispatcher::gather_builtin_arguments_async(args, runtime).await
 }
 
-pub(super) fn ensure_resident_constructor_extensions(args: &[Value]) -> BuiltinResult<()> {
-    match args {
-        [points] => ensure_resident_coordinate_values(std::slice::from_ref(points)),
-        [first, second] if constraint_form(first, second) => {
-            ensure_resident_coordinate_values(std::slice::from_ref(first))?;
-            ensure_resident_topology_values(std::slice::from_ref(second))
+pub(super) fn ensure_resident_constructor_extensions(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
+    match args.len() {
+        1 => ensure_resident_coordinate_values(args),
+        2 if constraint_form(&args[0], &args[1]) => {
+            ensure_resident_coordinate_values(args.range(..1).expect("first argument"))?;
+            ensure_resident_topology_values(args.range(1..).expect("second argument"))
         }
-        [x, y] => ensure_resident_coordinate_values(&[x.clone(), y.clone()]),
-        [x, y, topology] => {
-            ensure_resident_coordinate_values(&[x.clone(), y.clone()])?;
-            ensure_resident_topology_values(std::slice::from_ref(topology))
+        2 => ensure_resident_coordinate_values(args),
+        3 => {
+            ensure_resident_coordinate_values(args.range(..2).expect("coordinate arguments"))?;
+            ensure_resident_topology_values(args.range(2..).expect("topology argument"))
         }
         _ => Ok(()),
     }
 }
 
-pub(super) fn ensure_resident_coordinate_values(values: &[Value]) -> BuiltinResult<()> {
+pub(super) fn ensure_resident_coordinate_values(
+    values: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     if values.iter().any(is_resident_typed_integer_value) {
         ensure_coordinate_extension(true)?;
     }
     Ok(())
 }
 
-pub(super) fn ensure_resident_topology_values(values: &[Value]) -> BuiltinResult<()> {
+pub(super) fn ensure_resident_topology_values(
+    values: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     if values.iter().any(is_resident_typed_integer_value) {
         ensure_topology_extension(true)?;
     }
@@ -141,17 +161,17 @@ pub(super) fn is_resident_typed_integer_value(value: &Value) -> bool {
 
 pub(super) fn object_coordinates_are_typed_integer(object: &ObjectInstance) -> bool {
     object
-        .properties
+        .properties()
         .get(POINTS_PROPERTY)
-        .or_else(|| object.properties.get(LEGACY_POINTS_PROPERTY))
+        .or_else(|| object.properties().get(LEGACY_POINTS_PROPERTY))
         .is_some_and(is_typed_integer_numeric_value)
 }
 
 pub(super) fn object_topology_is_typed_integer(object: &ObjectInstance) -> bool {
     object
-        .properties
+        .properties()
         .get(CONNECTIVITY_PROPERTY)
-        .or_else(|| object.properties.get(LEGACY_CONNECTIVITY_PROPERTY))
+        .or_else(|| object.properties().get(LEGACY_CONNECTIVITY_PROPERTY))
         .is_some_and(is_typed_integer_numeric_value)
 }
 
@@ -161,24 +181,15 @@ pub(super) fn delaunay_object(parsed: ParsedDelaunay) -> BuiltinResult<ObjectIns
     let triangles = triangles_tensor(&mesh.triangles)?;
     let constraints = constraints_tensor(&parsed.constraints)?;
 
-    let mut object = ObjectInstance::new(DELAUNAY_TRI_CLASS.to_string());
-    object
-        .properties
-        .insert(LEGACY_POINTS_PROPERTY.to_string(), points.clone());
-    object
-        .properties
-        .insert(POINTS_PROPERTY.to_string(), points);
-    object
-        .properties
-        .insert(LEGACY_CONNECTIVITY_PROPERTY.to_string(), triangles.clone());
-    object
-        .properties
-        .insert(CONNECTIVITY_PROPERTY.to_string(), triangles);
-    object
-        .properties
-        .insert(CONSTRAINTS_PROPERTY.to_string(), constraints);
-    object
-        .properties
-        .insert(DIMENSION_PROPERTY.to_string(), Value::Num(2.0));
-    Ok(object)
+    let mut object = runmat_value::UnboundedObjectBuilder::with_property_capacity(
+        DELAUNAY_TRI_CLASS.to_string(),
+        6,
+    );
+    object.insert(LEGACY_POINTS_PROPERTY.to_string(), points.clone());
+    object.insert(POINTS_PROPERTY.to_string(), points);
+    object.insert(LEGACY_CONNECTIVITY_PROPERTY.to_string(), triangles.clone());
+    object.insert(CONNECTIVITY_PROPERTY.to_string(), triangles);
+    object.insert(CONSTRAINTS_PROPERTY.to_string(), constraints);
+    object.insert(DIMENSION_PROPERTY.to_string(), Value::Num(2.0));
+    Ok(object.finish())
 }

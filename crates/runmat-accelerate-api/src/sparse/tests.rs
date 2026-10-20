@@ -7,17 +7,17 @@ use anyhow::anyhow;
 
 use super::*;
 use crate::{
-    AccelDownloadFuture, AccelProvider, GpuTensorDescriptor, GpuTensorHandle, GpuTensorStorage,
-    HostNumericDataView, HostNumericTensorView, NumericElementType, ProviderCancellationToken,
+    AccelDownloadFuture, AccelProvider, GpuTensorHandle, GpuTensorStorage, HostNumericDataView,
+    HostNumericTensorView, NumericElementType, ProviderCancellationToken,
 };
 
-fn numeric_handle(device_id: u32, buffer_id: u64, length: usize) -> GpuTensorHandle {
-    GpuTensorHandle {
-        shape: vec![length],
+fn numeric_handle(device_id: u32, length: usize) -> GpuTensorHandle {
+    crate::test_support::handle(
         device_id,
-        buffer_id,
-        descriptor: GpuTensorDescriptor::numeric(NumericElementType::F64, GpuTensorStorage::Real),
-    }
+        vec![length],
+        NumericElementType::F64,
+        GpuTensorStorage::Real,
+    )
 }
 
 #[test]
@@ -78,10 +78,6 @@ impl AccelProvider for TransferCountingProvider {
 
     fn download<'a>(&'a self, _handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         Box::pin(async { Err(anyhow!("test download")) })
-    }
-
-    fn free(&self, _handle: &GpuTensorHandle) -> anyhow::Result<()> {
-        Ok(())
     }
 
     fn device_info(&self) -> String {
@@ -196,8 +192,8 @@ fn feasibility_rejects_impossible_constructed_pattern_descriptors() {
 #[test]
 fn krylov_validation_rejects_cross_device_and_preconditioner_substitution() {
     let matrix = matrix_handle(7, 13);
-    let rhs = numeric_handle(7, 21, 2);
-    let wrong_device_guess = numeric_handle(8, 22, 2);
+    let rhs = numeric_handle(7, 2);
+    let wrong_device_guess = numeric_handle(8, 2);
     let substituted = SparsePreconditionerHandle {
         device_id: 7,
         preconditioner_id: 31,
@@ -259,7 +255,7 @@ fn krylov_validation_requires_typed_provider_loss_to_match_the_terminal() {
         max_nnz: Some(2),
     });
     let matrix = matrix_handle(0, 13);
-    let rhs = numeric_handle(0, 21, 2);
+    let rhs = numeric_handle(0, 2);
     let cancellation = ProviderCancellationToken::new();
     let request = SparseKrylovRequest {
         matrix: &matrix,
@@ -357,7 +353,7 @@ fn default_sparse_contract_rejects_without_dense_transfer() {
     ));
 
     let matrix = matrix_handle(0, 13);
-    let rhs = numeric_handle(0, 21, 2);
+    let rhs = numeric_handle(0, 2);
     let cancellation = ProviderCancellationToken::new();
     let request = SparseKrylovRequest {
         matrix: &matrix,

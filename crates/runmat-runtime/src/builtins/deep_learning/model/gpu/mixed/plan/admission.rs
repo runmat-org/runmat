@@ -54,7 +54,7 @@ fn admit_stages(
     purpose: RoutePurpose,
     function: &'static str,
 ) -> BuiltinResult<Result<(), GpuCapabilityReason>> {
-    let Some(Value::Cell(layers)) = network.properties.get("Layers") else {
+    let Some(Value::Cell(layers)) = network.properties().get("Layers") else {
         unreachable!("host plan admitted Layers")
     };
     let mut view = input.view().clone();
@@ -150,7 +150,7 @@ fn admit_stages(
                 {
                     return Ok(Err(GpuCapabilityReason::AxisLayout));
                 }
-                let Some(Value::Object(layer)) = layers.data.get(*layer_index) else {
+                let Some(Value::Object(layer)) = layers.data().get(*layer_index) else {
                     unreachable!("host plan admitted convolution layer")
                 };
                 let weights = match super::super::super::parameters::admit_resident_parameter(
@@ -240,7 +240,7 @@ fn admit_stages(
                 }
             }
             Stage::Normalize { stage } => {
-                let Some(Value::Object(layer)) = layers.data.get(stage.layer_index) else {
+                let Some(Value::Object(layer)) = layers.data().get(stage.layer_index) else {
                     unreachable!("host plan admitted normalization layer")
                 };
                 let affine =

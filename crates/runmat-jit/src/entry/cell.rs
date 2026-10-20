@@ -1,7 +1,7 @@
 use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
 
 use runmat_execution::Digest;
-use runmat_types::ProgramFunctionId;
+use runmat_types::FunctionId;
 
 use crate::invalidation::DependencySnapshot;
 use runmat_native_executor::NativeExecutor;
@@ -12,7 +12,8 @@ pub struct EntryKey(pub String);
 #[derive(Clone)]
 pub struct PublishedEntry {
     pub executor: Rc<NativeExecutor>,
-    pub entrypoint: ProgramFunctionId,
+    /// Local compiled coordinate in this exact executor, not a portable owner.
+    pub entrypoint: FunctionId,
     pub dependencies: DependencySnapshot,
     pub publication: u64,
     pub tier: PublishedTier,
@@ -111,7 +112,7 @@ impl EntryCell {
     pub(crate) fn publish(
         &self,
         executor: Rc<NativeExecutor>,
-        entrypoint: ProgramFunctionId,
+        entrypoint: FunctionId,
         dependencies: DependencySnapshot,
         compilation: NativeCompilationEvidence,
     ) -> Result<PublishedEntry, &'static str> {
@@ -139,7 +140,7 @@ impl EntryCell {
         &self,
         profile: Digest,
         executor: Rc<NativeExecutor>,
-        entrypoint: ProgramFunctionId,
+        entrypoint: FunctionId,
         dependencies: DependencySnapshot,
         compilation: NativeCompilationEvidence,
     ) -> Result<PublishedEntry, &'static str> {

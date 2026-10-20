@@ -33,11 +33,17 @@ struct PulseInstance {
 }
 
 #[derive(Clone, Debug)]
-enum PulseSource {
+struct PulseSource {
+    waveform: PulseWaveform,
+    arguments: crate::call::BuiltinArguments,
+}
+
+#[derive(Clone, Debug)]
+enum PulseWaveform {
     Rect { width: f64 },
     Tri { width: f64, skew: f64 },
     Gaus { params: GauspulsParams },
-    Callback { handle: Value, args: Vec<Value> },
+    Callback(Value),
     Prototype { samples: Vec<f64>, fs: f64 },
 }
 
@@ -101,23 +107,25 @@ fn pulstran_error_with_source(
 #[runtime_builtin(
     name = "pulstran",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::signal::pulstran"
 )]
 async fn pulstran_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     t: Value,
     d: Value,
     pulse: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let selection = decode_pulse_selection(&pulse);
-    ensure_pulstran_extensions(&t, &d, &pulse, &rest, &selection).await?;
-    let gpu_operands = pulstran_gpu_operands(&t, &d, &pulse, &rest, &selection);
+    ensure_pulstran_extensions(&t, &d, &pulse, rest.view(), &selection).await?;
+    let gpu_operands = pulstran_gpu_operands(&t, &d, &pulse, rest.view(), &selection);
     let gpu_source =
         gpu_helpers::select_resident_output_source(gpu_operands.iter().cloned(), BUILTIN_NAME)?;
     let t = real_tensor_arg(t, &PULSTRAN_ERROR_INVALID_INPUT).await?;
     let delays = parse_delays(real_tensor_arg(d, &PULSTRAN_ERROR_INVALID_DELAY).await?)?;
     let source = parse_pulse_source(selection, pulse, rest).await?;
-    let y = evaluate_pulse_train(&t, &delays, &source).await?;
+    let y = evaluate_pulse_train(runtime.as_ref(), &t, &delays, &source).await?;
     let Some(source) = gpu_source else {
         return Ok(tensor_into_value(y));
     };
@@ -145,7 +153,7 @@ async fn ensure_pulstran_extensions(
     t: &Value,
     d: &Value,
     pulse: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     selection: &PulseSelection,
 ) -> BuiltinResult<()> {
     reject_nonreal_operand(t, &PULSTRAN_ERROR_INVALID_INPUT)?;
@@ -207,7 +215,7 @@ async fn ensure_pulstran_extensions(
 fn preflight_computation_shapes(
     d: &Value,
     pulse: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     selection: &PulseSelection,
 ) -> BuiltinResult<()> {
     if let Some(shape) = computation_shape(d) {
@@ -298,21 +306,21 @@ fn pulstran_resident_values<'a>(
     t: &'a Value,
     d: &'a Value,
     pulse: &'a Value,
-    rest: &'a [Value],
+    rest: crate::call::FunctionArgumentView<'a>,
     selection: &PulseSelection,
 ) -> impl Iterator<Item = &'a Value> {
     let uses_controls = selection.uses_numeric_controls();
     std::iter::once(t)
         .chain(std::iter::once(d))
         .chain(std::iter::once(pulse).filter(|value| is_numeric_or_gpu(value)))
-        .chain(rest.iter().filter(move |_| uses_controls))
+        .chain(rest.into_iter().filter(move |_| uses_controls))
 }
 
 fn pulstran_gpu_operands(
     t: &Value,
     d: &Value,
     pulse: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     selection: &PulseSelection,
 ) -> Vec<runmat_accelerate_api::GpuTensorHandle> {
     pulstran_resident_values(t, d, pulse, rest, selection)
@@ -400,33 +408,37 @@ fn parse_delays(tensor: Tensor) -> BuiltinResult<Vec<PulseInstance>> {
 async fn parse_pulse_source(
     selection: PulseSelection,
     pulse: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<PulseSource> {
-    match selection {
+    let arguments = rest.fork();
+    let waveform = match selection {
         PulseSelection::Prototype => parse_sampled_prototype(pulse, rest).await,
-        PulseSelection::Rect => Ok(PulseSource::Rect {
-            width: parse_rect_width(&rest).await?,
+        PulseSelection::Rect => Ok(PulseWaveform::Rect {
+            width: parse_rect_width(rest.view()).await?,
         }),
         PulseSelection::Tri => {
-            let (width, skew) = parse_tripuls_options(&rest).await?;
-            Ok(PulseSource::Tri { width, skew })
+            let (width, skew) = parse_tripuls_options(rest.view()).await?;
+            Ok(PulseWaveform::Tri { width, skew })
         }
-        PulseSelection::Gaus => Ok(PulseSource::Gaus {
-            params: parse_gauspuls_params(&rest).await?,
+        PulseSelection::Gaus => Ok(PulseWaveform::Gaus {
+            params: parse_gauspuls_params(rest.view()).await?,
         }),
-        PulseSelection::NamedCallback(name) => Ok(PulseSource::Callback {
-            handle: Value::function_handle(name),
-            args: rest,
-        }),
-        PulseSelection::HandleCallback => Ok(PulseSource::Callback {
-            handle: pulse,
-            args: rest,
-        }),
+        PulseSelection::NamedCallback(name) => {
+            Ok(PulseWaveform::Callback(Value::function_handle(name)))
+        }
+        PulseSelection::HandleCallback => Ok(PulseWaveform::Callback(pulse)),
         PulseSelection::Invalid(error) => Err(*error),
-    }
+    }?;
+    Ok(PulseSource {
+        waveform,
+        arguments,
+    })
 }
 
-async fn parse_sampled_prototype(pulse: Value, rest: Vec<Value>) -> BuiltinResult<PulseSource> {
+async fn parse_sampled_prototype(
+    pulse: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<PulseWaveform> {
     if rest.len() > 1 {
         return Err(pulstran_error_with_detail(
             &PULSTRAN_ERROR_ARG_COUNT,
@@ -471,7 +483,7 @@ async fn parse_sampled_prototype(pulse: Value, rest: Vec<Value>) -> BuiltinResul
         }
         None => 1.0,
     };
-    Ok(PulseSource::Prototype {
+    Ok(PulseWaveform::Prototype {
         samples: tensor::tensor_into_values_f64(prototype),
         fs,
     })
@@ -500,9 +512,11 @@ fn is_numeric_or_gpu(value: &Value) -> bool {
 
 fn text_scalar(value: &Value) -> Option<String> {
     match value {
-        Value::String(text) => Some(text.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
-        Value::CharArray(array) if array.rows == 1 => Some(array.data.iter().collect()),
+        Value::String(text) => Some(text.as_str().to_owned()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Some(array.data()[0].as_str().to_owned())
+        }
+        Value::CharArray(array) if array.rows == 1 => Some(array.data().iter().collect()),
         _ => None,
     }
 }
@@ -520,7 +534,7 @@ fn normalize_pulse_name(name: &str) -> BuiltinResult<String> {
     }
 }
 
-async fn parse_rect_width(rest: &[Value]) -> BuiltinResult<f64> {
+async fn parse_rect_width(rest: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<f64> {
     match rest.len() {
         0 => Ok(1.0),
         1 => {
@@ -535,7 +549,9 @@ async fn parse_rect_width(rest: &[Value]) -> BuiltinResult<f64> {
     }
 }
 
-async fn parse_tripuls_options(rest: &[Value]) -> BuiltinResult<(f64, f64)> {
+async fn parse_tripuls_options(
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<(f64, f64)> {
     if rest.len() > 2 {
         return Err(pulstran_error_with_detail(
             &PULSTRAN_ERROR_ARG_COUNT,
@@ -555,7 +571,9 @@ async fn parse_tripuls_options(rest: &[Value]) -> BuiltinResult<(f64, f64)> {
     Ok((width, skew))
 }
 
-async fn parse_gauspuls_params(rest: &[Value]) -> BuiltinResult<GauspulsParams> {
+async fn parse_gauspuls_params(
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<GauspulsParams> {
     if rest.len() > 3 {
         return Err(pulstran_error_with_detail(
             &PULSTRAN_ERROR_ARG_COUNT,

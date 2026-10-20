@@ -12,13 +12,13 @@ fn getfield_linear_indexing_follows_matlab_orientation_rules() {
             Tensor::new_integer(IntegerStorage::U64(target_values), target_shape).expect("target");
         let selector = Tensor::new_integer(IntegerStorage::U64(selector_values), selector_shape)
             .expect("selector");
-        let mut st = StructValue::new();
+        let mut st = runmat_value::UnboundedStructValueBuilder::new();
         st.fields
             .insert("values".to_string(), Value::Tensor(target));
         let index = CellArray::new_with_shape(vec![Value::Tensor(selector)], vec![1, 1])
             .expect("index cell");
         let result = run_getfield(
-            Value::Struct(st),
+            Value::Struct(st.finish()),
             vec![Value::from("values"), Value::Cell(index)],
         )
         .expect("numeric linear selection");
@@ -35,13 +35,13 @@ fn getfield_linear_indexing_follows_matlab_orientation_rules() {
         )
         .expect("target");
         let mask = LogicalArray::new(mask, mask_shape).expect("mask");
-        let mut st = StructValue::new();
+        let mut st = runmat_value::UnboundedStructValueBuilder::new();
         st.fields
             .insert("values".to_string(), Value::Tensor(target));
         let index = CellArray::new_with_shape(vec![Value::LogicalArray(mask)], vec![1, 1])
             .expect("index cell");
         let result = run_getfield(
-            Value::Struct(st),
+            Value::Struct(st.finish()),
             vec![Value::from("values"), Value::Cell(index)],
         )
         .expect("logical linear selection");

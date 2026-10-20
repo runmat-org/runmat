@@ -1,4 +1,5 @@
 use super::*;
+use crate::builtins::deep_learning::arguments::DeepLearningObjectEdit as _;
 use runmat_builtins::{
     CONVOLUTION_1D_LAYER_CLASS, FEATURE_INPUT_LAYER_CLASS, FULLY_CONNECTED_LAYER_CLASS,
     LAYER_NORMALIZATION_LAYER_CLASS, LSTM_LAYER_CLASS, RELU_LAYER_CLASS,
@@ -9,7 +10,9 @@ use runmat_value::ObjectInstance;
 fn layer(class: StaticClassIdentity, properties: Vec<(&str, Value)>) -> Value {
     let mut object = ObjectInstance::new(class.owned());
     for (name, value) in properties {
-        object.properties.insert(name.into(), value);
+        object
+            .replace_dl_property(name, value)
+            .expect("fixture property");
     }
     Value::Object(object)
 }

@@ -1623,10 +1623,10 @@ fn fea_step_result_selects_one_procedure_step_by_authored_id() {
     let runmat_value::Value::Object(object) = &selected else {
         panic!("expected a fea.StepRunResult object");
     };
-    assert_eq!(object.class_name.display_name(), "fea.StepRunResult");
+    assert_eq!(object.class_name().display_name(), "fea.StepRunResult");
     assert_eq!(
-        object.properties.get("run_id"),
-        Some(&runmat_value::Value::String(step.run_id.clone()))
+        object.properties().get("run_id"),
+        Some(&runmat_value::Value::String(step.run_id.clone().into()))
     );
 
     let missing = futures::executor::block_on(crate::builtins::fea::run_results::step_result(

@@ -10,54 +10,54 @@ pub(in crate::execution::value_codec::decode::machine) enum Expansion<'a> {
         shape: &'a [u64],
         values: &'a [ValuePayload],
         index: usize,
-        children: Vec<PartialValue>,
+        children: ControlVec<'a, PartialValue>,
         awaiting: bool,
-        path: String,
+        path: ControlPath<'a>,
     },
     Struct {
         fields: &'a [StructField],
         index: usize,
-        children: Vec<PartialValue>,
+        children: ControlVec<'a, PartialValue>,
         awaiting: bool,
-        path: String,
+        path: ControlPath<'a>,
     },
     Callable {
         callable: &'a CallableValue,
         index: usize,
-        children: Vec<PartialValue>,
+        children: ControlVec<'a, PartialValue>,
         awaiting: bool,
-        path: String,
+        path: ControlPath<'a>,
     },
     Immutable {
         value: &'a RegisteredData,
         index: usize,
-        children: Vec<PartialValue>,
+        children: ControlVec<'a, PartialValue>,
         awaiting: bool,
         class_name: Option<TextCopy<'a>>,
         class_identity: Option<runmat_types::ClassIdentity>,
-        path: String,
+        path: ControlPath<'a>,
     },
     PlainObject {
         value: &'a DurablePlainObject,
         index: usize,
-        children: Vec<PartialValue>,
+        children: ControlVec<'a, PartialValue>,
         awaiting: bool,
-        path: String,
+        path: ControlPath<'a>,
     },
     StructArray {
         value: &'a DurableStructArray,
         field: usize,
         index: usize,
-        children: Vec<PartialValue>,
+        children: ControlVec<'a, PartialValue>,
         awaiting: bool,
-        path: String,
+        path: ControlPath<'a>,
     },
     ObjectArray {
         value: &'a DurableObjectArray,
         index: usize,
-        children: Vec<PartialValue>,
+        children: ControlVec<'a, PartialValue>,
         awaiting: bool,
-        path: String,
+        path: ControlPath<'a>,
     },
 }
 
@@ -75,7 +75,7 @@ pub(super) fn advance<'a>(
             awaiting,
             path,
         } => {
-            retain_completed_child(machine, &mut children, awaiting);
+            retain_completed_child(machine, &mut children, awaiting, &path)?;
             if let Some(child) = values.get(index) {
                 machine.tasks.push(Task::Expand(Expansion::Cell {
                     shape,
@@ -83,18 +83,19 @@ pub(super) fn advance<'a>(
                     index: index + 1,
                     children,
                     awaiting: true,
-                    path: path.clone(),
-                }));
+                    path: path.try_clone()?,
+                }))?;
                 machine.tasks.push(Task::Decode {
                     payload: child,
-                    path: format!("{path}[{index}]"),
-                });
+                    path: path.extended(format_args!("[{index}]"))?,
+                })?;
             } else {
-                machine.tasks.push(Task::Cell(CellTask::new(
+                machine.tasks.push(Task::Cell(machine.boxed(CellTask::new(
                     shape,
-                    TakenValues::from_partials(children),
+                    TakenValues::from_partials(children, machine.runtime())?,
                     path,
-                )));
+                    machine.runtime(),
+                )?)?))?;
             }
         }
         Expansion::Struct {
@@ -104,25 +105,28 @@ pub(super) fn advance<'a>(
             awaiting,
             path,
         } => {
-            retain_completed_child(machine, &mut children, awaiting);
+            retain_completed_child(machine, &mut children, awaiting, &path)?;
             if let Some(field) = fields.get(index) {
                 machine.tasks.push(Task::Expand(Expansion::Struct {
                     fields,
                     index: index + 1,
                     children,
                     awaiting: true,
-                    path: path.clone(),
-                }));
+                    path: path.try_clone()?,
+                }))?;
                 machine.tasks.push(Task::Decode {
                     payload: &field.value,
-                    path: format!("{path}.{}", field.name),
-                });
+                    path: path.extended(format_args!(".{}", field.name))?,
+                })?;
             } else {
-                machine.tasks.push(Task::Struct(Box::new(StructTask::new(
-                    fields,
-                    TakenValues::from_partials(children),
-                    path,
-                ))));
+                machine
+                    .tasks
+                    .push(Task::Struct(machine.boxed(StructTask::new(
+                        fields,
+                        TakenValues::from_partials(children, machine.runtime())?,
+                        path,
+                        machine.runtime,
+                    )?)?))?;
             }
         }
         Expansion::Callable {
@@ -132,29 +136,30 @@ pub(super) fn advance<'a>(
             awaiting,
             path,
         } => {
-            retain_completed_child(machine, &mut children, awaiting);
+            retain_completed_child(machine, &mut children, awaiting, &path)?;
             if let Some(capture) = callable.captures.get(index) {
                 machine.tasks.push(Task::Expand(Expansion::Callable {
                     callable,
                     index: index + 1,
                     children,
                     awaiting: true,
-                    path: path.clone(),
-                }));
+                    path: path.try_clone()?,
+                }))?;
                 machine.tasks.push(Task::Decode {
                     payload: capture,
-                    path: format!("{path}.capture[{index}]"),
-                });
+                    path: path.extended(format_args!(".capture[{index}]"))?,
+                })?;
             } else {
                 let source_resolver = machine.source_resolver();
                 machine
                     .tasks
-                    .push(Task::Callable(Box::new(CallableTask::new(
+                    .push(Task::Callable(machine.boxed(CallableTask::new(
                         callable,
-                        TakenValues::from_partials(children),
+                        TakenValues::from_partials(children, machine.runtime())?,
                         source_resolver,
                         path,
-                    ))));
+                        machine.runtime(),
+                    )?)?))?;
             }
         }
         Expansion::Immutable {
@@ -178,7 +183,7 @@ pub(super) fn advance<'a>(
                         class_name,
                         class_identity,
                         path,
-                    }));
+                    }))?;
                     return Ok(completed);
                 }
                 let name = class_name
@@ -200,7 +205,10 @@ pub(super) fn advance<'a>(
                 {
                     return Err(ValueCodecError::unsupported(
                         &path,
-                        "the immutable value-class codec is not registered in this runtime",
+                        format!(
+                            "unknown immutable value-class type identity `{}`",
+                            value.type_identity,
+                        ),
                     ));
                 }
                 class_identity = Some(identity);
@@ -215,10 +223,10 @@ pub(super) fn advance<'a>(
                     class_name,
                     class_identity,
                     path,
-                }));
+                }))?;
                 return Ok(completed);
             }
-            retain_completed_child(machine, &mut children, awaiting);
+            retain_completed_child(machine, &mut children, awaiting, &path)?;
             if let Some(field) = value.fields.get(index) {
                 machine.tasks.push(Task::Expand(Expansion::Immutable {
                     value,
@@ -227,21 +235,22 @@ pub(super) fn advance<'a>(
                     awaiting: true,
                     class_name,
                     class_identity,
-                    path: path.clone(),
-                }));
+                    path: path.try_clone()?,
+                }))?;
                 machine.tasks.push(Task::Decode {
                     payload: &field.value,
-                    path: format!("{path}.{}", field.name),
-                });
+                    path: path.extended(format_args!(".{}", field.name))?,
+                })?;
             } else {
                 machine
                     .tasks
-                    .push(Task::Immutable(Box::new(ImmutableTask::new(
+                    .push(Task::Immutable(machine.boxed(ImmutableTask::new(
                         value,
                         class_identity.expect("validated class identity"),
-                        TakenValues::from_partials(children),
+                        TakenValues::from_partials(children, machine.runtime())?,
                         path,
-                    ))));
+                        machine.runtime(),
+                    )?)?))?;
             }
         }
         Expansion::PlainObject {
@@ -251,27 +260,28 @@ pub(super) fn advance<'a>(
             awaiting,
             path,
         } => {
-            retain_completed_child(machine, &mut children, awaiting);
+            retain_completed_child(machine, &mut children, awaiting, &path)?;
             if let Some(field) = value.properties.get(index) {
                 machine.tasks.push(Task::Expand(Expansion::PlainObject {
                     value,
                     index: index + 1,
                     children,
                     awaiting: true,
-                    path: path.clone(),
-                }));
+                    path: path.try_clone()?,
+                }))?;
                 machine.tasks.push(Task::Decode {
                     payload: &field.value,
-                    path: format!("{path}.{}", field.name),
-                });
+                    path: path.extended(format_args!(".{}", field.name))?,
+                })?;
             } else {
                 machine
                     .tasks
-                    .push(Task::PlainObject(Box::new(PlainObjectTask::new(
+                    .push(Task::PlainObject(machine.boxed(PlainObjectTask::new(
                         value,
-                        TakenValues::from_partials(children),
+                        TakenValues::from_partials(children, machine.runtime())?,
                         path,
-                    ))));
+                        machine.runtime(),
+                    )?)?))?;
             }
         }
         Expansion::StructArray {
@@ -282,7 +292,7 @@ pub(super) fn advance<'a>(
             awaiting,
             path,
         } => {
-            retain_completed_child(machine, &mut children, awaiting);
+            retain_completed_child(machine, &mut children, awaiting, &path)?;
             if let Some(column) = value.fields.get(field) {
                 if let Some(child) = column.values.get(index) {
                     machine.tasks.push(Task::Expand(Expansion::StructArray {
@@ -291,12 +301,12 @@ pub(super) fn advance<'a>(
                         index: index + 1,
                         children,
                         awaiting: true,
-                        path: path.clone(),
-                    }));
+                        path: path.try_clone()?,
+                    }))?;
                     machine.tasks.push(Task::Decode {
                         payload: child,
-                        path: format!("{path}.{}[{index}]", column.name),
-                    });
+                        path: path.extended(format_args!(".{}[{index}]", column.name))?,
+                    })?;
                 } else {
                     machine.tasks.push(Task::Expand(Expansion::StructArray {
                         value,
@@ -305,16 +315,16 @@ pub(super) fn advance<'a>(
                         children,
                         awaiting: false,
                         path,
-                    }));
+                    }))?;
                 }
             } else {
                 machine
                     .tasks
-                    .push(Task::StructArray(Box::new(StructArrayTask::new(
+                    .push(Task::StructArray(machine.boxed(StructArrayTask::new(
                         value,
-                        TakenValues::from_partials(children),
+                        TakenValues::from_partials(children, machine.runtime())?,
                         path,
-                    ))));
+                    )?)?))?;
             }
         }
         Expansion::ObjectArray {
@@ -324,42 +334,45 @@ pub(super) fn advance<'a>(
             awaiting,
             path,
         } => {
-            retain_completed_child(machine, &mut children, awaiting);
+            retain_completed_child(machine, &mut children, awaiting, &path)?;
             if let Some(object) = value.elements.get(index) {
                 machine.tasks.push(Task::Expand(Expansion::ObjectArray {
                     value,
                     index: index + 1,
                     children,
                     awaiting: true,
-                    path: path.clone(),
-                }));
+                    path: path.try_clone()?,
+                }))?;
                 machine.tasks.push(Task::Expand(Expansion::PlainObject {
                     value: object,
                     index: 0,
-                    children: Vec::with_capacity(object.properties.len()),
+                    children: machine.control.vector(object.properties.len(), &path)?,
                     awaiting: false,
-                    path: format!("{path}[{index}]"),
-                }));
+                    path: path.extended(format_args!("[{index}]"))?,
+                }))?;
             } else {
                 machine
                     .tasks
-                    .push(Task::ObjectArray(Box::new(ObjectArrayTask::new(
+                    .push(Task::ObjectArray(machine.boxed(ObjectArrayTask::new(
                         value,
-                        TakenValues::from_partials(children),
+                        TakenValues::from_partials(children, machine.runtime())?,
                         path,
-                    ))));
+                        machine.runtime(),
+                    )?)?))?;
             }
         }
     }
     Ok(1)
 }
 
-fn retain_completed_child(
+fn retain_completed_child<'a>(
     machine: &mut DecodeMachine<'_>,
-    children: &mut Vec<PartialValue>,
+    children: &mut ControlVec<'a, PartialValue>,
     awaiting: bool,
-) {
+    path: &str,
+) -> Result<(), ValueCodecError> {
     if awaiting {
-        children.push(machine.pop_partial());
+        children.push(machine.pop_partial(), path)?;
     }
+    Ok(())
 }

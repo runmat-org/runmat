@@ -71,9 +71,9 @@ fn map_string_result<T>(
 async fn fread_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     fid: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
-    let eval = evaluate_in(runtime.as_ref(), &fid, &rest).await?;
+    let eval = evaluate_in_view(runtime.as_ref(), &fid, rest.view()).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Value::output_list(Vec::new()));
@@ -136,6 +136,19 @@ pub async fn evaluate_in(
     runtime: Option<&crate::context::RuntimeContext>,
     fid_value: &Value,
     rest: &[Value],
+) -> BuiltinResult<FreadEval> {
+    evaluate_in_view(
+        runtime,
+        fid_value,
+        crate::call::FunctionArgumentView::from_slice(rest),
+    )
+    .await
+}
+
+pub async fn evaluate_in_view(
+    runtime: Option<&crate::context::RuntimeContext>,
+    fid_value: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<FreadEval> {
     let mut cooperation = super::cooperation::FileCooperation::new(runtime, BUILTIN_NAME);
     let prepared = PreparedFreadCall::new(fid_value, rest)?;

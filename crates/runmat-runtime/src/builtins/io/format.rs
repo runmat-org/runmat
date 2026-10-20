@@ -26,22 +26,22 @@ fn format_error_with(
     binding_variant = "default",
     builtin_path = "crate::builtins::io::format"
 )]
-async fn format_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn format_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     if crate::output_count::current_output_count().unwrap_or(0) > 0 {
         return Err(format_error_with(
             &runmat_builtins::FORMAT_ERROR_TOO_MANY_OUTPUTS,
             "format: expected no output arguments",
         ));
     }
-    let keyword = match args.as_slice() {
-        [] => {
+    let keyword = match (args.len(), args.first()) {
+        (0, _) => {
             set_display_format(FormatMode::Short);
             return Ok(empty_value());
         }
-        [Value::String(s)] => s.clone(),
-        [value @ Value::CharArray(_)] =>
-            crate::builtins::common::validation::value_text_scalar_string(value)
-                .ok_or_else(|| format_error_with(&FORMAT_ERROR_ARG_CONFIG, "format: unrecognized argument; expected a format name such as 'short' or 'long'"))?,
+        (1, Some(Value::String(s))) => std::borrow::Cow::Borrowed(s.as_str()),
+        (1, Some(value @ Value::CharArray(_))) =>
+            std::borrow::Cow::Owned(crate::builtins::common::validation::value_text_scalar_string(value)
+                .ok_or_else(|| format_error_with(&FORMAT_ERROR_ARG_CONFIG, "format: unrecognized argument; expected a format name such as 'short' or 'long'"))?),
         _ => {
             return Err(format_error_with(
                 &FORMAT_ERROR_ARG_CONFIG,
@@ -144,23 +144,29 @@ mod tests {
     #[test]
     fn test_spacing_modes_do_not_change_numeric_format() {
         block_on(async {
-            format_builtin(vec![Value::String("long".to_string())])
-                .await
-                .unwrap();
+            format_builtin(crate::builtins::common::test_support::builtin_arguments(
+                vec![Value::String("long".to_string().into())],
+            ))
+            .await
+            .unwrap();
             assert_eq!(get_display_format(), FormatMode::Long);
 
-            format_builtin(vec![Value::String("compact".to_string())])
-                .await
-                .unwrap();
+            format_builtin(crate::builtins::common::test_support::builtin_arguments(
+                vec![Value::String("compact".to_string().into())],
+            ))
+            .await
+            .unwrap();
             assert_eq!(
                 get_display_format(),
                 FormatMode::Long,
                 "compact must not reset numeric format"
             );
 
-            format_builtin(vec![Value::String("loose".to_string())])
-                .await
-                .unwrap();
+            format_builtin(crate::builtins::common::test_support::builtin_arguments(
+                vec![Value::String("loose".to_string().into())],
+            ))
+            .await
+            .unwrap();
             assert_eq!(
                 get_display_format(),
                 FormatMode::Long,
@@ -183,9 +189,11 @@ mod tests {
     #[test]
     fn format_builtin_long_sets_mode_and_pi_displays_full_precision() {
         block_on(async {
-            format_builtin(vec![Value::String("long".to_string())])
-                .await
-                .unwrap();
+            format_builtin(crate::builtins::common::test_support::builtin_arguments(
+                vec![Value::String("long".to_string().into())],
+            ))
+            .await
+            .unwrap();
             assert_eq!(format_number(PI), "3.141592653589793");
             set_display_format(FormatMode::Short);
         });
@@ -194,9 +202,11 @@ mod tests {
     #[test]
     fn format_builtin_short_pi_displays_four_decimal_places() {
         block_on(async {
-            format_builtin(vec![Value::String("short".to_string())])
-                .await
-                .unwrap();
+            format_builtin(crate::builtins::common::test_support::builtin_arguments(
+                vec![Value::String("short".to_string().into())],
+            ))
+            .await
+            .unwrap();
             assert_eq!(format_number(PI), "3.1416");
             assert_eq!(format_number(0.5), "0.5000");
             assert_eq!(format_number(1.0), "1");
@@ -206,9 +216,11 @@ mod tests {
     #[test]
     fn format_builtin_short_e_always_scientific() {
         block_on(async {
-            format_builtin(vec![Value::String("shortE".to_string())])
-                .await
-                .unwrap();
+            format_builtin(crate::builtins::common::test_support::builtin_arguments(
+                vec![Value::String("shortE".to_string().into())],
+            ))
+            .await
+            .unwrap();
             assert_eq!(format_number(PI), "3.1416e+00");
             assert_eq!(format_number(1000.0), "1.0000e+03");
             set_display_format(FormatMode::Short);
@@ -218,10 +230,16 @@ mod tests {
     #[test]
     fn format_builtin_no_args_resets_to_short() {
         block_on(async {
-            format_builtin(vec![Value::String("long".to_string())])
-                .await
-                .unwrap();
-            format_builtin(vec![]).await.unwrap();
+            format_builtin(crate::builtins::common::test_support::builtin_arguments(
+                vec![Value::String("long".to_string().into())],
+            ))
+            .await
+            .unwrap();
+            format_builtin(crate::builtins::common::test_support::builtin_arguments(
+                vec![],
+            ))
+            .await
+            .unwrap();
             assert_eq!(get_display_format(), FormatMode::Short);
         });
     }
@@ -230,9 +248,11 @@ mod tests {
     fn format_builtin_rational_pi_approximation() {
         block_on(async {
             // Use MATLAB's canonical keyword "rat" (not "rational").
-            format_builtin(vec![Value::String("rat".to_string())])
-                .await
-                .unwrap();
+            format_builtin(crate::builtins::common::test_support::builtin_arguments(
+                vec![Value::String("rat".to_string().into())],
+            ))
+            .await
+            .unwrap();
             // 355/113 is the classic rational approximation of pi
             assert_eq!(format_number(PI), "355/113");
             set_display_format(FormatMode::Short);
@@ -242,9 +262,11 @@ mod tests {
     #[test]
     fn format_builtin_hex_pi() {
         block_on(async {
-            format_builtin(vec![Value::String("hex".to_string())])
-                .await
-                .unwrap();
+            format_builtin(crate::builtins::common::test_support::builtin_arguments(
+                vec![Value::String("hex".to_string().into())],
+            ))
+            .await
+            .unwrap();
             assert_eq!(format_number(PI), "400921fb54442d18");
             set_display_format(FormatMode::Short);
         });
@@ -253,9 +275,11 @@ mod tests {
     #[test]
     fn format_builtin_small_value_goes_scientific_in_short() {
         block_on(async {
-            format_builtin(vec![Value::String("short".to_string())])
-                .await
-                .unwrap();
+            format_builtin(crate::builtins::common::test_support::builtin_arguments(
+                vec![Value::String("short".to_string().into())],
+            ))
+            .await
+            .unwrap();
             assert_eq!(format_number(1e-5), "1.0000e-05");
         });
     }
@@ -264,7 +288,10 @@ mod tests {
     fn captured_output_rejects_before_mode_change() {
         set_display_format(FormatMode::Long);
         let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
-        let err = block_on(format_builtin(vec![Value::from("hex")])).expect_err("sink output");
+        let err = block_on(format_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from("hex")]),
+        ))
+        .expect_err("sink output");
         assert_eq!(err.identifier(), Some("RunMat:format:TooManyOutputs"));
         assert_eq!(get_display_format(), FormatMode::Long);
         set_display_format(FormatMode::Short);
@@ -275,11 +302,19 @@ mod tests {
         let paged =
             runmat_value::CharArray::new_with_shape("long".chars().collect(), vec![1, 2, 2])
                 .expect("paged char");
-        assert!(block_on(format_builtin(vec![Value::CharArray(paged)])).is_err());
+        assert!(block_on(format_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::CharArray(paged)])
+        ))
+        .is_err());
         let trailing =
             runmat_value::CharArray::new_with_shape("long".chars().collect(), vec![1, 4, 1])
                 .expect("trailing singleton");
-        block_on(format_builtin(vec![Value::CharArray(trailing)])).expect("valid row");
+        block_on(format_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::CharArray(
+                trailing,
+            )]),
+        ))
+        .expect("valid row");
         assert_eq!(get_display_format(), FormatMode::Long);
         set_display_format(FormatMode::Short);
     }

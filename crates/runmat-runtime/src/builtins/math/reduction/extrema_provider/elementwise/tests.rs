@@ -88,12 +88,18 @@ fn successful_fill_then_unsupported_pair_is_terminal_without_scalar_replay() {
 
 async fn full(name: &str, input: Value, other: Value) -> BuiltinResult<(Value, Value)> {
     match name {
-        "min" => crate::builtins::math::reduction::min::evaluate(input, &[other])
-            .await
-            .map(|result| result.into_pair()),
-        _ => crate::builtins::math::reduction::max::evaluate(input, &[other])
-            .await
-            .map(|result| result.into_pair()),
+        "min" => crate::builtins::math::reduction::min::evaluate(
+            input,
+            crate::call::FunctionArgumentView::from_slice(&[other]),
+        )
+        .await
+        .map(|result| result.into_pair()),
+        _ => crate::builtins::math::reduction::max::evaluate(
+            input,
+            crate::call::FunctionArgumentView::from_slice(&[other]),
+        )
+        .await
+        .map(|result| result.into_pair()),
     }
 }
 #[cfg_attr(not(target_arch = "wasm32"), test)]

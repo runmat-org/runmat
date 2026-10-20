@@ -1,6 +1,7 @@
 use super::*;
 
 pub(super) async fn evaluate_pulse_train(
+    runtime: Option<&crate::context::RuntimeContext>,
     t: &Tensor,
     delays: &[PulseInstance],
     source: &PulseSource,
@@ -8,41 +9,63 @@ pub(super) async fn evaluate_pulse_train(
     let times = tensor::tensor_values_f64_cow(t);
     let mut out = vec![0.0; times.len()];
     for pulse in delays {
-        match source {
-            PulseSource::Rect { width } => {
+        match &source.waveform {
+            PulseWaveform::Rect { width } => {
                 for (idx, &time) in times.iter().enumerate() {
                     out[idx] += pulse.amplitude * rectpuls_scalar(time - pulse.delay, *width);
                 }
             }
-            PulseSource::Tri { width, skew } => {
+            PulseWaveform::Tri { width, skew } => {
                 for (idx, &time) in times.iter().enumerate() {
                     out[idx] += pulse.amplitude * tripuls_scalar(time - pulse.delay, *width, *skew);
                 }
             }
-            PulseSource::Gaus { params } => {
+            PulseWaveform::Gaus { params } => {
                 for (idx, &time) in times.iter().enumerate() {
                     out[idx] += pulse.amplitude * gauspuls_scalar(time - pulse.delay, *params);
                 }
             }
-            PulseSource::Prototype { samples, fs } => {
+            PulseWaveform::Prototype { samples, fs } => {
                 for (idx, &time) in times.iter().enumerate() {
                     out[idx] += pulse.amplitude * prototype_value(samples, *fs, time - pulse.delay);
                 }
             }
-            PulseSource::Callback { handle, args } => {
+            PulseWaveform::Callback(handle) => {
+                let args = &source.arguments;
                 let shifted = shifted_time_value(t, pulse.delay)?;
-                let mut call_args = Vec::with_capacity(args.len() + 1);
-                call_args.push(shifted);
-                call_args.extend(args.iter().cloned());
-                let value = crate::call_feval_async_with_outputs(handle.clone(), &call_args, 1)
-                    .await
-                    .map_err(|err| {
-                        pulstran_error_with_source(
-                            &PULSTRAN_ERROR_INVALID_PULSE,
-                            "pulse function call failed",
-                            err,
-                        )
-                    })?;
+                let source = args.fork().into_function_arguments();
+                let call_args = crate::execution::RootedValues::transform_arguments(
+                    &source,
+                    source.len() + 1,
+                    None,
+                    runtime,
+                    |slot| {
+                        Ok(if slot == 0 {
+                            shifted.clone()
+                        } else {
+                            source
+                                .get(slot - 1)
+                                .expect("callback argument slot")
+                                .clone()
+                        })
+                    },
+                )?;
+                let value = crate::call::feval::invoke_retained(
+                    runtime,
+                    handle.clone(),
+                    call_args.into(),
+                    1,
+                    None,
+                )
+                .await
+                .and_then(crate::call::arguments::project_rooted_legacy_builtin_value_abi)
+                .map_err(|err| {
+                    pulstran_error_with_source(
+                        &PULSTRAN_ERROR_INVALID_PULSE,
+                        "pulse function call failed",
+                        err,
+                    )
+                })?;
                 let samples = value
                     .with_owned_async(|value| callback_samples(value, times.len()))
                     .await?;

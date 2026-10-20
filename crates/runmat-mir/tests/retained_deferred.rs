@@ -58,8 +58,8 @@ fn original_async_declaration_survives_wire_and_local_function_remapping() {
         }) = &fact.fact
         {
             assert_eq!(
-                output.kind,
-                runmat_types::ValueKindFact::Unknown,
+                *output,
+                runmat_types::ValueSequenceFact::dynamic(),
                 "foreign target must not borrow the colliding local function's numeric output"
             );
             futures += 1;

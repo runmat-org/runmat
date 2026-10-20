@@ -298,7 +298,7 @@ fn var_dim_std_failure_is_terminal_and_successful_std_makes_square_terminal() {
         let _selected = ThreadProviderGuard::set(Some(provider));
         let result = futures::executor::block_on(super::super::var::var_builtin(
             Value::GpuTensor(handle.clone()),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ));
         if matches!(mode, Mode::Unsupported) {
             result.expect("certified initial unsupported may gather");
@@ -394,7 +394,7 @@ fn variance_square_error_preserves_primary_when_std_retirement_also_fails() {
     let _selected = ThreadProviderGuard::set(Some(provider));
     let error = futures::executor::block_on(super::super::var::var_builtin(
         Value::GpuTensor(handle.clone()),
-        vec![],
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
     ))
     .expect_err("square and intermediate cleanup both fail");
     assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
@@ -420,7 +420,7 @@ fn successful_square_is_retired_if_std_intermediate_retirement_fails() {
     let _selected = ThreadProviderGuard::set(Some(provider));
     let error = futures::executor::block_on(super::super::var::var_builtin(
         Value::GpuTensor(handle.clone()),
-        vec![],
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
     ))
     .expect_err("successful square cannot publish after intermediate cleanup failure");
     assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
@@ -451,7 +451,7 @@ fn var_rejects_invalid_std_before_square_and_keeps_borrowed_input() {
         let _selected = ThreadProviderGuard::set(Some(provider));
         let error = futures::executor::block_on(super::super::var::var_builtin(
             Value::GpuTensor(handle.clone()),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .expect_err("invalid std result must not reach variance square");
         assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
@@ -566,7 +566,7 @@ fn f32_nd_and_empty_var_results_stay_resident_after_valid_std_and_square() {
         let _selected = ThreadProviderGuard::set(Some(provider));
         let result = futures::executor::block_on(super::super::var::var_builtin(
             Value::GpuTensor(handle.clone()),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .expect("supported resident var shape");
         let Value::GpuTensor(output) = result else {
@@ -597,7 +597,7 @@ fn malformed_variance_square_is_terminal_and_retires_results() {
         let _selected = ThreadProviderGuard::set(Some(provider));
         let error = futures::executor::block_on(super::super::var::var_builtin(
             Value::GpuTensor(handle.clone()),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .expect_err("malformed square is terminal");
         assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);

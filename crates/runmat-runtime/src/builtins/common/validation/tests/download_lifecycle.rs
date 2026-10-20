@@ -85,15 +85,19 @@ fn nested_download_cancellation_and_failure_preserve_borrowed_source() {
         let handle = crate::builtins::common::gpu_helpers::upload_tensor(owner, &tensor).unwrap();
         let value =
             Value::Cell(CellArray::new(vec![Value::GpuTensor(handle.clone())], 1, 1).unwrap());
-        let mut future = Box::pin(must_be_nonmissing::evaluate(vec![value.clone()]));
+        let mut future = Box::pin(must_be_nonmissing::evaluate(
+            crate::builtins::common::validation::tests::retained_arguments(vec![value.clone()]),
+        ));
         let mut cx = std::task::Context::from_waker(futures::task::noop_waker_ref());
         assert!(future.as_mut().poll(&mut cx).is_pending());
         assert_eq!(owner.downloads.load(Ordering::SeqCst), 1);
         drop(future);
         assert_eq!(owner.abandoned.load(Ordering::SeqCst), 1);
         owner.mode.store(2, Ordering::SeqCst);
-        let error = futures::executor::block_on(must_be_nonmissing::evaluate(vec![value.clone()]))
-            .unwrap_err();
+        let error = futures::executor::block_on(must_be_nonmissing::evaluate(
+            crate::builtins::common::validation::tests::retained_arguments(vec![value.clone()]),
+        ))
+        .unwrap_err();
         assert_eq!(error.identifier(), Some("RunMat:gpu:DownloadFailed"));
         owner.mode.store(0, Ordering::SeqCst);
         assert!(futures::executor::block_on(owner.download_numeric(&handle)).is_ok());
@@ -105,8 +109,10 @@ fn nested_download_cancellation_and_failure_preserve_borrowed_source() {
         let nested = Value::Cell(CellArray::new(vec![Value::GpuTensor(explicit)], 1, 1).unwrap());
         let reads = owner.downloads.load(Ordering::SeqCst);
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let error =
-            futures::executor::block_on(must_be_non_nan::evaluate(vec![nested])).unwrap_err();
+        let error = futures::executor::block_on(must_be_non_nan::evaluate(
+            crate::builtins::common::validation::tests::retained_arguments(vec![nested]),
+        ))
+        .unwrap_err();
         assert_eq!(
             error.identifier(),
             Some("RunMat:compatibility:mustBeNonNanResidentInput")

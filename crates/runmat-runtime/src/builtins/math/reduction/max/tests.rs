@@ -3,7 +3,9 @@ use futures::executor::block_on;
 use runmat_value::{ObjectInstance, Tensor, Value};
 
 fn max_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    block_on(super::max_builtin(None, value, rest))
+    let rest =
+        crate::execution::RootedValues::new(rest).map_err(|error| error.into_runtime_error())?;
+    block_on(super::max_builtin(None, value, rest.into()))
 }
 
 fn nanmax_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -87,9 +89,7 @@ fn categorical_early_route_keeps_table_owned_argument_and_variable_errors() {
     );
 
     let mut malformed_ordinal = ObjectInstance::new(runmat_types::standard::CATEGORICAL);
-    malformed_ordinal
-        .properties
-        .insert("Ordinal".into(), Value::Bool(true));
+    malformed_ordinal.replace_property_unbounded("Ordinal".into(), Value::Bool(true));
     let error = max_builtin(Value::Object(malformed_ordinal), Vec::new())
         .expect_err("missing categorical Codes");
     assert_eq!(
@@ -99,7 +99,10 @@ fn categorical_early_route_keeps_table_owned_argument_and_variable_errors() {
 }
 
 fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<MaxEvaluation> {
-    block_on(super::evaluate(value, rest))
+    block_on(super::evaluate(
+        value,
+        crate::call::FunctionArgumentView::from_slice(rest),
+    ))
 }
 
 fn placeholder() -> Value {

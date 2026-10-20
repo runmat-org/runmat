@@ -1,27 +1,34 @@
 use super::super::metadata::MISSING_TEXT;
 use super::super::numeric::is_missing_text;
+use super::super::text_output::TextSelection;
 use super::lines::FillLines;
 use super::Neighbor;
+use runmat_value::StringArray;
 
-pub(super) fn fill_neighbor_text(data: &mut [String], lines: &FillLines, dir: Neighbor) {
+pub(super) fn fill_neighbor_text<T>(data: &mut [T], lines: &FillLines, dir: Neighbor)
+where
+    T: Clone + AsRef<str> + From<&'static str>,
+{
     for line in lines.iter() {
         fill_line_text(data, line.start, line.length, line.stride, dir);
     }
 }
 
-pub(super) fn fill_line_text(
-    data: &mut [String],
+pub(super) fn fill_line_text<T>(
+    data: &mut [T],
     start: usize,
     len: usize,
     step: usize,
     dir: Neighbor,
-) {
+) where
+    T: Clone + AsRef<str> + From<&'static str>,
+{
     match dir {
         Neighbor::Previous => {
-            let mut last: Option<String> = None;
+            let mut last: Option<T> = None;
             for i in 0..len {
                 let idx = start + i * step;
-                if is_missing_text(&data[idx]) {
+                if is_missing_text(data[idx].as_ref()) {
                     if let Some(value) = &last {
                         data[idx] = value.clone();
                     }
@@ -31,10 +38,10 @@ pub(super) fn fill_line_text(
             }
         }
         Neighbor::Next => {
-            let mut next: Option<String> = None;
+            let mut next: Option<T> = None;
             for i in (0..len).rev() {
                 let idx = start + i * step;
-                if is_missing_text(&data[idx]) {
+                if is_missing_text(data[idx].as_ref()) {
                     if let Some(value) = &next {
                         data[idx] = value.clone();
                     }
@@ -46,21 +53,137 @@ pub(super) fn fill_line_text(
     }
 }
 
-pub(super) fn fill_nearest_text(data: &mut [String], lines: &FillLines) {
+pub(super) fn fill_nearest_text<T>(data: &mut [T], lines: &FillLines)
+where
+    T: Clone + AsRef<str> + From<&'static str>,
+{
     for line in lines.iter() {
         fill_nearest_line_text(data, line.start, line.length, line.stride);
     }
 }
 
-pub(super) fn fill_nearest_line_text(data: &mut [String], start: usize, len: usize, step: usize) {
+pub(super) fn fill_nearest_line_text<T>(data: &mut [T], start: usize, len: usize, step: usize)
+where
+    T: Clone + AsRef<str> + From<&'static str>,
+{
     let mut runs = super::runs::MissingRuns::new(len);
-    while let Some(run) = runs.next(|position| is_missing_text(&data[start + position * step])) {
+    while let Some(run) =
+        runs.next(|position| is_missing_text(data[start + position * step].as_ref()))
+    {
         for position in run.start..run.end {
             data[start + position * step] = run.nearest_source(position).map_or_else(
-                || MISSING_TEXT.to_owned(),
+                || T::from(MISSING_TEXT),
                 |source| data[start + source * step].clone(),
             );
         }
+    }
+}
+
+/// Source indices are computed from the original input, never from a
+/// partially replaced line. `usize::MAX` denotes the one retained literal.
+pub(super) fn fill_selection_map(
+    input: &StringArray,
+    lines: &FillLines,
+    method: NeighborSelection,
+    destinations: &mut [usize],
+    mut checkpoint: impl FnMut(usize) -> crate::BuiltinResult<()>,
+) -> crate::BuiltinResult<()> {
+    for (index, destination) in destinations.iter_mut().enumerate() {
+        if index % 4096 == 0 {
+            checkpoint(index)?;
+        }
+        *destination = index;
+    }
+    for line in lines.iter() {
+        match method {
+            NeighborSelection::Constant => {
+                for position in 0..line.length {
+                    let index = line.start + position * line.stride;
+                    if position % 4096 == 0 {
+                        checkpoint(index)?;
+                    }
+                    if is_missing_text(input.data()[index].as_str()) {
+                        destinations[index] = usize::MAX;
+                    }
+                }
+            }
+            NeighborSelection::Previous | NeighborSelection::Next => {
+                let reverse = matches!(method, NeighborSelection::Next);
+                let mut source = None;
+                for ordinal in 0..line.length {
+                    let position = if reverse {
+                        line.length - 1 - ordinal
+                    } else {
+                        ordinal
+                    };
+                    let index = line.start + position * line.stride;
+                    if ordinal % 4096 == 0 {
+                        checkpoint(index)?;
+                    }
+                    if is_missing_text(input.data()[index].as_str()) {
+                        if let Some(source) = source {
+                            destinations[index] = source;
+                        }
+                    } else {
+                        source = Some(index);
+                    }
+                }
+            }
+            NeighborSelection::Nearest => {
+                let mut previous = None;
+                for position in 0..line.length {
+                    let index = line.start + position * line.stride;
+                    if position % 4096 == 0 {
+                        checkpoint(index)?;
+                    }
+                    if is_missing_text(input.data()[index].as_str()) {
+                        destinations[index] = previous.unwrap_or(usize::MAX);
+                    } else {
+                        previous = Some(index);
+                    }
+                }
+                let mut next = None;
+                for ordinal in 0..line.length {
+                    let position = line.length - 1 - ordinal;
+                    let index = line.start + position * line.stride;
+                    if ordinal % 4096 == 0 {
+                        checkpoint(index)?;
+                    }
+                    if is_missing_text(input.data()[index].as_str()) {
+                        if let Some(next_index) = next {
+                            let previous_distance = if destinations[index] == usize::MAX {
+                                usize::MAX
+                            } else {
+                                (index - destinations[index]) / line.stride
+                            };
+                            let next_distance = (next_index - index) / line.stride;
+                            if next_distance < previous_distance {
+                                destinations[index] = next_index;
+                            }
+                        }
+                    } else {
+                        next = Some(index);
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum NeighborSelection {
+    Constant,
+    Previous,
+    Next,
+    Nearest,
+}
+
+pub(super) fn selected(index: usize) -> TextSelection {
+    if index == usize::MAX {
+        TextSelection::Literal
+    } else {
+        TextSelection::Input(index)
     }
 }
 

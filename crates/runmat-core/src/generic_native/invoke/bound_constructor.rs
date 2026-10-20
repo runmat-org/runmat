@@ -78,7 +78,6 @@ pub(super) async fn invoke(
                     &execution_sources,
                 )?;
                 if is_native {
-                    let function = super::program_function(function)?;
                     let selected = selected_runtime.clone();
                     return selected
                         .scope(super::native_semantic::invoke_rooted(

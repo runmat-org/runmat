@@ -214,10 +214,12 @@ mod tests {
     use runmat_value::{IntValue, IntegerStorage, Tensor};
 
     fn model(value: f64) -> Value {
-        block_on(super::super::tf_builtin(vec![
-            Value::Num(value),
-            Value::Num(1.0),
-        ]))
+        block_on(super::super::tf_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(value),
+                Value::Num(1.0),
+            ]),
+        ))
         .expect("scalar transfer function")
     }
 
@@ -225,7 +227,7 @@ mod tests {
         let Value::Object(object) = value else {
             panic!("tf object expected")
         };
-        let Value::Tensor(tensor) = &object.properties[name] else {
+        let Value::Tensor(tensor) = &object.properties()[name] else {
             panic!("real coefficients expected")
         };
         tensor.materialize_f64().clone()
@@ -404,8 +406,7 @@ mod tests {
                 unreachable!()
             };
             object
-                .properties
-                .insert("Numerator".into(), Value::GpuTensor(resident.clone()));
+                .replace_property_unbounded("Numerator".into(), Value::GpuTensor(resident.clone()));
             provider.reset_telemetry();
             let error = block_on(tf_plus(sys, Value::from("bad"))).unwrap_err();
             assert_eq!(error.identifier(), Some("RunMat:tf:InvalidArgument"));
@@ -416,8 +417,7 @@ mod tests {
                 unreachable!()
             };
             object
-                .properties
-                .insert("Numerator".into(), Value::GpuTensor(resident.clone()));
+                .replace_property_unbounded("Numerator".into(), Value::GpuTensor(resident.clone()));
             provider.reset_telemetry();
             let error = block_on(tf_plus(sys, Value::Num(f64::INFINITY))).unwrap_err();
             assert_eq!(error.identifier(), Some("RunMat:tf:InvalidCoefficients"));
@@ -427,9 +427,7 @@ mod tests {
             let Value::Object(object) = &mut sys else {
                 unreachable!()
             };
-            object
-                .properties
-                .insert("Numerator".into(), Value::GpuTensor(resident));
+            object.replace_property_unbounded("Numerator".into(), Value::GpuTensor(resident));
             provider.reset_telemetry();
             let error = block_on(tf_power(sys, Value::Num(1.5))).unwrap_err();
             assert_eq!(error.identifier(), Some("RunMat:tf:InvalidExponent"));
@@ -454,9 +452,7 @@ mod tests {
             let Value::Object(object) = &mut sys else {
                 unreachable!()
             };
-            object
-                .properties
-                .insert("Numerator".into(), Value::GpuTensor(numerator));
+            object.replace_property_unbounded("Numerator".into(), Value::GpuTensor(numerator));
             provider.reset_telemetry();
             for result in [
                 block_on(tf_power(sys.clone(), Value::GpuTensor(exponent.clone()))),
@@ -512,9 +508,7 @@ mod tests {
             let Value::Object(object) = &mut sys else {
                 unreachable!()
             };
-            object
-                .properties
-                .insert("Numerator".into(), Value::GpuTensor(resident));
+            object.replace_property_unbounded("Numerator".into(), Value::GpuTensor(resident));
             provider.reset_telemetry();
             let error = block_on(tf_mtimes(sys, gain)).unwrap_err();
             assert_eq!(
@@ -537,9 +531,7 @@ mod tests {
             let Value::Object(object) = &mut sys else {
                 unreachable!()
             };
-            object
-                .properties
-                .insert("Numerator".into(), Value::GpuTensor(resident));
+            object.replace_property_unbounded("Numerator".into(), Value::GpuTensor(resident));
             provider.reset_telemetry();
             let result = block_on(tf_plus(sys, model(3.0))).expect("resident model operand");
             assert_eq!(coefficients(&result, "Numerator"), vec![5.0]);
@@ -559,9 +551,7 @@ mod tests {
             let Value::Object(object) = &mut sys else {
                 unreachable!()
             };
-            object
-                .properties
-                .insert("Numerator".into(), Value::GpuTensor(resident));
+            object.replace_property_unbounded("Numerator".into(), Value::GpuTensor(resident));
             provider.reset_telemetry();
             drop(tf_mtimes(sys, model(3.0)));
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);

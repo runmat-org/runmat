@@ -44,9 +44,13 @@ fn qammod_error(message: impl Into<String>) -> RuntimeError {
     binding_variant = "default",
     builtin_path = "crate::builtins::comms::qammod"
 )]
-async fn qammod_builtin(x: Value, m: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn qammod_builtin(
+    x: Value,
+    m: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     let order = parse_modulation_order(&m)?;
-    let options = ParsedOptions::parse(&rest, order, default_output_dtype(&x))?;
+    let options = ParsedOptions::parse(rest.view(), order, default_output_dtype(&x))?;
     match x {
         Value::GpuTensor(handle) => qammod_gpu(handle, order, options).await,
         other => {
@@ -232,7 +236,7 @@ enum OutputDType {
 
 impl ParsedOptions {
     fn parse(
-        args: &[Value],
+        args: crate::call::FunctionArgumentView<'_>,
         order: usize,
         default_output_dtype: OutputDType,
     ) -> BuiltinResult<Self> {
@@ -825,11 +829,11 @@ fn value_as_bool(value: &Value, name: &str) -> BuiltinResult<bool> {
     }
 }
 
-fn value_as_string(value: &Value) -> Option<String> {
+fn value_as_string(value: &Value) -> Option<runmat_value::Utf8Text> {
     match value {
         Value::String(s) => Some(s.clone()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
+        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].clone()),
+        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data().iter().collect::<String>().into()),
         _ => None,
     }
 }

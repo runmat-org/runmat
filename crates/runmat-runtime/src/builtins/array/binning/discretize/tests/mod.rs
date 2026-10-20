@@ -8,7 +8,11 @@ use runmat_value::Value;
 use super::discretize_builtin;
 
 fn call(x: Value, edges: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    block_on(discretize_builtin(x, edges, rest))
+    block_on(discretize_builtin(
+        x,
+        edges,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    ))
 }
 
 fn tensor(value: Value) -> runmat_value::Tensor {

@@ -16,6 +16,6 @@ use crate::BuiltinResult;
     binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::path"
 )]
-async fn path_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn path_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     execute::run(args).await
 }

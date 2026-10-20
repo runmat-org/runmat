@@ -1,12 +1,12 @@
 //! Explicit selected-pack compilation. The ordinary embedded archive route is
 //! unchanged; this path never downgrades a failed selected selection to it.
 
-mod admission;
+use runmat_aot::selected_admission as admission;
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, bail, Result};
 use runmat_aot::archive::{build_selected_runtime_archive, RuntimeArchiveEncoding};
 use runmat_aot::compile::build_program_link_plan_with_interop;
 use runmat_aot::link::{link_selected_standalone, LinkRequest};
@@ -14,7 +14,7 @@ use runmat_core::foreign_artifacts::PreparedForeignArtifacts;
 use runmat_execution::host::NativeDeploymentServiceKind;
 use runmat_execution_artifact::target_pack::TargetPackRequirements;
 use runmat_native_codegen::aot::{NativeOptimization, SelectedNativeProduct};
-use runmat_types::{InteropManifest, ProgramFunctionId};
+use runmat_types::InteropManifest;
 
 use crate::cli::AotOptLevel;
 use crate::presentation;
@@ -60,11 +60,7 @@ pub(super) fn execute(
     };
     expected_target.validate()?;
     let (_, retained) = unit.reachability_analysis();
-    let retained = retained
-        .into_iter()
-        .map(|id| u32::try_from(id.0).map(ProgramFunctionId))
-        .collect::<std::result::Result<BTreeSet<_>, _>>()
-        .context("selected retained function ID exceeds portable bounds")?;
+    let retained = retained.into_iter().collect::<BTreeSet<_>>();
     let assembly = unit
         .prepare_native_compilation_for_with_interop(None, interop.clone())?
         .retain_functions(&retained)?

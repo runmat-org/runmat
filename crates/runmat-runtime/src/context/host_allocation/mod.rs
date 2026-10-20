@@ -5,9 +5,11 @@
 //! neither estimates process RSS nor certifies host I/O effects or placement.
 
 mod aligned;
+mod checkpoint;
 mod collection_allocator;
 mod control_error;
 mod frame_collection;
+mod owner;
 mod plan;
 mod provider_registration;
 mod receipt;
@@ -17,6 +19,7 @@ mod text;
 mod trace_scratch;
 
 pub(crate) use aligned::AlignedHostWorkspace;
+pub(crate) use checkpoint::HostAllocationCheckpoint;
 pub use collection_allocator::{
     hashbrown_table_layout, AdmittedCollectionAllocator, OperationCollectionAllocator,
 };
@@ -27,6 +30,7 @@ pub use frame_collection::{
     collection_block_retained_bytes, frame_hash_table_retained_bytes, FrameCollectionGate,
     FrameCollectionPermit,
 };
+pub(in crate::context) use owner::HostAllocationContext;
 pub use plan::HostAllocationPlan;
 pub use provider_registration::{provider_registration_host_quote, ProviderRegistrationHostQuote};
 pub(crate) use receipt::HostOutputPermit;

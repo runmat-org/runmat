@@ -7,7 +7,12 @@ use runmat_value::{CharArray, ComplexTensor, IntValue, IntegerStorage, Tensor};
 fn any_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     // The reduction's fixed result family is logical-only; inspect it while
     // the producer owner is still live rather than consuming an unrooted ABI.
-    block_on(super::any_builtin(None, value, rest)).map(|owned| owned.value().clone())
+    block_on(super::any_builtin(
+        None,
+        value,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    ))
+    .map(|owned| owned.value().clone())
 }
 
 fn error_identifier(error: &crate::RuntimeError) -> Option<&str> {

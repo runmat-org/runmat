@@ -8,6 +8,53 @@ fn admitted_capture_free_nested_graph_uses_the_selected_source_path() {
     let mut session = crate::RunMatSession::with_options(false, false).expect("session");
     let unit = futures::executor::block_on(session.compile_executable_unit(source, None))
         .expect("compiled nested unit");
+    let nested = unit
+        .functions()
+        .functions
+        .values()
+        .find(|body| body.source_role == runmat_types::FunctionSourceRole::Nested)
+        .expect("compiled nested body");
+    assert_eq!(
+        unit.functions().resolve_name(&nested.display_name),
+        None,
+        "nested bodies must remain unavailable to textual lookup"
+    );
+    assert_ne!(
+        nested.function.0,
+        usize::try_from(nested.portable_function.0).expect("portable fixture ordinal"),
+        "fixture must distinguish compiler and portable coordinates"
+    );
+    let nested_origin = nested.binding_origin.expect("nested binding origin");
+    let nested_envelope = unit
+        .portable_envelope_for_function(nested.portable_function)
+        .expect("origin-selected nested product");
+    let imported_nested = crate::ExecutableUnit::from_portable_envelope(&nested_envelope)
+        .expect("import origin-selected nested product");
+    let imported_local = imported_nested
+        .local_function_for_origin(nested_origin)
+        .expect("nested origin lookup")
+        .expect("imported nested body");
+    assert_eq!(
+        imported_nested
+            .functions()
+            .get(imported_local)
+            .expect("imported nested registry body")
+            .portable_function,
+        nested.portable_function
+    );
+    assert!(
+        imported_nested
+            .function_analysis(nested.portable_function)
+            .is_some(),
+        "portable facts must remain keyed by the nested original identity"
+    );
+    assert_eq!(
+        imported_nested
+            .functions()
+            .resolve_name(&nested.display_name),
+        None,
+        "cold import must not publish nested textual lookup"
+    );
     let bytes = unit
         .portable_envelope()
         .expect("V2 envelope")

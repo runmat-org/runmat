@@ -240,7 +240,7 @@ fn cosh_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
 
 fn cosh_char_array(ca: CharArray) -> BuiltinResult<Value> {
     let data = ca
-        .data
+        .data()
         .iter()
         .map(|&ch| (ch as u32 as f64).cosh())
         .collect::<Vec<_>>();
@@ -600,7 +600,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cosh_string_errors() {
-        let err = cosh_builtin(Value::String("runmat".to_string())).expect_err("expected error");
+        let err =
+            cosh_builtin(Value::String("runmat".to_string().into())).expect_err("expected error");
         let message = error_message(&err);
         assert!(message.contains("invalid input"));
         assert_eq!(err.identifier(), COSH_ERROR_INVALID_INPUT.identifier);

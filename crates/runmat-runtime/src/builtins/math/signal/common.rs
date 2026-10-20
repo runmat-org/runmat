@@ -429,8 +429,19 @@ pub(crate) fn is_scalar_logical_window_length(value: &Value) -> bool {
         || matches!(value, Value::LogicalArray(array) if array.data.len() == 1)
 }
 
+#[cfg(test)]
 pub(crate) fn parse_window_controls(
     rest: &[Value],
+    allow_type_name: bool,
+) -> Result<WindowControls, WindowArgError> {
+    parse_window_controls_view(
+        crate::call::FunctionArgumentView::from_slice(rest),
+        allow_type_name,
+    )
+}
+
+pub(crate) fn parse_window_controls_view(
+    rest: crate::call::FunctionArgumentView<'_>,
     allow_type_name: bool,
 ) -> Result<WindowControls, WindowArgError> {
     if rest.len() > 2 {
@@ -489,7 +500,9 @@ pub(crate) fn parse_window_options(
 fn string_keyword(value: &Value) -> Option<String> {
     match value {
         Value::String(s) => Some(s.to_ascii_lowercase()),
-        Value::CharArray(chars) => Some(chars.data.iter().collect::<String>().to_ascii_lowercase()),
+        Value::CharArray(chars) => {
+            Some(chars.data().iter().collect::<String>().to_ascii_lowercase())
+        }
         _ => None,
     }
 }
@@ -497,11 +510,11 @@ fn string_keyword(value: &Value) -> Option<String> {
 fn window_keyword(value: &Value) -> Option<String> {
     match value {
         Value::String(text) => Some(text.to_ascii_lowercase()),
-        Value::StringArray(values) if values.data.len() == 1 => {
-            Some(values.data[0].to_ascii_lowercase())
+        Value::StringArray(values) if values.data().len() == 1 => {
+            Some(values.data()[0].to_ascii_lowercase())
         }
         Value::CharArray(chars) if chars.rows == 1 => {
-            Some(chars.data.iter().collect::<String>().to_ascii_lowercase())
+            Some(chars.data().iter().collect::<String>().to_ascii_lowercase())
         }
         _ => None,
     }

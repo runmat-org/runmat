@@ -186,7 +186,7 @@ mod tests {
             panic!("class labels expected")
         };
         assert_eq!(
-            classes.data,
+            classes.data(),
             vec![first.to_string(), (first + 1).to_string()]
         );
         let one_hot = plan.one_hot(NumericDType::F32).unwrap();

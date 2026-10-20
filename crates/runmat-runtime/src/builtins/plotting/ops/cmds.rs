@@ -22,8 +22,6 @@ pub use runmat_builtins::CLA_DESCRIPTOR;
 #[path = "cmds/colorbar.rs"]
 pub(crate) mod colorbar;
 #[cfg(test)]
-pub use colorbar::colorbar_builtin;
-#[cfg(test)]
 pub use runmat_builtins::COLORBAR_DESCRIPTOR;
 #[path = "cmds/colormap.rs"]
 pub(crate) mod colormap;

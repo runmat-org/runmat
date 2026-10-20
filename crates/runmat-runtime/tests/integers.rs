@@ -220,7 +220,7 @@ fn integer_class_and_string() {
     }
     let s = runmat_runtime::call_builtin("string", [i].as_slice()).unwrap();
     if let Value::StringArray(sa) = s.value() {
-        assert_eq!(sa.data[0], "42");
+        assert_eq!(sa.data()[0], "42");
     } else {
         panic!();
     }

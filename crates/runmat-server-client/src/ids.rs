@@ -96,7 +96,13 @@ mod tests {
         assert_eq!(project.as_str(), "proj_0123456789abcdef0123456789abcdef");
         assert_eq!(ProjectId::parse(project.as_str()), Ok(project.clone()));
         assert_eq!(project.as_uuid(), Ok(uuid));
-        assert_eq!(ProjectId::parse("org_0123456789abcdef0123456789abcdef"), Err(IdError::InvalidPrefix));
-        assert_eq!(ProjectId::parse("proj_0123456789ABCDEF0123456789abcdef"), Err(IdError::InvalidSuffix));
+        assert_eq!(
+            ProjectId::parse("org_0123456789abcdef0123456789abcdef"),
+            Err(IdError::InvalidPrefix)
+        );
+        assert_eq!(
+            ProjectId::parse("proj_0123456789ABCDEF0123456789abcdef"),
+            Err(IdError::InvalidSuffix)
+        );
     }
 }

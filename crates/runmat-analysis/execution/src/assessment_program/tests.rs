@@ -5,22 +5,20 @@ fn function_facts() -> FunctionAnalysis {
         CallableFact, CapabilitySet, EffectSet, NumericClass, NumericFact, ProgramFunctionId,
         StructFact,
     };
-    let output = ValueFact::scalar(ValueKindFact::Struct(StructFact {
-        elements_complete: false,
-        elements: Vec::new(),
-        fields: std::collections::BTreeMap::from([
+    let output = ValueFact::scalar(ValueKindFact::Struct(StructFact::scalar(
+        std::collections::BTreeMap::from([
             (
                 "evaluated".into(),
                 ValueFact::scalar(ValueKindFact::Logical),
             ),
             ("accepted".into(), ValueFact::scalar(ValueKindFact::Logical)),
         ]),
-        fields_complete: true,
-    }));
+        true,
+    )));
     FunctionAnalysis {
         function: ProgramFunctionId(1),
         callable: CallableFact {
-            capabilities: Default::default(),
+            capabilities: CapabilitySet::default(),
             identity: None,
             parameters: vec![ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
                 class: NumericClass::Double,

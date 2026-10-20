@@ -5,8 +5,8 @@ fn scalar_real_value(value: &Value) -> Option<f64> {
         Value::Num(n) => Some(*n),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
         Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
-        Value::CharArray(ca) if ca.data.len() == 1 => {
-            Some(ca.data.first().map(|&ch| ch as u32 as f64).unwrap_or(0.0))
+        Value::CharArray(ca) if ca.data().len() == 1 => {
+            Some(ca.data().first().map(|&ch| ch as u32 as f64).unwrap_or(0.0))
         }
         _ => None,
     }

@@ -138,7 +138,7 @@ fn collective_invocation(
                 };
                 Some(
                     values
-                        .data
+                        .data()
                         .iter()
                         .map(encode)
                         .collect::<Result<Vec<_>, _>>()?,
@@ -488,7 +488,7 @@ fn is_empty_value(value: &Value) -> bool {
     matches!(
         value,
         Value::Tensor(value) if value.is_empty()
-    ) || matches!(value, Value::Cell(value) if value.data.is_empty())
+    ) || matches!(value, Value::Cell(value) if value.data().is_empty())
         || matches!(value, Value::LogicalArray(value) if value.is_empty())
 }
 

@@ -1,4 +1,11 @@
 use super::*;
+
+fn run_parquetread(path: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let rest = crate::call::BuiltinArguments::from_borrowed(&rest, None)?;
+    block_on(crate::builtins::table::builtins::parquetread_builtin(
+        None, path, rest,
+    ))
+}
 use futures::executor::block_on;
 use runmat_accelerate_api::{
     test_support::TestAllocationOwner, AccelDownloadFuture, AccelNumericDownloadFuture,
@@ -70,10 +77,10 @@ fn controls_admit_only_needed_readback_after_host_validation() {
                     Value::from("not-read.parquet"),
                 ))
                 .unwrap_err(),
-                block_on(crate::builtins::table::builtins::parquetread_builtin(
+                run_parquetread(
                     Value::from("not-read.parquet"),
                     vec![Value::from("RowGroups"), resident.clone()],
-                ))
+                )
                 .unwrap_err(),
             ];
             for error in errors {
@@ -88,13 +95,7 @@ fn controls_admit_only_needed_readback_after_host_validation() {
             ))
             .is_err()
         );
-        assert!(
-            block_on(crate::builtins::table::builtins::parquetread_builtin(
-                resident.clone(),
-                vec![]
-            ))
-            .is_err()
-        );
+        assert!(run_parquetread(resident.clone(), vec![]).is_err());
         assert_eq!(owner.downloads.load(Ordering::SeqCst), 0);
         for args in [
             vec![resident.clone(), Value::Num(2.0)],
@@ -112,11 +113,11 @@ fn controls_admit_only_needed_readback_after_host_validation() {
                 Value::from("timetable"),
             ],
         ] {
-            assert!(block_on(ParquetReadOptions::parse(&args)).is_err());
+            assert!(block_on(parse(&args)).is_err());
             assert_eq!(owner.downloads.load(Ordering::SeqCst), 0);
         }
         let args = [Value::from("RowGroups"), resident];
-        let future = ParquetReadOptions::parse(&args);
+        let future = parse(&args);
         drop(future);
         assert_eq!(owner.downloads.load(Ordering::SeqCst), 0);
         #[cfg(not(target_arch = "wasm32"))]
@@ -130,18 +131,14 @@ fn controls_admit_only_needed_readback_after_host_validation() {
                     .unwrap(),
                 )
             };
-            assert!(block_on(ParquetReadOptions::parse(&[
-                paged("OutputType"),
-                paged("table"),
-            ]))
-            .is_ok());
-            let parsed = block_on(ParquetReadOptions::parse(&args)).unwrap();
+            assert!(block_on(parse(&[paged("OutputType"), paged("table"),])).is_ok());
+            let parsed = block_on(parse(&args)).unwrap();
             assert_eq!(parsed.row_groups, Some(vec![1]));
             assert_eq!(owner.downloads.load(Ordering::SeqCst), 1);
         }
         #[cfg(target_arch = "wasm32")]
         {
-            let error = block_on(ParquetReadOptions::parse(&args)).err().unwrap();
+            let error = block_on(parse(&args)).err().unwrap();
             assert_eq!(
                 error.identifier(),
                 Some("RunMat:readtable:UnsupportedFileType")
@@ -154,4 +151,7 @@ fn controls_admit_only_needed_readback_after_host_validation() {
             .validate_live()
             .unwrap();
     });
+}
+async fn parse(args: &[Value]) -> BuiltinResult<ParquetReadOptions> {
+    ParquetReadOptions::parse(crate::call::FunctionArgumentView::from_slice(args)).await
 }

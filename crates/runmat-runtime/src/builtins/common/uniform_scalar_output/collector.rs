@@ -3,7 +3,8 @@ use runmat_value::{IntValue, IntegerStorage, Value};
 use super::classify::{self, ClassifiedValue};
 use super::{finish, push, UniformScalarError};
 
-pub(crate) enum UniformScalarCollector {
+pub(crate) enum UniformScalarCollector<'a> {
+    Managed(super::managed::ManagedOwner<'a>),
     Pending,
     Logical(Vec<u8>),
     F64(Vec<f64>),
@@ -22,14 +23,47 @@ pub(crate) enum UniformScalarCollector {
     Char(Vec<char>),
 }
 
-impl UniformScalarCollector {
+impl<'a> UniformScalarCollector<'a> {
+    pub(crate) fn in_context(
+        runtime: &'a crate::context::RuntimeContext,
+        count: usize,
+    ) -> Result<Self, UniformScalarError> {
+        Ok(match super::managed::Managed::new(runtime, count)? {
+            Some(owner) => Self::Managed(owner),
+            None => Self::new(),
+        })
+    }
+
+    fn class(&self) -> Option<super::promotion::Class> {
+        use super::promotion::Class;
+        Some(match self {
+            Self::Pending => return None,
+            Self::Managed(owner) => return owner.class(),
+            Self::Logical(_) => Class::Logical,
+            Self::F64(_) => Class::F64,
+            Self::F32(_) => Class::F32,
+            Self::Integer { prototype, .. } => Class::Integer(prototype.numeric_dtype()),
+            Self::ComplexF64(_) => Class::ComplexF64,
+            Self::ComplexF32(_) => Class::ComplexF32,
+            Self::IntegerComplex { prototype, .. } => {
+                Class::IntegerComplex(prototype.numeric_dtype())
+            }
+            Self::Char(_) => Class::Char,
+        })
+    }
+
     pub(crate) fn new() -> Self {
         Self::Pending
     }
 
     pub(crate) fn push(&mut self, value: &Value) -> Result<(), UniformScalarError> {
         let classified = classify::value(value)?;
+        let next = super::promotion::Class::of(&classified)?;
+        if let Some(current) = self.class() {
+            current.join(next)?;
+        }
         match self {
+            Self::Managed(owner) => owner.push(classified),
             Self::Pending => self.start(classified),
             Self::Logical(values) => {
                 match push::logical(values, classified)? {

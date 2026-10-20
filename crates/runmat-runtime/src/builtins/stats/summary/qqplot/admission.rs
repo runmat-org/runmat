@@ -11,7 +11,7 @@ use runmat_builtins::{
 };
 use runmat_value::Value;
 
-pub(super) fn admit_host_visible(args: &[Value]) -> BuiltinResult<()> {
+pub(super) fn admit_host_visible(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<()> {
     if args.is_empty() {
         return Err(invalid("qqplot: sample input is required"));
     }

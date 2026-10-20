@@ -98,9 +98,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 async fn interp1_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
-    let explicit = args.len() >= 3 && !third_arg_is_option(&args);
+    let explicit = args.len() >= 3 && !third_arg_is_option(args.view());
     let sample_plan = if explicit {
         preflight_interp1_explicit_x(&args[0]).await?;
         Some(
@@ -111,8 +111,8 @@ async fn interp1_builtin_registered(
     } else {
         None
     };
-    preflight_interp1_inputs(&args, explicit).await?;
-    if let Some(output) = try_interp1_gpu(&args, sample_plan.as_ref()).await? {
+    preflight_interp1_inputs(args.view(), explicit).await?;
+    if let Some(output) = try_interp1_gpu(args.view(), sample_plan.as_ref()).await? {
         return Ok(output);
     }
     let parsed = ParsedInterp1::parse(args, sample_plan)
@@ -178,6 +178,7 @@ async fn interp1_builtin_registered(
 
 #[cfg(test)]
 async fn interp1_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let args = crate::call::BuiltinArguments::from_borrowed(&args, None)?;
     interp1_builtin_registered(None, args).await
 }
 
@@ -208,7 +209,7 @@ async fn preflight_interp1_explicit_x(value: &Value) -> crate::BuiltinResult<()>
 }
 
 async fn preflight_interp1_inputs(
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     explicit_x_admitted: bool,
 ) -> crate::BuiltinResult<()> {
     use crate::builtins::common::validation::{
@@ -220,9 +221,9 @@ async fn preflight_interp1_inputs(
     }
     let explicit = args.len() >= 3 && !third_arg_is_option(args);
     let (samples, query) = if explicit {
-        (&args[..2], &args[2])
+        (args.range(..2).expect("interp1 samples"), &args[2])
     } else {
-        (&args[..1], &args[1])
+        (args.range(..1).expect("interp1 samples"), &args[1])
     };
     for value in samples.iter().skip(usize::from(explicit_x_admitted)) {
         if value_has_native_integer_class(value) {
@@ -304,7 +305,7 @@ struct GpuInterp1Query {
 mod owning_tests;
 
 async fn try_interp1_gpu(
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     explicit_plan: Option<&Interp1SamplePlan>,
 ) -> crate::BuiltinResult<Option<Value>> {
     if args.len() < 2 {
@@ -317,7 +318,11 @@ async fn try_interp1_gpu(
         let Some(series) = implicit_gpu_series(&args[0])? else {
             return Ok(None);
         };
-        (series, &args[1], &args[2..])
+        (
+            series,
+            &args[1],
+            args.range(2..).expect("interp1 option suffix"),
+        )
     } else {
         if matches!(&args[0], Value::GpuTensor(_)) {
             return Ok(None);
@@ -326,7 +331,11 @@ async fn try_interp1_gpu(
         else {
             return Ok(None);
         };
-        (series, &args[2], &args[3..])
+        (
+            series,
+            &args[2],
+            args.range(3..).expect("interp1 option suffix"),
+        )
     };
 
     for option in options {
@@ -744,7 +753,7 @@ struct ParsedInterp1 {
 
 impl ParsedInterp1 {
     async fn parse(
-        args: Vec<Value>,
+        mut args: crate::call::BuiltinArguments,
         explicit_plan: Option<Interp1SamplePlan>,
     ) -> crate::BuiltinResult<Self> {
         if args.len() < 2 {
@@ -756,25 +765,23 @@ impl ParsedInterp1 {
         let mut method = InterpMethod::Linear;
         let mut extrap = Extrapolation::Nan;
         let mut explicit_extrapolation = false;
-        let (series, query, options) = if args.len() == 2 || third_arg_is_option(&args) {
-            let mut iter = args.into_iter();
-            let y = iter.next().expect("Y argument");
-            let xq = iter.next().expect("Xq argument");
+        let (series, query) = if args.len() == 2 || third_arg_is_option(args.view()) {
+            let y = args.pop_front().expect("Y argument");
+            let xq = args.pop_front().expect("Xq argument");
             let series = implicit_series_from_values(y, NAME).await?;
             let query = query_points(xq, NAME).await?;
-            (series, query, iter.collect::<Vec<_>>())
+            (series, query)
         } else {
-            let mut iter = args.into_iter();
-            let _x = iter.next().expect("X argument");
-            let y = iter.next().expect("Y argument");
-            let xq = iter.next().expect("Xq argument");
+            let _x = args.pop_front().expect("X argument");
+            let y = args.pop_front().expect("Y argument");
+            let xq = args.pop_front().expect("Xq argument");
             let series =
                 interp1_series_from_plan(explicit_plan.expect("explicit X plan"), y, NAME).await?;
             let query = query_points(xq, NAME).await?;
-            (series, query, iter.collect::<Vec<_>>())
+            (series, query)
         };
 
-        for option in &options {
+        for option in &args {
             if let Some(parsed) = parse_extrapolation(option, NAME).await? {
                 extrap = parsed;
                 explicit_extrapolation = true;
@@ -812,7 +819,7 @@ impl ParsedInterp1 {
     }
 }
 
-fn third_arg_is_option(args: &[Value]) -> bool {
+fn third_arg_is_option(args: crate::call::FunctionArgumentView<'_>) -> bool {
     args.get(2)
         .and_then(|value| crate::builtins::common::random_args::keyword_of(value))
         .is_some()
@@ -863,8 +870,8 @@ mod tests {
             row(&[3.0, 1.0, 2.0]),
             y,
             row(&[0.0, 1.5, 3.5]),
-            Value::String("linear".to_string()),
-            Value::String("extrap".to_string()),
+            Value::String("linear".to_string().into()),
+            Value::String("extrap".to_string().into()),
         ])
         .expect("distinct unsorted interp1");
         let Value::Tensor(tensor) = result else {
@@ -895,8 +902,8 @@ mod tests {
             row(&[3.0, 2.0, 1.0]),
             row(&[30.0, 20.0, 10.0]),
             row(&[0.0, 1.5, 3.5]),
-            Value::String("linear".to_string()),
-            Value::String("extrap".to_string()),
+            Value::String("linear".to_string().into()),
+            Value::String("extrap".to_string().into()),
         ])
         .expect("descending interp1");
         let Value::Tensor(tensor) = descending else {
@@ -909,14 +916,14 @@ mod tests {
                 row(&[3.0, 1.0, 4.0, 2.0]),
                 row(&[9.0, 1.0, 16.0, 4.0]),
                 Value::Num(2.5),
-                Value::String(method.to_string()),
+                Value::String(method.to_string().into()),
             ])
             .expect("higher-order unordered interpolation");
             let ordered = run(vec![
                 row(&[1.0, 2.0, 3.0, 4.0]),
                 row(&[1.0, 4.0, 9.0, 16.0]),
                 Value::Num(2.5),
-                Value::String(method.to_string()),
+                Value::String(method.to_string().into()),
             ])
             .expect("higher-order ordered reference");
             assert_eq!(unordered, ordered, "paired ordering for {method}");
@@ -988,7 +995,7 @@ mod tests {
             row(&[1.0, 2.0, 3.0]),
             row(&[10.0, 20.0, 40.0]),
             row(&[1.2, 2.8]),
-            Value::String("nearest".to_string()),
+            Value::String("nearest".to_string().into()),
         ])
         .expect("interp1");
         let Value::Tensor(tensor) = result else {
@@ -1003,7 +1010,7 @@ mod tests {
             row(&[0.0, 1.0, 2.0, 3.0, 4.0]),
             row(&[0.0, 0.0, 0.0, 1.0, 0.0]),
             row(&[2.5, 4.0]),
-            Value::String("makima".to_string()),
+            Value::String("makima".to_string().into()),
         ])
         .expect("makima interp1");
         let Value::Tensor(tensor) = result else {
@@ -1017,7 +1024,7 @@ mod tests {
             row(&[0.0, 1.0]),
             row(&[0.0, 1.0]),
             Value::Num(-1.0),
-            Value::String("makima".to_string()),
+            Value::String("makima".to_string().into()),
         ])
         .expect("two-point makima extrapolation");
         assert_eq!(extrapolated, Value::Num(-1.0));
@@ -1026,7 +1033,7 @@ mod tests {
             row(&[0.0, 1.0]),
             row(&[0.0, 1.0]),
             Value::Num(-1.0),
-            Value::String("makima".to_string()),
+            Value::String("makima".to_string().into()),
             Value::Num(99.0),
         ])
         .expect("explicit makima fill");
@@ -1043,29 +1050,29 @@ mod tests {
             ]
         };
         let mut cubic = samples();
-        cubic.push(Value::String("cubic".to_string()));
+        cubic.push(Value::String("cubic".to_string().into()));
         let Value::Num(default_cubic) = run(cubic).expect("cubic default") else {
             panic!("expected scalar cubic output");
         };
         assert!(default_cubic.is_nan());
 
         let mut pchip = samples();
-        pchip.push(Value::String("pchip".to_string()));
+        pchip.push(Value::String("pchip".to_string().into()));
         let Value::Num(default_pchip) = run(pchip).expect("pchip default") else {
             panic!("expected scalar pchip output");
         };
         assert!(default_pchip.is_finite());
 
         let mut explicit = samples();
-        explicit.push(Value::String("cubic".to_string()));
-        explicit.push(Value::String("extrap".to_string()));
+        explicit.push(Value::String("cubic".to_string().into()));
+        explicit.push(Value::String("extrap".to_string().into()));
         assert_eq!(
             run(explicit).expect("explicit cubic extrapolation"),
             Value::Num(default_pchip)
         );
 
         let mut filled = samples();
-        filled.push(Value::String("cubic".to_string()));
+        filled.push(Value::String("cubic".to_string().into()));
         filled.push(Value::Num(17.0));
         assert_eq!(run(filled).expect("explicit cubic fill"), Value::Num(17.0));
     }
@@ -1253,7 +1260,7 @@ mod tests {
             let result = run(vec![
                 Value::GpuTensor(y.clone()),
                 Value::Num(0.0),
-                Value::String("linear".to_string()),
+                Value::String("linear".to_string().into()),
                 Value::Num(99.0),
             ])
             .expect("interp1");
@@ -1272,7 +1279,7 @@ mod tests {
             vec![
                 row(&[10.0, 20.0]),
                 Value::Num(0.0),
-                Value::String("linear".to_string()),
+                Value::String("linear".to_string().into()),
                 Value::Int(runmat_value::IntValue::I16(99)),
             ]
         };
@@ -1301,7 +1308,7 @@ mod tests {
             row(&[1.0, 2.0]),
             row(&[10.0, 20.0]),
             Value::Num(0.0),
-            Value::String("extrap".to_string()),
+            Value::String("extrap".to_string().into()),
         ])
         .expect("interp1");
         assert_eq!(result, Value::Num(0.0));

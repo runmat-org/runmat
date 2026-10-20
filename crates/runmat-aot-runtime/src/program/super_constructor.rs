@@ -2,14 +2,13 @@
 
 use runmat_execution::FunctionBindingOrigin;
 use runmat_runtime::context::{RetainedClassDeclaration, RetainedConstructorDeclaration};
-use runmat_types::{ClassMethodRole, ProgramFunctionId};
-use runmat_value::BoundFunctionBinding;
+use runmat_types::{ClassMethodRole, FunctionId};
 
 use super::native_error;
 
 pub(super) fn bind_selected(
     executor: &runmat_native_executor::NativeExecutor,
-    function: ProgramFunctionId,
+    function: FunctionId,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> Result<runmat_runtime::context::RuntimeContext, Box<runmat_runtime::RuntimeError>> {
     let metadata = executor
@@ -27,8 +26,9 @@ pub(super) fn bind_selected(
     }
     let runtime =
         runtime.with_constructor_receiver_for_method(metadata.class_method_owner.as_ref())?;
-    let caller_origin = FunctionBindingOrigin::from_revision(executor.program_revision(), function)
-        .map_err(native_error)?;
+    let caller_origin =
+        FunctionBindingOrigin::from_revision(executor.program_revision(), metadata.portable_id)
+            .map_err(native_error)?;
     let Some(owner) = metadata
         .class_method_owner
         .as_ref()
@@ -83,11 +83,18 @@ pub(super) fn bind_selected(
         .class_method_owner
         .as_ref()
         .ok_or_else(|| native_error("linked superclass constructor lacks a typed owner"))?;
-    let target_origin =
-        FunctionBindingOrigin::from_revision(executor.program_revision(), target.function)
-            .map_err(native_error)?;
-    let target_function = usize::try_from(target.function.0)
-        .map_err(|_| native_error("linked superclass identity exceeds host indexing"))?;
+    let target_origin = FunctionBindingOrigin::from_revision(
+        executor.program_revision(),
+        target_metadata.portable_id,
+    )
+    .map_err(native_error)?;
+    let target_binding =
+        runmat_runtime::user_functions::resolve_binding_origin_binding_from_runtime(
+            &runtime,
+            target_origin,
+        )
+        .filter(|binding| binding.function == target.function.0)
+        .ok_or_else(|| native_error("linked superclass constructor has no exact issued binding"))?;
     runtime
         .with_retained_super_constructors(
             vec![
@@ -97,7 +104,7 @@ pub(super) fn bind_selected(
                     caller_origin,
                     target_origin,
                     target_owner.clone(),
-                    BoundFunctionBinding::portable(target_function, target_origin),
+                    target_binding,
                 )?,
             ],
             caller_origin,

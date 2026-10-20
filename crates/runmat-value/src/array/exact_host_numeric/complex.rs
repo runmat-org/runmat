@@ -147,6 +147,32 @@ impl ExactHostComplexTensorAllocation {
         Ok(())
     }
 
+    /// Write a native single-precision element without a floating conversion,
+    /// preserving NaN payloads and signed zero in portable decoder ingress.
+    pub fn set_f32(
+        &mut self,
+        index: usize,
+        value: ComplexElement<f32>,
+    ) -> Result<(), ExactHostNumericAllocationError> {
+        if self.dtype != NumericDType::F32 {
+            return Err(ExactHostNumericAllocationError::UnsupportedClass);
+        }
+        if index >= self.len {
+            return Err(ExactHostNumericAllocationError::LayoutOverflow);
+        }
+        // SAFETY: the checked native class and index identify one initialized
+        // aligned element in this uniquely owned exact allocation.
+        unsafe {
+            self.allocation
+                .pointer()
+                .as_ptr()
+                .cast::<ComplexElement<f32>>()
+                .add(index)
+                .write(value);
+        }
+        Ok(())
+    }
+
     pub fn into_tensor(self) -> Result<ComplexTensor, ExactHostNumericAllocationError> {
         let storage = match self.dtype {
             NumericDType::F32 => ComplexStorage::F32(

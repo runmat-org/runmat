@@ -30,7 +30,7 @@ pub(super) fn from_scalars(
     }
     if values
         .iter()
-        .all(|value| matches!(value, Value::CharArray(chars) if chars.data.len() == 1))
+        .all(|value| matches!(value, Value::CharArray(chars) if chars.data().len() == 1))
     {
         return typed_output::characters(values, shape, sparse);
     }

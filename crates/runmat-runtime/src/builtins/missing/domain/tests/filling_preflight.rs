@@ -67,8 +67,9 @@ fn registered_resident_invalid_controls_precede_all_provider_transfers() {
         vec![Value::from("bogus")],
     ] {
         let error = block_on(fillmissing_builtin(
+            None,
             Value::GpuTensor(allocation.handle.clone()),
-            rest,
+            crate::builtins::common::test_support::builtin_arguments(rest),
         ))
         .expect_err("host-visible invalid call");
         assert_eq!(error.identifier(), Some("RunMat:missing:InvalidArgument"));
@@ -82,8 +83,12 @@ fn registered_resident_invalid_controls_precede_all_provider_transfers() {
         )
         .unwrap();
     let error = block_on(fillmissing_builtin(
+        None,
         Value::GpuTensor(complex.handle.clone()),
-        vec![Value::from("constant"), Value::Num(0.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("constant"),
+            Value::Num(0.0),
+        ]),
     ))
     .expect_err("known complex representation must be rejected before download");
     assert_eq!(error.identifier(), Some("RunMat:missing:UnsupportedType"));
@@ -104,8 +109,13 @@ fn integer_noop_still_validates_dimension_and_direct_scalar_tensor_dimension() {
         Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, u64::MAX]), vec![2, 1]).unwrap(),
     );
     let error = block_on(fillmissing_builtin(
+        None,
         integer,
-        vec![Value::from("constant"), Value::Num(0.0), Value::Num(0.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("constant"),
+            Value::Num(0.0),
+            Value::Num(0.0),
+        ]),
     ))
     .expect_err("zero axis is invalid even if no values are missing");
     assert_eq!(error.identifier(), Some("RunMat:missing:InvalidArgument"));
@@ -114,8 +124,9 @@ fn integer_noop_still_validates_dimension_and_direct_scalar_tensor_dimension() {
     let axis =
         Value::Tensor(Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).unwrap());
     let result = block_on(fillmissing_builtin(
+        None,
         input,
-        vec![Value::from("linear"), axis],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("linear"), axis]),
     ))
     .unwrap();
     assert!(

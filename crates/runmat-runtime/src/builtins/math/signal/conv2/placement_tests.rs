@@ -32,7 +32,7 @@ fn actual_inprocess_matrix_host_and_provider_routes_report_completed_work() {
             Some(service.context()),
             Value::GpuTensor(signal.clone()),
             Value::GpuTensor(kernel.clone()),
-            vec![Value::from("same")],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from("same")]),
         ))
         .expect("selected matrix convolution route");
         let Value::GpuTensor(_) = &result else {
@@ -81,7 +81,7 @@ fn unpolled_matrix_call_does_not_select_or_publish_feedback() {
         Some(service.context()),
         Value::GpuTensor(signal.clone()),
         Value::GpuTensor(kernel.clone()),
-        vec![Value::from("same")],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("same")]),
     );
     drop(call);
     assert_eq!(service.selections(), 0);

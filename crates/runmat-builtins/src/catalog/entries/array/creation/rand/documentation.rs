@@ -52,7 +52,7 @@ BuiltinDocumentationLink { label: "range", target: BuiltinDocumentationLinkTarge
 BuiltinDocumentationLink { label: "true", target: BuiltinDocumentationLinkTarget::Documentation("./true") },
 BuiltinDocumentationLink { label: "zeros", target: BuiltinDocumentationLinkTarget::Documentation("./zeros") }],
     media: &[],
-    evidence: BuiltinDocumentationEvidence { implementation: &[BuiltinDocumentationLink { label: "`crates/runmat-runtime/src/builtins/array/creation/rand.rs`", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/rand.rs") }], verification: &[], notes: &[] },
+    evidence: BuiltinDocumentationEvidence { implementation: &[BuiltinDocumentationLink { label: "`crates/runmat-runtime/src/builtins/array/creation/rand.rs`", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/rand.rs") }], verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Retained rand verification", location: "builtins::array::creation::rand::tests::rand_gpu_like_uniform" }, BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Retained rand verification", location: "builtins::array::creation::rand::tests" }, ], notes: &[] },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Stable),
 };

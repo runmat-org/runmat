@@ -130,14 +130,18 @@ fn encode(
             shape: shape(&value.shape, path)?,
             little_endian_data: value.data.to_vec(),
         }),
-        Value::String(value) => InlineValue::String(value.clone()),
+        Value::String(value) => InlineValue::String(value.as_str().to_owned()),
         Value::StringArray(value) => InlineValue::StringArray {
             shape: shape(&value.shape, path)?,
-            values: value.data.clone(),
+            values: value
+                .data()
+                .iter()
+                .map(|text| text.as_str().to_owned())
+                .collect(),
         },
         Value::CharArray(value) => InlineValue::Char {
             shape: shape(&value.shape, path)?,
-            code_points: value.data.iter().map(|value| *value as u32).collect(),
+            code_points: value.data().iter().map(|value| *value as u32).collect(),
         },
         Value::Tensor(value) => InlineValue::Dense(encode_tensor(value, path)?),
         Value::SparseTensor(value) => InlineValue::Sparse(encode_sparse(value, path)?),
@@ -158,7 +162,7 @@ fn encode(
         Value::Cell(value) => InlineValue::Cell {
             shape: shape(&value.shape, path)?,
             values: value
-                .data
+                .data()
                 .iter()
                 .enumerate()
                 .map(|(index, value)| encode(value, &index_path(path, index), purpose, runtime))
@@ -170,7 +174,7 @@ fn encode(
                 .iter()
                 .map(|(name, value)| {
                     Ok(StructField {
-                        name: name.clone(),
+                        name: name.to_owned(),
                         value: encode(value, &field_path(path, name), purpose, runtime)?,
                     })
                 })
@@ -207,34 +211,40 @@ fn encode(
             InlineValue::DurableObjectArray(aggregate::object_array(value, path, purpose, runtime)?)
         }
         Value::Object(value)
-            if crate::parallel::codistributor::is_supported_class(&value.class_name) =>
+            if crate::parallel::codistributor::is_supported_class(value.class_name()) =>
         {
             crate::parallel::codistributor::validate_definition(value)
                 .map_err(|error| ValueCodecError::invalid(path, error.to_string()))?;
             let mut fields = value
-                .properties
+                .properties()
                 .iter()
                 .map(|(name, value)| {
                     Ok(RegisteredField {
-                        name: name.clone(),
+                        name: name.to_owned(),
                         value: encode(value, &field_path(path, name), purpose, runtime)?,
                     })
                 })
                 .collect::<Result<Vec<_>, ValueCodecError>>()?;
             fields.sort_by(|left, right| left.name.cmp(&right.name));
             InlineValue::ImmutableValueClass(RegisteredData {
-                type_identity: value.class_name.to_string(),
+                type_identity: value.class_name().to_string(),
                 schema_version: 1,
                 fields,
             })
         }
         Value::Object(value)
-            if super::immutable_class::schema_for_class(value.class_name.display_name())?
+            if super::immutable_class::schema_for_class(value.class_name().display_name())?
                 .is_some() =>
         {
             encode_immutable_class(value, path, purpose, runtime)?
         }
-        Value::Object(_) | Value::ObjectArray(_) => {
+        Value::ObjectArray(_) => {
+            return Err(ValueCodecError::unsupported(
+                path,
+                "value-class arrays require a shape-preserving registered array codec",
+            ))
+        }
+        Value::Object(_) => {
             return Err(ValueCodecError::unsupported(
                 path,
                 "value classes and object arrays require an explicitly registered codec",
@@ -346,9 +356,13 @@ fn encode(
                 None
             };
             InlineValue::Exception(ExceptionValue {
-                identifier: value.identifier.clone(),
-                message: value.message.clone(),
-                stack: value.stack.clone(),
+                identifier: value.identifier.as_str().to_owned(),
+                message: value.message.as_str().to_owned(),
+                stack: value
+                    .stack
+                    .iter()
+                    .map(|frame| frame.as_str().to_owned())
+                    .collect(),
                 causes: Vec::new(),
                 runtime,
             })
@@ -359,8 +373,12 @@ fn encode(
                 "execution handles are capabilities, not transferable values",
             ))
         }
-        Value::Distributed(handle) => return Ok(ValuePayload::Distributed(handle.clone())),
-        Value::Composite(handle) => return Ok(ValuePayload::Composite(handle.clone())),
+        Value::Distributed(handle) => {
+            return Ok(ValuePayload::Distributed(Box::new(handle.as_ref().clone())))
+        }
+        Value::Composite(handle) => {
+            return Ok(ValuePayload::Composite(Box::new(handle.as_ref().clone())))
+        }
         Value::Foreign(_) => return Err(ValueCodecError::unsupported(
             path,
             "foreign references require an interop-manifest adapter and cannot be encoded inline",
@@ -375,21 +393,21 @@ fn encode_immutable_class(
     purpose: CodecPurpose,
     runtime: Option<&dyn InlineSourceAuthority>,
 ) -> Result<InlineValue, ValueCodecError> {
-    let schema =
-        super::immutable_class::schema_for_class(object.class_name.display_name())?.ok_or_else(|| {
+    let schema = super::immutable_class::schema_for_class(object.class_name().display_name())?
+        .ok_or_else(|| {
             ValueCodecError::unsupported(
                 path,
                 "value classes require an explicitly registered immutable class codec",
             )
         })?;
     schema.validate_object(object, path)?;
-    let mut fields = object.properties.iter().collect::<Vec<_>>();
+    let mut fields = object.properties().iter().collect::<Vec<_>>();
     fields.sort_by(|left, right| left.0.cmp(right.0));
     let fields = fields
         .into_iter()
         .map(|(name, value)| {
             Ok(RegisteredField {
-                name: name.clone(),
+                name: name.to_owned(),
                 value: encode(value, &field_path(path, name), purpose, runtime)?,
             })
         })

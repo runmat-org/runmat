@@ -114,14 +114,19 @@ fn unpolled_and_abandoned_resident_gather_has_no_replay_and_exact_lifetime() {
     let retained = allocation.handle.allocation_lease().downgrade();
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
 
-    let unpolled = super::super::execute::run(vec![Value::GpuTensor(allocation.handle.clone())]);
+    let unpolled =
+        super::super::execute::run(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::GpuTensor(allocation.handle.clone())],
+        ));
     drop(unpolled);
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
     assert!(retained.acquire().is_some());
 
-    let mut pending = Box::pin(super::super::execute::run(vec![Value::GpuTensor(
-        allocation.handle.clone(),
-    )]));
+    let mut pending = Box::pin(super::super::execute::run(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(
+            allocation.handle.clone(),
+        )]),
+    ));
     drop(allocation.handle);
     let mut context = Context::from_waker(futures::task::noop_waker_ref());
     assert!(matches!(pending.as_mut().poll(&mut context), Poll::Pending));

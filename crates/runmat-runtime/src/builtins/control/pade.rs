@@ -51,12 +51,13 @@ fn checkpoint(runtime: Option<&RuntimeContext>) -> BuiltinResult<()> {
 async fn pade_builtin(
     runtime: Option<RuntimeContext>,
     first: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    let [order] = <[Value; 1]>::try_from(rest)
-        .map_err(|_| invalid("pade expects a delay and one approximation order"))?;
+    if rest.len() != 1 {
+        return Err(invalid("pade expects a delay and one approximation order"));
+    }
     let (delay, dtype) = scalar_delay(&first)?;
-    let order = scalar_order(&order)?;
+    let order = scalar_order(&rest[0])?;
     // The one/zero-output scalar overload is a plot, not a coefficient
     // return. Validate the inputs first, as with other control leaves.
     if crate::output_count::current_output_count() != Some(2) {

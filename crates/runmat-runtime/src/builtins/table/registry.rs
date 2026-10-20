@@ -37,7 +37,7 @@ pub fn ensure_table_class_registered() {
                 "ReadMode",
             ],
         );
-        register_plain_object_class(PARQUET_DATASTORE_CLASS, &["Files"]);
+        register_plain_object_class(PARQUET_DATASTORE_CLASS, &["Files", "ReadSize", "BlockSize"]);
         register_plain_object_class(UITABLE_CLASS, &["Data", "ColumnName", "RowName"]);
     });
 }
@@ -78,13 +78,16 @@ fn register_tabular_class(name: runmat_types::StaticClassIdentity) {
         );
     }
 
-    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-        events: Default::default(),
-        name: name.into(),
-        parent: None,
-        properties,
-        methods,
-    });
+    crate::class_registry::register_builtin_class(
+        name,
+        crate::class_registry::RuntimeClass {
+            events: Default::default(),
+            name: name.into(),
+            parent: None,
+            properties,
+            methods,
+        },
+    );
 }
 
 fn register_plain_object_class(name: runmat_types::StaticClassIdentity, property_names: &[&str]) {
@@ -103,13 +106,16 @@ fn register_plain_object_class(name: runmat_types::StaticClassIdentity, property
             },
         );
     }
-    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-        events: Default::default(),
-        name: name.into(),
-        parent: None,
-        properties,
-        methods: HashMap::new(),
-    });
+    crate::class_registry::register_builtin_class(
+        name,
+        crate::class_registry::RuntimeClass {
+            events: Default::default(),
+            name: name.into(),
+            parent: None,
+            properties,
+            methods: HashMap::new(),
+        },
+    );
 }
 
 fn register_dictionary_class() {
@@ -144,11 +150,14 @@ fn register_dictionary_class() {
             },
         );
     }
-    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-        events: Default::default(),
-        name: DICTIONARY_CLASS.into(),
-        parent: None,
-        properties,
-        methods,
-    });
+    crate::class_registry::register_builtin_class(
+        DICTIONARY_CLASS,
+        crate::class_registry::RuntimeClass {
+            events: Default::default(),
+            name: DICTIONARY_CLASS.into(),
+            parent: None,
+            properties,
+            methods,
+        },
+    );
 }

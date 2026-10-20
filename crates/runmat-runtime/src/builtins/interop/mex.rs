@@ -16,7 +16,7 @@ pub use runmat_builtins::{
     binding_variant = "default",
     builtin_path = "crate::builtins::interop::mex"
 )]
-fn mex_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
+fn mex_builtin(arguments: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     build_mex(arguments, "mex", false)
 }
 
@@ -25,11 +25,15 @@ fn mex_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::interop::mex"
 )]
-fn mexcuda_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
+fn mexcuda_builtin(arguments: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     build_mex(arguments, "mexcuda", true)
 }
 
-fn build_mex(arguments: Vec<Value>, builtin: &'static str, cuda: bool) -> BuiltinResult<Value> {
+fn build_mex(
+    arguments: crate::call::BuiltinArguments,
+    builtin: &'static str,
+    cuda: bool,
+) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         if cuda {
             &MEXCUDA_DESCRIPTOR
@@ -174,21 +178,30 @@ mod tests {
 
     #[test]
     fn mex_reports_missing_sources_as_an_argument_error() {
-        let error = mex_builtin(Vec::new()).unwrap_err();
+        let error = mex_builtin(crate::builtins::common::test_support::builtin_arguments(
+            Vec::new(),
+        ))
+        .unwrap_err();
         assert_eq!(error.identifier(), Some("RunMat:MEX:InvalidBuildArguments"));
         assert!(error.source.is_some());
     }
 
     #[test]
     fn mexcuda_invalid_argument_class_precedes_target_check() {
-        let error = mexcuda_builtin(vec![Value::output_list(Vec::new())]).unwrap_err();
+        let error = mexcuda_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::output_list(Vec::new())],
+        ))
+        .unwrap_err();
         assert_eq!(error.identifier(), Some("RunMat:MEX:InvalidBuildArguments"));
     }
 
     #[test]
     fn requested_build_output_is_rejected_before_argument_or_filesystem_work() {
         let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
-        let error = mex_builtin(Vec::new()).unwrap_err();
+        let error = mex_builtin(crate::builtins::common::test_support::builtin_arguments(
+            Vec::new(),
+        ))
+        .unwrap_err();
         assert_eq!(error.identifier(), Some("RunMat:MEX:TooManyOutputs"));
     }
 
@@ -201,7 +214,10 @@ mod tests {
 
     #[test]
     fn build_error_keeps_typed_source_at_target_or_parser_boundary() {
-        let error = mexcuda_builtin(vec![Value::from("gateway.cpp")]).unwrap_err();
+        let error = mexcuda_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::from("gateway.cpp")],
+        ))
+        .unwrap_err();
         let expected = if runmat_mex::MexTarget::current()
             .and_then(|target| target.validate_cuda_build())
             .is_ok()
@@ -252,7 +268,10 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn mexcuda_rejects_unsupported_native_target_before_source_access() {
-        let error = mexcuda_builtin(vec![Value::from("missing.cu")]).unwrap_err();
+        let error = mexcuda_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::from("missing.cu")],
+        ))
+        .unwrap_err();
         assert_eq!(error.identifier(), Some("RunMat:MEX:UnsupportedTarget"));
         assert!(error.source.is_some());
     }
@@ -286,7 +305,10 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
             Value::from("runtime_build_fixture"),
             Value::from(source.display().to_string()),
         ];
-        let result = mex_builtin(arguments).unwrap();
+        let result = mex_builtin(crate::builtins::common::test_support::builtin_arguments(
+            arguments,
+        ))
+        .unwrap();
         assert_eq!(result, Value::output_list(Vec::new()));
         assert!(directory
             .path()

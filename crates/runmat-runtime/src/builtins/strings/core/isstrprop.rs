@@ -8,21 +8,24 @@ use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
 use crate::builtins::common::map_control_flow_with_builtin;
+use crate::builtins::strings::common::{scalar_text_input, text_input_admission};
 use crate::builtins::strings::core::classification::{
     char_matches_prop, classify_text_or_numeric_value, parse_force_cell_output,
 };
-use crate::builtins::strings::core::compat::{compat_error, scalar_text};
+use crate::builtins::strings::core::compat::compat_error;
 use crate::{gather_if_needed_async, make_cell_with_shape, BuiltinResult};
 
 #[runtime_builtin(
     name = "isstrprop",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::strings::core::isstrprop"
 )]
 pub(crate) async fn isstrprop_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     text: Value,
     prop: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &ISSTRPROP_DESCRIPTOR,
@@ -48,14 +51,17 @@ pub(crate) async fn isstrprop_builtin(
     let prop = gather_if_needed_async(&prop)
         .await
         .map_err(|err| map_control_flow_with_builtin(err, "isstrprop"))?;
-    let prop = scalar_text(&prop, "isstrprop")?.to_ascii_lowercase();
-    let category = CharacterPropertyCategory::parse(&prop).ok_or_else(|| {
+    let prop = scalar_text_input(&prop, runtime.as_ref(), |runtime, cause| {
+        text_input_admission("isstrprop", runtime, cause)
+    })?
+    .ok_or_else(|| compat_error("isstrprop", "isstrprop: expected a text category"))?;
+    let category = CharacterPropertyCategory::parse(prop.as_str()).ok_or_else(|| {
         compat_error(
             "isstrprop",
-            format!("isstrprop: unknown character category '{prop}'"),
+            format!("isstrprop: unknown character category '{}'", prop.as_str()),
         )
     })?;
-    let force_cell_output = parse_force_cell_output(&rest)?;
+    let force_cell_output = parse_force_cell_output(runtime.as_ref(), rest.view())?;
     // Category and option values are host-only. Reject known invalid controls
     // before a selected resident input incurs provider work.
     let text = match &text {

@@ -45,13 +45,13 @@ fn diary_io_error(source: std::io::Error) -> crate::RuntimeError {
     binding_variant = "default",
     builtin_path = "crate::builtins::io::diary"
 )]
-async fn diary_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn diary_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     if crate::output_count::current_output_count().unwrap_or(0) > 0 {
         return Err(diary_error(&DIARY_ERROR_TOO_MANY_OUTPUTS));
     }
-    match args.as_slice() {
-        [] => console::toggle_diary().map_err(diary_io_error)?,
-        [arg] => match parse_diary_arg(arg)? {
+    match (args.len(), args.first()) {
+        (0, _) => console::toggle_diary().map_err(diary_io_error)?,
+        (1, Some(arg)) => match parse_diary_arg(arg)? {
             DiaryCommand::On => {
                 console::set_diary_enabled_checked(true).map_err(diary_io_error)?;
             }
@@ -105,10 +105,18 @@ mod tests {
             runmat_filesystem::SandboxFsProvider::new(dir.path().to_path_buf()).expect("sandbox");
         let _guard = runmat_filesystem::replace_provider(Arc::new(provider));
 
-        block_on(diary_builtin(vec![Value::from("session.log")])).expect("diary on");
+        block_on(diary_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from(
+                "session.log",
+            )]),
+        ))
+        .expect("diary on");
         console::record_console_line(console::ConsoleStream::Stdout, "alpha")
             .expect("record console line");
-        block_on(diary_builtin(vec![Value::from("off")])).expect("diary off");
+        block_on(diary_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from("off")]),
+        ))
+        .expect("diary off");
         console::record_console_line(console::ConsoleStream::Stdout, "beta")
             .expect("record console line");
 
@@ -126,10 +134,18 @@ mod tests {
         let _guard = runmat_filesystem::replace_provider(Arc::new(provider));
         std::fs::write(dir.path().join("session.log"), "seed\n").expect("seed");
 
-        block_on(diary_builtin(vec![Value::from("session.log")])).expect("diary on");
+        block_on(diary_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from(
+                "session.log",
+            )]),
+        ))
+        .expect("diary on");
         console::record_console_line(console::ConsoleStream::Stdout, "next")
             .expect("record console line");
-        block_on(diary_builtin(vec![Value::from("off")])).expect("diary off");
+        block_on(diary_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from("off")]),
+        ))
+        .expect("diary off");
 
         let text = std::fs::read_to_string(dir.path().join("session.log")).expect("read log");
         assert_eq!(text, "seed\nnext\n");
@@ -143,14 +159,22 @@ mod tests {
             runmat_filesystem::SandboxFsProvider::new(dir.path().to_path_buf()).expect("sandbox");
         let _guard = runmat_filesystem::replace_provider(Arc::new(provider));
 
-        block_on(diary_builtin(vec![Value::from("session.log")])).expect("diary on");
+        block_on(diary_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from(
+                "session.log",
+            )]),
+        ))
+        .expect("diary on");
         let capture = console::begin_capture().expect("console capture");
         console::record_console_line(console::ConsoleStream::Stdout, "captured-only")
             .expect("record console line");
         let captured = capture.finish().expect("captured text");
         console::record_console_line(console::ConsoleStream::Stdout, "logged")
             .expect("record console line");
-        block_on(diary_builtin(vec![Value::from("off")])).expect("diary off");
+        block_on(diary_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from("off")]),
+        ))
+        .expect("diary off");
 
         assert_eq!(captured, "captured-only\n");
         let text = std::fs::read_to_string(dir.path().join("session.log")).expect("read log");
@@ -166,8 +190,12 @@ mod tests {
             runmat_filesystem::SandboxFsProvider::new(dir.path().to_path_buf()).expect("sandbox");
         let _guard = runmat_filesystem::replace_provider(Arc::new(provider));
         let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
-        let error = block_on(diary_builtin(vec![Value::from("should-not-open.log")]))
-            .expect_err("diary has no public output");
+        let error = block_on(diary_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from(
+                "should-not-open.log",
+            )]),
+        ))
+        .expect_err("diary has no public output");
         assert_eq!(error.identifier(), Some("RunMat:diary:TooManyOutputs"));
         assert!(!dir.path().join("should-not-open.log").exists());
     }

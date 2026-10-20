@@ -99,7 +99,7 @@ fn ctranspose_toggles_property_and_solves_transposed_system() {
     let prop = block_on(decomposition_subsref(
         dt.clone(),
         OBJECT_INDEX_MEMBER.to_string(),
-        Value::String(IS_CONJUGATE_TRANSPOSED_FIELD.to_string()),
+        Value::String(IS_CONJUGATE_TRANSPOSED_FIELD.to_string().into()),
     ))
     .expect("property");
     assert_eq!(prop, Value::Bool(true));

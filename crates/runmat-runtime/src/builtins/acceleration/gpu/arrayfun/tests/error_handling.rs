@@ -23,7 +23,7 @@ fn arrayfun_error_handler_recovers() {
         binding: Some(binding),
         source_role: runmat_types::FunctionSourceRole::Unknown,
         source_file: None,
-        captures: vec![Value::Num(42.0)],
+        captures: vec![Value::Num(42.0)].into(),
     }));
     let result = call(
         Value::FunctionHandle("nonexistent_builtin".into()),

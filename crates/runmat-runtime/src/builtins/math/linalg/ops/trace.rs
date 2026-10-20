@@ -207,7 +207,7 @@ fn trace_char_array(ca: CharArray) -> BuiltinResult<Value> {
     let mut sum = 0.0;
     for idx in 0..diag_len {
         let linear = idx * ca.cols + idx;
-        if let Some(ch) = ca.data.get(linear) {
+        if let Some(ch) = ca.data().get(linear) {
             sum += *ch as u32 as f64;
         }
     }

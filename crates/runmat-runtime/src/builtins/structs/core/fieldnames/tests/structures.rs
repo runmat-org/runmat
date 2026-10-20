@@ -3,24 +3,25 @@ use runmat_value::{CellArray, StructArray, StructValue, Value};
 
 #[test]
 fn preserves_scalar_insertion_order_and_case() {
-    let mut structure = StructValue::new();
+    let mut structure = runmat_value::UnboundedStructValueBuilder::new();
     structure.fields.insert("beta".into(), Value::Num(1.0));
     structure.fields.insert("Beta".into(), Value::Num(2.0));
     structure.fields.insert("alpha".into(), Value::Num(3.0));
-    let (names, shape) = strings(run(Value::Struct(structure)).expect("fieldnames"));
+    let (names, shape) = strings(run(Value::Struct(structure.finish())).expect("fieldnames"));
     assert_eq!(names, ["beta", "Beta", "alpha"]);
     assert_eq!(shape, [3, 1]);
 }
 
 #[test]
 fn reads_ordered_schema_from_typed_struct_array() {
-    let mut first = StructValue::new();
+    let mut first = runmat_value::UnboundedStructValueBuilder::new();
     first.fields.insert("name".into(), Value::from("first"));
     first.fields.insert("id".into(), Value::Num(101.0));
-    let mut second = StructValue::new();
+    let mut second = runmat_value::UnboundedStructValueBuilder::new();
     second.fields.insert("name".into(), Value::from("second"));
     second.fields.insert("id".into(), Value::Num(102.0));
-    let array = StructArray::new(vec![first, second], vec![1, 2]).expect("struct array");
+    let array =
+        StructArray::new(vec![first.finish(), second.finish()], vec![1, 2]).expect("struct array");
     let (names, shape) = strings(run(Value::StructArray(array)).expect("fieldnames"));
     assert_eq!(names, ["name", "id"]);
     assert_eq!(shape, [2, 1]);
@@ -42,7 +43,7 @@ fn ordinary_cell_of_structs_is_not_a_structure_array() {
 
 #[test]
 fn reads_only_outer_metadata() {
-    let mut structure = StructValue::new();
+    let mut structure = runmat_value::UnboundedStructValueBuilder::new();
     structure.fields.insert(
         "resident".into(),
         Value::GpuTensor(
@@ -56,6 +57,6 @@ fn reads_only_outer_metadata() {
                 .handle,
         ),
     );
-    let (names, _) = strings(run(Value::Struct(structure)).expect("metadata-only lookup"));
+    let (names, _) = strings(run(Value::Struct(structure.finish())).expect("metadata-only lookup"));
     assert_eq!(names, ["resident"]);
 }

@@ -184,6 +184,7 @@ fn register_classes(
         let order = preflight::validate(&proposed, state, parent_admission)?;
         let mut retired = Vec::with_capacity(order.len());
         for name in order {
+            state.builtin_issuances.remove(&name);
             let registration = proposed
                 .remove(&name)
                 .expect("preflight returned only proposed classes");
@@ -224,14 +225,20 @@ fn validate_method_bindings(
             let issued = match &binding.authority {
                 runmat_value::BoundFunctionAuthority::Portable { origin } => Some(*origin),
                 runmat_value::BoundFunctionAuthority::SelectedNative { origin, lease }
-                    if lease.is_live() && lease.origin() == *origin =>
+                    if lease.is_live()
+                        && lease.origin() == *origin
+                        && lease.compiled_function().0 == binding.function =>
                 {
                     Some(*origin)
                 }
                 _ => None,
             };
             issued.is_none_or(|origin| {
-                usize::try_from(origin.function.0).ok() != Some(binding.function)
+                // The portable ordinal is not the local compiler coordinate.
+                // Resolve through the invocation's already-issued source facts,
+                // not a class/name resolver (the class batch is not published).
+                crate::user_functions::resolve_binding_origin_binding(origin)
+                    .is_none_or(|issued| issued != *binding)
             })
         })
     {

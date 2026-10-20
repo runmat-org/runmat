@@ -1,6 +1,8 @@
 use super::*;
 
-pub(super) fn preflight_known_options(args: &[Value]) -> BuiltinResult<()> {
+pub(super) fn preflight_known_options(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     for (index, value) in args.iter().enumerate() {
         let Some(token) = value_to_string_scalar(value) else {
             continue;
@@ -54,7 +56,9 @@ pub(super) struct SaveRequest {
     pub(super) append: bool,
 }
 
-pub(super) async fn parse_arguments(values: &[Value]) -> BuiltinResult<SaveRequest> {
+pub(super) async fn parse_arguments(
+    values: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<SaveRequest> {
     let mut variables = Vec::new();
     let mut structs = Vec::new();
     let mut regex_patterns = Vec::new();
@@ -167,7 +171,7 @@ pub(super) fn option_token(value: &Value) -> BuiltinResult<Option<String>> {
 
 async fn extract_names(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(s) => Ok(vec![s.clone()]),
+        Value::String(s) => Ok(vec![s.as_str().to_owned()]),
         Value::CharArray(ca) => {
             let rows = char_array_rows_as_strings(ca);
             if rows.is_empty() && ca.rows > 0 {
@@ -179,15 +183,15 @@ async fn extract_names(value: &Value) -> BuiltinResult<Vec<String>> {
             Ok(rows)
         }
         Value::StringArray(sa) => {
-            let mut names = Vec::with_capacity(sa.data.len());
-            for s in &sa.data {
-                names.push(s.clone());
+            let mut names = Vec::with_capacity(sa.data().len());
+            for s in sa.data() {
+                names.push(s.as_str().to_owned());
             }
             Ok(names)
         }
         Value::Cell(ca) => {
-            let mut names = Vec::with_capacity(ca.data.len());
-            for handle in &ca.data {
+            let mut names = Vec::with_capacity(ca.data().len());
+            for handle in ca.data() {
                 let inner = handle;
                 let text = value_to_string_scalar(inner).ok_or_else(|| {
                     save_error_with(
@@ -215,9 +219,9 @@ async fn extract_names(value: &Value) -> BuiltinResult<Vec<String>> {
 
 fn value_to_string_scalar(value: &Value) -> Option<String> {
     match value {
-        Value::String(s) => Some(s.clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
+        Value::String(s) => Some(s.as_str().to_owned()),
+        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data().iter().collect()),
+        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].as_str().to_owned()),
         _ => None,
     }
 }
@@ -228,7 +232,7 @@ fn char_array_rows_as_strings(ca: &CharArray) -> Vec<String> {
         let mut buffer = String::with_capacity(ca.cols);
         for col in 0..ca.cols {
             let idx = row * ca.cols + col;
-            buffer.push(ca.data[idx]);
+            buffer.push(ca.data()[idx]);
         }
         let trimmed = buffer.trim_end_matches([' ', '\0']).to_string();
         if !trimmed.is_empty() {

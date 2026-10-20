@@ -13,6 +13,11 @@ mod writematrix;
 mod writecell;
 mod xlswrite;
 mod xlsread;
+mod reader_contract;
+mod readtable;
+mod readcell;
+mod spreadsheet_import_options;
+mod detect_import_options;
 
 pub use csvread::*;
 pub use csvwrite::*;
@@ -26,6 +31,11 @@ pub use writecell::*;
 pub use writematrix::*;
 pub use xlsread::*;
 pub use xlswrite::*;
+pub use reader_contract::*;
+pub use readtable::*;
+pub use readcell::*;
+pub use spreadsheet_import_options::*;
+pub use detect_import_options::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(csvread::ENTRIES.iter().copied());
@@ -40,4 +50,8 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(writecell::ENTRIES.iter().copied());
     values.extend(xlswrite::ENTRIES.iter().copied());
     values.extend(xlsread::ENTRIES.iter().copied());
+    values.extend(readtable::ENTRIES.iter().copied());
+    values.extend(readcell::ENTRIES.iter().copied());
+    values.extend(spreadsheet_import_options::ENTRIES.iter().copied());
+    values.extend(detect_import_options::ENTRIES.iter().copied());
 }

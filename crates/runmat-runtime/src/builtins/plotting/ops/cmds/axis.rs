@@ -20,7 +20,7 @@ use runmat_value::{Tensor, Value};
     binding_variant = "default",
     builtin_path = "crate::builtins::plotting::cmds::axis"
 )]
-pub fn axis_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub fn axis_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(&AXIS_DESCRIPTOR, &AXIS_ERROR_OUTPUTS, "axis")?;
 
     if args.is_empty() {

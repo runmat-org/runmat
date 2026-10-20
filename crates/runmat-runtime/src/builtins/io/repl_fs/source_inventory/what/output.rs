@@ -1,17 +1,17 @@
-use runmat_value::{CellArray, CharArray, StructValue, Value};
+use runmat_value::{CellArray, CharArray, Value};
 
 use crate::builtins::common::fs::path_to_string;
 use crate::BuiltinResult;
 
 pub(super) fn value(inventory: super::contents::Inventory) -> BuiltinResult<Value> {
-    let mut result = StructValue::new();
+    let mut result = runmat_value::UnboundedStructValueBuilder::new();
     result.insert("path", character(&path_to_string(&inventory.folder)));
     result.insert("m", names(inventory.sources)?);
     result.insert("mat", names(inventory.data)?);
     result.insert("mex", names(inventory.extensions)?);
     result.insert("classes", names(inventory.classes)?);
     result.insert("packages", names(inventory.packages)?);
-    Ok(Value::Struct(result))
+    Ok(Value::Struct(result.finish()))
 }
 
 fn names(values: Vec<String>) -> BuiltinResult<Value> {

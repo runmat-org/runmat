@@ -66,7 +66,13 @@ async fn prepare(drive: Drive) -> SignalFixture {
     } = compilation::compile(source).await;
     let executable = unit.portable_envelope_for(Some("pulse")).unwrap();
     let function = unit
-        .function_analysis(executable.manifest.identity.entrypoint_function.unwrap())
+        .function_analysis(
+            executable
+                .manifest
+                .identity
+                .entrypoint_function
+                .expect("selected acoustic function"),
+        )
         .unwrap();
     let (authored, explicit) = signals(drive);
     let admitted = admit_named_signal_generator(

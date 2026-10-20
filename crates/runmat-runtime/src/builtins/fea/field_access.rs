@@ -29,11 +29,11 @@ pub(super) fn create_page_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
             "fea.fieldPage requires an fea.Field",
         ));
     };
-    if !field.class_name.is(identities::FEA_FIELD_CLASS) {
+    if !field.class_name().is(identities::FEA_FIELD_CLASS) {
         return Err(builtin_error(
             FIELD_PAGE_NAME,
             &ERROR_INPUT,
-            format!("expected fea.Field, got {}", field.class_name),
+            format!("expected fea.Field, got {}", field.class_name()),
         ));
     }
     let run_id = required_nonempty_string(field, "run_id")?;
@@ -68,7 +68,7 @@ pub(super) fn create_page_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     page_to_value(
         page,
         field
-            .properties
+            .properties()
             .get("sample")
             .cloned()
             .unwrap_or_else(empty_double_value),
@@ -80,9 +80,9 @@ pub(super) fn selection_from_field_object(
     field: &ObjectInstance,
 ) -> BuiltinResult<AnalysisFieldSelection> {
     let field_id = required_nonempty_string_for_builtin(builtin, field, "field_id")?;
-    let sample = match field.properties.get("sample") {
+    let sample = match field.properties().get("sample") {
         Some(value @ Value::Object(sample))
-            if sample.class_name.is(identities::FEA_FREQUENCY_CLASS) =>
+            if sample.class_name().is(identities::FEA_FREQUENCY_CLASS) =>
         {
             let hertz = super::values::quantity_scalar(
                 builtin,
@@ -149,39 +149,30 @@ fn page_to_value(page: AnalysisFieldPageResult, sample: Value) -> BuiltinResult<
         }
     };
     let values = page_values_to_value(page.values, page.count)?;
-    let mut object = ObjectInstance::new(identities::FEA_FIELD_PAGE_CLASS);
-    object
-        .properties
-        .insert("run_id".into(), Value::String(page.run_id));
-    object
-        .properties
-        .insert("field_id".into(), Value::String(page.field_id));
-    object.properties.insert("sample".into(), sample);
-    object.properties.insert("values".into(), values);
-    object
-        .properties
-        .insert("start".into(), exact_usize_value(start)?);
-    object
-        .properties
-        .insert("count".into(), exact_usize_value(page.count)?);
-    object
-        .properties
-        .insert("total_count".into(), exact_usize_value(page.total_count)?);
-    object.properties.insert(
+    let mut object = crate::builtins::fea::object_api::ordinary_builder(
+        FIELD_PAGE_NAME,
+        super::classes::FEA_FIELD_PAGE_CLASS,
+    )?;
+    object.insert("run_id".into(), Value::String(page.run_id.into()));
+    object.insert("field_id".into(), Value::String(page.field_id.into()));
+    object.insert("sample".into(), sample);
+    object.insert("values".into(), values);
+    object.insert("start".into(), exact_usize_value(start)?);
+    object.insert("count".into(), exact_usize_value(page.count)?);
+    object.insert("total_count".into(), exact_usize_value(page.total_count)?);
+    object.insert(
         "next_start".into(),
         next_start
             .map(exact_usize_value)
             .transpose()?
             .unwrap_or_else(empty_double_value),
     );
-    object
-        .properties
-        .insert("has_more".into(), Value::Bool(has_more));
-    object.properties.insert(
+    object.insert("has_more".into(), Value::Bool(has_more));
+    object.insert(
         "numeric_representation".into(),
         numeric_representation_value(Some(representation)),
     );
-    Ok(Value::Object(object))
+    Ok(Value::Object(object.finish()))
 }
 
 pub(super) fn numeric_representation_value(
@@ -265,7 +256,7 @@ fn required_nonempty_string_for_builtin<'a>(
     object: &'a ObjectInstance,
     property: &str,
 ) -> BuiltinResult<&'a str> {
-    match object.properties.get(property) {
+    match object.properties().get(property) {
         Some(Value::String(value)) if !value.is_empty() => Ok(value),
         _ => Err(builtin_error(
             builtin,
@@ -348,19 +339,19 @@ mod tests {
             panic!("expected page object")
         };
         assert_eq!(
-            page.properties.get("start"),
+            page.properties().get("start"),
             Some(&Value::Int(IntValue::U64(2)))
         );
         assert_eq!(
-            page.properties.get("next_start"),
+            page.properties().get("next_start"),
             Some(&Value::Int(IntValue::U64(4)))
         );
-        assert_eq!(page.properties.get("has_more"), Some(&Value::Bool(true)));
+        assert_eq!(page.properties().get("has_more"), Some(&Value::Bool(true)));
         assert_eq!(
-            page.properties.get("numeric_representation"),
+            page.properties().get("numeric_representation"),
             Some(&Value::String("complex".into()))
         );
-        let Some(Value::ComplexTensor(values)) = page.properties.get("values") else {
+        let Some(Value::ComplexTensor(values)) = page.properties().get("values") else {
             panic!("expected native complex values")
         };
         assert_eq!(values.materialize_f64(), vec![(1.0, -2.0), (3.0, 4.0)]);

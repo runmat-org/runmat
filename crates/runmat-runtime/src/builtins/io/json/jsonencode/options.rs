@@ -18,10 +18,10 @@ enum OptionLocation {
 }
 
 impl PreparedOption {
-    fn value<'a>(&self, rest: &'a [Value]) -> BuiltinResult<&'a Value> {
+    fn value<'a>(&self, rest: crate::call::FunctionArgumentView<'a>) -> BuiltinResult<&'a Value> {
         match &self.location {
-            OptionLocation::StructField(key) => match rest {
-                [Value::Struct(options)] => options
+            OptionLocation::StructField(key) => match (rest.len(), rest.first()) {
+                (1, Some(Value::Struct(options))) => options
                     .fields
                     .get(key)
                     .ok_or_else(|| jsonencode_error(&JSONENCODE_ERROR_INTERNAL)),
@@ -36,7 +36,7 @@ impl PreparedOption {
 
 pub(super) fn preflight_jsonencode_extensions(
     value: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     layout: &PreparedOptionLayout,
 ) -> BuiltinResult<()> {
     if value_contains_complex(value) {
@@ -61,7 +61,9 @@ pub(super) fn preflight_jsonencode_extensions(
     Ok(())
 }
 
-pub(super) fn prepare_option_layout(rest: &[Value]) -> BuiltinResult<PreparedOptionLayout> {
+pub(super) fn prepare_option_layout(
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<PreparedOptionLayout> {
     if rest.is_empty() {
         return Ok(PreparedOptionLayout {
             entries: Vec::new(),
@@ -74,7 +76,7 @@ pub(super) fn prepare_option_layout(rest: &[Value]) -> BuiltinResult<PreparedOpt
                 for name in options.fields.keys() {
                     entries.push(PreparedOption {
                         name: decode_option_name(name)?,
-                        location: OptionLocation::StructField(name.clone()),
+                        location: OptionLocation::StructField(name.to_owned()),
                     });
                 }
                 Ok(PreparedOptionLayout { entries })
@@ -107,7 +109,7 @@ fn decode_option_name(name: &str) -> BuiltinResult<JsonEncodeOptionName> {
 
 pub(super) fn preflight_option_extensions(
     layout: &PreparedOptionLayout,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<()> {
     for entry in &layout.entries {
         let option_value = entry.value(rest)?;
@@ -143,7 +145,7 @@ fn option_value_is_scalar(value: &Value) -> bool {
         Value::Tensor(tensor) => tensor::is_scalar_tensor(tensor),
         Value::LogicalArray(logical) => logical.data.len() == 1,
         Value::CharArray(chars) => chars.rows == 1,
-        Value::StringArray(strings) => strings.data.len() == 1,
+        Value::StringArray(strings) => strings.data().len() == 1,
         Value::GpuTensor(handle) => handle.shape().iter().all(|&extent| extent == 1),
         _ => false,
     }
@@ -192,10 +194,10 @@ fn value_contains_complex(value: &Value) -> bool {
             runmat_accelerate_api::handle_storage(handle)
                 != runmat_accelerate_api::GpuTensorStorage::Real
         }
-        Value::Cell(cell) => cell.data.iter().any(value_contains_complex),
+        Value::Cell(cell) => cell.data().iter().any(value_contains_complex),
         Value::Struct(struct_value) => struct_value.fields.values().any(value_contains_complex),
         Value::StructArray(array) => array.any_value(value_contains_complex),
-        Value::Object(object) => object.properties.values().any(value_contains_complex),
+        Value::Object(object) => object.properties().values().any(value_contains_complex),
         _ => false,
     }
 }
@@ -203,10 +205,10 @@ fn value_contains_complex(value: &Value) -> bool {
 fn value_contains_sparse(value: &Value) -> bool {
     match value {
         Value::SparseTensor(_) => true,
-        Value::Cell(cell) => cell.data.iter().any(value_contains_sparse),
+        Value::Cell(cell) => cell.data().iter().any(value_contains_sparse),
         Value::Struct(value) => value.fields.values().any(value_contains_sparse),
         Value::StructArray(array) => array.any_value(value_contains_sparse),
-        Value::Object(value) => value.properties.values().any(value_contains_sparse),
+        Value::Object(value) => value.properties().values().any(value_contains_sparse),
         _ => false,
     }
 }
@@ -214,17 +216,17 @@ fn value_contains_sparse(value: &Value) -> bool {
 fn value_contains_explicit_gpu(value: &Value) -> bool {
     match value {
         Value::GpuTensor(handle) => runmat_accelerate_api::handle_is_explicit(handle),
-        Value::Cell(cell) => cell.data.iter().any(value_contains_explicit_gpu),
+        Value::Cell(cell) => cell.data().iter().any(value_contains_explicit_gpu),
         Value::Struct(value) => value.fields.values().any(value_contains_explicit_gpu),
         Value::StructArray(array) => array.any_value(value_contains_explicit_gpu),
-        Value::Object(value) => value.properties.values().any(value_contains_explicit_gpu),
+        Value::Object(value) => value.properties().values().any(value_contains_explicit_gpu),
         _ => false,
     }
 }
 
 pub(super) fn parse_options(
     layout: &PreparedOptionLayout,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<JsonEncodeOptions> {
     let mut options = JsonEncodeOptions::default();
     for entry in &layout.entries {
@@ -233,11 +235,15 @@ pub(super) fn parse_options(
     Ok(options)
 }
 
-fn option_name(value: &Value) -> BuiltinResult<String> {
+fn option_name(value: &Value) -> BuiltinResult<std::borrow::Cow<'_, str>> {
     match value {
-        Value::String(s) => Ok(s.clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
+        Value::String(s) => Ok(std::borrow::Cow::Borrowed(s.as_str())),
+        Value::CharArray(ca) if ca.rows == 1 => {
+            Ok(std::borrow::Cow::Owned(ca.data().iter().collect()))
+        }
+        Value::StringArray(sa) if sa.data().len() == 1 => {
+            Ok(std::borrow::Cow::Borrowed(sa.data()[0].as_str()))
+        }
         _ => Err(jsonencode_error(&JSONENCODE_ERROR_OPTION_NAME)),
     }
 }
@@ -279,10 +285,10 @@ fn coerce_bool(value: &Value) -> BuiltinResult<bool> {
             _ => Err(jsonencode_error(&JSONENCODE_ERROR_OPTION_VALUE)),
         },
         Value::CharArray(ca) if ca.rows == 1 => {
-            parse_bool_string(&ca.data.iter().collect::<String>())
+            parse_bool_string(&ca.data().iter().collect::<String>())
         }
         Value::String(s) => parse_bool_string(s),
-        Value::StringArray(sa) if sa.data.len() == 1 => parse_bool_string(&sa.data[0]),
+        Value::StringArray(sa) if sa.data().len() == 1 => parse_bool_string(&sa.data()[0]),
         _ => Err(jsonencode_error(&JSONENCODE_ERROR_OPTION_VALUE)),
     }
 }

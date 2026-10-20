@@ -76,7 +76,11 @@ fn pending_audio_open_is_woken_and_releases_selected_probe() {
     let (runtime, placement) = selected_context(&fs);
     let source = CancellationSource::new();
     let runtime = runtime.with_cancellation_token(source.token());
-    let mut call = Box::pin(audioread_builtin(Some(runtime), value(), vec![]));
+    let mut call = Box::pin(audioread_builtin(
+        Some(runtime),
+        value(),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ));
     cancel_pending_call(call.as_mut(), &source, &placement);
     assert_eq!(fs.effects().0, 1);
 }
@@ -91,7 +95,11 @@ fn pending_provider_whole_read_is_woken_without_fallback_replay() {
     let (runtime, placement) = selected_context(&fs);
     let source = CancellationSource::new();
     let runtime = runtime.with_cancellation_token(source.token());
-    let mut call = Box::pin(audioread_builtin(Some(runtime), value(), vec![]));
+    let mut call = Box::pin(audioread_builtin(
+        Some(runtime),
+        value(),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ));
     cancel_pending_call(call.as_mut(), &source, &placement);
     assert_eq!(fs.effects().0, 1);
     assert_eq!(fs.effects().1, 1);

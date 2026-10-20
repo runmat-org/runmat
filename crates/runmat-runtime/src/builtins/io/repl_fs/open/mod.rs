@@ -25,7 +25,7 @@ const BUILTIN_NAME: &str = "open";
 )]
 async fn open_builtin(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<RootedValue> {
     if args.len() != 1 {
         return Err(open_error(
@@ -74,7 +74,7 @@ async fn open_path(
     let path_text = path_to_string(path);
 
     if extension == "fig" {
-        let args = [Value::String(path_text)];
+        let args = [Value::string(path_text)];
         let opened = match runtime {
             Some(runtime) => {
                 crate::call_builtin_async_with_outputs_in_context(runtime, "openfig", &args, 1)
@@ -87,7 +87,7 @@ async fn open_path(
     }
 
     if extension == "mat" {
-        let eval = crate::builtins::io::mat::load::evaluate(&[Value::String(path_text)])
+        let eval = crate::builtins::io::mat::load::evaluate(&[Value::string(path_text)])
             .await
             .map_err(|err| open_flow_error("open", err))?;
         return eval.first_output();
@@ -121,14 +121,16 @@ async fn open_path(
 
 fn open_name(value: &Value) -> BuiltinResult<String> {
     match value {
-        Value::String(text) => Ok(text.clone()),
+        Value::String(text) => Ok(text.as_str().to_owned()),
         Value::CharArray(chars)
             if chars.rows == 1
                 && crate::builtins::common::shape::effective_rank(&chars.shape) <= 2 =>
         {
-            Ok(chars.data.iter().collect::<String>())
+            Ok(chars.data().iter().collect::<String>())
         }
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(array.data()[0].as_str().to_owned())
+        }
         _ => Err(open_error(&OPEN_ERROR_NAME, OPEN_ERROR_NAME.message)),
     }
 }
@@ -147,7 +149,7 @@ async fn call_extension_handler(
     let Some(result) = crate::user_functions::try_call_semantic_function_by_name_in_context(
         runtime,
         &handler_name,
-        &[Value::String(path_to_string(path))],
+        &[Value::string(path_to_string(path))],
         requested_outputs,
     )
     .await

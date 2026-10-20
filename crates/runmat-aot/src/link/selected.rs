@@ -8,7 +8,8 @@ use runmat_native_codegen::aot::{RelocatableNativeObject, SelectedNativeProduct}
 use super::{
     inputs::{HostedNativeBuildTrees, SelectedLinkInputs},
     toolchain::{ExternalNativeLinkAdmission, NativeHostedDependency, NativeLinkAdapter},
-    LinkPlan, LinkRequest, LinkedProgram, LinkerDriver, LinkerFamily,
+    CanonicalSelectedLinkPlan, LinkPlan, LinkRequest, LinkedProgram, LinkerDriver, LinkerFamily,
+    SelectedLinkOption,
 };
 use crate::{archive::RuntimeArchive, AotError, AotResult};
 
@@ -66,7 +67,7 @@ fn plan(
     let macos = target.operating_system == NativeOperatingSystem::Macos;
     let driver_path = inputs.toolchain_root.join(admission.entrypoint.as_str());
     let mut tokens = Vec::new();
-    let family = match &admission.adapter {
+    let (family, mut options) = match &admission.adapter {
         NativeLinkAdapter::ClangDriver { linker } => {
             if target.operating_system == NativeOperatingSystem::Windows {
                 return Err(invalid(
@@ -84,7 +85,17 @@ fn plan(
                 "-nostartfiles".into(),
                 "-nodefaultlibs".into(),
             ]);
-            LinkerFamily::UnixCc
+            (
+                LinkerFamily::UnixCc,
+                vec![
+                    SelectedLinkOption::TargetTriple,
+                    SelectedLinkOption::Sysroot,
+                    SelectedLinkOption::CompanionLinker,
+                    SelectedLinkOption::NoStandardLibrary,
+                    SelectedLinkOption::NoStartFiles,
+                    SelectedLinkOption::NoDefaultLibraries,
+                ],
+            )
         }
         NativeLinkAdapter::MsvcLinker => {
             if target.operating_system != NativeOperatingSystem::Windows {
@@ -97,7 +108,13 @@ fn plan(
                 NativeArchitecture::Aarch64 => "ARM64",
             };
             tokens.extend([format!("/MACHINE:{machine}"), "/NODEFAULTLIB".into()]);
-            LinkerFamily::Msvc
+            (
+                LinkerFamily::Msvc,
+                vec![
+                    SelectedLinkOption::MsvcMachine,
+                    SelectedLinkOption::MsvcNoDefaultLibraries,
+                ],
+            )
         }
     };
     tokens.push(inputs.object.display().to_string());
@@ -159,6 +176,7 @@ fn plan(
         LinkerFamily::UnixCc => tokens.extend(["-o".into(), inputs.output.display().to_string()]),
         LinkerFamily::Msvc => tokens.push(format!("/OUT:{}", inputs.output.display())),
     }
+    options.push(SelectedLinkOption::Output);
     if tokens.iter().any(|token| {
         token.is_empty()
             || token.len() > 4096
@@ -166,7 +184,20 @@ fn plan(
     }) {
         return Err(invalid("selected link token exceeds response bounds"));
     }
-    Ok(LinkPlan {
+    let canonical = CanonicalSelectedLinkPlan::new(
+        selected
+            .product()
+            .selected()
+            .expect("selected constructor")
+            .clone(),
+        identity.clone(),
+        admission.identity(),
+        triple.clone(),
+        family,
+        options,
+        selected.contents().selection().link_inputs().to_vec(),
+    );
+    LinkPlan {
         schema_version: super::NATIVE_LINK_PLAN_SCHEMA_VERSION,
         product: selected.product().clone(),
         selected_build: Some(admission.identity()),
@@ -181,7 +212,9 @@ fn plan(
         runtime_archive: inputs.runtime.clone(),
         output: inputs.output.clone(),
         response_tokens: tokens,
-    })
+        selected_proof: None,
+    }
+    .bind_selected(canonical)
 }
 
 fn invalid(error: impl std::fmt::Display) -> AotError {

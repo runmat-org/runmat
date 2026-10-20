@@ -6,7 +6,13 @@ use runmat_builtins::POWER_DESCRIPTOR;
 use runmat_value::{ComplexTensor, IntValue, IntegerStorage, SymbolicArray, SymbolicExpr, Tensor};
 
 fn power_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    block_on(super::power_builtin(None, lhs, rhs, rest)).map(|owned| owned.value().clone())
+    block_on(super::power_builtin(
+        None,
+        lhs,
+        rhs,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    ))
+    .map(|owned| owned.value().clone())
 }
 
 mod contract;

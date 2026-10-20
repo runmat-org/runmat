@@ -6,7 +6,10 @@ use std::sync::Arc;
 use futures::executor::block_on;
 use runmat_runtime::context::RuntimeContext;
 use runmat_runtime::execution::RuntimeExecutionService;
-use runmat_value::{CellArray, HandleRef, Value};
+use runmat_value::{
+    CellArray, ExactHostAllocationPermit, ExactHostAllocationReservation,
+    ExactHostNumericAllocationError, HandleRef, OutputListStorage, Value,
+};
 
 use super::{interpret_parfor_task_in_context, ParforTaskExecution, ParforTaskMode};
 
@@ -15,6 +18,30 @@ thread_local! {
 }
 
 struct ObservedTaskMember(Option<runmat_gc::GcHandle>);
+
+#[derive(Debug)]
+struct IterationPermit(Arc<AtomicUsize>);
+
+#[derive(Debug)]
+struct IterationReservation(Arc<AtomicUsize>);
+
+impl ExactHostAllocationReservation for IterationReservation {}
+
+impl Drop for IterationReservation {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+impl ExactHostAllocationPermit for IterationPermit {
+    fn reserve_exact(
+        &self,
+        _: usize,
+    ) -> Result<Arc<dyn ExactHostAllocationReservation>, ExactHostNumericAllocationError> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Ok(Arc::new(IterationReservation(Arc::clone(&self.0))))
+    }
+}
 
 impl ObservedTaskMember {
     fn install(handle: runmat_gc::GcHandle) -> Self {
@@ -65,7 +92,16 @@ fn task_results_retain_managed_members_through_collecting_root_retirement() {
                 &analysis,
             )
             .expect("compile analyzed task");
-            let compiled_functions = mir.bodies.keys().copied().collect();
+            let compiled_functions = mir
+                .bodies
+                .keys()
+                .map(|local| {
+                    let facts = analysis
+                        .function_for_local(*local)
+                        .expect("exact analysis self binding");
+                    (*local, facts.function)
+                })
+                .collect();
             let region_contracts = analysis
                 .regions
                 .iter()
@@ -126,13 +162,21 @@ fn task_results_retain_managed_members_through_collecting_root_retirement() {
             }))
             .expect("observe task root retirement");
             let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
-            let outputs = block_on(inputs.with_unbounded_values_async(|inputs| {
+            let iteration_claims = Arc::new(AtomicUsize::new(0));
+            let iterations = OutputListStorage::try_initialize(
+                2,
+                &IterationPermit(Arc::clone(&iteration_claims)),
+                |index| Ok::<_, std::convert::Infallible>(Value::Num((index + 1) as f64)),
+            )
+            .expect("admit the original iteration collection");
+            assert_eq!(iteration_claims.load(Ordering::SeqCst), 1);
+            let outputs = block_on(inputs.with_owned_output_storage_async(|inputs| {
                 interpret_parfor_task_in_context(ParforTaskExecution {
                     bytecode_owner: None,
                     bytecode: &bytecode,
                     region,
                     inputs,
-                    iterations: vec![Value::Num(1.0), Value::Num(2.0)],
+                    iterations,
                     input_roots: None,
                     randomness: runmat_execution::ParallelRandomnessContext::Inherit,
                     mode,
@@ -140,8 +184,8 @@ fn task_results_retain_managed_members_through_collecting_root_retirement() {
                     runtime,
                 })
             }))
-            .and_then(std::convert::identity)
             .expect("execute task");
+            assert_eq!(iteration_claims.load(Ordering::SeqCst), 0);
             assert_eq!(outputs.values().len(), region.output_variables().count());
             assert!(
                 retirements.load(Ordering::SeqCst) > 0,

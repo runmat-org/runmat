@@ -6,19 +6,20 @@ pub(super) enum PageOperation {
 
 impl PageOperation {
     pub(super) fn from_callable(value: Value) -> BuiltinResult<Self> {
-        let raw = match value {
-            Value::FunctionHandle(func) => func.into_name(),
-            Value::ExternalFunctionHandle(func) => func.into_name(),
-            Value::BoundFunctionHandle(handle) => handle.into_data().name,
-            Value::String(s) => s,
+        use std::borrow::Cow;
+        let raw = match &value {
+            Value::FunctionHandle(func) => Cow::Borrowed(func.name()),
+            Value::ExternalFunctionHandle(func) => Cow::Borrowed(func.name()),
+            Value::BoundFunctionHandle(handle) => Cow::Borrowed(handle.name.as_str()),
+            Value::String(s) => Cow::Borrowed(s.as_str()),
             Value::StringArray(sa) => {
-                if sa.data.len() != 1 {
+                if sa.data().len() != 1 {
                     return Err(pagefun_error_with_detail(
                         &PAGEFUN_ERROR_INVALID_CALLABLE,
                         "function string array must contain exactly one element",
                     ));
                 }
-                sa.data[0].clone()
+                Cow::Borrowed(sa.data()[0].as_str())
             }
             Value::CharArray(chars) => {
                 if chars.rows != 1 {
@@ -27,7 +28,7 @@ impl PageOperation {
                         "function char array must be a single row character vector",
                     ));
                 }
-                chars.data.iter().collect()
+                Cow::Owned(chars.data().iter().collect::<String>())
             }
             other => {
                 return Err(pagefun_error_with_detail(

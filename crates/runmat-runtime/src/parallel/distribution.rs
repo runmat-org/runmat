@@ -225,7 +225,7 @@ pub async fn materialize_partitions(
                 "distributed partition payload shape disagrees with its immutable layout",
             ));
         }
-        output = assembly::assign_with_plan(output, &plan, &partition.value).await?;
+        output = assembly::assign_with_plan(None, output, &plan, &partition.value).await?;
     }
     Ok(output)
 }

@@ -37,6 +37,14 @@ impl std::error::Error for MissingCallableTarget {}
 /// Executor adapter used only to map stable source names to semantic functions.
 pub trait FunctionNameResolver {
     fn resolve_function(&self, name: &str) -> Option<FunctionId>;
+
+    /// Retain the exact selected definition when the resolver owns one.
+    /// Numeric identity remains a lookup hint, never retained execution
+    /// authority. Resolvers without a definition owner keep the legacy
+    /// current-publication behavior through the default.
+    fn resolve_bound_function(&self, _name: &str) -> Option<runmat_value::BoundFunctionBinding> {
+        None
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,7 +67,7 @@ impl CallableCallKind {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CallableMetadata {
     pub call_kind: CallableCallKind,
-    pub display_name: Option<String>,
+    pub display_name: Option<runmat_value::Utf8Text>,
     pub source_id: Option<runmat_types::SourceId>,
     pub source_ref: Option<crate::source_context::RuntimeSourceRef>,
     pub source_invocation: Option<crate::context::RuntimeInvocationArity>,
@@ -82,7 +90,7 @@ impl Default for CallableMetadata {
 }
 
 impl CallableMetadata {
-    fn feval(display_name: Option<String>) -> Self {
+    fn feval(display_name: Option<runmat_value::Utf8Text>) -> Self {
         Self {
             call_kind: CallableCallKind::Feval,
             display_name,
@@ -98,21 +106,30 @@ impl CallableMetadata {
 /// One closure stored in its canonical Value representation so root scans can
 /// borrow the complete capture and lexical-activation graph without cloning it.
 #[derive(Debug, Clone)]
-pub struct RetainedClosureValue(runmat_value::SharedValueGeneration);
+pub struct RetainedClosureValue(RetainedClosureOwner);
+
+#[derive(Debug, Clone)]
+enum RetainedClosureOwner {
+    Generation(runmat_value::SharedValueGeneration),
+    Captured(super::CapturedValueLease),
+}
 
 impl RetainedClosureValue {
     pub fn new(closure: Closure) -> Self {
-        Self(runmat_value::SharedValueGeneration::unbounded(
-            Value::Closure(closure),
+        Self(RetainedClosureOwner::Generation(
+            runmat_value::SharedValueGeneration::unbounded(Value::Closure(closure)),
         ))
     }
 
     pub fn as_value(&self) -> &Value {
-        self.0.value()
+        match &self.0 {
+            RetainedClosureOwner::Generation(owner) => owner.value(),
+            RetainedClosureOwner::Captured(owner) => owner.value(),
+        }
     }
 
     pub fn as_closure(&self) -> &Closure {
-        match self.0.value() {
+        match self.as_value() {
             Value::Closure(closure) => closure,
             _ => unreachable!("retained closure is constructed only from Closure"),
         }
@@ -130,27 +147,99 @@ impl RetainedClosureValue {
                 "retained callable owner is not a closure",
             ));
         }
-        Ok(Self(lease.shared_generation()))
+        Ok(Self(RetainedClosureOwner::Generation(
+            lease.shared_generation(),
+        )))
     }
 
-    pub(crate) fn generation(&self) -> runmat_value::SharedValueGeneration {
-        self.0.clone()
+    pub(crate) fn from_callable_owner(
+        owner: &super::RetainedCallableTarget,
+    ) -> Result<Self, RuntimeError> {
+        if !matches!(owner.value(), Value::Closure(_)) {
+            return Err(crate::runtime_error::semantic_error(
+                "CallableArguments",
+                "retained callable owner is not a closure",
+            ));
+        }
+        Ok(Self(match owner {
+            super::RetainedCallableTarget::Direct(owner) => {
+                RetainedClosureOwner::Generation(owner.shared_generation())
+            }
+            super::RetainedCallableTarget::Captured(owner) => {
+                RetainedClosureOwner::Captured(owner.clone())
+            }
+        }))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn generation(&self) -> Option<runmat_value::SharedValueGeneration> {
+        match &self.0 {
+            RetainedClosureOwner::Generation(owner) => Some(owner.clone()),
+            RetainedClosureOwner::Captured(_) => None,
+        }
+    }
+
+    pub(crate) fn matches_callable_owner(&self, owner: &super::RetainedCallableTarget) -> bool {
+        match (&self.0, owner) {
+            (
+                RetainedClosureOwner::Generation(left),
+                super::RetainedCallableTarget::Direct(right),
+            ) => left.ptr_eq(&right.shared_generation()),
+            (
+                RetainedClosureOwner::Captured(left),
+                super::RetainedCallableTarget::Captured(right),
+            ) => left.same_capture(right),
+            _ => false,
+        }
     }
 
     pub(crate) fn retain_for_call(
         &self,
         runtime: Option<&crate::context::RuntimeContext>,
-    ) -> Result<crate::execution::RetainedValueReadLease, RuntimeError> {
-        crate::execution::RetainedValueReadLease::retain_shared_generation(
-            self.generation(),
-            runtime,
-        )
+    ) -> Result<super::RetainedCallableTarget, RuntimeError> {
+        match &self.0 {
+            RetainedClosureOwner::Generation(owner) => Ok(super::RetainedCallableTarget::Direct(
+                crate::execution::RetainedValueReadLease::retain_shared_generation(
+                    owner.clone(),
+                    runtime,
+                )?,
+            )),
+            RetainedClosureOwner::Captured(owner) => {
+                Ok(super::RetainedCallableTarget::Captured(owner.clone()))
+            }
+        }
     }
 }
 
 impl PartialEq for RetainedClosureValue {
     fn eq(&self, other: &Self) -> bool {
         self.as_value() == other.as_value()
+    }
+}
+
+/// Immutable callable target generation used by a repeatable forwarded
+/// request. Its external `RetainedValueReadLease` remains with the repeatable
+/// descriptor owner, so this root-free alias never creates a root cycle.
+#[derive(Debug, Clone)]
+pub struct RetainedCallableValue(super::RetainedCallableTarget);
+
+impl RetainedCallableValue {
+    pub(crate) fn from_read_lease(lease: &crate::execution::RetainedValueReadLease) -> Self {
+        Self(super::RetainedCallableTarget::Direct(lease.clone()))
+    }
+
+    pub fn value(&self) -> &Value {
+        self.0.value()
+    }
+
+    pub(crate) fn matches_callable_owner(&self, owner: &super::RetainedCallableTarget) -> bool {
+        self.0.same_owner(owner)
+    }
+}
+
+impl PartialEq for RetainedCallableValue {
+    fn eq(&self, other: &Self) -> bool {
+        self.value() == other.value()
     }
 }
 
@@ -173,6 +262,7 @@ pub enum CallableTarget {
         fallback_policy: CallableFallbackPolicy,
     },
     FevalForward(Value),
+    RetainedFevalForward(RetainedCallableValue),
 }
 
 impl CallableTarget {
@@ -186,6 +276,7 @@ impl CallableTarget {
                 visitor(closure.as_value())
             }
             Self::FevalForward(value) => visitor(value),
+            Self::RetainedFevalForward(value) => visitor(value.value()),
             Self::Bound(_) | Self::Resolved { .. } => Some(()),
         }
     }
@@ -200,6 +291,104 @@ pub struct CallableDescriptor {
 }
 
 impl CallableDescriptor {
+    /// Select a repeatable target from one already-admitted immutable callable
+    /// generation. This is the retained-owner arm of the same descriptor
+    /// selector used by `from_feval_value`: it may only return a descriptor
+    /// whose selected authority and metadata borrow or share that generation.
+    /// In particular it never copies a name into an unclaimed `String`.
+    pub(crate) fn from_retained_feval_value(
+        owner: &crate::execution::RetainedValueReadLease,
+        requested_outputs: usize,
+        function_resolver: &impl FunctionNameResolver,
+    ) -> Result<Self, RuntimeError> {
+        let descriptor = match owner.value() {
+            Value::BoundFunctionHandle(handle) => Self {
+                target: CallableTarget::Bound(runmat_value::BoundFunctionBinding {
+                    function: handle.function,
+                    authority: handle.authority.clone(),
+                }),
+                args: Vec::new(),
+                requested_outputs,
+                metadata: CallableMetadata::feval(None),
+            },
+            Value::Closure(closure) => {
+                let retained = RetainedClosureValue::from_read_lease(owner)?;
+                let binding = closure
+                    .binding
+                    .clone()
+                    .or_else(|| function_resolver.resolve_bound_function(&closure.function_name));
+                if let Some(binding) = binding {
+                    Self {
+                        target: CallableTarget::BoundLexical {
+                            binding,
+                            closure: retained,
+                        },
+                        args: Vec::new(),
+                        requested_outputs,
+                        // The immutable callable generation remains the
+                        // display-name owner.
+                        metadata: CallableMetadata::feval(None),
+                    }
+                } else if let Some(function) =
+                    function_resolver.resolve_function(&closure.function_name)
+                {
+                    Self {
+                        target: CallableTarget::CapturedResolved {
+                            identity: CallableIdentity::BoundFunction(function),
+                            fallback_policy: CallableFallbackPolicy::None,
+                            closure: retained,
+                        },
+                        args: Vec::new(),
+                        requested_outputs,
+                        metadata: CallableMetadata::feval(None),
+                    }
+                } else {
+                    Self {
+                        target: CallableTarget::RetainedFevalForward(
+                            RetainedCallableValue::from_read_lease(owner),
+                        ),
+                        args: Vec::new(),
+                        requested_outputs,
+                        metadata: CallableMetadata::feval(None),
+                    }
+                }
+            }
+            Value::FunctionHandle(name) | Value::ExternalFunctionHandle(name) => {
+                match function_resolver.resolve_bound_function(name.name()) {
+                    Some(binding) => Self {
+                        target: CallableTarget::Bound(binding),
+                        args: Vec::new(),
+                        requested_outputs,
+                        metadata: CallableMetadata::feval(None),
+                    },
+                    None => Self {
+                        target: match function_resolver.resolve_function(name.name()) {
+                            Some(function) => CallableTarget::Resolved {
+                                identity: CallableIdentity::BoundFunction(function),
+                                fallback_policy: CallableFallbackPolicy::None,
+                            },
+                            None => CallableTarget::RetainedFevalForward(
+                                RetainedCallableValue::from_read_lease(owner),
+                            ),
+                        },
+                        args: Vec::new(),
+                        requested_outputs,
+                        metadata: CallableMetadata::feval(None),
+                    },
+                }
+            }
+            _ => Self {
+                target: CallableTarget::RetainedFevalForward(
+                    RetainedCallableValue::from_read_lease(owner),
+                ),
+                args: Vec::new(),
+                requested_outputs,
+                metadata: CallableMetadata::feval(None),
+            },
+        };
+        Ok(descriptor)
+    }
+
     /// Visit arguments and the callable target as one retained graph.
     pub(crate) fn visit_retained_values(
         &self,
@@ -265,7 +454,7 @@ impl CallableDescriptor {
 
     fn resolved_inner(
         identity: CallableIdentity,
-        display_name: Option<String>,
+        display_name: Option<runmat_value::Utf8Text>,
         fallback_policy: CallableFallbackPolicy,
         args: Vec<Value>,
         requested_outputs: usize,
@@ -274,7 +463,7 @@ impl CallableDescriptor {
         metadata.display_name = metadata
             .display_name
             .or(display_name)
-            .or_else(|| strict_callable_display_name(&identity));
+            .or_else(|| strict_callable_display_name(&identity).map(Into::into));
         Self {
             target: CallableTarget::Resolved {
                 identity,
@@ -288,7 +477,7 @@ impl CallableDescriptor {
 
     fn feval_bound(
         binding: runmat_value::BoundFunctionBinding,
-        name: String,
+        name: runmat_value::Utf8Text,
         args: Vec<Value>,
         requested_outputs: usize,
     ) -> Self {
@@ -307,6 +496,7 @@ impl CallableDescriptor {
         args: Vec<Value>,
         requested_outputs: usize,
     ) -> Self {
+        let name: runmat_value::Utf8Text = name.into();
         Self::resolved_inner(
             identity,
             Some(name.clone()),
@@ -315,6 +505,19 @@ impl CallableDescriptor {
             requested_outputs,
             CallableMetadata::feval(Some(name)),
         )
+    }
+
+    fn feval_named(
+        name: String,
+        args: Vec<Value>,
+        requested_outputs: usize,
+        function_resolver: &impl FunctionNameResolver,
+    ) -> Self {
+        if let Some(binding) = function_resolver.resolve_bound_function(&name) {
+            return Self::feval_bound(binding, name.into(), args, requested_outputs);
+        }
+        let (identity, fallback_policy) = Self::resolve_named_target(&name, function_resolver);
+        Self::feval_resolved_name(identity, name, fallback_policy, args, requested_outputs)
     }
 
     fn resolve_named_target(
@@ -386,81 +589,47 @@ impl CallableDescriptor {
                     return Self::feval_forward(Value::String(text), args, requested_outputs);
                 }
                 if let Some(name) = Self::parse_handle_name(&text) {
-                    let (identity, fallback_policy) =
-                        Self::resolve_named_target(&name, function_resolver);
-                    return Self::feval_resolved_name(
-                        identity,
-                        name,
-                        fallback_policy,
-                        args,
-                        requested_outputs,
-                    );
+                    return Self::feval_named(name, args, requested_outputs, function_resolver);
                 }
                 Self::feval_forward(Value::String(text), args, requested_outputs)
             }
             Value::CharArray(ca) if ca.rows == 1 => {
-                let text: String = ca.data.iter().collect();
+                let text: String = ca.data().iter().collect();
                 if Self::is_at_prefixed_text(&text) {
                     return Self::feval_forward(Value::CharArray(ca), args, requested_outputs);
                 }
                 if let Some(name) = Self::parse_handle_name(&text) {
-                    let (identity, fallback_policy) =
-                        Self::resolve_named_target(&name, function_resolver);
-                    return Self::feval_resolved_name(
-                        identity,
-                        name,
-                        fallback_policy,
-                        args,
-                        requested_outputs,
-                    );
+                    return Self::feval_named(name, args, requested_outputs, function_resolver);
                 }
                 Self::feval_forward(Value::CharArray(ca), args, requested_outputs)
             }
-            Value::StringArray(sa) if sa.data.len() == 1 => {
-                if Self::is_at_prefixed_text(&sa.data[0]) {
+            Value::StringArray(sa) if sa.data().len() == 1 => {
+                if Self::is_at_prefixed_text(&sa.data()[0]) {
                     return Self::feval_forward(Value::StringArray(sa), args, requested_outputs);
                 }
-                if let Some(name) = Self::parse_handle_name(&sa.data[0]) {
-                    let (identity, fallback_policy) =
-                        Self::resolve_named_target(&name, function_resolver);
-                    return Self::feval_resolved_name(
-                        identity,
-                        name,
-                        fallback_policy,
-                        args,
-                        requested_outputs,
-                    );
+                if let Some(name) = Self::parse_handle_name(&sa.data()[0]) {
+                    return Self::feval_named(name, args, requested_outputs, function_resolver);
                 }
                 Self::feval_forward(Value::StringArray(sa), args, requested_outputs)
             }
             Value::Closure(closure) => {
                 Self::from_closure(closure, args, requested_outputs, function_resolver)
             }
-            Value::FunctionHandle(name) => {
-                let (identity, fallback_policy) =
-                    Self::resolve_named_target(&name, function_resolver);
-                Self::feval_resolved_name(
-                    identity,
-                    name.into_name(),
-                    fallback_policy,
-                    args,
-                    requested_outputs,
-                )
-            }
-            Value::ExternalFunctionHandle(name) => {
-                let (identity, fallback_policy) =
-                    Self::resolve_named_target(&name, function_resolver);
-                Self::feval_resolved_name(
-                    identity,
-                    name.into_name(),
-                    fallback_policy,
-                    args,
-                    requested_outputs,
-                )
-            }
+            Value::FunctionHandle(name) => Self::feval_named(
+                name.into_name_unbounded(),
+                args,
+                requested_outputs,
+                function_resolver,
+            ),
+            Value::ExternalFunctionHandle(name) => Self::feval_named(
+                name.into_name_unbounded(),
+                args,
+                requested_outputs,
+                function_resolver,
+            ),
             Value::MethodFunctionHandle(name) => Self::feval_resolved_name(
                 CallableIdentity::Method(runmat_types::MethodId(name.name().to_owned())),
-                name.into_name(),
+                name.into_name_unbounded(),
                 CallableFallbackPolicy::RuntimeNameResolution,
                 args,
                 requested_outputs,
@@ -606,7 +775,7 @@ async fn call_builtin_with_requested_outputs(
 async fn forward_named_fallback(
     runtime: Option<&crate::context::RuntimeContext>,
     name: String,
-    args: Vec<Value>,
+    args: impl Into<crate::call::BuiltinArguments>,
     requested_outputs: usize,
     callsite: Option<crate::callsite::CallsiteInfo>,
     source_ref: Option<crate::source_context::RuntimeSourceRef>,
@@ -614,9 +783,9 @@ async fn forward_named_fallback(
 ) -> Result<crate::execution::RootedValueSequence, RuntimeError> {
     let invoke = crate::callsite::with_callsite(
         callsite,
-        crate::dispatcher::try_call_builtin_sequence_async_with_outputs(
+        crate::dispatcher::try_call_retained_builtin_sequence_with_outputs(
             &name,
-            &args,
+            args.into(),
             requested_outputs,
             runtime,
         ),
@@ -643,10 +812,37 @@ async fn forward_named_fallback(
 
 #[path = "descriptor/execution.rs"]
 mod execution;
-pub(crate) use execution::try_execute_retained_bound_closure_in_context;
+pub(crate) use execution::invoke_selected_retained_closure;
 
 #[path = "descriptor/resolved_execution.rs"]
 mod resolved_execution;
+
+#[path = "descriptor/repeatable.rs"]
+mod repeatable;
+pub use repeatable::RepeatableCallable;
+
+/// Execute an exact selected method binding with a new callee's supplied
+/// inputs, retaining the original argument forest through normalization.
+pub(crate) async fn execute_retained_bound_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    binding: runmat_value::BoundFunctionBinding,
+    args: crate::call::BuiltinArguments,
+    requested_outputs: usize,
+    call_kind: CallableCallKind,
+) -> Result<crate::execution::RootedValueSequence, crate::RuntimeError> {
+    execution::invoke_bound(
+        runtime,
+        binding,
+        args.into_supplied_function_arguments(runtime)?,
+        requested_outputs,
+        CallableMetadata {
+            call_kind,
+            ..CallableMetadata::default()
+        },
+        None,
+    )
+    .await
+}
 
 pub fn execute_callable_descriptor(
     descriptor: CallableDescriptor,

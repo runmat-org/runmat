@@ -7,7 +7,7 @@ use runmat_python::{
 use runmat_value::{
     CellArray, ComplexStorage, ComplexTensor, HostComplexBuffer, HostLogicalBuffer,
     HostNumericBuffer, IntValue, IntegerStorage, LogicalArray, NumericDType, NumericStorage,
-    StructValue, Tensor, Value,
+    Tensor, Value,
 };
 
 use super::super::{foreign_error, ForeignErrorKind};
@@ -105,6 +105,104 @@ pub(super) fn value_to_python(value: Value) -> Result<PythonValue, RuntimeError>
     value_to_python_inner(value)
 }
 
+pub(super) fn value_ref_to_python(value: &Value) -> Result<PythonValue, RuntimeError> {
+    runmat_value::validate_no_transient_sequence(value).map_err(|_| {
+        crate::runtime_error::semantic_error(
+            "TransientSequenceNotPortable",
+            "transient output sequences cannot cross the Python value boundary",
+        )
+    })?;
+    match value {
+        Value::Bool(value) => Ok(PythonValue::Bool(*value)),
+        Value::Num(value) => Ok(PythonValue::Float(*value)),
+        Value::Complex(real, imaginary) => Ok(PythonValue::Complex {
+            real: *real,
+            imaginary: *imaginary,
+        }),
+        Value::Int(value) => value_to_python_inner(Value::Int(value.clone())),
+        Value::String(value) => Ok(PythonValue::String(value.as_str().to_owned())),
+        Value::CharArray(value) => value
+            .row_string()
+            .map(PythonValue::String)
+            .ok_or_else(|| invalid_conversion("character conversion requires a row vector")),
+        Value::StringArray(value) => Ok(PythonValue::List(
+            value
+                .data()
+                .iter()
+                .map(|value| PythonValue::String(value.as_str().to_owned()))
+                .collect(),
+        )),
+        Value::Tensor(value) => Ok(PythonValue::Array(PythonArray {
+            dtype: python_dtype(value.numeric_dtype()),
+            shape: value.shape().to_vec(),
+            column_major: true,
+            read_only: true,
+            owner: Arc::new(NumericOwner(value.host_buffer().clone())),
+        })),
+        Value::LogicalArray(value) => Ok(PythonValue::Array(PythonArray {
+            dtype: PythonDType::Bool,
+            shape: value.shape.to_vec(),
+            column_major: true,
+            read_only: true,
+            owner: Arc::new(LogicalOwner(value.data.clone())),
+        })),
+        Value::ComplexTensor(value) => {
+            let (dtype, owner): (PythonDType, Arc<dyn PythonBufferOwner>) =
+                match value.complex_storage() {
+                    ComplexStorage::F64(owner) => (
+                        PythonDType::Complex128,
+                        Arc::new(ComplexF64Owner(owner.clone())),
+                    ),
+                    ComplexStorage::F32(owner) => (
+                        PythonDType::Complex64,
+                        Arc::new(ComplexF32Owner(owner.clone())),
+                    ),
+                    ComplexStorage::Integer(_) => {
+                        return Err(invalid_conversion(
+                            "integer-complex arrays require an explicit Python conversion",
+                        ))
+                    }
+                };
+            Ok(PythonValue::Array(PythonArray {
+                dtype,
+                shape: value.shape().to_vec(),
+                column_major: true,
+                read_only: true,
+                owner,
+            }))
+        }
+        Value::Cell(value) => Ok(PythonValue::Tuple(
+            value
+                .data()
+                .iter()
+                .map(value_ref_to_python)
+                .collect::<Result<_, _>>()?,
+        )),
+        Value::Struct(value) => Ok(PythonValue::Dict(
+            value
+                .fields
+                .iter()
+                .map(|(name, value)| {
+                    Ok((
+                        PythonValue::String(name.to_owned()),
+                        value_ref_to_python(value)?,
+                    ))
+                })
+                .collect::<Result<_, RuntimeError>>()?,
+        )),
+        Value::StructArray(_) => Err(invalid_conversion(
+            "structure arrays require a shape-preserving Python conversion",
+        )),
+        Value::Foreign(_) => Err(invalid_conversion(
+            "foreign objects must be resolved by their owning adapter",
+        )),
+        other => Err(invalid_conversion(format!(
+            "RunMat value {} is not convertible to Python",
+            value_kind(other)
+        ))),
+    }
+}
+
 fn value_to_python_inner(value: Value) -> Result<PythonValue, RuntimeError> {
     match value {
         Value::Bool(value) => Ok(PythonValue::Bool(value)),
@@ -120,13 +218,17 @@ fn value_to_python_inner(value: Value) -> Result<PythonValue, RuntimeError> {
             IntValue::U32(value) => PythonValue::Unsigned(u64::from(value)),
             IntValue::U64(value) => PythonValue::Unsigned(value),
         }),
-        Value::String(value) => Ok(PythonValue::String(value)),
+        Value::String(value) => Ok(PythonValue::String(value.into_string_unbounded())),
         Value::CharArray(value) => value
             .row_string()
             .map(PythonValue::String)
             .ok_or_else(|| invalid_conversion("character conversion requires a row vector")),
         Value::StringArray(value) => Ok(PythonValue::List(
-            value.data.into_iter().map(PythonValue::String).collect(),
+            value
+                .data()
+                .iter()
+                .map(|value| PythonValue::String(value.as_str().to_owned()))
+                .collect(),
         )),
         Value::Tensor(value) => {
             let dtype = python_dtype(value.numeric_dtype());
@@ -179,16 +281,21 @@ fn value_to_python_inner(value: Value) -> Result<PythonValue, RuntimeError> {
         }
         Value::Cell(value) => Ok(PythonValue::Tuple(
             value
-                .data
-                .into_iter()
-                .map(value_to_python_inner)
+                .data()
+                .iter()
+                .map(value_ref_to_python)
                 .collect::<Result<_, _>>()?,
         )),
         Value::Struct(value) => Ok(PythonValue::Dict(
             value
                 .fields
-                .into_iter()
-                .map(|(name, value)| Ok((PythonValue::String(name), value_to_python_inner(value)?)))
+                .iter()
+                .map(|(name, value)| {
+                    Ok((
+                        PythonValue::String(name.to_owned()),
+                        value_ref_to_python(value)?,
+                    ))
+                })
                 .collect::<Result<_, RuntimeError>>()?,
         )),
         Value::StructArray(_) => Err(invalid_conversion(
@@ -202,7 +309,7 @@ fn value_to_python_inner(value: Value) -> Result<PythonValue, RuntimeError> {
         }
         Value::Object(value)
             if value
-                .class_name
+                .class_name()
                 .is(runmat_types::standard::PYTHON_ARGUMENTS) =>
         {
             keyword_bundle(value)
@@ -219,18 +326,18 @@ fn value_to_python_inner(value: Value) -> Result<PythonValue, RuntimeError> {
 
 fn keyword_bundle(value: runmat_value::ObjectInstance) -> Result<PythonValue, RuntimeError> {
     let names = value
-        .properties
+        .properties()
         .get("Names")
         .and_then(|value| match value {
-            Value::Cell(value) => Some(&value.data),
+            Value::Cell(value) => Some(value.data()),
             _ => None,
         })
         .ok_or_else(|| invalid_conversion("invalid pyargs name storage"))?;
     let values = value
-        .properties
+        .properties()
         .get("Values")
         .and_then(|value| match value {
-            Value::Cell(value) => Some(&value.data),
+            Value::Cell(value) => Some(value.data()),
             _ => None,
         })
         .ok_or_else(|| invalid_conversion("invalid pyargs value storage"))?;
@@ -257,7 +364,10 @@ fn keyword_bundle(value: runmat_value::ObjectInstance) -> Result<PythonValue, Ru
 #[path = "conversion/keyword_tests.rs"]
 mod keyword_tests;
 
-pub(super) fn value_from_python(value: PythonValue) -> Result<Value, RuntimeError> {
+pub(super) fn value_from_python(
+    value: PythonValue,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> Result<Value, RuntimeError> {
     match value {
         PythonValue::None => Tensor::new(Vec::new(), vec![0, 0])
             .map(Value::Tensor)
@@ -267,21 +377,21 @@ pub(super) fn value_from_python(value: PythonValue) -> Result<Value, RuntimeErro
         PythonValue::Unsigned(value) => Ok(Value::Int(IntValue::U64(value))),
         PythonValue::Float(value) => Ok(Value::Num(value)),
         PythonValue::Complex { real, imaginary } => Ok(Value::Complex(real, imaginary)),
-        PythonValue::String(value) => Ok(Value::String(value)),
+        PythonValue::String(value) => Ok(Value::String(value.into())),
         PythonValue::Bytes(value) => {
             let length = value.len();
             Tensor::new_integer(IntegerStorage::U8(value), vec![1, length])
                 .map(Value::Tensor)
                 .map_err(invalid_conversion)
         }
-        PythonValue::DateTime(value) => datetime_from_python(value),
-        PythonValue::TimeDelta(value) => timedelta_from_python(value),
+        PythonValue::DateTime(value) => datetime_from_python(value, runtime),
+        PythonValue::TimeDelta(value) => timedelta_from_python(value, runtime),
         PythonValue::List(values) | PythonValue::Tuple(values) => {
             let length = values.len();
             CellArray::new(
                 values
                     .into_iter()
-                    .map(value_from_python)
+                    .map(|value| value_from_python(value, runtime))
                     .collect::<Result<_, _>>()?,
                 length,
                 1,
@@ -289,8 +399,8 @@ pub(super) fn value_from_python(value: PythonValue) -> Result<Value, RuntimeErro
             .map(Value::Cell)
             .map_err(invalid_conversion)
         }
-        PythonValue::Dict(values) => dictionary_from_python(values),
-        PythonValue::Array(value) => array_from_python(value),
+        PythonValue::Dict(values) => dictionary_from_python(values, runtime),
+        PythonValue::Array(value) => array_from_python(value, runtime),
         PythonValue::Object(_) => Err(invalid_conversion(
             "Python object identity must be registered before value conversion",
         )),
@@ -303,32 +413,38 @@ pub(super) fn value_from_python(value: PythonValue) -> Result<Value, RuntimeErro
     }
 }
 
-fn dictionary_from_python(values: Vec<(PythonValue, PythonValue)>) -> Result<Value, RuntimeError> {
+fn dictionary_from_python(
+    values: Vec<(PythonValue, PythonValue)>,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> Result<Value, RuntimeError> {
     if values
         .iter()
         .all(|(key, _)| matches!(key, PythonValue::String(_)))
     {
-        let mut structure = StructValue::new();
+        let mut structure = runmat_value::UnboundedStructValueBuilder::new();
         for (key, value) in values {
             let PythonValue::String(key) = key else {
                 unreachable!();
             };
-            structure.insert(key, value_from_python(value)?);
+            structure.insert(key, value_from_python(value, runtime)?);
         }
-        return Ok(Value::Struct(structure));
+        return Ok(Value::Struct(structure.finish()));
     }
     let rows = values.len();
     let mut cells = Vec::with_capacity(rows * 2);
     for (key, value) in values {
-        cells.push(value_from_python(key)?);
-        cells.push(value_from_python(value)?);
+        cells.push(value_from_python(key, runtime)?);
+        cells.push(value_from_python(value, runtime)?);
     }
     CellArray::new(cells, rows, 2)
         .map(Value::Cell)
         .map_err(invalid_conversion)
 }
 
-fn array_from_python(array: PythonArray) -> Result<Value, RuntimeError> {
+fn array_from_python(
+    array: PythonArray,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> Result<Value, RuntimeError> {
     let bytes = array.owner.copy_bytes();
     let expected = array
         .shape
@@ -350,8 +466,8 @@ fn array_from_python(array: PythonArray) -> Result<Value, RuntimeError> {
         PythonDType::Complex128 => ComplexTensor::new(decode_complex_f64(&bytes)?, array.shape)
             .map(Value::ComplexTensor)
             .map_err(invalid_conversion),
-        PythonDType::DateTime64Micros => datetime_array_from_python(&bytes, array.shape),
-        PythonDType::TimeDelta64Micros => duration_array_from_python(&bytes, array.shape),
+        PythonDType::DateTime64Micros => datetime_array_from_python(&bytes, array.shape, runtime),
+        PythonDType::TimeDelta64Micros => duration_array_from_python(&bytes, array.shape, runtime),
         dtype => Tensor::from_numeric_storage(decode_numeric(dtype, &bytes)?, array.shape)
             .map(Value::Tensor)
             .map_err(invalid_conversion),
@@ -458,7 +574,10 @@ fn temporal_array(dtype: PythonDType, shape: Vec<usize>, values: Vec<i64>) -> Py
     ))
 }
 
-fn datetime_from_python(value: PythonDateTime) -> Result<Value, RuntimeError> {
+fn datetime_from_python(
+    value: PythonDateTime,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> Result<Value, RuntimeError> {
     let date = NaiveDate::from_ymd_opt(value.year, u32::from(value.month), u32::from(value.day))
         .and_then(|date| {
             date.and_hms_micro_opt(
@@ -471,10 +590,17 @@ fn datetime_from_python(value: PythonDateTime) -> Result<Value, RuntimeError> {
         .ok_or_else(|| invalid_conversion("Python datetime contains invalid components"))?;
     let serial = crate::builtins::datetime::datenum_from_naive(date);
     let tensor = Tensor::new(vec![serial], vec![1, 1]).map_err(invalid_conversion)?;
-    crate::builtins::datetime::datetime_object_from_serial_tensor(tensor, "dd-MMM-yyyy HH:mm:ss")
+    crate::builtins::datetime::datetime_object_from_serial_tensor(
+        runtime,
+        tensor,
+        "dd-MMM-yyyy HH:mm:ss",
+    )
 }
 
-fn timedelta_from_python(value: PythonTimeDelta) -> Result<Value, RuntimeError> {
+fn timedelta_from_python(
+    value: PythonTimeDelta,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> Result<Value, RuntimeError> {
     let days = value.days;
     let seconds = value.seconds;
     let microseconds = value.microseconds;
@@ -484,10 +610,14 @@ fn timedelta_from_python(value: PythonTimeDelta) -> Result<Value, RuntimeError> 
         .and_then(|total| total.checked_add(i128::from(microseconds)))
         .ok_or_else(|| invalid_conversion("Python timedelta is outside RunMat's duration range"))?;
     let total = matlab_duration_micros(total)?;
-    duration_from_micros(vec![total], vec![1, 1])
+    duration_from_micros(vec![total], vec![1, 1], runtime)
 }
 
-fn datetime_array_from_python(bytes: &[u8], shape: Vec<usize>) -> Result<Value, RuntimeError> {
+fn datetime_array_from_python(
+    bytes: &[u8],
+    shape: Vec<usize>,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> Result<Value, RuntimeError> {
     let serials = decode_i64(bytes)
         .into_iter()
         .map(|micros| {
@@ -503,10 +633,18 @@ fn datetime_array_from_python(bytes: &[u8], shape: Vec<usize>) -> Result<Value, 
         })
         .collect::<Result<Vec<_>, _>>()?;
     let tensor = Tensor::new(serials, shape).map_err(invalid_conversion)?;
-    crate::builtins::datetime::datetime_object_from_serial_tensor(tensor, "dd-MMM-yyyy HH:mm:ss")
+    crate::builtins::datetime::datetime_object_from_serial_tensor(
+        runtime,
+        tensor,
+        "dd-MMM-yyyy HH:mm:ss",
+    )
 }
 
-fn duration_array_from_python(bytes: &[u8], shape: Vec<usize>) -> Result<Value, RuntimeError> {
+fn duration_array_from_python(
+    bytes: &[u8],
+    shape: Vec<usize>,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> Result<Value, RuntimeError> {
     let values = decode_i64(bytes)
         .into_iter()
         .map(|micros| {
@@ -518,16 +656,20 @@ fn duration_array_from_python(bytes: &[u8], shape: Vec<usize>) -> Result<Value, 
             matlab_duration_micros(i128::from(micros))
         })
         .collect::<Result<Vec<_>, _>>()?;
-    duration_from_micros(values, shape)
+    duration_from_micros(values, shape, runtime)
 }
 
-fn duration_from_micros(values: Vec<i64>, shape: Vec<usize>) -> Result<Value, RuntimeError> {
+fn duration_from_micros(
+    values: Vec<i64>,
+    shape: Vec<usize>,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> Result<Value, RuntimeError> {
     let days = values
         .into_iter()
         .map(|value| value as f64 / MICROS_PER_DAY as f64)
         .collect();
     let tensor = Tensor::new(days, shape).map_err(invalid_conversion)?;
-    crate::builtins::duration::duration_object_from_days_tensor(tensor, "hh:mm:ss")
+    crate::builtins::duration::duration_object_from_days_tensor(runtime, tensor, "hh:mm:ss")
 }
 
 fn matlab_duration_micros(value: i128) -> Result<i64, RuntimeError> {
@@ -671,10 +813,12 @@ mod tests {
 
     #[test]
     fn python_conversion_rejects_typed_structure_arrays_without_reclassifying_cells() {
-        let mut first = runmat_value::StructValue::new();
+        let mut first = runmat_value::UnboundedStructValueBuilder::new();
         first.insert("payload", Value::Num(1.0));
-        let mut second = runmat_value::StructValue::new();
+        let mut second = runmat_value::UnboundedStructValueBuilder::new();
         second.insert("payload", Value::Num(2.0));
+        let second = second.finish();
+        let first = first.finish();
         let array = runmat_value::StructArray::with_fields(
             vec!["payload".into()],
             vec![first.clone(), second.clone()],
@@ -711,6 +855,7 @@ mod tests {
         )
         .unwrap();
         let value = crate::builtins::datetime::datetime_object_from_serial_tensor(
+            None,
             tensor,
             "dd-MMM-yyyy HH:mm:ss",
         )
@@ -731,15 +876,18 @@ mod tests {
 
     #[test]
     fn python_temporal_values_convert_to_runmat_objects_with_documented_precision() {
-        let value = value_from_python(PythonValue::DateTime(PythonDateTime {
-            year: 1969,
-            month: 12,
-            day: 31,
-            hour: 23,
-            minute: 59,
-            second: 59,
-            microsecond: 123_456,
-        }))
+        let value = value_from_python(
+            PythonValue::DateTime(PythonDateTime {
+                year: 1969,
+                month: 12,
+                day: 31,
+                hour: 23,
+                minute: 59,
+                second: 59,
+                microsecond: 123_456,
+            }),
+            None,
+        )
         .unwrap();
         let Value::Object(object) = value else {
             panic!("expected datetime object");
@@ -749,11 +897,14 @@ mod tests {
             crate::builtins::datetime::naive_from_datenum(serial.materialize_f64()[0]).unwrap();
         assert!(round_trip.and_utc().timestamp_micros().abs_diff(-876_544) <= 10);
 
-        let duration = value_from_python(PythonValue::TimeDelta(PythonTimeDelta {
-            days: -1,
-            seconds: 86_399,
-            microseconds: 998_999,
-        }))
+        let duration = value_from_python(
+            PythonValue::TimeDelta(PythonTimeDelta {
+                days: -1,
+                seconds: 86_399,
+                microseconds: 998_999,
+            }),
+            None,
+        )
         .unwrap();
         let tensor =
             crate::builtins::duration::duration_tensor_from_duration_value(&duration).unwrap();
@@ -773,7 +924,7 @@ mod tests {
                 .flat_map(i64::to_ne_bytes)
                 .collect(),
         );
-        let value = value_from_python(PythonValue::Array(dates)).unwrap();
+        let value = value_from_python(PythonValue::Array(dates), None).unwrap();
         let Value::Object(object) = value else {
             panic!("expected datetime object");
         };
@@ -795,7 +946,7 @@ mod tests {
             false,
             i64::MIN.to_ne_bytes().to_vec(),
         );
-        let error = value_from_python(PythonValue::Array(nat)).unwrap_err();
+        let error = value_from_python(PythonValue::Array(nat), None).unwrap_err();
         assert!(error.message().contains("NaT"));
     }
 }

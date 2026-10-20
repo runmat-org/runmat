@@ -63,14 +63,17 @@ fn feedback_error(
     binding_variant = "default",
     builtin_path = "crate::builtins::control::feedback"
 )]
-async fn feedback_builtin(sys1: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn feedback_builtin(
+    sys1: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if rest.len() > 2 {
         return Err(feedback_error(
             "feedback: expected feedback(sys1), feedback(sys1, sys2), or feedback(sys1, sys2, sign)",
             &FEEDBACK_ERRORS[0],
         ));
     }
-    ensure_extensions_enabled(&sys1, &rest)?;
+    ensure_extensions_enabled(&sys1, rest.view())?;
     let sys2 = rest.first().cloned().unwrap_or(Value::Num(1.0));
     preflight_model_operand(&sys1, BUILTIN_NAME)?;
     preflight_model_operand(&sys2, BUILTIN_NAME)?;
@@ -94,7 +97,10 @@ async fn feedback_builtin(sys1: Value, rest: Vec<Value>) -> BuiltinResult<Value>
         .to_value(BUILTIN_NAME)
 }
 
-fn ensure_extensions_enabled(sys1: &Value, rest: &[Value]) -> BuiltinResult<()> {
+fn ensure_extensions_enabled(
+    sys1: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     if rest.is_empty() {
         ensure_extension(&SINGLE_SYSTEM_EXTENSION)?;
     }
@@ -145,7 +151,7 @@ fn has_consumed_resident_model_property(value: &Value) -> bool {
             "Variable",
         ]
         .into_iter()
-        .filter_map(|name| object.properties.get(name))
+        .filter_map(|name| object.properties().get(name))
         .any(is_resident_value)
 }
 
@@ -199,15 +205,11 @@ mod tests {
 
     fn raw_tf(numerator: Value, denominator: Value) -> ObjectInstance {
         let mut model = ObjectInstance::new(TF_CLASS.to_string());
-        model.properties.insert("Numerator".into(), numerator);
-        model.properties.insert("Denominator".into(), denominator);
-        model.properties.insert("Ts".into(), Value::Num(0.0));
-        model
-            .properties
-            .insert("InputDelay".into(), Value::Num(0.0));
-        model
-            .properties
-            .insert("OutputDelay".into(), Value::Num(0.0));
+        model.replace_property_unbounded("Numerator".into(), numerator);
+        model.replace_property_unbounded("Denominator".into(), denominator);
+        model.replace_property_unbounded("Ts".into(), Value::Num(0.0));
+        model.replace_property_unbounded("InputDelay".into(), Value::Num(0.0));
+        model.replace_property_unbounded("OutputDelay".into(), Value::Num(0.0));
         model
     }
 
@@ -223,31 +225,37 @@ mod tests {
             provider.reset_telemetry();
             let result = block_on(feedback_builtin(
                 Value::Object(valid),
-                vec![Value::Num(1.0)],
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
             ))
             .expect("resident tf");
             assert_eq!(coeff(&result, "Denominator"), vec![1.0, 5.0]);
             assert!(provider.telemetry_snapshot().download_bytes > 0);
 
             let mut unsupported = ObjectInstance::new(SS_CLASS.to_string());
-            unsupported
-                .properties
-                .insert("Denominator".into(), Value::GpuTensor(resident.clone()));
+            unsupported.replace_property_unbounded(
+                "Denominator".into(),
+                Value::GpuTensor(resident.clone()),
+            );
             provider.reset_telemetry();
             let error = block_on(feedback_builtin(
                 Value::Object(unsupported),
-                vec![Value::Num(1.0)],
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
             ))
             .expect_err("unsupported object");
             assert_eq!(error.identifier(), Some("RunMat:feedback:UnsupportedModel"));
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
 
             let mut incomplete = raw_tf(Value::Num(2.0), Value::GpuTensor(resident.clone()));
-            incomplete.properties.remove("Ts");
+            crate::builtins::common::test_support::remove_object_property_unbounded(
+                &mut incomplete,
+                "Ts",
+            );
             provider.reset_telemetry();
             let error = block_on(feedback_builtin(
                 Value::Object(incomplete),
-                vec![Value::GpuTensor(resident)],
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(
+                    resident,
+                )]),
             ))
             .expect_err("missing property before second operand gather");
             assert_eq!(error.identifier(), Some("RunMat:feedback:InvalidModel"));
@@ -268,7 +276,7 @@ mod tests {
         let model = raw_tf(Value::Num(2.0), Value::GpuTensor(allocation.handle));
         let error = block_on(feedback_builtin(
             Value::Object(model),
-            vec![Value::Num(1.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
         ))
         .expect_err("nested resident admission");
         assert_eq!(
@@ -288,7 +296,7 @@ mod tests {
             provider.reset_telemetry();
             let error = block_on(feedback_builtin(
                 Value::Object(model),
-                vec![Value::Num(1.0)],
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
             ))
             .expect_err("invalid denominator");
             assert_eq!(error.identifier(), Some("RunMat:feedback:InvalidModel"));
@@ -307,13 +315,11 @@ mod tests {
                 Value::Num(2.0),
                 Value::Tensor(Tensor::new(vec![1.0, 3.0], vec![1, 2]).unwrap()),
             );
-            model
-                .properties
-                .insert("Unrelated".into(), Value::GpuTensor(resident));
+            model.replace_property_unbounded("Unrelated".into(), Value::GpuTensor(resident));
             provider.reset_telemetry();
             let result = block_on(feedback_builtin(
                 Value::Object(model),
-                vec![Value::Num(1.0)],
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
             ))
             .expect("feedback");
             assert_eq!(coeff(&result, "Denominator"), vec![1.0, 5.0]);
@@ -336,7 +342,7 @@ mod tests {
         let Value::Object(object) = value else {
             panic!("expected tf object");
         };
-        let Value::Tensor(tensor) = object.properties.get(field).expect(field) else {
+        let Value::Tensor(tensor) = object.properties().get(field).expect(field) else {
             panic!("expected tensor");
         };
         tensor.materialize_f64().clone()
@@ -347,7 +353,12 @@ mod tests {
         rest: Vec<Value>,
     ) -> BuiltinResult<crate::execution::RootedValue> {
         model.try_map_owned(
-            |model| block_on(feedback_builtin(model, rest)),
+            |model| {
+                block_on(feedback_builtin(
+                    model,
+                    crate::builtins::common::test_support::builtin_arguments(rest),
+                ))
+            },
             |error| error.into_runtime_error(),
         )
     }
@@ -389,7 +400,12 @@ mod tests {
         ] {
             let error = sys1
                 .with_owned(|sys1| {
-                    sys2.with_owned(|sys2| block_on(feedback_builtin(sys1, vec![sys2])))
+                    sys2.with_owned(|sys2| {
+                        block_on(feedback_builtin(
+                            sys1,
+                            crate::builtins::common::test_support::builtin_arguments(vec![sys2]),
+                        ))
+                    })
                 })
                 .expect_err("model coefficient must not use scalar-gain rounding");
             assert_eq!(error.identifier(), Some("RunMat:feedback:InvalidModel"));
@@ -412,8 +428,14 @@ mod tests {
                     .expect("resident integer coefficient");
                 let model = assign_numerator(tf(vec![1.0], vec![1.0]), Value::GpuTensor(resident));
                 provider.reset_telemetry();
-                let result = model
-                    .with_owned(|model| block_on(feedback_builtin(model, vec![Value::Num(0.0)])));
+                let result = model.with_owned(|model| {
+                    block_on(feedback_builtin(
+                        model,
+                        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(
+                            0.0,
+                        )]),
+                    ))
+                });
                 if expected_valid {
                     assert_eq!(
                         coeff(&result.expect("exact coefficient"), "Numerator"),
@@ -439,13 +461,11 @@ mod tests {
                 let Value::Object(mut object) = value else {
                     unreachable!()
                 };
-                object
-                    .properties
-                    .insert("Denominator".into(), Value::from("invalid"));
+                object.replace_property_unbounded("Denominator".into(), Value::from("invalid"));
                 provider.reset_telemetry();
                 block_on(feedback_builtin(
                     Value::Object(object),
-                    vec![Value::Num(0.0)],
+                    crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(0.0)]),
                 ))
                 .expect_err("host denominator preflight")
             });
@@ -458,7 +478,12 @@ mod tests {
     fn unity_negative_feedback_forms_closed_loop() {
         let g = tf(vec![2.0], vec![1.0, 3.0]);
         let out = g
-            .with_owned(|g| block_on(feedback_builtin(g, vec![Value::Num(1.0)])))
+            .with_owned(|g| {
+                block_on(feedback_builtin(
+                    g,
+                    crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
+                ))
+            })
             .expect("feedback");
         assert_eq!(coeff(&out, "Numerator"), vec![2.0]);
         assert_eq!(coeff(&out, "Denominator"), vec![1.0, 5.0]);
@@ -468,7 +493,15 @@ mod tests {
     fn positive_feedback_subtracts_loop_gain() {
         let g = tf(vec![2.0], vec![1.0, 3.0]);
         let out = g
-            .with_owned(|g| block_on(feedback_builtin(g, vec![Value::Num(1.0), Value::Num(1.0)])))
+            .with_owned(|g| {
+                block_on(feedback_builtin(
+                    g,
+                    crate::builtins::common::test_support::builtin_arguments(vec![
+                        Value::Num(1.0),
+                        Value::Num(1.0),
+                    ]),
+                ))
+            })
             .expect("feedback");
         assert_eq!(coeff(&out, "Numerator"), vec![2.0]);
         assert_eq!(coeff(&out, "Denominator"), vec![1.0, 1.0]);
@@ -548,8 +581,11 @@ mod tests {
         let g = tf(vec![2.0], vec![1.0, 3.0]);
         {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-            let error = block_on(feedback_builtin(g.value().clone(), vec![Value::Bool(true)]))
-                .expect_err("strict mode rejects logical gain");
+            let error = block_on(feedback_builtin(
+                g.value().clone(),
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::Bool(true)]),
+            ))
+            .expect_err("strict mode rejects logical gain");
             assert_eq!(
                 error.identifier(),
                 LOGICAL_NUMERIC_EXTENSION.error_identifier
@@ -560,7 +596,14 @@ mod tests {
             let logical = LogicalArray::new(vec![1], vec![1, 1]).expect("logical scalar");
             let out = g
                 .try_map_owned(
-                    |g| block_on(feedback_builtin(g, vec![Value::LogicalArray(logical)])),
+                    |g| {
+                        block_on(feedback_builtin(
+                            g,
+                            crate::builtins::common::test_support::builtin_arguments(vec![
+                                Value::LogicalArray(logical),
+                            ]),
+                        ))
+                    },
                     |error| error.into_runtime_error(),
                 )
                 .expect("logical gain");
@@ -585,15 +628,23 @@ mod tests {
 
         let gain = tf(vec![1.0], vec![1.0]);
         let error = gain
-            .with_owned(|gain| block_on(feedback_builtin(Value::Num(1.0), vec![gain])))
+            .with_owned(|gain| {
+                block_on(feedback_builtin(
+                    Value::Num(1.0),
+                    crate::builtins::common::test_support::builtin_arguments(vec![gain]),
+                ))
+            })
             .expect_err("scalar forward form");
         assert_eq!(
             error.identifier(),
             SCALAR_FORWARD_EXTENSION.error_identifier
         );
 
-        let error = block_on(feedback_builtin(Value::Num(1.0), vec![Value::Num(1.0)]))
-            .expect_err("scalar-scalar form");
+        let error = block_on(feedback_builtin(
+            Value::Num(1.0),
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
+        ))
+        .expect_err("scalar-scalar form");
         assert_eq!(
             error.identifier(),
             SCALAR_SYSTEMS_EXTENSION.error_identifier

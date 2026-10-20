@@ -22,7 +22,10 @@ const BUILTIN_NAME: &str = "genvarname";
     binding_variant = "default",
     builtin_path = "crate::builtins::strings::core::genvarname"
 )]
-async fn genvarname_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn genvarname_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &GENVARNAME_DESCRIPTOR,
         &GENVARNAME_ERROR_TOO_MANY_OUTPUTS,
@@ -77,7 +80,7 @@ fn numeric_or_resident(value: &Value) -> bool {
 fn contains_numeric_or_resident(value: &Value) -> bool {
     match value {
         Value::Cell(cell) => cell
-            .data
+            .data()
             .iter()
             .any(|value| numeric_or_resident(value) || contains_numeric_or_resident(value)),
         Value::Struct(value) => value
@@ -93,19 +96,19 @@ fn contains_numeric_or_resident(value: &Value) -> bool {
 fn genvarname_value(value: Value, exclusions: Vec<String>) -> BuiltinResult<Value> {
     let mut used = exclusions.into_iter().collect::<HashSet<_>>();
     match value {
-        Value::String(text) => Ok(Value::String(unique_name(&text, &mut used))),
+        Value::String(text) => Ok(Value::string(unique_name(&text, &mut used))),
         Value::StringArray(array) => {
-            let StringArray { data, shape, .. } = array;
+let (data, shape, _, _) = array.into_parts();
             let out = data
                 .iter()
-                .map(|text| unique_name(text, &mut used))
+                .map(|text| unique_name(text.as_str(), &mut used))
                 .collect::<Vec<_>>();
-            StringArray::new(out, shape)
+            StringArray::new(out, shape.to_vec())
                 .map(Value::StringArray)
                 .map_err(|err| error(&ERROR_INTERNAL, format!("genvarname: {err}")))
         }
         Value::CharArray(chars) if chars.rows <= 1 && chars.shape.iter().skip(2).all(|dimension| *dimension == 1) => {
-            let text = chars.data.iter().collect::<String>();
+            let text = chars.data().iter().copied().collect::<String>();
             Ok(Value::CharArray(CharArray::new_row(&unique_name(
                 &text, &mut used,
             ))))
@@ -115,7 +118,7 @@ fn genvarname_value(value: Value, exclusions: Vec<String>) -> BuiltinResult<Valu
             "genvarname: character array input must be a character vector; use a cell array for multiple names",
         )),
         Value::Cell(cell) => {
-            let shape = cell.shape.clone();
+            let shape = cell.shape().to_vec();
             let data = cell.into_column_major().map_err(|err| error(&ERROR_INTERNAL, err))?;
             let mut out = Vec::with_capacity(data.len());
             for value in &data {
@@ -143,19 +146,23 @@ enum TextListContext {
 
 fn text_list(value: &Value, context: TextListContext) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(text) => Ok(vec![text.clone()]),
-        Value::StringArray(array) => Ok(array.data.clone()),
+        Value::String(text) => Ok(vec![text.as_str().to_owned()]),
+        Value::StringArray(array) => Ok(array
+            .data()
+            .iter()
+            .map(|text| text.as_str().to_owned())
+            .collect()),
         Value::CharArray(chars)
             if chars.rows <= 1 && chars.shape.iter().skip(2).all(|dimension| *dimension == 1) =>
         {
-            Ok(vec![chars.data.iter().collect::<String>()])
+            Ok(vec![chars.data().iter().copied().collect::<String>()])
         }
         Value::CharArray(_) => Err(error(
             &ERROR_INVALID_INPUT,
             "genvarname: multiple names must be supplied as a string array or cell array",
         )),
         Value::Cell(cell) => cell
-            .data
+            .data()
             .iter()
             .map(|value| text_scalar(value, context))
             .collect(),
@@ -168,12 +175,14 @@ fn text_list(value: &Value, context: TextListContext) -> BuiltinResult<Vec<Strin
 
 fn text_scalar(value: &Value, context: TextListContext) -> BuiltinResult<String> {
     match value {
-        Value::String(text) => Ok(text.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::String(text) => Ok(text.as_str().to_owned()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(array.data()[0].as_str().to_owned())
+        }
         Value::CharArray(chars)
             if chars.rows <= 1 && chars.shape.iter().skip(2).all(|dimension| *dimension == 1) =>
         {
-            Ok(chars.data.iter().collect())
+            Ok(chars.data().iter().copied().collect())
         }
         _ => {
             let message = match context {
@@ -293,6 +302,18 @@ fn error(descriptor: &'static BuiltinErrorDescriptor, message: impl Into<String>
 }
 
 #[cfg(test)]
+pub(crate) async fn genvarname_builtin_source(
+    value: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    genvarname_builtin(
+        value,
+        crate::call::BuiltinArguments::from_borrowed(&rest, None)?,
+    )
+    .await
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use futures::executor::block_on;
@@ -319,10 +340,11 @@ mod tests {
     #[test]
     fn nd_character_input_and_excess_outputs_reject() {
         let chars = CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap();
-        let error = block_on(genvarname_builtin(Value::CharArray(chars), vec![])).unwrap_err();
+        let error =
+            block_on(genvarname_builtin_source(Value::CharArray(chars), vec![])).unwrap_err();
         assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
         let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
-        let error = block_on(genvarname_builtin(Value::from("A"), vec![])).unwrap_err();
+        let error = block_on(genvarname_builtin_source(Value::from("A"), vec![])).unwrap_err();
         assert_eq!(
             error.identifier(),
             GENVARNAME_ERROR_TOO_MANY_OUTPUTS.identifier
@@ -330,7 +352,7 @@ mod tests {
     }
 
     fn call(value: Value, rest: Vec<Value>) -> Value {
-        block_on(genvarname_builtin(value, rest)).expect("genvarname")
+        block_on(genvarname_builtin_source(value, rest)).expect("genvarname")
     }
 
     #[test]
@@ -351,7 +373,7 @@ mod tests {
             panic!("expected string array")
         };
         assert_eq!(array.shape, vec![1, 3]);
-        assert_eq!(array.data, vec!["A", "A1", "A2"]);
+        assert_eq!(array.data(), vec!["A", "A1", "A2"]);
     }
 
     #[test]
@@ -359,17 +381,17 @@ mod tests {
         let exclusions = CellArray::new(
             vec![
                 Value::CharArray(CharArray::new_row("A")),
-                Value::String("A1".to_string()),
+                Value::String("A1".to_string().into()),
             ],
             1,
             2,
         )
         .unwrap();
         let out = call(
-            Value::String("A".to_string()),
+            Value::String("A".to_string().into()),
             vec![Value::Cell(exclusions)],
         );
-        assert_eq!(out, Value::String("A2".to_string()));
+        assert_eq!(out, Value::String("A2".to_string().into()));
     }
 
     #[test]
@@ -388,9 +410,9 @@ mod tests {
             panic!("expected cell array")
         };
         assert_eq!(cell.shape, vec![2, 1]);
-        assert_eq!(cell.data[0], Value::CharArray(CharArray::new_row("xFor")));
+        assert_eq!(cell.data()[0], Value::CharArray(CharArray::new_row("xFor")));
         assert_eq!(
-            cell.data[1],
+            cell.data()[1],
             Value::CharArray(CharArray::new_row("hasSpace"))
         );
     }
@@ -399,7 +421,11 @@ mod tests {
     fn multirow_char_array_is_not_a_multiple_name_container() {
         let input =
             CharArray::new(vec!['a', ' ', ' ', 'a', ' ', ' ', '1', ' ', ' '], 3, 3).unwrap();
-        assert!(block_on(genvarname_builtin(Value::CharArray(input), Vec::new())).is_err());
+        assert!(block_on(genvarname_builtin_source(
+            Value::CharArray(input),
+            Vec::new()
+        ))
+        .is_err());
     }
 
     #[test]
@@ -410,15 +436,15 @@ mod tests {
         let Value::StringArray(array) = out else {
             panic!("expected string array")
         };
-        assert_eq!(array.data[0].chars().count(), MATLAB_NAME_LENGTH_MAX);
-        assert_eq!(array.data[1].chars().count(), MATLAB_NAME_LENGTH_MAX);
-        assert_ne!(array.data[0], array.data[1]);
-        assert!(array.data[1].ends_with('1'));
+        assert_eq!(array.data()[0].chars().count(), MATLAB_NAME_LENGTH_MAX);
+        assert_eq!(array.data()[1].chars().count(), MATLAB_NAME_LENGTH_MAX);
+        assert_ne!(array.data()[0], array.data()[1]);
+        assert!(array.data()[1].ends_with('1'));
     }
 
     #[test]
     fn rejects_non_text_input_and_non_scalar_cell_elements() {
-        assert!(block_on(genvarname_builtin(Value::Num(1.0), Vec::new())).is_err());
+        assert!(block_on(genvarname_builtin_source(Value::Num(1.0), Vec::new())).is_err());
         let bad = CellArray::new(
             vec![Value::StringArray(
                 StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap(),
@@ -427,7 +453,7 @@ mod tests {
             1,
         )
         .unwrap();
-        assert!(block_on(genvarname_builtin(Value::Cell(bad), Vec::new())).is_err());
+        assert!(block_on(genvarname_builtin_source(Value::Cell(bad), Vec::new())).is_err());
     }
 
     #[test]
@@ -446,10 +472,10 @@ mod tests {
             Value::Int(runmat_value::IntValue::U32(1)),
             Value::Int(runmat_value::IntValue::U64(1)),
         ] {
-            let error = block_on(genvarname_builtin(value.clone(), Vec::new()))
+            let error = block_on(genvarname_builtin_source(value.clone(), Vec::new()))
                 .expect_err("integer name input");
             assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
-            let error = block_on(genvarname_builtin(
+            let error = block_on(genvarname_builtin_source(
                 Value::String("name".into()),
                 vec![value],
             ))
@@ -469,10 +495,10 @@ mod tests {
                     .handle,
             )
         };
-        let error =
-            block_on(genvarname_builtin(resident(), Vec::new())).expect_err("resident name input");
+        let error = block_on(genvarname_builtin_source(resident(), Vec::new()))
+            .expect_err("resident name input");
         assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
-        let error = block_on(genvarname_builtin(
+        let error = block_on(genvarname_builtin_source(
             Value::String("name".into()),
             vec![resident()],
         ))

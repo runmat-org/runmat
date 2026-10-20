@@ -118,7 +118,9 @@ fn infer_loss(
     function: &'static str,
 ) -> BuiltinResult<LossKind> {
     let terminal = layers.iter().rev().find_map(|layer| match layer {
-        Value::Object(layer) => K::from_identity(&layer.class_name).filter(|kind| kind.is_output()),
+        Value::Object(layer) => {
+            K::from_identity(layer.class_name()).filter(|kind| kind.is_output())
+        }
         _ => None,
     });
     match terminal {
@@ -136,7 +138,7 @@ pub(super) fn prediction_domain(layers: &[Value]) -> PredictionDomain {
         .iter()
         .rev()
         .filter_map(|layer| match layer {
-            Value::Object(layer) => K::from_identity(&layer.class_name),
+            Value::Object(layer) => K::from_identity(layer.class_name()),
             _ => None,
         })
         .find(|kind| !kind.is_output());

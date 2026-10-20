@@ -124,28 +124,25 @@ fn hdf5_path(value: &Value, builtin: &'static str, label: &str) -> BuiltinResult
     })
 }
 
-async fn gather_args(builtin: &'static str, args: &[Value]) -> BuiltinResult<Vec<Value>> {
-    let mut gathered = Vec::with_capacity(args.len());
-    for arg in args {
-        gathered.push(
-            gather_if_needed_async(arg)
-                .await
-                .map_err(|err| map_control_flow(builtin, err))?,
-        );
-    }
-    Ok(gathered)
-}
-
 async fn finish_selection_args(
     builtin: &'static str,
-    rest: &[Value],
+    runtime: Option<&crate::context::RuntimeContext>,
+    rest: &crate::call::BuiltinArguments,
     host_controls: Option<SelectionControls>,
 ) -> BuiltinResult<SelectionControls> {
     if let Some(controls) = host_controls {
         return Ok(controls);
     }
-    let gathered = gather_args(builtin, rest).await?;
-    parse_selection_controls(&gathered, builtin)
+    let gather = rest.try_map_preserving_roots_async(rest.len(), runtime, async |index| {
+        gather_if_needed_async(&rest[index])
+            .await
+            .map_err(|err| map_control_flow(builtin, err))
+    });
+    let gathered = match runtime {
+        Some(runtime) => runtime.scope(gather).await?,
+        None => gather.await?,
+    };
+    parse_selection_controls(gathered.view(), builtin)
 }
 
 fn preflight_writable_data(value: &Value, builtin: &'static str) -> BuiltinResult<()> {
@@ -173,16 +170,23 @@ fn preflight_writable_data(value: &Value, builtin: &'static str) -> BuiltinResul
 
 #[runtime_builtin(
     name = "h5read",
+    context = true,
     binding_variant = "default",
     builtin_path = "crate::builtins::io::hdf5"
 )]
-async fn h5read_builtin(filename: Value, dataset: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn h5read_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    filename: Value,
+    dataset: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     admit_output_count(H5READ_NAME, &H5READ_DESCRIPTOR)?;
     let path = resolve_path(&filename, H5READ_NAME)?;
     let dataset_path = hdf5_path(&dataset, H5READ_NAME, "dataset")?;
-    let host_controls = prepare_host_selection_controls(&rest, H5READ_NAME)?;
+    let host_controls = prepare_host_selection_controls(rest.view(), H5READ_NAME)?;
     let path = path::capture(path, NativePathIntent::Read, H5READ_NAME)?;
-    let selection = finish_selection_args(H5READ_NAME, &rest, host_controls).await?;
+    let selection =
+        finish_selection_args(H5READ_NAME, runtime.as_ref(), &rest, host_controls).await?;
     path::check(&path, H5READ_NAME)?;
     let result = imp::read_dataset(H5READ_NAME, &path, dataset_path, selection)?;
     path::check(&path, H5READ_NAME)?;
@@ -191,20 +195,23 @@ async fn h5read_builtin(filename: Value, dataset: Value, rest: Vec<Value>) -> Bu
 
 #[runtime_builtin(
     name = "hdf5read",
+    context = true,
     binding_variant = "default",
     builtin_path = "crate::builtins::io::hdf5"
 )]
 async fn hdf5read_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     filename: Value,
     dataset: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     admit_output_count(HDF5READ_NAME, &HDF5READ_DESCRIPTOR)?;
     let path = resolve_path(&filename, HDF5READ_NAME)?;
     let dataset_path = hdf5_path(&dataset, HDF5READ_NAME, "dataset")?;
-    let host_controls = prepare_host_selection_controls(&rest, HDF5READ_NAME)?;
+    let host_controls = prepare_host_selection_controls(rest.view(), HDF5READ_NAME)?;
     let path = path::capture(path, NativePathIntent::Read, HDF5READ_NAME)?;
-    let selection = finish_selection_args(HDF5READ_NAME, &rest, host_controls).await?;
+    let selection =
+        finish_selection_args(HDF5READ_NAME, runtime.as_ref(), &rest, host_controls).await?;
     path::check(&path, HDF5READ_NAME)?;
     let result = imp::read_dataset(HDF5READ_NAME, &path, dataset_path, selection)?;
     path::check(&path, HDF5READ_NAME)?;
@@ -213,25 +220,31 @@ async fn hdf5read_builtin(
 
 #[runtime_builtin(
     name = "h5write",
+    context = true,
     binding_variant = "default",
     builtin_path = "crate::builtins::io::hdf5"
 )]
 async fn h5write_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     filename: Value,
     dataset: Value,
     data: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     admit_output_count(H5WRITE_NAME, &H5WRITE_DESCRIPTOR)?;
     let path = resolve_path(&filename, H5WRITE_NAME)?;
     let dataset_path = hdf5_path(&dataset, H5WRITE_NAME, "dataset")?;
     preflight_writable_data(&data, H5WRITE_NAME)?;
-    let host_controls = prepare_host_selection_controls(&rest, H5WRITE_NAME)?;
+    let host_controls = prepare_host_selection_controls(rest.view(), H5WRITE_NAME)?;
     let path = path::capture(path, NativePathIntent::ReadWriteCreate, H5WRITE_NAME)?;
-    let selection = finish_selection_args(H5WRITE_NAME, &rest, host_controls).await?;
-    let data = gather_if_needed_async(&data)
-        .await
-        .map_err(|err| map_control_flow(H5WRITE_NAME, err))?;
+    let selection =
+        finish_selection_args(H5WRITE_NAME, runtime.as_ref(), &rest, host_controls).await?;
+    let gather = gather_if_needed_async(&data);
+    let data = match runtime.as_ref() {
+        Some(runtime) => runtime.scope(gather).await,
+        None => gather.await,
+    }
+    .map_err(|err| map_control_flow(H5WRITE_NAME, err))?;
     path::check(&path, H5WRITE_NAME)?;
     imp::write_dataset(H5WRITE_NAME, &path, dataset_path, data, selection)?;
     path::check(&path, H5WRITE_NAME)?;
@@ -240,25 +253,31 @@ async fn h5write_builtin(
 
 #[runtime_builtin(
     name = "hdf5write",
+    context = true,
     binding_variant = "default",
     builtin_path = "crate::builtins::io::hdf5"
 )]
 async fn hdf5write_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     filename: Value,
     dataset: Value,
     data: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     admit_output_count(HDF5WRITE_NAME, &HDF5WRITE_DESCRIPTOR)?;
     let path = resolve_path(&filename, HDF5WRITE_NAME)?;
     let dataset_path = hdf5_path(&dataset, HDF5WRITE_NAME, "dataset")?;
     preflight_writable_data(&data, HDF5WRITE_NAME)?;
-    let host_controls = prepare_host_selection_controls(&rest, HDF5WRITE_NAME)?;
+    let host_controls = prepare_host_selection_controls(rest.view(), HDF5WRITE_NAME)?;
     let path = path::capture(path, NativePathIntent::ReadWriteCreate, HDF5WRITE_NAME)?;
-    let selection = finish_selection_args(HDF5WRITE_NAME, &rest, host_controls).await?;
-    let data = gather_if_needed_async(&data)
-        .await
-        .map_err(|err| map_control_flow(HDF5WRITE_NAME, err))?;
+    let selection =
+        finish_selection_args(HDF5WRITE_NAME, runtime.as_ref(), &rest, host_controls).await?;
+    let gather = gather_if_needed_async(&data);
+    let data = match runtime.as_ref() {
+        Some(runtime) => runtime.scope(gather).await,
+        None => gather.await,
+    }
+    .map_err(|err| map_control_flow(HDF5WRITE_NAME, err))?;
     path::check(&path, HDF5WRITE_NAME)?;
     imp::write_dataset(HDF5WRITE_NAME, &path, dataset_path, data, selection)?;
     path::check(&path, HDF5WRITE_NAME)?;
@@ -267,10 +286,12 @@ async fn hdf5write_builtin(
 
 #[runtime_builtin(
     name = "h5writeatt",
+    context = true,
     binding_variant = "default",
     builtin_path = "crate::builtins::io::hdf5"
 )]
 async fn h5writeatt_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     filename: Value,
     location: Value,
     attribute: Value,
@@ -289,9 +310,12 @@ async fn h5writeatt_builtin(
     }
     preflight_writable_data(&data, H5WRITEATT_NAME)?;
     let path = path::capture(path, NativePathIntent::ReadWriteCreate, H5WRITEATT_NAME)?;
-    let data = gather_if_needed_async(&data)
-        .await
-        .map_err(|err| map_control_flow(H5WRITEATT_NAME, err))?;
+    let gather = gather_if_needed_async(&data);
+    let data = match runtime.as_ref() {
+        Some(runtime) => runtime.scope(gather).await,
+        None => gather.await,
+    }
+    .map_err(|err| map_control_flow(H5WRITEATT_NAME, err))?;
     path::check(&path, H5WRITEATT_NAME)?;
     imp::write_attribute(H5WRITEATT_NAME, &path, location_path, attr_name, data)?;
     path::check(&path, H5WRITEATT_NAME)?;
@@ -303,10 +327,13 @@ async fn h5writeatt_builtin(
     binding_variant = "default",
     builtin_path = "crate::builtins::io::hdf5"
 )]
-async fn h5info_builtin(filename: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn h5info_builtin(
+    filename: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     admit_output_count(H5INFO_NAME, &H5INFO_DESCRIPTOR)?;
     let path = resolve_path(&filename, H5INFO_NAME)?;
-    let location = optional_location(&rest, H5INFO_NAME)?;
+    let location = optional_location(rest.view(), H5INFO_NAME)?;
     let path = path::capture(path, NativePathIntent::Read, H5INFO_NAME)?;
     path::check(&path, H5INFO_NAME)?;
     let result = imp::info(H5INFO_NAME, &path, location)?;
@@ -319,10 +346,13 @@ async fn h5info_builtin(filename: Value, rest: Vec<Value>) -> BuiltinResult<Valu
     binding_variant = "default",
     builtin_path = "crate::builtins::io::hdf5"
 )]
-async fn hdf5info_builtin(filename: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn hdf5info_builtin(
+    filename: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     admit_output_count(HDF5INFO_NAME, &HDF5INFO_DESCRIPTOR)?;
     let path = resolve_path(&filename, HDF5INFO_NAME)?;
-    let location = optional_location(&rest, HDF5INFO_NAME)?;
+    let location = optional_location(rest.view(), HDF5INFO_NAME)?;
     let path = path::capture(path, NativePathIntent::Read, HDF5INFO_NAME)?;
     path::check(&path, HDF5INFO_NAME)?;
     let result = imp::info(HDF5INFO_NAME, &path, location)?;
@@ -335,7 +365,10 @@ async fn hdf5info_builtin(filename: Value, rest: Vec<Value>) -> BuiltinResult<Va
     binding_variant = "default",
     builtin_path = "crate::builtins::io::hdf5"
 )]
-async fn h5disp_builtin(filename: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn h5disp_builtin(
+    filename: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     admit_output_count(H5DISP_NAME, &H5DISP_DESCRIPTOR)?;
     if crate::output_count::current_output_count().is_some_and(|requested| requested > 0) {
         crate::compatibility::ensure_builtin_extension_enabled(
@@ -344,7 +377,7 @@ async fn h5disp_builtin(filename: Value, rest: Vec<Value>) -> BuiltinResult<Valu
         )?;
     }
     let path = resolve_path(&filename, H5DISP_NAME)?;
-    let controls = h5disp_controls::parse(&rest)?;
+    let controls = h5disp_controls::parse(rest.view())?;
     let path = path::capture(path, NativePathIntent::Read, H5DISP_NAME)?;
     path::check(&path, H5DISP_NAME)?;
     let result = imp::disp(H5DISP_NAME, &path, controls)?;
@@ -353,11 +386,14 @@ async fn h5disp_builtin(filename: Value, rest: Vec<Value>) -> BuiltinResult<Valu
         record_console_line(ConsoleStream::Stdout, result)?;
         Ok(Value::output_list(Vec::new()))
     } else {
-        Ok(Value::String(result))
+        Ok(Value::string(result))
     }
 }
 
-fn optional_location(rest: &[Value], builtin: &'static str) -> BuiltinResult<String> {
+fn optional_location(
+    rest: crate::call::FunctionArgumentView<'_>,
+    builtin: &'static str,
+) -> BuiltinResult<String> {
     match rest.len() {
         0 => Ok("/".to_string()),
         1 => hdf5_path(&rest[0], builtin, "location"),
@@ -439,3 +475,5 @@ mod alias_tests;
 mod failure_tests;
 #[cfg(test)]
 mod admission_tests;
+#[cfg(test)]
+mod test_arguments;

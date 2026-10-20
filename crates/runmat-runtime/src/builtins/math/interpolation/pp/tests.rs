@@ -228,16 +228,16 @@ fn pp_from_value_reads_typed_integer_coefficients_without_mirror() {
     let order = mirrorless_integer_tensor(IntegerStorage::U16(vec![4]), vec![1, 1]);
     let dim = mirrorless_integer_tensor(IntegerStorage::U16(vec![1]), vec![1, 1]);
 
-    let mut st = StructValue::new();
-    st.insert("form", Value::String("pp".to_string()));
+    let mut st = runmat_value::UnboundedStructValueBuilder::new();
+    st.insert("form", Value::String("pp".to_string().into()));
     st.insert("breaks", Value::Tensor(breaks));
     st.insert("coefs", Value::Tensor(coefs));
     st.insert("pieces", Value::Tensor(pieces));
     st.insert("order", Value::Tensor(order));
     st.insert("dim", Value::Tensor(dim));
 
-    let pp =
-        futures::executor::block_on(pp_from_value(Value::Struct(st), "ppval")).expect("pp struct");
+    let pp = futures::executor::block_on(pp_from_value(Value::Struct(st.finish()), "ppval"))
+        .expect("pp struct");
 
     assert_eq!(pp.breaks, vec![1.0, 2.0]);
     assert_eq!(pp.coefs, vec![0.0, 0.0, 2.0, 1.0]);
@@ -262,7 +262,11 @@ fn pp_from_value_admits_rank_zero_and_rank_one_dimension_metadata_only() {
         let Value::Struct(mut fields) = public.clone() else {
             panic!("spline creates a pp struct");
         };
-        fields.insert("dim", Value::Tensor(Tensor::new(values, shape).unwrap()));
+        crate::builtins::common::test_support::replace_struct_field_unbounded(
+            &mut fields,
+            "dim",
+            Value::Tensor(Tensor::new(values, shape).unwrap()),
+        );
         let parsed = futures::executor::block_on(pp_from_value(Value::Struct(fields), "ppval"))
             .expect("vector dimension metadata");
         assert_eq!(parsed.component_shape, expected_components);
@@ -272,7 +276,8 @@ fn pp_from_value_admits_rank_zero_and_rank_one_dimension_metadata_only() {
     let Value::Struct(mut fields) = public else {
         panic!("spline creates a pp struct");
     };
-    fields.insert(
+    crate::builtins::common::test_support::replace_struct_field_unbounded(
+        &mut fields,
         "dim",
         Value::Tensor(Tensor::new(vec![1.0; 4], vec![2, 2]).unwrap()),
     );
@@ -289,7 +294,8 @@ fn pp_metadata_rejects_lossy_integer_dimensions_before_evaluation() {
     else {
         panic!("spline creates a pp struct");
     };
-    pp.insert(
+    crate::builtins::common::test_support::replace_struct_field_unbounded(
+        &mut pp,
         "dim",
         Value::Int(runmat_value::IntValue::U64((1_u64 << 53) + 1)),
     );
@@ -338,7 +344,8 @@ fn external_pp_requires_piece_major_coefficient_matrix_geometry() {
         let Value::Struct(mut malformed) = public.clone() else {
             unreachable!();
         };
-        malformed.insert(
+        crate::builtins::common::test_support::replace_struct_field_unbounded(
+            &mut malformed,
             "coefs",
             Value::Tensor(Tensor::new(coefs.materialize_f64(), shape).unwrap()),
         );
@@ -368,7 +375,8 @@ fn external_pp_rejects_inexact_integer_breaks_and_coefficients() {
                 vec![2, 4],
             )
         };
-        malformed.insert(
+        crate::builtins::common::test_support::replace_struct_field_unbounded(
+            &mut malformed,
             field,
             Value::Tensor(Tensor::new_integer(storage, shape).unwrap()),
         );
@@ -381,7 +389,8 @@ fn external_pp_rejects_inexact_integer_breaks_and_coefficients() {
         unreachable!();
     };
     let exact_wide = 1_u64 << 54;
-    exact.insert(
+    crate::builtins::common::test_support::replace_struct_field_unbounded(
+        &mut exact,
         "coefs",
         Value::Tensor(
             Tensor::new_integer(

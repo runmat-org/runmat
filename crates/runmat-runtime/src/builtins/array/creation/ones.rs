@@ -112,7 +112,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::ones"
 )]
-async fn ones_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn ones_builtin(rest: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     let parsed = ParsedOnes::parse(rest).await?;
     build_output(parsed).await
 }
@@ -135,7 +135,7 @@ enum OutputTemplate {
 }
 
 impl ParsedOnes {
-    async fn parse(args: Vec<Value>) -> crate::BuiltinResult<Self> {
+    async fn parse(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Self> {
         let mut dims: Vec<usize> = Vec::new();
         let mut saw_dims_arg = false;
         let mut like_proto: Option<Value> = None;
@@ -525,9 +525,9 @@ async fn ones_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> crate::Buil
 fn keyword_of(value: &Value) -> Option<String> {
     match value {
         Value::String(s) => Some(s.to_ascii_lowercase()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].to_ascii_lowercase()),
+        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].to_ascii_lowercase()),
         Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data.iter().collect();
+            let text: String = ca.data().iter().collect();
             Some(text.to_ascii_lowercase())
         }
         _ => None,
@@ -544,7 +544,10 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ones_default_scalar() {
-        let result = block_on(ones_builtin(Vec::new())).expect("ones");
+        let result = block_on(ones_builtin(
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect("ones");
         assert_eq!(result, Value::Num(1.0));
     }
 
@@ -580,7 +583,10 @@ pub(crate) mod tests {
     #[test]
     fn ones_square_from_single_dimension() {
         let args = vec![Value::Num(3.0)];
-        let result = block_on(ones_builtin(args)).expect("ones");
+        let result = block_on(ones_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect("ones");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape(), vec![3, 3]);
@@ -594,7 +600,10 @@ pub(crate) mod tests {
     #[test]
     fn ones_rectangular_from_dims() {
         let args = vec![Value::Num(2.0), Value::Num(4.0)];
-        let result = block_on(ones_builtin(args)).expect("ones");
+        let result = block_on(ones_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect("ones");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape(), vec![2, 4]);
@@ -609,7 +618,10 @@ pub(crate) mod tests {
     fn ones_from_size_vector() {
         let size_vec = Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap();
         let args = vec![Value::Tensor(size_vec)];
-        let result = block_on(ones_builtin(args)).expect("ones");
+        let result = block_on(ones_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect("ones");
         match result {
             Value::Tensor(t) => assert_eq!(t.shape(), vec![2, 3]),
             other => panic!("expected tensor, got {other:?}"),
@@ -618,11 +630,13 @@ pub(crate) mod tests {
 
     #[test]
     fn ones_integer_dimensions_clamp_negative_and_normalize_trailing_singletons() {
-        let result = block_on(ones_builtin(vec![
-            Value::Int(IntValue::I8(-2)),
-            Value::Int(IntValue::U16(3)),
-            Value::Int(IntValue::U64(1)),
-        ]))
+        let result = block_on(ones_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Int(IntValue::I8(-2)),
+                Value::Int(IntValue::U16(3)),
+                Value::Int(IntValue::U64(1)),
+            ]),
+        ))
         .expect("ones integer dimensions");
         let Value::Tensor(tensor) = result else {
             panic!("expected empty host tensor");
@@ -635,7 +649,10 @@ pub(crate) mod tests {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let size = Tensor::new_integer(IntegerStorage::U32(vec![2, 3]), vec![2, 1])
             .expect("column size vector");
-        let error = block_on(ones_builtin(vec![Value::Tensor(size)])).unwrap_err();
+        let error = block_on(ones_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(size)]),
+        ))
+        .unwrap_err();
         assert_eq!(
             error.identifier(),
             Some("RunMat:compatibility:OnesColumnSizeVectorExtension")
@@ -646,7 +663,10 @@ pub(crate) mod tests {
     #[test]
     fn ones_logical_output() {
         let args = vec![Value::Num(2.0), Value::Num(2.0), Value::from("logical")];
-        let result = block_on(ones_builtin(args)).expect("ones");
+        let result = block_on(ones_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect("ones");
         match result {
             Value::LogicalArray(logical) => {
                 assert_eq!(logical.shape, vec![2, 2]);
@@ -661,7 +681,10 @@ pub(crate) mod tests {
     fn ones_implicit_prototype_is_rejected() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let args = vec![Value::Tensor(tensor)];
-        assert!(block_on(ones_builtin(args)).is_err());
+        assert!(block_on(ones_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args)
+        ))
+        .is_err());
     }
 
     #[test]
@@ -679,12 +702,14 @@ pub(crate) mod tests {
 
         for storage in storages {
             let prototype = Tensor::new_integer(storage.clone(), vec![1, 2]).expect("prototype");
-            let result = block_on(ones_builtin(vec![
-                Value::Num(1.0),
-                Value::Num(2.0),
-                Value::from("like"),
-                Value::Tensor(prototype),
-            ]))
+            let result = block_on(ones_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(1.0),
+                    Value::Num(2.0),
+                    Value::from("like"),
+                    Value::Tensor(prototype),
+                ]),
+            ))
             .expect("ones like");
             let Value::Tensor(output) = result else {
                 panic!("expected integer tensor");
@@ -693,11 +718,13 @@ pub(crate) mod tests {
             assert_eq!(output.integer_storage(), Some(&storage.ones_like(2)));
         }
 
-        let result = block_on(ones_builtin(vec![
-            Value::Num(2.0),
-            Value::from("like"),
-            Value::Int(IntValue::U64(u64::MAX)),
-        ]))
+        let result = block_on(ones_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(2.0),
+                Value::from("like"),
+                Value::Int(IntValue::U64(u64::MAX)),
+            ]),
+        ))
         .expect("integer scalar prototype");
         let Value::Tensor(output) = result else {
             panic!("expected uint64 tensor");
@@ -710,10 +737,12 @@ pub(crate) mod tests {
 
     #[test]
     fn ones_like_without_dimensions_returns_scalar_in_prototype_class() {
-        let result = block_on(ones_builtin(vec![
-            Value::from("like"),
-            Value::Int(IntValue::U64(u64::MAX)),
-        ]))
+        let result = block_on(ones_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("like"),
+                Value::Int(IntValue::U64(u64::MAX)),
+            ]),
+        ))
         .expect("scalar ones like uint64");
         assert_eq!(result, Value::Int(IntValue::U64(1)));
     }
@@ -732,11 +761,13 @@ pub(crate) mod tests {
         ];
 
         for (class_name, expected) in cases {
-            let result = block_on(ones_builtin(vec![
-                Value::Num(2.0),
-                Value::Num(3.0),
-                Value::from(class_name),
-            ]))
+            let result = block_on(ones_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(2.0),
+                    Value::Num(3.0),
+                    Value::from(class_name),
+                ]),
+            ))
             .expect("ones integer class");
             let Value::Tensor(output) = result else {
                 panic!("expected integer tensor for {class_name}");
@@ -754,7 +785,10 @@ pub(crate) mod tests {
             Value::from("like"),
             Value::Complex(1.0, 2.0),
         ];
-        let result = block_on(ones_builtin(args)).expect("ones");
+        let result = block_on(ones_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect("ones");
         match result {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape(), vec![3, 3]);
@@ -771,11 +805,13 @@ pub(crate) mod tests {
     fn ones_like_complex_single_preserves_native_single() {
         let prototype =
             ComplexTensor::from_f32(vec![(1.0, 2.0)], vec![1, 1]).expect("complex single");
-        let result = block_on(ones_builtin(vec![
-            Value::Num(2.0),
-            Value::from("like"),
-            Value::ComplexTensor(prototype),
-        ]))
+        let result = block_on(ones_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(2.0),
+                Value::from("like"),
+                Value::ComplexTensor(prototype),
+            ]),
+        ))
         .expect("ones complex single like");
         let Value::ComplexTensor(output) = result else {
             panic!("expected complex tensor");
@@ -795,11 +831,13 @@ pub(crate) mod tests {
             vec![1, 2],
         )
         .expect("typed complex tensor");
-        let result = block_on(ones_builtin(vec![
-            Value::Num(2.0),
-            Value::from("like"),
-            Value::ComplexTensor(prototype),
-        ]))
+        let result = block_on(ones_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(2.0),
+                Value::from("like"),
+                Value::ComplexTensor(prototype),
+            ]),
+        ))
         .expect("ones like");
         let Value::ComplexTensor(output) = result else {
             panic!("expected typed complex output");
@@ -821,7 +859,10 @@ pub(crate) mod tests {
     fn ones_like_logical_array() {
         let logical = LogicalArray::new(vec![1, 0, 1, 0], vec![2, 2]).unwrap();
         let args = vec![Value::from("like"), Value::LogicalArray(logical)];
-        let result = block_on(ones_builtin(args)).expect("ones");
+        let result = block_on(ones_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect("ones");
         match result {
             Value::LogicalArray(out) => {
                 assert_eq!(out.shape, vec![1, 1]);
@@ -843,7 +884,10 @@ pub(crate) mod tests {
                 Value::from("like"),
                 Value::GpuTensor(handle),
             ];
-            let result = block_on(ones_builtin(args)).expect("ones");
+            let result = block_on(ones_builtin(
+                crate::builtins::common::test_support::builtin_arguments(args),
+            ))
+            .expect("ones");
             match result {
                 Value::GpuTensor(gpu) => {
                     assert_eq!(gpu.shape(), vec![2, 2]);
@@ -872,7 +916,10 @@ pub(crate) mod tests {
                 Value::from("like"),
                 Value::GpuTensor(prototype),
             ];
-            let result = block_on(ones_builtin(args)).expect("ones integer gpu like");
+            let result = block_on(ones_builtin(
+                crate::builtins::common::test_support::builtin_arguments(args),
+            ))
+            .expect("ones integer gpu like");
             let Value::GpuTensor(handle) = result else {
                 panic!("expected resident gpuArray");
             };
@@ -913,7 +960,10 @@ pub(crate) mod tests {
             Value::from("like"),
             g.value().clone(),
         ];
-        let result = block_on(ones_builtin(args)).expect("ones like gpu");
+        let result = block_on(ones_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect("ones like gpu");
         match result {
             Value::GpuTensor(h) => {
                 let gathered = test_support::gather(Value::GpuTensor(h)).expect("gather");
@@ -937,12 +987,14 @@ pub(crate) mod tests {
                     .expect("upload")
                     .with_provenance(provenance)
                     .expect("prototype provenance");
-                let result = block_on(ones_builtin(vec![
-                    Value::Num(2.0),
-                    Value::Num(2.0),
-                    Value::from("like"),
-                    Value::GpuTensor(handle.clone()),
-                ]))
+                let result = block_on(ones_builtin(
+                    crate::builtins::common::test_support::builtin_arguments(vec![
+                        Value::Num(2.0),
+                        Value::Num(2.0),
+                        Value::from("like"),
+                        Value::GpuTensor(handle.clone()),
+                    ]),
+                ))
                 .expect("ones complex gpu like");
                 let Value::GpuTensor(output) = result else {
                     panic!("expected resident output");
@@ -972,7 +1024,10 @@ pub(crate) mod tests {
         );
         // Create ones on GPU (2x2), then sin, then sum along dim=1
         let args = vec![Value::Num(2.0), Value::Num(2.0)];
-        let o = block_on(ones_builtin(args)).expect("ones");
+        let o = block_on(ones_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect("ones");
         let s = block_on(crate::call_builtin_async("sin", &[o])).expect("sin");
         let summed = block_on(crate::call_builtin_async(
             "sum",

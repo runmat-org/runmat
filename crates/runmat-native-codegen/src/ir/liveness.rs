@@ -12,7 +12,7 @@ pub struct NativeBlockLiveness {
 
 pub fn analyze_liveness(
     assembly: &NativeAssembly,
-) -> BTreeMap<runmat_types::ProgramFunctionId, Vec<NativeBlockLiveness>> {
+) -> BTreeMap<runmat_types::FunctionId, Vec<NativeBlockLiveness>> {
     assembly
         .functions
         .iter()

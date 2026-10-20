@@ -32,7 +32,7 @@ pub(super) fn apply(
     if scalar_text(specification).is_some_and(|text| text.eq_ignore_ascii_case("none")) {
         return Ok(None);
     }
-    let values = numeric_values(&columns[0].value)?;
+    let values = numeric_values(columns[0].value())?;
     let included_right = edge == IncludedEdge::Right;
     let (assignments, labels) = if is_bin_count(specification) {
         equal_width::assign(&values, bin_count(specification)?, included_right)?
@@ -55,7 +55,7 @@ pub(super) fn apply(
 
 fn unwrap_specification(value: &Value) -> BuiltinResult<&Value> {
     match value {
-        Value::Cell(value) if value.data.len() == 1 => Ok(&value.data[0]),
+        Value::Cell(value) if value.data().len() == 1 => Ok(&value.data()[0]),
         Value::Cell(_) => Err(error::invalid(
             "groupcounts: one grouping vector requires one bin specification",
         )),

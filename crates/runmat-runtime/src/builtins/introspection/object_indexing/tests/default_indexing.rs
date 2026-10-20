@@ -58,10 +58,10 @@ fn public_subsref_and_subsasgn_use_default_numeric_indexing() {
 #[test]
 fn typed_structure_array_carries_multiple_subscript_levels() {
     let level = |kind: &str, subs: Value| {
-        let mut value = StructValue::new();
-        value.insert("type", Value::String(kind.to_string()));
+        let mut value = runmat_value::UnboundedStructValueBuilder::new();
+        value.insert("type", Value::String(kind.to_string().into()));
         value.insert("subs", subs);
-        value
+        value.finish()
     };
     let descriptor = Value::StructArray(
         StructArray::new(

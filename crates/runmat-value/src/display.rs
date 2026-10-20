@@ -250,7 +250,9 @@ impl fmt::Display for Value {
                 h.device_id(),
                 h.buffer_id()
             ),
-            Value::Object(obj) => write!(f, "{}(props={})", obj.class_name, obj.properties.len()),
+            Value::Object(obj) => {
+                write!(f, "{}(props={})", obj.class_name(), obj.properties().len())
+            }
             Value::ObjectArray(array) => write!(f, "{array}"),
             Value::HandleObject(h) => {
                 write!(

@@ -13,6 +13,8 @@ use std::path::Path;
 
 #[path = "export_builtin_documentation/cli.rs"]
 mod cli;
+#[path = "export_builtin_documentation/links.rs"]
+mod links;
 
 use cli::{parse_options, ExportMode};
 
@@ -137,6 +139,30 @@ fn build_export_with_legacy(
     }
     let legacy_sidecar_count = legacy.len();
     let selected_catalog_count = catalog_entries.len();
+    // Report the complete selected link frontier before encoding documents.
+    // A scoped export still resolves names against the full inventory.
+    links::validate_scope(
+        catalog_entries
+            .iter()
+            .filter(|entry| entry.documentation.authority == BuiltinDocumentationAuthority::Catalog)
+            .map(|entry| (entry.identity.name, &entry.documentation))
+            .chain(
+                builtin_constant_catalog_entries()
+                    .iter()
+                    .filter_map(|entry| {
+                        if !identities.is_empty()
+                            && !identities.contains(&entry.name.to_ascii_lowercase())
+                        {
+                            return None;
+                        }
+                        entry
+                            .documentation
+                            .as_ref()
+                            .map(|documentation| (entry.name, documentation))
+                    }),
+            ),
+        &complete_names,
+    )?;
     let mut documents = BTreeMap::new();
     let mut slugs = BTreeMap::new();
     let mut missing_legacy = Vec::new();
@@ -152,7 +178,7 @@ fn build_export_with_legacy(
                     )
                     .into());
                 }
-                validate_catalog_documentation(entry, &complete_names)?;
+                validate_catalog_documentation(entry)?;
                 let document = catalog_document(entry);
                 record_document(&mut documents, &mut slugs, key, document)?;
                 if mode == ExportMode::CatalogPreview {
@@ -212,7 +238,6 @@ fn build_export_with_legacy(
             )
             .into());
         }
-        validate_documentation_links(entry.name, documentation, &complete_names)?;
         record_document(
             &mut documents,
             &mut slugs,
@@ -359,37 +384,13 @@ fn record_document(
 
 fn validate_catalog_documentation(
     entry: &'static runmat_builtins::BuiltinCatalogEntry,
-    complete_names: &BTreeSet<String>,
 ) -> Result<(), String> {
-    let documentation = &entry.documentation;
     let name = entry.identity.name;
     let errors = validate_builtin_catalog(&[entry]);
     if !errors.is_empty() {
         return Err(format!(
             "{name} has invalid canonical catalog data: {errors:#?}"
         ));
-    }
-    validate_documentation_links(name, documentation, complete_names)
-}
-
-fn validate_documentation_links(
-    name: &str,
-    documentation: &BuiltinDocumentation,
-    complete_names: &BTreeSet<String>,
-) -> Result<(), String> {
-    for related in documentation.related {
-        if !complete_names.contains(&related.to_ascii_lowercase()) {
-            return Err(format!(
-                "{name} references unknown related builtin {related}"
-            ));
-        }
-    }
-    for link in documentation.links {
-        if let BuiltinDocumentationLinkTarget::Builtin(target) = link.target {
-            if !complete_names.contains(&target.to_ascii_lowercase()) {
-                return Err(format!("{name} links to unknown builtin {target}"));
-            }
-        }
     }
     Ok(())
 }

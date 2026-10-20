@@ -70,7 +70,8 @@ impl SparsePreconditionerApplyRequest<'_> {
             "sparse preconditioner input shape does not match its matrix"
         );
         ensure!(
-            self.input.descriptor().element_type == Some(self.preconditioner.descriptor.element_type)
+            self.input.descriptor().element_type
+                == Some(self.preconditioner.descriptor.element_type)
                 && self.input.descriptor().storage == Some(self.preconditioner.descriptor.storage),
             "sparse preconditioner input representation does not match its matrix"
         );

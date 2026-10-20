@@ -6,9 +6,13 @@ use runmat_value::Value;
 #[runmat_macros::runtime_builtin(
     name = "deal",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::common::deal"
 )]
-pub async fn deal_builtin_registered(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub async fn deal_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     let out_count = crate::output_count::current_output_count().unwrap_or(1);
     let valid_count = rest.len() == 1 || rest.len() == out_count;
     if !valid_count {
@@ -28,15 +32,23 @@ pub async fn deal_builtin_registered(rest: Vec<Value>) -> crate::BuiltinResult<V
     if out_count == 0 {
         return Ok(Value::output_list(Vec::new()));
     }
-    if rest.len() == 1 {
-        let value = rest.into_iter().next().expect("one deal input");
-        return if out_count == 1 {
-            Ok(value)
-        } else {
-            Ok(Value::output_list(vec![value; out_count]))
-        };
+    if rest.len() == 1 && out_count == 1 {
+        return Ok(rest.into_iter().next().expect("one deal input"));
     }
-    Ok(Value::output_list(rest))
+    let arguments = rest.into_function_arguments();
+    let outputs = crate::execution::RootedValues::transform_arguments(
+        &arguments,
+        out_count,
+        None,
+        runtime.as_ref(),
+        |index| {
+            Ok(arguments
+                .get(if arguments.len() == 1 { 0 } else { index })
+                .expect("validated deal output arity")
+                .clone())
+        },
+    )?;
+    Ok(outputs.with_owned_output_storage(Value::OutputList))
 }
 
 #[cfg(all(test, feature = "wgpu"))]
@@ -279,7 +291,7 @@ mod tests {
                 let Value::Cell(cell) = output else {
                     panic!("expected nested cell");
                 };
-                let Value::Foreign(alias) = &cell.data[0] else {
+                let Value::Foreign(alias) = &cell.data()[0] else {
                     panic!("expected foreign reference");
                 };
                 assert_eq!(alias, &original);
@@ -302,7 +314,10 @@ mod tests {
     fn call(inputs: Vec<Value>, outputs: usize) -> crate::BuiltinResult<Value> {
         let _outputs =
             crate::output_count::push_output_count(Some(outputs)).expect("output-count scope");
-        block_on(deal_builtin_registered(inputs))
+        let inputs = crate::execution::RootedValues::new(inputs)
+            .expect("ordinary deal fixture arguments")
+            .into();
+        block_on(deal_builtin_registered(None, inputs))
     }
 
     #[test]

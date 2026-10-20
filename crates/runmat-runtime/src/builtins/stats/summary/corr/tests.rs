@@ -5,7 +5,11 @@ use runmat_value::IntegerStorage;
 
 #[test]
 fn empty_observations_preserve_variable_count_and_row_mismatch() {
-    let output = block_on(corr_builtin(tensor(vec![], vec![0, 3]), vec![])).unwrap();
+    let output = block_on(corr_builtin(
+        tensor(vec![], vec![0, 3]),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap();
     let Value::Tensor(output) = output else {
         panic!("matrix")
     };
@@ -13,7 +17,7 @@ fn empty_observations_preserve_variable_count_and_row_mismatch() {
     assert!(output.materialize_f64().iter().all(|value| value.is_nan()));
     let error = block_on(corr_builtin(
         tensor(vec![], vec![2, 0]),
-        vec![tensor(vec![], vec![3, 0])],
+        crate::builtins::common::test_support::builtin_arguments(vec![tensor(vec![], vec![3, 0])]),
     ))
     .unwrap_err();
     assert!(error.message.contains("same number of observations"));
@@ -22,17 +26,25 @@ fn empty_observations_preserve_variable_count_and_row_mismatch() {
 #[test]
 fn empty_observation_matrix_checks_result_dimension_overflow() {
     let input = tensor(vec![], vec![0, usize::MAX]);
-    let error = block_on(corr_builtin(input, vec![])).unwrap_err();
+    let error = block_on(corr_builtin(
+        input,
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap_err();
     assert!(error.message.contains("platform limits"));
 }
 
 #[test]
 fn rejects_extra_observation_pages_but_accepts_trailing_singletons() {
-    let error = block_on(corr_builtin(tensor(vec![1.; 8], vec![2, 2, 2]), vec![])).unwrap_err();
+    let error = block_on(corr_builtin(
+        tensor(vec![1.; 8], vec![2, 2, 2]),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap_err();
     assert!(error.to_string().contains("two-dimensional"));
     assert!(block_on(corr_builtin(
         tensor(vec![1., 2., 3.], vec![3, 1, 1]),
-        vec![]
+        crate::builtins::common::test_support::builtin_arguments(vec![])
     ))
     .is_ok());
 }
@@ -46,7 +58,11 @@ fn resident_observations_gather_without_releasing_source() {
                 shape: &[3, 2],
             })
             .unwrap();
-        let result = block_on(corr_builtin(Value::GpuTensor(handle.clone()), vec![])).unwrap();
+        let result = block_on(corr_builtin(
+            Value::GpuTensor(handle.clone()),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap();
         let Value::Tensor(result) = result else {
             panic!("host correlation matrix")
         };
@@ -69,7 +85,7 @@ fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>, _poison: f64)
 fn corr_matrix_defaults_to_columns() {
     let out = block_on(corr_builtin(
         tensor(vec![1.0, 2.0, 1.0, 4.0], vec![2, 2]),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap();
     match out {
@@ -89,7 +105,7 @@ fn corr_accepts_typed_integer_matrix_inputs() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let out = block_on(corr_builtin(
         poisoned_int_tensor(IntegerStorage::I16(vec![1, 2, 1, 4]), vec![2, 2], 0.0),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap();
     match out {
@@ -114,7 +130,11 @@ fn corr_complete_rows_reads_typed_integer_storage() {
 
     let out = block_on(corr_builtin(
         x,
-        vec![y, Value::from("Rows"), Value::from("complete")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            y,
+            Value::from("Rows"),
+            Value::from("complete"),
+        ]),
     ))
     .unwrap();
 
@@ -132,7 +152,11 @@ fn corr_complete_rows_reads_typed_integer_storage() {
 fn corr_xy_returns_cross_correlation_matrix() {
     let x = tensor(vec![1.0, 2.0, 3.0, 3.0, 2.0, 1.0], vec![3, 2]);
     let y = tensor(vec![2.0, 4.0, 6.0], vec![3, 1]);
-    let out = block_on(corr_builtin(x, vec![y])).unwrap();
+    let out = block_on(corr_builtin(
+        x,
+        crate::builtins::common::test_support::builtin_arguments(vec![y]),
+    ))
+    .unwrap();
     match out {
         Value::Tensor(tensor) => {
             assert_eq!(tensor.shape(), [2, 1]);
@@ -149,7 +173,11 @@ fn corr_pairwise_omits_nan_pair() {
     let y = tensor(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]);
     let out = block_on(corr_builtin(
         x,
-        vec![y, Value::from("Rows"), Value::from("pairwise")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            y,
+            Value::from("Rows"),
+            Value::from("pairwise"),
+        ]),
     ))
     .unwrap();
     match out {
@@ -163,7 +191,11 @@ fn corr_returns_pvalues_when_requested() {
     let x = tensor(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]);
     let y = tensor(vec![2.0, 4.0, 6.0, 8.0], vec![4, 1]);
     let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
-    let out = block_on(corr_builtin(x, vec![y])).unwrap();
+    let out = block_on(corr_builtin(
+        x,
+        crate::builtins::common::test_support::builtin_arguments(vec![y]),
+    ))
+    .unwrap();
     match out {
         Value::OutputList(values) => {
             assert_eq!(values.len(), 2);
@@ -181,13 +213,13 @@ fn corr_supports_kendall_and_tail_option() {
     let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let out = block_on(corr_builtin(
         x,
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             y,
             Value::from("Type"),
             Value::from("Kendall"),
             Value::from("Tail"),
             Value::from("right"),
-        ],
+        ]),
     ))
     .unwrap();
     match out {
@@ -207,7 +239,7 @@ fn corr_integer_extensions_are_independently_gated() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
     let data_error = block_on(corr_builtin(
         poisoned_int_tensor(IntegerStorage::I16(vec![1, 2, 3]), vec![3, 1], 0.0),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap_err();
     assert_eq!(
@@ -217,10 +249,10 @@ fn corr_integer_extensions_are_independently_gated() {
 
     let weight_error = block_on(corr_builtin(
         tensor(vec![1.0, 2.0, 3.0], vec![3, 1]),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("Weights"),
             poisoned_int_tensor(IntegerStorage::U8(vec![1, 2, 3]), vec![3, 1], 0.0),
-        ],
+        ]),
     ))
     .unwrap_err();
     assert_eq!(
@@ -235,8 +267,11 @@ fn corr_resident_integer_data_rejects_before_gather() {
         let input = Tensor::new_integer(IntegerStorage::U16(vec![1, 2, 3]), vec![3, 1]).unwrap();
         let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &input).unwrap();
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        let error =
-            block_on(corr_builtin(Value::GpuTensor(handle.clone()), Vec::new())).unwrap_err();
+        let error = block_on(corr_builtin(
+            Value::GpuTensor(handle.clone()),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap_err();
         assert_eq!(
             error.identifier(),
             Some("RunMat:compatibility:CorrIntegerDataExtension")
@@ -263,17 +298,17 @@ fn corr_supports_all_eight_integer_data_classes() {
         let weight_storage = storage.clone();
         let out = block_on(corr_builtin(
             poisoned_int_tensor(storage, vec![3, 1], 0.0),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .unwrap_or_else(|error| panic!("{class}: {error}"));
         assert!(matches!(out, Value::Num(value) if (value - 1.0).abs() < 1.0e-12));
 
         let weighted = block_on(corr_builtin(
             tensor(vec![1.0, 2.0, 3.0], vec![3, 1]),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::from("Weights"),
                 poisoned_int_tensor(weight_storage, vec![3, 1], 0.0),
-            ],
+            ]),
         ))
         .unwrap_or_else(|error| panic!("{class} weights: {error}"));
         assert!(matches!(weighted, Value::Num(value) if (value - 1.0).abs() < 1.0e-12));
@@ -297,7 +332,11 @@ fn corr_wide_integer_rank_and_pearson_paths_remain_distinct() {
     for method in ["Pearson", "Spearman", "Kendall"] {
         let out = block_on(corr_builtin(
             x.clone(),
-            vec![y.clone(), Value::from("Type"), Value::from(method)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                y.clone(),
+                Value::from("Type"),
+                Value::from(method),
+            ]),
         ))
         .unwrap();
         assert!(
@@ -316,13 +355,13 @@ fn corr_weights_affect_all_types_and_force_nan_pvalues() {
         let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let out = block_on(corr_builtin(
             x.clone(),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 y.clone(),
                 Value::from("Type"),
                 Value::from(method),
                 Value::from("Weights"),
                 weights.clone(),
-            ],
+            ]),
         ))
         .unwrap();
         let Value::OutputList(values) = out else {

@@ -1,6 +1,6 @@
 use super::*;
 pub(super) fn preflight_websave_rest(
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     prepared_api_key: Option<&super::super::api_key::PreparedApiKey>,
 ) -> BuiltinResult<()> {
     let mut headers = Vec::new();
@@ -58,7 +58,7 @@ pub(super) fn parse_websave_rest(
     headers: &mut Vec<(String, String)>,
     timeout: &mut Duration,
     user_agent: &mut String,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     prepared_api_key: Option<&super::super::api_key::PreparedApiKey>,
 ) -> BuiltinResult<()> {
     let mut idx = 0usize;
@@ -149,7 +149,7 @@ pub(super) fn numeric_seconds(value: &Value, label: &str) -> BuiltinResult<f64> 
         }
         Value::String(text) => parse_positive_seconds(text),
         Value::CharArray(array) if array.rows == 1 => {
-            parse_positive_seconds(&array.data.iter().collect::<String>())
+            parse_positive_seconds(&array.data().iter().collect::<String>())
         }
         _ => Err(compat_error(
             "websave",
@@ -248,16 +248,16 @@ pub(super) fn append_header_fields(
             for (name, value) in &st.fields {
                 let header_value = scalar_text(value, "websave", "HeaderFields value")?;
                 if !name.is_empty() && !header_value.is_empty() {
-                    headers.push((name.clone(), header_value));
+                    headers.push((name.to_owned(), header_value));
                 }
             }
             Ok(())
         }
         Value::Cell(cell) if cell.cols == 2 => {
             for row in 0..cell.rows {
-                let name = scalar_text(&cell.data[row * cell.cols], "websave", "header name")?;
+                let name = scalar_text(&cell.data()[row * cell.cols], "websave", "header name")?;
                 let value =
-                    scalar_text(&cell.data[row * cell.cols + 1], "websave", "header value")?;
+                    scalar_text(&cell.data()[row * cell.cols + 1], "websave", "header value")?;
                 if !name.is_empty() && !value.is_empty() {
                     headers.push((name, value));
                 }

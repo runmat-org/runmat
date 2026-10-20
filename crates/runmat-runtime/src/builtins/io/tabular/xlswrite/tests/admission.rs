@@ -96,7 +96,7 @@ fn invalid_host_controls_precede_resident_download_and_filesystem_effects() {
                     None,
                     Value::from("out.xlsx"),
                     resident.clone(),
-                    arguments,
+                    crate::builtins::common::test_support::builtin_arguments(arguments),
                 ));
                 let Poll::Ready(Err(error)) = poll_once(call.as_mut()) else {
                     panic!("known-invalid host control must reject before download")
@@ -137,7 +137,10 @@ fn valid_resident_data_still_reaches_the_existing_download_route() {
                 None,
                 Value::from("out.xlsx"),
                 Value::GpuTensor(allocation.handle.clone()),
-                vec![Value::from("Sheet1"), Value::from("A1")],
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::from("Sheet1"),
+                    Value::from("A1"),
+                ]),
             ));
             assert!(poll_once(call.as_mut()).is_pending());
             assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
@@ -163,8 +166,9 @@ fn host_known_invalid_data_precedes_resident_cell_download_and_fs_admission() {
         .owner
         .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
         .expect("resident cell member");
-    let mut invalid = StructValue::new();
+    let mut invalid = runmat_value::UnboundedStructValueBuilder::new();
     invalid.insert("x", Value::Num(1.0));
+    let invalid = invalid.finish();
     let resident_then_invalid = Value::Cell(
         CellArray::new(
             vec![
@@ -186,7 +190,10 @@ fn host_known_invalid_data_precedes_resident_cell_download_and_fs_admission() {
                     None,
                     Value::from("out.xlsx"),
                     data,
-                    vec![Value::from("Sheet1"), Value::from("A1")],
+                    crate::builtins::common::test_support::builtin_arguments(vec![
+                        Value::from("Sheet1"),
+                        Value::from("A1"),
+                    ]),
                 ));
                 let Poll::Ready(Err(error)) = poll_once(call.as_mut()) else {
                     panic!("known-invalid data must reject before resident download")
@@ -231,7 +238,10 @@ fn admitted_resident_cell_member_still_enters_download() {
                 None,
                 Value::from("out.xlsx"),
                 data,
-                vec![Value::from("Sheet1"), Value::from("A1")],
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::from("Sheet1"),
+                    Value::from("A1"),
+                ]),
             ));
             assert!(poll_once(call.as_mut()).is_pending());
             assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);

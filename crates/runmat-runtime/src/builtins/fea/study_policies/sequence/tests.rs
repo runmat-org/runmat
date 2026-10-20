@@ -11,7 +11,7 @@ macro_rules! assert_choice {
         let Value::Object(object) = &value else {
             panic!("{} must return an object", $name)
         };
-        assert_eq!(object.class_name.display_name(), $class, $name);
+        assert_eq!(object.class_name().display_name(), $class, $name);
         let entry = runmat_builtins::builtin_catalog_entry_by_name($name).expect($name);
         assert!(entry
             .documentation

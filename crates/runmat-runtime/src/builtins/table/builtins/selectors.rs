@@ -5,9 +5,14 @@ use runmat_macros::runtime_builtin;
 #[runtime_builtin(
     name = "head",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::table::builtins"
 )]
-pub(crate) async fn head_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(crate) async fn head_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(invalid_argument(
             "head: expected at most one row-count argument",
@@ -42,7 +47,7 @@ pub(crate) async fn head_builtin(value: Value, rest: Vec<Value>) -> BuiltinResul
         .map_err(map_control_flow)?;
         let rows = value_row_count(&host)?;
         let selected = (0..rows.min(n)).collect::<Vec<_>>();
-        let selected_value = select_rows(&host, &selected)?;
+        let selected_value = select_rows_in_context(runtime.as_ref(), &host, &selected)?;
         return crate::builtins::common::gpu_helpers::restore_class_preserving_value(
             &handle,
             selected_value,
@@ -59,7 +64,8 @@ pub(crate) async fn head_builtin(value: Value, rest: Vec<Value>) -> BuiltinResul
         let variables = table_variables(object)?;
         let mut columns = Vec::with_capacity(names.len());
         for name in &names {
-            columns.push(select_rows(
+            columns.push(select_rows_in_context(
+                runtime.as_ref(),
                 variables
                     .fields
                     .get(name)
@@ -67,7 +73,13 @@ pub(crate) async fn head_builtin(value: Value, rest: Vec<Value>) -> BuiltinResul
                 &selected,
             )?);
         }
-        return subset_tabular_object(object, names, columns, &selected);
+        return subset_tabular_object_in_context(
+            runtime.as_ref(),
+            object,
+            names,
+            columns,
+            &selected,
+        );
     }
-    select_rows(&value, &selected)
+    select_rows_in_context(runtime.as_ref(), &value, &selected)
 }

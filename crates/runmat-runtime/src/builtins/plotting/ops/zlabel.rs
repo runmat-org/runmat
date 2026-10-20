@@ -4,6 +4,7 @@ use runmat_builtins::{
     ZLABEL_ERROR_TOO_MANY_OUTPUTS,
 };
 use runmat_macros::runtime_builtin;
+#[cfg(test)]
 use runmat_value::Value;
 
 use super::op_common::{annotation_error, map_figure_error, parse_numeric_text_command};
@@ -14,7 +15,7 @@ use super::state::set_zlabel_for_axes;
     binding_variant = "default",
     builtin_path = "crate::builtins::plotting::zlabel"
 )]
-pub fn zlabel_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+pub fn zlabel_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<f64> {
     crate::output_count::validate_fixed_outputs(
         &ZLABEL_DESCRIPTOR,
         &ZLABEL_ERROR_TOO_MANY_OUTPUTS,
@@ -31,7 +32,7 @@ pub fn zlabel_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
             "zlabel",
         )?;
     }
-    let command = parse_numeric_text_command("zlabel", &args)
+    let command = parse_numeric_text_command("zlabel", args.view())
         .map_err(|error| annotation_error("zlabel", &ZLABEL_ERROR_INVALID_ARGUMENT, error))?;
     let target = command.resolve_target();
     set_zlabel_for_axes(target.0, target.1, &command.text, command.style).map_err(|err| {
@@ -75,7 +76,10 @@ mod tests {
         reset_hold_state_for_run();
         let _ = clear_figure(None);
 
-        let handle = zlabel_builtin(vec![Value::String("Height".into())]).unwrap();
+        let handle = zlabel_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::String("Height".into())],
+        ))
+        .unwrap();
         assert_eq!(
             decode_plot_object_handle(handle).unwrap().2,
             PlotObjectKind::ZLabel
@@ -99,17 +103,16 @@ mod tests {
             1,
         ));
 
-        let handle = zlabel_builtin(vec![
-            ax,
-            Value::StringArray(StringArray {
-                data: vec!["Height".into(), "(m)".into()],
-                shape: vec![1, 2],
-                rows: 1,
-                cols: 2,
-            }),
-            Value::String("FontWeight".into()),
-            Value::String("bold".into()),
-        ])
+        let handle = zlabel_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![
+                ax,
+                Value::StringArray(
+                    StringArray::new(vec!["Height".into(), "(m)".into()], vec![1, 2]).unwrap(),
+                ),
+                Value::String("FontWeight".into()),
+                Value::String("bold".into()),
+            ],
+        ))
         .unwrap();
 
         let fig = clone_figure(current_figure_handle()).unwrap();
@@ -144,13 +147,19 @@ mod tests {
 mod output_contract_tests {
     #[test]
     fn missing_required_input_uses_identity_diagnostic() {
-        let error = super::zlabel_builtin(vec![]).expect_err("missing annotation input");
+        let error = super::zlabel_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        )
+        .expect_err("missing annotation input");
         assert_eq!(error.identifier(), Some("RunMat:zlabel:InvalidArgument"));
     }
     #[test]
     fn excessive_outputs_reject_before_argument_or_graphics_effects() {
         let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
-        let error = super::zlabel_builtin(vec![]).expect_err("excess outputs");
+        let error = super::zlabel_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        )
+        .expect_err("excess outputs");
         assert_eq!(error.identifier(), Some("RunMat:zlabel:TooManyOutputs"));
     }
 }

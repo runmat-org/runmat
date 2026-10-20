@@ -450,7 +450,12 @@ impl ErrorBar {
                 continue;
             }
             let length = ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt();
-            let at = |t: f64| [a[0] + (b[0] - a[0]) * t / length, a[1] + (b[1] - a[1]) * t / length];
+            let at = |t: f64| {
+                [
+                    a[0] + (b[0] - a[0]) * t / length,
+                    a[1] + (b[1] - a[1]) * t / length,
+                ]
+            };
             let mut t = 0.0;
             while length > 0.0 && t < length {
                 let step = remaining.min(length - t);
@@ -749,7 +754,8 @@ impl ErrorBar {
         );
         let mut px_segments =
             self.bar_segments(|x, y| map.to_px(x, y), self.cap_size.max(0.0) as f64 * 0.5);
-        px_segments.extend(self.data_line_segments(|x, y| map.to_px(x, y), &self.dash_pattern_px()));
+        px_segments
+            .extend(self.data_line_segments(|x, y| map.to_px(x, y), &self.dash_pattern_px()));
         let segments: Vec<stroke::PixelSegment> = px_segments
             .into_iter()
             .map(|(a, b)| (a, b, self.color))

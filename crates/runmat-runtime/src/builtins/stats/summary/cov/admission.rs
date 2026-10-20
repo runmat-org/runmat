@@ -11,7 +11,7 @@ pub(super) struct CovArgs {
 }
 
 impl CovArgs {
-    pub(super) fn parse(first: Value, rest: Vec<Value>) -> BuiltinResult<Self> {
+    pub(super) fn parse(first: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Self> {
         let mut second_candidate: Option<Value> = None;
         let mut weight_candidate: Option<Value> = None;
         let mut normalization = CovNormalization::Unbiased;

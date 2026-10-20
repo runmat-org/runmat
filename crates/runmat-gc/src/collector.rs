@@ -492,7 +492,7 @@ pub struct IncrementalProgress {
 mod tests {
     use super::*;
     use crate::{GcConfig, GcStats, GenerationalAllocator};
-    use runmat_value::{StructArray, StructValue};
+    use runmat_value::StructArray;
 
     #[test]
     fn test_mark_sweep_collector_creation() {
@@ -588,7 +588,7 @@ mod tests {
         let mut collector = MarkSweepCollector::new(&config);
 
         let target = allocator
-            .allocate(Value::String("alive".to_string()), &stats)
+            .allocate(Value::String("alive".to_string().into()), &stats)
             .expect("target allocation");
         let target_addr = target.addr();
         let handle_value = Value::HandleObject(runmat_value::HandleRef {
@@ -616,15 +616,15 @@ mod tests {
         let mut collector = MarkSweepCollector::new(&config);
 
         let first_target = allocator
-            .allocate(Value::String("first".to_string()), &stats)
+            .allocate(Value::String("first".to_string().into()), &stats)
             .expect("first target allocation");
         let second_target = allocator
-            .allocate(Value::String("second".to_string()), &stats)
+            .allocate(Value::String("second".to_string().into()), &stats)
             .expect("second target allocation");
         let first_addr = first_target.addr();
         let second_addr = second_target.addr();
         let element = |payload: f64, target| {
-            let mut value = StructValue::new();
+            let mut value = runmat_value::UnboundedStructValueBuilder::with_capacity(2);
             value.insert("payload", Value::Num(payload));
             value.insert(
                 "nested",
@@ -634,7 +634,7 @@ mod tests {
                     valid: true,
                 }),
             );
-            value
+            value.finish()
         };
         let array = StructArray::with_fields(
             vec!["payload".into(), "nested".into()],
@@ -674,7 +674,7 @@ mod tests {
         let mut collector = MarkSweepCollector::new(&config);
 
         let stale_target = allocator
-            .allocate(Value::String("stale".to_string()), &stats)
+            .allocate(Value::String("stale".to_string().into()), &stats)
             .expect("target allocation");
         let stale_addr = stale_target.addr();
         let stale_epoch = stale_target

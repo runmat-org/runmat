@@ -17,7 +17,7 @@ fn onehotdecode_host_invalid_dimension_precedes_resident_input_access() {
         resident,
         tensor(vec![1.0, 2.0], vec![1, 2]),
         Value::Num(0.0),
-        vec![],
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
     ))
     .expect_err("invalid host dimension must precede input provider access");
     assert_eq!(
@@ -38,13 +38,13 @@ fn onehotdecode_round_trips_string_classes() {
         encoded,
         Value::StringArray(StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap()),
         Value::Num(2.0),
-        vec![Value::from("string")],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("string")]),
     ))
     .unwrap() else {
         panic!("strings");
     };
     assert_eq!(out.shape, vec![3, 1]);
-    assert_eq!(out.data, vec!["b", "a", "a"]);
+    assert_eq!(out.data(), vec!["b", "a", "a"]);
 }
 
 #[test]
@@ -64,7 +64,7 @@ fn onehotdecode_returns_categorical_for_categorical_classes() {
         encoded,
         classes,
         Value::Num(1.0),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap() else {
         panic!("categorical");
@@ -88,7 +88,7 @@ fn onehotdecode_defaults_to_categorical_and_preserves_class_order() {
         encoded.clone(),
         classes.clone(),
         Value::Num(2.0),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap_err();
     assert!(err.message.contains("classes length"));
@@ -100,13 +100,13 @@ fn onehotdecode_defaults_to_categorical_and_preserves_class_order() {
         encoded,
         classes,
         Value::Num(2.0),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap() else {
         panic!("categorical");
     };
-    let categories = match out.properties.get("Categories") {
-        Some(Value::StringArray(array)) => array.data.clone(),
+    let categories = match out.properties().get("Categories") {
+        Some(Value::StringArray(array)) => array.data(),
         other => panic!("categories {other:?}"),
     };
     assert_eq!(categories, vec!["low", "high"]);
@@ -122,13 +122,13 @@ fn onehotdecode_reads_typed_integer_encoded_array_exactly() {
             StringArray::new(vec!["low".into(), "high".into()], vec![1, 2]).unwrap(),
         ),
         Value::Num(2.0),
-        vec![Value::from("string")],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("string")]),
     ))
     .unwrap() else {
         panic!("strings");
     };
     assert_eq!(out.shape, vec![2, 1]);
-    assert_eq!(out.data, vec!["high", "low"]);
+    assert_eq!(out.data(), vec!["high", "low"]);
 }
 
 #[test]
@@ -145,7 +145,7 @@ fn onehotdecode_preserves_wide_integer_classes_and_native_output_types() {
         encoded.clone(),
         classes.clone(),
         Value::Int(IntValue::U8(2)),
-        vec![Value::from("uint64")],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("uint64")]),
     ))
     .expect("wide uint64 output") else {
         panic!("typed output")
@@ -160,7 +160,7 @@ fn onehotdecode_preserves_wide_integer_classes_and_native_output_types() {
         encoded,
         classes,
         Value::Num(2.0),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("categorical wide labels") else {
         panic!("categorical output")
@@ -182,7 +182,7 @@ fn onehotdecode_integer_probabilities_are_mode_gated_before_computation() {
         encoded.clone(),
         classes.clone(),
         Value::Num(2.0),
-        vec![Value::from("string")],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("string")]),
     ))
     .expect_err("strict mode rejects integer probabilities");
     assert_eq!(
@@ -196,12 +196,12 @@ fn onehotdecode_integer_probabilities_are_mode_gated_before_computation() {
         encoded,
         classes,
         Value::Num(2.0),
-        vec![Value::from("string")],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("string")]),
     ))
     .expect("RunMat extension") else {
         panic!("string output")
     };
-    assert_eq!(decoded.data, vec!["high", "low"]);
+    assert_eq!(decoded.data(), vec!["high", "low"]);
     drop(extension);
 }
 
@@ -216,7 +216,7 @@ fn onehotdecode_categorical_output_allows_repeated_decoded_labels() {
         encoded,
         classes,
         Value::Num(2.0),
-        vec![Value::from("categorical")],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("categorical")]),
     ))
     .unwrap() else {
         panic!("categorical");

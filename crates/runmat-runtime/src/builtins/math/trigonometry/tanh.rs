@@ -236,7 +236,7 @@ fn tanh_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
 
 fn tanh_char_array(ca: CharArray) -> BuiltinResult<Value> {
     let data = ca
-        .data
+        .data()
         .iter()
         .map(|&ch| (ch as u32 as f64).tanh())
         .collect::<Vec<_>>();

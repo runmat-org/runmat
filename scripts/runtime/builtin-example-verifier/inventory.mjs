@@ -80,7 +80,7 @@ export function buildInventory(documentExport, options) {
         inventoryDigest: ""
     };
     inventory.inventoryDigest = digestObject(inventory, ["inventoryDigest"]);
-    return inventory;
+    return validateInventory(inventory);
 }
 
 export function validateInventory(inventory) {
@@ -115,7 +115,7 @@ export function validateInventory(inventory) {
         for (const field of ["runnerKey", "builtinKey", "exampleId", "category", "description", "program", "compatibility", "harness"]) {
             if (typeof example[field] !== "string") throw new Error(`Invalid example ${field}: ${example.identity}`);
         }
-        if (!example.runnerKey || !example.builtinKey || !example.exampleId || !example.description || !example.program) throw new Error(`Inventory example has an empty required field: ${example.identity}`);
+        if (!example.runnerKey || !example.builtinKey || !example.exampleId || !example.description) throw new Error(`Inventory example has an empty required field: ${example.identity}`);
         if (example.builtinKey !== example.builtinKey.trim().toLowerCase() || example.exampleId !== example.exampleId.trim().toLowerCase()) throw new Error(`Inventory example identity fields are not normalized: ${example.identity}`);
         if (example.displayOutput !== null && typeof example.displayOutput !== "string") throw new Error(`Invalid example display output: ${example.identity}`);
         if (typeof example.isPlotExample !== "boolean") throw new Error(`Invalid plot marker: ${example.identity}`);
@@ -128,6 +128,7 @@ export function validateInventory(inventory) {
         if (sha256(["runmat.builtin-example.definition.v2", expectedDefinition]) !== example.definitionDigest) throw new Error(`Invalid example definition digest: ${example.identity}`);
         exactKeys(example.admission, example.admission.kind === "executable" ? ["kind"] : ["kind", "reason"], `example admission ${example.identity}`);
         enumValue(example.admission.kind, ["executable", "documentation-only"], "example admission kind");
+        if (example.admission.kind === "executable" && !example.program.trim()) throw new Error(`Executable example has no source: ${example.identity}`);
         if (example.admission.kind === "documentation-only" && (typeof example.admission.reason !== "string" || !example.admission.reason.trim())) throw new Error(`Documentation-only example lacks a reason: ${example.identity}`);
         if (example.authority === "catalog" && example.admission.kind !== "executable") throw new Error(`Catalog example is not executable: ${example.builtinKey}#${example.exampleId}`);
         const expectedLanes = example.admission.kind === "executable"

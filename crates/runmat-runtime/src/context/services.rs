@@ -1131,11 +1131,11 @@ pub trait RuntimeNativeService {
     fn supports(&self, capability: NativeCapability) -> bool;
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ForeignCall {
     pub adapter: String,
     pub symbol: String,
-    pub arguments: Vec<Value>,
+    pub arguments: crate::call::RootedFunctionArguments,
     pub requested_outputs: usize,
 }
 
@@ -1354,7 +1354,7 @@ pub enum RuntimeDistributedInvocation {
 #[derive(Debug, Clone)]
 pub struct RuntimeDistributedCallRequest {
     pub builtin: BuiltinId,
-    pub arguments: Vec<Value>,
+    pub arguments: crate::call::BuiltinArguments,
     pub literals: runmat_types::LiteralContext,
     pub requested_outputs: usize,
     pub outputs: Vec<runmat_types::ValueFact>,
@@ -1366,7 +1366,7 @@ pub struct RuntimeDistributedCallRequest {
 /// record never invents object references for locally retained partitions.
 #[derive(Debug, Clone)]
 pub struct RuntimeDistributedSnapshot {
-    pub handle: runmat_execution::DistributedValueHandle,
+    pub handle: runmat_value::SharedDistributedHandle,
     pub partitions: Vec<runmat_execution::DistributedPartitionLayout>,
 }
 
@@ -1417,29 +1417,29 @@ pub trait RuntimeDistributedService {
 
     fn inspect(
         &self,
-        handle: runmat_execution::DistributedValueHandle,
+        handle: runmat_value::SharedDistributedHandle,
     ) -> RuntimeServiceFuture<Result<RuntimeDistributedSnapshot, RuntimeError>>;
 
     fn export_local(
         &self,
-        handle: runmat_execution::DistributedValueHandle,
+        handle: runmat_value::SharedDistributedHandle,
         rank: LabRank,
     ) -> RuntimeServiceFuture<Result<runmat_execution::DistributedShardSnapshot, RuntimeError>>;
 
     fn local_part(
         &self,
-        handle: runmat_execution::DistributedValueHandle,
+        handle: runmat_value::SharedDistributedHandle,
         rank: LabRank,
     ) -> RuntimeServiceFuture<Result<crate::execution::RootedValue, RuntimeError>>;
 
     fn materialize(
         &self,
-        handle: runmat_execution::DistributedValueHandle,
+        handle: runmat_value::SharedDistributedHandle,
     ) -> RuntimeServiceFuture<Result<crate::execution::RootedValue, RuntimeError>>;
 
     fn redistribute(
         &self,
-        handle: runmat_execution::DistributedValueHandle,
+        handle: runmat_value::SharedDistributedHandle,
         scheme: DistributionScheme,
     ) -> RuntimeServiceFuture<Result<runmat_execution::DistributedValueHandle, RuntimeError>>;
 
@@ -1450,7 +1450,7 @@ pub trait RuntimeDistributedService {
 
     fn composite_entry(
         &self,
-        handle: runmat_execution::CompositeHandle,
+        handle: runmat_value::SharedCompositeHandle,
         rank: LabRank,
     ) -> RuntimeServiceFuture<Result<Option<crate::execution::RootedValue>, RuntimeError>>;
 }
@@ -1538,13 +1538,13 @@ pub trait RuntimeProgramService {
     /// Freeze this function's original product after validating its active caller.
     fn freeze_executable(
         &self,
-        function: runmat_types::ProgramFunctionId,
+        origin: runmat_execution::FunctionBindingOrigin,
         invocation_revision: &runmat_execution::ProgramRevision,
     ) -> Result<runmat_execution::ExecutableUnitEnvelope, crate::RuntimeError>;
 
     fn freeze_bound_callable(
         &self,
-        function: runmat_types::ProgramFunctionId,
+        origin: runmat_execution::FunctionBindingOrigin,
         display_name: &str,
     ) -> Result<RuntimeProgramCallable, crate::RuntimeError>;
 }
@@ -1773,21 +1773,6 @@ impl RuntimeServicePorts {
     pub fn timing(&self) -> &Rc<dyn RuntimeTimingService> {
         &self.timing
     }
-    /// A staged effect may finish only under the same installed owners that
-    /// reserved the scan and supplied the original placement revision.
-    pub(crate) fn same_host_effect_owners(&self, other: &Self) -> bool {
-        fn same<T: ?Sized>(left: Option<&Rc<T>>, right: Option<&Rc<T>>) -> bool {
-            match (left, right) {
-                (Some(left), Some(right)) => Rc::ptr_eq(left, right),
-                (None, None) => true,
-                _ => false,
-            }
-        }
-        same(self.placement(), other.placement())
-            && same(self.host_effect_resources(), other.host_effect_resources())
-            && same(self.parallel(), other.parallel())
-    }
-
     port_accessors!(
         with_call,
         call,

@@ -22,6 +22,9 @@ use crate::BuiltinResult;
     binding_variant = "default",
     builtin_path = "crate::builtins::array::grouping::groupcounts"
 )]
-pub(crate) async fn groupcounts_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(crate) async fn groupcounts_builtin(
+    first: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     execute::apply(first, rest).await
 }

@@ -96,12 +96,12 @@ async fn filter2_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     kernel: Value,
     image: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
-    ensure_filter2_extensions(&kernel, &image, &rest)?;
+    ensure_filter2_extensions(&kernel, &image, rest.view())?;
     // Invalid controls must fail before a resident integer/logical operand is
     // gathered, or a floating kernel is uploaded to the image owner.
-    let options = parse_filter2_options(&rest)?;
+    let options = parse_filter2_options(rest.view())?;
     preflight_filter2_geometry(&kernel, &image, options.shape)?;
     let output_single = value_is_single(&kernel) || value_is_single(&image);
     let image_precision_mismatch = matches!(&image, Value::GpuTensor(handle)
@@ -252,7 +252,11 @@ fn value_is_single(value: &Value) -> bool {
             && runmat_accelerate_api::handle_precision(handle) == Some(runmat_accelerate_api::ProviderPrecision::F32))
 }
 
-fn ensure_filter2_extensions(kernel: &Value, image: &Value, rest: &[Value]) -> BuiltinResult<()> {
+fn ensure_filter2_extensions(
+    kernel: &Value,
+    image: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     if rest.len() > 1 {
         crate::compatibility::ensure_builtin_extension_enabled(
             &FILTER2_VARIADIC_OPTIONS_EXTENSION,
@@ -696,7 +700,9 @@ fn upload_filter2_kernel(
     }
 }
 
-fn parse_filter2_options(args: &[Value]) -> BuiltinResult<ImfilterOptions> {
+fn parse_filter2_options(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<ImfilterOptions> {
     let mut options = ImfilterOptions::default();
     for value in args {
         let Some(text) = tensor::value_to_string(value) else {

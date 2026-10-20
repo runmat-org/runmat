@@ -147,10 +147,12 @@ fn metadata_queries_and_style_only_updates_do_not_require_coordinate_materializa
         assert!(crate::is_handle_valid(handle));
         let original = x_data(id);
         assert_eq!(
-            block_on(crate::builtins::plotting::get::get_builtin_async(vec![
-                object.clone(),
-                Value::String("XData".into())
-            ]))
+            block_on(crate::builtins::plotting::get::get_builtin_async(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    object.clone(),
+                    Value::String("XData".into())
+                ])
+            ))
             .unwrap(),
             original
         );
@@ -161,10 +163,12 @@ fn metadata_queries_and_style_only_updates_do_not_require_coordinate_materializa
         ]))
         .unwrap();
         assert_eq!(
-            block_on(crate::builtins::plotting::get::get_builtin_async(vec![
-                object.clone(),
-                Value::String("LineWidth".into())
-            ]))
+            block_on(crate::builtins::plotting::get::get_builtin_async(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    object.clone(),
+                    Value::String("LineWidth".into())
+                ])
+            ))
             .unwrap(),
             Value::Num(4.0)
         );
@@ -176,23 +180,25 @@ fn metadata_queries_and_style_only_updates_do_not_require_coordinate_materializa
         ]))
         .unwrap();
         assert_eq!(
-            block_on(crate::builtins::plotting::get::get_builtin_async(vec![
-                object.clone(),
-                Value::String("XData".into())
-            ]))
+            block_on(crate::builtins::plotting::get::get_builtin_async(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    object.clone(),
+                    Value::String("XData".into())
+                ])
+            ))
             .unwrap(),
             Value::Tensor(replacement)
         );
         let selected =
             crate::builtins::plotting::state::GraphicsPropertySelection::capture(receiver).unwrap();
         crate::builtins::plotting::state::close_figure(Some(selected.figure_handle())).unwrap();
-        assert!(
-            block_on(crate::builtins::plotting::get::get_builtin_async(vec![
+        assert!(block_on(crate::builtins::plotting::get::get_builtin_async(
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 object,
                 Value::String("Type".into())
-            ]))
-            .is_err()
-        );
+            ])
+        ))
+        .is_err());
     }
 }
 
@@ -225,12 +231,12 @@ fn selected_figure_outcome_retains_exact_scene_and_axes_mutation_is_public() {
         .unwrap();
     let admitted = PreparedFigureProperties::new(
         figure,
-        &[
+        crate::call::FunctionArgumentView::from_slice(&[
             Value::String("Name".into()),
             Value::String("retained".into()),
             Value::String("CurrentAxes".into()),
             original_axes_object,
-        ],
+        ]),
         "set",
     )
     .unwrap();
@@ -240,7 +246,7 @@ fn selected_figure_outcome_retains_exact_scene_and_axes_mutation_is_public() {
     for edits in [
         vec![
             Value::String("Name".into()),
-            Value::String("y".repeat(4096)),
+            Value::String("y".repeat(4096).into()),
             Value::String("Name".into()),
             Value::String("retained".into()),
         ],
@@ -251,7 +257,12 @@ fn selected_figure_outcome_retains_exact_scene_and_axes_mutation_is_public() {
             Value::Num(state::encode_axes_handle(figure, 0)),
         ],
     ] {
-        let rejected = PreparedFigureProperties::new(figure, &edits, "set").unwrap();
+        let rejected = PreparedFigureProperties::new(
+            figure,
+            crate::call::FunctionArgumentView::from_slice(&edits),
+            "set",
+        )
+        .unwrap();
         let proposal = rejected.proposal(&selection, "set").unwrap();
         assert!(matches!(
             proposal.validate_retained_budget(budget),
@@ -288,10 +299,12 @@ fn selected_figure_outcome_retains_exact_scene_and_axes_mutation_is_public() {
     ]))
     .unwrap();
     assert_eq!(
-        block_on(crate::builtins::plotting::get::get_builtin_async(vec![
-            object,
-            Value::String("Grid".into())
-        ]))
+        block_on(crate::builtins::plotting::get::get_builtin_async(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                object,
+                Value::String("Grid".into())
+            ])
+        ))
         .unwrap(),
         Value::Bool(true)
     );

@@ -164,7 +164,7 @@ fn character_value(array: &CharArray, index: usize) -> crate::BuiltinResult<Valu
     let column = index / array.rows;
     let source = row * array.cols + column;
     let character = array
-        .data
+        .data()
         .get(source)
         .copied()
         .ok_or_else(|| super::error::internal("character input index is out of bounds"))?;

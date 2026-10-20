@@ -3,7 +3,7 @@ use super::*;
 impl HostState {
     pub fn lexical_captures(
         &mut self,
-        function: runmat_types::ProgramFunctionId,
+        function: runmat_types::FunctionId,
     ) -> NativeExecutorResult<Option<Vec<runmat_runtime::call::lexical::LexicalCapture>>> {
         let target = self
             .functions
@@ -56,7 +56,7 @@ impl HostState {
     /// the same full positional ABI used by VM-produced callables.
     pub fn callable_capture_values(
         &mut self,
-        function: runmat_types::ProgramFunctionId,
+        function: runmat_types::FunctionId,
     ) -> NativeExecutorResult<Vec<runmat_value::Value>> {
         let functions = std::sync::Arc::clone(&self.functions);
         let captures = &functions
@@ -107,10 +107,7 @@ impl HostState {
         Ok(values)
     }
 
-    fn nested_function_is_visible(
-        &self,
-        target_parent: Option<runmat_types::ProgramFunctionId>,
-    ) -> bool {
+    fn nested_function_is_visible(&self, target_parent: Option<runmat_types::FunctionId>) -> bool {
         let Some(target_parent) = target_parent else {
             return false;
         };
@@ -129,10 +126,7 @@ impl HostState {
         false
     }
 
-    pub fn program_function(
-        &self,
-        function: runmat_types::ProgramFunctionId,
-    ) -> Option<&NativeFunction> {
+    pub fn program_function(&self, function: runmat_types::FunctionId) -> Option<&NativeFunction> {
         self.functions
             .iter()
             .find(|candidate| candidate.id == function)

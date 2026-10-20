@@ -10,7 +10,10 @@ use runmat_builtins::{
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::summary::distributions::tcdf"
 )]
-pub(crate) async fn tcdf_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(crate) async fn tcdf_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     let args = parse_args(value, rest).await?;
     let data = args
         .x
@@ -35,18 +38,22 @@ struct Args {
     output: NormalOutputPlan,
 }
 
-async fn parse_args(value: Value, mut rest: Vec<Value>) -> BuiltinResult<Args> {
-    let tail = super::pop_upper_tail(&mut rest);
+async fn parse_args(value: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Args> {
+    let (rest, tail) = super::split_upper_tail(rest)?;
     if rest.len() != 1 {
         return Err(super::normal_error(
             "tcdf",
             "tcdf: expected x and nu, optionally followed by 'upper'",
         ));
     }
-    let nu_value = rest.pop().expect("one nu argument");
+    let nu_value = rest[0].clone();
     ensure_extensions(&value, &nu_value)?;
     numeric_inputs("tcdf", &[&value, &nu_value], NumericShapePolicy::Broadcast)?;
-    let output = NormalOutputPlan::inspect("tcdf", &value, std::slice::from_ref(&nu_value))?;
+    let output = NormalOutputPlan::inspect(
+        "tcdf",
+        &value,
+        crate::call::FunctionArgumentView::from_slice(std::slice::from_ref(&nu_value)),
+    )?;
     let x = super::normal_value_to_tensor("tcdf", "x", value).await?;
     let nu = super::normal_value_to_tensor("tcdf", "nu", nu_value).await?;
     let (x, nu, shape) = super::broadcast_pair("tcdf", &x, &nu)?;

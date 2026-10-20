@@ -27,7 +27,7 @@ fn arrayfun_single_segment_external_handle_uses_runtime_name_resolution() {
     let result = block_on(runtime.scope(arrayfun_builtin(
         Some(runtime.clone()),
         Value::ExternalFunctionHandle("callback".into()),
-        vec![Value::Tensor(tensor)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(tensor)]),
     )))
     .expect("single-segment external-handle arrayfun should resolve via runtime-name policy");
     match result.value() {
@@ -89,7 +89,7 @@ fn arrayfun_name_only_closure_prefers_semantic_handle_binding_when_resolved() {
             binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
-            captures: vec![Value::Num(5.0)],
+            captures: vec![Value::Num(5.0)].into(),
         },
     )))
     .expect("closure callback should parse");
@@ -125,7 +125,7 @@ fn arrayfun_name_only_closure_call_uses_semantic_resolver_when_unbound() {
             binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
-            captures: vec![Value::Num(5.0)],
+            captures: vec![Value::Num(5.0)].into(),
         },
     )))
     .expect("closure callback should parse");

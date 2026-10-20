@@ -228,7 +228,7 @@ fn value_is_empty(value: &Value) -> bool {
     match value {
         Value::Tensor(tensor) => tensor::tensor_element_len(tensor) == 0,
         Value::GpuTensor(handle) => total_len(handle.shape()) == 0,
-        Value::CharArray(chars) => chars.data.is_empty(),
+        Value::CharArray(chars) => chars.data().is_empty(),
         Value::String(s) => s.trim().is_empty(),
         _ => false,
     }

@@ -4,6 +4,7 @@ use runmat_builtins::{
     XLABEL_ERROR_TOO_MANY_OUTPUTS,
 };
 use runmat_macros::runtime_builtin;
+#[cfg(test)]
 use runmat_value::Value;
 
 use super::op_common::{annotation_error, map_figure_error, parse_numeric_text_command};
@@ -14,7 +15,7 @@ use super::state::set_xlabel_for_axes;
     binding_variant = "default",
     builtin_path = "crate::builtins::plotting::xlabel"
 )]
-pub fn xlabel_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+pub fn xlabel_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<f64> {
     crate::output_count::validate_fixed_outputs(
         &XLABEL_DESCRIPTOR,
         &XLABEL_ERROR_TOO_MANY_OUTPUTS,
@@ -31,7 +32,7 @@ pub fn xlabel_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
             "xlabel",
         )?;
     }
-    let command = parse_numeric_text_command("xlabel", &args)
+    let command = parse_numeric_text_command("xlabel", args.view())
         .map_err(|error| annotation_error("xlabel", &XLABEL_ERROR_INVALID_ARGUMENT, error))?;
     let target = command.resolve_target();
     set_xlabel_for_axes(target.0, target.1, &command.text, command.style).map_err(|err| {
@@ -80,12 +81,17 @@ mod tests {
     #[test]
     fn x_and_y_labels_update_active_axes_metadata() {
         let _guard = setup_plot_tests();
-        let xh = xlabel_builtin(vec![Value::String("Time".into())]).unwrap();
-        let yh = ylabel_builtin(vec![
-            Value::String("Amplitude".into()),
-            Value::String("Color".into()),
-            Value::String("g".into()),
-        ])
+        let xh = xlabel_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::String("Time".into())],
+        ))
+        .unwrap();
+        let yh = ylabel_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![
+                Value::String("Amplitude".into()),
+                Value::String("Color".into()),
+                Value::String("g".into()),
+            ],
+        ))
         .unwrap();
 
         assert_eq!(
@@ -108,19 +114,23 @@ mod tests {
     fn xlabel_and_ylabel_reject_invalid_property_values() {
         let _guard = setup_plot_tests();
 
-        let err = xlabel_builtin(vec![
-            Value::String("Time".into()),
-            Value::String("Bogus".into()),
-            Value::Num(1.0),
-        ])
+        let err = xlabel_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![
+                Value::String("Time".into()),
+                Value::String("Bogus".into()),
+                Value::Num(1.0),
+            ],
+        ))
         .unwrap_err();
         assert!(err.message.contains("unsupported property"));
 
-        let err = ylabel_builtin(vec![
-            Value::String("Amp".into()),
-            Value::String("Interpreter".into()),
-            Value::Num(5.0),
-        ])
+        let err = ylabel_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![
+                Value::String("Amp".into()),
+                Value::String("Interpreter".into()),
+                Value::Num(5.0),
+            ],
+        ))
         .unwrap_err();
         assert!(err.message.contains("Interpreter must be a string"));
     }
@@ -128,14 +138,19 @@ mod tests {
     #[test]
     fn xlabel_formats_native_integer_scalars_exactly() {
         let _guard = setup_plot_tests();
-        xlabel_builtin(vec![
-            Value::Tensor(
-                runmat_value::Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1])
+        xlabel_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![
+                Value::Tensor(
+                    runmat_value::Tensor::new_integer(
+                        IntegerStorage::U64(vec![u64::MAX]),
+                        vec![1, 1],
+                    )
                     .expect("scalar integer label"),
-            ),
-            Value::String("FontSize".into()),
-            Value::Int(IntValue::U8(14)),
-        ])
+                ),
+                Value::String("FontSize".into()),
+                Value::Int(IntValue::U8(14)),
+            ],
+        ))
         .expect("integer label");
         let fig = clone_figure(current_figure_handle()).unwrap();
         assert_eq!(
@@ -158,10 +173,12 @@ mod tests {
         )
         .expect("axes handle") as u64;
         let strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let error = xlabel_builtin(vec![
-            Value::Int(IntValue::U64(axes_handle)),
-            Value::String("Blocked".into()),
-        ])
+        let error = xlabel_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![
+                Value::Int(IntValue::U64(axes_handle)),
+                Value::String("Blocked".into()),
+            ],
+        ))
         .expect_err("strict mode rejects typed integer axes aliases");
         assert_eq!(
             error.identifier(),
@@ -180,34 +197,35 @@ mod tests {
             figure, 1,
         ));
 
-        let xhandle = xlabel_builtin(vec![
-            ax.clone(),
-            Value::StringArray(StringArray {
-                data: vec!["Time".into(), "(s)".into()],
-                shape: vec![1, 2],
-                rows: 1,
-                cols: 2,
-            }),
-            Value::String("FontWeight".into()),
-            Value::String("bold".into()),
-        ])
+        let xhandle = xlabel_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![
+                ax.clone(),
+                Value::StringArray(
+                    StringArray::new(vec!["Time".into(), "(s)".into()], vec![1, 2]).unwrap(),
+                ),
+                Value::String("FontWeight".into()),
+                Value::String("bold".into()),
+            ],
+        ))
         .unwrap();
-        let yhandle = ylabel_builtin(vec![
-            ax,
-            Value::Cell(
-                CellArray::new(
-                    vec![
-                        Value::String("Amplitude".into()),
-                        Value::String("(V)".into()),
-                    ],
-                    1,
-                    2,
-                )
-                .unwrap(),
-            ),
-            Value::String("FontAngle".into()),
-            Value::String("italic".into()),
-        ])
+        let yhandle = ylabel_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![
+                ax,
+                Value::Cell(
+                    CellArray::new(
+                        vec![
+                            Value::String("Amplitude".into()),
+                            Value::String("(V)".into()),
+                        ],
+                        1,
+                        2,
+                    )
+                    .unwrap(),
+                ),
+                Value::String("FontAngle".into()),
+                Value::String("italic".into()),
+            ],
+        ))
         .unwrap();
 
         assert_eq!(decode_plot_object_handle(xhandle).unwrap().1, 1);
@@ -226,13 +244,19 @@ mod tests {
 mod output_contract_tests {
     #[test]
     fn missing_required_input_uses_identity_diagnostic() {
-        let error = super::xlabel_builtin(vec![]).expect_err("missing annotation input");
+        let error = super::xlabel_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        )
+        .expect_err("missing annotation input");
         assert_eq!(error.identifier(), Some("RunMat:xlabel:InvalidArgument"));
     }
     #[test]
     fn excessive_outputs_reject_before_argument_or_graphics_effects() {
         let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
-        let error = super::xlabel_builtin(vec![]).expect_err("excess outputs");
+        let error = super::xlabel_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        )
+        .expect_err("excess outputs");
         assert_eq!(error.identifier(), Some("RunMat:xlabel:TooManyOutputs"));
     }
 }

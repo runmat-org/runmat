@@ -12,8 +12,8 @@ pub(in crate::builtins::deep_learning) fn floating_precision(
                 ProviderPrecision::F64 => NumericDType::F64,
             })
         }
-        Value::Object(object) if object.class_name.is(DLARRAY_CLASS) => {
-            object.properties.get("Data").and_then(floating_precision)
+        Value::Object(object) if object.class_name().is(DLARRAY_CLASS) => {
+            object.properties().get("Data").and_then(floating_precision)
         }
         Value::Num(_) => Some(NumericDType::F64),
         _ => None,

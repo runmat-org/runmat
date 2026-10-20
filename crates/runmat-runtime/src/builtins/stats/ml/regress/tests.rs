@@ -8,7 +8,12 @@ mod provider_preflight;
 fn rank_one_response_is_admitted_as_a_vector() {
     let y = Value::Tensor(Tensor::new(vec![1.0, 3.0, 5.0], vec![3]).unwrap());
     let x = tensor(vec![1.0, 1.0, 1.0, 0.0, 1.0, 2.0], 3, 2);
-    let output = block_on(regress_builtin(y, x, Vec::new())).unwrap();
+    let output = block_on(regress_builtin(
+        y,
+        x,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap();
     let Value::Tensor(beta) = output else {
         panic!("expected numeric coefficient vector")
     };
@@ -24,8 +29,12 @@ fn rank_zero_design_preserves_cached_matrix_geometry_at_entry() {
     let design = Tensor::new(vec![2.0], Vec::new()).unwrap();
     assert_eq!(regress_matrix_dimensions(design.shape()), (0, 0));
     let x = Value::Tensor(design);
-    let error = block_on(regress_builtin(y, x, Vec::new()))
-        .expect_err("rank-zero design has no observation row");
+    let error = block_on(regress_builtin(
+        y,
+        x,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect_err("rank-zero design has no observation row");
     assert!(error
         .message()
         .contains("length(y) must match the number of rows in X"));
@@ -35,7 +44,12 @@ fn rank_zero_design_preserves_cached_matrix_geometry_at_entry() {
 fn empty_observations_reject_before_a_fit() {
     let y = tensor(Vec::new(), 0, 1);
     let x = tensor(Vec::new(), 0, 2);
-    let error = block_on(regress_builtin(y, x, Vec::new())).unwrap_err();
+    let error = block_on(regress_builtin(
+        y,
+        x,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap_err();
     assert!(error
         .message()
         .contains("at least one complete observation"));
@@ -48,8 +62,12 @@ fn integer_alpha_compatibility_and_exactness_precede_alpha_range() {
     let one = Value::Tensor(Tensor::new_integer(IntegerStorage::I64(vec![1]), vec![1, 1]).unwrap());
     {
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let error = block_on(regress_builtin(y.clone(), x.clone(), vec![one]))
-            .expect_err("typed alpha is a RunMat-only extension");
+        let error = block_on(regress_builtin(
+            y.clone(),
+            x.clone(),
+            crate::builtins::common::test_support::builtin_arguments(vec![one]),
+        ))
+        .expect_err("typed alpha is a RunMat-only extension");
         assert_eq!(
             error.identifier(),
             Some("RunMat:compatibility:RegressIntegerAlphaExtension")
@@ -59,8 +77,12 @@ fn integer_alpha_compatibility_and_exactness_precede_alpha_range() {
     let wide = Value::Tensor(
         Tensor::new_integer(IntegerStorage::U64(vec![(1_u64 << 54) + 1]), vec![1, 1]).unwrap(),
     );
-    let error = block_on(regress_builtin(y, x, vec![wide]))
-        .expect_err("wide integer alpha must cross an exact boundary first");
+    let error = block_on(regress_builtin(
+        y,
+        x,
+        crate::builtins::common::test_support::builtin_arguments(vec![wide]),
+    ))
+    .expect_err("wide integer alpha must cross an exact boundary first");
     assert!(error.message().contains("exactly representable"));
 }
 
@@ -107,7 +129,14 @@ fn regress_fits_coefficients_and_requested_outputs() {
     let _guard = crate::output_count::push_output_count(Some(5)).expect("output-count scope");
     let y = tensor(vec![1.0, 3.0, 5.0, 7.0], 4, 1);
     let x = tensor(vec![1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 2.0, 3.0], 4, 2);
-    let out = outputs(block_on(regress_builtin(y, x, Vec::new())).unwrap());
+    let out = outputs(
+        block_on(regress_builtin(
+            y,
+            x,
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap(),
+    );
     let b = tensor_ref(&out[0]);
     assert_eq!(b.shape(), [2, 1]);
     assert_close(b.materialize_f64()[0], 1.0);
@@ -132,7 +161,14 @@ fn regress_accepts_typed_integer_design_and_response() {
         2,
         f64::NAN,
     );
-    let out = outputs(block_on(regress_builtin(y, x, Vec::new())).unwrap());
+    let out = outputs(
+        block_on(regress_builtin(
+            y,
+            x,
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap(),
+    );
     let b = tensor_ref(&out[0]);
     assert_eq!(b.shape(), [2, 1]);
     assert_close(b.materialize_f64()[0], 1.0);
@@ -145,7 +181,12 @@ fn regress_rejects_typed_integer_alpha_boundaries() {
     let y = poisoned_int_tensor(IntegerStorage::I16(vec![1, 3, 5, 7]), 4, 1, 0.0);
     let x = poisoned_int_tensor(IntegerStorage::I16(vec![1, 1, 1, 1, 0, 1, 2, 3]), 4, 2, 0.0);
     let alpha = poisoned_int_tensor(IntegerStorage::U8(vec![1]), 1, 1, 0.5);
-    let err = block_on(regress_builtin(y, x, vec![alpha])).unwrap_err();
+    let err = block_on(regress_builtin(
+        y,
+        x,
+        crate::builtins::common::test_support::builtin_arguments(vec![alpha]),
+    ))
+    .unwrap_err();
     assert!(err.message.contains("alpha must be between 0 and 1"));
 }
 
@@ -154,7 +195,14 @@ fn regress_omits_nan_rows_and_uses_alpha() {
     let _guard = crate::output_count::push_output_count(Some(5)).expect("output-count scope");
     let y = tensor(vec![1.0, f64::NAN, 5.0, 7.0], 4, 1);
     let x = tensor(vec![1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 2.0, 3.0], 4, 2);
-    let out = outputs(block_on(regress_builtin(y, x, vec![Value::Num(0.1)])).unwrap());
+    let out = outputs(
+        block_on(regress_builtin(
+            y,
+            x,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(0.1)]),
+        ))
+        .unwrap(),
+    );
     let b = tensor_ref(&out[0]);
     assert_close(b.materialize_f64()[0], 1.0);
     assert_close(b.materialize_f64()[1], 2.0);
@@ -167,7 +215,14 @@ fn regress_supports_partial_outputs() {
     let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let y = tensor(vec![1.0, 3.0, 5.0, 7.0], 4, 1);
     let x = tensor(vec![1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 2.0, 3.0], 4, 2);
-    let out = outputs(block_on(regress_builtin(y, x, Vec::new())).unwrap());
+    let out = outputs(
+        block_on(regress_builtin(
+            y,
+            x,
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap(),
+    );
     assert_eq!(out.len(), 3);
     assert_eq!(tensor_ref(&out[0]).shape(), [2, 1]);
     assert_eq!(tensor_ref(&out[1]).shape(), [2, 2]);
@@ -186,7 +241,14 @@ fn regress_reports_nonzero_intervals_and_stats() {
         6,
         2,
     );
-    let out = outputs(block_on(regress_builtin(y, x, Vec::new())).unwrap());
+    let out = outputs(
+        block_on(regress_builtin(
+            y,
+            x,
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap(),
+    );
 
     let b = tensor_ref(&out[0]);
     assert_close_tol(b.materialize_f64()[0], 1.023809523809523, 1.0e-12);
@@ -247,7 +309,14 @@ fn regress_zeroes_dependent_columns_and_intervals() {
         4,
         3,
     );
-    let out = outputs(block_on(regress_builtin(y, x, Vec::new())).unwrap());
+    let out = outputs(
+        block_on(regress_builtin(
+            y,
+            x,
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap(),
+    );
     let b = tensor_ref(&out[0]);
     assert_close(b.materialize_f64()[0], 1.0);
     assert_close(b.materialize_f64()[1], 0.0);
@@ -292,7 +361,7 @@ fn regress_rejects_bad_dimensions_and_alpha() {
     let err = block_on(regress_builtin(
         tensor(vec![1.0, 2.0], 2, 1),
         tensor(vec![1.0, 1.0, 1.0], 3, 1),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap_err();
     assert!(err.message.contains("length(y)"));
@@ -300,7 +369,7 @@ fn regress_rejects_bad_dimensions_and_alpha() {
     let err = block_on(regress_builtin(
         tensor(vec![1.0, 2.0], 2, 1),
         tensor(vec![1.0, 1.0], 2, 1),
-        vec![Value::Num(1.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
     ))
     .unwrap_err();
     assert!(err.message.contains("alpha"));
@@ -319,12 +388,16 @@ fn discarded_calls_admit_without_fitting_but_still_validate_alpha() {
         let result = block_on(regress_builtin(
             response.clone(),
             design.clone(),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect("discarded call does not fit");
         assert!(matches!(result, Value::OutputList(values) if values.is_empty()));
-        let error = block_on(regress_builtin(response, design, vec![Value::Num(1.0)]))
-            .expect_err("discarded call still admits alpha");
+        let error = block_on(regress_builtin(
+            response,
+            design,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
+        ))
+        .expect_err("discarded call still admits alpha");
         assert!(error.message().contains("alpha"));
     }
 }

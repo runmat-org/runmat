@@ -77,10 +77,12 @@ fn action_to_object(
 ) -> BuiltinResult<Value> {
     let revision = value.geometry_revision;
     let mut object = serializable_to_object_value(builtin, &ERROR_INTERNAL, class_name, &value)?;
-    object.properties.insert(
-        "geometry_revision".into(),
+    crate::builtins::fea::object_api::replace(
+        builtin,
+        &mut object,
+        "geometry_revision",
         Value::Int(IntValue::U32(revision)),
-    );
+    )?;
     Ok(Value::Object(object))
 }
 
@@ -159,10 +161,10 @@ macro_rules! action_builtin {
         $quantity:path, $region:expr, $distribution:path, $preserve_moment:expr, $variant:path
     ) => {
         #[runtime_builtin(
-                    name = $builtin,
-                    binding_variant = "default",
-                    builtin_path = "crate::builtins::fea::excitations"
-                )]
+                                    name = $builtin,
+                                    binding_variant = "default",
+                                    builtin_path = "crate::builtins::fea::excitations"
+                                )]
         pub async fn $function(id: String, region: Value, signal: Value) -> BuiltinResult<Value> {
             crate::builtins::fea::constraints::fixed_outputs(
                 &runmat_builtins::$descriptor,
@@ -519,7 +521,7 @@ pub(super) fn bound_excitation_vec_from_value(
     value: &Value,
 ) -> BuiltinResult<Vec<GeometryBoundExcitation>> {
     let values = match value {
-        Value::Cell(cell) => cell.data.iter().collect::<Vec<_>>(),
+        Value::Cell(cell) => cell.data().iter().collect::<Vec<_>>(),
         Value::Object(_) => vec![value],
         other => {
             return Err(builtin_error(
@@ -541,11 +543,11 @@ pub(super) fn bound_excitation_vec_from_value(
                     ),
                 ));
             };
-            let class_name = excitation_class_name(object.class_name.display_name()).ok_or_else(|| {
+            let class_name = excitation_class_name(object.class_name().display_name()).ok_or_else(|| {
                 builtin_error(
                     builtin,
                     &ERROR_INPUT,
-                    format!("unsupported FEA excitation class `{}`", object.class_name),
+                    format!("unsupported FEA excitation class `{}`", object.class_name()),
                 )
             })?;
             let payload: GeometryBoundExcitation = object_payload(builtin, value, class_name)?;
@@ -719,39 +721,39 @@ fn excitation_methods(class_name: &str) -> HashMap<MethodName, RuntimeMethod> {
 }
 
 fn validate_excitation_object(object: &ObjectInstance) -> Result<(), String> {
-    if !matches!(object.properties.get("geometry_id"), Some(Value::String(value)) if !value.is_empty())
+    if !matches!(object.properties().get("geometry_id"), Some(Value::String(value)) if !value.is_empty())
     {
         return Err(format!(
             "{}.geometry_id must be a non-empty string",
-            object.class_name
+            object.class_name()
         ));
     }
     if !matches!(
-        object.properties.get("geometry_revision"),
+        object.properties().get("geometry_revision"),
         Some(Value::Int(IntValue::U32(_)))
     ) {
         return Err(format!(
             "{}.geometry_revision must be uint32",
-            object.class_name
+            object.class_name()
         ));
     }
-    if !matches!(object.properties.get("action"), Some(Value::Struct(_))) {
+    if !matches!(object.properties().get("action"), Some(Value::Struct(_))) {
         return Err(format!(
             "{}.action must be a typed structure",
-            object.class_name
+            object.class_name()
         ));
     }
     Ok(())
 }
 
 fn validate_case_object(object: &ObjectInstance) -> Result<(), String> {
-    if !matches!(object.properties.get("case_id"), Some(Value::String(value)) if !value.is_empty())
+    if !matches!(object.properties().get("case_id"), Some(Value::String(value)) if !value.is_empty())
         || !matches!(
-            object.properties.get("action_ids"),
+            object.properties().get("action_ids"),
             Some(Value::StringArray(_))
         )
         || !matches!(
-            object.properties.get("activation"),
+            object.properties().get("activation"),
             Some(Value::String(_) | Value::Struct(_))
         )
     {
@@ -773,18 +775,34 @@ mod tests {
     fn region() -> Value {
         ensure_region_class_registered();
         let mut object = ObjectInstance::new(GEOMETRY_REGION_CLASS);
-        object
-            .properties
-            .insert("geometry_id".into(), Value::String("geom".into()));
-        object
-            .properties
-            .insert("geometry_revision".into(), Value::Int(IntValue::U32(2)));
-        object
-            .properties
-            .insert("region_id".into(), Value::String("load_face".into()));
-        object
-            .properties
-            .insert("name".into(), Value::String("Load Face".into()));
+        crate::builtins::fea::object_api::replace(
+            "fea.fixture",
+            &mut object,
+            "geometry_id",
+            Value::String("geom".into()),
+        )
+        .expect("ordinary fixture property edit");
+        crate::builtins::fea::object_api::replace(
+            "fea.fixture",
+            &mut object,
+            "geometry_revision",
+            Value::Int(IntValue::U32(2)),
+        )
+        .expect("ordinary fixture property edit");
+        crate::builtins::fea::object_api::replace(
+            "fea.fixture",
+            &mut object,
+            "region_id",
+            Value::String("load_face".into()),
+        )
+        .expect("ordinary fixture property edit");
+        crate::builtins::fea::object_api::replace(
+            "fea.fixture",
+            &mut object,
+            "name",
+            Value::String("Load Face".into()),
+        )
+        .expect("ordinary fixture property edit");
         Value::Object(object)
     }
 
@@ -888,18 +906,20 @@ mod tests {
         .unwrap();
         let action = block_on(structural_force("tip".into(), region, signal.clone())).unwrap();
         let case = block_on(excitation_case_always("service".into(), action.clone())).unwrap();
-        let model = super::super::modeling::create_model_object_from_args(vec![
-            Value::String("bracket".into()),
-            geometry,
-            Value::String("Steps".into()),
-            super::super::modeling::static_test_steps_value(),
-            Value::String("Signals".into()),
-            signal,
-            Value::String("Excitations".into()),
-            action,
-            Value::String("ExcitationCases".into()),
-            case,
-        ])
+        let model = super::super::modeling::create_model_object_from_args(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("bracket".into()),
+                geometry,
+                Value::String("Steps".into()),
+                super::super::modeling::static_test_steps_value(),
+                Value::String("Signals".into()),
+                signal,
+                Value::String("Excitations".into()),
+                action,
+                Value::String("ExcitationCases".into()),
+                case,
+            ]),
+        )
         .unwrap();
         let model: AnalysisModel = object_payload("test", &model, FEA_MODEL_CLASS).unwrap();
         assert_eq!(model.signals.len(), 1);

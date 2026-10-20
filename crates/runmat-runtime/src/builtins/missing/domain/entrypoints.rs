@@ -15,7 +15,7 @@ use crate::execution::RootedValue;
     binding_variant = "default",
     builtin_path = "crate::builtins::missing"
 )]
-pub(super) async fn missing_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn missing_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     if !args.is_empty() {
         crate::compatibility::ensure_builtin_extension_enabled(
             &MISSING_SHAPED_ARRAY_EXTENSION,
@@ -93,11 +93,13 @@ pub(super) async fn anymissing_builtin(value: Value) -> BuiltinResult<Value> {
 #[runtime_builtin(
     name = "standardizeMissing",
     binding_variant = "default",
-    builtin_path = "crate::builtins::missing"
+    builtin_path = "crate::builtins::missing",
+    context = true
 )]
 pub(super) async fn standardize_missing_builtin(
+    runtime: Option<RuntimeContext>,
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     if crate::builtins::common::validation::value_has_native_integer_class(&value) {
         crate::compatibility::ensure_builtin_extension_enabled(
@@ -121,15 +123,20 @@ pub(super) async fn standardize_missing_builtin(
     let value = gather_if_needed_async(&value)
         .await
         .map_err(|err| gather_error("standardizeMissing", "input", err))?;
-    standardize_missing_value(value, &indicators)
+    standardize_missing_value(runtime.as_ref(), value, &indicators)
 }
 
 #[runtime_builtin(
     name = "rmmissing",
     binding_variant = "default",
-    builtin_path = "crate::builtins::missing"
+    builtin_path = "crate::builtins::missing",
+    context = true
 )]
-pub(super) async fn rmmissing_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn rmmissing_builtin(
+    runtime: Option<RuntimeContext>,
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     ensure_output_arity("rmmissing", 2)?;
     if rest.iter().any(is_real_typed_integer_value) {
         crate::compatibility::ensure_builtin_extension_enabled(
@@ -137,7 +144,7 @@ pub(super) async fn rmmissing_builtin(value: Value, rest: Vec<Value>) -> Builtin
             "rmmissing",
         )?;
     }
-    let options = RemoveOptions::parse(&rest)?;
+    let options = RemoveOptions::parse(rest.view())?;
     let source = match &value {
         Value::GpuTensor(handle) => Some(handle.clone()),
         _ => None,
@@ -151,7 +158,7 @@ pub(super) async fn rmmissing_builtin(value: Value, rest: Vec<Value>) -> Builtin
     } else {
         value
     };
-    let (result, removed) = remove_missing_value(value, options)?;
+    let (result, removed) = remove_missing_value(runtime.as_ref(), value, options)?;
     let (result, removed) = if let Some(source) = source.as_ref() {
         (
             gpu_helpers::restore_class_preserving_value(source, result, "rmmissing")?,
@@ -178,9 +185,14 @@ pub(super) async fn rmmissing_builtin(value: Value, rest: Vec<Value>) -> Builtin
 #[runtime_builtin(
     name = "fillmissing",
     binding_variant = "default",
-    builtin_path = "crate::builtins::missing"
+    builtin_path = "crate::builtins::missing",
+    context = true
 )]
-pub(super) async fn fillmissing_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn fillmissing_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     ensure_output_arity("fillmissing", 2)?;
     if is_real_typed_integer_value(&value) {
         crate::compatibility::ensure_builtin_extension_enabled(
@@ -193,12 +205,15 @@ pub(super) async fn fillmissing_builtin(value: Value, rest: Vec<Value>) -> Built
             "fillmissing",
         )?;
     }
-    let options = FillOptions::parse(&rest)?;
+    let options = FillOptions::parse(rest.view())?;
     options.preflight(&value)?;
     let value = gather_if_needed_async(&value)
         .await
         .map_err(|err| gather_error("fillmissing", "input", err))?;
-    let (result, mask) = fill_missing_value(value, &options)?;
+    let (result, mask) = fill_missing_value(runtime.as_ref(), value, &options)?;
+    if matches!(result, Value::StringArray(_)) {
+        return super::text_output::fill_outputs(runtime.as_ref(), result, mask);
+    }
     match crate::output_count::current_output_count() {
         Some(0) => Ok(Value::output_list(Vec::new())),
         Some(1) => Ok(Value::output_list(vec![result])),
@@ -213,7 +228,7 @@ pub(super) async fn fillmissing_builtin(value: Value, rest: Vec<Value>) -> Built
 pub(super) fn fillmissing_aggregate_contains_integer(value: &Value) -> BuiltinResult<bool> {
     match value {
         Value::Cell(cell) => {
-            for child in &cell.data {
+            for child in cell.data() {
                 if is_real_typed_integer_value(child)
                     || fillmissing_aggregate_contains_integer(child)?
                 {
@@ -242,9 +257,12 @@ pub(super) fn fillmissing_aggregate_contains_integer(value: &Value) -> BuiltinRe
     binding_variant = "default",
     builtin_path = "crate::builtins::missing"
 )]
-pub(super) async fn nanmean_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn nanmean_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     ensure_output_arity("nanmean", 1)?;
-    ensure_nan_integer_extension(&NANMEAN_INTEGER_EXTENSION, "nanmean", &value, &rest)?;
+    ensure_nan_integer_extension(&NANMEAN_INTEGER_EXTENSION, "nanmean", &value, rest.view())?;
     mean::mean_with_nan_policy(value, rest, Some(runmat_builtins::ReductionNaN::Omit)).await
 }
 
@@ -259,10 +277,10 @@ pub(super) async fn nansum_builtin(
     runtime: Option<RuntimeContext>,
     observation: Option<crate::dispatcher::direct_call_observation::CallAdmissionSink>,
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<RootedValue> {
     ensure_output_arity("nansum", 1)?;
-    ensure_nan_integer_extension(&NANSUM_INTEGER_EXTENSION, "nansum", &value, &rest)?;
+    ensure_nan_integer_extension(&NANSUM_INTEGER_EXTENSION, "nansum", &value, rest.view())?;
     sum::sum_for_invocation_observed(
         runtime.as_ref(),
         value,
@@ -279,9 +297,12 @@ pub(super) async fn nansum_builtin(
     binding_variant = "default",
     builtin_path = "crate::builtins::missing"
 )]
-pub(super) async fn nanmin_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn nanmin_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     ensure_output_arity("nanmin", 2)?;
-    ensure_nan_integer_extension(&NANMIN_INTEGER_EXTENSION, "nanmin", &value, &rest)?;
+    ensure_nan_integer_extension(&NANMIN_INTEGER_EXTENSION, "nanmin", &value, rest.view())?;
     if let Some(first) = rest.first() {
         if is_numeric_data_like(first) && !is_empty_numeric_placeholder(first) {
             ensure_output_arity("nanmin pairwise", 1)?;
@@ -301,9 +322,17 @@ pub(super) async fn nanmin_builtin(value: Value, rest: Vec<Value>) -> BuiltinRes
     binding_variant = "default",
     builtin_path = "crate::builtins::missing"
 )]
-pub(super) async fn nanmedian_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn nanmedian_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     ensure_output_arity("nanmedian", 1)?;
-    ensure_nan_integer_extension(&NANMEDIAN_INTEGER_EXTENSION, "nanmedian", &value, &rest)?;
+    ensure_nan_integer_extension(
+        &NANMEDIAN_INTEGER_EXTENSION,
+        "nanmedian",
+        &value,
+        rest.view(),
+    )?;
     median::median_with_nan_policy(value, rest, Some(runmat_builtins::ReductionNaN::Omit)).await
 }
 
@@ -312,9 +341,12 @@ pub(super) async fn nanmedian_builtin(value: Value, rest: Vec<Value>) -> Builtin
     binding_variant = "default",
     builtin_path = "crate::builtins::missing"
 )]
-pub(super) async fn nanstd_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn nanstd_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     ensure_output_arity("nanstd", 1)?;
-    ensure_nan_integer_control_extension(&NANSTD_INTEGER_EXTENSION, "nanstd", &value, &rest)?;
+    ensure_nan_integer_control_extension(&NANSTD_INTEGER_EXTENSION, "nanstd", &value, rest.view())?;
     std_reduction::std_with_nan_policy(value, rest, Some(runmat_builtins::ReductionNaN::Omit)).await
 }
 
@@ -323,9 +355,12 @@ pub(super) async fn nanstd_builtin(value: Value, rest: Vec<Value>) -> BuiltinRes
     binding_variant = "default",
     builtin_path = "crate::builtins::missing"
 )]
-pub(super) async fn nanvar_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn nanvar_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     ensure_output_arity("nanvar", 1)?;
-    ensure_nan_integer_control_extension(&NANVAR_INTEGER_EXTENSION, "nanvar", &value, &rest)?;
+    ensure_nan_integer_control_extension(&NANVAR_INTEGER_EXTENSION, "nanvar", &value, rest.view())?;
     var::var_with_nan_policy(value, rest, Some(runmat_builtins::ReductionNaN::Omit)).await
 }
 
@@ -337,14 +372,14 @@ pub(super) async fn nanvar_builtin(value: Value, rest: Vec<Value>) -> BuiltinRes
 pub(super) async fn movmad_builtin(
     value: Value,
     window: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     ensure_output_arity("movmad", 1)?;
     let window = scalar_usize(&window, "movmad window")?;
     if window == 0 {
         return Err(invalid_argument("movmad: window length must be positive"));
     }
-    let options = MovingOptions::parse(&rest)?;
+    let options = MovingOptions::parse(rest.view())?;
     let source = match &value {
         Value::GpuTensor(handle) => Some(handle.clone()),
         _ => None,
@@ -394,7 +429,7 @@ pub(super) fn ensure_nan_integer_extension(
     extension: &BuiltinExtensionDescriptor,
     builtin: &str,
     value: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<()> {
     if is_real_typed_integer_value(value) || rest.iter().any(is_real_typed_integer_value) {
         crate::compatibility::ensure_builtin_extension_enabled(extension, builtin)?;
@@ -406,7 +441,7 @@ pub(super) fn ensure_nan_integer_control_extension(
     extension: &BuiltinExtensionDescriptor,
     builtin: &str,
     value: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<()> {
     if !is_real_typed_integer_value(value) && rest.iter().any(is_real_typed_integer_value) {
         crate::compatibility::ensure_builtin_extension_enabled(extension, builtin)?;

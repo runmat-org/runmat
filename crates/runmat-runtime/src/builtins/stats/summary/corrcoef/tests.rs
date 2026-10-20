@@ -19,7 +19,10 @@ fn single_observations_keep_all_four_output_classes() {
     let _outputs = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
     let Value::OutputList(outputs) = block_on(corrcoef_builtin(
         Value::Tensor(observations),
-        vec![Value::from("Alpha"), Value::Num(0.1)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("Alpha"),
+            Value::Num(0.1),
+        ]),
     ))
     .unwrap() else {
         panic!("expected output list");
@@ -45,7 +48,7 @@ fn mixed_observation_precision_promotes_corrcoef_result() {
     let double = Tensor::new(vec![3.0, 1.0, 2.0], vec![3, 1]).unwrap();
     let Value::Tensor(result) = block_on(corrcoef_builtin(
         Value::Tensor(single),
-        vec![Value::Tensor(double)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(double)]),
     ))
     .unwrap() else {
         panic!("expected tensor");
@@ -110,7 +113,11 @@ fn corrcoef_matrix_basic() {
         vec![4, 3],
     )
     .unwrap();
-    let result = block_on(corrcoef_builtin(Value::Tensor(tensor), Vec::new())).expect("corrcoef");
+    let result = block_on(corrcoef_builtin(
+        Value::Tensor(tensor),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect("corrcoef");
     match result {
         Value::Tensor(out) => {
             let expected = [
@@ -134,7 +141,11 @@ fn corrcoef_matrix_basic() {
 fn corrcoef_accepts_typed_integer_matrix_inputs() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let tensor = poisoned_int_tensor(IntegerStorage::I16(vec![1, 2, 1, 4]), vec![2, 2], 0.0);
-    let result = block_on(corrcoef_builtin(Value::Tensor(tensor), Vec::new())).expect("corrcoef");
+    let result = block_on(corrcoef_builtin(
+        Value::Tensor(tensor),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect("corrcoef");
     match result {
         Value::Tensor(out) => {
             assert_eq!(out.shape(), [2, 2]);
@@ -161,11 +172,11 @@ fn corrcoef_complete_rows_reads_typed_integer_storage() {
 
     let result = block_on(corrcoef_builtin(
         Value::Tensor(x),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::Tensor(y),
             Value::from("Rows"),
             Value::from("complete"),
-        ],
+        ]),
     ))
     .expect("corrcoef complete rows");
 
@@ -212,11 +223,16 @@ fn corrcoef_two_inputs_vectorize_equal_size_matrices() {
 
     let via_two = block_on(corrcoef_builtin(
         Value::Tensor(left.clone()),
-        vec![Value::Tensor(right.clone())],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(
+            right.clone(),
+        )]),
     ))
     .expect("corrcoef");
-    let via_combined =
-        block_on(corrcoef_builtin(Value::Tensor(combined), Vec::new())).expect("corrcoef combined");
+    let via_combined = block_on(corrcoef_builtin(
+        Value::Tensor(combined),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect("corrcoef combined");
 
     let expected_tensor = match via_combined {
         Value::Tensor(t) => t,
@@ -248,7 +264,10 @@ fn corrcoef_rows_complete_ignores_missing() {
     .unwrap();
     let result = block_on(corrcoef_builtin(
         Value::Tensor(tensor),
-        vec![Value::from("rows"), Value::from("complete")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("rows"),
+            Value::from("complete"),
+        ]),
     ))
     .expect("corrcoef");
     match result {
@@ -270,7 +289,10 @@ fn corrcoef_rows_options_do_not_treat_infinity_as_missing() {
         let tensor = Tensor::new(vec![1.0, f64::INFINITY, 3.0, 1.0, 2.0, 3.0], vec![3, 2]).unwrap();
         let result = block_on(corrcoef_builtin(
             Value::Tensor(tensor),
-            vec![Value::from("rows"), Value::from(rows)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("rows"),
+                Value::from(rows),
+            ]),
         ))
         .expect("corrcoef");
         let Value::Tensor(out) = result else {
@@ -307,7 +329,10 @@ fn corrcoef_rows_pairwise_staggered_missing() {
     .unwrap();
     let result = block_on(corrcoef_builtin(
         Value::Tensor(tensor),
-        vec![Value::from("rows"), Value::from("pairwise")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("rows"),
+            Value::from("pairwise"),
+        ]),
     ))
     .expect("corrcoef");
     match result {
@@ -326,15 +351,21 @@ fn corrcoef_rows_pairwise_staggered_missing() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn corrcoef_numeric_scalar_second_argument_is_data() {
-    let result =
-        block_on(corrcoef_builtin(Value::Num(1.0), vec![Value::Num(2.0)])).expect("scalar pair");
+    let result = block_on(corrcoef_builtin(
+        Value::Num(1.0),
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(2.0)]),
+    ))
+    .expect("scalar pair");
     let Value::Tensor(result) = result else {
         panic!("expected tensor")
     };
     assert_tensor_close(&result, &[1.0], 0.0);
 
-    let equal = block_on(corrcoef_builtin(Value::Num(2.0), vec![Value::Num(2.0)]))
-        .expect("equal scalar pair");
+    let equal = block_on(corrcoef_builtin(
+        Value::Num(2.0),
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(2.0)]),
+    ))
+    .expect("equal scalar pair");
     let Value::Tensor(equal) = equal else {
         panic!("expected tensor")
     };
@@ -346,9 +377,11 @@ fn corrcoef_numeric_scalar_second_argument_is_data() {
 fn corrcoef_public_scalar_vector_and_paired_empty_geometry() {
     for shape in [vec![], vec![1, 1]] {
         let scalar = Tensor::new(vec![7.0], shape).unwrap();
-        let Value::Tensor(scalar_result) =
-            block_on(corrcoef_builtin(Value::Tensor(scalar), Vec::new())).expect("scalar")
-        else {
+        let Value::Tensor(scalar_result) = block_on(corrcoef_builtin(
+            Value::Tensor(scalar),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect("scalar") else {
             panic!("expected tensor")
         };
         assert_tensor_close(&scalar_result, &[f64::NAN], 0.0);
@@ -356,9 +389,11 @@ fn corrcoef_public_scalar_vector_and_paired_empty_geometry() {
 
     for shape in [vec![4], vec![1, 4], vec![4, 1]] {
         let vector = Tensor::new(vec![1.0, 2.0, 4.0, 8.0], shape).unwrap();
-        let Value::Tensor(vector_result) =
-            block_on(corrcoef_builtin(Value::Tensor(vector), Vec::new())).expect("vector")
-        else {
+        let Value::Tensor(vector_result) = block_on(corrcoef_builtin(
+            Value::Tensor(vector),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect("vector") else {
             panic!("expected tensor")
         };
         assert_tensor_close(&vector_result, &[1.0], 0.0);
@@ -368,7 +403,7 @@ fn corrcoef_public_scalar_vector_and_paired_empty_geometry() {
     let right = Tensor::new(Vec::new(), vec![0, 0]).unwrap();
     let Value::Tensor(empty) = block_on(corrcoef_builtin(
         Value::Tensor(left),
-        vec![Value::Tensor(right)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(right)]),
     ))
     .expect("paired empty") else {
         panic!("expected tensor")
@@ -378,7 +413,7 @@ fn corrcoef_public_scalar_vector_and_paired_empty_geometry() {
     let trailing_singleton = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1, 1]).unwrap();
     let error = block_on(corrcoef_builtin(
         Value::Tensor(trailing_singleton),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect_err("corrcoef admits only rank-zero, vector, and matrix inputs");
     assert_eq!(
@@ -394,7 +429,7 @@ fn corrcoef_low_rank_inputs_keep_statistics_outputs_canonical() {
         let _outputs = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
         let Value::OutputList(outputs) = block_on(corrcoef_builtin(
             Value::Tensor(Tensor::new(values, shape).unwrap()),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect("low-rank four-output corrcoef") else {
             panic!("expected output list")
@@ -425,9 +460,11 @@ fn corrcoef_supports_all_integer_classes_and_exact_wide_centering() {
     for storage in storages {
         let class = storage.class_name();
         let tensor = Tensor::new_integer(storage, vec![3, 2]).unwrap();
-        let Value::Tensor(result) = block_on(corrcoef_builtin(Value::Tensor(tensor), Vec::new()))
-            .unwrap_or_else(|error| panic!("{class}: {error}"))
-        else {
+        let Value::Tensor(result) = block_on(corrcoef_builtin(
+            Value::Tensor(tensor),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap_or_else(|error| panic!("{class}: {error}")) else {
             panic!("{class}: expected tensor")
         };
         assert_tensor_close(&result, &[1.0, -1.0, -1.0, 1.0], 1.0e-12);
@@ -439,9 +476,11 @@ fn corrcoef_supports_all_integer_classes_and_exact_wide_centering() {
         vec![3, 2],
     )
     .unwrap();
-    let Value::Tensor(result) =
-        block_on(corrcoef_builtin(Value::Tensor(wide), Vec::new())).expect("wide corrcoef")
-    else {
+    let Value::Tensor(result) = block_on(corrcoef_builtin(
+        Value::Tensor(wide),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect("wide corrcoef") else {
         panic!("expected tensor")
     };
     assert_tensor_close(&result, &[1.0, -1.0, -1.0, 1.0], 1.0e-12);
@@ -451,15 +490,22 @@ fn corrcoef_supports_all_integer_classes_and_exact_wide_centering() {
 fn corrcoef_integer_and_logical_extensions_gate_before_dispatch() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
     let integer = Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3]), vec![3, 1]).unwrap();
-    let integer_error = block_on(corrcoef_builtin(Value::Tensor(integer), Vec::new())).unwrap_err();
+    let integer_error = block_on(corrcoef_builtin(
+        Value::Tensor(integer),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap_err();
     assert_eq!(
         integer_error.identifier(),
         Some("RunMat:compatibility:CorrcoefIntegerDataExtension")
     );
 
     let logical = LogicalArray::new(vec![0, 1, 1], vec![3, 1]).unwrap();
-    let logical_error =
-        block_on(corrcoef_builtin(Value::LogicalArray(logical), Vec::new())).unwrap_err();
+    let logical_error = block_on(corrcoef_builtin(
+        Value::LogicalArray(logical),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap_err();
     assert_eq!(
         logical_error.identifier(),
         Some("RunMat:compatibility:CorrcoefLogicalDataExtension")
@@ -474,7 +520,7 @@ fn corrcoef_resident_integer_gate_precedes_provider_dispatch() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = block_on(corrcoef_builtin(
             Value::GpuTensor(handle.clone()),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .unwrap_err();
         assert_eq!(
@@ -503,7 +549,7 @@ fn resident_complex_observations_preserve_host_complex_correlation() {
         let handle = gpu_helpers::upload_complex_tensor(provider, &input).unwrap();
         let Value::ComplexTensor(result) = block_on(corrcoef_builtin(
             Value::GpuTensor(handle.clone()),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect("admitted complex materialization") else {
             panic!("complex correlation must retain its output class");
@@ -532,10 +578,11 @@ fn corrcoef_complex_coefficients_are_hermitian() {
         vec![3, 2],
     )
     .unwrap();
-    let Value::ComplexTensor(result) =
-        block_on(corrcoef_builtin(Value::ComplexTensor(tensor), Vec::new()))
-            .expect("complex corrcoef")
-    else {
+    let Value::ComplexTensor(result) = block_on(corrcoef_builtin(
+        Value::ComplexTensor(tensor),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect("complex corrcoef") else {
         panic!("expected complex tensor")
     };
     assert_eq!(result.shape(), [2, 2]);
@@ -558,10 +605,11 @@ fn corrcoef_complex_integer_components_center_exactly() {
     )
     .unwrap();
     let tensor = ComplexTensor::new_integer(storage, vec![3, 1]).unwrap();
-    let Value::ComplexTensor(result) =
-        block_on(corrcoef_builtin(Value::ComplexTensor(tensor), Vec::new()))
-            .expect("complex integer corrcoef")
-    else {
+    let Value::ComplexTensor(result) = block_on(corrcoef_builtin(
+        Value::ComplexTensor(tensor),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect("complex integer corrcoef") else {
         panic!("expected complex tensor")
     };
     let values = result.materialize_f64();
@@ -583,7 +631,10 @@ fn corrcoef_requested_outputs_include_p_values_and_alpha_bounds() {
     let _outputs = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
     let Value::OutputList(outputs) = block_on(corrcoef_builtin(
         Value::Tensor(tensor),
-        vec![Value::from("Alpha"), Value::Num(0.1)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("Alpha"),
+            Value::Num(0.1),
+        ]),
     ))
     .expect("four outputs") else {
         panic!("expected output list")
@@ -613,7 +664,11 @@ fn corrcoef_requested_outputs_include_p_values_and_alpha_bounds() {
 fn corrcoef_complex_multi_output_is_rejected() {
     let tensor = ComplexTensor::new(vec![(1.0, 1.0), (2.0, 0.0), (3.0, -1.0)], vec![3, 1]).unwrap();
     let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
-    let error = block_on(corrcoef_builtin(Value::ComplexTensor(tensor), Vec::new())).unwrap_err();
+    let error = block_on(corrcoef_builtin(
+        Value::ComplexTensor(tensor),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap_err();
     assert_eq!(
         error.identifier(),
         CORRCOEF_ERROR_COMPLEX_OUTPUTS.identifier
@@ -638,8 +693,11 @@ fn corrcoef_gpu_roundtrip() {
             shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
-        let result =
-            block_on(corrcoef_builtin(Value::GpuTensor(handle), Vec::new())).expect("corrcoef");
+        let result = block_on(corrcoef_builtin(
+            Value::GpuTensor(handle),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect("corrcoef");
         let gathered = test_support::gather(result).expect("gather");
         let expected = [
             1.0,
@@ -663,7 +721,7 @@ fn corrcoef_mismatched_sizes_error() {
     let right = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
     let err = block_on(corrcoef_builtin(
         Value::Tensor(left),
-        vec![Value::Tensor(right)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(right)]),
     ))
     .expect_err("expected mismatch error");
     assert_eq!(err.identifier(), CORRCOEF_ERROR_SIZE_MISMATCH.identifier);
@@ -675,7 +733,10 @@ fn corrcoef_invalid_alpha_errors() {
     let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
     let err = block_on(corrcoef_builtin(
         Value::Tensor(tensor),
-        vec![Value::from("Alpha"), Value::Num(1.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("Alpha"),
+            Value::Num(1.0),
+        ]),
     ))
     .expect_err("expected invalid Alpha error");
     assert_eq!(err.identifier(), CORRCOEF_ERROR_ALPHA_INVALID.identifier);
@@ -687,7 +748,10 @@ fn corrcoef_unknown_rows_option_errors() {
     let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
     let err = block_on(corrcoef_builtin(
         Value::Tensor(tensor),
-        vec![Value::from("rows"), Value::from("bogus")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("rows"),
+            Value::from("bogus"),
+        ]),
     ))
     .expect_err("expected unknown rows option error");
     assert_eq!(
@@ -702,12 +766,12 @@ fn corrcoef_duplicate_alpha_errors() {
     let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
     let err = block_on(corrcoef_builtin(
         Value::Tensor(tensor),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("Alpha"),
             Value::Num(0.05),
             Value::from("Alpha"),
             Value::Num(0.1),
-        ],
+        ]),
     ))
     .expect_err("expected duplicate Alpha error");
     assert_eq!(err.identifier(), CORRCOEF_ERROR_OPTION_DUPLICATE.identifier);
@@ -719,7 +783,10 @@ fn corrcoef_unknown_option_errors() {
     let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
     let err = block_on(corrcoef_builtin(
         Value::Tensor(tensor),
-        vec![Value::from("bogus"), Value::from("value")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("bogus"),
+            Value::from("value"),
+        ]),
     ))
     .expect_err("expected unknown option error");
     assert_eq!(err.identifier(), CORRCOEF_ERROR_OPTION_UNKNOWN.identifier);
@@ -732,7 +799,10 @@ fn corrcoef_rows_option_malformed_errors() {
     let non_string_option = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
     let err = block_on(corrcoef_builtin(
         Value::Tensor(tensor),
-        vec![Value::from("rows"), Value::Tensor(non_string_option)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("rows"),
+            Value::Tensor(non_string_option),
+        ]),
     ))
     .expect_err("expected malformed rows option error");
     assert_eq!(
@@ -749,7 +819,10 @@ fn corrcoef_too_many_input_arrays_errors() {
     let c = Tensor::new(vec![7.0, 8.0, 9.0], vec![3, 1]).unwrap();
     let err = block_on(corrcoef_builtin(
         Value::Tensor(a),
-        vec![Value::Tensor(b), Value::Tensor(c)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Tensor(b),
+            Value::Tensor(c),
+        ]),
     ))
     .expect_err("expected too many input arrays error");
     assert_eq!(
@@ -819,7 +892,7 @@ fn corrcoef_wgpu_public_vector_and_paired_geometry() {
         .expect("row upload");
     let row_result = block_on(corrcoef_builtin(
         Value::GpuTensor(row_handle.clone()),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("row corrcoef");
     let row_gathered = test_support::gather(row_result).expect("row gather");
@@ -849,7 +922,9 @@ fn corrcoef_wgpu_public_vector_and_paired_geometry() {
         .expect("right upload");
     let paired = block_on(corrcoef_builtin(
         Value::GpuTensor(left_handle.clone()),
-        vec![Value::GpuTensor(right_handle.clone())],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(
+            right_handle.clone(),
+        )]),
     ))
     .expect("paired corrcoef");
     let paired_gathered = test_support::gather(paired).expect("paired gather");

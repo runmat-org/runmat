@@ -19,13 +19,9 @@ impl ExecutableUnit {
         let unit = Self::decode_local_product(envelope)?;
         let unit = dependencies::restore(unit, &envelope.dependency_products)?;
         let restored = match envelope.manifest.identity.entrypoint_kind {
-            ExecutableEntrypointKind::Function => unit.portable_envelope_for_function(
-                envelope
-                    .manifest
-                    .identity
-                    .entrypoint_function
-                    .ok_or("portable function product has no entrypoint function")?,
-            )?,
+            ExecutableEntrypointKind::Function => {
+                unit.portable_envelope_for_selection(Some(imported_function(&unit, envelope)?))?
+            }
             ExecutableEntrypointKind::Script => unit.portable_envelope_for_selection(None)?,
             ExecutableEntrypointKind::DeclarationOnly => {
                 return Err("declaration-only products are not imported for invocation".into())
@@ -76,23 +72,14 @@ impl ExecutableUnit {
         bytecode.function_registry = registry;
         bytecode.layout = Some(layout);
         let mut unit = Self::new(source, revision, source_map, mir, analysis, bytecode)?;
+        unit.reset_direct_code_cache();
         unit.imported_contract = Some(std::rc::Rc::new(super::unit::ImportedPortableContract {
             interop: envelope.manifest.interop.clone(),
             parallel: envelope.manifest.parallel.clone(),
             optional_sections: envelope.manifest.optional_sections.clone(),
         }));
         let selected = match envelope.manifest.identity.entrypoint_kind {
-            ExecutableEntrypointKind::Function => Some((
-                envelope.manifest.identity.entrypoint.clone(),
-                runmat_hir::FunctionId(
-                    envelope
-                        .manifest
-                        .identity
-                        .entrypoint_function
-                        .ok_or("portable function product has no entrypoint function")?
-                        .0 as usize,
-                ),
-            )),
+            ExecutableEntrypointKind::Function => Some(imported_function(&unit, envelope)?),
             ExecutableEntrypointKind::Script => None,
             ExecutableEntrypointKind::DeclarationOnly => {
                 return Err("declaration-only products are not imported for invocation".into())
@@ -105,6 +92,41 @@ impl ExecutableUnit {
             return Err("portable product differs from canonical source, coverage, region or component inventory".into());
         }
         Ok(unit)
+    }
+}
+
+/// The manifest carries an original portable ordinal, not a compiler/session
+/// function coordinate. Resolve it through the immutable binding origin;
+/// entrypoint text is descriptive and cannot make a nested body name-callable.
+fn imported_function(
+    unit: &ExecutableUnit,
+    envelope: &ExecutableUnitEnvelope,
+) -> Result<(String, runmat_hir::FunctionId), String> {
+    let identity = &envelope.manifest.identity;
+    let expected = identity
+        .entrypoint_function
+        .ok_or("portable function product has no entrypoint function")?;
+    let origin = runmat_execution::FunctionBindingOrigin::from_revision(
+        &unit.revision().program_revision,
+        expected,
+    )
+    .map_err(|error| error.to_string())?;
+    let compiled = unit
+        .local_function_for_origin(origin)?
+        .ok_or("portable function product has no exact original body")?;
+    let selected = super::portable_entrypoint::resolve_compiled_function_with_label(
+        unit,
+        compiled,
+        &identity.entrypoint,
+    )?;
+    match selected {
+        super::portable_entrypoint::PortableEntrypoint::Callable {
+            name,
+            compiled_function,
+            function,
+            kind: ExecutableEntrypointKind::Function,
+        } if function == expected && name == identity.entrypoint => Ok((name, compiled_function)),
+        _ => Err("portable entrypoint differs from its original function binding".into()),
     }
 }
 

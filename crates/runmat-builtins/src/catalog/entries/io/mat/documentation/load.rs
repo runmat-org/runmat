@@ -14,7 +14,7 @@ pub(in super::super) const LOAD: BuiltinDocumentation = BuiltinDocumentation {
             "A filename without an extension gains `.mat`. The default path is read from `RUNMAT_LOAD_DEFAULT_PATH` only for the bare/default form. Relative paths use the provider and working folder captured for this invocation.",
         ] },
         BuiltinDocumentationSection { heading: "Values and layout", paragraphs: &[
-            "The Level-5 reader restores real and complex single/double values; all eight signed/unsigned integer classes with exact storage; logical, character, string, cell, structure, and sparse arrays; and RunMat object envelopes. Shapes and column-major order are retained, including empty structure schemas. Registered static `Class.loadobj` callbacks restore saved objects.",
+            "The Level-5 reader restores real and complex single/double values; all eight signed/unsigned integer classes with exact storage; logical, character, string, cell, structure, and sparse arrays; and RunMat typed object records. Shapes and column-major order are retained, including empty structure schemas. Registered static `Class.loadobj` callbacks restore saved objects.",
             "Decoded values are host-resident. Saving a GPU value materializes it through its owner; loading that file does not create a GPU allocation. Use `gpuArray` explicitly if a device result is required.",
         ] },
         BuiltinDocumentationSection { heading: "Execution", paragraphs: &[
@@ -33,8 +33,8 @@ pub(in super::super) const LOAD: BuiltinDocumentation = BuiltinDocumentation {
     example_exemption: None,
     faqs: &[
         BuiltinDocumentationFaq { question: "Does `load` support ASCII text files?", answer: "No. RunMat currently reads Level-5 MAT-files only; `load(filename, '-ascii')` and automatic ASCII loading are a coverage gap. Use text I/O utilities such as `readmatrix` or `readtable`." },
-        BuiltinDocumentationFaq { question: "How are structures handled?", answer: "Scalar and array structures retain field schema, dimensions, and column-major element order, including empty schemas. Nested cells, logical, sparse, and object envelope values are supported." },
-        BuiltinDocumentationFaq { question: "Does `load` call `loadobj` for saved objects?", answer: "Yes. RunMat object envelopes dispatch registered static `Class.loadobj` methods during restoration when available." },
+        BuiltinDocumentationFaq { question: "How are structures handled?", answer: "Scalar and array structures retain field schema, dimensions, and column-major element order, including empty schemas. Nested cells, logical, sparse, and typed object values are supported. A struct's field names never grant it object identity." },
+        BuiltinDocumentationFaq { question: "Does `load` call `loadobj` for saved objects?", answer: "Yes. RunMat typed object records dispatch registered static `Class.loadobj` methods during restoration when available." },
         BuiltinDocumentationFaq { question: "Will `load` overwrite existing variables?", answer: "A zero-output call assigns matching names in the caller workspace. `S = load(...)` returns a struct without those assignments." },
         BuiltinDocumentationFaq { question: "What if a requested variable is missing?", answer: "The call raises a selection error naming the missing variable." },
         BuiltinDocumentationFaq { question: "Can I load into another workspace?", answer: "`load` targets the caller workspace in its statement form. Capture a struct and assign explicitly when a different scope is needed." },

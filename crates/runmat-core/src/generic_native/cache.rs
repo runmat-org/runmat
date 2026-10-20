@@ -814,9 +814,16 @@ fn tier_site(
     preferred_function: Option<&str>,
 ) -> Result<TierSiteId, runmat_runtime::RuntimeError> {
     let function = unit.native_entrypoint_function(preferred_function)?;
-    let function = u32::try_from(function.0)
-        .map(runmat_types::ProgramFunctionId)
-        .map_err(|_| super::error::stage("NativeTierIdentity", "function identity exceeds u32"))?;
+    let function = unit
+        .analysis()
+        .function_for_local(function)
+        .ok_or_else(|| {
+            super::error::stage(
+                "NativeTierIdentity",
+                "entry has no authenticated portable identity",
+            )
+        })?
+        .function;
     Ok(TierSiteId {
         entry: authored_entry_key(unit, preferred_function).0,
         function,

@@ -1,5 +1,7 @@
 //! MATLAB-compatible `strtrim` builtin with GPU-aware semantics for RunMat.
 
+use crate::context::host_allocation::HostAllocationError;
+use crate::context::RuntimeContext;
 use runmat_builtins::{
     BuiltinErrorDescriptor, STRTRIM_ERROR_CELL_ELEMENT, STRTRIM_ERROR_INTERNAL,
     STRTRIM_ERROR_INVALID_INPUT, STRTRIM_STRING_CELL_EXTENSION,
@@ -14,7 +16,8 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::strings::common::{
     cell_has_valid_string_scalar, char_row_to_string_slice,
-    contains_numeric_or_resident_text_input, is_missing_string,
+    contains_numeric_or_resident_text_input, is_missing_string, transform_scalar_borrowed,
+    transform_string_array_borrowed,
 };
 #[cfg(test)]
 use crate::builtins::strings::type_resolvers::text_preserve_type;
@@ -73,10 +76,11 @@ fn strtrim_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
 
 #[runtime_builtin(
     name = "strtrim",
+    context = true,
     binding_variant = "default",
     builtin_path = "crate::builtins::strings::transform::strtrim"
 )]
-async fn strtrim_builtin(value: Value) -> BuiltinResult<Value> {
+async fn strtrim_builtin(runtime: Option<RuntimeContext>, value: Value) -> BuiltinResult<Value> {
     if contains_numeric_or_resident_text_input(&value) {
         return Err(strtrim_error(&STRTRIM_ERROR_INVALID_INPUT));
     }
@@ -88,38 +92,55 @@ async fn strtrim_builtin(value: Value) -> BuiltinResult<Value> {
     }
     let gathered = gather_if_needed_async(&value).await.map_err(map_flow)?;
     match gathered {
-        Value::String(text) => Ok(Value::String(trim_string(text))),
-        Value::StringArray(array) => strtrim_string_array(array),
+        Value::String(text) => {
+            let strict = !crate::compatibility::runmat_extensions_enabled();
+            transform_scalar_borrowed(
+                runtime.as_ref(),
+                text,
+                |value| trim_whitespace_with_mode(value, strict),
+                strtrim_admission,
+            )
+            .map(Value::String)
+        }
+        Value::StringArray(array) => strtrim_string_array(runtime.as_ref(), array),
         Value::CharArray(array) => strtrim_char_array(array),
-        Value::Cell(cell) => strtrim_cell_array(cell).await,
+        Value::Cell(cell) => strtrim_cell_array(runtime.as_ref(), cell).await,
         _ => Err(strtrim_error(&STRTRIM_ERROR_INVALID_INPUT)),
     }
 }
 
-fn strtrim_string_array(array: StringArray) -> BuiltinResult<Value> {
-    let StringArray { data, shape, .. } = array;
-    let trimmed = data.into_iter().map(trim_string).collect::<Vec<_>>();
-    let out = StringArray::new(trimmed, shape).map_err(|e| {
-        strtrim_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRTRIM_ERROR_INTERNAL)
-    })?;
+fn strtrim_string_array(
+    runtime: Option<&RuntimeContext>,
+    array: StringArray,
+) -> BuiltinResult<Value> {
+    let strict = !crate::compatibility::runmat_extensions_enabled();
+    let out = transform_string_array_borrowed(
+        runtime,
+        array,
+        |text| trim_whitespace_with_mode(text, strict),
+        strtrim_admission,
+        |e| strtrim_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRTRIM_ERROR_INTERNAL),
+    )?;
     Ok(Value::StringArray(out))
 }
 
+fn strtrim_admission(runtime: &RuntimeContext, cause: HostAllocationError) -> RuntimeError {
+    build_runtime_error(format!("strtrim: host allocation: {cause}"))
+        .with_builtin(BUILTIN_NAME)
+        .with_identifier(format!(
+            "{}:{}",
+            runtime.error_namespace(),
+            cause.runtime_identifier_suffix()
+        ))
+        .with_source(cause)
+        .build()
+}
+
 fn strtrim_char_array(array: CharArray) -> BuiltinResult<Value> {
-    let CharArray {
-        data,
-        shape,
-        rows,
-        cols,
-    } = array;
-    if rows == 0 {
-        return Ok(Value::CharArray(CharArray {
-            data,
-            shape,
-            rows,
-            cols,
-        }));
+    if array.rows == 0 {
+        return Ok(Value::CharArray(array));
     }
+    let (data, _, rows, cols) = array.into_parts();
 
     let mut trimmed_rows: Vec<Vec<char>> = Vec::with_capacity(rows);
     let mut target_cols: usize = 0;
@@ -146,13 +167,14 @@ fn strtrim_char_array(array: CharArray) -> BuiltinResult<Value> {
         })
 }
 
-async fn strtrim_cell_array(cell: CellArray) -> BuiltinResult<Value> {
-    let CellArray {
-        data, rows, cols, ..
-    } = cell;
+async fn strtrim_cell_array(
+    runtime: Option<&RuntimeContext>,
+    cell: CellArray,
+) -> BuiltinResult<Value> {
+    let (data, _, rows, cols) = cell.into_parts();
     let mut trimmed_values = Vec::with_capacity(rows * cols);
     for value in &data {
-        let trimmed = strtrim_cell_element(value).await?;
+        let trimmed = strtrim_cell_element(runtime, value).await?;
         trimmed_values.push(trimmed);
     }
     make_cell(trimmed_values, rows, cols).map_err(|e| {
@@ -160,18 +182,36 @@ async fn strtrim_cell_array(cell: CellArray) -> BuiltinResult<Value> {
     })
 }
 
-async fn strtrim_cell_element(value: &Value) -> BuiltinResult<Value> {
+async fn strtrim_cell_element(
+    runtime: Option<&RuntimeContext>,
+    value: &Value,
+) -> BuiltinResult<Value> {
     match gather_if_needed_async(value).await.map_err(map_flow)? {
-        Value::String(text) => Ok(Value::String(trim_string(text))),
-        Value::StringArray(sa) if sa.data.len() == 1 => {
-            let text = sa.data.into_iter().next().unwrap();
-            Ok(Value::String(trim_string(text)))
+        Value::String(text) => {
+            let strict = !crate::compatibility::runmat_extensions_enabled();
+            transform_scalar_borrowed(
+                runtime,
+                text,
+                |value| trim_whitespace_with_mode(value, strict),
+                strtrim_admission,
+            )
+            .map(Value::String)
+        }
+        Value::StringArray(sa) if sa.data().len() == 1 => {
+            let strict = !crate::compatibility::runmat_extensions_enabled();
+            transform_scalar_borrowed(
+                runtime,
+                sa.data()[0].clone(),
+                |value| trim_whitespace_with_mode(value, strict),
+                strtrim_admission,
+            )
+            .map(Value::String)
         }
         Value::CharArray(ca) if ca.rows <= 1 => {
             if ca.rows == 0 {
                 return Ok(Value::CharArray(ca));
             }
-            let source = char_row_to_string_slice(&ca.data, ca.cols, 0);
+            let source = char_row_to_string_slice(ca.data(), ca.cols, 0);
             let trimmed = trim_whitespace(&source);
             let chars: Vec<char> = trimmed.chars().collect();
             let cols = chars.len();
@@ -189,21 +229,15 @@ async fn strtrim_cell_element(value: &Value) -> BuiltinResult<Value> {
     }
 }
 
-fn trim_string(text: String) -> String {
-    if is_missing_string(&text) {
-        text
-    } else {
-        trim_whitespace(&text)
-    }
+fn trim_whitespace(text: &str) -> String {
+    trim_whitespace_with_mode(text, !crate::compatibility::runmat_extensions_enabled()).to_owned()
 }
 
-fn trim_whitespace(text: &str) -> String {
-    let strict = !crate::compatibility::runmat_extensions_enabled();
-    let trimmed = text.trim_matches(|c: char| {
-        c.is_whitespace()
-            && (!strict || !matches!(c, '\u{0085}' | '\u{00A0}' | '\u{2007}' | '\u{202F}'))
-    });
-    trimmed.to_string()
+fn trim_whitespace_with_mode(text: &str, strict: bool) -> &str {
+    if is_missing_string(text) {
+        return text;
+    }
+    text.trim_matches(|c: char| crate::builtins::strings::common::trimmable_whitespace(c, strict))
 }
 
 #[cfg(test)]
@@ -212,7 +246,7 @@ pub(crate) mod tests {
     use runmat_builtins::{ResolveContext, Type};
 
     fn run_strtrim(value: Value) -> BuiltinResult<Value> {
-        futures::executor::block_on(strtrim_builtin(value))
+        futures::executor::block_on(strtrim_builtin(None, value))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -241,13 +275,11 @@ pub(crate) mod tests {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![2, 2]);
                 assert_eq!(
-                    sa.data,
-                    vec![
-                        String::from("one"),
-                        String::from("<missing>"),
-                        String::from("two"),
-                        String::from("three")
-                    ]
+                    sa.data()
+                        .iter()
+                        .map(|text| text.as_str())
+                        .collect::<Vec<_>>(),
+                    vec!["one", "<missing>", "two", "three"]
                 );
             }
             other => panic!("expected string array, got {other:?}"),
@@ -264,7 +296,7 @@ pub(crate) mod tests {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 2);
                 assert_eq!(ca.cols, 3);
-                assert_eq!(ca.data, vec!['c', 'a', 't', 'd', 'o', 'g']);
+                assert_eq!(ca.data(), vec!['c', 'a', 't', 'd', 'o', 'g']);
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -279,7 +311,7 @@ pub(crate) mod tests {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 1);
                 assert_eq!(ca.cols, 0);
-                assert!(ca.data.is_empty());
+                assert!(ca.data().is_empty());
             }
             other => panic!("expected empty char array, got {other:?}"),
         }
@@ -381,8 +413,8 @@ pub(crate) mod tests {
             let input = format!("  {significant}RunMat{significant}  ");
             let expected = format!("{significant}RunMat{significant}");
             assert_eq!(
-                run_strtrim(Value::String(input)).expect("strict string trim"),
-                Value::String(expected.clone())
+                run_strtrim(Value::String(input.into())).expect("strict string trim"),
+                Value::String(expected.clone().into())
             );
             assert_eq!(
                 run_strtrim(Value::CharArray(CharArray::new_row(&format!(

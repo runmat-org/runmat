@@ -242,10 +242,10 @@ impl fmt::Display for StringArray {
         let count = self.data.len();
         if count == 1 && rows == 1 && cols == 1 {
             let v = &self.data[0];
-            if v == "<missing>" {
+            if v.as_str() == "<missing>" {
                 return write!(f, "<missing>");
             }
-            let escaped = v.replace('"', "\\\"");
+            let escaped = v.as_str().replace('"', "\\\"");
             return write!(f, "\"{escaped}\"");
         }
         if self.shape.len() > 2 {
@@ -264,10 +264,10 @@ impl fmt::Display for StringArray {
                     write!(f, "  ")?;
                 }
                 let v = &self.data[r + c * rows];
-                if v == "<missing>" {
+                if v.as_str() == "<missing>" {
                     write!(f, "<missing>")?;
                 } else {
-                    let escaped = v.replace('"', "\\\"");
+                    let escaped = v.as_str().replace('"', "\\\"");
                     write!(f, "\"{escaped}\"")?;
                 }
             }

@@ -58,17 +58,20 @@ fn char_rows(chars: &CharArray) -> Vec<String> {
     (0..chars.rows)
         .map(|row| {
             (0..chars.cols)
-                .map(|col| chars.data[row * chars.cols + col])
+                .map(|col| chars.data()[row * chars.cols + col])
                 .collect()
         })
         .collect()
 }
 
-fn encode_strings(builtin: &'static str, values: &[String]) -> BuiltinResult<Vec<VarLenUnicode>> {
+fn encode_strings(
+    builtin: &'static str,
+    values: &[impl AsRef<str>],
+) -> BuiltinResult<Vec<VarLenUnicode>> {
     values
         .iter()
         .map(|value| {
-            VarLenUnicode::from_str(value).map_err(|err| {
+            VarLenUnicode::from_str(value.as_ref()).map_err(|err| {
                 hdf5_error(
                     builtin,
                     &ERR_ARGUMENT,

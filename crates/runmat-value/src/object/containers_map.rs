@@ -3,7 +3,8 @@
 //! Key admission and value conversion belong to the runtime. This module owns
 //! only representation, exact-key indexing, and the values traced by the GC.
 
-use std::collections::HashMap;
+use std::collections::hash_map::RandomState;
+use std::hash::BuildHasher;
 
 use runmat_gc_api::{Trace, Tracer};
 
@@ -64,14 +65,52 @@ pub enum ContainersMapValueClass {
     Other(&'static str),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MapIndexSlot {
+    Empty,
+    Tombstone,
+    Occupied { hash: u64, entry: usize },
+}
+
+#[derive(Debug)]
 pub struct ContainersMapStorage {
     pub key_type: ContainersMapKeyType,
     pub value_type: ContainersMapValueType,
     pub uniform_values: bool,
     pub uniform_class: Option<ContainersMapValueClass>,
     entries: Vec<ContainersMapEntry>,
-    index: HashMap<ContainersMapKey, usize>,
+    index: Vec<MapIndexSlot>,
+    index_len: usize,
+    index_tombstones: usize,
+    index_hasher: RandomState,
+}
+
+impl Clone for ContainersMapStorage {
+    fn clone(&self) -> Self {
+        let mut clone = Self {
+            key_type: self.key_type,
+            value_type: self.value_type,
+            uniform_values: self.uniform_values,
+            uniform_class: self.uniform_class.clone(),
+            entries: self.entries.clone(),
+            index: Vec::new(),
+            index_len: 0,
+            index_tombstones: 0,
+            index_hasher: RandomState::new(),
+        };
+        clone.rebuild_index(self.index.len());
+        clone
+    }
+}
+
+impl PartialEq for ContainersMapStorage {
+    fn eq(&self, other: &Self) -> bool {
+        self.key_type == other.key_type
+            && self.value_type == other.value_type
+            && self.uniform_values == other.uniform_values
+            && self.uniform_class == other.uniform_class
+            && self.entries == other.entries
+    }
 }
 
 impl ContainersMapStorage {
@@ -86,7 +125,10 @@ impl ContainersMapStorage {
             uniform_values,
             uniform_class: None,
             entries: Vec::new(),
-            index: HashMap::new(),
+            index: Vec::new(),
+            index_len: 0,
+            index_tombstones: 0,
+            index_hasher: RandomState::new(),
         }
     }
 
@@ -99,25 +141,26 @@ impl ContainersMapStorage {
     }
 
     pub fn contains(&self, key: &ContainersMapKey) -> bool {
-        self.index.contains_key(key)
+        self.find_index(key).is_some()
     }
 
     pub fn get(&self, key: &ContainersMapKey) -> Option<&ContainersMapEntry> {
-        self.index.get(key).map(|&index| &self.entries[index])
+        self.find_index(key).map(|(_, index)| &self.entries[index])
     }
 
     /// Caller must validate uniqueness before insertion.
     pub fn insert_unique(&mut self, entry: ContainersMapEntry) {
-        debug_assert!(!self.index.contains_key(&entry.normalized));
+        debug_assert!(self.find_index(&entry.normalized).is_none());
+        self.ensure_index_capacity_for_insert();
         let index = self.entries.len();
-        self.index.insert(entry.normalized.clone(), index);
         self.entries.push(entry);
+        self.insert_index(index);
     }
 
     /// Replace an entry or append it, returning the displaced value for
     /// destruction after the GC owner's mutable borrow ends.
     pub fn replace_or_insert(&mut self, entry: ContainersMapEntry) -> Option<ContainersMapEntry> {
-        if let Some(&index) = self.index.get(&entry.normalized) {
+        if let Some((_, index)) = self.find_index(&entry.normalized) {
             Some(std::mem::replace(&mut self.entries[index], entry))
         } else {
             self.insert_unique(entry);
@@ -126,15 +169,117 @@ impl ContainersMapStorage {
     }
 
     pub fn remove_entry(&mut self, key: &ContainersMapKey) -> Option<ContainersMapEntry> {
-        let index = self.index.remove(key)?;
+        let (slot, index) = self.find_index(key)?;
+        self.index[slot] = MapIndexSlot::Tombstone;
+        self.index_len -= 1;
+        self.index_tombstones += 1;
+        let moved_slot = (index + 1 < self.entries.len()).then(|| {
+            let moved = self
+                .entries
+                .last()
+                .expect("non-last removal has a final map entry");
+            self.find_index(&moved.normalized)
+                .map(|(slot, _)| slot)
+                .expect("final map entry remains indexed before removal")
+        });
         let removed = self.entries.swap_remove(index);
-        if let Some(moved) = self.entries.get(index) {
-            self.index.insert(moved.normalized.clone(), index);
+        if let Some(moved_slot) = moved_slot {
+            let MapIndexSlot::Occupied { hash, .. } = self.index[moved_slot] else {
+                unreachable!("lookup returned an occupied slot")
+            };
+            self.index[moved_slot] = MapIndexSlot::Occupied { hash, entry: index };
         }
         if self.entries.is_empty() {
             self.uniform_class = None;
         }
+        if self.index_tombstones > self.index_len {
+            self.rebuild_index(self.index.len());
+        }
         Some(removed)
+    }
+
+    fn hash_key(&self, key: &ContainersMapKey) -> u64 {
+        self.index_hasher.hash_one(key)
+    }
+
+    fn find_index(&self, key: &ContainersMapKey) -> Option<(usize, usize)> {
+        if self.index.is_empty() {
+            return None;
+        }
+        let hash = self.hash_key(key);
+        let mask = self.index.len() - 1;
+        for step in 0..self.index.len() {
+            let slot = (hash as usize).wrapping_add(step) & mask;
+            match self.index[slot] {
+                MapIndexSlot::Empty => return None,
+                MapIndexSlot::Tombstone => {}
+                MapIndexSlot::Occupied {
+                    hash: candidate,
+                    entry,
+                } if candidate == hash && self.entries[entry].normalized == *key => {
+                    return Some((slot, entry));
+                }
+                MapIndexSlot::Occupied { .. } => {}
+            }
+        }
+        None
+    }
+
+    fn ensure_index_capacity_for_insert(&mut self) {
+        let used = self.index_len + self.index_tombstones;
+        if self.index.is_empty() || used.saturating_add(1) > self.index.len() / 2 {
+            let capacity = self
+                .index
+                .len()
+                .max(4)
+                .checked_mul(2)
+                .expect("containers.Map index capacity overflow");
+            self.rebuild_index(capacity);
+        }
+    }
+
+    fn rebuild_index(&mut self, requested: usize) {
+        let minimum = self
+            .entries
+            .len()
+            .checked_mul(2)
+            .expect("containers.Map index capacity overflow")
+            .max(8);
+        let capacity = requested
+            .max(minimum)
+            .checked_next_power_of_two()
+            .expect("containers.Map index capacity overflow");
+        self.index = vec![MapIndexSlot::Empty; capacity];
+        self.index_len = 0;
+        self.index_tombstones = 0;
+        for entry in 0..self.entries.len() {
+            self.insert_index(entry);
+        }
+    }
+
+    fn insert_index(&mut self, entry: usize) {
+        let hash = self.hash_key(&self.entries[entry].normalized);
+        let mask = self.index.len() - 1;
+        let mut first_tombstone = None;
+        for step in 0..self.index.len() {
+            let slot = (hash as usize).wrapping_add(step) & mask;
+            match self.index[slot] {
+                MapIndexSlot::Empty => {
+                    let slot = first_tombstone.unwrap_or(slot);
+                    if first_tombstone.is_some() {
+                        self.index_tombstones -= 1;
+                    }
+                    self.index[slot] = MapIndexSlot::Occupied { hash, entry };
+                    self.index_len += 1;
+                    return;
+                }
+                MapIndexSlot::Tombstone if first_tombstone.is_none() => {
+                    first_tombstone = Some(slot);
+                }
+                MapIndexSlot::Tombstone | MapIndexSlot::Occupied { .. } => {}
+            }
+        }
+        unreachable!("map index load bound always leaves an empty slot")
     }
 
     pub fn sorted_entries(&self) -> Vec<&ContainersMapEntry> {
@@ -167,6 +312,27 @@ impl ContainersMapStorage {
         } else {
             &entry.value
         })
+    }
+
+    pub(super) fn retained_physical_bytes(
+        &self,
+    ) -> Result<usize, crate::ExactHostNumericAllocationError> {
+        use crate::ExactHostNumericAllocationError::LayoutOverflow;
+        use std::alloc::Layout;
+
+        let entries = Layout::array::<ContainersMapEntry>(self.entries.capacity())
+            .map_err(|_| LayoutOverflow)?
+            .size();
+        let index_entries = Layout::array::<MapIndexSlot>(self.index.capacity())
+            .map_err(|_| LayoutOverflow)?
+            .size();
+        let mut bytes = entries.checked_add(index_entries).ok_or(LayoutOverflow)?;
+        for entry in &self.entries {
+            if let ContainersMapKey::String(value) = &entry.normalized {
+                bytes = bytes.checked_add(value.capacity()).ok_or(LayoutOverflow)?;
+            }
+        }
+        Ok(bytes)
     }
 }
 

@@ -382,7 +382,7 @@ fn is_join_input(value: &Value) -> bool {
     match value {
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => true,
         Value::Cell(cell) => cell
-            .data
+            .data()
             .iter()
             .all(|value| cell_element_to_string(value).is_some()),
         _ => false,
@@ -393,7 +393,7 @@ fn is_join_delimiter(value: &Value) -> bool {
     match value {
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => true,
         Value::Cell(cell) => cell
-            .data
+            .data()
             .iter()
             .all(|value| cell_element_to_string(value).is_some()),
         _ => false,
@@ -403,9 +403,9 @@ fn is_join_delimiter(value: &Value) -> bool {
 fn value_contains_explicit_gpu(value: &Value) -> bool {
     match value {
         Value::GpuTensor(handle) => runmat_accelerate_api::handle_is_explicit(handle),
-        Value::Cell(cell) => cell.data.iter().any(value_contains_explicit_gpu),
+        Value::Cell(cell) => cell.data().iter().any(value_contains_explicit_gpu),
         Value::Struct(value) => value.fields.values().any(value_contains_explicit_gpu),
-        Value::Object(value) => value.properties.values().any(value_contains_explicit_gpu),
+        Value::Object(value) => value.properties().values().any(value_contains_explicit_gpu),
         Value::Closure(value) => value.captures.iter().any(value_contains_explicit_gpu),
         Value::OutputList(values) => values.iter().any(value_contains_explicit_gpu),
         _ => false,
@@ -520,7 +520,7 @@ fn parse_dimension_float(rounded: f64) -> BuiltinResult<Option<usize>> {
 }
 
 struct JoinInput {
-    data: Vec<String>,
+    data: Vec<runmat_value::Utf8Text>,
     shape: Vec<usize>,
     kind: OutputKind,
 }
@@ -540,15 +540,23 @@ impl JoinInput {
                 shape: vec![1, 1],
                 kind: OutputKind::StringScalar,
             }),
-            Value::StringArray(array) => Ok(Self {
-                data: array.data,
-                shape: array.shape,
-                kind: OutputKind::StringArray,
-            }),
+            Value::StringArray(array) => {
+                let shape = array.shape().to_vec();
+                let (owner, _shape, _rows, _cols) = array.into_parts();
+                let data = match owner.try_into_owned() {
+                    Ok(values) => values.into_iter().collect(),
+                    Err(data) => data.iter().cloned().collect(),
+                };
+                Ok(Self {
+                    data,
+                    shape,
+                    kind: OutputKind::StringArray,
+                })
+            }
             Value::CharArray(array) => {
                 let strings = char_array_rows_to_strings(&array);
                 Ok(Self {
-                    data: strings,
+                    data: strings.into_iter().map(Into::into).collect(),
                     shape: vec![array.rows, 1],
                     kind: OutputKind::StringArray,
                 })
@@ -588,11 +596,19 @@ impl JoinInput {
     }
 }
 
-fn build_value(kind: OutputKind, data: Vec<String>, shape: Vec<usize>) -> BuiltinResult<Value> {
+fn build_value<T: Default + Into<runmat_value::Utf8Text> + AsRef<str>>(
+    kind: OutputKind,
+    data: Vec<T>,
+    shape: Vec<usize>,
+) -> BuiltinResult<Value> {
     match kind {
-        OutputKind::StringScalar => Ok(Value::String(data.into_iter().next().unwrap_or_default())),
+        OutputKind::StringScalar => Ok(Value::string(data.into_iter().next().unwrap_or_default())),
         OutputKind::StringArray => {
-            let array = StringArray::new(data, shape).map_err(|e| {
+            let array = StringArray::from_texts_unbounded(
+                data.into_iter().map(Into::into).collect(),
+                shape,
+            )
+            .map_err(|e| {
                 join_error_with_message(format!("{BUILTIN_NAME}: {e}"), &JOIN_ERROR_INTERNAL)
             })?;
             Ok(Value::StringArray(array))
@@ -609,8 +625,7 @@ fn build_value(kind: OutputKind, data: Vec<String>, shape: Vec<usize>) -> Builti
             for row in 0..rows {
                 for col in 0..cols {
                     let idx = row + col * rows;
-                    let text = data[idx].clone();
-                    let chars: Vec<char> = text.chars().collect();
+                    let chars: Vec<char> = data[idx].as_ref().chars().collect();
                     let cols_count = chars.len();
                     let char_array = CharArray::new(chars, 1, cols_count).map_err(|e| {
                         join_error_with_message(
@@ -631,22 +646,23 @@ fn build_value(kind: OutputKind, data: Vec<String>, shape: Vec<usize>) -> Builti
 fn char_array_rows_to_strings(array: &CharArray) -> Vec<String> {
     let mut strings = Vec::with_capacity(array.rows);
     for row in 0..array.rows {
-        strings.push(char_row_to_string_slice(&array.data, array.cols, row));
+        strings.push(char_row_to_string_slice(array.data(), array.cols, row));
     }
     strings
 }
 
-fn cell_array_to_strings(cell: CellArray) -> BuiltinResult<(Vec<String>, Vec<usize>)> {
-    let CellArray {
-        data, rows, cols, ..
-    } = cell;
+fn cell_array_to_strings(
+    cell: CellArray,
+) -> BuiltinResult<(Vec<runmat_value::Utf8Text>, Vec<usize>)> {
+    let (data, _, rows, cols) = cell.into_parts();
     let mut strings = Vec::with_capacity(rows * cols);
     for col in 0..cols {
         for row in 0..rows {
             let idx = row * cols + col;
             strings.push(
                 cell_element_to_string(&data[idx])
-                    .ok_or_else(|| join_error(&JOIN_ERROR_INPUT_TYPE))?,
+                    .ok_or_else(|| join_error(&JOIN_ERROR_INPUT_TYPE))?
+                    .into(),
             );
         }
     }
@@ -655,13 +671,15 @@ fn cell_array_to_strings(cell: CellArray) -> BuiltinResult<(Vec<String>, Vec<usi
 
 fn cell_element_to_string(value: &Value) -> Option<String> {
     match value {
-        Value::String(text) => Some(text.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
+        Value::String(text) => Some(text.as_str().to_owned()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Some(array.data()[0].as_str().to_owned())
+        }
         Value::CharArray(array) if array.rows <= 1 => {
             if array.rows == 0 {
                 Some(String::new())
             } else {
-                Some(char_row_to_string_slice(&array.data, array.cols, 0))
+                Some(char_row_to_string_slice(array.data(), array.cols, 0))
             }
         }
         _ => None,
@@ -733,26 +751,40 @@ impl DelimiterArray {
 
 fn value_to_scalar_string(value: &Value) -> Option<String> {
     match value {
-        Value::String(text) => Some(text.clone()),
+        Value::String(text) => Some(text.as_str().to_owned()),
         Value::CharArray(array) if array.rows <= 1 => {
             if array.rows == 0 {
                 Some(String::new())
             } else {
-                Some(char_row_to_string_slice(&array.data, array.cols, 0))
+                Some(char_row_to_string_slice(array.data(), array.cols, 0))
             }
         }
-        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
-        Value::Cell(cell) if cell.data.len() == 1 => cell_element_to_string(&cell.data[0]),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Some(array.data()[0].as_str().to_owned())
+        }
+        Value::Cell(cell) if cell.data().len() == 1 => cell_element_to_string(&cell.data()[0]),
         _ => None,
     }
 }
 
 fn value_to_string_array(value: Value) -> BuiltinResult<(Vec<String>, Vec<usize>)> {
     match value {
-        Value::StringArray(array) => Ok((array.data, array.shape)),
+        Value::StringArray(array) => Ok((
+            array
+                .data()
+                .iter()
+                .map(|text| text.as_str().to_owned())
+                .collect(),
+            array.shape.to_vec(),
+        )),
         Value::Cell(cell) => {
             let (data, shape) = cell_array_to_strings(cell)?;
-            Ok((data, shape))
+            Ok((
+                data.into_iter()
+                    .map(|text| text.as_str().to_owned())
+                    .collect(),
+                shape,
+            ))
         }
         Value::CharArray(array) => {
             let rows = array.rows;
@@ -796,7 +828,7 @@ fn normalize_delimiter_shape(
 }
 
 fn perform_join(
-    data: &[String],
+    data: &[runmat_value::Utf8Text],
     full_shape: &[usize],
     axis_idx: usize,
     delimiter: &Delimiter,
@@ -920,7 +952,7 @@ pub(crate) mod tests {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![3, 1]);
                 assert_eq!(
-                    sa.data,
+                    sa.data(),
                     vec![
                         "Carlos Sada".to_string(),
                         "Ella Olsen".to_string(),
@@ -952,7 +984,10 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![2, 1]);
-                assert_eq!(sa.data, vec![String::from("x-y-z"), String::from("a-b-c")]);
+                assert_eq!(
+                    sa.data(),
+                    vec![String::from("x-y-z"), String::from("a-b-c")]
+                );
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -984,7 +1019,7 @@ pub(crate) mod tests {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![2, 1]);
                 assert_eq!(
-                    sa.data,
+                    sa.data(),
                     vec![String::from("x + y = z"), String::from("a - b = c")]
                 );
             }
@@ -1012,7 +1047,7 @@ pub(crate) mod tests {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![1, 2]);
                 assert_eq!(
-                    sa.data,
+                    sa.data(),
                     vec![
                         String::from("Carlos Ella Diana"),
                         String::from("Sada Olsen Lee"),
@@ -1175,7 +1210,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, array.shape);
-                assert_eq!(sa.data, array.data);
+                assert_eq!(sa.data(), array.data());
             }
             other => panic!("expected original array, got {other:?}"),
         }
@@ -1200,16 +1235,16 @@ pub(crate) mod tests {
             Value::Cell(cell_out) => {
                 assert_eq!(cell_out.rows, 2);
                 assert_eq!(cell_out.cols, 1);
-                let first = &cell_out.data[0];
-                let second = &cell_out.data[1];
+                let first = &cell_out.data()[0];
+                let second = &cell_out.data()[1];
                 match (first, second) {
                     (Value::CharArray(a), Value::CharArray(b)) => {
                         assert_eq!(
-                            char_row_to_string_slice(&a.data, a.cols, 0),
+                            char_row_to_string_slice(a.data(), a.cols, 0),
                             "GPU, Accelerate"
                         );
                         assert_eq!(
-                            char_row_to_string_slice(&b.data, b.cols, 0),
+                            char_row_to_string_slice(b.data(), b.cols, 0),
                             "VM, Interpreter"
                         );
                     }
@@ -1232,7 +1267,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![1, 1]);
-                assert_eq!(sa.data, vec![String::from("RunMat Accelerate Planner")]);
+                assert_eq!(sa.data(), vec![String::from("RunMat Accelerate Planner")]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -1247,7 +1282,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![1, 1]);
-                assert_eq!(sa.data, vec![String::from("RunM atGP UDev")]);
+                assert_eq!(sa.data(), vec![String::from("RunM atGP UDev")]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -1270,9 +1305,9 @@ pub(crate) mod tests {
         .unwrap();
         let delimiters = make_cell(
             vec![
-                Value::String(String::from(" -> ")),
-                Value::String(String::from(" => ")),
-                Value::String(String::from(" :: ")),
+                Value::String(String::from(" -> ").into()),
+                Value::String(String::from(" => ").into()),
+                Value::String(String::from(" :: ").into()),
             ],
             3,
             1,
@@ -1284,7 +1319,7 @@ pub(crate) mod tests {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![3, 1]);
                 assert_eq!(
-                    sa.data,
+                    sa.data(),
                     vec![
                         String::from("g -> gpu"),
                         String::from("c => cuda"),
@@ -1322,7 +1357,7 @@ pub(crate) mod tests {
                     String::from("r0c1p0:r0c1p1"),
                     String::from("r1c1p0:r1c1p1"),
                 ];
-                assert_eq!(sa.data, expected);
+                assert_eq!(sa.data(), expected);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -1361,7 +1396,7 @@ pub(crate) mod tests {
         let result = join_builtin(Value::StringArray(array), Vec::new()).expect("join");
         match result {
             Value::StringArray(sa) => {
-                assert_eq!(sa.data, vec![String::from("<missing>")]);
+                assert_eq!(sa.data(), vec![String::from("<missing>")]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -1379,7 +1414,7 @@ pub(crate) mod tests {
         .expect("join");
         match result {
             Value::StringArray(sa) => {
-                assert_eq!(sa.data, vec![String::from("A++B")]);
+                assert_eq!(sa.data(), vec![String::from("A++B")]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -1393,7 +1428,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![2, 1]);
-                assert_eq!(sa.data, vec![String::from(""), String::from("")]);
+                assert_eq!(sa.data(), vec![String::from(""), String::from("")]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -1416,7 +1451,10 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![2, 1]);
-                assert_eq!(sa.data, vec![String::from("aa-bb"), String::from("cc-dd")]);
+                assert_eq!(
+                    sa.data(),
+                    vec![String::from("aa-bb"), String::from("cc-dd")]
+                );
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -1431,7 +1469,7 @@ pub(crate) mod tests {
         let result = join_builtin(Value::StringArray(array), Vec::new()).expect("join");
         match result {
             Value::StringArray(sa) => {
-                assert_eq!(sa.data, vec![String::from("GPU Planner")]);
+                assert_eq!(sa.data(), vec![String::from("GPU Planner")]);
             }
             other => panic!("expected string array, got {other:?}"),
         }

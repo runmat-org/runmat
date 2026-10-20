@@ -110,7 +110,7 @@ fn specialized_product_still_rejects_mismatched_selected_entry_profile() {
     .unwrap();
     let error = executor
         .begin_request(runmat_native_executor::NativeInvocationRequest {
-            function: ProgramFunctionId(0),
+            function: FunctionId(0),
             captures: Vec::new(),
             arguments: vec![Value::Num(7.0)],
             requested_outputs: 1,
@@ -148,7 +148,7 @@ fn stable_entry_cell_retires_stale_target_and_publishes_replacement() {
         .publish(
             key.clone(),
             Rc::clone(&first_executor),
-            ProgramFunctionId(0),
+            FunctionId(0),
             first_snapshot,
             FIXTURE_COMPILATION,
         )
@@ -168,7 +168,7 @@ fn stable_entry_cell_retires_stale_target_and_publishes_replacement() {
             key.clone(),
             first_profile,
             Rc::new(compile_executor(fixture()).unwrap()),
-            ProgramFunctionId(0),
+            FunctionId(0),
             dependencies.snapshot([&program, &provider]),
             FIXTURE_COMPILATION,
         )
@@ -182,7 +182,7 @@ fn stable_entry_cell_retires_stale_target_and_publishes_replacement() {
             key.clone(),
             second_profile,
             Rc::new(compile_executor(fixture()).unwrap()),
-            ProgramFunctionId(0),
+            FunctionId(0),
             dependencies.snapshot([&program, &provider]),
             FIXTURE_COMPILATION,
         )
@@ -233,7 +233,7 @@ fn stable_entry_cell_retires_stale_target_and_publishes_replacement() {
         .publish(
             key,
             Rc::clone(&second_executor),
-            ProgramFunctionId(0),
+            FunctionId(0),
             current,
             FIXTURE_COMPILATION,
         )
@@ -261,7 +261,7 @@ fn completed_specialization_retires_only_replaceable_code_to_make_room() {
         .publish(
             key.clone(),
             Rc::new(compile_executor(fixture()).unwrap()),
-            ProgramFunctionId(0),
+            FunctionId(0),
             dependencies.snapshot([&program]),
             FIXTURE_COMPILATION,
         )
@@ -271,7 +271,7 @@ fn completed_specialization_retires_only_replaceable_code_to_make_room() {
             key.clone(),
             Digest::sha256(b"old"),
             Rc::new(compile_executor(fixture()).unwrap()),
-            ProgramFunctionId(0),
+            FunctionId(0),
             dependencies.snapshot([&program]),
             FIXTURE_COMPILATION,
         )
@@ -298,7 +298,7 @@ fn forced_generic_entry_executes_literal_assignment_and_transactional_return() {
     let executor = compile_executor(fixture()).unwrap();
     assert!(executor.retained_code_bytes() > 0);
     let execution = executor
-        .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
+        .invoke(FunctionId(0), Vec::new(), 1, runtime_context())
         .unwrap();
     assert_eq!(execution.outputs, vec![Value::Num(41.0)]);
 }
@@ -316,7 +316,7 @@ fn native_symbol_constants_match_registered_values_in_generic_and_linked_entries
         )));
         let generic = compile_executor(assembly.clone()).unwrap();
         let linked_owner = GenericCompiler::compile(&assembly).unwrap();
-        let function = ProgramFunctionId(0);
+        let function = FunctionId(0);
         let linked = NativeExecutor::bind(
             assembly,
             NativeExecutable::linked(BTreeMap::from([(
@@ -354,7 +354,7 @@ fn native_unknown_symbol_is_rejected_but_string_literal_is_preserved() {
     )))
     .unwrap();
     let error = executor
-        .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
+        .invoke(FunctionId(0), Vec::new(), 1, runtime_context())
         .expect_err("an unknown constant must not become a string");
     assert!(error
         .to_string()
@@ -365,7 +365,7 @@ fn native_unknown_symbol_is_rejected_but_string_literal_is_preserved() {
     ))))
     .unwrap();
     let execution = executor
-        .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
+        .invoke(FunctionId(0), Vec::new(), 1, runtime_context())
         .unwrap();
     assert_eq!(execution.outputs, vec![Value::String("NaN".into())]);
 }
@@ -375,7 +375,7 @@ fn native_imaginary_numeric_constant_is_not_a_symbol_lookup() {
     let executor =
         compile_executor(constant_fixture(MirConstant::ImaginaryNumber("1e3".into()))).unwrap();
     let execution = executor
-        .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
+        .invoke(FunctionId(0), Vec::new(), 1, runtime_context())
         .unwrap();
     assert_eq!(execution.outputs, vec![Value::Complex(0.0, 1000.0)]);
 }
@@ -428,7 +428,7 @@ fn native_unary_arithmetic_uses_numeric_semantics_not_overload_names_as_builtins
         );
         let executor = compile_executor(assembly).unwrap();
         let execution = futures::executor::block_on(executor.invoke_async(
-            ProgramFunctionId(0),
+            FunctionId(0),
             Vec::new(),
             1,
             runtime_context(),
@@ -442,7 +442,7 @@ fn native_unary_arithmetic_uses_numeric_semantics_not_overload_names_as_builtins
 fn linked_static_entrypoint_uses_the_same_invocation_host() {
     let assembly = fixture();
     let linked_owner = GenericCompiler::compile(&assembly).unwrap();
-    let function = ProgramFunctionId(0);
+    let function = FunctionId(0);
     let entrypoint = linked_owner.entrypoint(function).unwrap();
     let executor = NativeExecutor::bind(
         assembly,
@@ -495,7 +495,7 @@ fn failed_representation_guard_materializes_and_resumes_exact_native_state() {
     let executor = compile_executor(fixture_with_regions(vec![region])).unwrap();
     let mut invocation = executor
         .begin_with_deoptimization(
-            ProgramFunctionId(0),
+            FunctionId(0),
             Vec::new(),
             Vec::new(),
             1,
@@ -535,6 +535,7 @@ fn failed_representation_guard_materializes_and_resumes_exact_native_state() {
 #[test]
 fn injected_failure_at_every_guard_materializes_and_resumes_exact_state() {
     let function = ProgramFunctionId(0);
+    let compiled_function = FunctionId(0);
     let value = RegionValueId { function, local: 0 };
     let numeric = ValueKindFact::Numeric(NumericFact {
         class: NumericClass::Double,
@@ -605,7 +606,7 @@ fn injected_failure_at_every_guard_materializes_and_resumes_exact_state() {
         let executor = compile_executor(assembly.clone()).unwrap();
         let mut invocation = executor
             .begin_with_deoptimization(
-                function,
+                compiled_function,
                 Vec::new(),
                 Vec::new(),
                 1,
@@ -649,7 +650,7 @@ fn interpreter_target_is_selected_only_for_verified_empty_stack_resume_points() 
     };
     let mut invocation = executor
         .begin_with_deoptimization(
-            ProgramFunctionId(0),
+            FunctionId(0),
             Vec::new(),
             Vec::new(),
             1,
@@ -701,14 +702,7 @@ fn injected_failure_at_every_safepoint_does_not_replay_completed_calls() {
         let executor = compile_executor(assembly.clone()).unwrap();
         let policy = DeoptimizationPolicy::default().inject(FaultInjection::Safepoint(safepoint));
         let mut invocation = executor
-            .begin_with_deoptimization(
-                ProgramFunctionId(0),
-                Vec::new(),
-                Vec::new(),
-                1,
-                runtime,
-                policy,
-            )
+            .begin_with_deoptimization(FunctionId(0), Vec::new(), Vec::new(), 1, runtime, policy)
             .unwrap();
         let runmat_native_executor::execute::NativeInvocationStep::Deoptimized { frame, .. } =
             advance_after_suspended_work(&mut invocation).unwrap()
@@ -734,7 +728,7 @@ fn injected_failure_at_every_safepoint_does_not_replay_completed_calls() {
 
 #[test]
 fn gc_collection_during_deopt_resume_preserves_native_handle_values() {
-    let rooted = runmat_gc::gc_allocate_rooted(Value::String("native-live".to_string()))
+    let rooted = runmat_gc::gc_allocate_rooted(Value::String("native-live".into()))
         .expect("allocate rooted native test value");
     let handle = rooted.handle();
     let handle_value = Value::HandleObject(runmat_value::HandleRef {
@@ -784,14 +778,7 @@ fn gc_collection_during_deopt_resume_preserves_native_handle_values() {
     let policy =
         DeoptimizationPolicy::default().inject(FaultInjection::Safepoint(second_safepoint));
     let mut invocation = executor
-        .begin_with_deoptimization(
-            ProgramFunctionId(0),
-            Vec::new(),
-            Vec::new(),
-            1,
-            runtime,
-            policy,
-        )
+        .begin_with_deoptimization(FunctionId(0), Vec::new(), Vec::new(), 1, runtime, policy)
         .unwrap();
     let runmat_native_executor::execute::NativeInvocationStep::Deoptimized { frame, .. } =
         advance_after_suspended_work(&mut invocation).unwrap()
@@ -828,7 +815,7 @@ fn cancellation_exits_without_committing_speculative_outputs() {
     let runtime = runtime_context().with_cancellation_token(source.token());
     source.cancel(runmat_execution::CancellationReason::User);
     assert!(matches!(
-        executor.invoke(ProgramFunctionId(0), Vec::new(), 1, runtime),
+        executor.invoke(FunctionId(0), Vec::new(), 1, runtime),
         Err(NativeExecutorError::Cancelled)
     ));
 }
@@ -863,13 +850,9 @@ fn suspending_external_call_resumes_exactly_without_replay() {
     ));
     drop(activation);
     let executor = compile_executor(semantic_call_fixture()).unwrap();
-    let execution = futures::executor::block_on(executor.invoke_async(
-        ProgramFunctionId(0),
-        Vec::new(),
-        1,
-        runtime,
-    ))
-    .unwrap();
+    let execution =
+        futures::executor::block_on(executor.invoke_async(FunctionId(0), Vec::new(), 1, runtime))
+            .unwrap();
     assert_eq!(execution.outputs, vec![Value::Num(7.0)]);
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     drop(invoker);
@@ -938,7 +921,7 @@ fn suspending_subscript_prefix_is_prepared_once_before_end_and_suffix() {
 
     let executor = compile_executor(suspending_subscript_prefix_fixture()).unwrap();
     let output = futures::executor::block_on(executor.invoke_async(
-        ProgramFunctionId(0),
+        FunctionId(0),
         vec![Value::Object(runmat_value::ObjectInstance::new(
             "SuspendingPrefixObject",
         ))],
@@ -1049,7 +1032,7 @@ fn suspending_object_end_and_final_path_do_not_replay_prior_stages() {
 
     let executor = compile_executor(staged_subscript_suspension_fixture()).unwrap();
     let output = futures::executor::block_on(executor.invoke_async(
-        ProgramFunctionId(0),
+        FunctionId(0),
         vec![Value::Object(runmat_value::ObjectInstance::new(
             "StagedPathObject",
         ))],
@@ -1068,7 +1051,7 @@ fn suspending_object_end_and_final_path_do_not_replay_prior_stages() {
 fn generated_branch_uses_shared_truth_semantics_and_exact_edge_values() {
     let executor = compile_executor(branch_fixture()).unwrap();
     let execution = futures::executor::block_on(executor.invoke_async(
-        ProgramFunctionId(0),
+        FunctionId(0),
         Vec::new(),
         1,
         runtime_context(),
@@ -1082,7 +1065,7 @@ fn generic_operator_and_range_sites_use_canonical_runtime_builtins() {
     let operator = compile_executor(binary_fixture()).unwrap();
     assert_eq!(
         futures::executor::block_on(operator.invoke_async(
-            ProgramFunctionId(0),
+            FunctionId(0),
             Vec::new(),
             1,
             runtime_context(),
@@ -1094,7 +1077,7 @@ fn generic_operator_and_range_sites_use_canonical_runtime_builtins() {
 
     let range = compile_executor(range_fixture()).unwrap();
     let execution = futures::executor::block_on(range.invoke_async(
-        ProgramFunctionId(0),
+        FunctionId(0),
         Vec::new(),
         1,
         runtime_context(),
@@ -1108,7 +1091,7 @@ fn generic_operator_and_range_sites_use_canonical_runtime_builtins() {
     let call = compile_executor(call_fixture()).unwrap();
     assert_eq!(
         futures::executor::block_on(call.invoke_async(
-            ProgramFunctionId(0),
+            FunctionId(0),
             Vec::new(),
             1,
             runtime_context(),
@@ -1120,7 +1103,7 @@ fn generic_operator_and_range_sites_use_canonical_runtime_builtins() {
 
     let aggregate = compile_executor(aggregate_fixture()).unwrap();
     let execution = futures::executor::block_on(aggregate.invoke_async(
-        ProgramFunctionId(0),
+        FunctionId(0),
         Vec::new(),
         1,
         runtime_context(),
@@ -1193,14 +1176,9 @@ fn generic_super_dispatch_uses_runtime_class_and_semantic_call_services() {
 
     let executor = compile_executor(super_method_fixture()).unwrap();
     assert_eq!(
-        futures::executor::block_on(executor.invoke_async(
-            ProgramFunctionId(0),
-            Vec::new(),
-            1,
-            runtime,
-        ))
-        .unwrap()
-        .outputs,
+        futures::executor::block_on(executor.invoke_async(FunctionId(0), Vec::new(), 1, runtime,))
+            .unwrap()
+            .outputs,
         vec![Value::Num(6.0)]
     );
 
@@ -1223,7 +1201,7 @@ fn generic_super_dispatch_uses_runtime_class_and_semantic_call_services() {
     drop(activation);
     let constructor = compile_executor(super_constructor_fixture()).unwrap();
     let execution = futures::executor::block_on(constructor.invoke_async(
-        ProgramFunctionId(0),
+        FunctionId(0),
         Vec::new(),
         1,
         runtime,
@@ -1232,7 +1210,7 @@ fn generic_super_dispatch_uses_runtime_class_and_semantic_call_services() {
     let Value::Object(value) = execution.outputs.first().unwrap() else {
         panic!("super constructor must return the active child receiver");
     };
-    assert_eq!(value.class_name.display_name(), "NativeChild");
+    assert_eq!(value.class_name().display_name(), "NativeChild");
     drop(invoker);
     drop(resolver);
 }
@@ -1242,7 +1220,7 @@ fn generic_short_circuit_and_switch_preserve_compiled_control_flow() {
     let short = compile_executor(short_circuit_fixture()).unwrap();
     assert_eq!(
         futures::executor::block_on(short.invoke_async(
-            ProgramFunctionId(0),
+            FunctionId(0),
             Vec::new(),
             1,
             runtime_context(),
@@ -1255,7 +1233,7 @@ fn generic_short_circuit_and_switch_preserve_compiled_control_flow() {
     let switch = compile_executor(switch_fixture()).unwrap();
     assert_eq!(
         futures::executor::block_on(switch.invoke_async(
-            ProgramFunctionId(0),
+            FunctionId(0),
             Vec::new(),
             1,
             runtime_context(),
@@ -1270,7 +1248,7 @@ fn generic_short_circuit_and_switch_preserve_compiled_control_flow() {
 fn generic_for_iterates_captured_columns_through_compiled_backedges() {
     let executor = compile_executor(for_fixture()).unwrap();
     let execution = futures::executor::block_on(executor.invoke_async(
-        ProgramFunctionId(0),
+        FunctionId(0),
         Vec::new(),
         1,
         runtime_context(),
@@ -1307,10 +1285,10 @@ fn generic_for_transfers_once_to_an_exact_retained_optimized_entry() {
         )
         .unwrap(),
     );
-    let target = OsrTarget::new(Rc::clone(&optimized), ProgramFunctionId(0), point).unwrap();
+    let target = OsrTarget::new(Rc::clone(&optimized), FunctionId(0), point).unwrap();
     let mut invocation = generic
         .begin_request(runmat_native_executor::NativeInvocationRequest {
-            function: ProgramFunctionId(0),
+            function: FunctionId(0),
             captures: Vec::new(),
             arguments: Vec::new(),
             requested_outputs: 1,
@@ -1345,7 +1323,7 @@ fn generic_indexing_and_member_reads_use_shared_runtime_semantics() {
     let indexing = compile_executor(index_fixture()).unwrap();
     assert_eq!(
         futures::executor::block_on(indexing.invoke_async(
-            ProgramFunctionId(0),
+            FunctionId(0),
             Vec::new(),
             1,
             runtime_context(),
@@ -1358,7 +1336,7 @@ fn generic_indexing_and_member_reads_use_shared_runtime_semantics() {
     let member = compile_executor(member_fixture()).unwrap();
     assert_eq!(
         futures::executor::block_on(member.invoke_async(
-            ProgramFunctionId(0),
+            FunctionId(0),
             Vec::new(),
             1,
             runtime_context(),
@@ -1373,7 +1351,7 @@ fn generic_indexing_and_member_reads_use_shared_runtime_semantics() {
 fn generic_index_and_member_mutations_publish_updated_root_values() {
     let indexing = compile_executor(index_assignment_fixture()).unwrap();
     let execution = futures::executor::block_on(indexing.invoke_async(
-        ProgramFunctionId(0),
+        FunctionId(0),
         Vec::new(),
         1,
         runtime_context(),
@@ -1386,7 +1364,7 @@ fn generic_index_and_member_mutations_publish_updated_root_values() {
 
     let member = compile_executor(member_assignment_fixture()).unwrap();
     let execution = futures::executor::block_on(member.invoke_async(
-        ProgramFunctionId(0),
+        FunctionId(0),
         Vec::new(),
         1,
         runtime_context(),
@@ -1400,7 +1378,7 @@ fn generic_index_and_member_mutations_publish_updated_root_values() {
     let multi = compile_executor(multi_assignment_fixture()).unwrap();
     assert_eq!(
         futures::executor::block_on(multi.invoke_async(
-            ProgramFunctionId(0),
+            FunctionId(0),
             Vec::new(),
             1,
             runtime_context(),
@@ -1419,7 +1397,7 @@ fn generic_native_sequence_assignment_supports_static_and_dynamic_members() {
     ] {
         let executor = compile_executor(sequence_member_assignment_fixture(destination)).unwrap();
         let execution = futures::executor::block_on(executor.invoke_async(
-            ProgramFunctionId(0),
+            FunctionId(0),
             Vec::new(),
             1,
             runtime_context(),
@@ -1439,7 +1417,7 @@ fn generic_native_sequence_assignment_supports_static_and_dynamic_members() {
     ))
     .unwrap();
     let execution = futures::executor::block_on(executor.invoke_async(
-        ProgramFunctionId(0),
+        FunctionId(0),
         Vec::new(),
         1,
         runtime_context(),
@@ -1506,7 +1484,7 @@ fn generic_native_sequence_destination_precedes_rhs_and_runs_once() {
 
         let executor = compile_executor(sequence_member_order_fixture(dynamic)).unwrap();
         let execution = futures::executor::block_on(executor.invoke_async(
-            ProgramFunctionId(0),
+            FunctionId(0),
             Vec::new(),
             1,
             runtime,
@@ -1528,7 +1506,7 @@ fn generic_native_sequence_destination_precedes_rhs_and_runs_once() {
 fn generic_native_structure_assignment_uses_shared_growth_semantics() {
     let executor = compile_executor(structure_growth_fixture()).unwrap();
     let execution = executor
-        .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
+        .invoke(FunctionId(0), Vec::new(), 1, runtime_context())
         .unwrap();
     let Value::StructArray(array) = execution.outputs.first().unwrap() else {
         panic!("expected grown structure array")
@@ -1565,7 +1543,7 @@ fn generic_global_and_persistent_declarations_use_semantic_session_names() {
     .unwrap();
     assert_eq!(
         futures::executor::block_on(global.invoke_async(
-            ProgramFunctionId(0),
+            FunctionId(0),
             Vec::new(),
             1,
             runtime.clone(),
@@ -1589,7 +1567,7 @@ fn generic_global_and_persistent_declarations_use_semantic_session_names() {
     .unwrap();
     assert_eq!(
         futures::executor::block_on(persistent.invoke_async(
-            ProgramFunctionId(0),
+            FunctionId(0),
             Vec::new(),
             1,
             runtime.clone(),
@@ -1639,7 +1617,7 @@ fn generic_interactive_workspace_uses_binding_identity_and_commits_a_snapshot() 
     );
     let mut invocation = executor
         .begin_request(runmat_native_executor::NativeInvocationRequest {
-            function: ProgramFunctionId(0),
+            function: FunctionId(0),
             captures: Vec::new(),
             arguments: Vec::new(),
             requested_outputs: 1,
@@ -1666,7 +1644,7 @@ fn generic_workspace_first_static_property_prefers_named_local_binding() {
     let executor = compile_executor(workspace_first_static_fixture()).unwrap();
     assert_eq!(
         executor
-            .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
+            .invoke(FunctionId(0), Vec::new(), 1, runtime_context())
             .unwrap()
             .outputs,
         vec![Value::Num(55.0)]
@@ -1678,7 +1656,7 @@ fn generic_context_dependent_end_selectors_execute_once_against_the_base_shape()
     let scalar = compile_executor(end_scalar_fixture()).unwrap();
     assert_eq!(
         futures::executor::block_on(scalar.invoke_async(
-            ProgramFunctionId(0),
+            FunctionId(0),
             Vec::new(),
             1,
             runtime_context(),
@@ -1690,7 +1668,7 @@ fn generic_context_dependent_end_selectors_execute_once_against_the_base_shape()
 
     let range = compile_executor(end_range_fixture()).unwrap();
     let execution = futures::executor::block_on(range.invoke_async(
-        ProgramFunctionId(0),
+        FunctionId(0),
         Vec::new(),
         1,
         runtime_context(),
@@ -1745,14 +1723,9 @@ fn generic_context_dependent_end_selectors_execute_once_against_the_base_shape()
     );
     let called = compile_executor(called_assembly).unwrap();
     assert_eq!(
-        futures::executor::block_on(called.invoke_async(
-            ProgramFunctionId(0),
-            Vec::new(),
-            1,
-            runtime,
-        ))
-        .unwrap()
-        .outputs,
+        futures::executor::block_on(called.invoke_async(FunctionId(0), Vec::new(), 1, runtime,))
+            .unwrap()
+            .outputs,
         vec![Value::Num(40.0)]
     );
     assert_eq!(calls.load(Ordering::SeqCst), 3);
@@ -1792,14 +1765,9 @@ fn contextual_regions_at_one_site_resume_without_replaying_prior_regions() {
 
     let executor = compile_executor(end_two_regions_fixture()).unwrap();
     assert_eq!(
-        futures::executor::block_on(executor.invoke_async(
-            ProgramFunctionId(0),
-            Vec::new(),
-            1,
-            runtime,
-        ))
-        .unwrap()
-        .outputs,
+        futures::executor::block_on(executor.invoke_async(FunctionId(0), Vec::new(), 1, runtime,))
+            .unwrap()
+            .outputs,
         vec![Value::Num(40.0)]
     );
     assert_eq!(calls.load(Ordering::SeqCst), 2);
@@ -1839,14 +1807,9 @@ fn contextual_step_calls_have_distinct_resume_identities() {
 
     let executor = compile_executor(end_two_calls_one_step_fixture()).unwrap();
     assert_eq!(
-        futures::executor::block_on(executor.invoke_async(
-            ProgramFunctionId(0),
-            Vec::new(),
-            1,
-            runtime,
-        ))
-        .unwrap()
-        .outputs,
+        futures::executor::block_on(executor.invoke_async(FunctionId(0), Vec::new(), 1, runtime,))
+            .unwrap()
+            .outputs,
         vec![Value::Num(30.0)]
     );
     assert_eq!(
@@ -1898,14 +1861,9 @@ fn nested_contextual_call_restores_the_outer_operation_identity() {
 
     let executor = compile_executor(end_nested_context_then_call_fixture()).unwrap();
     assert_eq!(
-        futures::executor::block_on(executor.invoke_async(
-            ProgramFunctionId(0),
-            Vec::new(),
-            1,
-            runtime,
-        ))
-        .unwrap()
-        .outputs,
+        futures::executor::block_on(executor.invoke_async(FunctionId(0), Vec::new(), 1, runtime,))
+            .unwrap()
+            .outputs,
         vec![Value::Num(30.0)]
     );
     assert_eq!(
@@ -1949,14 +1907,9 @@ fn caught_contextual_selector_call_error_clears_native_site_state() {
 
     let executor = compile_executor(caught_contextual_error_fixture()).unwrap();
     assert_eq!(
-        futures::executor::block_on(executor.invoke_async(
-            ProgramFunctionId(0),
-            Vec::new(),
-            1,
-            runtime,
-        ))
-        .unwrap()
-        .outputs,
+        futures::executor::block_on(executor.invoke_async(FunctionId(0), Vec::new(), 1, runtime,))
+            .unwrap()
+            .outputs,
         vec![Value::Num(7.0)]
     );
     assert_eq!(calls.load(Ordering::SeqCst), 1);
@@ -1965,11 +1918,11 @@ fn caught_contextual_selector_call_error_clears_native_site_state() {
 
 #[test]
 fn suspended_contextual_site_roots_completed_calls_and_captured_sequences() {
-    let rooted = runmat_gc::gc_allocate_rooted(Value::String("contextual-live".to_string()))
+    let rooted = runmat_gc::gc_allocate_rooted(Value::String("contextual-live".into()))
         .expect("allocate rooted contextual test value");
     let handle = rooted.handle();
     let completion_root =
-        runmat_gc::gc_allocate_rooted(Value::String("completed-call-live".to_string()))
+        runmat_gc::gc_allocate_rooted(Value::String("completed-call-live".into()))
             .expect("allocate rooted completed-call test value");
     let completion_handle = completion_root.handle();
     thread_local! {
@@ -2038,7 +1991,7 @@ fn suspended_contextual_site_roots_completed_calls_and_captured_sequences() {
     let executor = compile_executor(assembly.clone()).unwrap();
     let mut invocation = executor
         .begin_request(runmat_native_executor::NativeInvocationRequest {
-            function: ProgramFunctionId(0),
+            function: FunctionId(0),
             captures: Vec::new(),
             arguments: Vec::new(),
             requested_outputs: 1,
@@ -2110,7 +2063,7 @@ fn terminator_sites_clear_state_on_success_and_caught_call_failures() {
     let success = compile_executor(branch_fixture()).unwrap();
     assert_eq!(
         futures::executor::block_on(success.invoke_async(
-            ProgramFunctionId(0),
+            FunctionId(0),
             Vec::new(),
             1,
             runtime_context(),
@@ -2151,7 +2104,7 @@ fn terminator_sites_clear_state_on_success_and_caught_call_failures() {
         let executor = compile_executor(caught_terminator_call_fixture()).unwrap();
         assert_eq!(
             futures::executor::block_on(executor.invoke_async(
-                ProgramFunctionId(0),
+                FunctionId(0),
                 Vec::new(),
                 1,
                 runtime,
@@ -3232,7 +3185,7 @@ fn generic_native_omitted_input_can_be_initialized_before_member_assignment() {
         ))
         .unwrap();
         let result = futures::executor::block_on(executor.invoke_async(
-            ProgramFunctionId(0),
+            FunctionId(0),
             Vec::new(),
             1,
             runtime_context(),
@@ -3257,7 +3210,7 @@ fn generic_native_member_assignment_creates_unassigned_roots_and_nested_paths() 
         let executor =
             compile_executor(member_assignment_fixture_with_root(initialize, nested)).unwrap();
         let execution = futures::executor::block_on(executor.invoke_async(
-            ProgramFunctionId(0),
+            FunctionId(0),
             Vec::new(),
             1,
             runtime_context(),

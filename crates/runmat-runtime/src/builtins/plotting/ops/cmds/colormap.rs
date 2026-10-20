@@ -19,7 +19,7 @@ use runmat_value::{NumericDType, Value};
     binding_variant = "default",
     builtin_path = "crate::builtins::plotting::cmds::colormap"
 )]
-pub fn colormap_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub fn colormap_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &COLORMAP_DESCRIPTOR,
         &COLORMAP_ERROR_OUTPUTS,

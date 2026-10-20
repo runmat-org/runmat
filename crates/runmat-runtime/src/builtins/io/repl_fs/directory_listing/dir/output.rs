@@ -17,14 +17,14 @@ pub(super) fn value(records: Vec<Record>) -> BuiltinResult<Value> {
 }
 
 fn struct_value(record: Record) -> StructValue {
-    let mut value = StructValue::new();
+    let mut value = runmat_value::UnboundedStructValueBuilder::new();
     value.insert("name", character_row(&record.name));
     value.insert("folder", character_row(&record.folder));
     value.insert("date", character_row(&record.date));
     value.insert("bytes", Value::Num(record.bytes));
     value.insert("isdir", Value::Bool(record.is_dir));
     value.insert("datenum", Value::Num(record.datenum));
-    value
+    value.finish()
 }
 
 fn character_row(text: &str) -> Value {

@@ -17,7 +17,7 @@ impl Default for ReadStructOptions {
 }
 
 impl ReadStructOptions {
-    pub(super) fn preflight(args: &[Value]) -> BuiltinResult<()> {
+    pub(super) fn preflight(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<()> {
         for pair in args.chunks_exact(2) {
             known_text(&pair[0], "readstruct", "option")?;
             known_text(&pair[1], "readstruct", "option value")?;
@@ -47,7 +47,7 @@ impl ReadStructOptions {
         Ok(())
     }
 
-    pub(super) fn parse(args: &[Value]) -> BuiltinResult<Self> {
+    pub(super) fn parse(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<Self> {
         let mut options = Self::default();
         let mut idx = 0usize;
         while idx < args.len() {
@@ -105,27 +105,58 @@ impl XmlNode {
     pub(super) async fn into_object(
         self,
         cooperation: &mut XmlCooperation,
-    ) -> BuiltinResult<ObjectInstance> {
+        runtime: Option<&RuntimeContext>,
+    ) -> BuiltinResult<crate::execution::RootedValue> {
         let text = self.direct_text(cooperation).await?;
         cooperation.completed(self.name.len()).await?;
-        let mut object = ObjectInstance::new(XML_ELEMENT_CLASS);
-        object
-            .properties
-            .insert("NodeName".to_string(), char_value(&self.name));
-        object
-            .properties
-            .insert("TagName".to_string(), char_value(&self.name));
-        object
-            .properties
-            .insert("TextContent".to_string(), char_value(text.trim()));
-        let mut attributes = StructValue::new();
         for (name, value) in &self.attributes {
             cooperation.completed(name.len() + value.len()).await?;
-            attributes.insert(name.clone(), char_value(value));
         }
-        object
-            .properties
-            .insert("Attributes".to_string(), Value::Struct(attributes));
+        let attributes = if let Some(runtime) = runtime {
+            let mut source = self.attributes.values();
+            let values = crate::execution::RootedValues::try_initialize_in_context(
+                self.attributes.len(),
+                runtime,
+                |_| {
+                    Ok::<_, crate::RuntimeError>(char_value(
+                        source.next().expect("one attribute value per slot"),
+                    ))
+                },
+            )?;
+            crate::execution::structure::construct_struct_in_context(
+                runtime,
+                self.attributes.keys().map(String::as_str),
+                values,
+            )?
+        } else {
+            // This is the explicit ordinary parser route, not a Managed
+            // fallback. Check policy before creating its projection backing.
+            use crate::context::host_allocation::{
+                host_allocation_runtime_error, HostAllocationError, HostAllocationPolicy,
+                HostAllocationReceipt,
+            };
+            let allocation = |source| {
+                host_allocation_runtime_error(
+                    None,
+                    "RunMat:xmlread:Projection",
+                    "XML attribute projection admission failed",
+                    source,
+                )
+            };
+            if HostAllocationReceipt::policy(None).map_err(allocation)?
+                != HostAllocationPolicy::Unbounded
+            {
+                return Err(allocation(HostAllocationError::MissingManagedOwner));
+            }
+            let mut attributes = runmat_value::UnboundedStructValueBuilder::new();
+            for (name, value) in &self.attributes {
+                attributes.insert(name.clone(), char_value(value));
+            }
+            crate::execution::RootedValue::in_optional_context(
+                Value::Struct(attributes.finish()),
+                None,
+            )?
+        };
         let mut children = Vec::new();
         for item in self.content {
             cooperation.completed(1).await?;
@@ -136,18 +167,27 @@ impl XmlNode {
                         .with_source(err)
                         .build()
                 })?;
-                children.push(Value::Object(child.into_object(cooperation).await?));
+                children.push(child.into_object(cooperation, runtime).await?);
             }
         }
         let child_count = children.len();
-        object.properties.insert(
-            "ChildNodes".to_string(),
-            Value::Cell(
-                CellArray::new(children, child_count, 1)
-                    .map_err(|err| compat_error("xmlread", err))?,
-            ),
-        );
-        Ok(object)
+        let child_nodes = crate::execution::structure::cell::from_borrowed_values(
+            runtime,
+            &[child_count, 1],
+            children.iter().map(|child| child.value()),
+        )?;
+        let fields = [
+            ("NodeName", char_value(&self.name)),
+            ("TagName", char_value(&self.name)),
+            ("TextContent", char_value(text.trim())),
+            ("Attributes", attributes.value().clone()),
+            ("ChildNodes", child_nodes.value().clone()),
+        ];
+        crate::execution::object::construct_object_from_borrowed_fields(
+            runtime,
+            XML_ELEMENT_CLASS.display_name(),
+            fields.iter().map(|(name, value)| (*name, value)),
+        )
     }
 }
 
@@ -158,7 +198,7 @@ pub(super) async fn xml_node_to_struct(
     cooperation: &mut XmlCooperation,
 ) -> BuiltinResult<StructValue> {
     cooperation.completed(node.name.len()).await?;
-    let mut out = StructValue::new();
+    let mut out = runmat_value::UnboundedStructValueBuilder::new();
     for (name, value) in &node.attributes {
         cooperation.completed(name.len() + value.len()).await?;
         out.insert(
@@ -241,7 +281,7 @@ pub(super) async fn xml_node_to_struct(
         };
         out.insert(field, value);
     }
-    Ok(out)
+    Ok(out.finish())
 }
 
 async fn xml_node_to_struct_value(

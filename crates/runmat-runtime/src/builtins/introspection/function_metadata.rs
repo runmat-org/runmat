@@ -1,5 +1,5 @@
 use runmat_builtins::FUNCTIONS_ERROR_HANDLE_UNSUPPORTED;
-use runmat_value::{StructValue, Value};
+use runmat_value::Value;
 
 #[derive(Debug, Clone, Copy)]
 enum FunctionHandleKind {
@@ -22,12 +22,16 @@ impl FunctionHandleKind {
     }
 }
 
-fn metadata_struct(function: String, kind: FunctionHandleKind, file: String) -> Value {
-    let mut info = StructValue::new();
+fn metadata_struct(
+    function: runmat_value::Utf8Text,
+    kind: FunctionHandleKind,
+    file: runmat_value::Utf8Text,
+) -> Value {
+    let mut info = runmat_value::UnboundedStructValueBuilder::new();
     info.insert("function", Value::String(function));
-    info.insert("type", Value::String(kind.as_str().to_string()));
+    info.insert("type", Value::string(kind.as_str().to_string()));
     info.insert("file", Value::String(file));
-    Value::Struct(info)
+    Value::Struct(info.finish())
 }
 
 fn role_kind(role: runmat_types::FunctionSourceRole) -> Option<FunctionHandleKind> {
@@ -49,9 +53,9 @@ pub(crate) fn dispatch_functions(handle: Value) -> crate::BuiltinResult<Value> {
         Value::FunctionHandle(name)
         | Value::ExternalFunctionHandle(name)
         | Value::MethodFunctionHandle(name) => Ok(metadata_struct(
-            name.into_name(),
+            name.into_text_owner(),
             FunctionHandleKind::Simple,
-            String::new(),
+            runmat_value::Utf8Text::default(),
         )),
         Value::BoundFunctionHandle(handle) => {
             let data = handle.into_data();
@@ -62,7 +66,7 @@ pub(crate) fn dispatch_functions(handle: Value) -> crate::BuiltinResult<Value> {
         Value::Closure(closure) => {
             let data = closure.into_data();
             let kind = role_kind(data.source_role).unwrap_or(FunctionHandleKind::Unknown);
-            let file = data.source_file.map(String::from).unwrap_or_default();
+            let file = data.source_file.unwrap_or_default();
             Ok(metadata_struct(data.function_name, kind, file))
         }
         _ => Err(crate::runtime_descriptor_error(
@@ -150,9 +154,15 @@ mod tests {
     fn functions_reports_named_handle_metadata() {
         let value =
             dispatch_functions(Value::FunctionHandle("sin".into())).expect("functions succeeds");
-        assert_eq!(field(&value, "function"), &Value::String("sin".to_string()));
-        assert_eq!(field(&value, "type"), &Value::String("simple".to_string()));
-        assert_eq!(field(&value, "file"), &Value::String(String::new()));
+        assert_eq!(
+            field(&value, "function"),
+            &Value::String("sin".to_string().into())
+        );
+        assert_eq!(
+            field(&value, "type"),
+            &Value::String("simple".to_string().into())
+        );
+        assert_eq!(field(&value, "file"), &Value::String(String::new().into()));
     }
 
     #[test]
@@ -176,17 +186,17 @@ mod tests {
                 binding: Some(runmat_value::BoundFunctionBinding::unavailable(1)),
                 source_role: runmat_types::FunctionSourceRole::Anonymous,
                 source_file: None,
-                captures: Vec::new(),
+                captures: Vec::new().into(),
             },
         )))
         .expect("functions succeeds");
         assert_eq!(
             field(&value, "function"),
-            &Value::String("@anon0".to_string())
+            &Value::String("@anon0".to_string().into())
         );
         assert_eq!(
             field(&value, "type"),
-            &Value::String("anonymous".to_string())
+            &Value::String("anonymous".to_string().into())
         );
     }
 
@@ -280,7 +290,7 @@ mod tests {
                 binding: None,
                 source_role: runmat_types::FunctionSourceRole::Anonymous,
                 source_file: None,
-                captures: Vec::new(),
+                captures: Vec::new().into(),
             },
         )))
         .expect("anonymous metadata");
@@ -295,7 +305,7 @@ mod tests {
                 binding: None,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
-                captures: Vec::new(),
+                captures: Vec::new().into(),
             },
         )))
         .expect("unknown metadata");

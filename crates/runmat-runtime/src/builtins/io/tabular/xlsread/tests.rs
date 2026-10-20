@@ -37,7 +37,7 @@ fn workbook_and_sheet_codec_failures_retain_typed_sources() {
     let error = block_on(xlsread_builtin(
         None,
         Value::from(invalid.to_string_lossy().to_string()),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect_err("invalid workbook");
     assert_eq!(error.identifier(), XLSREAD_ERROR_IO.identifier);
@@ -49,7 +49,7 @@ fn workbook_and_sheet_codec_failures_retain_typed_sources() {
     let error = block_on(xlsread_builtin(
         None,
         Value::from(workbook.to_string_lossy().to_string()),
-        vec![Value::from("Absent")],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("Absent")]),
     ))
     .expect_err("missing worksheet");
     assert_eq!(error.identifier(), XLSREAD_ERROR_SHEET.identifier);
@@ -133,7 +133,10 @@ fn xlsread_gates_numeric_range_before_file_access() {
     let error = futures::executor::block_on(xlsread_builtin(
         None,
         Value::from("definitely-missing.xlsx"),
-        vec![Value::from("Sheet1"), Value::Tensor(range)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("Sheet1"),
+            Value::Tensor(range),
+        ]),
     ))
     .expect_err("strict mode rejects numeric ranges");
     assert_eq!(
@@ -274,7 +277,7 @@ fn direct_xlsread(path: &Path, args: Vec<Value>, outputs: Option<usize>) -> Valu
     block_on(xlsread_builtin(
         None,
         Value::from(path.to_string_lossy().to_string()),
-        args,
+        crate::builtins::common::test_support::builtin_arguments(args),
     ))
     .expect("xlsread")
 }
@@ -607,7 +610,7 @@ fn xlsread_rejects_too_many_outputs() {
     let err = block_on(xlsread_builtin(
         None,
         Value::from(path.to_string_lossy().to_string()),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect_err("too many outputs");
     assert!(err.message().contains("at most 3 outputs"));

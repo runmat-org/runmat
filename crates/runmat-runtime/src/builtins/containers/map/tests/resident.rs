@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn nested_resident_inputs_are_gated_before_provider_access() {
-    use runmat_value::{Closure, ObjectArray, StructArray, StructValue};
+    use runmat_value::{Closure, ObjectArray, StructArray};
 
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
     let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
@@ -13,10 +13,12 @@ fn nested_resident_inputs_are_gated_before_provider_access() {
         )
         .unwrap();
     let resident = Value::GpuTensor(allocation.handle.clone());
-    let mut structure = StructValue::new();
+    let mut structure = runmat_value::UnboundedStructValueBuilder::new();
     structure.insert("payload", resident.clone());
-    let mut object = ObjectInstance::new("TestResidentContainer");
-    object.properties.insert("payload".into(), resident.clone());
+    let mut object = runmat_value::UnboundedObjectBuilder::new("TestResidentContainer");
+    object.insert("payload".into(), resident.clone());
+    let object = object.finish();
+    let structure = structure.finish();
     let nested = [
         Value::Struct(structure.clone()),
         Value::StructArray(
@@ -32,7 +34,7 @@ fn nested_resident_inputs_are_gated_before_provider_access() {
             binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
-            captures: vec![resident.clone()],
+            captures: vec![resident.clone()].into(),
         })),
         Value::output_list(vec![resident.clone()]),
     ];
@@ -71,10 +73,12 @@ fn resident_extensions_gate_before_provider_access_for_integer_surfaces() {
     let resident = Value::GpuTensor(allocation.handle.clone());
     let char_map = containers_map_builtin(Vec::new()).unwrap();
     let checks = [
-        block_on(super::super::containers_map_builtin(vec![
-            resident.clone(),
-            Value::Num(1.0),
-        ]))
+        block_on(super::super::containers_map_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                resident.clone(),
+                Value::Num(1.0),
+            ]),
+        ))
         .unwrap_err(),
         block_on(super::super::containers_map_is_key(
             char_map.clone(),
@@ -88,7 +92,12 @@ fn resident_extensions_gate_before_provider_access_for_integer_surfaces() {
         .unwrap_err(),
         block_on(super::super::containers_map_values(
             char_map.clone(),
-            vec![crate::make_cell(vec![resident.clone()], 1, 1).unwrap()],
+            crate::builtins::common::test_support::builtin_arguments(vec![crate::make_cell(
+                vec![resident.clone()],
+                1,
+                1,
+            )
+            .unwrap()]),
         ))
         .unwrap_err(),
         containers_map_subsref(

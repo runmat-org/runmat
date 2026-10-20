@@ -1,5 +1,8 @@
 //! Native process composition for the portable RunMat execution driver.
 
+#[cfg(test)]
+mod test_support;
+
 mod accelerator_placement;
 mod machine_capacity;
 pub use accelerator_placement::active_provider_resource;

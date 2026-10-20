@@ -2,7 +2,6 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 
 use runmat_python::PythonValue;
-use runmat_value::Value;
 
 use super::{PythonAdapter, PythonCallbackRegistration, RuntimeContext, RuntimeError};
 
@@ -21,24 +20,24 @@ impl<'a> CallbackAdmission<'a> {
         }
     }
 
-    pub(super) fn convert(
+    pub(super) fn convert<V: Into<crate::call::RootedArgumentValue>>(
         &mut self,
         adapter: &PythonAdapter,
         context: &RuntimeContext,
-        value: Value,
+        value: V,
     ) -> Result<PythonValue, RuntimeError> {
-        let converted = adapter.argument_to_python(context, value)?;
+        let converted = adapter.argument_to_python(context, value.into())?;
         if let PythonValue::Callback(id) = &converted {
             self.unpublished.push(*id);
         }
         Ok(converted)
     }
 
-    pub(super) fn convert_arguments(
+    pub(super) fn convert_arguments<V: Into<crate::call::RootedArgumentValue>>(
         &mut self,
         adapter: &PythonAdapter,
         context: &RuntimeContext,
-        arguments: Vec<Value>,
+        arguments: Vec<V>,
     ) -> Result<Vec<PythonValue>, RuntimeError> {
         arguments
             .into_iter()
@@ -46,11 +45,11 @@ impl<'a> CallbackAdmission<'a> {
             .collect()
     }
 
-    pub(super) fn convert_named_inputs(
+    pub(super) fn convert_named_inputs<V: Into<crate::call::RootedArgumentValue>>(
         &mut self,
         adapter: &PythonAdapter,
         context: &RuntimeContext,
-        inputs: Vec<(String, Value)>,
+        inputs: Vec<(String, V)>,
     ) -> Result<Vec<(String, PythonValue)>, RuntimeError> {
         inputs
             .into_iter()

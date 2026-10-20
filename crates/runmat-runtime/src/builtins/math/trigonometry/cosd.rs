@@ -111,8 +111,7 @@ async fn cosd_builtin(value: Value) -> BuiltinResult<Value> {
 
 fn cosd_char_array(array: CharArray) -> BuiltinResult<Value> {
     let data = array
-        .data
-        .into_iter()
+        .iter_column_major()
         .map(|value| cosd_scalar(f64::from(u32::from(value))))
         .collect();
     let tensor = Tensor::new(data, array.shape)

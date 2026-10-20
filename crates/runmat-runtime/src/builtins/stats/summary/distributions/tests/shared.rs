@@ -18,7 +18,7 @@ fn invalid_distribution_calls_fail_before_resident_provider_access() {
 pub(super) fn assert_invalid_calls(input: Value) {
     let bad_normal = block_on(normpdf::normpdf_builtin(
         input.clone(),
-        vec![Value::from("bad")],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("bad")]),
     ))
     .unwrap_err();
     assert_eq!(
@@ -32,31 +32,55 @@ pub(super) fn assert_invalid_calls(input: Value) {
         }};
     }
     rejects_before_owner!(
-        normcdf::normcdf_builtin(input.clone(), vec![Value::from("bad")]),
+        normcdf::normcdf_builtin(
+            input.clone(),
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from("bad")])
+        ),
         "RunMat:normcdf:InvalidArgument"
     );
     rejects_before_owner!(
-        norminv::norminv_builtin(input.clone(), vec![Value::from("bad")]),
+        norminv::norminv_builtin(
+            input.clone(),
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from("bad")])
+        ),
         "RunMat:norminv:InvalidArgument"
     );
     rejects_before_owner!(
-        tpdf::tpdf_builtin(input.clone(), vec![Value::from("bad")]),
+        tpdf::tpdf_builtin(
+            input.clone(),
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from("bad")])
+        ),
         "RunMat:tpdf:InvalidArgument"
     );
     rejects_before_owner!(
-        tcdf::tcdf_builtin(input.clone(), vec![Value::from("bad")]),
+        tcdf::tcdf_builtin(
+            input.clone(),
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from("bad")])
+        ),
         "RunMat:tcdf:InvalidArgument"
     );
     rejects_before_owner!(
-        tinv::tinv_builtin(input.clone(), vec![Value::from("bad")]),
+        tinv::tinv_builtin(
+            input.clone(),
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from("bad")])
+        ),
         "RunMat:tinv:InvalidArgument"
     );
     rejects_before_owner!(
-        chi2cdf::chi2cdf_builtin(input.clone(), vec![Value::from("bad")]),
+        chi2cdf::chi2cdf_builtin(
+            input.clone(),
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from("bad")])
+        ),
         "RunMat:chi2cdf:InvalidArgument"
     );
     rejects_before_owner!(
-        binocdf::binocdf_builtin(input.clone(), vec![Value::Num(10.0), Value::from("bad")]),
+        binocdf::binocdf_builtin(
+            input.clone(),
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(10.0),
+                Value::from("bad")
+            ])
+        ),
         "RunMat:binocdf:InvalidArgument"
     );
 
@@ -68,7 +92,11 @@ pub(super) fn assert_invalid_calls(input: Value) {
     .unwrap_err();
     assert_eq!(bad_named.identifier(), Some("RunMat:icdf:InvalidArgument"));
 
-    let bad_arity = block_on(wblinv::wblinv_builtin(input, vec![Value::Num(1.0)])).unwrap_err();
+    let bad_arity = block_on(wblinv::wblinv_builtin(
+        input,
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
+    ))
+    .unwrap_err();
     assert_eq!(
         bad_arity.identifier(),
         Some("RunMat:wblinv:InvalidArgument")
@@ -100,7 +128,10 @@ fn distribution_broadcast_indexing_appends_trailing_singletons() {
 fn binomial_chi_square_and_weibull_distribution_values() {
     let binomial = block_on(binocdf::binocdf_builtin(
         Value::Num(55.0),
-        vec![Value::Num(100.0), Value::Num(0.5)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(100.0),
+            Value::Num(0.5),
+        ]),
     ))
     .unwrap();
     match binomial {
@@ -110,7 +141,11 @@ fn binomial_chi_square_and_weibull_distribution_values() {
 
     let upper = block_on(binocdf::binocdf_builtin(
         Value::Num(55.0),
-        vec![Value::Num(100.0), Value::Num(0.5), Value::from("upper")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(100.0),
+            Value::Num(0.5),
+            Value::from("upper"),
+        ]),
     ))
     .unwrap();
     match upper {
@@ -120,7 +155,7 @@ fn binomial_chi_square_and_weibull_distribution_values() {
 
     let chi2 = block_on(chi2cdf::chi2cdf_builtin(
         Value::Num(3.0),
-        vec![Value::Num(5.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(5.0)]),
     ))
     .unwrap();
     match chi2 {
@@ -130,7 +165,10 @@ fn binomial_chi_square_and_weibull_distribution_values() {
 
     let weibull = block_on(wblinv::wblinv_builtin(
         Value::Num(0.5),
-        vec![Value::Num(3.0), Value::Num(4.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(3.0),
+            Value::Num(4.0),
+        ]),
     ))
     .unwrap();
     match weibull {
@@ -144,10 +182,10 @@ fn distribution_helpers_accept_typed_integer_tensors_at_f64_boundary() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let out = block_on(normcdf::normcdf_builtin(
         mirrorless_int_tensor(IntegerStorage::I16(vec![0, 1]), vec![1, 2]),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             mirrorless_int_tensor(IntegerStorage::I16(vec![0]), vec![1, 1]),
             mirrorless_int_tensor(IntegerStorage::U16(vec![1]), vec![1, 1]),
-        ],
+        ]),
     ))
     .unwrap();
     match out {
@@ -161,10 +199,10 @@ fn distribution_helpers_accept_typed_integer_tensors_at_f64_boundary() {
 
     let chi2 = block_on(chi2cdf::chi2cdf_builtin(
         mirrorless_int_tensor(IntegerStorage::U16(vec![3]), vec![1, 1]),
-        vec![mirrorless_int_tensor(
+        crate::builtins::common::test_support::builtin_arguments(vec![mirrorless_int_tensor(
             IntegerStorage::U16(vec![5]),
             vec![1, 1],
-        )],
+        )]),
     ))
     .unwrap();
     match chi2 {
@@ -177,9 +215,9 @@ fn distribution_helpers_accept_typed_integer_tensors_at_f64_boundary() {
 fn distribution_helpers_broadcast_and_return_nan_for_bad_parameters() {
     let out = block_on(chi2cdf::chi2cdf_builtin(
         Value::Num(3.0),
-        vec![Value::Tensor(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(
             Tensor::new(vec![1.0, 2.0, 5.0], vec![1, 3]).unwrap(),
-        )],
+        )]),
     ))
     .unwrap();
     match out {
@@ -192,7 +230,10 @@ fn distribution_helpers_broadcast_and_return_nan_for_bad_parameters() {
 
     let invalid = block_on(wblinv::wblinv_builtin(
         Value::Num(0.5),
-        vec![Value::Num(-1.0), Value::Num(2.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(-1.0),
+            Value::Num(2.0),
+        ]),
     ))
     .unwrap();
     assert!(matches!(invalid, Value::Num(value) if value.is_nan()));

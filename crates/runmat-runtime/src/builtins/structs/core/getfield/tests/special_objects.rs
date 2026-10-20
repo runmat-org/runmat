@@ -39,17 +39,20 @@ fn getfield_exception_fields() {
 #[test]
 fn getfield_exception_stack_cell() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-    let mut ex = MException::new("RunMat:Test".to_string(), "failure".to_string());
-    ex.stack.push("demo.m:5".to_string());
-    ex.stack.push("main.m:1".to_string());
+    let ex = MException::from_owned_fields(
+        "RunMat:Test".into(),
+        "failure".into(),
+        MException::stack_from_unbounded(vec!["demo.m:5".into(), "main.m:1".into()]),
+        None,
+    );
     let stack = run_getfield(Value::MException(ex), vec![Value::from("stack")]).expect("stack");
     let Value::Cell(cell) = stack.value() else {
         panic!("expected cell array");
     };
     assert_eq!(cell.rows, 2);
     assert_eq!(cell.cols, 1);
-    let first = cell.data[0].clone();
-    assert_eq!(first, Value::String("demo.m:5".to_string()));
+    let first = cell.data()[0].clone();
+    assert_eq!(first, Value::String("demo.m:5".to_string().into()));
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -95,7 +98,10 @@ fn getfield_listener_fields_resolved() {
         vec![Value::from("EventName")],
     )
     .expect("event name");
-    assert_eq!(event_name.value(), &Value::String("tick".to_string()));
+    assert_eq!(
+        event_name.value(),
+        &Value::String("tick".to_string().into())
+    );
     let callback =
         run_getfield(Value::Listener(listener), vec![Value::from("Callback")]).expect("callback");
     assert!(matches!(callback.value(), Value::FunctionHandle(_)));

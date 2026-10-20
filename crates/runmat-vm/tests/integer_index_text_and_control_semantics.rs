@@ -48,12 +48,12 @@ fn compiled_inputname_bounds_and_comma_list_propagation_match_the_public_contrac
     )
     .expect("compiled inputname comma-list propagation");
     assert!(values.iter().any(|value| {
-        matches!(value, runmat_value::Value::CharArray(chars) if chars.data.iter().collect::<String>() == "alpha")
+        matches!(value, runmat_value::Value::CharArray(chars) if chars.data().iter().collect::<String>() == "alpha")
     }));
     assert!(
         values
             .iter()
-            .filter(|value| matches!(value, runmat_value::Value::CharArray(chars) if chars.data.is_empty()))
+            .filter(|value| matches!(value, runmat_value::Value::CharArray(chars) if chars.data().is_empty()))
             .count()
             >= 2,
         "indexed and subsequent arguments must be unnamed: {values:?}"

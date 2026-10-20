@@ -9,7 +9,9 @@ mod registry;
 pub use binding::*;
 pub use constant::builtin_constant_value;
 #[doc(hidden)]
-pub use continuation::{admitted_builtin_future, continuation_layout_for};
+pub use continuation::{
+    admitted_builtin_future, admitted_builtin_future_with, continuation_layout_for,
+};
 pub(crate) use control_error::builtin_control_error;
 pub use output::CanonicalBuiltinOutput;
 pub use registry::*;

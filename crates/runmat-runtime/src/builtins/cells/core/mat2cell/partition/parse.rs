@@ -14,7 +14,7 @@ enum Entry {
 
 pub(in crate::builtins::cells::core::mat2cell) fn for_dimensions(
     dims: &[usize],
-    arguments: &[Value],
+    arguments: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<PartitionPlan> {
     let mut extents = dims.to_vec();
     extents.resize(extents.len().max(arguments.len()), 1);

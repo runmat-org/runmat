@@ -122,10 +122,10 @@ async fn execute(
     }
     let provider = crate::builtins::common::gpu_helpers::exact_provider_for_handle(input)
         .ok_or_else(|| unsupported_error(function, "no provider owns the GPU dlarray input"))?;
-    let Some(Value::Cell(layers)) = network.properties.get("Layers") else {
+    let Some(Value::Cell(layers)) = network.properties().get("Layers") else {
         unreachable!("host plan admitted network Layers")
     };
-    let Some(Value::Object(layer)) = layers.data.get(stage.layer_index) else {
+    let Some(Value::Object(layer)) = layers.data().get(stage.layer_index) else {
         return Err(deep_learning_error(
             function,
             "admitted normalization stage no longer matches network Layers",

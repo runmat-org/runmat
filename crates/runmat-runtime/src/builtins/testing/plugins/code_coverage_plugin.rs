@@ -1,13 +1,18 @@
-use runmat_value::{ObjectInstance, Value};
+use runmat_value::Value;
 
 use crate::BuiltinResult;
 
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.plugins.CodeCoveragePlugin.forFolder",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::testing::plugins"
 )]
-fn code_coverage_plugin_for_folder(args: Vec<Value>) -> BuiltinResult<Value> {
+fn code_coverage_plugin_for_folder(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<crate::execution::RootedValue> {
+    let runtime = runtime.as_ref();
     crate::testing::ensure_testing_classes();
     if args.is_empty() {
         return Err(plugin_error(
@@ -39,7 +44,7 @@ fn code_coverage_plugin_for_folder(args: Vec<Value>) -> BuiltinResult<Value> {
         }
         match &args[index] {
             Value::String(folder) if !folder.trim().is_empty() => {
-                folders.push(folder.clone());
+                folders.push(folder.as_str().to_owned());
             }
             Value::CharArray(folder) => {
                 let folder = folder.row_string().ok_or_else(|| {
@@ -53,10 +58,10 @@ fn code_coverage_plugin_for_folder(args: Vec<Value>) -> BuiltinResult<Value> {
             Value::StringArray(array) => {
                 folders.extend(
                     array
-                        .data
+                        .data()
                         .iter()
                         .filter(|folder| !folder.trim().is_empty())
-                        .cloned(),
+                        .map(|folder| folder.as_str().to_owned()),
                 );
             }
             _ => {
@@ -72,20 +77,22 @@ fn code_coverage_plugin_for_folder(args: Vec<Value>) -> BuiltinResult<Value> {
             "CodeCoveragePlugin.forFolder requires at least one folder",
         ));
     }
-    let mut object = ObjectInstance::new(runmat_types::standard::UNIT_TEST_CODE_COVERAGE_PLUGIN);
     let count = folders.len();
-    object.properties.insert(
-        "Folders".into(),
-        Value::StringArray(
-            runmat_value::StringArray::new(folders, vec![1, count])
-                .expect("coverage folders form a row"),
+    let fields = [
+        (
+            "Folders",
+            Value::StringArray(
+                runmat_value::StringArray::new(folders, vec![1, count])
+                    .expect("coverage folders form a row"),
+            ),
         ),
-    );
-    object.properties.insert(
-        "IncludingSubfolders".into(),
-        Value::Bool(including_subfolders),
-    );
-    Ok(Value::Object(object))
+        ("IncludingSubfolders", Value::Bool(including_subfolders)),
+    ];
+    crate::execution::object::construct_object_from_borrowed_fields(
+        runtime,
+        runmat_types::standard::UNIT_TEST_CODE_COVERAGE_PLUGIN.display_name(),
+        fields.iter().map(|(name, value)| (*name, value)),
+    )
 }
 
 #[derive(Clone, Copy)]
@@ -158,22 +165,37 @@ fn unsupported_option_error(name: &str) -> crate::RuntimeError {
 mod tests {
     use super::*;
 
+    fn code_coverage_plugin_for_folder(
+        runtime: Option<crate::context::RuntimeContext>,
+        args: Vec<Value>,
+    ) -> BuiltinResult<crate::execution::RootedValue> {
+        super::code_coverage_plugin_for_folder(
+            runtime,
+            crate::execution::RootedValues::new(args)
+                .map_err(|error| error.into_runtime_error())?
+                .into(),
+        )
+    }
+
     #[test]
     fn coverage_plugin_preserves_folder_policy() {
-        let plugin = code_coverage_plugin_for_folder(vec![
-            Value::String("src".into()),
-            Value::String("IncludingSubfolders".into()),
-            Value::Bool(true),
-        ])
+        let plugin = code_coverage_plugin_for_folder(
+            None,
+            vec![
+                Value::String("src".into()),
+                Value::String("IncludingSubfolders".into()),
+                Value::Bool(true),
+            ],
+        )
         .unwrap();
-        let Value::Object(plugin) = plugin else {
+        let Value::Object(plugin) = plugin.value() else {
             panic!("coverage plugin must be an object");
         };
         assert!(plugin
-            .class_name
+            .class_name()
             .is(runmat_types::standard::UNIT_TEST_CODE_COVERAGE_PLUGIN));
         assert_eq!(
-            plugin.properties.get("IncludingSubfolders"),
+            plugin.properties().get("IncludingSubfolders"),
             Some(&Value::Bool(true))
         );
     }
@@ -181,17 +203,20 @@ mod tests {
     #[test]
     fn character_row_option_name_is_recognized() {
         let option = runmat_value::CharArray::new_row("IncludingSubfolders");
-        let plugin = code_coverage_plugin_for_folder(vec![
-            Value::String("src".into()),
-            Value::CharArray(option),
-            Value::Bool(true),
-        ])
+        let plugin = code_coverage_plugin_for_folder(
+            None,
+            vec![
+                Value::String("src".into()),
+                Value::CharArray(option),
+                Value::Bool(true),
+            ],
+        )
         .unwrap();
-        let Value::Object(plugin) = plugin else {
+        let Value::Object(plugin) = plugin.value() else {
             panic!("coverage plugin must be an object");
         };
         assert_eq!(
-            plugin.properties.get("IncludingSubfolders"),
+            plugin.properties().get("IncludingSubfolders"),
             Some(&Value::Bool(true))
         );
     }
@@ -203,11 +228,14 @@ mod tests {
                 Value::String(name.into()),
                 Value::CharArray(runmat_value::CharArray::new_row(name)),
             ] {
-                let error = code_coverage_plugin_for_folder(vec![
-                    Value::String("src".into()),
-                    value,
-                    Value::String("ignored".into()),
-                ])
+                let error = code_coverage_plugin_for_folder(
+                    None,
+                    vec![
+                        Value::String("src".into()),
+                        value,
+                        Value::String("ignored".into()),
+                    ],
+                )
                 .unwrap_err();
                 assert_eq!(
                     error.identifier(),
@@ -219,32 +247,41 @@ mod tests {
 
     #[test]
     fn dangling_supported_option_is_not_a_folder() {
-        let error = code_coverage_plugin_for_folder(vec![
-            Value::String("src".into()),
-            Value::String("IncludingSubfolders".into()),
-        ])
+        let error = code_coverage_plugin_for_folder(
+            None,
+            vec![
+                Value::String("src".into()),
+                Value::String("IncludingSubfolders".into()),
+            ],
+        )
         .unwrap_err();
         assert_eq!(error.identifier(), Some("RunMat:Testing:InvalidPlugin"));
     }
 
     #[test]
     fn first_folder_may_have_an_option_spelling_and_later_folder_options_still_work() {
-        let plugin = code_coverage_plugin_for_folder(vec![
-            Value::String("Filter".into()),
-            Value::String("src".into()),
-            Value::String("IncludingSubfolders".into()),
-            Value::Bool(true),
-        ])
+        let plugin = code_coverage_plugin_for_folder(
+            None,
+            vec![
+                Value::String("Filter".into()),
+                Value::String("src".into()),
+                Value::String("IncludingSubfolders".into()),
+                Value::Bool(true),
+            ],
+        )
         .unwrap();
-        let Value::Object(plugin) = plugin else {
+        let Value::Object(plugin) = plugin.value() else {
             panic!("coverage plugin must be an object");
         };
-        let Some(Value::StringArray(folders)) = plugin.properties.get("Folders") else {
+        let Some(Value::StringArray(folders)) = plugin.properties().get("Folders") else {
             panic!("folder array must be retained");
         };
-        assert_eq!(folders.data, vec!["Filter".to_string(), "src".to_string()]);
         assert_eq!(
-            plugin.properties.get("IncludingSubfolders"),
+            folders.data(),
+            vec!["Filter".to_string(), "src".to_string()]
+        );
+        assert_eq!(
+            plugin.properties().get("IncludingSubfolders"),
             Some(&Value::Bool(true))
         );
     }

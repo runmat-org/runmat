@@ -3,17 +3,30 @@ use runmat_value::{IntValue, NumericScalar, Value};
 use super::error;
 
 pub(super) fn parse(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
+    let mut dimensions = Vec::new();
+    visit(value, |dimension| {
+        dimensions.push(dimension);
+        Ok(())
+    })?;
+    Ok(dimensions)
+}
+
+pub(super) fn visit(
+    value: &Value,
+    mut accept: impl FnMut(usize) -> crate::BuiltinResult<()>,
+) -> crate::BuiltinResult<()> {
     match value {
-        Value::Num(value) => Ok(vec![floating(*value)?]),
-        Value::Int(value) => Ok(vec![integer(value)?]),
-        Value::Tensor(tensor) if is_vector(tensor.shape()) => (0..tensor.len())
-            .map(|index| {
-                tensor
+        Value::Num(value) => accept(floating(*value)?),
+        Value::Int(value) => accept(integer(value)?),
+        Value::Tensor(tensor) if is_vector(tensor.shape()) => {
+            for index in 0..tensor.len() {
+                let value = tensor
                     .numeric_value_at(index)
-                    .ok_or_else(|| error::invalid_input("dimension storage is inconsistent"))
-                    .and_then(numeric)
-            })
-            .collect(),
+                    .ok_or_else(|| error::invalid_input("dimension storage is inconsistent"))?;
+                accept(numeric(value)?)?;
+            }
+            Ok(())
+        }
         Value::Tensor(_) => Err(error::invalid_input(
             "dimensions must be a positive integer scalar or vector",
         )),

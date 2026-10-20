@@ -24,6 +24,6 @@ async fn function_file_excludes_primary_from_localfunctions() {
         panic!("expected one local-functions cell result: {output:?}");
     };
     assert_eq!(handles.shape, vec![1, 1]);
-    assert!(matches!(&handles.data[0],
+    assert!(matches!(&handles.data()[0],
         Value::BoundFunctionHandle(handle) if handle.name == "child_local"));
 }

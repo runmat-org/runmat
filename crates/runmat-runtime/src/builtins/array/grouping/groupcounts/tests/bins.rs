@@ -19,7 +19,7 @@ fn numeric_edges_include_empty_bins() {
     assert!(
         matches!(&outputs[0], Value::Tensor(value) if value.materialize_f64() == [1.0, 0.0, 1.0])
     );
-    assert!(matches!(&outputs[1], Value::StringArray(value) if value.data.len() == 3));
+    assert!(matches!(&outputs[1], Value::StringArray(value) if value.data().len() == 3));
 }
 
 #[test]
@@ -51,6 +51,6 @@ fn included_edge_uses_exact_wide_integer_boundaries() {
         let Value::StringArray(labels) = &outputs[1] else {
             panic!("expected interval labels");
         };
-        assert!(labels.data[0].contains(&(base + expected_label as u64).to_string()));
+        assert!(labels.data()[0].contains(&(base + expected_label as u64).to_string()));
     }
 }

@@ -10,9 +10,12 @@ fn fitclinear_header_keeps_typed_options_and_ignored_payload_policy() {
         Value::from("BatchLimit"),
         Value::Num(20.0),
     ];
-    let header = HeaderInspection::inspect(&first, &values)
-        .validate(values.len())
-        .unwrap();
+    let header = HeaderInspection::inspect(
+        &first,
+        crate::call::FunctionArgumentView::from_slice(&values),
+    )
+    .validate(values.len())
+    .unwrap();
     assert_eq!(header.option_start, 1);
     assert_eq!(
         header.options[0].name.identity,
@@ -25,9 +28,12 @@ fn fitclinear_header_keeps_typed_options_and_ignored_payload_policy() {
     assert!(header.options[1].name.identity.ignored());
 
     let invalid = vec![Value::Num(0.0), Value::from("Cost"), Value::Num(1.0)];
-    assert!(HeaderInspection::inspect(&first, &invalid)
-        .validate(invalid.len())
-        .is_err());
+    assert!(HeaderInspection::inspect(
+        &first,
+        crate::call::FunctionArgumentView::from_slice(&invalid)
+    )
+    .validate(invalid.len())
+    .is_err());
 }
 
 #[test]
@@ -46,11 +52,14 @@ fn typed_fitclinear_actions_preserve_ignored_payload_and_response_orientation() 
         Value::from("BatchLimit"),
         Value::from("uninspected payload"),
     ];
-    let prepared = HeaderInspection::inspect(&first, &values)
-        .validate(values.len())
-        .unwrap()
-        .preflight_values(&values)
-        .unwrap();
+    let prepared = HeaderInspection::inspect(
+        &first,
+        crate::call::FunctionArgumentView::from_slice(&values),
+    )
+    .validate(values.len())
+    .unwrap()
+    .preflight_values(crate::call::FunctionArgumentView::from_slice(&values))
+    .unwrap();
     assert!(matches!(
         prepared.options[0].predecoded.as_ref(),
         Some(FitclinearAction::ObservationsIn(ObservationsIn::Columns))
@@ -59,34 +68,49 @@ fn typed_fitclinear_actions_preserve_ignored_payload_and_response_orientation() 
         prepared.options[1].predecoded.as_ref(),
         Some(FitclinearAction::Ignored)
     ));
-    preflight_response_shape(&first, &values, &prepared).unwrap();
+    preflight_response_shape(
+        &first,
+        crate::call::FunctionArgumentView::from_slice(&values),
+        &prepared,
+    )
+    .unwrap();
     let wrong_y = vec![
         tensor(vec![0.0, 1.0], vec![2, 1]),
         values[1].clone(),
         values[2].clone(),
     ];
-    let wrong = HeaderInspection::inspect(&first, &wrong_y)
-        .validate(wrong_y.len())
-        .unwrap()
-        .preflight_values(&wrong_y)
-        .unwrap();
-    assert!(preflight_response_shape(&first, &wrong_y, &wrong)
-        .expect_err("known response mismatch")
-        .message()
-        .contains("length(Y)"));
+    let wrong = HeaderInspection::inspect(
+        &first,
+        crate::call::FunctionArgumentView::from_slice(&wrong_y),
+    )
+    .validate(wrong_y.len())
+    .unwrap()
+    .preflight_values(crate::call::FunctionArgumentView::from_slice(&wrong_y))
+    .unwrap();
+    assert!(preflight_response_shape(
+        &first,
+        crate::call::FunctionArgumentView::from_slice(&wrong_y),
+        &wrong
+    )
+    .expect_err("known response mismatch")
+    .message()
+    .contains("length(Y)"));
     let invalid = vec![
         values[0].clone(),
         Value::from("ObservationsIn"),
         Value::from("sideways"),
     ];
-    assert!(HeaderInspection::inspect(&first, &invalid)
-        .validate(invalid.len())
-        .unwrap()
-        .preflight_values(&invalid)
-        .err()
-        .expect("invalid orientation")
-        .message()
-        .contains("ObservationsIn"));
+    assert!(HeaderInspection::inspect(
+        &first,
+        crate::call::FunctionArgumentView::from_slice(&invalid)
+    )
+    .validate(invalid.len())
+    .unwrap()
+    .preflight_values(crate::call::FunctionArgumentView::from_slice(&invalid))
+    .err()
+    .expect("invalid orientation")
+    .message()
+    .contains("ObservationsIn"));
 }
 
 #[test]
@@ -122,12 +146,13 @@ fn scalar_option_parsers_read_all_integer_storage_variants() {
 #[tokio::test]
 async fn fitclinear_svm_predicts_binary_numeric_labels() {
     let model = fitclinear_builtin(
+        None,
         tensor(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             tensor(vec![0.0, 0.0, 1.0, 1.0], vec![4, 1]),
             Value::String("Lambda".into()),
             Value::Num(0.0),
-        ],
+        ]),
     )
     .await
     .unwrap();
@@ -137,7 +162,7 @@ async fn fitclinear_svm_predicts_binary_numeric_labels() {
             _ => panic!("expected object"),
         },
         tensor(vec![0.2, 2.8], vec![2, 1]),
-        Vec::new(),
+        crate::call::FunctionArgumentView::from_slice(&[]),
     )
     .unwrap();
     match &outputs[0] {
@@ -154,8 +179,9 @@ async fn fitclinear_svm_predicts_binary_numeric_labels() {
 async fn fitclinear_and_predict_read_typed_integer_storage_exactly() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     let model = fitclinear_builtin(
+        None,
         poisoned_int_tensor(IntegerStorage::I16(vec![0, 1, 2, 3]), vec![4, 1]),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             poisoned_int_tensor(IntegerStorage::U8(vec![0, 0, 1, 1]), vec![4, 1]),
             Value::String("Lambda".into()),
             Value::Num(0.0),
@@ -165,7 +191,7 @@ async fn fitclinear_and_predict_read_typed_integer_storage_exactly() {
             poisoned_int_tensor(IntegerStorage::U16(vec![25]), vec![1, 1]),
             Value::String("Bias".into()),
             poisoned_int_tensor(IntegerStorage::I16(vec![0]), vec![1, 1]),
-        ],
+        ]),
     )
     .await
     .unwrap();
@@ -175,7 +201,7 @@ async fn fitclinear_and_predict_read_typed_integer_storage_exactly() {
             _ => panic!("expected object"),
         },
         poisoned_int_tensor(IntegerStorage::I16(vec![0, 3]), vec![2, 1]),
-        Vec::new(),
+        crate::call::FunctionArgumentView::from_slice(&[]),
     )
     .unwrap();
     match &outputs[0] {

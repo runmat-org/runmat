@@ -1,5 +1,7 @@
 //! Borrowed parameter enumeration and cross-network topology admission.
 use super::*;
+#[cfg(test)]
+use crate::builtins::deep_learning::arguments::DeepLearningObjectEdit as _;
 use runmat_builtins::DeepLearningLayerKind;
 use std::collections::HashSet;
 
@@ -19,7 +21,7 @@ fn push_parameter<'a>(
     expected_shape: ParameterShape,
     function: &'static str,
 ) -> BuiltinResult<()> {
-    let value = layer.properties.get(role.name());
+    let value = layer.properties().get(role.name());
     if let Some(value) = value {
         validate_parameter(value, &expected_shape, role, function)?;
     }
@@ -41,7 +43,7 @@ fn width_option(
     channels: Option<usize>,
     function: &'static str,
 ) -> BuiltinResult<Option<usize>> {
-    match layer.properties.get(property) {
+    match layer.properties().get(property) {
         None => Ok(channels),
         Some(Value::String(value)) if value.eq_ignore_ascii_case("auto") => Ok(channels),
         Some(value) => {
@@ -58,19 +60,19 @@ fn width_option(
 }
 
 fn layer_metadata_matches(left: &ObjectInstance, right: &ObjectInstance) -> bool {
-    let metadata = |(name, _): &(&String, &Value)| ParameterRole::parse(name.as_str()).is_none();
-    left.class_name == right.class_name
-        && left.properties.iter().filter(metadata).count()
-            == right.properties.iter().filter(metadata).count()
+    let metadata = |(name, _): &(&str, &Value)| ParameterRole::parse(name).is_none();
+    left.class_name() == right.class_name()
+        && left.properties().iter().filter(metadata).count()
+            == right.properties().iter().filter(metadata).count()
         && left
-            .properties
+            .properties()
             .iter()
             .filter(metadata)
-            .all(|(name, value)| right.properties.get(name) == Some(value))
+            .all(|(name, value)| right.properties().get(name) == Some(value))
 }
 
 fn layers<'a>(network: &'a ObjectInstance, function: &'static str) -> BuiltinResult<&'a [Value]> {
-    let stored = network.properties.get("Layers").ok_or_else(|| {
+    let stored = network.properties().get("Layers").ok_or_else(|| {
         deep_learning_error(function, format!("{function}: network is missing Layers"))
     })?;
     let Value::Cell(cell) = stored else {
@@ -79,13 +81,13 @@ fn layers<'a>(network: &'a ObjectInstance, function: &'static str) -> BuiltinRes
             format!("{function}: Layers must be a cell array"),
         ));
     };
-    if cell.shape != [cell.data.len(), 1] {
+    if cell.shape != [cell.data().len(), 1] {
         return Err(deep_learning_error(
             function,
             format!("{function}: Layers must be a column cell array"),
         ));
     }
-    Ok(&cell.data)
+    Ok(cell.data())
 }
 
 /// Borrow the parameters consumed by supported sequential execution without
@@ -125,18 +127,18 @@ pub(in crate::builtins::deep_learning) fn view_layers<'a>(
         let Value::Object(layer) = layer else {
             unreachable!("validated layers")
         };
-        match DeepLearningLayerKind::from_identity(&layer.class_name) {
+        match DeepLearningLayerKind::from_identity(layer.class_name()) {
             Some(DeepLearningLayerKind::FeatureInput | DeepLearningLayerKind::SequenceInput) => {
                 // A vector InputSize can be stored by deferred construction;
                 // it does not give one flattened execution width here.
-                let input_size = layer.properties.get("InputSize").ok_or_else(|| {
+                let input_size = layer.properties().get("InputSize").ok_or_else(|| {
                     deep_learning_error(
                         function,
                         format!("{function}: featureInputLayer is missing InputSize"),
                     )
                 })?;
                 let dimensions = numeric_vector(input_size, function, "InputSize")?;
-                input_geometry = match DeepLearningLayerKind::from_identity(&layer.class_name) {
+                input_geometry = match DeepLearningLayerKind::from_identity(layer.class_name()) {
                     Some(DeepLearningLayerKind::FeatureInput) => Some(InputGeometry::Feature),
                     _ if dimensions.len() == 1 => Some(InputGeometry::VectorSequence),
                     _ => Some(InputGeometry::SpatialSequence),
@@ -201,7 +203,7 @@ pub(in crate::builtins::deep_learning) fn view_layers<'a>(
                 channels = width_option(layer, "InputSize", channels, function)?;
                 let units = positive_property_usize(layer, "NumHiddenUnits", function)?;
                 let bidirectional = matches!(
-                    DeepLearningLayerKind::from_identity(&layer.class_name),
+                    DeepLearningLayerKind::from_identity(layer.class_name()),
                     Some(DeepLearningLayerKind::Bilstm)
                 );
                 let gates = units
@@ -270,7 +272,10 @@ pub(in crate::builtins::deep_learning) fn view_layers<'a>(
             None => {
                 return Err(deep_learning_error(
                     function,
-                    format!("{function}: unsupported layer class '{}'", layer.class_name),
+                    format!(
+                        "{function}: unsupported layer class '{}'",
+                        layer.class_name()
+                    ),
                 ));
             }
         }
@@ -288,7 +293,7 @@ pub(in crate::builtins) fn validate_matching_networks(
     let expected = view(first, function)?;
     let first_layers = layers(first, function)?;
     for network in networks.iter().skip(1) {
-        if network.class_name != first.class_name {
+        if network.class_name() != first.class_name() {
             return Err(deep_learning_error(
                 function,
                 format!("{function}: network classes differ"),
@@ -331,25 +336,34 @@ mod tests {
     #[test]
     fn metadata_comparison_uses_keys_and_values_not_hash_map_iteration_order() {
         let mut left = ObjectInstance::new(DeepLearningLayerKind::FullyConnected.class().owned());
-        left.properties
-            .insert("Name".into(), Value::String("dense".into()));
-        left.properties
-            .insert("Description".into(), Value::String("projection".into()));
-        left.properties.insert("OutputSize".into(), Value::Num(2.0));
-        left.properties.insert("InputSize".into(), Value::Num(3.0));
-        left.properties.insert("Weights".into(), Value::Num(1.0));
+        left.replace_dl_property("Name", Value::String("dense".into()))
+            .expect("fixture property");
+        left.replace_dl_property("Description", Value::String("projection".into()))
+            .expect("fixture property");
+        left.replace_dl_property("OutputSize", Value::Num(2.0))
+            .expect("fixture property");
+        left.replace_dl_property("InputSize", Value::Num(3.0))
+            .expect("fixture property");
+        left.replace_dl_property("Weights", Value::Num(1.0))
+            .expect("fixture property");
         for _ in 0..32 {
-            let mut right = ObjectInstance::new(left.class_name.clone());
-            for (name, value) in left.properties.iter() {
-                right.properties.insert(name.clone(), value.clone());
+            let mut right = ObjectInstance::new(left.class_name().clone());
+            for (name, value) in left.properties().iter() {
+                right
+                    .replace_dl_property(name, value.clone())
+                    .expect("fixture property");
             }
-            right.properties.insert("Weights".into(), Value::Num(9.0));
+            right
+                .replace_dl_property("Weights", Value::Num(9.0))
+                .expect("fixture property");
             assert!(layer_metadata_matches(&left, &right));
             right
-                .properties
-                .insert("OutputSize".into(), Value::Num(4.0));
+                .replace_dl_property("OutputSize", Value::Num(4.0))
+                .expect("fixture property");
             assert!(!layer_metadata_matches(&left, &right));
-            right.properties.remove("OutputSize");
+            right
+                .remove_dl_property("OutputSize")
+                .expect("fixture removal");
             assert!(!layer_metadata_matches(&left, &right));
         }
     }

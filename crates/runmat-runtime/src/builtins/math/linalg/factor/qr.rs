@@ -140,7 +140,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::factor::qr"
 )]
-async fn qr_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn qr_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     let count = crate::output_count::current_output_count();
     let request = match count {
         None | Some(0 | 1) => QrOutputRequest::R,
@@ -148,7 +151,7 @@ async fn qr_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Valu
         Some(3) => QrOutputRequest::Qrp,
         Some(_) => return Err(qr_error(&QR_ERROR_INVALID_ARGUMENT)),
     };
-    let eval = evaluate_requested(value, &rest, request).await?;
+    let eval = evaluate_requested(value, rest.view(), request).await?;
     match count {
         None => Ok(eval.r()),
         Some(0) => Ok(Value::output_list(Vec::new())),
@@ -266,14 +269,17 @@ pub enum QrMode {
 }
 
 /// Evaluate the builtin with full access to multiple outputs.
-pub async fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<QrEval> {
+pub async fn evaluate(
+    value: Value,
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<QrEval> {
     evaluate_requested(value, args, QrOutputRequest::FullEnvelope).await
 }
 
 /// Evaluate exactly the requested public QR outputs.
 pub async fn evaluate_requested(
     value: Value,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     request: QrOutputRequest,
 ) -> BuiltinResult<QrEval> {
     admit_qr_extensions(&value, args)?;
@@ -316,11 +322,14 @@ pub async fn evaluate_provider(
     } else {
         QrMode::Full
     };
-    admit_qr_extensions(&value, &[])?;
+    admit_qr_extensions(&value, crate::call::FunctionArgumentView::from_slice(&[]))?;
     evaluate_with_options(value, QrOptions { mode, format }, request).await
 }
 
-fn admit_qr_extensions(value: &Value, args: &[Value]) -> BuiltinResult<()> {
+fn admit_qr_extensions(
+    value: &Value,
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     if crate::builtins::common::validation::value_has_native_integer_class(value) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &QR_INTEGER_INPUT_EXTENSION,
@@ -500,7 +509,7 @@ fn qr_output_dtype(value: &Value) -> NumericDType {
     }
 }
 
-async fn parse_options(args: &[Value]) -> BuiltinResult<QrOptions> {
+async fn parse_options(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<QrOptions> {
     if args.len() > 2 {
         return Err(qr_invalid_argument("qr: too many option arguments"));
     }
@@ -1648,11 +1657,16 @@ pub(crate) mod tests {
     }
 
     fn qr_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::qr_builtin(value, rest))
+        let rest = crate::execution::RootedValues::new(rest)
+            .map_err(|error| error.into_runtime_error())?;
+        block_on(super::qr_builtin(value, rest.into()))
     }
 
     fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<QrEval> {
-        block_on(super::evaluate(value, args))
+        block_on(super::evaluate(
+            value,
+            crate::call::FunctionArgumentView::from_slice(args),
+        ))
     }
 
     fn evaluate_requested(
@@ -1660,6 +1674,10 @@ pub(crate) mod tests {
         args: &[Value],
         request: QrOutputRequest,
     ) -> BuiltinResult<QrEval> {
-        block_on(super::evaluate_requested(value, args, request))
+        block_on(super::evaluate_requested(
+            value,
+            crate::call::FunctionArgumentView::from_slice(args),
+            request,
+        ))
     }
 }

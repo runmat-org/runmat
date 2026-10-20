@@ -55,12 +55,18 @@ impl Class {
 fn host_result(kind: ExtremaKind, left: Value, right: Value) -> BuiltinResult<Value> {
     futures::executor::block_on(async {
         match kind {
-            ExtremaKind::Min => crate::builtins::math::reduction::min::evaluate(left, &[right])
-                .await
-                .map(|x| x.into_value()),
-            ExtremaKind::Max => crate::builtins::math::reduction::max::evaluate(left, &[right])
-                .await
-                .map(|x| x.into_value()),
+            ExtremaKind::Min => crate::builtins::math::reduction::min::evaluate(
+                left,
+                crate::call::FunctionArgumentView::from_slice(&[right]),
+            )
+            .await
+            .map(|x| x.into_value()),
+            ExtremaKind::Max => crate::builtins::math::reduction::max::evaluate(
+                left,
+                crate::call::FunctionArgumentView::from_slice(&[right]),
+            )
+            .await
+            .map(|x| x.into_value()),
         }
     })
 }

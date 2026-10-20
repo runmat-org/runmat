@@ -1,4 +1,6 @@
 //! MATLAB-compatible `upper` builtin with GPU-aware semantics for RunMat.
+use crate::context::host_allocation::HostAllocationError;
+use crate::context::RuntimeContext;
 use runmat_builtins::{
     BuiltinErrorDescriptor, UPPER_ERROR_CELL_ELEMENT, UPPER_ERROR_INTERNAL,
     UPPER_ERROR_INVALID_INPUT, UPPER_STRING_CELL_EXTENSION,
@@ -12,7 +14,8 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{
-    cell_has_valid_string_scalar, char_row_to_string_slice, uppercase_preserving_missing,
+    cell_has_valid_string_scalar, char_row_to_string_slice, transform_scalar_case,
+    transform_string_array_case, TextCase,
 };
 #[cfg(test)]
 use crate::builtins::strings::type_resolvers::text_preserve_type;
@@ -69,10 +72,11 @@ fn upper_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
 
 #[runtime_builtin(
     name = "upper",
+    context = true,
     binding_variant = "default",
     builtin_path = "crate::builtins::strings::transform::upper"
 )]
-async fn upper_builtin(value: Value) -> BuiltinResult<Value> {
+async fn upper_builtin(runtime: Option<RuntimeContext>, value: Value) -> BuiltinResult<Value> {
     if crate::dispatcher::value_contains_gpu(&value) {
         return Err(upper_error(&UPPER_ERROR_INVALID_INPUT));
     }
@@ -84,41 +88,44 @@ async fn upper_builtin(value: Value) -> BuiltinResult<Value> {
     }
     let gathered = gather_if_needed_async(&value).await.map_err(map_flow)?;
     match gathered {
-        Value::String(text) => Ok(Value::String(uppercase_preserving_missing(text))),
-        Value::StringArray(array) => upper_string_array(array),
+        Value::String(text) => {
+            transform_scalar_case(runtime.as_ref(), text, TextCase::Upper, upper_admission)
+                .map(Value::String)
+        }
+        Value::StringArray(array) => upper_string_array(runtime.as_ref(), array),
         Value::CharArray(array) => upper_char_array(array),
-        Value::Cell(cell) => upper_cell_array(cell),
+        Value::Cell(cell) => upper_cell_array(runtime.as_ref(), cell),
         _ => Err(upper_error(&UPPER_ERROR_INVALID_INPUT)),
     }
 }
 
-fn upper_string_array(array: StringArray) -> BuiltinResult<Value> {
-    let StringArray { data, shape, .. } = array;
-    let uppered = data
-        .into_iter()
-        .map(uppercase_preserving_missing)
-        .collect::<Vec<_>>();
-    let upper_array = StringArray::new(uppered, shape).map_err(|e| {
-        upper_error_with_message(format!("{BUILTIN_NAME}: {e}"), &UPPER_ERROR_INTERNAL)
-    })?;
-    Ok(Value::StringArray(upper_array))
+fn upper_string_array(
+    runtime: Option<&RuntimeContext>,
+    array: StringArray,
+) -> BuiltinResult<Value> {
+    transform_string_array_case(runtime, array, TextCase::Upper, upper_admission, |detail| {
+        upper_error_with_message(format!("{BUILTIN_NAME}: {detail}"), &UPPER_ERROR_INTERNAL)
+    })
+    .map(Value::StringArray)
+}
+
+fn upper_admission(runtime: &RuntimeContext, cause: HostAllocationError) -> RuntimeError {
+    build_runtime_error(format!("upper: host allocation: {cause}"))
+        .with_builtin(BUILTIN_NAME)
+        .with_identifier(format!(
+            "{}:{}",
+            runtime.error_namespace(),
+            cause.runtime_identifier_suffix()
+        ))
+        .with_source(cause)
+        .build()
 }
 
 fn upper_char_array(array: CharArray) -> BuiltinResult<Value> {
-    let CharArray {
-        data,
-        shape,
-        rows,
-        cols,
-    } = array;
-    if rows == 0 || cols == 0 {
-        return Ok(Value::CharArray(CharArray {
-            data,
-            shape,
-            rows,
-            cols,
-        }));
+    if array.rows == 0 || array.cols == 0 {
+        return Ok(Value::CharArray(array));
     }
+    let (data, _, rows, cols) = array.into_parts();
 
     let mut upper_rows = Vec::with_capacity(rows);
     let mut target_cols = cols;
@@ -145,15 +152,13 @@ fn upper_char_array(array: CharArray) -> BuiltinResult<Value> {
         })
 }
 
-fn upper_cell_array(cell: CellArray) -> BuiltinResult<Value> {
-    let CellArray {
-        data, rows, cols, ..
-    } = cell;
+fn upper_cell_array(runtime: Option<&RuntimeContext>, cell: CellArray) -> BuiltinResult<Value> {
+    let (data, _, rows, cols) = cell.into_parts();
     let mut upper_values = Vec::with_capacity(rows * cols);
     for row in 0..rows {
         for col in 0..cols {
             let idx = row * cols + col;
-            let upper = upper_cell_element(&data[idx])?;
+            let upper = upper_cell_element(runtime, &data[idx])?;
             upper_values.push(upper);
         }
     }
@@ -162,12 +167,19 @@ fn upper_cell_array(cell: CellArray) -> BuiltinResult<Value> {
     })
 }
 
-fn upper_cell_element(value: &Value) -> BuiltinResult<Value> {
+fn upper_cell_element(runtime: Option<&RuntimeContext>, value: &Value) -> BuiltinResult<Value> {
     match value {
-        Value::String(text) => Ok(Value::String(uppercase_preserving_missing(text.clone()))),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(Value::String(
-            uppercase_preserving_missing(sa.data[0].clone()),
-        )),
+        Value::String(text) => {
+            transform_scalar_case(runtime, text.clone(), TextCase::Upper, upper_admission)
+                .map(Value::String)
+        }
+        Value::StringArray(sa) if sa.data().len() == 1 => transform_scalar_case(
+            runtime,
+            sa.data()[0].clone(),
+            TextCase::Upper,
+            upper_admission,
+        )
+        .map(Value::String),
         Value::CharArray(ca) if ca.rows <= 1 => upper_char_array(ca.clone()),
         Value::CharArray(_) => Err(upper_error(&UPPER_ERROR_CELL_ELEMENT)),
         _ => Err(upper_error(&UPPER_ERROR_CELL_ELEMENT)),
@@ -180,7 +192,7 @@ pub(crate) mod tests {
     use runmat_builtins::{ResolveContext, Type};
 
     fn run_upper(value: Value) -> BuiltinResult<Value> {
-        futures::executor::block_on(upper_builtin(value))
+        futures::executor::block_on(upper_builtin(None, value))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -208,13 +220,11 @@ pub(crate) mod tests {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![2, 2]);
                 assert_eq!(
-                    sa.data,
-                    vec![
-                        String::from("GPU"),
-                        String::from("ACCEL"),
-                        String::from("<missing>"),
-                        String::from("MIXED")
-                    ]
+                    sa.data()
+                        .iter()
+                        .map(|text| text.as_str())
+                        .collect::<Vec<_>>(),
+                    vec!["GPU", "ACCEL", "<missing>", "MIXED"]
                 );
             }
             other => panic!("expected string array, got {other:?}"),
@@ -231,7 +241,7 @@ pub(crate) mod tests {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 2);
                 assert_eq!(ca.cols, 3);
-                assert_eq!(ca.data, vec!['C', 'A', 'T', 'D', 'O', 'G']);
+                assert_eq!(ca.data(), vec!['C', 'A', 'T', 'D', 'O', 'G']);
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -247,7 +257,7 @@ pub(crate) mod tests {
                 assert_eq!(ca.rows, 1);
                 assert_eq!(ca.cols, 6);
                 let expected: Vec<char> = "HELLO ".chars().collect();
-                assert_eq!(ca.data, expected);
+                assert_eq!(ca.data(), expected);
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -265,7 +275,7 @@ pub(crate) mod tests {
                 assert_eq!(ca.rows, 1);
                 assert_eq!(ca.cols, 3);
                 let expected: Vec<char> = vec!['S', 'S', 'A'];
-                assert_eq!(ca.data, expected);
+                assert_eq!(ca.data(), expected);
             }
             other => panic!("expected char array, got {other:?}"),
         }

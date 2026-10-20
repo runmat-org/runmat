@@ -21,13 +21,13 @@ const BUILTIN_NAME: &str = "syms";
     binding_variant = "default",
     builtin_path = "crate::builtins::math::symbolic::syms"
 )]
-async fn syms_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn syms_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &SYMS_DESCRIPTOR,
         &SYMS_ERROR_TOO_MANY_OUTPUTS,
         "syms",
     )?;
-    let declarations = declared_symbols(&args)?;
+    let declarations = declared_symbols(args.view())?;
     if declarations.is_empty() {
         return Err(syms_error(&SYMS_ERRORS[0]));
     }
@@ -46,7 +46,9 @@ async fn syms_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     Ok(empty_return_value())
 }
 
-fn declared_symbols(args: &[Value]) -> BuiltinResult<Vec<SymbolicDeclaration>> {
+fn declared_symbols(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Vec<SymbolicDeclaration>> {
     let mut declarations = Vec::new();
     for arg in args {
         if matches!(arg, Value::CharArray(chars) if chars.shape.iter().skip(2).any(|dimension| *dimension != 1))
@@ -113,7 +115,15 @@ fn syms_error_with_message(
 }
 
 #[cfg(test)]
+pub(crate) async fn syms_builtin_source(args: Vec<Value>) -> BuiltinResult<Value> {
+    syms_builtin(crate::call::BuiltinArguments::from_borrowed(&args, None)?).await
+}
+
+#[cfg(test)]
 mod tests {
+    fn declared_symbols(args: &[Value]) -> BuiltinResult<Vec<SymbolicDeclaration>> {
+        super::declared_symbols(crate::call::FunctionArgumentView::from_slice(args))
+    }
     use super::*;
     use futures::executor::block_on;
     use runmat_thread_local::runmat_thread_local;
@@ -178,12 +188,15 @@ mod tests {
     #[test]
     fn validation_and_output_arity_fail_before_any_workspace_write() {
         let _workspace = test_workspace_guard();
-        let error =
-            block_on(syms_builtin(vec![Value::from("x"), Value::from("_bad")])).unwrap_err();
+        let error = block_on(syms_builtin_source(vec![
+            Value::from("x"),
+            Value::from("_bad"),
+        ]))
+        .unwrap_err();
         assert_eq!(error.identifier(), SYMS_ERRORS[1].identifier);
         assert!(crate::workspace::lookup("x").is_none());
         let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
-        let error = block_on(syms_builtin(vec![Value::from("x")])).unwrap_err();
+        let error = block_on(syms_builtin_source(vec![Value::from("x")])).unwrap_err();
         assert_eq!(error.identifier(), SYMS_ERROR_TOO_MANY_OUTPUTS.identifier);
         assert!(crate::workspace::lookup("x").is_none());
     }
@@ -202,7 +215,7 @@ mod tests {
         let handle = allocation.handle;
         assert!(crate::builtins::common::gpu_helpers::exact_provider_for_handle(&handle).is_none());
         runmat_accelerate_api::mark_residency(&handle);
-        let error = block_on(syms_builtin(vec![
+        let error = block_on(syms_builtin_source(vec![
             Value::from("x"),
             Value::GpuTensor(handle.clone()),
         ]))
@@ -219,7 +232,7 @@ mod tests {
     fn zero_outputs_still_declares_and_placeholder_is_empty_double() {
         let _workspace = test_workspace_guard();
         let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
-        let value = block_on(syms_builtin(vec![Value::from("x h")])).unwrap();
+        let value = block_on(syms_builtin_source(vec![Value::from("x h")])).unwrap();
         assert_eq!(crate::workspace::lookup("x").unwrap().to_string(), "x");
         assert_eq!(crate::workspace::lookup("h").unwrap().to_string(), "h");
         let Value::Tensor(tensor) = value else {
@@ -242,7 +255,7 @@ mod tests {
     fn assigns_symbolic_function_declaration_to_workspace() {
         let _guard = test_workspace_guard();
 
-        block_on(syms_builtin(vec![Value::from("Y(X)")])).expect("syms");
+        block_on(syms_builtin_source(vec![Value::from("Y(X)")])).expect("syms");
 
         assert_eq!(crate::workspace::lookup("X").unwrap().to_string(), "X");
         assert_eq!(crate::workspace::lookup("Y").unwrap().to_string(), "Y(X)");

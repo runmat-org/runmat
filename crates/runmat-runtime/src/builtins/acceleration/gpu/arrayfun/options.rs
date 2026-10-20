@@ -11,20 +11,23 @@ use super::BUILTIN_NAME;
 
 pub(super) struct Invocation {
     pub callable: Callable,
-    pub inputs: Vec<Value>,
+    pub inputs: crate::call::BuiltinArguments,
     pub uniform_output: bool,
     pub error_handler: Option<Callable>,
 }
 
 impl Invocation {
-    pub fn parse(function: Value, mut inputs: Vec<Value>) -> BuiltinResult<Self> {
+    pub fn parse(
+        function: Value,
+        mut inputs: crate::call::BuiltinArguments,
+    ) -> BuiltinResult<Self> {
         ensure_text_callable_policy(&function)?;
         let callable = Callable::from_function(function)?;
         let mut uniform_output = true;
         let mut uniform_output_explicit = false;
         let mut error_handler = None;
 
-        while let Some(option) = trailing_option(&inputs) {
+        while let Some(option) = trailing_option(inputs.view()) {
             let value = inputs.pop().ok_or_else(|| {
                 arrayfun_flow("arrayfun: option name requires a corresponding value")
             })?;
@@ -72,7 +75,7 @@ enum OptionName {
     Unknown(String),
 }
 
-fn trailing_option(values: &[Value]) -> Option<OptionName> {
+fn trailing_option(values: crate::call::FunctionArgumentView<'_>) -> Option<OptionName> {
     let candidate = values.len().checked_sub(2)?;
     let name = extract_string(values.get(candidate)?)?;
     Some(match name.trim().to_ascii_lowercase().as_str() {
@@ -119,9 +122,9 @@ pub(super) fn parse_uniform_output(value: Value) -> BuiltinResult<bool> {
 
 pub(super) fn extract_string(value: &Value) -> Option<String> {
     match value {
-        Value::String(s) => Some(s.clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
+        Value::String(s) => Some(s.as_str().to_owned()),
+        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data().iter().collect()),
+        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].as_str().to_owned()),
         _ => None,
     }
 }

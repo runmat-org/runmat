@@ -546,6 +546,11 @@ mod tests {
         )
         .unwrap();
 
+        assert_eq!(
+            object.reference.schema_version,
+            VALUE_PAYLOAD_SCHEMA_VERSION
+        );
+        object.validate().unwrap();
         assert_ne!(
             Digest::sha256(&object.bytes),
             object.reference.logical_digest
@@ -557,6 +562,11 @@ mod tests {
                 encryption_context: Digest::sha256(b"other-value-encryption"),
             })
             .unwrap();
+        assert_eq!(
+            rebound.reference.schema_version,
+            VALUE_PAYLOAD_SCHEMA_VERSION
+        );
+        rebound.validate().unwrap();
         assert_eq!(
             rebound.reference.logical_digest,
             object.reference.logical_digest
@@ -766,7 +776,7 @@ mod tests {
                         worker_id: WorkerId::derive(&[b"worker"]),
                         node_lease_id: NodeLeaseId::derive(&[b"lease"]),
                         process_generation: 1,
-                        device_identity: None,
+                        accelerator: None,
                     })
                 }
                 2 => invalid.objects[input].reference.authorization_scope = "foreign".into(),

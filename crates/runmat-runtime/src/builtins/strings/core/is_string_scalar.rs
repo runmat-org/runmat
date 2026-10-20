@@ -19,7 +19,7 @@ pub(crate) fn is_string_scalar_builtin(value: Value) -> BuiltinResult<Value> {
     )?;
     Ok(Value::Bool(match value {
         Value::String(_) => true,
-        Value::StringArray(array) => array.data.len() == 1,
+        Value::StringArray(array) => array.data().len() == 1,
         _ => false,
     }))
 }

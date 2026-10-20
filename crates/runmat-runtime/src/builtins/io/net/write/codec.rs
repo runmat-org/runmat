@@ -37,7 +37,9 @@ pub(super) enum PreparedWriteDatatype {
     Resident(Value),
 }
 
-pub(super) fn preflight_datatype(args: Vec<Value>) -> BuiltinResult<PreparedWriteDatatype> {
+pub(super) fn preflight_datatype(
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<PreparedWriteDatatype> {
     match args.len() {
         0 => Ok(PreparedWriteDatatype::Default),
         1 => {
@@ -246,14 +248,14 @@ async fn char_payload(data: &Value, work: &mut NetCooperation) -> BuiltinResult<
         Value::CharArray(array) => {
             append_bounded(
                 &mut bytes,
-                array.data.iter().map(|ch| (u32::from(*ch) & 0xff) as u8),
+                array.data().iter().map(|ch| (u32::from(*ch) & 0xff) as u8),
                 work,
             )
             .await?
         }
         Value::String(text) => append_bounded(&mut bytes, text.bytes(), work).await?,
-        Value::StringArray(array) if array.data.len() == 1 => {
-            append_bounded(&mut bytes, array.data[0].bytes(), work).await?
+        Value::StringArray(array) if array.data().len() == 1 => {
+            append_bounded(&mut bytes, array.data()[0].bytes(), work).await?
         }
         Value::StringArray(_) => {
             return Err(write_flow(
@@ -308,7 +310,7 @@ async fn string_payload(data: &Value, work: &mut NetCooperation) -> BuiltinResul
             1
         }
         Value::CharArray(array) => {
-            for group in array.data.chunks(1024) {
+            for group in array.data().chunks(1024) {
                 bytes
                     .try_reserve(group.len().checked_mul(4).ok_or_else(|| {
                         write_flow(&WRITE_ERROR_INTERNAL, "write: encoded text size overflow")
@@ -327,9 +329,9 @@ async fn string_payload(data: &Value, work: &mut NetCooperation) -> BuiltinResul
             }
             1
         }
-        Value::StringArray(array) if array.data.is_empty() => 0,
-        Value::StringArray(array) if array.data.len() == 1 => {
-            append_bounded(&mut bytes, array.data[0].bytes(), work).await?;
+        Value::StringArray(array) if array.data().is_empty() => 0,
+        Value::StringArray(array) if array.data().len() == 1 => {
+            append_bounded(&mut bytes, array.data()[0].bytes(), work).await?;
             1
         }
         Value::StringArray(_) => {

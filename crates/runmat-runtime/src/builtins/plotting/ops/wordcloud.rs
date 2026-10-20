@@ -562,7 +562,7 @@ fn parse_single_data(value: &Value) -> BuiltinResult<WordCloudData> {
         )),
         Value::Object(object) => Err(wordcloud_error(format!(
             "unsupported object class {}",
-            object.class_name
+            object.class_name()
         ))),
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) | Value::Cell(_) => {
             documents_counts(text_documents(value)?)
@@ -587,7 +587,7 @@ fn table_words_and_sizes(
     word_var: &Value,
     size_var: &Value,
 ) -> BuiltinResult<WordCloudData> {
-    let variables = match object.properties.get(TABLE_VARIABLES_FIELD) {
+    let variables = match object.properties().get(TABLE_VARIABLES_FIELD) {
         Some(Value::Struct(st)) => st,
         _ => return Err(wordcloud_error("table input is missing variable storage")),
     };
@@ -613,9 +613,9 @@ fn table_variable_names(
     variables: &StructValue,
 ) -> BuiltinResult<Vec<String>> {
     if let Some(Value::Struct(props)) = object
-        .properties
+        .properties()
         .get(TABLE_PROPERTIES_FIELD)
-        .or_else(|| object.properties.get("Properties"))
+        .or_else(|| object.properties().get("Properties"))
     {
         if let Some(value) = props.fields.get("VariableNames") {
             let names = words_from_word_vector(value)?;
@@ -624,7 +624,7 @@ fn table_variable_names(
             }
         }
     }
-    Ok(variables.field_names().cloned().collect())
+    Ok(variables.field_names().map(ToOwned::to_owned).collect())
 }
 
 fn table_selector(value: &Value, names: &[String], label: &str) -> BuiltinResult<String> {
@@ -656,27 +656,29 @@ fn is_table_object(object: &ObjectInstance) -> bool {
 fn text_documents(value: &Value) -> BuiltinResult<Vec<Vec<String>>> {
     match value {
         Value::String(text) => Ok(vec![tokenize_text(text)]),
-        Value::StringArray(array) => {
-            Ok(array.data.iter().map(|text| tokenize_text(text)).collect())
-        }
+        Value::StringArray(array) => Ok(array
+            .data()
+            .iter()
+            .map(|text| tokenize_text(text))
+            .collect()),
         Value::CharArray(array) if array.rows <= 1 => {
             let text = if array.rows == 0 {
                 String::new()
             } else {
-                char_row(&array.data, array.cols, 0)
+                char_row(array.data(), array.cols, 0)
             };
             Ok(vec![tokenize_text(&text)])
         }
         Value::CharArray(array) => {
             let mut docs = Vec::with_capacity(array.rows);
             for row in 0..array.rows {
-                docs.push(tokenize_text(&char_row(&array.data, array.cols, row)));
+                docs.push(tokenize_text(&char_row(array.data(), array.cols, row)));
             }
             Ok(docs)
         }
         Value::Cell(cell) => {
-            let mut docs = Vec::with_capacity(cell.data.len());
-            for item in &cell.data {
+            let mut docs = Vec::with_capacity(cell.data().len());
+            for item in cell.data() {
                 docs.push(tokenize_text(&text_scalar(item, "cell text")?));
             }
             Ok(docs)
@@ -743,13 +745,13 @@ fn is_stop_word(token: &str) -> bool {
 }
 
 fn documents_from_object(object: &ObjectInstance) -> BuiltinResult<Vec<Vec<String>>> {
-    let Some(Value::Cell(cell)) = object.properties.get("Documents") else {
+    let Some(Value::Cell(cell)) = object.properties().get("Documents") else {
         return Err(wordcloud_error(
             "tokenizedDocument object missing Documents property",
         ));
     };
-    let mut docs = Vec::with_capacity(cell.data.len());
-    for item in &cell.data {
+    let mut docs = Vec::with_capacity(cell.data().len());
+    for item in cell.data() {
         docs.push(words_from_word_vector(item)?);
     }
     Ok(docs)
@@ -778,7 +780,7 @@ fn documents_counts(documents: Vec<Vec<String>>) -> BuiltinResult<WordCloudData>
 
 fn bag_of_words_counts(object: &ObjectInstance) -> BuiltinResult<WordCloudData> {
     let vocabulary = object
-        .properties
+        .properties()
         .get("Vocabulary")
         .ok_or_else(|| wordcloud_error("bagOfWords object missing Vocabulary property"))
         .and_then(words_from_word_vector)?;
@@ -788,11 +790,11 @@ fn bag_of_words_counts(object: &ObjectInstance) -> BuiltinResult<WordCloudData> 
 
 fn bag_of_ngrams_counts(object: &ObjectInstance) -> BuiltinResult<WordCloudData> {
     let counts = tensor_property(object, "Counts", "bagOfNgrams")?;
-    let labels = if let Some(Value::StringArray(array)) = object.properties.get("Ngrams") {
+    let labels = if let Some(Value::StringArray(array)) = object.properties().get("Ngrams") {
         ngram_labels(array)
     } else {
         object
-            .properties
+            .properties()
             .get("Vocabulary")
             .ok_or_else(|| wordcloud_error("bagOfNgrams object missing Ngrams property"))
             .and_then(words_from_word_vector)?
@@ -805,7 +807,7 @@ fn ngram_labels(array: &StringArray) -> Vec<String> {
     for row in 0..array.rows {
         let mut parts = Vec::new();
         for col in 0..array.cols {
-            let text = array.data[row + col * array.rows].trim();
+            let text = array.data()[row + col * array.rows].trim();
             if !text.is_empty() {
                 parts.push(text.to_string());
             }
@@ -849,7 +851,7 @@ fn counts_by_columns(words: Vec<String>, counts: Tensor) -> BuiltinResult<WordCl
 
 fn categorical_counts(object: &ObjectInstance) -> BuiltinResult<WordCloudData> {
     let categories = object
-        .properties
+        .properties()
         .get("Categories")
         .ok_or_else(|| wordcloud_error("categorical object missing Categories property"))
         .and_then(words_from_word_vector)?;
@@ -998,29 +1000,29 @@ pub(crate) fn get_wordcloud_property(
 ) -> BuiltinResult<Value> {
     match property.map(canonical_key).as_deref() {
         None => {
-            let mut st = StructValue::new();
+            let mut st = runmat_value::UnboundedStructValueBuilder::new();
             st.insert("Type", Value::String("wordcloud".into()));
             st.insert("Parent", Value::Num(state.figure.as_u32() as f64));
             st.insert("Children", empty_handles());
             st.insert("WordData", string_array_value(state.word_data.clone())?);
             st.insert("SizeData", vector_value(state.size_data.clone())?);
-            st.insert("WordVariable", Value::String(state.word_variable.clone()));
-            st.insert("SizeVariable", Value::String(state.size_variable.clone()));
+            st.insert("WordVariable", Value::string(state.word_variable.clone()));
+            st.insert("SizeVariable", Value::string(state.size_variable.clone()));
             st.insert(
                 "MaxDisplayWords",
                 Value::Num(state.max_display_words as f64),
             );
             st.insert("Color", color_value(&state.color)?);
             st.insert("HighlightColor", single_color_value(state.highlight_color)?);
-            st.insert("Shape", Value::String(state.shape.clone()));
+            st.insert("Shape", Value::string(state.shape.clone()));
             st.insert("LayoutNum", Value::Num(state.layout_num as f64));
             st.insert("SizePower", Value::Num(state.size_power));
-            st.insert("Title", Value::String(state.title.clone()));
+            st.insert("Title", Value::string(state.title.clone()));
             st.insert(
                 "TitleFontName",
-                Value::String(state.title_font_name.clone()),
+                Value::string(state.title_font_name.clone()),
             );
-            st.insert("FontName", Value::String(state.font_name.clone()));
+            st.insert("FontName", Value::string(state.font_name.clone()));
             st.insert(
                 "Visible",
                 Value::String(if state.visible { "on" } else { "off" }.into()),
@@ -1029,44 +1031,44 @@ pub(crate) fn get_wordcloud_property(
                 "Box",
                 Value::String(if state.box_visible { "on" } else { "off" }.into()),
             );
-            st.insert("Units", Value::String(state.units.clone()));
+            st.insert("Units", Value::string(state.units.clone()));
             st.insert("Position", vector_value(state.position.to_vec())?);
             st.insert(
                 "HandleVisibility",
-                Value::String(state.handle_visibility.clone()),
+                Value::string(state.handle_visibility.clone()),
             );
-            st.insert("DisplayName", Value::String(state.display_name.clone()));
-            st.insert("Tag", Value::String(state.tag.clone()));
+            st.insert("DisplayName", Value::string(state.display_name.clone()));
+            st.insert("Tag", Value::string(state.tag.clone()));
             st.insert("SourceTable", Value::Struct(StructValue::new()));
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("wordcloud".into())),
         Some("parent") => Ok(Value::Num(state.figure.as_u32() as f64)),
         Some("children") => Ok(empty_handles()),
         Some("worddata") => string_array_value(state.word_data.clone()),
         Some("sizedata") => vector_value(state.size_data.clone()),
-        Some("wordvariable") => Ok(Value::String(state.word_variable.clone())),
-        Some("sizevariable") => Ok(Value::String(state.size_variable.clone())),
+        Some("wordvariable") => Ok(Value::string(state.word_variable.clone())),
+        Some("sizevariable") => Ok(Value::string(state.size_variable.clone())),
         Some("maxdisplaywords") => Ok(Value::Num(state.max_display_words as f64)),
         Some("color") => color_value(&state.color),
         Some("highlightcolor") => single_color_value(state.highlight_color),
-        Some("shape") => Ok(Value::String(state.shape.clone())),
+        Some("shape") => Ok(Value::string(state.shape.clone())),
         Some("layoutnum") => Ok(Value::Num(state.layout_num as f64)),
         Some("sizepower") => Ok(Value::Num(state.size_power)),
-        Some("title") => Ok(Value::String(state.title.clone())),
-        Some("titlefontname") => Ok(Value::String(state.title_font_name.clone())),
-        Some("fontname") => Ok(Value::String(state.font_name.clone())),
+        Some("title") => Ok(Value::string(state.title.clone())),
+        Some("titlefontname") => Ok(Value::string(state.title_font_name.clone())),
+        Some("fontname") => Ok(Value::string(state.font_name.clone())),
         Some("visible") => Ok(Value::String(
             if state.visible { "on" } else { "off" }.into(),
         )),
         Some("box") => Ok(Value::String(
             if state.box_visible { "on" } else { "off" }.into(),
         )),
-        Some("units") => Ok(Value::String(state.units.clone())),
+        Some("units") => Ok(Value::string(state.units.clone())),
         Some("position") => vector_value(state.position.to_vec()),
-        Some("handlevisibility") => Ok(Value::String(state.handle_visibility.clone())),
-        Some("displayname") => Ok(Value::String(state.display_name.clone())),
-        Some("tag") => Ok(Value::String(state.tag.clone())),
+        Some("handlevisibility") => Ok(Value::string(state.handle_visibility.clone())),
+        Some("displayname") => Ok(Value::string(state.display_name.clone())),
+        Some("tag") => Ok(Value::string(state.tag.clone())),
         Some("sourcetable") => Ok(Value::Struct(StructValue::new())),
         Some(other) => Err(wordcloud_error(format!(
             "unsupported WordCloudChart property `{other}`"
@@ -1406,7 +1408,7 @@ fn word_color(rank: usize, word_index: usize, options: &WordCloudOptions) -> Vec
 }
 
 fn tensor_property(object: &ObjectInstance, name: &str, class_name: &str) -> BuiltinResult<Tensor> {
-    match object.properties.get(name) {
+    match object.properties().get(name) {
         Some(Value::Tensor(tensor)) => Ok(tensor.clone()),
         _ => Err(wordcloud_error(format!(
             "{class_name} object missing {name} property"
@@ -1441,22 +1443,26 @@ fn validate_sizes(sizes: &[f64]) -> BuiltinResult<()> {
 
 fn words_from_word_vector(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(text) => Ok(vec![text.clone()]),
-        Value::StringArray(array) => Ok(array.data.clone()),
+        Value::String(text) => Ok(vec![text.as_str().to_owned()]),
+        Value::StringArray(array) => Ok(array
+            .data()
+            .iter()
+            .map(|text| text.as_str().to_owned())
+            .collect()),
         Value::CharArray(array) if array.rows <= 1 => Ok(vec![if array.rows == 0 {
             String::new()
         } else {
-            char_row(&array.data, array.cols, 0)
+            char_row(array.data(), array.cols, 0)
         }]),
         Value::CharArray(array) => {
             let mut words = Vec::with_capacity(array.rows);
             for row in 0..array.rows {
-                words.push(char_row(&array.data, array.cols, row));
+                words.push(char_row(array.data(), array.cols, row));
             }
             Ok(words)
         }
         Value::Cell(cell) => cell
-            .data
+            .data()
             .iter()
             .map(|item| text_scalar(item, "word cell"))
             .collect(),
@@ -1877,7 +1883,7 @@ mod tests {
         let Value::StringArray(words) = words else {
             panic!("expected WordData string array");
         };
-        assert_eq!(words.data, vec!["alpha", "beta", "gamma"]);
+        assert_eq!(words.data(), vec!["alpha", "beta", "gamma"]);
         assert_eq!(
             get_builtin(vec![
                 Value::Num(handle),
@@ -1960,7 +1966,7 @@ mod tests {
         let Value::StringArray(words) = words else {
             panic!("expected WordData string array");
         };
-        assert_eq!(words.data, vec!["delta", "epsilon"]);
+        assert_eq!(words.data(), vec!["delta", "epsilon"]);
     }
 
     #[test]
@@ -1973,7 +1979,7 @@ mod tests {
         let Value::StringArray(words) = words else {
             panic!("expected ngram labels");
         };
-        assert_eq!(words.data, vec!["alpha alpha", "beta gamma"]);
+        assert_eq!(words.data(), vec!["alpha alpha", "beta gamma"]);
 
         let categorical = categorical_object(&["red", "blue"], vec![1.0, 2.0, 1.0]);
         let handle = wordcloud_builtin(vec![categorical]).unwrap();
@@ -2098,54 +2104,49 @@ mod tests {
                 Value::StringArray(StringArray::new(words.clone(), vec![1, words.len()]).unwrap())
             })
             .collect::<Vec<_>>();
-        let mut object = ObjectInstance::new("tokenizedDocument");
-        object.properties.insert(
+        let mut object =
+            runmat_value::UnboundedObjectBuilder::with_property_capacity("tokenizedDocument", 1);
+        object.insert(
             "Documents".into(),
             Value::Cell(CellArray::new(cell_values, doc_count, 1).unwrap()),
         );
-        Value::Object(object)
+        Value::Object(object.finish())
     }
 
     fn bag_of_ngrams_object(ngrams_column_major: &[&str], counts: Vec<f64>) -> Value {
-        let mut object = ObjectInstance::new("bagOfNgrams");
-        object
-            .properties
-            .insert("Ngrams".into(), str_array(ngrams_column_major, vec![2, 2]));
-        object
-            .properties
-            .insert("Counts".into(), tensor(counts, vec![1, 2]));
-        Value::Object(object)
+        let mut object =
+            runmat_value::UnboundedObjectBuilder::with_property_capacity("bagOfNgrams", 2);
+        object.insert("Ngrams".into(), str_array(ngrams_column_major, vec![2, 2]));
+        object.insert("Counts".into(), tensor(counts, vec![1, 2]));
+        Value::Object(object.finish())
     }
 
     fn categorical_object(categories: &[&str], codes: Vec<f64>) -> Value {
-        let mut object = ObjectInstance::new("categorical");
-        object.properties.insert(
+        let mut object =
+            runmat_value::UnboundedObjectBuilder::with_property_capacity("categorical", 2);
+        object.insert(
             "Categories".into(),
             str_array(categories, vec![1, categories.len()]),
         );
-        object
-            .properties
-            .insert("Codes".into(), tensor(codes.clone(), vec![codes.len(), 1]));
-        Value::Object(object)
+        object.insert("Codes".into(), tensor(codes.clone(), vec![codes.len(), 1]));
+        Value::Object(object.finish())
     }
 
     fn table_object(names: &[&str], columns: Vec<Value>) -> Value {
-        let mut variables = StructValue::new();
+        let mut variables = runmat_value::UnboundedStructValueBuilder::new();
         for (name, column) in names.iter().zip(columns) {
             variables.insert(*name, column);
         }
-        let mut props = StructValue::new();
+        let mut props = runmat_value::UnboundedStructValueBuilder::new();
         props.insert("VariableNames", str_array(names, vec![1, names.len()]));
-        let mut object = ObjectInstance::new("table");
-        object
-            .properties
-            .insert(TABLE_VARIABLES_FIELD.into(), Value::Struct(variables));
-        object
-            .properties
-            .insert(TABLE_PROPERTIES_FIELD.into(), Value::Struct(props.clone()));
-        object
-            .properties
-            .insert("Properties".into(), Value::Struct(props));
-        Value::Object(object)
+        let mut object = runmat_value::UnboundedObjectBuilder::with_property_capacity("table", 3);
+        object.insert(
+            TABLE_VARIABLES_FIELD.into(),
+            Value::Struct(variables.finish()),
+        );
+        let props = props.finish();
+        object.insert(TABLE_PROPERTIES_FIELD.into(), Value::Struct(props.clone()));
+        object.insert("Properties".into(), Value::Struct(props));
+        Value::Object(object.finish())
     }
 }

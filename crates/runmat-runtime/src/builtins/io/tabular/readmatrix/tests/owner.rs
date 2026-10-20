@@ -124,7 +124,7 @@ fn invocation_keeps_opened_provider_and_cwd_when_ambient_owner_changes_while_pen
     let mut call = Box::pin(readmatrix_builtin(
         None,
         Value::from("input.csv"),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ));
     let waker = futures::task::noop_waker();
     assert!(matches!(
@@ -152,12 +152,12 @@ fn known_invalid_late_control_rejects_without_opening_selected_file() {
     let error = block_on(readmatrix_builtin(
         None,
         Value::from("input.csv"),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("Delimiter"),
             Value::from(","),
             Value::from("Range"),
             Value::from("not-a-range"),
-        ],
+        ]),
     ))
     .expect_err("known invalid range");
     assert!(error.message().contains("Range"));
@@ -175,11 +175,16 @@ fn paged_text_filename_and_option_reject_before_file_open() {
         runmat_value::CharArray::new_with_shape(vec!['x', 'y'], vec![1, 1, 2])
             .expect("paged character array"),
     );
-    assert!(block_on(readmatrix_builtin(None, paged.clone(), Vec::new())).is_err());
+    assert!(block_on(readmatrix_builtin(
+        None,
+        paged.clone(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new())
+    ))
+    .is_err());
     assert!(block_on(readmatrix_builtin(
         None,
         Value::from("input.csv"),
-        vec![paged, Value::from(",")],
+        crate::builtins::common::test_support::builtin_arguments(vec![paged, Value::from(",")]),
     ))
     .is_err());
     assert_eq!(selected.opens.load(Ordering::SeqCst), 0);
@@ -191,9 +196,12 @@ fn paged_text_filename_and_option_reject_before_file_open() {
         )
         .expect("trailing singleton character vector"),
     );
-    let Value::Tensor(result) = block_on(readmatrix_builtin(None, trailing, Vec::new()))
-        .expect("effective character row accepted")
-    else {
+    let Value::Tensor(result) = block_on(readmatrix_builtin(
+        None,
+        trailing,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect("effective character row accepted") else {
         panic!("numeric matrix")
     };
     assert_eq!(result.shape(), vec![2, 2]);
@@ -213,12 +221,12 @@ fn explicit_double_output_type_and_like_conflict_before_file_open() {
     let error = block_on(readmatrix_builtin(
         None,
         Value::from("input.csv"),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("OutputType"),
             Value::from("double"),
             Value::from("Like"),
             Value::Num(0.0),
-        ],
+        ]),
     ))
     .expect_err("controls conflict");
     assert!(error.message().contains("cannot combine"));
@@ -236,7 +244,10 @@ fn like_word_as_option_value_does_not_enable_the_like_extension() {
     let value = block_on(readmatrix_builtin(
         None,
         Value::from("input.csv"),
-        vec![Value::from("TreatAsMissing"), Value::from("Like")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("TreatAsMissing"),
+            Value::from("Like"),
+        ]),
     ))
     .expect("ordinary TreatAsMissing value");
     assert!(matches!(value, Value::Tensor(_)));
@@ -259,7 +270,7 @@ fn cancelling_pending_open_returns_no_value_and_does_not_reopen() {
     let mut call = Box::pin(readmatrix_builtin(
         Some(runtime),
         Value::from("input.csv"),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ));
     let waker = futures::task::noop_waker();
     assert!(matches!(

@@ -238,7 +238,7 @@ pub(super) fn datetime_from_date_only(
     naive: NaiveDateTime,
     format: impl Into<String>,
 ) -> BuiltinResult<Value> {
-    datetime_object_from_serials(vec![datenum_from_naive(naive)], vec![1, 1], format)
+    datetime_object_from_serials(None, vec![datenum_from_naive(naive)], vec![1, 1], format)
 }
 
 pub(super) fn current_naive_local() -> NaiveDateTime {

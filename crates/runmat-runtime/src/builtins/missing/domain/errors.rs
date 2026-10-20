@@ -2,6 +2,8 @@ use super::metadata::core::{
     MISSING_ERROR_INTERNAL, MISSING_ERROR_INVALID_ARGUMENT, MISSING_ERROR_UNSUPPORTED_TYPE,
 };
 use super::{build_runtime_error, BuiltinErrorDescriptor, RuntimeError};
+use crate::context::host_allocation::HostAllocationError;
+use crate::context::RuntimeContext;
 use crate::RuntimeErrorBuilder;
 
 fn missing_error_builder(
@@ -27,6 +29,22 @@ pub(super) fn unsupported_type(detail: impl Into<String>) -> RuntimeError {
 
 pub(super) fn internal_error(detail: impl Into<String>) -> RuntimeError {
     missing_error_builder(&MISSING_ERROR_INTERNAL, "missing", detail).build()
+}
+
+pub(super) fn allocation_error(
+    runtime: &RuntimeContext,
+    builtin: &'static str,
+    cause: HostAllocationError,
+) -> RuntimeError {
+    build_runtime_error(format!("{builtin}: host text allocation: {cause}"))
+        .with_builtin(builtin)
+        .with_identifier(format!(
+            "{}:{}",
+            RuntimeContext::error_namespace(runtime),
+            cause.runtime_identifier_suffix()
+        ))
+        .with_source(cause)
+        .build()
 }
 
 /// Keep the established missing-data presentation and the delegated failure.

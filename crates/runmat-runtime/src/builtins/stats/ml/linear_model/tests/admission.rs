@@ -1,6 +1,18 @@
 use super::super::values::ensure_exact_fitlm_integer_scalar_boundary;
 use super::*;
 
+fn build_fit_spec(
+    first: Value,
+    rest: Vec<Value>,
+    arguments: FitlmArguments,
+) -> BuiltinResult<FitSpec> {
+    super::super::build_fit_spec(
+        first,
+        crate::call::FunctionArgumentView::from_slice(&rest),
+        arguments,
+    )
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn fitlm_dense_matrix_projection_preserves_rank_zero_and_rank_one_policy() {
@@ -13,11 +25,14 @@ fn fitlm_dense_matrix_projection_preserves_rank_zero_and_rank_one_policy() {
     let one_response = Value::Tensor(Tensor::new(vec![4.0], vec![1, 1]).expect("one response"));
     preflight_response_shape(
         &Value::Tensor(vector.clone()),
-        std::slice::from_ref(&one_response),
+        crate::call::FunctionArgumentView::from_slice(std::slice::from_ref(&one_response)),
     )
     .expect("rank-one predictors have one observation at preflight");
-    let rank_zero_error = preflight_response_shape(&Value::Tensor(scalar.clone()), &[one_response])
-        .expect_err("rank-zero predictors have no observation at preflight");
+    let rank_zero_error = preflight_response_shape(
+        &Value::Tensor(scalar.clone()),
+        crate::call::FunctionArgumentView::from_slice(&[one_response]),
+    )
+    .expect_err("rank-zero predictors have no observation at preflight");
     assert!(rank_zero_error.message().contains("length(y)"));
 
     let arguments = || FitlmArguments {
@@ -69,9 +84,12 @@ fn fitlm_header_keeps_model_spec_separate_from_typed_options() {
         Value::from("Intercept"),
         Value::Bool(false),
     ];
-    let header = HeaderInspection::inspect(&first, &values)
-        .validate(values.len())
-        .unwrap();
+    let header = HeaderInspection::inspect(
+        &first,
+        crate::call::FunctionArgumentView::from_slice(&values),
+    )
+    .validate(values.len())
+    .unwrap();
     assert_eq!(header.option_start, 2);
     assert_eq!(header.options.len(), 1);
     assert_eq!(header.options[0].name.identity, FitlmOption::Intercept);
@@ -83,9 +101,12 @@ fn fitlm_header_keeps_model_spec_separate_from_typed_options() {
         Value::from("RobustOpts"),
         Value::Bool(true),
     ];
-    assert!(HeaderInspection::inspect(&first, &invalid)
-        .validate(invalid.len())
-        .is_err());
+    assert!(HeaderInspection::inspect(
+        &first,
+        crate::call::FunctionArgumentView::from_slice(&invalid)
+    )
+    .validate(invalid.len())
+    .is_err());
 }
 
 #[test]
@@ -102,11 +123,14 @@ fn fitlm_preflights_host_option_values_and_response_shape() {
         Value::from("Intercept"),
         Value::Bool(false),
     ];
-    let prepared = HeaderInspection::inspect(&first, &values)
-        .validate(values.len())
-        .unwrap()
-        .preflight_values(&values)
-        .unwrap();
+    let prepared = HeaderInspection::inspect(
+        &first,
+        crate::call::FunctionArgumentView::from_slice(&values),
+    )
+    .validate(values.len())
+    .unwrap()
+    .preflight_values(crate::call::FunctionArgumentView::from_slice(&values))
+    .unwrap();
     assert!(matches!(
         prepared.options[0].predecoded,
         Some(FitlmAction::Intercept(false))
@@ -116,19 +140,25 @@ fn fitlm_preflights_host_option_values_and_response_shape() {
         Value::from("Intercept"),
         Value::from("bad"),
     ];
-    assert!(HeaderInspection::inspect(&first, &invalid)
-        .validate(invalid.len())
-        .unwrap()
-        .preflight_values(&invalid)
-        .err()
-        .expect("invalid Intercept")
-        .message()
-        .contains("Intercept"));
+    assert!(HeaderInspection::inspect(
+        &first,
+        crate::call::FunctionArgumentView::from_slice(&invalid)
+    )
+    .validate(invalid.len())
+    .unwrap()
+    .preflight_values(crate::call::FunctionArgumentView::from_slice(&invalid))
+    .err()
+    .expect("invalid Intercept")
+    .message()
+    .contains("Intercept"));
     let short = vec![tensor_value(vec![1.0, 3.0, 5.0], 3, 1)];
-    assert!(preflight_response_shape(&first, &short)
-        .unwrap_err()
-        .message()
-        .contains("length(y)"));
+    assert!(preflight_response_shape(
+        &first,
+        crate::call::FunctionArgumentView::from_slice(&short)
+    )
+    .unwrap_err()
+    .message()
+    .contains("length(y)"));
 }
 
 #[test]
@@ -136,7 +166,12 @@ fn logical_predictors_follow_the_numeric_matrix_training_path() {
     let x =
         Value::LogicalArray(runmat_value::LogicalArray::new(vec![0, 0, 1, 1], vec![4, 1]).unwrap());
     let y = tensor_value(vec![1.0, 1.0, 3.0, 3.0], 4, 1);
-    let model = block_on(fitlm_builtin(x, vec![y])).unwrap();
+    let model = block_on(fitlm_builtin(
+        None,
+        x,
+        crate::builtins::common::test_support::builtin_arguments(vec![y]),
+    ))
+    .unwrap();
     let predicted = block_on(predict_builtin(
         model,
         tensor_value(vec![0.0, 1.0], 2, 1),
@@ -153,13 +188,18 @@ fn logical_predictors_follow_the_numeric_matrix_training_path() {
 fn fitlm_matrix_fits_coefficients_and_predicts() {
     let x = tensor_value(vec![0.0, 1.0, 2.0, 3.0], 4, 1);
     let y = tensor_value(vec![1.0, 3.0, 5.0, 7.0], 4, 1);
-    let model = block_on(fitlm_builtin(x, vec![y])).unwrap();
+    let model = block_on(fitlm_builtin(
+        None,
+        x,
+        crate::builtins::common::test_support::builtin_arguments(vec![y]),
+    ))
+    .unwrap();
     let model_object = object(model.clone());
     assert_eq!(
-        model_object.properties.get("NumObservations"),
+        model_object.properties().get("NumObservations"),
         Some(&Value::Num(4.0))
     );
-    let coeffs = match model_object.properties.get("Coefficients").unwrap() {
+    let coeffs = match model_object.properties().get("Coefficients").unwrap() {
         Value::Object(object) => table_variables(object).unwrap(),
         other => panic!("coefficients {other:?}"),
     };
@@ -182,7 +222,12 @@ fn fitlm_matrix_fits_coefficients_and_predicts() {
 fn registered_predict_preserves_statistical_output_overloads_without_ambient_arity() {
     let x = tensor_value(vec![0.0, 1.0, 2.0, 3.0], 4, 1);
     let y = tensor_value(vec![1.0, 3.0, 5.0, 7.0], 4, 1);
-    let model = block_on(fitlm_builtin(x, vec![y])).unwrap();
+    let model = block_on(fitlm_builtin(
+        None,
+        x,
+        crate::builtins::common::test_support::builtin_arguments(vec![y]),
+    ))
+    .unwrap();
     let args = [model, tensor_value(vec![4.0, 5.0], 2, 1)];
     let bindings = crate::builtin::runtime_builtin_bindings_by_name("predict");
     assert_eq!(bindings.len(), 1);
@@ -219,8 +264,9 @@ fn registered_predict_preserves_statistical_output_overloads_without_ambient_ari
 fn fitlm_and_predict_read_typed_integer_storage_exactly() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let model = block_on(fitlm_builtin(
+        None,
         poisoned_int_tensor(IntegerStorage::I16(vec![0, 1, 2, 99]), 4, 1),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             poisoned_int_tensor(IntegerStorage::I16(vec![1, 3, 5, 999]), 4, 1),
             Value::from("Weights"),
             poisoned_int_tensor(IntegerStorage::U8(vec![1, 1, 1, 1]), 4, 1),
@@ -228,7 +274,7 @@ fn fitlm_and_predict_read_typed_integer_storage_exactly() {
             poisoned_int_tensor(IntegerStorage::U8(vec![4]), 1, 1),
             Value::from("Intercept"),
             poisoned_int_tensor(IntegerStorage::U8(vec![1]), 1, 1),
-        ],
+        ]),
     ))
     .unwrap();
     let predicted = block_on(predict_builtin(
@@ -248,8 +294,9 @@ fn fitlm_runmat_mode_admits_all_integer_classes_by_role() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     for storage in all_fitlm_integer_storages() {
         let model = block_on(fitlm_builtin(
+            None,
             poisoned_int_tensor(storage.clone(), 3, 1),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 poisoned_int_tensor(storage.clone(), 3, 1),
                 Value::from("Weights"),
                 poisoned_int_tensor(storage, 3, 1),
@@ -257,7 +304,7 @@ fn fitlm_runmat_mode_admits_all_integer_classes_by_role() {
                 poisoned_int_tensor(IntegerStorage::U8(Vec::new()), 0, 1),
                 Value::from("Intercept"),
                 poisoned_int_tensor(IntegerStorage::U8(vec![1]), 1, 1),
-            ],
+            ]),
         ))
         .expect("all-class integer fitlm roles");
         assert!(matches!(model, Value::Object(_)));
@@ -273,41 +320,58 @@ fn fitlm_strict_mode_rejects_each_integer_role_independently() {
 
     let cases = [
         (
-            block_on(fitlm_builtin(integer(), vec![y()])).unwrap_err(),
+            block_on(fitlm_builtin(
+                None,
+                integer(),
+                crate::builtins::common::test_support::builtin_arguments(vec![y()]),
+            ))
+            .unwrap_err(),
             "RunMat:compatibility:FitlmIntegerPredictorExtension",
         ),
         (
-            block_on(fitlm_builtin(x(), vec![integer()])).unwrap_err(),
+            block_on(fitlm_builtin(
+                None,
+                x(),
+                crate::builtins::common::test_support::builtin_arguments(vec![integer()]),
+            ))
+            .unwrap_err(),
             "RunMat:compatibility:FitlmIntegerResponseExtension",
         ),
         (
             block_on(fitlm_builtin(
+                None,
                 x(),
-                vec![y(), Value::from("Weights"), integer()],
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    y(),
+                    Value::from("Weights"),
+                    integer(),
+                ]),
             ))
             .unwrap_err(),
             "RunMat:compatibility:FitlmIntegerWeightsExtension",
         ),
         (
             block_on(fitlm_builtin(
+                None,
                 x(),
-                vec![
+                crate::builtins::common::test_support::builtin_arguments(vec![
                     y(),
                     Value::from("Exclude"),
                     poisoned_int_tensor(IntegerStorage::U8(vec![1]), 1, 1),
-                ],
+                ]),
             ))
             .unwrap_err(),
             "RunMat:compatibility:FitlmIntegerSelectorExtension",
         ),
         (
             block_on(fitlm_builtin(
+                None,
                 x(),
-                vec![
+                crate::builtins::common::test_support::builtin_arguments(vec![
                     y(),
                     Value::from("Intercept"),
                     poisoned_int_tensor(IntegerStorage::U8(vec![1]), 1, 1),
-                ],
+                ]),
             ))
             .unwrap_err(),
             "RunMat:compatibility:FitlmIntegerControlExtension",
@@ -325,8 +389,13 @@ fn fitlm_rejects_inexact_floating_roles_but_keeps_selectors_structural() {
         .expect("wide powers of two remain exactly representable");
     let wide = (1_u64 << 53) + 1;
     let predictor_error = block_on(fitlm_builtin(
+        None,
         poisoned_int_tensor(IntegerStorage::U64(vec![1, 2, wide]), 3, 1),
-        vec![tensor_value(vec![1.0, 2.0, 3.0], 3, 1)],
+        crate::builtins::common::test_support::builtin_arguments(vec![tensor_value(
+            vec![1.0, 2.0, 3.0],
+            3,
+            1,
+        )]),
     ))
     .unwrap_err();
     assert!(predictor_error
@@ -334,12 +403,13 @@ fn fitlm_rejects_inexact_floating_roles_but_keeps_selectors_structural() {
         .contains("exactly representable as double"));
 
     let response_error = block_on(fitlm_builtin(
+        None,
         tensor_value(vec![1.0, 2.0, 3.0], 3, 1),
-        vec![poisoned_int_tensor(
+        crate::builtins::common::test_support::builtin_arguments(vec![poisoned_int_tensor(
             IntegerStorage::U64(vec![1, 2, wide]),
             3,
             1,
-        )],
+        )]),
     ))
     .unwrap_err();
     assert!(response_error
@@ -347,12 +417,13 @@ fn fitlm_rejects_inexact_floating_roles_but_keeps_selectors_structural() {
         .contains("exactly representable as double"));
 
     let weights_error = block_on(fitlm_builtin(
+        None,
         tensor_value(vec![1.0, 2.0, 3.0], 3, 1),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             tensor_value(vec![1.0, 2.0, 3.0], 3, 1),
             Value::from("Weights"),
             poisoned_int_tensor(IntegerStorage::U64(vec![1, 2, wide]), 3, 1),
-        ],
+        ]),
     ))
     .unwrap_err();
     assert!(weights_error
@@ -360,12 +431,13 @@ fn fitlm_rejects_inexact_floating_roles_but_keeps_selectors_structural() {
         .contains("exactly representable as double"));
 
     let selector_error = block_on(fitlm_builtin(
+        None,
         tensor_value(vec![1.0, 2.0, 3.0], 3, 1),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             tensor_value(vec![1.0, 2.0, 3.0], 3, 1),
             Value::from("Exclude"),
             poisoned_int_tensor(IntegerStorage::U64(vec![wide]), 1, 1),
-        ],
+        ]),
     ))
     .unwrap_err();
     assert!(selector_error.message().contains("exceeds observations"));
@@ -388,8 +460,13 @@ fn fitlm_strict_mode_gates_resident_fallback_before_gather() {
         let floating_handle =
             gpu_helpers::upload_tensor(provider, &floating).expect("floating upload");
         let resident_error = block_on(fitlm_builtin(
+            None,
             Value::GpuTensor(floating_handle.clone()),
-            vec![tensor_value(vec![1.0, 2.0, 3.0], 3, 1)],
+            crate::builtins::common::test_support::builtin_arguments(vec![tensor_value(
+                vec![1.0, 2.0, 3.0],
+                3,
+                1,
+            )]),
         ))
         .unwrap_err();
         assert_eq!(
@@ -402,12 +479,13 @@ fn fitlm_strict_mode_gates_resident_fallback_before_gather() {
             })
         );
         let resident_option_error = block_on(fitlm_builtin(
+            None,
             tensor_value(vec![1.0, 2.0, 3.0], 3, 1),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 tensor_value(vec![1.0, 2.0, 3.0], 3, 1),
                 Value::from("Weights"),
                 Value::GpuTensor(floating_handle.clone()),
-            ],
+            ]),
         ))
         .unwrap_err();
         assert_eq!(
@@ -416,8 +494,13 @@ fn fitlm_strict_mode_gates_resident_fallback_before_gather() {
         );
 
         let error = block_on(fitlm_builtin(
+            None,
             Value::GpuTensor(handle.clone()),
-            vec![tensor_value(vec![1.0, 2.0, 3.0], 3, 1)],
+            crate::builtins::common::test_support::builtin_arguments(vec![tensor_value(
+                vec![1.0, 2.0, 3.0],
+                3,
+                1,
+            )]),
         ))
         .unwrap_err();
         assert_eq!(

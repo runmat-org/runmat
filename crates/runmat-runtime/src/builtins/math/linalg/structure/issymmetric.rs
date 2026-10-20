@@ -80,7 +80,10 @@ fn issymmetric_error_with_detail(
     binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::structure::issymmetric"
 )]
-async fn issymmetric_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn issymmetric_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     if value_has_integer_storage(&value) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &ISSYMMETRIC_INTEGER_INPUT_EXTENSION,
@@ -99,7 +102,7 @@ async fn issymmetric_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinRe
             NAME,
         )?;
     }
-    let (mode, tol) = parse_optional_args(&rest)?;
+    let (mode, tol) = parse_optional_args(rest.view())?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, "issymmetric")?;
     match value {
         Value::GpuTensor(handle) => issymmetric_gpu(handle, mode, tol).await,
@@ -126,12 +129,12 @@ fn is_tolerance_argument(value: &Value) -> bool {
 fn is_flag_alias_argument(value: &Value) -> bool {
     let text = match value {
         Value::String(value) => Some(value.as_str()),
-        Value::StringArray(value) if value.data.len() == 1 => Some(value.data[0].as_str()),
+        Value::StringArray(value) if value.data().len() == 1 => Some(value.data()[0].as_str()),
         _ => None,
     };
     text.is_some_and(|value| value.trim().eq_ignore_ascii_case("symmetric"))
         || matches!(value, Value::CharArray(value) if value.rows == 1 && {
-            let text = value.data.iter().collect::<String>().trim().to_ascii_lowercase();
+            let text = value.data().iter().collect::<String>().trim().to_ascii_lowercase();
             text == "symmetric"
         })
 }
@@ -257,7 +260,9 @@ fn evaluate_matrix(matrix: MatrixInput, mode: SymmetryMode, tol: f64) -> bool {
     }
 }
 
-fn parse_optional_args(args: &[Value]) -> BuiltinResult<(SymmetryMode, f64)> {
+fn parse_optional_args(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<(SymmetryMode, f64)> {
     if args.len() > 2 {
         return Err(issymmetric_error_with_detail(
             &ISSYMMETRIC_ERROR_INVALID_ARGUMENT,
@@ -298,9 +303,9 @@ fn parse_optional_args(args: &[Value]) -> BuiltinResult<(SymmetryMode, f64)> {
 
 fn parse_mode_flag(value: &Value) -> BuiltinResult<Option<SymmetryMode>> {
     let text = match value {
-        Value::String(s) => Some(s.clone()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
+        Value::String(s) => Some(s.as_str().to_owned()),
+        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].as_str().to_owned()),
+        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data().iter().collect()),
         _ => None,
     };
 
@@ -652,7 +657,7 @@ pub(crate) mod tests {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let integer_error = block_on(super::issymmetric_builtin(
             Value::Int(IntValue::I32(1)),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect_err("integer input is an extension");
         assert_eq!(
@@ -661,7 +666,7 @@ pub(crate) mod tests {
         );
         let tolerance_error = block_on(super::issymmetric_builtin(
             Value::Num(1.0),
-            vec![Value::Num(0.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(0.0)]),
         ))
         .expect_err("tolerance form is an extension");
         assert_eq!(
@@ -670,7 +675,9 @@ pub(crate) mod tests {
         );
         let alias_error = block_on(super::issymmetric_builtin(
             Value::Num(1.0),
-            vec![Value::from("symmetric")],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from(
+                "symmetric",
+            )]),
         ))
         .expect_err("noncanonical flag alias is an extension");
         assert_eq!(
@@ -1029,6 +1036,9 @@ pub(crate) mod tests {
 
     fn issymmetric_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
-        block_on(super::issymmetric_builtin(value, rest))
+        block_on(super::issymmetric_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 }

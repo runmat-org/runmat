@@ -5,7 +5,7 @@ use std::time::Duration;
 use runmat_execution::{JobHandle, JobId};
 use runmat_execution_artifact::ProgramExecutionResponse;
 use runmat_runtime::execution::ExecutionServiceError;
-use runmat_value::Value;
+use runmat_value::{SharedJobHandle, Value};
 
 use crate::supervisor::{
     GraphBatchSubmission, LocalJobState, LocalJobWorkloadKind, LocalSupervisorClient,
@@ -25,15 +25,15 @@ enum Command {
     /// One non-blocking inspection. No bridge command waits for task lifetime,
     /// so a long-running job never stalls submissions or cancellation.
     Inspect {
-        handle: JobHandle,
+        handle: SharedJobHandle,
         response: mpsc::Sender<Result<Option<ProgramExecutionResponse>, ExecutionServiceError>>,
     },
     InspectKind {
-        handle: JobHandle,
+        handle: SharedJobHandle,
         response: mpsc::Sender<Result<LocalJobWorkloadKind, ExecutionServiceError>>,
     },
     Cancel {
-        handle: JobHandle,
+        handle: SharedJobHandle,
         reason: runmat_execution::CancellationReason,
         response: mpsc::Sender<Result<(), ExecutionServiceError>>,
     },
@@ -90,7 +90,7 @@ impl DurableJobBridge {
     /// The terminal response, or None while the job is still active.
     pub(crate) fn try_response(
         &self,
-        handle: &JobHandle,
+        handle: &SharedJobHandle,
     ) -> Result<Option<ProgramExecutionResponse>, ExecutionServiceError> {
         self.request(|response| Command::Inspect {
             handle: handle.clone(),
@@ -102,7 +102,7 @@ impl DurableJobBridge {
     /// and yields Pending instead.
     pub(crate) fn await_response(
         &self,
-        handle: JobHandle,
+        handle: SharedJobHandle,
     ) -> Result<ProgramExecutionResponse, ExecutionServiceError> {
         loop {
             if let Some(response) = self.try_response(&handle)? {
@@ -114,12 +114,15 @@ impl DurableJobBridge {
 
     pub(crate) fn workload_kind(
         &self,
-        handle: JobHandle,
+        handle: SharedJobHandle,
     ) -> Result<LocalJobWorkloadKind, ExecutionServiceError> {
         self.request(|response| Command::InspectKind { handle, response })
     }
 
-    pub(crate) fn await_job(&self, handle: JobHandle) -> Result<Value, ExecutionServiceError> {
+    pub(crate) fn await_job(
+        &self,
+        handle: SharedJobHandle,
+    ) -> Result<Value, ExecutionServiceError> {
         loop {
             if let Some(value) = self.try_await_job(&handle)? {
                 return Ok(value);
@@ -130,7 +133,7 @@ impl DurableJobBridge {
 
     pub(crate) fn try_await_job(
         &self,
-        handle: &JobHandle,
+        handle: &SharedJobHandle,
     ) -> Result<Option<Value>, ExecutionServiceError> {
         if matches!(
             self.workload_kind(handle.clone())?,
@@ -148,7 +151,7 @@ impl DurableJobBridge {
 
     pub(crate) fn cancel(
         &self,
-        handle: JobHandle,
+        handle: SharedJobHandle,
         reason: runmat_execution::CancellationReason,
     ) -> Result<(), ExecutionServiceError> {
         self.request(|response| Command::Cancel {
@@ -237,7 +240,7 @@ fn bridge_main(commands: mpsc::Receiver<Command>) {
                         other => service_error(other),
                     })
                     .and_then(|record| {
-                        if record.handle != handle {
+                        if &record.handle != handle.as_ref() {
                             Err(ExecutionServiceError::UnknownHandle)
                         } else {
                             Ok(record.workload_kind)
@@ -250,8 +253,11 @@ fn bridge_main(commands: mpsc::Receiver<Command>) {
                 reason,
                 response,
             } => {
+                // The supervisor transport owns its wire command. This is an
+                // explicit serialization boundary, not a Value retain or a
+                // polling clone; transport admission remains independent.
                 let result = runtime
-                    .block_on(client.cancel_handle(handle, reason))
+                    .block_on(client.cancel_handle(handle.into_wire_unbounded(), reason))
                     .map(|_| ())
                     .map_err(service_error);
                 let _ = response.send(result);
@@ -287,13 +293,13 @@ fn bridge_main(commands: mpsc::Receiver<Command>) {
 
 async fn inspect_job(
     client: &LocalSupervisorClient,
-    handle: JobHandle,
+    handle: SharedJobHandle,
 ) -> Result<Option<ProgramExecutionResponse>, ExecutionServiceError> {
     let attachment = client
         .attach(handle.id, 0, 0)
         .await
         .map_err(service_error)?;
-    if attachment.record.handle != handle {
+    if &attachment.record.handle != handle.as_ref() {
         return Err(ExecutionServiceError::UnknownHandle);
     }
     match attachment.record.state {

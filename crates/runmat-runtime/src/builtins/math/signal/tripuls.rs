@@ -115,20 +115,22 @@ pub(crate) fn validate_skew(skew: f64) -> Result<f64, String> {
 async fn tripuls_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
     t: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     tripuls_in_runtime(runtime.as_ref(), t, rest).await
 }
 
 #[cfg(test)]
 async fn tripuls_builtin(t: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    tripuls_in_runtime(None, t, rest).await
+    let rest =
+        crate::execution::RootedValues::new(rest).map_err(|error| error.into_runtime_error())?;
+    tripuls_in_runtime(None, t, rest.into()).await
 }
 
 async fn tripuls_in_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
     t: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let mut cooperation = SignalCooperation::new(runtime, BUILTIN_NAME)
         .with_integer_error_descriptor(&TRIPULS_ERROR_INTERNAL);
@@ -149,7 +151,7 @@ async fn tripuls_in_runtime(
             BUILTIN_NAME,
         )?;
     }
-    let mut controls = prepare_options(&rest)?;
+    let mut controls = prepare_options(rest.view())?;
     admit_real_waveform_sample(&t).map_err(|_| tripuls_error(&TRIPULS_ERROR_INVALID_INPUT))?;
     if let Some(width) = &mut controls.0 {
         width
@@ -212,7 +214,9 @@ type TripulsControls<'a> = (
     Option<PreparedWaveformControl<'a>>,
 );
 
-fn prepare_options(rest: &[Value]) -> BuiltinResult<TripulsControls<'_>> {
+fn prepare_options<'a>(
+    rest: crate::call::FunctionArgumentView<'a>,
+) -> BuiltinResult<TripulsControls<'a>> {
     if rest.len() > 2 {
         return Err(tripuls_error_with_detail(
             &TRIPULS_ERROR_ARG_COUNT,

@@ -7,14 +7,14 @@ use runmat_value::Value;
     binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::path_predicate::isfile"
 )]
-async fn isfile_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn isfile_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &runmat_builtins::ISFILE_DESCRIPTOR,
         &runmat_builtins::ISFILE_ERROR_TOO_MANY_OUTPUTS,
         "isfile",
     )?;
     super::execute::evaluate(
-        &args,
+        args.view(),
         "isfile",
         &ISFILE_ERROR_ARITY,
         &ISFILE_ERROR_PATH,

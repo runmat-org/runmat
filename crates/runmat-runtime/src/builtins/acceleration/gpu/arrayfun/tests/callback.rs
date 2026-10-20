@@ -77,8 +77,8 @@ fn arrayfun_name_only_callback_uses_semantic_resolver() {
 
     let result = block_on(runtime.scope(arrayfun_builtin(
         Some(runtime.clone()),
-        Value::String("resolved_arrayfun_target".to_string()),
-        vec![Value::Tensor(tensor)],
+        Value::String("resolved_arrayfun_target".to_string().into()),
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(tensor)]),
     )))
     .expect("resolved name-only arrayfun");
     match result.value() {
@@ -124,7 +124,7 @@ fn arrayfun_external_handle_uses_semantic_resolver() {
     let result = block_on(runtime.scope(arrayfun_builtin(
         Some(runtime.clone()),
         Value::ExternalFunctionHandle("pkg.callback".into()),
-        vec![Value::Tensor(tensor)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(tensor)]),
     )))
     .expect("resolved external-handle arrayfun");
     match result.value() {

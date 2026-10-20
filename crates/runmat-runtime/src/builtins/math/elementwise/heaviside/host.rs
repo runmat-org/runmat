@@ -62,7 +62,7 @@ where
 
 fn character(array: CharArray) -> BuiltinResult<Value> {
     let values = array
-        .data
+        .data()
         .iter()
         .map(|character| scalar(f64::from(u32::from(*character))))
         .collect();

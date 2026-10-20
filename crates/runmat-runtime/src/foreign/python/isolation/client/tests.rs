@@ -18,7 +18,9 @@ async fn closed_nested_request_never_writes_to_the_child() {
         call: ForeignCall {
             adapter: "python".into(),
             symbol: "must-not-run".into(),
-            arguments: Vec::new(),
+            arguments: crate::call::RootedFunctionArguments::ordinary(
+                crate::execution::RootedValues::new(Vec::new()).unwrap(),
+            ),
             requested_outputs: 1,
         },
         reply,
@@ -44,7 +46,9 @@ async fn dropping_dispatched_nested_request_terminalizes_owned_client() {
         call: ForeignCall {
             adapter: "python".into(),
             symbol: "status".into(),
-            arguments: Vec::new(),
+            arguments: crate::call::RootedFunctionArguments::ordinary(
+                crate::execution::RootedValues::new(Vec::new()).unwrap(),
+            ),
             requested_outputs: 1,
         },
         reply,

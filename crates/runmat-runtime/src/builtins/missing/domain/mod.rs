@@ -2,7 +2,7 @@ use runmat_builtins::{BuiltinErrorDescriptor, BuiltinExtensionDescriptor};
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CellArray, CharArray, IntValue, LogicalArray, NumericDType, ObjectInstance, StringArray,
-    StructValue, Tensor, Value,
+    Tensor, Value,
 };
 
 use crate::builtins::common::{gpu_helpers, tensor as tensor_utils};
@@ -22,6 +22,7 @@ mod moving;
 mod numeric;
 mod removal;
 mod standardize;
+mod text_output;
 
 use errors::{gather_error, internal_error, invalid_argument, unsupported_type};
 use metadata::MISSING_TEXT;

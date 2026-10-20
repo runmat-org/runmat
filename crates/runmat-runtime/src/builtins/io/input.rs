@@ -57,7 +57,7 @@ fn input_error_with_source(
     binding_variant = "default",
     builtin_path = "crate::builtins::io::input"
 )]
-async fn input_builtin(args: Vec<Value>) -> BuiltinResult<RootedValue> {
+async fn input_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<RootedValue> {
     if matches!(crate::output_count::current_output_count(), Some(n) if n > 1) {
         return Err(input_error(&INPUT_ERROR_TOO_MANY_OUTPUTS));
     }
@@ -220,7 +220,7 @@ async fn parse_numeric_response(line: &str) -> Result<RootedValue, RuntimeError>
     }
 
     // Fallback when no eval hook is installed (unit tests, native REPL).
-    let parsed = call_builtin_async("str2double", &[Value::String(trimmed.to_string())])
+    let parsed = call_builtin_async("str2double", &[Value::string(trimmed.to_string())])
         .await
         .map_err(|err| {
             let message = err.message().to_string();

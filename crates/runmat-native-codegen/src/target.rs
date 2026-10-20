@@ -153,7 +153,7 @@ impl NativeTarget {
     pub fn cache_key(
         &self,
         executable_cache_key: &runmat_execution::Digest,
-        selected_entrypoint: runmat_types::ProgramFunctionId,
+        selected_entrypoint: runmat_types::FunctionId,
         selected_entrypoint_body: &runmat_execution::Digest,
     ) -> NativeCodegenResult<runmat_execution::Digest> {
         self.validate()?;

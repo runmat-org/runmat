@@ -95,7 +95,7 @@ async fn bayesopt_builtin_registered(
     requested_outputs: Option<usize>,
     objective: Value,
     variables: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     bayesopt_in_runtime(
         runtime.as_ref(),
@@ -111,7 +111,7 @@ async fn bayesopt_builtin_registered(
 async fn bayesopt_builtin(
     objective: Value,
     variables: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     bayesopt_in_runtime(
         None,
@@ -128,7 +128,7 @@ async fn bayesopt_in_runtime(
     requested_outputs: Option<usize>,
     objective: Value,
     variables: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     check_cancellation(runtime)?;
     if requested_outputs.is_some_and(|count| count > 1) {
@@ -143,6 +143,7 @@ async fn bayesopt_in_runtime(
             &ERROR_INVALID_ARGUMENT,
         ));
     }
+    let _control_sources = rest.fork();
     let headers = BayesoptOptions::headers(rest)?;
     let admitted_options = BayesoptOptions::admit(headers)?;
     let options = BayesoptOptions::materialize(admitted_options).await?;
@@ -152,7 +153,7 @@ async fn bayesopt_in_runtime(
     let vars = parse_variables(variables)?;
     check_cancellation(runtime)?;
     let outcome = optimize(runtime, objective, vars, options).await?;
-    finalize(outcome, requested_outputs)
+    finalize(runtime, outcome, requested_outputs)
 }
 
 fn check_cancellation(runtime: Option<&crate::context::RuntimeContext>) -> BuiltinResult<()> {
@@ -203,7 +204,7 @@ async fn call_function(
     handle: &Value,
     args: Vec<Value>,
 ) -> BuiltinResult<crate::execution::RootedValue> {
-    let callback = crate::canonicalize_callback_handle_for_semantic_resolution(handle.clone());
+    let callback = crate::canonicalize_callback_handle_for_semantic_resolution(handle.clone())?;
     crate::call_feval_async_with_outputs(callback, &args, 1).await
 }
 

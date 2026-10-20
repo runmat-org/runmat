@@ -229,13 +229,13 @@ impl SelectedImageRegionSet {
                         .checked_mul(std::mem::size_of::<usize>())
                         .and_then(|shape| {
                             array
-                                .data
+                                .data()
                                 .len()
                                 .checked_mul(std::mem::size_of::<String>())
                                 .and_then(|data| shape.checked_add(data))
                         })
                         .ok_or(HostAllocationError::Overflow)?;
-                    for text in &array.data {
+                    for text in array.data() {
                         bytes = bytes
                             .checked_add(text.len())
                             .ok_or(HostAllocationError::Overflow)?;
@@ -248,7 +248,7 @@ impl SelectedImageRegionSet {
                     .checked_mul(std::mem::size_of::<usize>())
                     .and_then(|shape| {
                         array
-                            .data
+                            .data()
                             .len()
                             .checked_mul(std::mem::size_of::<char>())
                             .and_then(|data| shape.checked_add(data))

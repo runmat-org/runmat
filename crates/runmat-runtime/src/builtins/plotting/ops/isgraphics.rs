@@ -109,11 +109,11 @@ pub fn isgraphics_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 fn graphics_type_name(value: &Value) -> crate::BuiltinResult<String> {
     match value {
         Value::String(value) => Ok(value.trim().to_ascii_lowercase()),
-        Value::StringArray(value) if value.data.len() == 1 => {
-            Ok(value.data[0].trim().to_ascii_lowercase())
+        Value::StringArray(value) if value.data().len() == 1 => {
+            Ok(value.data()[0].trim().to_ascii_lowercase())
         }
         Value::CharArray(value) if value.rows == 1 => Ok(value
-            .data
+            .data()
             .iter()
             .collect::<String>()
             .trim()

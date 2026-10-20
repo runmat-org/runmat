@@ -16,7 +16,7 @@ use crate::BuiltinResult;
 
 pub(super) async fn evaluate(
     name: &'static str,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
     operator: BinaryBitwiseOperator,
     single_extension: &BuiltinExtensionDescriptor,
     gpu_domain_extension: &BuiltinExtensionDescriptor,

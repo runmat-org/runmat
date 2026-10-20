@@ -22,7 +22,10 @@ fn pdf_wgpu_fallback_preserves_residency_for_all_integer_classes() {
         let result = block_on(pdf_builtin(
             Value::String("Normal".into()),
             Value::GpuTensor(handle),
-            vec![Value::Num(0.0), Value::Num(1.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(0.0),
+                Value::Num(1.0),
+            ]),
         ))
         .expect("resident integer pdf");
         let Value::GpuTensor(output) = &result else {
@@ -53,7 +56,10 @@ fn cdf_wgpu_fallback_preserves_residency_for_all_integer_classes() {
         let result = block_on(cdf_builtin(
             Value::String("Normal".into()),
             Value::GpuTensor(handle),
-            vec![Value::Num(0.0), Value::Num(1.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(0.0),
+                Value::Num(1.0),
+            ]),
         ))
         .expect("resident integer cdf");
         assert!(matches!(result, Value::GpuTensor(_)));

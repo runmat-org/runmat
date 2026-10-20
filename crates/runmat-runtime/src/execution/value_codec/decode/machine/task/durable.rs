@@ -1,76 +1,79 @@
 use super::super::*;
 use super::text::{ShapeCopy, TextCopy};
+use crate::execution::value_codec::object_output::{ObjectOutput, ObjectText};
 use runmat_execution::value::{
     DurableDynamicProperty, DurableObjectArray, DurablePlainObject, DurableStructArray,
 };
-use runmat_value::{DynamicPropertyDef, ObjectArrayAdmission, StructArrayAdmission};
+use runmat_value::{DynamicPropertyDef, StructArrayAdmission};
 use std::num::NonZeroUsize;
 
 pub(in crate::execution::value_codec::decode::machine) struct PlainObjectTask<'a> {
     source: &'a DurablePlainObject,
-    children: TakenValues,
-    class: TextCopy<'a>,
-    object: Option<ObjectInstance>,
+    object: Option<ObjectOutput<'a>>,
+    children: TakenValues<'a>,
     property: usize,
-    property_name: Option<TextCopy<'a>>,
+    property_name: Option<ObjectText<'a>>,
     dynamic: usize,
     dynamic_text: usize,
-    texts: Vec<String>,
-    path: String,
+    texts: [Option<runmat_value::Utf8Text>; 4],
+    path: ControlPath<'a>,
 }
 
 impl<'a> PlainObjectTask<'a> {
-    pub(super) fn new(source: &'a DurablePlainObject, children: TakenValues, path: String) -> Self {
-        Self {
+    pub(super) fn new(
+        source: &'a DurablePlainObject,
+        children: TakenValues<'a>,
+        path: ControlPath<'a>,
+        runtime: Option<&'a crate::context::RuntimeContext>,
+    ) -> Result<Self, ValueCodecError> {
+        let object = ObjectOutput::new(
+            source.class_identity.display_name(),
+            source.properties.iter().map(|f| f.name.as_str()),
+            &source.dynamic_properties,
+            crate::execution::value_codec::object_output::DynamicMetadataCopy::Incremental,
+            runtime,
+            &path,
+        )?;
+        Ok(Self {
             source,
+            object: Some(object),
             children,
-            class: TextCopy::new(source.class_identity.display_name()),
-            object: None,
             property: 0,
             property_name: None,
             dynamic: 0,
             dynamic_text: 0,
-            texts: Vec::new(),
+            texts: [None, None, None, None],
             path,
-        }
+        })
     }
 
     pub(super) fn advance(
         &mut self,
         maximum_work: usize,
     ) -> Result<(usize, Option<Value>), ValueCodecError> {
-        if self.object.is_none() {
-            let completed = self.class.advance(maximum_work);
-            if self.class.is_complete() {
-                let class = std::mem::replace(&mut self.class, TextCopy::new("")).finish();
-                let class = runmat_types::ClassIdentity::new(class)
-                    .map_err(|error| ValueCodecError::invalid(&self.path, error.to_string()))?;
-                let mut object = ObjectInstance::new(class);
-                object.properties.reserve(self.source.properties.len());
-                if !self.source.dynamic_properties.is_empty() {
-                    object.dynamic_properties =
-                        Some(Box::new(std::collections::HashMap::with_capacity(
-                            self.source.dynamic_properties.len(),
-                        )));
-                }
-                self.object = Some(object);
-            }
-            return Ok((completed, None));
-        }
+        self.object
+            .as_ref()
+            .expect("object output")
+            .checkpoint(&self.path)?;
         if self.property < self.source.properties.len() {
             let field = &self.source.properties[self.property];
-            let copy = self
-                .property_name
-                .get_or_insert_with(|| TextCopy::new(&field.name));
+            if self.property_name.is_none() {
+                self.property_name = Some(
+                    self.object
+                        .as_ref()
+                        .expect("object output")
+                        .text(&field.name, &self.path)?,
+                );
+            }
+            let copy = self.property_name.as_mut().expect("active property name");
             let completed = copy.advance(maximum_work);
             if copy.is_complete() {
                 let name = self.property_name.take().expect("property name").finish();
-                let value = self.children.next().expect("decoded property value");
+                let value = self.children.next()?.expect("decoded property value");
                 self.object
                     .as_mut()
                     .expect("object")
-                    .properties
-                    .insert(name, value);
+                    .insert(name, value, &self.path)?;
                 self.property += 1;
             }
             return Ok((completed, None));
@@ -78,32 +81,36 @@ impl<'a> PlainObjectTask<'a> {
         if self.dynamic < self.source.dynamic_properties.len() {
             let definition = &self.source.dynamic_properties[self.dynamic];
             let source = dynamic_text(definition, self.dynamic_text);
-            let mut copy = self
-                .property_name
-                .take()
-                .unwrap_or_else(|| TextCopy::new(source));
+            let mut copy = match self.property_name.take() {
+                Some(copy) => copy,
+                None => self
+                    .object
+                    .as_ref()
+                    .expect("object output")
+                    .text(source, &self.path)?,
+            };
             let completed = copy.advance(maximum_work);
             if !copy.is_complete() {
                 self.property_name = Some(copy);
                 return Ok((completed, None));
             }
-            self.texts.push(copy.finish());
+            self.texts[self.dynamic_text] = Some(copy.finish());
             self.dynamic_text += 1;
             if self.dynamic_text == 4 {
-                let mut texts = std::mem::take(&mut self.texts).into_iter();
-                let key = texts.next().expect("dynamic key");
-                let name = texts.next().expect("dynamic definition name");
-                let defining_class =
-                    runmat_types::ClassIdentity::new(texts.next().expect("defining class"))
-                        .map_err(|error| ValueCodecError::invalid(&self.path, error.to_string()))?;
-                let description = texts.next().expect("description");
+                let key = self.texts[0].take().expect("dynamic key");
+                let name = self.texts[1].take().expect("dynamic definition name");
+                let class_text = self.texts[2].take().expect("defining class");
+                let defining_class = self
+                    .object
+                    .as_ref()
+                    .expect("object output")
+                    .class(&class_text, &self.path)?;
+                let description = self.texts[3].take().expect("description");
                 let property = dynamic_property(definition, name, defining_class, description);
                 self.object
                     .as_mut()
                     .expect("object")
-                    .dynamic_properties
-                    .get_or_insert_with(Default::default)
-                    .insert(key, property);
+                    .insert_dynamic(key, property, &self.path)?;
                 self.dynamic += 1;
                 self.dynamic_text = 0;
             }
@@ -111,11 +118,16 @@ impl<'a> PlainObjectTask<'a> {
         }
         Ok((
             1,
-            Some(Value::Object(self.object.take().expect("decoded object"))),
+            Some(Value::Object(
+                self.object
+                    .take()
+                    .expect("decoded object")
+                    .finish(&self.path)?,
+            )),
         ))
     }
 
-    pub(super) fn take_children(&mut self) -> TakenValues {
+    pub(super) fn take_children(&mut self) -> TakenValues<'a> {
         std::mem::replace(&mut self.children, DecodeMachine::empty_taken_values())
     }
 }
@@ -132,9 +144,9 @@ fn dynamic_text(value: &DurableDynamicProperty, index: usize) -> &str {
 
 fn dynamic_property(
     value: &DurableDynamicProperty,
-    name: String,
-    defining_class: runmat_types::ClassIdentity,
-    description: String,
+    name: runmat_value::Utf8Text,
+    defining_class: runmat_value::SharedClassIdentity,
+    description: runmat_value::Utf8Text,
 ) -> DynamicPropertyDef {
     DynamicPropertyDef {
         name,
@@ -155,28 +167,32 @@ fn dynamic_property(
 
 pub(in crate::execution::value_codec::decode::machine) struct StructArrayTask<'a> {
     source: &'a DurableStructArray,
-    children: TakenValues,
     shape: ShapeCopy<'a>,
     names: Vec<String>,
     name: Option<TextCopy<'a>>,
     values: Vec<Value>,
     admission: Option<StructArrayAdmission>,
-    path: String,
+    children: TakenValues<'a>,
+    path: ControlPath<'a>,
 }
 
 impl<'a> StructArrayTask<'a> {
-    pub(super) fn new(source: &'a DurableStructArray, children: TakenValues, path: String) -> Self {
+    pub(super) fn new(
+        source: &'a DurableStructArray,
+        children: TakenValues<'a>,
+        path: ControlPath<'a>,
+    ) -> Result<Self, ValueCodecError> {
         let capacity = children.remaining();
-        Self {
+        Ok(Self {
             source,
-            children,
-            shape: ShapeCopy::new(&source.shape, path.clone()),
+            shape: ShapeCopy::new(&source.shape, path.try_clone()?),
             names: Vec::with_capacity(source.fields.len()),
             name: None,
             values: Vec::with_capacity(capacity),
             admission: None,
+            children,
             path,
-        }
+        })
     }
 
     pub(super) fn advance(
@@ -219,12 +235,12 @@ impl<'a> StructArrayTask<'a> {
         let count = self.children.remaining().min(maximum_work);
         for _ in 0..count {
             self.values
-                .push(self.children.next().expect("field-major value"));
+                .push(self.children.next()?.expect("field-major value"));
         }
         if self.children.remaining() != 0 {
             return Ok((count.max(1), None));
         }
-        let shape = std::mem::replace(&mut self.shape, ShapeCopy::new(&[], String::new())).finish();
+        let shape = self.shape.take_finished();
         self.admission = Some(
             StructArrayAdmission::field_major(
                 std::mem::take(&mut self.names),
@@ -236,98 +252,98 @@ impl<'a> StructArrayTask<'a> {
         Ok((count.max(1), None))
     }
 
-    pub(super) fn take_children(&mut self) -> TakenValues {
+    pub(super) fn take_children(&mut self) -> TakenValues<'a> {
         std::mem::replace(&mut self.children, DecodeMachine::empty_taken_values())
     }
 }
 
 pub(in crate::execution::value_codec::decode::machine) struct ObjectArrayTask<'a> {
-    children: TakenValues,
-    class: TextCopy<'a>,
-    decoded_class: Option<runmat_types::ClassIdentity>,
-    shape: ShapeCopy<'a>,
-    objects: Vec<Value>,
-    admission: Option<ObjectArrayAdmission>,
-    path: String,
+    output: Option<crate::execution::object_array::ObjectArrayConstruction<'a>>,
+    shape: Option<crate::execution::value_codec::shape_copy::ShapeCopy<'a>>,
+    source: &'a DurableObjectArray,
+    children: TakenValues<'a>,
+    path: ControlPath<'a>,
+    runtime: Option<&'a crate::context::RuntimeContext>,
 }
 
 impl<'a> ObjectArrayTask<'a> {
-    pub(super) fn new(source: &'a DurableObjectArray, children: TakenValues, path: String) -> Self {
-        let capacity = children.remaining();
-        Self {
+    pub(super) fn new(
+        source: &'a DurableObjectArray,
+        children: TakenValues<'a>,
+        path: ControlPath<'a>,
+        runtime: Option<&'a crate::context::RuntimeContext>,
+    ) -> Result<Self, ValueCodecError> {
+        let shape = crate::execution::value_codec::shape_copy::ShapeCopy::new(
+            &source.shape,
+            runtime,
+            &path,
+        )?;
+        Ok(Self {
+            output: None,
+            shape: Some(shape),
+            source,
             children,
-            class: TextCopy::new(source.class_identity.display_name()),
-            decoded_class: None,
-            shape: ShapeCopy::new(&source.shape, path.clone()),
-            objects: Vec::with_capacity(capacity),
-            admission: None,
             path,
-        }
+            runtime,
+        })
     }
-
     pub(super) fn advance(
         &mut self,
         maximum_work: usize,
     ) -> Result<(usize, Option<Value>), ValueCodecError> {
-        if let Some(admission) = &mut self.admission {
-            let completed = admission
-                .advance(NonZeroUsize::new(maximum_work).expect("machine work is nonzero"))
-                .map_err(|error| ValueCodecError::invalid(&self.path, error))?;
-            if !admission.is_complete() {
-                return Ok((completed, None));
+        if let Some(shape) = &mut self.shape {
+            if !shape.is_complete() {
+                return Ok((shape.advance(maximum_work, &self.path)?, None));
             }
-            let admission = self.admission.take().expect("completed object admission");
-            return Ok((
-                completed,
-                Some(Value::ObjectArray(
-                    admission
-                        .into_validated()
-                        .ok()
-                        .expect("completed object admission")
-                        .into_array(),
-                )),
-            ));
+            let shape = self
+                .shape
+                .take()
+                .expect("completed object-array shape")
+                .finish(&self.path)?;
+            self.output = Some(
+                crate::execution::object_array::ObjectArrayConstruction::new_retaining_shape(
+                    self.runtime,
+                    crate::execution::object_array::Class::Name(
+                        self.source.class_identity.display_name(),
+                    ),
+                    self.children.remaining(),
+                    &shape,
+                    std::iter::empty(),
+                    false,
+                )
+                .map_err(|error| ValueCodecError::runtime(&self.path, error))?,
+            );
         }
-        if self.decoded_class.is_none() {
-            let completed = self.class.advance(maximum_work);
-            if self.class.is_complete() {
-                let class = std::mem::replace(&mut self.class, TextCopy::new("")).finish();
-                self.decoded_class =
-                    Some(runmat_types::ClassIdentity::new(class).map_err(|error| {
-                        ValueCodecError::invalid(&self.path, error.to_string())
-                    })?);
-            }
-            return Ok((completed, None));
-        }
-        if !self.shape.is_complete() {
-            return Ok((self.shape.advance(maximum_work)?, None));
-        }
+        let output = self.output.as_mut().expect("prepared object-array output");
+        output
+            .checkpoint()
+            .map_err(|error| ValueCodecError::runtime(&self.path, error))?;
         let count = self.children.remaining().min(maximum_work);
         for _ in 0..count {
-            let value @ Value::Object(_) = self.children.next().expect("decoded object") else {
+            let value @ Value::Object(_) =
+                self.children.next()?.expect("decoded object-array child")
+            else {
                 return Err(ValueCodecError::invalid(
                     &self.path,
                     "object-array child is not an object",
                 ));
             };
-            self.objects.push(value);
+            output
+                .push(value)
+                .map_err(|error| ValueCodecError::runtime(&self.path, error))?;
         }
         if self.children.remaining() != 0 {
             return Ok((count.max(1), None));
         }
-        let shape = std::mem::replace(&mut self.shape, ShapeCopy::new(&[], String::new())).finish();
-        self.admission = Some(
-            ObjectArrayAdmission::values(
-                self.decoded_class.take().expect("class identity"),
-                std::mem::take(&mut self.objects),
-                shape,
-            )
-            .map_err(|error| ValueCodecError::invalid(&self.path, error))?,
-        );
-        Ok((count.max(1), None))
+        let value = self
+            .output
+            .take()
+            .expect("complete object-array output")
+            .finish_value()
+            .map_err(|error| ValueCodecError::runtime(&self.path, error))?;
+        Ok((count.max(1), Some(value)))
     }
-
-    pub(super) fn take_children(&mut self) -> TakenValues {
+    pub(super) fn take_children(&mut self) -> TakenValues<'a> {
         std::mem::replace(&mut self.children, DecodeMachine::empty_taken_values())
     }
 }

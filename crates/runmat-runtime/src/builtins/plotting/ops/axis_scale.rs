@@ -36,12 +36,13 @@ pub fn axis_scale_builtin(
     runtime: Option<&crate::context::RuntimeContext>,
     builtin: &'static str,
     axis: TickAxis,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let (target, args) = prepare_scale_call(runtime, builtin, args)?;
-    match args.as_slice() {
-        [] => query_scale(builtin, axis, &target.resolve(builtin)?),
-        [value] => {
+    match args.len() {
+        0 => query_scale(builtin, axis, &target.resolve(builtin)?),
+        1 => {
+            let value = args.first().expect("one scale argument");
             let mode = scale_mode_from_value(value, builtin)?;
             super::op_common::axes_output::validate_setter_output(builtin)?;
             set_scale(builtin, axis, &target.resolve(builtin)?, mode)?;
@@ -70,10 +71,10 @@ pub fn scale_mode_from_value(value: &Value, builtin: &'static str) -> BuiltinRes
 fn prepare_scale_call(
     runtime: Option<&crate::context::RuntimeContext>,
     builtin: &'static str,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<(
     super::op_common::axes_target::PreparedAxesTarget,
-    Vec<Value>,
+    crate::call::BuiltinArguments,
 )> {
     use super::op_common::axes_target::{prepare_graphics_target, PreparedAxesTarget};
     if let Some(first) = args
@@ -82,7 +83,10 @@ fn prepare_scale_call(
     {
         if let Some(prepared) = prepare_graphics_target(runtime, builtin, first)? {
             let target = prepared.into_axes(builtin)?;
-            return Ok((target, args.into_iter().skip(1).collect()));
+            return Ok((
+                target,
+                args.into_range(1..).expect("nonempty axes arguments"),
+            ));
         }
     }
     // Preserve this family's stricter exact numeric-handle grammar/errors.
@@ -96,13 +100,12 @@ fn prepare_scale_call(
 
 fn split_optional_axes_target(
     builtin: &'static str,
-    args: Vec<Value>,
-) -> BuiltinResult<(AxesScaleTarget, Vec<Value>)> {
-    let mut iter = args.into_iter();
-    let Some(first) = iter.next() else {
-        return Ok((None, Vec::new()));
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<(AxesScaleTarget, crate::call::BuiltinArguments)> {
+    let Some(first) = args.first() else {
+        return Ok((None, args));
     };
-    let integer_scalar = tensor_utils::scalar_integer_value(&first);
+    let integer_scalar = tensor_utils::scalar_integer_value(first);
     if let Some(integer) = integer_scalar {
         // Axes handles occupy at most 52 bits (u32 figure id plus 20-bit axes
         // index), so this bounded conversion to f64 remains exact.
@@ -134,9 +137,12 @@ fn split_optional_axes_target(
         }
         axes_metadata_snapshot(handle, axes_index)
             .map_err(|err| plotting_error_with_source(builtin, format!("{builtin}: {err}"), err))?;
-        return Ok((Some((handle, axes_index)), iter.collect()));
+        return Ok((
+            Some((handle, axes_index)),
+            args.into_range(1..).expect("nonempty axes arguments"),
+        ));
     }
-    if let Some(scalar) = numeric_scalar(&first) {
+    if let Some(scalar) = numeric_scalar(first) {
         let (handle, axes_index) = decode_axes_handle(scalar).map_err(|_| {
             plotting_error(
                 builtin,
@@ -151,12 +157,12 @@ fn split_optional_axes_target(
         }
         axes_metadata_snapshot(handle, axes_index)
             .map_err(|err| plotting_error_with_source(builtin, format!("{builtin}: {err}"), err))?;
-        return Ok((Some((handle, axes_index)), iter.collect()));
+        return Ok((
+            Some((handle, axes_index)),
+            args.into_range(1..).expect("nonempty axes arguments"),
+        ));
     }
-    let mut rest = Vec::with_capacity(iter.size_hint().0 + 1);
-    rest.push(first);
-    rest.extend(iter);
-    Ok((None, rest))
+    Ok((None, args))
 }
 
 fn numeric_scalar(value: &Value) -> Option<f64> {
@@ -227,7 +233,9 @@ mod tests {
             IntegerStorage::U64(vec![1]),
         ];
         for storage in storages {
-            let err = split_optional_axes_target("xscale", vec![poisoned_scalar(storage)])
+            let values = vec![poisoned_scalar(storage)];
+            let args = crate::call::BuiltinArguments::from_borrowed(&values, None).unwrap();
+            let err = split_optional_axes_target("xscale", args)
                 .expect_err("unregistered axes handle must be rejected");
             assert!(err.message().contains("expected axes handle"));
         }

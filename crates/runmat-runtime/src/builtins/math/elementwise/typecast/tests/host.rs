@@ -8,7 +8,7 @@ fn preserves_integer_bytes_width_and_orientation() {
         Tensor::new_integer(IntegerStorage::U32(vec![1, 255, 256]), vec![1, 3]).expect("input");
     let Value::Tensor(output) = block_on(typecast_builtin(vec![
         Value::Tensor(input),
-        Value::String("uint8".to_string()),
+        Value::String("uint8".to_string().into()),
     ]))
     .expect("typecast") else {
         panic!("expected tensor");
@@ -60,12 +60,12 @@ fn round_trips_exact_uint64_bits() {
         Tensor::new_integer(IntegerStorage::U64(original.to_vec()), vec![3, 1]).expect("input");
     let bytes = block_on(typecast_builtin(vec![
         Value::Tensor(input),
-        Value::String("uint8".to_string()),
+        Value::String("uint8".to_string().into()),
     ]))
     .expect("to bytes");
     let Value::Tensor(output) = block_on(typecast_builtin(vec![
         bytes,
-        Value::String("uint64".to_string()),
+        Value::String("uint64".to_string().into()),
     ]))
     .expect("from bytes") else {
         panic!("expected tensor");
@@ -95,7 +95,7 @@ fn like_complex_integer_groups_adjacent_components_exactly() {
     .expect("prototype");
     let Value::ComplexTensor(output) = block_on(typecast_builtin(vec![
         Value::Tensor(input),
-        Value::String("like".to_string()),
+        Value::String("like".to_string().into()),
         Value::ComplexTensor(prototype),
     ]))
     .expect("complex like") else {
@@ -113,12 +113,12 @@ fn rejects_matrix_and_indivisible_byte_count() {
         Tensor::new_integer(IntegerStorage::U8(vec![1, 2, 3, 4]), vec![2, 2]).expect("matrix");
     assert!(block_on(typecast_builtin(vec![
         Value::Tensor(matrix),
-        Value::String("uint16".to_string()),
+        Value::String("uint16".to_string().into()),
     ]))
     .is_err());
     assert!(block_on(typecast_builtin(vec![
         Value::Int(IntValue::U8(1)),
-        Value::String("uint16".to_string()),
+        Value::String("uint16".to_string().into()),
     ]))
     .is_err());
 }
@@ -129,7 +129,10 @@ fn registered_binding_dispatches_exact_storage() {
         Tensor::new_integer(IntegerStorage::I16(vec![-1, i16::MIN]), vec![1, 2]).expect("input");
     let result = crate::dispatcher::call_builtin(
         "typecast",
-        &[Value::Tensor(input), Value::String("uint16".to_string())],
+        &[
+            Value::Tensor(input),
+            Value::String("uint16".to_string().into()),
+        ],
     )
     .expect("registered typecast");
     let Value::Tensor(output) = result.value() else {

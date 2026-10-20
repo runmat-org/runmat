@@ -26,14 +26,14 @@ fn setfield_assigns_object_property() {
     crate::class_registry::register_class(class_def);
 
     let mut obj = ObjectInstance::new("Simple".to_string());
-    obj.properties.insert("x".to_string(), Value::Num(0.0));
+    obj.replace_property_unbounded("x".to_string(), Value::Num(0.0));
 
     let updated = run_setfield(Value::Object(obj), vec![Value::from("x"), Value::Num(5.0)])
         .expect("setfield");
 
     match updated.value() {
         Value::Object(o) => {
-            assert_eq!(o.properties.get("x"), Some(&Value::Num(5.0)));
+            assert_eq!(o.properties().get("x"), Some(&Value::Num(5.0)));
         }
         other => panic!("expected object result, got {other:?}"),
     }

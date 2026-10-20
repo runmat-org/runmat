@@ -14,7 +14,7 @@ async fn original_future_environment_survives_caller_mutation_without_mutating_p
         )
         .unwrap();
         session.set_compat_mode(crate::CompatMode::RunMat);
-        let service = Rc::new(CapturingService::default());
+        let service = Rc::new(CapturingService::new(&session));
         session.install_execution_services(service.clone());
         let unit = session.compile_executable_unit(ExecutableSource::new(
             "deferred-environment-owner", "environment.m",
@@ -29,16 +29,16 @@ async fn original_future_environment_survives_caller_mutation_without_mutating_p
                 &unit,
                 crate::ProcedureInvocation {
                     target: crate::ProcedureTarget::Function("entry".into()),
-                    arguments: vec![],
+                    arguments: crate::ProcedureArguments::Source(vec![]),
                     requested_outputs: 1,
                 },
                 &control,
             )
             .await
             .unwrap();
-        let original = service.original.borrow_mut().take().unwrap();
+        let original = service.take_original();
         assert_eq!(
-            original.environment.entries(),
+            original.call.environment.entries(),
             [(name.into(), "captured".into())]
         );
         session
@@ -49,7 +49,9 @@ async fn original_future_environment_survives_caller_mutation_without_mutating_p
                 &unit,
                 crate::ProcedureInvocation {
                     target: crate::ProcedureTarget::Function("finish".into()),
-                    arguments: vec![future],
+                    arguments: crate::ProcedureArguments::Source(
+                        vec![future.as_slice()[0].clone()],
+                    ),
                     requested_outputs: 1,
                 },
                 &control,
@@ -57,8 +59,8 @@ async fn original_future_environment_survives_caller_mutation_without_mutating_p
             .await
             .unwrap();
         assert_eq!(
-            value,
-            Value::CharArray(CharArray::new_row("captured")),
+            value.as_slice(),
+            &[Value::CharArray(CharArray::new_row("captured"))],
             "native={native}"
         );
         assert_eq!(

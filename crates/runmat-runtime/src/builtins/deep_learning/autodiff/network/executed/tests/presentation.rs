@@ -6,10 +6,11 @@ fn unformatted_input(data: Vec<f64>, dtype: NumericDType) -> Value {
         "dlarray",
         vec![
             ("Data", values(data, vec![2, 3, 4], dtype)),
-            ("Format", Value::String(String::new())),
-            ("Labels", Value::String(String::new())),
+            ("Format", Value::String(String::new().into())),
+            ("Labels", Value::String(String::new().into())),
         ],
     )
+    .expect("fixture object")
 }
 
 fn predict(net: &Value, x: Value) -> Value {
@@ -39,10 +40,16 @@ fn rank_changing_predict_inverts_observation_major_axes_in_the_shared_reverse() 
             assert_eq!(tensor(&y).numeric_dtype(), dtype);
             let loss = dlarray_sum_builtin(
                 dlarray_times_builtin(y, values(weights.to_vec(), vec![3, 2], dtype)).unwrap(),
-                vec![Value::String("all".into())],
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                    "all".into(),
+                )]),
             )
             .unwrap();
-            let gradient = block_on(dlgradient_direct(loss, vec![x])).unwrap();
+            let gradient = block_on(dlgradient_direct(
+                loss,
+                crate::builtins::common::test_support::builtin_arguments(vec![x]),
+            ))
+            .unwrap();
             assert_eq!(tensor(&gradient).shape(), &[2, 3, 4]);
             assert_eq!(tensor(&gradient).numeric_dtype(), dtype);
             tensor(&gradient).materialize_f64()

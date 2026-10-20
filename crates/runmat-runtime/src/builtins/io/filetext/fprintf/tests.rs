@@ -140,7 +140,7 @@ fn fprintf_integer_string_conversion_preserves_character_codes() {
     let format = crate::builtins::common::format::validate_format_syntax("[%s]").unwrap();
     let args = coerce_single_integer_string_argument(format, vec![Value::Tensor(tensor)])
         .expect("integer string conversion");
-    assert_eq!(args, vec![Value::String("ABC".to_string())]);
+    assert_eq!(args, vec![Value::String("ABC".to_string().into())]);
     assert_eq!(format_with_repetition("[%s]", &args).unwrap(), "[ABC]");
 }
 
@@ -190,7 +190,7 @@ fn fprintf_format_tensor_reads_typed_integer_storage_exactly() {
 
     assert_eq!(
         coerce_to_format_string(&Value::Tensor(format)).unwrap(),
-        Some(Value::String("%d".to_string()))
+        Some(Value::String("%d".to_string().into()))
     );
 }
 
@@ -248,7 +248,7 @@ fn fprintf_matrix_column_major() {
     let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
     let args = vec![
         Value::Num(fid as f64),
-        Value::String("%d %d\n".to_string()),
+        Value::String("%d %d\n".to_string().into()),
         Value::Tensor(tensor),
     ];
     let eval = run_evaluate(&args).expect("fprintf");
@@ -275,7 +275,7 @@ fn fprintf_uses_shared_scientific_and_general_conversions() {
     let fid = open.as_open().unwrap().fid as i32;
     let eval = run_evaluate(&[
         Value::Num(fid as f64),
-        Value::String("%E|%G|%d".to_string()),
+        Value::String("%E|%G|%d".to_string().into()),
         Value::Num(1234.5),
         Value::Num(1.0e-10),
         Value::Num(2.5),
@@ -308,8 +308,8 @@ fn fprintf_ascii_encoding_errors() {
 
     let args = vec![
         Value::Num(fid as f64),
-        Value::String("%s".to_string()),
-        Value::String("café".to_string()),
+        Value::String("%s".to_string().into()),
+        Value::String("café".to_string().into()),
     ];
     let err = unwrap_error_message(run_evaluate(&args).unwrap_err());
     assert!(err.contains("cannot be encoded as ASCII"), "{err}");
@@ -342,7 +342,7 @@ fn fprintf_gpu_gathers_values() {
         let handle = provider.upload(&view).expect("upload");
         let args = vec![
             Value::Num(fid as f64),
-            Value::String("%.1f,".to_string()),
+            Value::String("%.1f,".to_string().into()),
             Value::GpuTensor(handle),
         ];
         let eval = run_evaluate(&args).expect("fprintf");
@@ -370,7 +370,7 @@ fn fprintf_missing_format_errors() {
 fn fprintf_literal_with_extra_args_errors() {
     let err = unwrap_error_message(
         run_evaluate(&[
-            Value::String("literal text".to_string()),
+            Value::String("literal text".to_string().into()),
             Value::Int(IntValue::I32(1)),
         ])
         .unwrap_err(),
@@ -382,7 +382,7 @@ fn fprintf_literal_with_extra_args_errors() {
 #[test]
 fn fprintf_invalid_identifier_errors() {
     let err = unwrap_error_message(
-        run_evaluate(&[Value::Num(99.0), Value::String("value".to_string())]).unwrap_err(),
+        run_evaluate(&[Value::Num(99.0), Value::String("value".to_string().into())]).unwrap_err(),
     );
     assert_eq!(err, FPRINTF_ERROR_INVALID_IDENTIFIER.message);
 }
@@ -401,7 +401,11 @@ fn fprintf_read_only_error() {
     .expect("fopen");
     let fid = open.as_open().unwrap().fid as i32;
     let err = unwrap_error_message(
-        run_evaluate(&[Value::Num(fid as f64), Value::String("text".to_string())]).unwrap_err(),
+        run_evaluate(&[
+            Value::Num(fid as f64),
+            Value::String("text".to_string().into()),
+        ])
+        .unwrap_err(),
     );
     assert!(err.contains("not open for writing"), "{err}");
 

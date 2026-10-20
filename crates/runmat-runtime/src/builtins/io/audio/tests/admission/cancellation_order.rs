@@ -24,7 +24,7 @@ fn cancelled_finite_calls_precede_missing_resource_evidence_without_file_effects
         block_on(audioread_builtin(
             Some(runtime.clone()),
             Value::from("/audio/tone.wav"),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .expect_err("cancelled decode before resource lookup"),
         block_on(audioinfo_builtin(
@@ -35,8 +35,12 @@ fn cancelled_finite_calls_precede_missing_resource_evidence_without_file_effects
     ] {
         assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
     }
-    let invalid = block_on(audioread_builtin(Some(runtime), Value::Num(3.0), vec![]))
-        .expect_err("pure argument admission retains precedence");
+    let invalid = block_on(audioread_builtin(
+        Some(runtime),
+        Value::Num(3.0),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .expect_err("pure argument admission retains precedence");
     assert_eq!(
         invalid.identifier(),
         Some("RunMat:audioread:InvalidArgument")

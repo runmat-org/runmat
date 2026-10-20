@@ -1,6 +1,6 @@
 use runmat_gc::{Trace, Tracer};
 use runmat_runtime::context::RuntimeContext;
-use runmat_types::ProgramFunctionId;
+use runmat_types::FunctionId;
 use runmat_value::Value;
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -31,7 +31,7 @@ pub struct NativeExecutor {
 }
 
 struct EntryRepresentationProfile {
-    function: ProgramFunctionId,
+    function: FunctionId,
     profile: crate::RepresentationProfile,
 }
 
@@ -45,7 +45,7 @@ pub struct NativeExecutorOptions {
 }
 
 pub struct NativeInvocationRequest {
-    pub function: ProgramFunctionId,
+    pub function: FunctionId,
     pub captures: Vec<runmat_runtime::call::lexical::LexicalCapture>,
     pub arguments: Vec<Value>,
     pub requested_outputs: usize,
@@ -55,8 +55,20 @@ pub struct NativeInvocationRequest {
     pub workspace: Option<super::workspace::NativeWorkspaceInput>,
 }
 
+/// Live rooted inputs with the same execution controls as source ingress.
+pub struct RootedNativeInvocationRequest {
+    pub function: FunctionId,
+    pub arguments: runmat_runtime::call::RootedFunctionArguments,
+    pub requested_outputs: usize,
+    pub runtime: RuntimeContext,
+    pub lexical_environment: Option<runmat_value::LexicalEnvironment>,
+    pub deoptimization: DeoptimizationPolicy,
+    pub osr_target: Option<OsrTarget>,
+    pub workspace: Option<super::workspace::NativeWorkspaceInput>,
+}
+
 struct NativeRequestParts {
-    function: ProgramFunctionId,
+    function: FunctionId,
     inputs: NativeFunctionInputs,
     captures: Vec<NativeCaptureInput>,
     requested_outputs: usize,
@@ -105,7 +117,7 @@ impl NativeExecutor {
     /// generation and moves only the explicit suffix into function locals.
     pub async fn invoke_rooted_function_arguments_async(
         &self,
-        function: ProgramFunctionId,
+        function: FunctionId,
         arguments: runmat_runtime::call::RootedFunctionArguments,
         requested_outputs: usize,
         runtime: RuntimeContext,
@@ -128,12 +140,39 @@ impl NativeExecutor {
     /// same interpreter-resume policy as ordinary native execution.
     pub async fn begin_rooted_function_arguments_async(
         &self,
-        function: ProgramFunctionId,
+        function: FunctionId,
         arguments: runmat_runtime::call::RootedFunctionArguments,
         requested_outputs: usize,
         runtime: RuntimeContext,
         lexical_environment: Option<runmat_value::LexicalEnvironment>,
     ) -> NativeExecutorResult<NativeInvocation> {
+        self.begin_rooted_request_async(RootedNativeInvocationRequest {
+            function,
+            arguments,
+            requested_outputs,
+            runtime,
+            lexical_environment,
+            deoptimization: DeoptimizationPolicy::default(),
+            osr_target: None,
+            workspace: None,
+        })
+        .await
+    }
+
+    pub async fn begin_rooted_request_async(
+        &self,
+        request: RootedNativeInvocationRequest,
+    ) -> NativeExecutorResult<NativeInvocation> {
+        let RootedNativeInvocationRequest {
+            function,
+            arguments,
+            requested_outputs,
+            runtime,
+            lexical_environment,
+            deoptimization,
+            osr_target,
+            workspace,
+        } = request;
         self.require_runtime_services(&runtime)?;
         let retained_captures = self.retained_capture_arguments(function, &arguments)?;
         self.validate_entry_profile(function, arguments.supplied().iter())?;
@@ -144,31 +183,28 @@ impl NativeExecutor {
             .ok_or_else(|| {
                 NativeExecutorError::Host(format!("native function {} is unavailable", function.0))
             })?;
-        arguments
-            .with_owned_supplied_async(|_callable, supplied| async move {
-                let _callable = _callable;
-                let specs = super::state::function_input_specs(function_ir)?;
-                let prepared = runmat_runtime::call::function_abi::prepare_function_inputs_owned(
-                    &function_ir.name,
-                    supplied,
-                    function_ir.abi.fixed_inputs.len(),
-                    function_ir.abi.varargin.is_some(),
-                    &specs,
-                )
-                .await?;
-                let request = NativeRequestParts {
-                    function,
-                    captures: retained_captures,
-                    inputs: NativeFunctionInputs::Prepared(prepared),
-                    requested_outputs,
-                    runtime,
-                    deoptimization: DeoptimizationPolicy::default(),
-                    osr_target: None,
-                    workspace: None,
-                };
-                self.begin_request_with_environment_parts(request, lexical_environment)
-            })
-            .await?
+        let supplied = arguments.into_supplied_arguments();
+        let specs = super::state::function_input_specs(function_ir)?;
+        let prepared = runmat_runtime::call::function_abi::prepare_function_inputs_rooted(
+            &function_ir.name,
+            supplied,
+            function_ir.abi.fixed_inputs.len(),
+            function_ir.abi.varargin.is_some(),
+            &specs,
+            Some(&runtime),
+        )
+        .await?;
+        let request = NativeRequestParts {
+            function,
+            captures: retained_captures,
+            inputs: NativeFunctionInputs::prepared(prepared),
+            requested_outputs,
+            runtime,
+            deoptimization,
+            osr_target,
+            workspace,
+        };
+        self.begin_request_with_environment_parts(request, lexical_environment)
     }
 
     /// Bind verified Native IR to an executable with the same exact function set.
@@ -277,7 +313,7 @@ impl NativeExecutor {
 
     pub fn function_metadata(
         &self,
-        function: ProgramFunctionId,
+        function: FunctionId,
     ) -> Option<&runmat_native_codegen::NativeFunction> {
         self.functions
             .iter()
@@ -302,14 +338,14 @@ impl NativeExecutor {
 
     pub(crate) fn compiled_entrypoint(
         &self,
-        function: ProgramFunctionId,
+        function: FunctionId,
     ) -> NativeExecutorResult<runmat_runtime::native::NativeEntryPoint> {
         self.compiled.entrypoint(function)
     }
 
     pub fn invoke(
         &self,
-        function: ProgramFunctionId,
+        function: FunctionId,
         arguments: Vec<Value>,
         requested_outputs: usize,
         runtime: RuntimeContext,
@@ -344,7 +380,7 @@ impl NativeExecutor {
 
     pub async fn invoke_async(
         &self,
-        function: ProgramFunctionId,
+        function: FunctionId,
         arguments: Vec<Value>,
         requested_outputs: usize,
         runtime: RuntimeContext,
@@ -355,7 +391,7 @@ impl NativeExecutor {
 
     pub async fn invoke_async_with_captures(
         &self,
-        function: ProgramFunctionId,
+        function: FunctionId,
         captures: Vec<runmat_runtime::call::lexical::LexicalCapture>,
         arguments: Vec<Value>,
         requested_outputs: usize,
@@ -421,7 +457,7 @@ impl NativeExecutor {
 
     pub async fn invoke_workspace_async(
         &self,
-        function: ProgramFunctionId,
+        function: FunctionId,
         workspace: super::workspace::NativeWorkspaceInput,
         requested_outputs: usize,
         runtime: RuntimeContext,
@@ -463,7 +499,7 @@ impl NativeExecutor {
 
     pub fn begin(
         &self,
-        function: ProgramFunctionId,
+        function: FunctionId,
         arguments: Vec<Value>,
         requested_outputs: usize,
         runtime: RuntimeContext,
@@ -473,7 +509,7 @@ impl NativeExecutor {
 
     pub fn begin_with_captures(
         &self,
-        function: ProgramFunctionId,
+        function: FunctionId,
         captures: Vec<runmat_runtime::call::lexical::LexicalCapture>,
         arguments: Vec<Value>,
         requested_outputs: usize,
@@ -491,7 +527,7 @@ impl NativeExecutor {
 
     pub fn begin_with_deoptimization(
         &self,
-        function: ProgramFunctionId,
+        function: FunctionId,
         captures: Vec<runmat_runtime::call::lexical::LexicalCapture>,
         arguments: Vec<Value>,
         requested_outputs: usize,
@@ -541,7 +577,7 @@ impl NativeExecutor {
                     .into_iter()
                     .map(NativeCaptureInput::Owned)
                     .collect(),
-                inputs: NativeFunctionInputs::Legacy(arguments),
+                inputs: NativeFunctionInputs::legacy(arguments),
                 requested_outputs,
                 runtime,
                 deoptimization,
@@ -578,10 +614,7 @@ impl NativeExecutor {
         } = request;
         self.require_runtime_services(&runtime)?;
         let profile_values = || {
-            let arguments = match &inputs {
-                NativeFunctionInputs::Legacy(arguments) => arguments.as_slice(),
-                NativeFunctionInputs::Prepared(_) => &[],
-            };
+            let arguments = inputs.legacy_arguments().unwrap_or(&[]);
             arguments.iter().chain(
                 workspace
                     .as_ref()
@@ -589,11 +622,11 @@ impl NativeExecutor {
                     .flat_map(|workspace| workspace.profile_values()),
             )
         };
-        if matches!(&inputs, NativeFunctionInputs::Legacy(_)) {
+        if inputs.legacy_arguments().is_some() {
             self.validate_entry_profile(function, profile_values())?;
         }
         if let Some(target) = &osr_target {
-            if matches!(&inputs, NativeFunctionInputs::Legacy(_)) {
+            if inputs.legacy_arguments().is_some() {
                 target
                     .executor()
                     .validate_entry_profile(function, profile_values())?;
@@ -609,7 +642,7 @@ impl NativeExecutor {
             })?;
         if let Some(target) = &osr_target {
             let point = target.point();
-            if point.function != function
+            if point.function != function_ir.portable_id
                 || !function_ir.blocks.iter().any(|block| {
                     block.terminator.site.point == point
                         && matches!(
@@ -643,7 +676,7 @@ impl NativeExecutor {
             workspace,
         })?;
         let resume = runmat_runtime::native::NativeResumeState {
-            function: function.0,
+            function: state.function.portable_id.0,
             block: state.function.entry.0,
             phase: runmat_runtime::native::NativeSitePhase::RVALUE.0,
             local_count: state.locals.len() as u32,
@@ -691,7 +724,7 @@ impl NativeExecutor {
 
     fn validate_entry_profile<'a>(
         &self,
-        function: ProgramFunctionId,
+        function: FunctionId,
         arguments: impl Iterator<Item = &'a Value>,
     ) -> NativeExecutorResult<()> {
         let Some(entry) = &self.entry_profile else {

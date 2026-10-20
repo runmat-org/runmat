@@ -34,13 +34,6 @@ impl JavaAdapter {
         context: RuntimeContext,
         call: ForeignCall,
     ) -> ForeignCallCompletion {
-        let _input_roots =
-            match crate::execution::RootedValueLease::for_values(call.arguments.iter()) {
-                Ok(roots) => roots,
-                Err(error) => {
-                    return ForeignCallCompletion::invoked(Err(error.into_runtime_error()))
-                }
-            };
         let cancellation = context.cancellation();
         let operation = async {
             if call.symbol == "invoke_qualified" {
@@ -57,8 +50,7 @@ impl JavaAdapter {
                         return Err(invalid_conversion("Java selected adapter is retiring"));
                     }
                     if call.symbol == "usejava" {
-                        let feature =
-                            string_argument(call.arguments.into_iter().next(), "Java feature")?;
+                        let feature = string_argument_ref(call.arguments.first(), "Java feature")?;
                         let parsed =
                             runmat_builtins::JavaFeature::parse(&feature).ok_or_else(|| {
                                 invalid_conversion(
@@ -70,8 +62,9 @@ impl JavaAdapter {
                             runmat_builtins::JavaFeature::Jvm
                                 | runmat_builtins::JavaFeature::Desktop
                         ) {
-                            return self
-                                .root_single(self.usejava_value(vec![Value::String(feature)])?);
+                            return self.root_single(
+                                self.usejava_value(vec![Value::String(feature.into())])?,
+                            );
                         }
                         let session = self.started_lane()?;
                         let result = self
@@ -91,7 +84,7 @@ impl JavaAdapter {
                     {
                         let snapshot = self.initial_classpath.borrow().snapshot();
                         let value = if call.symbol == "classpath" {
-                            self.classpath_value(call.arguments, snapshot)?
+                            self.classpath_value(call.arguments.first(), snapshot)?
                         } else {
                             Value::Bool(
                                 !snapshot.bootstrap.is_empty()
@@ -279,7 +272,7 @@ impl JavaAdapter {
                     .map_err(|error| error.into_runtime_error())
             }
             (JavaOutput::Classpath(arguments), JavaLaneResult::Classpath(snapshot)) => {
-                self.root_single(self.classpath_value(arguments, snapshot)?)
+                self.root_single(self.classpath_value(arguments.first(), snapshot)?)
             }
             (JavaOutput::HasClasspath, JavaLaneResult::Classpath(snapshot)) => {
                 self.root_single(Value::Bool(
@@ -475,14 +468,16 @@ impl JavaAdapter {
                     }
                     self.argument_to_java(
                         &context,
-                        values
-                            .try_into_first()
-                            .map_err(|_| {
-                                JavaInvocationError::Callback(
-                                    "shared output storage requires separate admission".into(),
-                                )
-                            })?
-                            .expect("one selected Java callback result"),
+                        crate::call::RootedArgumentValue::Owned(
+                            values
+                                .try_into_first()
+                                .map_err(|_| {
+                                    JavaInvocationError::Callback(
+                                        "shared output storage requires separate admission".into(),
+                                    )
+                                })?
+                                .expect("one selected Java callback result"),
+                        ),
                     )
                     .map_err(callback_error)
                 })

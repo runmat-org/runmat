@@ -75,7 +75,7 @@ enum DbMode {
     binding_variant = "default",
     builtin_path = "crate::builtins::control::db"
 )]
-async fn db_builtin(y: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn db_builtin(y: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(db_error_with_detail(
             &DB_ERROR_INVALID_ARGUMENT,
@@ -145,13 +145,13 @@ fn is_resident_nonfloating_extension_value(value: &Value) -> bool {
 fn parse_mode(value: Value) -> BuiltinResult<DbMode> {
     match value {
         Value::String(text) => parse_mode_string(&text),
-        Value::StringArray(array) if array.data.len() == 1 => parse_mode_string(&array.data[0]),
+        Value::StringArray(array) if array.data().len() == 1 => parse_mode_string(&array.data()[0]),
         Value::StringArray(_) => Err(db_error_with_detail(
             &DB_ERROR_INVALID_MODE,
             "mode must be a scalar string",
         )),
         Value::CharArray(array) if array.rows == 1 => {
-            let text = array.data.iter().collect::<String>();
+            let text = array.data().iter().collect::<String>();
             parse_mode_string(&text)
         }
         Value::CharArray(_) => Err(db_error_with_detail(
@@ -367,7 +367,10 @@ pub(crate) mod tests {
     use runmat_value::{CharArray, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray};
 
     fn db_builtin(y: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::db_builtin(y, rest))
+        block_on(super::db_builtin(
+            y,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     fn assert_num_close(value: Value, expected: f64) {

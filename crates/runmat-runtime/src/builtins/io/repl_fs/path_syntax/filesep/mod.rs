@@ -8,7 +8,7 @@ use runmat_value::{CharArray, Value};
     binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::path_syntax::filesep"
 )]
-async fn filesep_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn filesep_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     if !args.is_empty() {
         return Err(super::error::catalog(
             &runmat_builtins::FILESEP_ERROR_ARITY,

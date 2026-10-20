@@ -144,7 +144,7 @@ pub(super) async fn append_struct_fields(
     } else {
         for (field, val) in &value.fields {
             let gathered = cooperation.await_io(gather_if_needed_async(val)).await??;
-            out.push((field.clone(), gathered));
+            out.push((field.to_owned(), gathered));
         }
     }
     Ok(())

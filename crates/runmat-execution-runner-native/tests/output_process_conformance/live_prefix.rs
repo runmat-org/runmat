@@ -16,7 +16,7 @@ pub(super) async fn verify(
     });
     let job = service
         .submit_job(
-            original,
+            original.call.clone(),
             DurableJobOptions {
                 idempotency_key: Some("original-live-prefix".into()),
                 retention_millis: runmat_execution_runner_native::supervisor::MIN_RETENTION_MILLIS,

@@ -138,7 +138,8 @@ struct FusionExecutionFrame<'a> {
     vars: &'a mut InterpreterVars,
     context: &'a mut crate::bytecode::program::ExecutionContext,
     persistent_aliases: &'a crate::interpreter::PersistentAliases,
-    current_function_name: &'a str,
+    global_aliases: &'a runmat_runtime::workspace::bindings::FrameGlobalBindings,
+    missing_input_slots: &'a HashSet<usize>,
 }
 
 #[cfg(feature = "native-accel")]
@@ -148,9 +149,7 @@ fn boxed_fusion_execution<'a>(
     graph: &'a runmat_accelerate::AccelGraph,
     frame: FusionExecutionFrame<'a>,
     placement: Option<runmat_accelerate::placement::PlacementCorrelationId>,
-    right: Option<runmat_runtime::context::VmFusionCompletionRight>,
-    decline: Option<runmat_runtime::context::VmFusionDeclineRight>,
-    input_uses: Option<&'a runmat_accelerate::fusion_exec::VmHostInputUses>,
+    invocation: accel_fusion::VmFusionInvocation<'a>,
 ) -> FusionExecutionFuture<'a> {
     #[cfg(test)]
     fusion_store_tests::record_fusion_execution_entry();
@@ -160,45 +159,26 @@ fn boxed_fusion_execution<'a>(
             vars,
             context,
             persistent_aliases,
-            current_function_name,
+            global_aliases,
+            missing_input_slots,
         } = frame;
-        // Refresh only frame-owned variable inputs before graph capture. Stack
-        // operands remain the values evaluated at their original instructions.
-        let authority = context.runtime.session_variable_authority();
-        let mut refreshed = HashSet::new();
-        for value_id in &plan.inputs {
-            if let Some(info) = graph.value(*value_id) {
-                if let runmat_accelerate::graph::ValueOrigin::Variable { kind, index } =
-                    &info.origin
-                {
-                    if (*kind == runmat_accelerate::VarKind::Global
-                        || context.call_stack.last().is_none())
-                        && refreshed.insert(*index)
-                    {
-                        crate::interpreter::persistent::refresh(
-                            persistent_aliases,
-                            vars,
-                            &authority,
-                            current_function_name,
-                            *index,
-                        )
-                        .map_err(accel_fusion::FusionAttemptError::Terminal)?;
-                    }
-                }
-            }
+        if invocation.transport.is_none_or(|transport| {
+            !transport.permits_frame_reads(
+                context,
+                missing_input_slots,
+                global_aliases,
+                persistent_aliases,
+            )
+        }) {
+            return Err(accel_fusion::FusionAttemptError::Deopt(
+                crate::interpreter::errors::mex(
+                    "FusionInputTransport",
+                    "fusion region retains an ordinary semantic load",
+                ),
+            ));
         }
         accel_fusion::try_execute_fusion_group_with_inputs(
-            plan,
-            graph,
-            stack,
-            vars,
-            context,
-            placement,
-            accel_fusion::VmFusionInvocation {
-                right,
-                decline,
-                input_uses,
-            },
+            plan, graph, stack, vars, context, placement, invocation,
         )
         .await
     })
@@ -478,6 +458,11 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                             .as_ref()
                             .and_then(|active| installation.host_input_uses(active, &plan))
                     });
+                    let transport = fusion_installation.as_ref().and_then(|installation| {
+                        fusion_plan
+                            .as_ref()
+                            .and_then(|active| installation.input_transport(active, &plan))
+                    });
                     let fusion_future = boxed_fusion_execution(
                         &plan,
                         graph,
@@ -486,12 +471,16 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                             vars: &mut *vars,
                             context: &mut *context,
                             persistent_aliases: &*persistent_aliases,
-                            current_function_name,
+                            global_aliases,
+                            missing_input_slots,
                         },
                         Some(trace.correlation()),
-                        right,
-                        decline,
-                        input_uses,
+                        accel_fusion::VmFusionInvocation {
+                            right,
+                            decline,
+                            input_uses,
+                            transport,
+                        },
                     );
                     let fusion_result = if let Some(exception) = active_catch.clone() {
                         catch_runtime

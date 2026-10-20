@@ -5,6 +5,7 @@
 //! between shuffled observations. Only a complete typed parameter step is
 //! published to a new network object.
 
+use crate::builtins::deep_learning::arguments::DeepLearningObjectEdit as _;
 use std::collections::BTreeMap;
 
 use runmat_accelerate_api::handle_is_explicit;
@@ -39,8 +40,8 @@ fn fail(function: &'static str, detail: impl std::fmt::Display) -> crate::Runtim
 fn explicit_resident(value: &Value) -> bool {
     match value {
         Value::GpuTensor(handle) => handle_is_explicit(handle),
-        Value::Object(wrapper) if wrapper.class_name.is(DLARRAY_CLASS) => wrapper
-            .properties
+        Value::Object(wrapper) if wrapper.class_name().is(DLARRAY_CLASS) => wrapper
+            .properties()
             .get("Data")
             .is_some_and(explicit_resident),
         _ => false,
@@ -82,16 +83,14 @@ fn admit_host_residency(
     Ok(())
 }
 
-fn batch_value(original: &Value, selected: Tensor) -> Value {
+fn batch_value(original: &Value, selected: Tensor) -> BuiltinResult<Value> {
     match original {
-        Value::Object(wrapper) if wrapper.class_name.is(DLARRAY_CLASS) => {
+        Value::Object(wrapper) if wrapper.class_name().is(DLARRAY_CLASS) => {
             let mut wrapper = wrapper.clone();
-            wrapper
-                .properties
-                .insert("Data".into(), Value::Tensor(selected));
-            Value::Object(wrapper)
+            wrapper.replace_dl_property("Data", Value::Tensor(selected))?;
+            Ok(Value::Object(wrapper))
         }
-        _ => Value::Tensor(selected),
+        _ => Ok(Value::Tensor(selected)),
     }
 }
 
@@ -100,30 +99,46 @@ async fn initialized_network(
     source: &Value,
     caller: TrainingCaller,
 ) -> BuiltinResult<(ObjectInstance, crate::execution::RootedValueLease)> {
-    let _source_roots = crate::execution::RootedValueLease::for_values(std::iter::once(source))
-        .map_err(|error| error.into_runtime_error())?;
+    let _source_roots = crate::execution::structure::replacement::lease(source, runtime)?;
     let function = caller.function();
     if let Value::Object(existing) = source {
         if model::is_deep_learning_network_object(existing) {
             let mut network = existing.clone();
-            let Some(Value::Cell(layers)) = network.properties.get_mut("Layers") else {
+            let Some(Value::Cell(layers)) = network.property("Layers") else {
                 return Err(fail(function, "network is missing Layers"));
             };
+            let prepared_layers = crate::execution::structure::replacement::cell(layers, runtime)?;
+            let _layer_roots = prepared_layers.1;
+            let mut layers = prepared_layers.0;
+            let layer_values = layers
+                .try_data_mut_unique()
+                .expect("private Layers destination");
             let _initialized_roots =
-                model::initialise_layers_in_runtime(runtime, &mut layers.data, function).await?;
+                model::initialise_layers_in_runtime(runtime, layer_values, function).await?;
+            network.replace_dl_property("Layers", Value::Cell(layers))?;
             model::state::initialize_missing(&mut network, function)?;
-            let roots = crate::execution::RootedValueLease::for_traced(&network)
-                .map_err(|error| error.into_runtime_error())?;
+            let roots = crate::execution::structure::replacement::lease(
+                &Value::Object(network.clone()),
+                runtime,
+            )?;
             return Ok((network, roots));
         }
     }
-    let mut layers = model::layers_from_network_value(source.clone(), function)?;
-    let _initialized_roots =
-        model::initialise_layers_in_runtime(runtime, &mut layers, function).await?;
+    let prepared_layers = model::layers_from_network_value(source.clone(), function)?;
+    let _layer_roots = prepared_layers.1;
+    let mut layers = prepared_layers.0;
+    let _initialized_roots = model::initialise_layers_in_runtime(
+        runtime,
+        layers
+            .try_data_mut_unique()
+            .expect("private Layers destination"),
+        function,
+    )
+    .await?;
     let class = match caller {
         TrainingCaller::Trainnet => model::DLNETWORK_CLASS,
         TrainingCaller::TrainNetwork => {
-            if matches!(source, Value::Object(object) if object.class_name.is(crate::builtins::deep_learning::LAYER_GRAPH_CLASS))
+            if matches!(source, Value::Object(object) if object.class_name().is(crate::builtins::deep_learning::LAYER_GRAPH_CLASS))
             {
                 model::DAG_NETWORK_CLASS
             } else {
@@ -131,7 +146,8 @@ async fn initialized_network(
             }
         }
     };
-    let Value::Object(network) = model::network_object(class, layers, BTreeMap::new(), function)?
+    let Value::Object(network) =
+        model::network_object_from_layer_cell(class, layers, BTreeMap::new(), function)?
     else {
         unreachable!("network constructor produces an object")
     };
@@ -149,16 +165,13 @@ fn attach_training_result(
     iteration: usize,
     function: &'static str,
 ) -> BuiltinResult<()> {
-    network.properties.insert(
-        "TrainingInfo".into(),
+    network.replace_dl_property(
+        "TrainingInfo",
         training_info(config, losses, iteration, function)?,
-    );
-    network.properties.insert(
-        "TrainedWith".into(),
-        Value::String(config.solver.as_str().into()),
-    );
-    network.properties.insert(
-        "TrainingLoss".into(),
+    )?;
+    network.replace_dl_property("TrainedWith", Value::String(config.solver.as_str().into()))?;
+    network.replace_dl_property(
+        "TrainingLoss",
         Value::String(
             match loss {
                 LossKind::Regression => "mse",
@@ -166,9 +179,9 @@ fn attach_training_result(
             }
             .into(),
         ),
-    );
+    )?;
     if let Some(classes) = classes {
-        network.properties.insert("Classes".into(), classes);
+        network.replace_dl_property("Classes", classes)?;
     }
     Ok(())
 }
@@ -213,7 +226,9 @@ pub(in crate::builtins::deep_learning::supervised) async fn train(
         loss_kind == LossKind::Classification,
         function,
     )?;
-    let (mut network, mut network_roots) = initialized_network(runtime, source, caller).await?;
+    let prepared_network = initialized_network(runtime, source, caller).await?;
+    let mut network_roots = prepared_network.1;
+    let mut network = prepared_network.0;
     let full_input = {
         let full_plan = HostNetworkPlan::admit(&network, input, function)?;
         let HostValue::Real(full_input) = full_plan.prepare_input(input).await? else {
@@ -242,7 +257,7 @@ pub(in crate::builtins::deep_learning::supervised) async fn train(
                 .checked_add(1)
                 .ok_or_else(|| fail(function, "iteration count overflow"))?;
             let input_selection = BatchSelection::admit(&geometry.input_axes, indices, function)?;
-            let input_batch = batch_value(input, input_selection.select(&full_input, function)?);
+            let input_batch = batch_value(input, input_selection.select(&full_input, function)?)?;
             let target_selection = BatchSelection::admit(&geometry.output_axes, indices, function)?;
             let target_batch = target_selection.select(&full_target, function)?;
             let (mut execution, original_parameters) = {

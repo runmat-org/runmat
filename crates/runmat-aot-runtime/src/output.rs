@@ -14,6 +14,16 @@ pub fn install_console_forwarder() -> ConsoleForwarder {
     ConsoleForwarder
 }
 
+/// A target-test process reserves stdout exclusively for one framed result.
+pub fn install_test_console_forwarder() -> ConsoleForwarder {
+    runmat_runtime::console::install_forwarder(Some(Arc::new(|entry| match entry.stream {
+        runmat_runtime::console::ConsoleStream::Stdout
+        | runmat_runtime::console::ConsoleStream::Stderr => write_stderr(entry.text.as_bytes()),
+        runmat_runtime::console::ConsoleStream::ClearScreen => {}
+    })));
+    ConsoleForwarder
+}
+
 impl Drop for ConsoleForwarder {
     fn drop(&mut self) {
         runmat_runtime::console::install_forwarder(None);

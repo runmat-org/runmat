@@ -85,7 +85,9 @@ fn test_guard() -> (
 }
 
 fn which_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    block_on(super::which_builtin(args))
+    block_on(super::which_builtin(
+        crate::builtins::common::test_support::builtin_arguments(args),
+    ))
 }
 
 runmat_thread_local! {
@@ -255,7 +257,7 @@ fn which_all_returns_cell_array() {
     let (_guard, _lock) = test_guard();
     let value = which_builtin(vec![Value::from("sin"), Value::from("-all")]).expect("which");
     match value {
-        Value::Cell(cell) => assert!(!cell.data.is_empty()),
+        Value::Cell(cell) => assert!(!cell.data().is_empty()),
         other => panic!("expected cell array, got {other:?}"),
     }
 }
@@ -337,7 +339,7 @@ fn which_decodes_padded_case_variant_all_option() {
     let (_guard, _lock) = test_guard();
     let value = which_builtin(vec![Value::from(" \t-ALL \n"), Value::from("sin")]).expect("which");
     match value {
-        Value::Cell(cell) => assert!(!cell.data.is_empty()),
+        Value::Cell(cell) => assert!(!cell.data().is_empty()),
         other => panic!("expected cell array, got {other:?}"),
     }
 }
@@ -348,7 +350,7 @@ fn which_parses_leading_option() {
     let (_guard, _lock) = test_guard();
     let value = which_builtin(vec![Value::from("-all"), Value::from("sin")]).expect("which");
     match value {
-        Value::Cell(cell) => assert!(!cell.data.is_empty()),
+        Value::Cell(cell) => assert!(!cell.data().is_empty()),
         other => panic!("expected cell array, got {other:?}"),
     }
 }

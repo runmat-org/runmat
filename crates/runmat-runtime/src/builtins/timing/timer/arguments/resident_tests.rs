@@ -88,12 +88,12 @@ fn late_property_rejection_never_reads_an_earlier_resident_value() {
     for invalid in ["UnknownProperty", "Running"] {
         let error = futures::executor::block_on(prepare_timer_property_pairs(
             None,
-            &[
+            crate::call::FunctionArgumentView::from_slice(&[
                 Value::String("Period".into()),
                 resident.clone(),
                 Value::String(invalid.into()),
                 Value::Num(1.0),
-            ],
+            ]),
             false,
         ))
         .err()
@@ -102,21 +102,19 @@ fn late_property_rejection_never_reads_an_earlier_resident_value() {
     }
     let error = futures::executor::block_on(prepare_timer_property_pairs(
         None,
-        &[
+        crate::call::FunctionArgumentView::from_slice(&[
             Value::String("Period".into()),
             resident.clone(),
             Value::String("BusyMode".into()),
             Value::String("invalid".into()),
-        ],
+        ]),
         false,
     ))
     .err()
     .expect("late resident host validation");
     assert_eq!(error.identifier(), Some("RunMat:timer:InvalidProperty"));
     let mut running = default_timer_object("running".into());
-    running
-        .properties
-        .insert("Running".into(), Value::String("on".into()));
+    running.replace_property_unbounded("Running".into(), Value::String("on".into()));
     let error = futures::executor::block_on(super::super::setter::set_timer_property_object(
         None,
         Value::Object(running),
@@ -130,7 +128,10 @@ fn late_property_rejection_never_reads_an_earlier_resident_value() {
     owner.mode.store(0, Ordering::SeqCst);
     let prepared = futures::executor::block_on(prepare_timer_property_pairs(
         None,
-        &[Value::String("Period".into()), resident.clone()],
+        crate::call::FunctionArgumentView::from_slice(&[
+            Value::String("Period".into()),
+            resident.clone(),
+        ]),
         false,
     ))
     .expect("automatic resident numeric option remains admitted");
@@ -143,7 +144,10 @@ fn late_property_rejection_never_reads_an_earlier_resident_value() {
         .expect_err("direct provider failure");
     let timer = futures::executor::block_on(prepare_timer_property_pairs(
         None,
-        &[Value::String("Period".into()), resident.clone()],
+        crate::call::FunctionArgumentView::from_slice(&[
+            Value::String("Period".into()),
+            resident.clone(),
+        ]),
         false,
     ))
     .err()
@@ -158,7 +162,11 @@ fn late_property_rejection_never_reads_an_earlier_resident_value() {
 
     owner.mode.store(1, Ordering::SeqCst);
     let args = [Value::String("Period".into()), resident];
-    let mut pending = Box::pin(prepare_timer_property_pairs(None, &args, false));
+    let mut pending = Box::pin(prepare_timer_property_pairs(
+        None,
+        crate::call::FunctionArgumentView::from_slice(&args),
+        false,
+    ));
     let mut context = std::task::Context::from_waker(futures::task::noop_waker_ref());
     let before_pending = owner.downloads.load(Ordering::SeqCst);
     assert!(pending.as_mut().poll(&mut context).is_pending());
@@ -170,9 +178,11 @@ fn late_property_rejection_never_reads_an_earlier_resident_value() {
         crate::execution::RuntimeExecutionService::new(),
     ))
     .with_cancellation_token(cancellation.token());
+    let empty = crate::call::BuiltinArguments::from_borrowed(&[], Some(&runtime))
+        .expect("root empty timer arguments");
     let timer = futures::executor::block_on(super::super::api::timer_builtin(
         Some(runtime.clone()),
-        Vec::new(),
+        empty,
     ))
     .expect("session timer");
     let Value::HandleObject(timer_handle) = &timer else {

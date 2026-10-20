@@ -80,7 +80,7 @@ async fn csvwrite_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     filename: Value,
     data: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     let mut cooperation = TabularCooperation::new(runtime.as_ref(), BUILTIN_NAME);
     let requested_outputs = crate::output_count::current_output_count();

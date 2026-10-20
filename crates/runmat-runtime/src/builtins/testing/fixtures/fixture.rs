@@ -16,23 +16,46 @@ static TEMPORARY_FOLDER_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.fixtures.PathFixture",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::testing::fixtures::fixture"
 )]
-async fn path_fixture(path: Value) -> BuiltinResult<Value> {
+async fn path_fixture(
+    runtime: Option<crate::context::RuntimeContext>,
+    path: Value,
+) -> BuiltinResult<crate::execution::RootedValue> {
     crate::testing::ensure_testing_classes();
     let path = scalar_text("PathFixture", path)?;
-    let fixture = crate::new_handle_object_builtin(PATH_FIXTURE_CLASS.into()).await?;
-    set_handle_property(&fixture, "Name", Value::String("PathFixture".into()))?;
-    set_handle_property(&fixture, "Path", Value::String(path))?;
+    let create = crate::new_handle_object_builtin(PATH_FIXTURE_CLASS.into());
+    let fixture = match &runtime {
+        Some(runtime) => runtime.scope(create).await?,
+        None => create.await?,
+    };
+    let fixture = crate::execution::RootedValue::in_optional_context(fixture, runtime.as_ref())?;
+    set_handle_property(
+        runtime.as_ref(),
+        fixture.value(),
+        "Name",
+        Value::String("PathFixture".into()),
+    )?;
+    set_handle_property(
+        runtime.as_ref(),
+        fixture.value(),
+        "Path",
+        Value::string(path),
+    )?;
     Ok(fixture)
 }
 
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.fixtures.TemporaryFolderFixture",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::testing::fixtures::fixture"
 )]
-async fn temporary_folder_fixture(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn temporary_folder_fixture(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<crate::execution::RootedValue> {
     crate::testing::ensure_testing_classes();
     if !args.is_empty() {
         return Err(testing_error(
@@ -40,36 +63,63 @@ async fn temporary_folder_fixture(args: Vec<Value>) -> BuiltinResult<Value> {
             "TemporaryFolderFixture: too many input arguments",
         ));
     }
-    let fixture = crate::new_handle_object_builtin(TEMPORARY_FOLDER_FIXTURE_CLASS.into()).await?;
+    let create = crate::new_handle_object_builtin(TEMPORARY_FOLDER_FIXTURE_CLASS.into());
+    let fixture = match &runtime {
+        Some(runtime) => runtime.scope(create).await?,
+        None => create.await?,
+    };
+    let fixture = crate::execution::RootedValue::in_optional_context(fixture, runtime.as_ref())?;
     set_handle_property(
-        &fixture,
+        runtime.as_ref(),
+        fixture.value(),
         "Name",
         Value::String("TemporaryFolderFixture".into()),
     )?;
-    set_handle_property(&fixture, "Folder", Value::String(String::new()))?;
+    set_handle_property(
+        runtime.as_ref(),
+        fixture.value(),
+        "Folder",
+        Value::string(String::new()),
+    )?;
     Ok(fixture)
 }
 
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.TestCase.applyFixture",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::testing::fixtures::fixture"
 )]
-async fn apply_fixture(receiver: Value, fixture: Value) -> BuiltinResult<Value> {
+async fn apply_fixture(
+    runtime: Option<crate::context::RuntimeContext>,
+    receiver: Value,
+    fixture: Value,
+) -> BuiltinResult<crate::execution::RootedValue> {
     validate_test_case(&receiver)?;
     let handle = fixture_handle(&fixture)?;
     let kind = fixture_kind(&handle)?;
-    crate::testing::ensure_runtime_teardown_available()
+    crate::testing::ensure_runtime_teardown_available_in(runtime.as_ref())
         .map_err(|message| testing_error("applyFixture", message))?;
+    let fixture = crate::execution::RootedValue::in_optional_context(fixture, runtime.as_ref())?;
     match kind {
         FixtureKind::Path => {
             let path = handle_text_property(&handle, "Path")?;
-            crate::call_builtin_async("addpath", &[Value::String(path.clone())]).await?;
+            crate::call_builtin_async("addpath", &[Value::string(path.clone())]).await?;
             crate::testing::record_runtime_teardown(
+                runtime.as_ref(),
                 Value::FunctionHandle("rmpath".into()),
-                vec![Value::String(path)],
+                crate::call::BuiltinArguments::from_borrowed(
+                    &[Value::string(path)],
+                    runtime.as_ref(),
+                )?,
             )
-            .map_err(|message| testing_error("applyFixture", message))?;
+            .map_err(|source| {
+                build_runtime_error(source.message())
+                    .with_builtin("applyFixture")
+                    .with_identifier("RunMat:Testing:InvalidFixture")
+                    .with_source(source)
+                    .build()
+            })?;
         }
         FixtureKind::TemporaryFolder => {
             let folder = temporary_folder_path();
@@ -81,12 +131,27 @@ async fn apply_fixture(receiver: Value, fixture: Value) -> BuiltinResult<Value> 
                         format!("applyFixture: could not create '{folder}': {error}"),
                     )
                 })?;
-            set_handle_property(&fixture, "Folder", Value::String(folder.clone()))?;
+            set_handle_property(
+                runtime.as_ref(),
+                fixture.value(),
+                "Folder",
+                Value::string(folder.clone()),
+            )?;
             crate::testing::record_runtime_teardown(
+                runtime.as_ref(),
                 Value::FunctionHandle("rmdir".into()),
-                vec![Value::String(folder), Value::String("s".into())],
+                crate::call::BuiltinArguments::from_borrowed(
+                    &[Value::string(folder), Value::String("s".into())],
+                    runtime.as_ref(),
+                )?,
             )
-            .map_err(|message| testing_error("applyFixture", message))?;
+            .map_err(|source| {
+                build_runtime_error(source.message())
+                    .with_builtin("applyFixture")
+                    .with_identifier("RunMat:Testing:InvalidFixture")
+                    .with_source(source)
+                    .build()
+            })?;
         }
     }
     Ok(fixture)
@@ -152,8 +217,8 @@ fn fixture_handle(value: &Value) -> BuiltinResult<HandleRef> {
 fn validate_test_case(receiver: &Value) -> BuiltinResult<()> {
     crate::testing::ensure_testing_classes();
     let class_name = match receiver {
-        Value::Object(object) => Some(&object.class_name),
-        Value::HandleObject(handle) => Some(&handle.class_name),
+        Value::Object(object) => Some(object.class_name()),
+        Value::HandleObject(handle) => Some(&*handle.class_name),
         _ => None,
     };
     if class_name.is_some_and(|identity| {
@@ -173,8 +238,8 @@ fn validate_test_case(receiver: &Value) -> BuiltinResult<()> {
 
 fn handle_text_property(handle: &HandleRef, name: &str) -> BuiltinResult<String> {
     runmat_gc::gc_with_value(&handle.target, |target| match target {
-        Value::Object(object) => object.properties.get(name).and_then(|value| match value {
-            Value::String(value) => Some(value.clone()),
+        Value::Object(object) => object.properties().get(name).and_then(|value| match value {
+            Value::String(value) => Some(value.as_str().to_owned()),
             _ => None,
         }),
         _ => None,
@@ -188,37 +253,54 @@ fn handle_text_property(handle: &HandleRef, name: &str) -> BuiltinResult<String>
     })
 }
 
-fn set_handle_property(handle: &Value, name: &str, value: Value) -> BuiltinResult<()> {
+fn set_handle_property(
+    runtime: Option<&crate::context::RuntimeContext>,
+    handle: &Value,
+    name: &str,
+    value: Value,
+) -> BuiltinResult<()> {
+    let value = crate::execution::RootedValue::in_optional_context(value, runtime)?;
     let Value::HandleObject(handle) = handle else {
         return Err(testing_error(
             "applyFixture",
             "testing fixture construction did not produce a handle object",
         ));
     };
-    runmat_gc::gc_with_value_mut(&handle.target, |target| match target {
-        Value::Object(object) => {
-            object.properties.insert(name.into(), value);
-            true
-        }
-        _ => false,
-    })
-    .map_err(|error| testing_error("applyFixture", format!("fixture mutation failed: {error}")))
-    .and_then(|updated| {
-        if updated {
-            Ok(())
-        } else {
-            Err(testing_error(
+    runmat_gc::gc_with_value_mut(&handle.target, |target| -> BuiltinResult<()> {
+        match target {
+            Value::Object(object) => {
+                runmat_gc::gc_record_handle_write(&handle.target, value.value());
+                crate::execution::object::replacement::replace_property(
+                    runtime,
+                    object,
+                    name,
+                    value.value().clone(),
+                    |message, source| {
+                        crate::context::host_allocation::host_allocation_runtime_error(
+                            runtime,
+                            "RunMat:Testing:InvalidFixture",
+                            message,
+                            source,
+                        )
+                    },
+                    |message| testing_error("applyFixture", message),
+                )?;
+                Ok(())
+            }
+            _ => Err(testing_error(
                 "applyFixture",
                 "fixture handle does not reference an object",
-            ))
+            )),
         }
     })
+    .map_err(|error| testing_error("applyFixture", format!("fixture mutation failed: {error}")))
+    .and_then(std::convert::identity)
 }
 
 fn scalar_text(builtin: &'static str, value: Value) -> BuiltinResult<String> {
     match value {
-        Value::String(value) => Ok(value),
-        Value::CharArray(chars) if chars.rows <= 1 => Ok(chars.data.iter().collect()),
+        Value::String(value) => Ok(value.into_string_unbounded()),
+        Value::CharArray(chars) if chars.rows <= 1 => Ok(chars.data().iter().collect()),
         _ => Err(testing_error(
             builtin,
             format!("{builtin}: expected scalar text"),
@@ -236,12 +318,25 @@ fn testing_error(builtin: &'static str, message: impl Into<String>) -> crate::Ru
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn temporary_folder_fixture(
+        runtime: Option<crate::context::RuntimeContext>,
+        args: Vec<Value>,
+    ) -> BuiltinResult<crate::execution::RootedValue> {
+        super::temporary_folder_fixture(
+            runtime,
+            crate::execution::RootedValues::new(args)
+                .map_err(|error| error.into_runtime_error())?
+                .into(),
+        )
+        .await
+    }
     use futures::executor::block_on;
 
     #[test]
     fn constructors_create_concrete_handle_fixtures_without_applying_them() {
-        let path = block_on(path_fixture(Value::String("not-yet-created".into()))).unwrap();
-        let Value::HandleObject(path_handle) = &path else {
+        let path = block_on(path_fixture(None, Value::String("not-yet-created".into()))).unwrap();
+        let Value::HandleObject(path_handle) = path.value() else {
             panic!("PathFixture must be a handle")
         };
         assert_eq!(path_handle.class_name, PATH_FIXTURE_CLASS.owned());
@@ -250,8 +345,8 @@ mod tests {
             "not-yet-created"
         );
 
-        let temporary = block_on(temporary_folder_fixture(vec![])).unwrap();
-        let Value::HandleObject(temp_handle) = &temporary else {
+        let temporary = block_on(temporary_folder_fixture(None, vec![])).unwrap();
+        let Value::HandleObject(temp_handle) = temporary.value() else {
             panic!("TemporaryFolderFixture must be a handle")
         };
         assert_eq!(
@@ -260,7 +355,7 @@ mod tests {
         );
         assert_eq!(handle_text_property(temp_handle, "Folder").unwrap(), "");
         assert_eq!(
-            block_on(temporary_folder_fixture(vec![Value::Num(1.0)]))
+            block_on(temporary_folder_fixture(None, vec![Value::Num(1.0)]))
                 .unwrap_err()
                 .identifier(),
             Some("RunMat:Testing:InvalidFixture")
@@ -270,13 +365,14 @@ mod tests {
     #[test]
     fn application_outside_test_rejects_before_path_or_filesystem_work() {
         let receiver = crate::testing::test_case_object("", false);
-        let path = block_on(path_fixture(Value::String("not-yet-created".into()))).unwrap();
-        let error = block_on(apply_fixture(receiver.clone(), path)).unwrap_err();
+        let path = block_on(path_fixture(None, Value::String("not-yet-created".into()))).unwrap();
+        let error =
+            block_on(apply_fixture(None, receiver.clone(), path.value().clone())).unwrap_err();
         assert_eq!(error.identifier(), Some("RunMat:Testing:InvalidFixture"));
         assert!(error.to_string().contains("active test lifecycle"));
 
-        let temporary = block_on(temporary_folder_fixture(vec![])).unwrap();
-        let error = block_on(apply_fixture(receiver, temporary)).unwrap_err();
+        let temporary = block_on(temporary_folder_fixture(None, vec![])).unwrap();
+        let error = block_on(apply_fixture(None, receiver, temporary.value().clone())).unwrap_err();
         assert_eq!(error.identifier(), Some("RunMat:Testing:InvalidFixture"));
         assert!(error.to_string().contains("active test lifecycle"));
     }

@@ -61,10 +61,10 @@ pub async fn output_named(name: Value) -> BuiltinResult<Value> {
 macro_rules! selector {
     ($function:ident, $builtin:literal, $variant:ident) => {
         #[runtime_builtin(
-                            name = $builtin,
-                            binding_variant = "default",
-                            builtin_path = "crate::builtins::fea::field_selectors"
-                        )]
+                                            name = $builtin,
+                                            binding_variant = "default",
+                                            builtin_path = "crate::builtins::fea::field_selectors"
+                                        )]
         pub async fn $function() -> BuiltinResult<Value> {
             to_typed_value(
                 $builtin,
@@ -198,7 +198,7 @@ pub(super) fn from_value(builtin: &'static str, value: &Value) -> BuiltinResult<
             "field selector must be a typed FEA field selector",
         ));
     };
-    match object.class_name.display_name() {
+    match object.class_name().display_name() {
         STRUCTURAL_FIELD_CLASS => from_typed_value(builtin, STRUCTURAL_FIELD_CLASS, value)
             .map(FieldSelector::Structural),
         RESPONSE_SPECTRUM_FIELD_CLASS => {
@@ -233,7 +233,7 @@ mod tests {
         let Value::Object(object) = &selector else {
             panic!("expected authored output field selector object");
         };
-        assert_eq!(object.class_name.display_name(), OUTPUT_FIELD_CLASS);
+        assert_eq!(object.class_name().display_name(), OUTPUT_FIELD_CLASS);
         assert_eq!(
             from_value("test", &selector).unwrap().field_id(),
             "peak_stress"

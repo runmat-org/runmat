@@ -25,7 +25,7 @@ fn raw_single_forward_and_predict_keep_explicit_residency_without_download() {
                 execution::NetworkCaller::Forward => block_on(forward_builtin(
                     network_owner.value().clone(),
                     Value::GpuTensor(input.clone()),
-                    vec![],
+                    crate::builtins::common::test_support::builtin_arguments(vec![]),
                 ))
                 .unwrap(),
                 execution::NetworkCaller::Predict => {
@@ -64,8 +64,16 @@ fn raw_single_forward_and_predict_keep_explicit_residency_without_download() {
 #[test]
 fn raw_unsupported_route_respects_explicit_and_automatic_input_intent() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
-        let sequence = block_on(sequence_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
-        let recurrent = block_on(lstm_layer_builtin(Value::Num(1.0), vec![])).unwrap();
+        let sequence = block_on(sequence_input_layer_builtin(
+            Value::Num(2.0),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap();
+        let recurrent = block_on(lstm_layer_builtin(
+            Value::Num(1.0),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap();
         let network = block_on(dlnetwork_builtin(vec![Value::Cell(
             CellArray::new(vec![sequence, recurrent], 2, 1).unwrap(),
         )]))
@@ -75,7 +83,7 @@ fn raw_unsupported_route_respects_explicit_and_automatic_input_intent() {
         let Value::Tensor(expected) = block_on(forward_builtin(
             network.value().clone(),
             Value::Tensor(Tensor::new(values.to_vec(), shape.to_vec()).unwrap()),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .unwrap() else {
             panic!("host recurrent output expected")
@@ -94,7 +102,7 @@ fn raw_unsupported_route_respects_explicit_and_automatic_input_intent() {
         let error = block_on(forward_builtin(
             network.value().clone(),
             Value::GpuTensor(explicit),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .unwrap_err();
         assert_eq!(error.identifier(), Some("RunMat:deepLearning:Unsupported"));
@@ -108,7 +116,7 @@ fn raw_unsupported_route_respects_explicit_and_automatic_input_intent() {
         let Value::Tensor(actual) = block_on(forward_builtin(
             network.value().clone(),
             Value::GpuTensor(automatic),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .unwrap() else {
             panic!("automatic unsupported route may use host output")

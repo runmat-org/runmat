@@ -132,7 +132,7 @@ fn cached_receiver_preserves_ordinal_before_later_and_deeper_suspensions() {
     drop(activation);
     let executor = compile_executor(fixture()).unwrap();
     let result = futures::executor::block_on(executor.invoke_async(
-        ProgramFunctionId(0),
+        FunctionId(0),
         vec![Value::Object(runmat_value::ObjectInstance::new(
             "ReceiverReplayObject",
         ))],

@@ -14,9 +14,7 @@ use crate::runtime::globals as runtime_globals;
 use crate::runtime::workspace::{
     workspace_assign, workspace_clear, workspace_lookup, workspace_remove, workspace_snapshot,
 };
-use runmat_runtime::call::function_abi::{
-    collect_function_outputs, prepare_function_inputs_owned, FunctionInputSpec,
-};
+use runmat_runtime::call::function_abi::{collect_function_outputs, FunctionInputSpec};
 use runmat_runtime::context::RuntimeInvocationArity;
 use runmat_runtime::{
     user_functions,
@@ -411,6 +409,19 @@ async fn invoke_semantic_function_with_captures_inner(
     })?;
     // The entered body, not a numeric caller ID or ambient name, selects the
     // instruction-site namespace for this invocation's static imports.
+    let runtime = if func.selected_executable_product.is_some() {
+        let binding = function_registry
+            .exact_bound_binding(function_id)
+            .ok_or_else(|| {
+                mex(
+                    "StaticImportUnavailable",
+                    "selected frame has no exact definition graph",
+                )
+            })?;
+        function_registry.bind_selected_body_sites(runtime, &binding, func)?
+    } else {
+        runtime
+    };
     let runtime = runtime.with_selected_static_caller(func.binding_origin);
     lexical_storage::validate_inherited_storage(func, function_registry)?;
     if arguments.len() < func.capture_slots.len() {
@@ -444,39 +455,33 @@ async fn invoke_semantic_function_with_captures_inner(
             ));
         }
     }
-    arguments
-        .with_owned_supplied_async(|callable, mut supplied| async move {
-            if callable.is_none() {
-                for (slot, value) in func
-                    .capture_slots
-                    .iter()
-                    .copied()
-                    .zip(supplied.drain(..func.capture_slots.len()))
-                {
-                    if vars.replace_owned(slot, value).is_none() {
-                        return Err(mex(
-                            "SemanticFunctionArity",
-                            "semantic capture slot is outside its function frame",
-                        ));
-                    }
-                }
+    let has_callable = arguments.callable().is_some();
+    let mut supplied = arguments.into_supplied_arguments();
+    if !has_callable {
+        for slot in func.capture_slots.iter().copied() {
+            let value = supplied.pop_front().expect("validated capture prefix");
+            if vars.replace_owned(slot, value).is_none() {
+                return Err(mex(
+                    "SemanticFunctionArity",
+                    "semantic capture slot is outside its function frame",
+                ));
             }
-            invoke_semantic_function_with_owned_inputs(
-                OwnedFunctionEntry {
-                    function_id,
-                    function: func,
-                    registry: function_registry,
-                    requested_outputs,
-                    runtime,
-                    driver,
-                    lexical_environment,
-                },
-                supplied,
-                vars,
-            )
-            .await
-        })
-        .await?
+        }
+    }
+    invoke_semantic_function_with_owned_inputs(
+        OwnedFunctionEntry {
+            function_id,
+            function: func,
+            registry: function_registry,
+            requested_outputs,
+            runtime,
+            driver,
+            lexical_environment,
+        },
+        supplied,
+        vars,
+    )
+    .await
 }
 
 struct OwnedFunctionEntry<'a> {
@@ -491,7 +496,7 @@ struct OwnedFunctionEntry<'a> {
 
 async fn invoke_semantic_function_with_owned_inputs(
     entry: OwnedFunctionEntry<'_>,
-    supplied: Vec<Value>,
+    supplied: runmat_runtime::call::BuiltinArguments,
     mut vars: InterpreterVars,
 ) -> Result<
     (
@@ -548,16 +553,22 @@ async fn invoke_semantic_function_with_owned_inputs(
             })
         })
         .collect::<Result<Vec<_>, RuntimeError>>()?;
-    let prepared = prepare_function_inputs_owned(
+    let prepared = runmat_runtime::call::function_abi::prepare_function_inputs_rooted(
         &func.display_name,
         supplied,
         func.input_slots.len(),
         func.varargin_slot.is_some(),
         &input_specs,
+        Some(&runtime),
     )
     .await?;
     let mut missing_input_slots = HashSet::new();
-    for (slot, value) in func.input_slots.iter().copied().zip(prepared.fixed) {
+    for (slot, value) in func
+        .input_slots
+        .iter()
+        .copied()
+        .zip(prepared.fixed.iter().cloned())
+    {
         if let Some(value) = value {
             let retired = vars.replace_owned(slot, value).ok_or_else(|| {
                 mex(
@@ -1726,8 +1737,16 @@ async fn run_interpreter_inner(
     let registry_for_function_invoker = std::rc::Rc::new(function_registry.current_view());
     let _semantic_function_guard =
         user_functions::install_local_semantic_function_invoker(std::rc::Rc::new(
-            move |selected, function: usize, args: &[Value], requested_outputs: usize| {
-                let args = args.to_vec();
+            move |selected,
+                  function: usize,
+                  args: runmat_runtime::call::RootedFunctionArguments,
+                  requested_outputs: usize| {
+                let lexical_environment = args.callable().and_then(|callable| {
+                    let Value::Closure(closure) = callable.value() else {
+                        return None;
+                    };
+                    closure.lexical_environment.clone()
+                });
                 let previous_invoker = previous_semantic_invoker.clone();
                 let function_registry = std::rc::Rc::clone(&registry_for_function_invoker);
                 let same_owner = selected.as_ref().is_none_or(|context| {
@@ -1763,18 +1782,18 @@ async fn run_interpreter_inner(
                     if !local_function {
                         if let Some(invoker) = previous_invoker {
                             let future =
-                                invoker(Some(runtime.clone()), function, &args, requested_outputs);
+                                invoker(Some(runtime.clone()), function, args, requested_outputs);
                             return await_prior_semantic_invoker(driver, runtime, future).await;
                         }
                     }
-                    invoke_semantic_function_value_with_capture_updates(
+                    invoke_semantic_function_with_rooted_captures(
                         function,
-                        &args,
+                        args,
                         requested_outputs,
                         &function_registry,
                         runtime,
                         driver,
-                        None,
+                        lexical_environment,
                     )
                     .await
                     .map(|(value, _)| value)
@@ -2191,8 +2210,8 @@ pub(crate) struct ParforTaskExecution<'a> {
     pub bytecode: &'a Bytecode,
     pub bytecode_owner: Option<crate::interpreter::bytecode_owner::BytecodeLease>,
     pub region: &'a crate::BytecodeParforRegion,
-    pub inputs: Vec<Value>,
-    pub iterations: Vec<Value>,
+    pub inputs: runmat_value::OutputListStorage,
+    pub iterations: runmat_value::OutputListStorage,
     pub randomness: runmat_execution::ParallelRandomnessContext,
     pub mode: ParforTaskMode,
     pub current_function_name: &'a str,
@@ -2226,6 +2245,18 @@ pub(crate) async fn interpret_parfor_task_in_context(
         current_function_name,
         runtime,
     } = execution;
+    let inputs = inputs.try_into_owned().map_err(|_| {
+        mex(
+            "ParallelTaskInput",
+            "parallel inputs require their original unique collection owner",
+        )
+    })?;
+    let iterations = iterations.try_into_owned().map_err(|_| {
+        mex(
+            "ParallelTaskInput",
+            "parallel iterations require their original unique collection owner",
+        )
+    })?;
     randomness
         .validate_for_iterations(iterations.len())
         .map_err(|error| mex("ParallelRandomness", &error.to_string()))?;
@@ -2646,9 +2677,9 @@ mod tests {
         value_is_real, value_is_scalar_or_empty, value_is_text,
     };
     use runmat_runtime::context::RuntimeInvocationArity;
-    use runmat_value::{CellArray, Tensor, Value};
     #[cfg(feature = "native-accel")]
-    use runmat_value::{HandleRef, StructValue};
+    use runmat_value::HandleRef;
+    use runmat_value::{CellArray, Tensor, Value};
     use std::collections::HashSet;
     use std::future::Future;
     use std::task::{Context, Poll};
@@ -3177,9 +3208,7 @@ mod tests {
         assert!(value_is_numeric_or_logical(&Value::Complex(1.0, 2.0)));
         let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
         assert!(value_is_numeric_or_logical(&Value::Tensor(tensor)));
-        assert!(!value_is_numeric_or_logical(&Value::String(
-            "x".to_string()
-        )));
+        assert!(!value_is_numeric_or_logical(&Value::String("x".into())));
         assert!(!value_is_numeric_or_logical(&Value::CharArray(
             runmat_value::CharArray::new("x".chars().collect(), 1, 1).expect("char")
         )));
@@ -3187,7 +3216,7 @@ mod tests {
 
     #[test]
     fn text_validator_accepts_string_char_vector_and_cellstr() {
-        assert!(value_is_text(&Value::String("x".to_string())));
+        assert!(value_is_text(&Value::String("x".into())));
         assert!(value_is_text(&Value::CharArray(
             runmat_value::CharArray::new("abc".chars().collect(), 1, 3).expect("char")
         )));
@@ -3197,7 +3226,7 @@ mod tests {
                     Value::CharArray(
                         runmat_value::CharArray::new("a".chars().collect(), 1, 1).expect("char"),
                     ),
-                    Value::String("b".to_string()),
+                    Value::String("b".into()),
                 ],
                 1,
                 2,
@@ -3215,7 +3244,7 @@ mod tests {
         assert!(value_is_empty(&Value::CharArray(empty_char)));
         let empty_cell = CellArray::new(Vec::new(), 0, 0).expect("empty cell");
         assert!(value_is_empty(&Value::Cell(empty_cell)));
-        assert!(!value_is_empty(&Value::String("".to_string())));
+        assert!(!value_is_empty(&Value::String("".into())));
         assert!(!value_is_empty(&Value::Num(1.0)));
     }
 
@@ -3605,12 +3634,10 @@ mod tests {
                 Some("<main>"),
                 RuntimeInvocationArity::Script,
             );
-            let mut payload = StructValue::new();
-            payload
-                .fields
-                .insert("nested".to_string(), Value::GpuTensor(handle.clone()));
-            let target =
-                runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
+            let mut payload = runmat_value::UnboundedStructValueBuilder::with_capacity(1);
+            payload.insert("nested", Value::GpuTensor(handle.clone()));
+            let target = runmat_gc::gc_allocate(Value::Struct(payload.finish()))
+                .expect("gc allocate payload");
             state.context.locals.push(Value::HandleObject(HandleRef {
                 class_name: "Payload".into(),
                 target,
@@ -3650,12 +3677,10 @@ mod tests {
                 Some("<main>"),
                 RuntimeInvocationArity::Script,
             );
-            let mut payload = StructValue::new();
-            payload
-                .fields
-                .insert("nested".to_string(), Value::GpuTensor(handle.clone()));
-            let target =
-                runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
+            let mut payload = runmat_value::UnboundedStructValueBuilder::with_capacity(1);
+            payload.insert("nested", Value::GpuTensor(handle.clone()));
+            let target = runmat_gc::gc_allocate(Value::Struct(payload.finish()))
+                .expect("gc allocate payload");
             let local_value = Value::HandleObject(HandleRef {
                 class_name: "Payload".into(),
                 target,
@@ -3801,12 +3826,10 @@ mod tests {
                 Some("<main>"),
                 RuntimeInvocationArity::Script,
             );
-            let mut payload = StructValue::new();
-            payload
-                .fields
-                .insert("nested".to_string(), Value::GpuTensor(handle.clone()));
-            let target =
-                runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
+            let mut payload = runmat_value::UnboundedStructValueBuilder::with_capacity(1);
+            payload.insert("nested", Value::GpuTensor(handle.clone()));
+            let target = runmat_gc::gc_allocate(Value::Struct(payload.finish()))
+                .expect("gc allocate payload");
             state.vars = vec![Value::HandleObject(HandleRef {
                 class_name: "Payload".into(),
                 target,
@@ -3851,12 +3874,10 @@ mod tests {
                 Some("<main>"),
                 RuntimeInvocationArity::Script,
             );
-            let mut payload = StructValue::new();
-            payload
-                .fields
-                .insert("nested".to_string(), Value::GpuTensor(handle.clone()));
-            let target =
-                runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
+            let mut payload = runmat_value::UnboundedStructValueBuilder::with_capacity(1);
+            payload.insert("nested", Value::GpuTensor(handle.clone()));
+            let target = runmat_gc::gc_allocate(Value::Struct(payload.finish()))
+                .expect("gc allocate payload");
             let nested = Value::HandleObject(HandleRef {
                 class_name: "Payload".into(),
                 target,
@@ -3908,12 +3929,10 @@ mod tests {
                 Some("<main>"),
                 RuntimeInvocationArity::Script,
             );
-            let mut payload = StructValue::new();
-            payload
-                .fields
-                .insert("nested".to_string(), Value::GpuTensor(handle.clone()));
-            let target =
-                runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
+            let mut payload = runmat_value::UnboundedStructValueBuilder::with_capacity(1);
+            payload.insert("nested", Value::GpuTensor(handle.clone()));
+            let target = runmat_gc::gc_allocate(Value::Struct(payload.finish()))
+                .expect("gc allocate payload");
             let nested = Value::HandleObject(HandleRef {
                 class_name: "Payload".into(),
                 target,
@@ -4130,12 +4149,10 @@ mod tests {
                 Some("<main>"),
                 RuntimeInvocationArity::Script,
             );
-            let mut payload = StructValue::new();
-            payload
-                .fields
-                .insert("nested".to_string(), Value::GpuTensor(handle.clone()));
-            let target =
-                runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
+            let mut payload = runmat_value::UnboundedStructValueBuilder::with_capacity(1);
+            payload.insert("nested", Value::GpuTensor(handle.clone()));
+            let target = runmat_gc::gc_allocate(Value::Struct(payload.finish()))
+                .expect("gc allocate payload");
             state
                 .stack
                 .try_push(Value::Num(0.0))
@@ -4190,12 +4207,10 @@ mod tests {
                 Some("<main>"),
                 RuntimeInvocationArity::Script,
             );
-            let mut payload = StructValue::new();
-            payload
-                .fields
-                .insert("nested".to_string(), Value::GpuTensor(handle.clone()));
-            let target =
-                runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
+            let mut payload = runmat_value::UnboundedStructValueBuilder::with_capacity(1);
+            payload.insert("nested", Value::GpuTensor(handle.clone()));
+            let target = runmat_gc::gc_allocate(Value::Struct(payload.finish()))
+                .expect("gc allocate payload");
             let local_value = Value::HandleObject(HandleRef {
                 class_name: "Payload".into(),
                 target,
@@ -4259,12 +4274,10 @@ mod tests {
                 Some("<main>"),
                 RuntimeInvocationArity::Script,
             );
-            let mut payload = StructValue::new();
-            payload
-                .fields
-                .insert("nested".to_string(), Value::GpuTensor(handle.clone()));
-            let target =
-                runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
+            let mut payload = runmat_value::UnboundedStructValueBuilder::with_capacity(1);
+            payload.insert("nested", Value::GpuTensor(handle.clone()));
+            let target = runmat_gc::gc_allocate(Value::Struct(payload.finish()))
+                .expect("gc allocate payload");
             let nested = Value::HandleObject(HandleRef {
                 class_name: "Payload".into(),
                 target,

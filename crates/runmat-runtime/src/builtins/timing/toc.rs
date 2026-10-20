@@ -28,7 +28,7 @@ fn toc_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
 pub async fn toc_builtin(
     runtime: Option<RuntimeContext>,
     requested_outputs: Option<usize>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<f64> {
     if args.len() > 1 {
         return Err(toc_error(&TOC_ERROR_TOO_MANY_INPUTS));
@@ -95,7 +95,12 @@ mod tests {
 
     #[test]
     fn toc_requires_matching_tic() {
-        let error = block_on(toc_builtin(Some(runtime()), None, Vec::new())).unwrap_err();
+        let error = block_on(toc_builtin(
+            Some(runtime()),
+            None,
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap_err();
         assert_eq!(error.identifier(), TOC_ERROR_NO_MATCHING_TIC.identifier);
     }
 
@@ -104,11 +109,25 @@ mod tests {
         let first = runtime();
         let second = runtime();
         let token = block_on(tic_builtin(Some(first.clone()), None)).unwrap();
-        let elapsed =
-            block_on(toc_builtin(Some(first.clone()), None, vec![token.clone()])).unwrap();
-        let latest = block_on(toc_builtin(Some(first), None, Vec::new())).unwrap();
+        let elapsed = block_on(toc_builtin(
+            Some(first.clone()),
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![token.clone()]),
+        ))
+        .unwrap();
+        let latest = block_on(toc_builtin(
+            Some(first),
+            None,
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap();
         assert!(latest >= elapsed);
-        let error = block_on(toc_builtin(Some(second), None, vec![token])).unwrap_err();
+        let error = block_on(toc_builtin(
+            Some(second),
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![token]),
+        ))
+        .unwrap_err();
         assert_eq!(error.identifier(), TOC_ERROR_INVALID_HANDLE.identifier);
     }
 
@@ -120,8 +139,12 @@ mod tests {
             panic!("uint64")
         };
         for invalid in [Value::Num(raw as f64), Value::Int(IntValue::U64(0))] {
-            let error =
-                block_on(toc_builtin(Some(runtime.clone()), None, vec![invalid])).unwrap_err();
+            let error = block_on(toc_builtin(
+                Some(runtime.clone()),
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![invalid]),
+            ))
+            .unwrap_err();
             assert_eq!(error.identifier(), TOC_ERROR_INVALID_HANDLE.identifier);
         }
     }
@@ -131,7 +154,10 @@ mod tests {
         let error = block_on(toc_builtin(
             None,
             None,
-            vec![Value::Num(0.0), Value::Num(0.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(0.0),
+                Value::Num(0.0),
+            ]),
         ))
         .unwrap_err();
         assert_eq!(error.identifier(), TOC_ERROR_TOO_MANY_INPUTS.identifier);
@@ -139,7 +165,12 @@ mod tests {
 
     #[test]
     fn toc_rejects_extra_outputs_before_state_access() {
-        let error = block_on(toc_builtin(None, Some(2), Vec::new())).unwrap_err();
+        let error = block_on(toc_builtin(
+            None,
+            Some(2),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap_err();
         assert_eq!(error.identifier(), TOC_ERROR_TOO_MANY_OUTPUTS.identifier);
     }
 }

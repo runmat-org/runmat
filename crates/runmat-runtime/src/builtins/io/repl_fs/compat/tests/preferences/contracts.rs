@@ -7,7 +7,10 @@ use runmat_builtins::{
 fn missing_named_preference_preserves_public_diagnostic_and_typed_cause() {
     let error = run(getpref_builtin(
         Some(preference_context()),
-        vec![Value::String("app".into()), Value::String("absent".into())],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::String("app".into()),
+            Value::String("absent".into()),
+        ]),
     ))
     .expect_err("a missing named preference has no implicit default");
     assert_eq!(
@@ -52,13 +55,15 @@ fn ispref_rejects_integer_and_resident_controls_without_gather() {
     ] {
         assert!(run(ispref_builtin(
             Some(runtime.clone()),
-            vec![Value::Int(integer)]
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(integer)])
         ))
         .is_err());
     }
     assert!(run(ispref_builtin(
         Some(runtime.clone()),
-        vec![unregistered_resident_value()]
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            unregistered_resident_value()
+        ])
     ))
     .is_err());
 }
@@ -71,16 +76,22 @@ fn preference_output_admission_precedes_storage_and_provider_access() {
     for call in [
         run(getpref_builtin(
             Some(runtime.clone()),
-            vec![group.clone(), Value::String("name".into())],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                group.clone(),
+                Value::String("name".into()),
+            ]),
         )),
-        run(ispref_builtin(Some(runtime.clone()), vec![group.clone()])),
+        run(ispref_builtin(
+            Some(runtime.clone()),
+            crate::builtins::common::test_support::builtin_arguments(vec![group.clone()]),
+        )),
         run(setpref_builtin(
             Some(runtime.clone()),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 group.clone(),
                 Value::String("name".into()),
                 unregistered_resident_value(),
-            ],
+            ]),
         )),
     ] {
         let error = call.expect_err("too many outputs before effects");
@@ -88,7 +99,11 @@ fn preference_output_admission_precedes_storage_and_provider_access() {
     }
     drop(_count);
     assert_eq!(
-        run(ispref_builtin(Some(runtime.clone()), vec![group])).expect("no mutation"),
+        run(ispref_builtin(
+            Some(runtime.clone()),
+            crate::builtins::common::test_support::builtin_arguments(vec![group])
+        ))
+        .expect("no mutation"),
         Value::Bool(false)
     );
 }
@@ -101,11 +116,11 @@ fn setpref_status_result_is_a_separately_gated_extension() {
     let group = Value::String("runmatSetprefStatusAdmission".into());
     let error = run(setpref_builtin(
         Some(runtime.clone()),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             group.clone(),
             Value::String("name".into()),
             unregistered_resident_value(),
-        ],
+        ]),
     ))
     .expect_err("status extension must reject before gather");
     assert_eq!(
@@ -113,7 +128,11 @@ fn setpref_status_result_is_a_separately_gated_extension() {
         runmat_builtins::SETPREF_STATUS_EXTENSION.error_identifier
     );
     assert_eq!(
-        run(ispref_builtin(Some(runtime.clone()), vec![group])).expect("no mutation"),
+        run(ispref_builtin(
+            Some(runtime.clone()),
+            crate::builtins::common::test_support::builtin_arguments(vec![group])
+        ))
+        .expect("no mutation"),
         Value::Bool(false)
     );
 }
@@ -139,7 +158,9 @@ fn getpref_group_query_is_a_separately_gated_extension() {
     let strict = crate::compatibility::push_runmat_extensions_enabled(false);
     let error = run(getpref_builtin(
         Some(runtime.clone()),
-        vec![Value::String("group".into())],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+            "group".into(),
+        )]),
     ))
     .expect_err("strict group query");
     assert_eq!(
@@ -151,7 +172,9 @@ fn getpref_group_query_is_a_separately_gated_extension() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     let result = run(getpref_builtin(
         Some(runtime.clone()),
-        vec![Value::String("group".into())],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+            "group".into(),
+        )]),
     ))
     .expect("extension group query");
     assert!(matches!(result, Value::Struct(_)));
@@ -172,13 +195,19 @@ fn getpref_rejects_every_integer_class_in_text_control_positions() {
     ] {
         let error = run(getpref_builtin(
             Some(runtime.clone()),
-            vec![value.clone(), Value::String("name".into())],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                value.clone(),
+                Value::String("name".into()),
+            ]),
         ))
         .expect_err("integer group");
         assert!(error.message().contains("group must be"));
         let error = run(getpref_builtin(
             Some(runtime.clone()),
-            vec![Value::String("getprefIntegerControls".into()), value],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("getprefIntegerControls".into()),
+                value,
+            ]),
         ))
         .expect_err("integer preference name");
         assert!(error.message().contains("preference must be"));

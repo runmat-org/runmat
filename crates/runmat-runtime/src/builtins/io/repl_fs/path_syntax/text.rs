@@ -24,11 +24,18 @@ impl TextContainer {
         error: &'static runmat_builtins::BuiltinErrorDescriptor,
     ) -> BuiltinResult<Self> {
         match value {
-            Value::String(text) => Ok(Self::scalar(TextRepresentation::String, text.clone())),
+            Value::String(text) => Ok(Self::scalar(
+                TextRepresentation::String,
+                text.as_str().to_owned(),
+            )),
             Value::StringArray(array) => Ok(Self {
                 representation: TextRepresentation::StringArray,
-                values: array.data.clone(),
-                shape: array.shape.clone(),
+                values: array
+                    .data()
+                    .iter()
+                    .map(|text| text.as_str().to_owned())
+                    .collect(),
+                shape: array.shape.as_slice().to_vec(),
             }),
             Value::CharArray(array)
                 if array.rows == 1
@@ -36,7 +43,7 @@ impl TextContainer {
             {
                 Ok(Self::scalar(
                     TextRepresentation::Character,
-                    array.data.iter().take(array.cols).collect(),
+                    array.data().iter().take(array.cols).collect(),
                 ))
             }
             Value::Cell(array) => Self::decode_cell(array, identity, error),
@@ -57,7 +64,7 @@ impl TextContainer {
         identity: &'static str,
         error: &'static runmat_builtins::BuiltinErrorDescriptor,
     ) -> BuiltinResult<Self> {
-        let mut values = Vec::with_capacity(array.data.len());
+        let mut values = Vec::with_capacity(array.data().len());
         for value in array.iter_column_major() {
             let Value::CharArray(chars) = value else {
                 return Err(super::error::catalog(error, identity));
@@ -65,12 +72,12 @@ impl TextContainer {
             if chars.rows != 1 || crate::builtins::common::shape::effective_rank(&chars.shape) > 2 {
                 return Err(super::error::catalog(error, identity));
             }
-            values.push(chars.data.iter().take(chars.cols).collect());
+            values.push(chars.data().iter().take(chars.cols).collect());
         }
         Ok(Self {
             representation: TextRepresentation::Cell,
             values,
-            shape: array.shape.clone(),
+            shape: array.shape.as_slice().to_vec(),
         })
     }
 
@@ -98,7 +105,7 @@ pub(super) fn output(
             values.first().map_or("", String::as_str),
         ))),
         TextRepresentation::String if values.len() == 1 => {
-            Ok(Value::String(values.into_iter().next().unwrap_or_default()))
+            Ok(Value::string(values.into_iter().next().unwrap_or_default()))
         }
         TextRepresentation::String | TextRepresentation::StringArray => {
             StringArray::new(values, shape.to_vec())

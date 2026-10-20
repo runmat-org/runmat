@@ -141,11 +141,22 @@ fn spectrogram_error_with_message(
     binding_variant = "default",
     builtin_path = "crate::builtins::math::signal::spectrogram"
 )]
-async fn spectrogram_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    evaluate(x, &rest).await
+async fn spectrogram_builtin(
+    x: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    evaluate_view(x, rest.view()).await
 }
 
+#[cfg(test)]
 pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
+    evaluate_view(x, crate::call::FunctionArgumentView::from_slice(rest)).await
+}
+
+async fn evaluate_view(
+    x: Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Value> {
     if rest.len() > 9 {
         return Err(spectrogram_error(&SPECTROGRAM_ERROR_ARG_COUNT));
     }
@@ -410,7 +421,7 @@ async fn output_gpu(
 }
 
 async fn parse_options(
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     signal_len: usize,
     complex_input: bool,
 ) -> BuiltinResult<SpectrogramOptions> {
@@ -943,12 +954,12 @@ fn is_empty(value: &Value) -> bool {
 fn keyword(value: &Value) -> Option<String> {
     match value {
         Value::String(text) => Some(text.trim().to_ascii_lowercase()),
-        Value::StringArray(array) if array.data.len() == 1 => {
-            Some(array.data[0].trim().to_ascii_lowercase())
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Some(array.data()[0].trim().to_ascii_lowercase())
         }
         Value::CharArray(chars) if chars.rows <= 1 => Some(
             chars
-                .data
+                .data()
                 .iter()
                 .collect::<String>()
                 .trim()
@@ -970,8 +981,9 @@ mod tests {
     #[test]
     fn empty_numeric_frequency_tensor_selects_default_fft_grid() {
         let empty = Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap());
+        let controls = [empty.clone(), empty.clone(), empty];
         let options = block_on(parse_options(
-            &[empty.clone(), empty.clone(), empty],
+            crate::call::FunctionArgumentView::from_slice(&controls),
             8,
             false,
         ))
@@ -982,7 +994,13 @@ mod tests {
     #[test]
     fn singleton_numeric_window_tensor_selects_scalar_hamming_length() {
         let win = Value::Tensor(Tensor::new(vec![4.0], vec![1, 1]).unwrap());
-        let options = block_on(parse_options(&[win, Value::Num(2.0)], 8, false)).unwrap();
+        let controls = [win, Value::Num(2.0)];
+        let options = block_on(parse_options(
+            crate::call::FunctionArgumentView::from_slice(&controls),
+            8,
+            false,
+        ))
+        .unwrap();
         assert_eq!(options.window.len(), 4);
         assert_eq!(options.n_overlap, 2);
     }

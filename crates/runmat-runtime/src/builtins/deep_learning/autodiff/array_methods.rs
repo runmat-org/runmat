@@ -155,7 +155,7 @@ fn dlarray_binary_payloads(
     let out = Tensor::new_with_dtype(data, shape, dtype)
         .map_err(|err| deep_learning_error(function, err))?;
     let node = record(lhs, rhs, out.clone())?;
-    Ok(wrap_result(result_metadata_owner(lhs, rhs), out, node))
+    wrap_result(result_metadata_owner(lhs, rhs), out, node)
 }
 
 fn method_shape_error(function: &'static str, source: crate::RuntimeError) -> crate::RuntimeError {
@@ -231,7 +231,7 @@ pub(crate) fn dlarray_mtimes_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Va
     } else {
         None
     };
-    Ok(wrap_result(result_metadata_owner(&lhs, &rhs), out, node))
+    wrap_result(result_metadata_owner(&lhs, &rhs), out, node)
 }
 
 #[runtime_builtin(
@@ -239,7 +239,10 @@ pub(crate) fn dlarray_mtimes_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Va
     binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::autodiff::array_methods"
 )]
-pub(crate) fn dlarray_sum_builtin(input: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(crate) fn dlarray_sum_builtin(
+    input: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     super::super::errors::admit_single_output(
         "sum",
         &runmat_builtins::DLARRAY_METHOD_INVALID_INPUT,
@@ -273,5 +276,5 @@ pub(crate) fn dlarray_sum_builtin(input: Value, rest: Vec<Value>) -> BuiltinResu
     } else {
         None
     };
-    Ok(wrap_result(&payload, out, node))
+    wrap_result(&payload, out, node)
 }

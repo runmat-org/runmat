@@ -1,7 +1,14 @@
 use runmat_builtins::LOCALFUNCTIONS_ERROR_TOO_MANY_INPUTS;
 use runmat_value::{CellArray, Value};
 
+#[cfg(test)]
 pub(crate) fn dispatch_localfunctions(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    dispatch_localfunctions_arguments(crate::call::FunctionArgumentView::from_slice(&args))
+}
+
+fn dispatch_localfunctions_arguments(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<Value> {
     if !args.is_empty() {
         return Err(crate::runtime_descriptor_error(
             "localfunctions",
@@ -43,8 +50,10 @@ pub(crate) fn dispatch_localfunctions(args: Vec<Value>) -> crate::BuiltinResult<
     binding_variant = "default",
     builtin_path = "crate::builtins::introspection::localfunctions"
 )]
-pub fn localfunctions_builtin_registered(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    dispatch_localfunctions(args)
+pub fn localfunctions_builtin_registered(
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    dispatch_localfunctions_arguments(args.view())
 }
 
 #[cfg(test)]
@@ -62,7 +71,7 @@ mod tests {
         };
         assert_eq!(cell.rows, 1);
         assert_eq!(cell.cols, 0);
-        assert!(cell.data.is_empty());
+        assert!(cell.data().is_empty());
     }
 
     #[test]
@@ -121,9 +130,9 @@ mod tests {
         let Value::Cell(cell) = value else {
             panic!("expected cell array");
         };
-        assert_eq!(cell.data.len(), 1);
+        assert_eq!(cell.data().len(), 1);
         assert!(matches!(
-            &cell.data[0],
+            &cell.data()[0],
             Value::BoundFunctionHandle(handle)
                 if handle.name == "first"
                     && handle.function == 10
@@ -198,8 +207,8 @@ mod tests {
         else {
             panic!("cell result");
         };
-        assert_eq!(cell.data.len(), 1);
-        let Value::BoundFunctionHandle(handle) = &cell.data[0] else {
+        assert_eq!(cell.data().len(), 1);
+        let Value::BoundFunctionHandle(handle) = &cell.data()[0] else {
             panic!("bound local");
         };
         assert_eq!(handle.name, "old_local");

@@ -90,6 +90,7 @@ fn executable(admitted: &AdmittedSignalGenerator) -> ExecutableUnitEnvelope {
                 entrypoint: admitted.callable.qualified_name.clone(),
                 entrypoint_function: Some(admitted.function),
                 entrypoint_kind: ExecutableEntrypointKind::Function,
+                declaration_class: None,
                 source_digest: admitted.executable_source_digest,
             },
             revisions: ExecutableComponentRevisions {
@@ -162,7 +163,7 @@ fn task_context(
     pool: &[u8],
 ) -> GeneratorExecutionContext {
     GeneratorExecutionContext {
-        host,
+        host: crate::tests::contract_host(&revision()),
         scope_id: ExecutionScopeId::derive(&[scope]),
         pool_id: PoolId::derive(&[pool]),
         resources: ResourceRequest {
@@ -187,12 +188,20 @@ fn descriptor_preserves_exact_callable_authority_without_preparing_chunks() {
     let admitted = admitted();
     let executable = executable(&admitted);
     let descriptor = prepare_generator_descriptor(&admitted, executable.clone()).unwrap();
+    assert_eq!(
+        descriptor.recipe.entrypoint,
+        admitted.callable.qualified_name
+    );
+    assert_eq!(descriptor.recipe.interop, executable.manifest.interop);
     let prepared = prepare_generator_program(&admitted, executable.clone(), chunks(), &[]).unwrap();
     assert_eq!(descriptor, prepared.descriptor);
     assert!(prepare_generator_program(&admitted, executable.clone(), Vec::new(), &[]).is_err());
 
     let mut foreign = admitted.clone();
     foreign.callable.owner_identity = "foreign@1".into();
+    assert!(prepare_generator_descriptor(&foreign, executable.clone()).is_err());
+    let mut foreign = admitted.clone();
+    foreign.callable.qualified_name = "loads.foreign".into();
     assert!(prepare_generator_descriptor(&foreign, executable.clone()).is_err());
     let mut foreign = admitted.clone();
     foreign.function = ProgramFunctionId(4);
@@ -224,13 +233,10 @@ fn portable_program_binds_exact_callable_revision_and_chunk_arguments() {
     let prepared =
         prepare_generator_program(&admitted, executable(&admitted), chunks(), &[]).unwrap();
     assert_eq!(prepared.chunks.len(), 1);
-    assert!(matches!(
-        prepared.chunks[0].request.callable,
-        runmat_execution::ProgramCallable::Semantic {
-            function: runmat_execution::ProgramFunctionId(3),
-            ..
-        }
-    ));
+    assert_eq!(
+        prepared.chunks[0].request.callable.semantic_function(),
+        Some(ProgramFunctionId(3))
+    );
     assert_eq!(
         prepared.chunks[0].request.arguments,
         prepared.chunks[0].plan.arguments
@@ -422,6 +428,8 @@ fn task_identity_tracks_materialization_and_generator_while_callable_is_the_comp
     );
 
     let mut generator_change = baseline.clone();
+    generator_change.function = ProgramFunctionId(4);
+    generator_change.callable.qualified_name = "loads.alternate".into();
     generator_change.generator_identity = GeneratorIdentity::new(
         digest("changed-callable"),
         digest("captures"),
@@ -434,11 +442,22 @@ fn task_identity_tracks_materialization_and_generator_while_callable_is_the_comp
         digest("sampling"),
     )
     .unwrap();
-    let generator_task = submit(&generator_change);
+    let generator_program = prepare_generator_program(
+        &generator_change,
+        executable(&generator_change),
+        chunks(),
+        &[],
+    )
+    .unwrap();
+    let generator_task = build_generator_task_submission(
+        &generator_change,
+        &generator_program.chunks[0],
+        BTreeSet::new(),
+        task_context(b"scope", b"pool"),
+    )
+    .unwrap();
     assert_ne!(baseline_task.request.id, generator_task.request.id);
-    // The typed callable names the compiled function; the generator is bound by
-    // the task identity and the program request, not by the callable digest.
-    assert_eq!(
+    assert_ne!(
         baseline_task.request.callable.entrypoint_digest(),
         generator_task.request.callable.entrypoint_digest()
     );

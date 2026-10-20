@@ -109,7 +109,7 @@ fn evaluate_inner(
                             })?;
                     let runtime = state.runtime.clone();
                     let lexical_call = runmat_runtime::call::lexical::LexicalCall {
-                        function: function.0 as usize,
+                        function: function.0,
                         captures,
                         environment: state.lexical_environment.clone(),
                         arguments,
@@ -235,18 +235,13 @@ fn evaluate_inner(
 
 fn local_program_function(
     identity: &runmat_types::CallableIdentity,
-) -> NativeExecutorResult<Option<runmat_types::ProgramFunctionId>> {
+) -> NativeExecutorResult<Option<runmat_types::FunctionId>> {
     let function = match identity {
         runmat_types::CallableIdentity::BoundFunction(function)
         | runmat_types::CallableIdentity::AnonymousFunction(function) => function.0,
         _ => return Ok(None),
     };
-    u32::try_from(function)
-        .map(runmat_types::ProgramFunctionId)
-        .map(Some)
-        .map_err(|_| {
-            NativeExecutorError::Host("semantic function identity exceeds native schema".into())
-        })
+    Ok(Some(runmat_types::FunctionId(function)))
 }
 
 pub(super) fn materialize_arguments(

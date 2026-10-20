@@ -59,14 +59,14 @@ pub(super) fn preference_names(
                 Ok(PreferenceNames::Scalar(text))
             } else {
                 Ok(PreferenceNames::Array {
-                    names: array.data.clone(),
-                    shape: array.shape.clone(),
+                    names: array.data().iter().map(|text| text.as_str().to_owned()).collect(),
+                    shape: array.shape.as_slice().to_vec(),
                 })
             }
         }
         Value::Cell(cell) => {
-            let mut names = Vec::with_capacity(cell.data.len());
-            for value in &cell.data {
+            let mut names = Vec::with_capacity(cell.data().len());
+            for value in cell.data() {
                 if let Value::CharArray(_) = value {
                     if let Some(text) = preference_scalar_text(value) {
                         names.push(text);
@@ -80,7 +80,7 @@ pub(super) fn preference_names(
             }
             Ok(PreferenceNames::Array {
                 names,
-                shape: cell.shape.clone(),
+                shape: cell.shape.as_slice().to_vec(),
             })
         }
         _ => Err(error(

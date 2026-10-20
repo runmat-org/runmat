@@ -249,7 +249,7 @@ fn coefficient_only_result_reports_absent_statistics_without_panicking() {
         Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap()),
         Value::Tensor(Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap()),
         Value::Num(1.0),
-        &[],
+        crate::call::FunctionArgumentView::from_slice(&[]),
         ProviderPolyfitOutputs::Coefficients,
     ))
     .expect("coefficient-only fit");

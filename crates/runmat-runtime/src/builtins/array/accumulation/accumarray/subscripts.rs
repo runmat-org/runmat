@@ -6,10 +6,14 @@ use crate::BuiltinResult;
 use super::error;
 
 pub(super) fn parse(value: Value) -> BuiltinResult<Vec<Vec<usize>>> {
+    parse_borrowed(&value)
+}
+
+fn parse_borrowed(value: &Value) -> BuiltinResult<Vec<Vec<usize>>> {
     match value {
-        Value::Int(value) => Ok(vec![vec![positive_exact(&value, "accumarray subscript")?]]),
-        Value::Num(value) => Ok(vec![vec![positive_float(value, "accumarray subscript")?]]),
-        Value::Tensor(tensor) if tensor_utils::tensor_element_len(&tensor) == 0 => Ok(Vec::new()),
+        Value::Int(value) => Ok(vec![vec![positive_exact(value, "accumarray subscript")?]]),
+        Value::Num(value) => Ok(vec![vec![positive_float(*value, "accumarray subscript")?]]),
+        Value::Tensor(tensor) if tensor_utils::tensor_element_len(tensor) == 0 => Ok(Vec::new()),
         Value::Tensor(tensor) => {
             let rows = tensor.rows();
             let cols = tensor.cols();
@@ -41,9 +45,11 @@ pub(super) fn parse(value: Value) -> BuiltinResult<Vec<Vec<usize>>> {
                     .collect();
             }
             if cols <= 1 || rows == 1 {
-                return tensor_utils::tensor_into_values_f64(tensor)
-                    .into_iter()
-                    .map(|value| Ok(vec![positive_float(value, "accumarray subscript")?]))
+                return (0..tensor.len())
+                    .map(|index| {
+                        let value = tensor_utils::tensor_value_f64(tensor, index);
+                        Ok(vec![positive_float(value, "accumarray subscript")?])
+                    })
                     .collect();
             }
             (0..rows)
@@ -59,17 +65,17 @@ pub(super) fn parse(value: Value) -> BuiltinResult<Vec<Vec<usize>>> {
                 })
                 .collect()
         }
-        Value::Cell(cell) => parse_cell_columns(cell.data),
+        Value::Cell(cell) => parse_cell_columns(cell.data_owner().as_slice()),
         other => Err(error::invalid(format!(
             "accumarray: unsupported subscript input {other:?}"
         ))),
     }
 }
 
-fn parse_cell_columns(values: Vec<Value>) -> BuiltinResult<Vec<Vec<usize>>> {
+fn parse_cell_columns(values: &[Value]) -> BuiltinResult<Vec<Vec<usize>>> {
     let mut columns = Vec::with_capacity(values.len());
     for value in values {
-        let column = parse(value)?;
+        let column = parse_borrowed(value)?;
         if column.iter().any(|row| row.len() != 1) {
             return Err(error::invalid(
                 "accumarray: cell subscript entries must be vectors",

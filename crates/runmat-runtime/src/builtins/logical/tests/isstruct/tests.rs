@@ -19,8 +19,9 @@ fn run(value: Value) -> bool {
 
 #[test]
 fn recognizes_scalar_nonscalar_and_empty_structures_only() {
-    let mut scalar = StructValue::new();
+    let mut scalar = runmat_value::UnboundedStructValueBuilder::new();
     scalar.insert("value", Value::Num(19.0));
+    let scalar = scalar.finish();
     assert!(run(Value::Struct(scalar.clone())));
     assert!(run(Value::StructArray(
         StructArray::new(vec![scalar.clone(), scalar], vec![1, 2]).unwrap()
@@ -51,29 +52,32 @@ fn resident_and_distributed_classification_needs_no_payload() {
         function,
         ordinal: 2,
     });
-    let value = Value::Distributed(Box::new(DistributedValueHandle {
-        id: DistributedObjectId::derive(&[b"isstruct-value"]),
-        contract: DistributedValueId {
-            function,
-            ordinal: 1,
-        },
-        owner: DistributedOwner::Region(owner),
-        scope_id,
-        generation: 1,
-        pool: PoolHandle {
-            id: PoolId::derive(&[b"isstruct-pool"]),
+    let value = Value::Distributed(
+        Box::new(DistributedValueHandle {
+            id: DistributedObjectId::derive(&[b"isstruct-value"]),
+            contract: DistributedValueId {
+                function,
+                ordinal: 1,
+            },
+            owner: DistributedOwner::Region(owner),
             scope_id,
             generation: 1,
-        },
-        partition_count: LabCount(2),
-        value: ValueFact::scalar(ValueKindFact::Struct(StructFact::scalar(
-            BTreeMap::new(),
-            true,
-        ))),
-        global_shape: vec![2, 2],
-        scheme: DistributionScheme::Replicated,
-        materializable: true,
-    }));
+            pool: PoolHandle {
+                id: PoolId::derive(&[b"isstruct-pool"]),
+                scope_id,
+                generation: 1,
+            },
+            partition_count: LabCount(2),
+            value: ValueFact::scalar(ValueKindFact::Struct(StructFact::scalar(
+                BTreeMap::new(),
+                true,
+            ))),
+            global_shape: vec![2, 2],
+            scheme: DistributionScheme::Replicated,
+            materializable: true,
+        })
+        .into(),
+    );
     assert!(run(value));
 }
 

@@ -40,9 +40,11 @@ use properties::normalize_numeric_tensor;
 pub(crate) use predict::predict_deep_learning_object;
 pub(in crate::builtins) use predict::predict_deep_learning_object_in_runtime;
 
+#[cfg(test)]
+pub(in crate::builtins) use construction::network_object;
 pub(in crate::builtins) use construction::{
     is_deep_learning_network_object, layers_from_network_ref, layers_from_network_value,
-    network_object,
+    network_object_from_layer_cell,
 };
 pub(in crate::builtins) use initialization::initialise_layers_in_runtime;
 pub(in crate::builtins) use parameters::{
@@ -173,20 +175,25 @@ pub(crate) fn ensure_network_classes_registered() {
 async fn dlnetwork_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<RootedValue> {
     dlnetwork_in_runtime(runtime.as_ref(), requested_outputs, args).await
 }
 
 #[cfg(test)]
 pub(super) async fn dlnetwork_builtin(args: Vec<Value>) -> BuiltinResult<RootedValue> {
-    dlnetwork_in_runtime(None, crate::output_count::current_output_count(), args).await
+    dlnetwork_in_runtime(
+        None,
+        crate::output_count::current_output_count(),
+        crate::builtins::common::test_support::builtin_arguments(args),
+    )
+    .await
 }
 
 async fn dlnetwork_in_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<RootedValue> {
     let _argument_roots =
         RootedValueLease::for_values(args.iter()).map_err(|error| error.into_runtime_error())?;
@@ -196,7 +203,7 @@ async fn dlnetwork_in_runtime(
             "dlnetwork: at most one output is supported",
         ));
     }
-    let Some((layers_value, rest)) = args.split_first() else {
+    let Some((layers_value, rest)) = args.view().split_first() else {
         return Err(deep_learning_error(
             "dlnetwork",
             "dlnetwork: expected a layer collection or layerGraph object",
@@ -206,20 +213,29 @@ async fn dlnetwork_in_runtime(
     let layers = layers_from_network_ref(layers_value, "dlnetwork")?;
     validate_forward_layers(layers, "dlnetwork")?;
     options.preflight_layers(layers, "dlnetwork")?;
-    let mut layers = layers_from_network_value(
+    let prepared_layers = layers_from_network_value(
         args.into_iter()
             .next()
             .expect("validated first layer argument"),
         "dlnetwork",
     )?;
-    let _layer_roots =
-        RootedValueLease::for_values(layers.iter()).map_err(|error| error.into_runtime_error())?;
+    let _layer_roots = prepared_layers.1;
+    let mut layers = prepared_layers.0;
     let _initialized_roots = if options.initialize {
-        Some(initialise_layers_in_runtime(runtime, &mut layers, "dlnetwork").await?)
+        Some(
+            initialise_layers_in_runtime(
+                runtime,
+                layers
+                    .try_data_mut_unique()
+                    .expect("private Layers destination"),
+                "dlnetwork",
+            )
+            .await?,
+        )
     } else {
         None
     };
-    let network = network_object(
+    let network = network_object_from_layer_cell(
         DLNETWORK_CLASS,
         layers,
         options.into_properties(),
@@ -240,7 +256,7 @@ async fn forward_builtin_registered(
     requested_outputs: Option<usize>,
     network: Value,
     input: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     forward_in_runtime(runtime.as_ref(), requested_outputs, network, input, rest).await
 }
@@ -249,7 +265,7 @@ async fn forward_builtin_registered(
 pub(super) async fn forward_builtin(
     network: Value,
     input: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     forward_in_runtime(
         None,
@@ -266,7 +282,7 @@ async fn forward_in_runtime(
     requested_outputs: Option<usize>,
     network: Value,
     input: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     if requested_outputs.is_some_and(|count| count > 2) {
         return Err(deep_learning_error(

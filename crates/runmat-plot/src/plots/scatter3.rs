@@ -396,14 +396,20 @@ impl Scatter3Plot {
             values
                 .iter()
                 .filter(|v| v.is_finite())
-                .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), &v| (a.min(v), b.max(v)))
+                .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), &v| {
+                    (a.min(v), b.max(v))
+                })
         });
         let span = if hi > lo { hi - lo } else { 1.0 };
         let colors: Vec<Vec4> = values
             .iter()
             .zip(&self.colors)
             .map(|(&v, old)| {
-                let t = if v.is_finite() { ((v - lo) / span).clamp(0.0, 1.0) } else { 0.0 };
+                let t = if v.is_finite() {
+                    ((v - lo) / span).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
                 let rgb = cmap.map_value(t as f32);
                 Vec4::new(rgb.x, rgb.y, rgb.z, old.w)
             })

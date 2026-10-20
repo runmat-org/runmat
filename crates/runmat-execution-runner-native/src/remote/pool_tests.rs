@@ -552,7 +552,7 @@ async fn late_dependent_on_failed_remote_task_resolves_without_dispatch() {
     .unwrap();
     pool.add_worker(Arc::new(FailingRouteWorker {
         spec: WorkerSpec {
-            host: crate::test_fixtures::host_inventory(),
+            host: crate::test_support::host_inventory(),
             id: WorkerId::derive(&[b"remote-late-terminal-worker"]),
             pool_id,
             resources: inventory(1_000),
@@ -600,7 +600,7 @@ async fn remote_pool_rejects_worker_inventory_that_differs_from_description() {
     let pool_id = PoolId::derive(&[b"remote-description-pool"]);
     let bundle = Arc::new(executable_bundle().await.2);
     let advertised = WorkerSpec {
-        host: crate::test_fixtures::host_inventory(),
+        host: crate::test_support::host_inventory(),
         id: WorkerId::derive(&[b"advertised-worker"]),
         pool_id,
         resources: inventory(1_000),
@@ -672,7 +672,7 @@ async fn duplicate_worker_registration_preserves_the_original_route_and_state() 
     pool.add_worker(Arc::new(FakeWorker {
         node: "node-original".into(),
         spec: WorkerSpec {
-            host: crate::test_fixtures::host_inventory(),
+            host: crate::test_support::host_inventory(),
             id: worker_id,
             pool_id,
             resources: inventory(1_000),
@@ -699,7 +699,7 @@ async fn duplicate_worker_registration_preserves_the_original_route_and_state() 
         .add_worker(Arc::new(FakeWorker {
             node: "node-replacement".into(),
             spec: WorkerSpec {
-                host: crate::test_fixtures::host_inventory(),
+                host: crate::test_support::host_inventory(),
                 id: worker_id,
                 pool_id,
                 resources: inventory(1_000),
@@ -932,8 +932,8 @@ async fn remote_pool_executes_the_compiler_bound_parallel_region() {
         .submit(
             TaskSubmission {
                 request: TaskRequest {
-                    environment: runmat_execution::EnvironmentSnapshot::default(),
                     console: None,
+                    environment: runmat_execution::EnvironmentSnapshot::default(),
                     id: task_id,
                     scope_id,
                     pool_id,
@@ -975,7 +975,12 @@ async fn remote_pool_executes_the_compiler_bound_parallel_region() {
         .expect("compiled parallel region");
     let observed = region
         .output_variables()
-        .zip(outputs.data)
+        .zip(
+            outputs
+                .into_owned_data()
+                .expect("fresh decoded result envelope")
+                .into_iter(),
+        )
         .map(|(variable, value)| {
             let name = bytecode
                 .var_names
@@ -1312,7 +1317,7 @@ async fn pinned_quic_ready_v1_upgrades_only_the_opted_in_worker() {
     let run_key =
         runmat_execution_artifact::encryption::RunKeyMaterial::from_entropy([29; 32]).unwrap();
     let server = run_remote_worker_quic_ready_v1(RemoteWorkerQuicRequest {
-        listener: listener,
+        listener,
         run_identity: "run-quic-ready".into(),
         worker: worker.clone(),
         driver_fence: 23,
@@ -1376,7 +1381,7 @@ async fn lost_route_is_fenced_before_retry_and_same_allocation_can_reconnect() {
     )
     .unwrap();
     let worker = WorkerSpec {
-        host: crate::test_fixtures::host_inventory(),
+        host: crate::test_support::host_inventory(),
         id: WorkerId::derive(&[b"route-recovery-worker"]),
         pool_id,
         resources: inventory(1_000),
@@ -1448,6 +1453,7 @@ async fn late_result_from_a_fenced_route_cannot_replace_the_retry_commit() {
         id: WorkerId::derive(&[b"stale-result-worker"]),
         pool_id,
         resources: inventory(1_000),
+        host: host_inventory(),
     };
     let old_active = Arc::new(AtomicUsize::new(0));
     pool.add_worker(Arc::new(FakeWorker {
@@ -1482,7 +1488,7 @@ async fn late_result_from_a_fenced_route_cannot_replace_the_retry_commit() {
 
     pool.remove_worker(worker.id, true).await.unwrap();
     let replacement_worker = WorkerSpec {
-        host: crate::test_fixtures::host_inventory(),
+        host: crate::test_support::host_inventory(),
         id: WorkerId::derive(&[b"replacement-result-worker"]),
         pool_id,
         resources: inventory(1_000),
@@ -1554,7 +1560,7 @@ async fn failed_drain_fences_the_worker_and_removes_its_route() {
     )
     .unwrap();
     let worker = WorkerSpec {
-        host: crate::test_fixtures::host_inventory(),
+        host: crate::test_support::host_inventory(),
         id: WorkerId::derive(&[b"drain-failure-worker"]),
         pool_id,
         resources: inventory(1_000),
@@ -1600,7 +1606,7 @@ async fn remote_pool_resolves_cancellation_only_after_worker_quiescence_acknowle
     pool.add_worker(Arc::new(FakeWorker {
         node: "node-cancel-ack".into(),
         spec: WorkerSpec {
-            host: crate::test_fixtures::host_inventory(),
+            host: crate::test_support::host_inventory(),
             id: WorkerId::derive(&[b"cancel-ack-worker"]),
             pool_id,
             resources: inventory(1_000),
@@ -1686,7 +1692,7 @@ async fn remote_pool_tick_enforces_task_deadlines() {
     pool.add_worker(Arc::new(FakeWorker {
         node: "node-deadline".into(),
         spec: WorkerSpec {
-            host: crate::test_fixtures::host_inventory(),
+            host: crate::test_support::host_inventory(),
             id: WorkerId::derive(&[b"deadline-worker"]),
             pool_id,
             resources: inventory(1_000),
@@ -1912,8 +1918,8 @@ async fn pinned_quic_worker_executes_only_the_installed_exact_bundle() {
         assert!(channel.verified_software_capabilities().is_none());
         channel.drain().await.unwrap();
     };
-    let (served, ()) = tokio::join!(server, client);
-    served.unwrap();
+    let (server_result, ()) = tokio::join!(server, client);
+    server_result.expect("remote worker retired successfully");
 }
 
 #[tokio::test]
@@ -2473,8 +2479,8 @@ end
         .unwrap();
     let callable = ProgramCallable::parallel_region(region.contract.id);
     let program = ProgramExecutionRequest {
-        environment: runmat_execution::EnvironmentSnapshot::default(),
         console: None,
+        environment: runmat_execution::EnvironmentSnapshot::default(),
         schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         recipe,
         artifact,

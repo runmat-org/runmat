@@ -1,19 +1,24 @@
+use crate::builtins::deep_learning::arguments::DeepLearningObjectEdit as _;
 use futures::executor::block_on;
 use runmat_accelerate_api::{GpuHandleProvenance, HostTensorView};
 use runmat_value::{CellArray, IntegerStorage, Tensor, Value};
 
 use super::*;
-use crate::builtins::deep_learning::layers::{
-    feature_input_layer_builtin, fully_connected_layer_builtin,
-};
+use crate::builtins::deep_learning::layers::feature_input_layer_builtin;
 use crate::builtins::deep_learning::model::dlnetwork_builtin;
+use crate::builtins::deep_learning::tests::fully_connected_layer_builtin;
 
 #[path = "tests/complex.rs"]
 mod complex;
 
 fn network() -> crate::execution::RootedValue {
-    let input = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
+    let input = block_on(feature_input_layer_builtin(
+        Value::Num(2.0),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap();
     let dense = block_on(fully_connected_layer_builtin(
+        None,
         Value::Num(1.0),
         vec![
             Value::String("Weights".into()),
@@ -233,7 +238,8 @@ fn formatted_predictor_keeps_its_typed_axis_order() {
             ("Format", Value::String("CB".into())),
             ("Labels", Value::String("CB".into())),
         ],
-    );
+    )
+    .expect("fixture object");
     let output = block_on(crate::builtins::stats::ml::linear_model::predict_builtin(
         network.value().clone(),
         input,
@@ -243,16 +249,16 @@ fn formatted_predictor_keeps_its_typed_axis_order() {
     let Value::Object(output) = output else {
         panic!("formatted dlarray score expected")
     };
-    assert!(output.class_name.is(DLARRAY_CLASS));
+    assert!(output.class_name().is(DLARRAY_CLASS));
     assert_eq!(
-        output.properties.get("Format"),
+        output.properties().get("Format"),
         Some(&Value::String("CB".into()))
     );
     assert_eq!(
-        output.properties.get("Labels"),
+        output.properties().get("Labels"),
         Some(&Value::String("CB".into()))
     );
-    let Some(Value::Tensor(data)) = output.properties.get("Data") else {
+    let Some(Value::Tensor(data)) = output.properties().get("Data") else {
         panic!("host score data expected")
     };
     assert_eq!(data.shape(), &[1, 3]);
@@ -269,10 +275,11 @@ fn unformatted_dlarray_keeps_wrapper_and_same_rank_input_order() {
                 "Data",
                 Value::Tensor(Tensor::new(vec![1., 3., 5., 2., 4., 6.], vec![3, 2]).unwrap()),
             ),
-            ("Format", Value::String(String::new())),
-            ("Labels", Value::String(String::new())),
+            ("Format", Value::String(String::new().into())),
+            ("Labels", Value::String(String::new().into())),
         ],
-    );
+    )
+    .expect("fixture object");
     let output = block_on(crate::builtins::stats::ml::linear_model::predict_builtin(
         network.value().clone(),
         input,
@@ -282,12 +289,12 @@ fn unformatted_dlarray_keeps_wrapper_and_same_rank_input_order() {
     let Value::Object(output) = output else {
         panic!("unformatted dlarray score expected")
     };
-    assert!(output.class_name.is(DLARRAY_CLASS));
+    assert!(output.class_name().is(DLARRAY_CLASS));
     assert_eq!(
-        output.properties.get("Format"),
-        Some(&Value::String(String::new()))
+        output.properties().get("Format"),
+        Some(&Value::String(String::new().into()))
     );
-    let Some(Value::Tensor(data)) = output.properties.get("Data") else {
+    let Some(Value::Tensor(data)) = output.properties().get("Data") else {
         panic!("unformatted host score expected")
     };
     assert_eq!(data.shape(), &[3, 1]);
@@ -307,7 +314,8 @@ fn source_dlarray_metadata_is_preserved_and_disagreement_is_rejected() {
             ("Labels", Value::String("CB".into())),
             ("TraceMarker", Value::String("retained".into())),
         ],
-    );
+    )
+    .expect("fixture object");
     let prepared = prepare_input(input.clone(), ObservationsIn::Rows).unwrap();
     assert_eq!(prepared, input);
     let prepared = prepare_input(input, ObservationsIn::Columns).unwrap();
@@ -315,24 +323,24 @@ fn source_dlarray_metadata_is_preserved_and_disagreement_is_rejected() {
         panic!("dlarray expected")
     };
     assert_eq!(
-        prepared.properties.get("TraceMarker"),
+        prepared.properties().get("TraceMarker"),
         Some(&Value::String("retained".into()))
     );
 
     let mut disagreement = prepared.clone();
     disagreement
-        .properties
-        .insert("Labels".into(), Value::String("BC".into()));
+        .replace_dl_property("Labels", Value::String("BC".into()))
+        .expect("fixture property");
     let error = prepare_input(Value::Object(disagreement), ObservationsIn::Rows).unwrap_err();
     assert!(error.message().contains("Format and Labels disagree"));
 
     let mut conflicting = prepared;
     conflicting
-        .properties
-        .insert("Format".into(), Value::String("BC".into()));
+        .replace_dl_property("Format", Value::String("BC".into()))
+        .expect("fixture property");
     conflicting
-        .properties
-        .insert("Labels".into(), Value::String("BC".into()));
+        .replace_dl_property("Labels", Value::String("BC".into()))
+        .expect("fixture property");
     let error = prepare_input(Value::Object(conflicting), ObservationsIn::Columns).unwrap_err();
     assert!(error.message().contains("conflicts"));
 }

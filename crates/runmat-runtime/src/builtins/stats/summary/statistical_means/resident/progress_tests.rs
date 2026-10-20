@@ -444,7 +444,7 @@ fn first_unsupported_geomean_stage_uses_documented_host_materialization() {
     let _selected = ThreadProviderGuard::set(Some(provider));
     let input = provider.source(vec![4.0, 4.0], vec![2, 1]);
     let result = block_on(
-        crate::builtins::stats::summary::statistical_means::geomean::geomean_builtin(
+        crate::builtins::stats::summary::statistical_means::geomean::geomean_builtin_source(
             Value::GpuTensor(input.clone()),
             vec![],
         ),

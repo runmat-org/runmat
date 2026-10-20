@@ -43,6 +43,76 @@ pub struct LinkPlan {
     pub runtime_archive: PathBuf,
     pub output: PathBuf,
     pub response_tokens: Vec<String>,
+    /// Private construction proof. It cannot be deserialized or supplied by
+    /// an ambient/unselected caller, and is checked again before invocation.
+    #[serde(skip)]
+    pub(super) selected_proof: Option<SelectedPlanProof>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct SelectedPlanProof {
+    canonical: super::CanonicalSelectedLinkReceipt,
+    physical: runmat_execution::Digest,
+}
+
+impl SelectedPlanProof {
+    pub(super) fn into_receipt(self) -> super::CanonicalSelectedLinkReceipt {
+        self.canonical
+    }
+}
+
+impl LinkPlan {
+    pub(super) fn bind_selected(
+        mut self,
+        canonical: super::CanonicalSelectedLinkPlan,
+    ) -> AotResult<Self> {
+        let binding = self.product.selected().ok_or_else(|| {
+            AotError::contract("aot.link.canonical", "selected plan lacks product binding")
+        })?;
+        if binding != &canonical.product
+            || self.selected_build.as_ref() != Some(&canonical.build)
+            || self.inputs != canonical.inputs
+            || self.target_triple != canonical.target_triple
+            || self.driver.family != canonical.family
+        {
+            return Err(AotError::contract(
+                "aot.link.canonical",
+                "canonical selected plan differs from physical invocation inputs",
+            ));
+        }
+        self.selected_proof = Some(SelectedPlanProof {
+            canonical: super::CanonicalSelectedLinkReceipt::new(canonical)?,
+            physical: self.physical_digest()?,
+        });
+        Ok(self)
+    }
+
+    pub(super) fn verify_selected_proof(&self) -> AotResult<Option<runmat_execution::Digest>> {
+        match (&self.selected_proof, self.product.selected()) {
+            (None, None) if self.selected_build.is_none() => Ok(None),
+            (Some(proof), Some(_)) if self.selected_build.is_some() => {
+                if proof.physical != self.physical_digest()? {
+                    return Err(AotError::contract(
+                        "aot.link.canonical",
+                        "selected physical invocation changed after canonical binding",
+                    ));
+                }
+                Ok(Some(proof.canonical.identity()))
+            }
+            _ => Err(AotError::contract(
+                "aot.link.canonical",
+                "selected link lacks its private canonical construction proof",
+            )),
+        }
+    }
+
+    fn physical_digest(&self) -> AotResult<runmat_execution::Digest> {
+        let mut digest = runmat_execution::DigestStream::new();
+        digest.update(b"runmat-physical-native-link-plan-v1\0");
+        serde_json::to_writer(&mut digest, self)
+            .map_err(|error| AotError::contract("aot.link.canonical", error.to_string()))?;
+        Ok(digest.finish())
+    }
 }
 
 pub fn build_link_plan(
@@ -126,6 +196,7 @@ pub fn build_link_plan(
         runtime_archive: archive.to_path_buf(),
         output: output.to_path_buf(),
         response_tokens,
+        selected_proof: None,
     })
 }
 
@@ -218,7 +289,7 @@ mod tests {
         },
         NativeTarget,
     };
-    use runmat_types::ProgramFunctionId;
+    use runmat_types::FunctionId;
 
     use crate::{
         archive::{build_runtime_archive, RuntimeArchiveCapabilities, RuntimeArchiveEncoding},
@@ -285,7 +356,7 @@ mod tests {
         .unwrap();
         let bytes = b"object".to_vec();
         let target = NativeTarget::current();
-        let function = ProgramFunctionId(1);
+        let function = FunctionId(1);
         let object = RelocatableNativeObject {
             manifest: NativeObjectManifest {
                 schema_version: NATIVE_OBJECT_SCHEMA_VERSION,
@@ -379,6 +450,7 @@ mod tests {
             LinkerDriver {
                 path: "linker".into(),
                 family: LinkerFamily::Msvc,
+                environment: Vec::new(),
             },
             "program.obj".as_ref(),
             "runtime.lib".as_ref(),

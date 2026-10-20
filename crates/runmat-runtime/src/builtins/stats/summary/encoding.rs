@@ -116,7 +116,7 @@ fn value_contains_typed_integer(value: &Value) -> bool {
     matches!(value, Value::Int(_))
         || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
         || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
-        || matches!(value, Value::Cell(cell) if cell.data.iter().any(value_contains_typed_integer))
+        || matches!(value, Value::Cell(cell) if cell.data().iter().any(value_contains_typed_integer))
 }
 
 fn validate_dummyvar_integer_levels(value: &Value) -> BuiltinResult<()> {
@@ -137,7 +137,7 @@ fn validate_dummyvar_integer_levels(value: &Value) -> BuiltinResult<()> {
             Ok(())
         }
         Value::Cell(cell) => {
-            for item in &cell.data {
+            for item in cell.data() {
                 validate_dummyvar_integer_levels(item)?;
             }
             Ok(())
@@ -180,8 +180,9 @@ fn validate_dummyvar_integer_level(value: &IntValue) -> BuiltinResult<()> {
 async fn onehotencode_builtin(
     input: Value,
     feature_dim: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
+    let _control_sources = rest.fork();
     let controls = AdmittedControls::encode(rest).preflight_known_extensions()?;
     if crate::builtins::common::validation::value_contains_explicit_gpu(&input)
         || crate::builtins::common::validation::value_contains_explicit_gpu(&feature_dim)
@@ -232,8 +233,9 @@ async fn onehotdecode_builtin(
     encoded: Value,
     classes: Value,
     feature_dim: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
+    let _control_sources = rest.fork();
     let controls = AdmittedControls::decode(rest).preflight_known_extensions()?;
     if encoded_value_needs_runmat_extension(&encoded) {
         crate::compatibility::ensure_builtin_extension_enabled(

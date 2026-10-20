@@ -21,8 +21,8 @@ use crate::{build_runtime_error, RuntimeError};
 
 use super::bar::{apply_bar_style, series_bar_style};
 use super::state::{
-    continue_line_color_cycle_after, current_axes_state, current_hold_enabled,
-    render_active_plot, HistogramHandleMetadata, PlotRenderOptions,
+    continue_line_color_cycle_after, current_axes_state, current_hold_enabled, render_active_plot,
+    HistogramHandleMetadata, PlotRenderOptions,
 };
 use super::style::{parse_bar_style_args, BarStyleDefaults};
 
@@ -399,10 +399,12 @@ pub async fn histogram_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         .unwrap_or_else(|| data.clone());
     let (histcounts_args, style_args) = split_histogram_args(&rest);
     let raw_histcounts_args = histcounts_count_args(&histcounts_args);
-    let eval =
-        crate::builtins::stats::hist::histcounts::evaluate(evaluation_data, &raw_histcounts_args)
-            .await
-            .map_err(map_histogram_invalid_argument)?;
+    let eval = crate::builtins::stats::hist::histcounts::evaluate(
+        evaluation_data,
+        crate::call::FunctionArgumentView::from_slice(&raw_histcounts_args),
+    )
+    .await
+    .map_err(map_histogram_invalid_argument)?;
     let (counts_value, edges_value) = eval.into_pair();
     let counts = Tensor::try_from(&counts_value)
         .map_err(|e| histogram_invalid_argument(format!("cannot convert counts tensor: {e}")))?;
@@ -636,8 +638,8 @@ pub(crate) fn color_to_property_string(color: glam::Vec4) -> String {
 
 fn value_as_string(value: &Value) -> Option<String> {
     match value {
-        Value::String(s) => Some(s.clone()),
-        Value::CharArray(chars) => Some(chars.data.iter().collect()),
+        Value::String(s) => Some(s.as_str().to_owned()),
+        Value::CharArray(chars) => Some(chars.data().iter().collect()),
         _ => None,
     }
 }

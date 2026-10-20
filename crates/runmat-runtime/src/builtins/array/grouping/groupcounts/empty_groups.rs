@@ -32,7 +32,7 @@ fn explicit_levels(
     bins: Option<&BinLevels>,
 ) -> BuiltinResult<Option<Vec<Vec<KeyAtom>>>> {
     let categorical = columns.iter().any(|column| {
-        matches!(&column.value, runmat_value::Value::Object(value) if value.is_class(runmat_types::standard::CATEGORICAL))
+        matches!(column.value(), runmat_value::Value::Object(value) if value.is_class(runmat_types::standard::CATEGORICAL))
     });
     if !include_empty && !categorical && bins.is_none() {
         return Ok(None);
@@ -57,7 +57,7 @@ fn column_levels(
     include_missing: bool,
     include_empty: bool,
 ) -> BuiltinResult<Vec<KeyAtom>> {
-    if let runmat_value::Value::Object(value) = &column.value {
+    if let runmat_value::Value::Object(value) = column.value() {
         if value.is_class(runmat_types::standard::CATEGORICAL) {
             let mut levels = categorical_categories(value)?
                 .into_iter()
@@ -74,7 +74,7 @@ fn column_levels(
     }
     if include_empty
         && matches!(
-            column.value,
+            column.value(),
             runmat_value::Value::LogicalArray(_) | runmat_value::Value::Bool(_)
         )
     {

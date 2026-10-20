@@ -1,4 +1,3 @@
-use runmat_execution::CompositeHandle;
 use runmat_types::LabRank;
 use runmat_value::Value;
 
@@ -10,7 +9,7 @@ use crate::RuntimeError;
 /// Read one retained lab value through the selected runtime's Composite lease.
 pub async fn read_composite_entry(
     runtime: &RuntimeContext,
-    handle: CompositeHandle,
+    handle: runmat_value::SharedCompositeHandle,
     raw_indices: &[Value],
 ) -> Result<crate::execution::RootedValue, RuntimeError> {
     super::lease::validate_composite(runtime, &handle)?;

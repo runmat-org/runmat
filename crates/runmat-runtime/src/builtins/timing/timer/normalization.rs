@@ -80,7 +80,7 @@ fn normalize_callback(value: Value, name: &str) -> BuiltinResult<Value> {
         | Value::BoundFunctionHandle(_)
         | Value::Closure(_) => Ok(value),
         Value::Cell(ref cell)
-            if cell.data.is_empty() || cell.data.first().is_some_and(is_callback_function) =>
+            if cell.data().is_empty() || cell.data().first().is_some_and(is_callback_function) =>
         {
             Ok(value)
         }
@@ -112,7 +112,7 @@ fn parse_choice<T: Copy>(
 ) -> BuiltinResult<Value> {
     let text = value_to_string(value)?;
     parse(&text)
-        .map(|choice| Value::String(spelling(choice).to_string()))
+        .map(|choice| Value::string(spelling(choice).to_string()))
         .ok_or_else(|| {
             timer_error(
                 &TIMER_ERROR_INVALID_PROPERTY,
@@ -121,10 +121,12 @@ fn parse_choice<T: Copy>(
         })
 }
 
-pub(super) fn value_to_string(value: &Value) -> BuiltinResult<String> {
+pub(super) fn value_to_string(value: &Value) -> BuiltinResult<runmat_value::Utf8Text> {
     match value {
         Value::String(text) => Ok(text.clone()),
-        Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data.iter().collect()),
+        Value::CharArray(chars) if chars.rows == 1 => {
+            Ok(chars.data().iter().collect::<String>().into())
+        }
         other => Err(timer_error(
             &TIMER_ERROR_INVALID_INPUT,
             format!("timer: expected string scalar or character row, got {other:?}"),

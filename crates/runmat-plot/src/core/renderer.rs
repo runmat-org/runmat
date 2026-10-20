@@ -2295,22 +2295,22 @@ pub mod vertex_utils {
                 t += step;
                 remaining -= step;
                 let p = a + (b - a) * (t / length);
-                if phase % 2 == 0 {
+                if phase.is_multiple_of(2) {
                     dash.push(p);
                 }
                 if remaining <= 1.0e-4 {
-                    if phase % 2 == 0 {
+                    if phase.is_multiple_of(2) {
                         flush(&mut dash, &mut out);
                     }
                     phase = (phase + 1) % pattern.len();
                     remaining = pattern[phase];
-                    if phase % 2 == 0 {
+                    if phase.is_multiple_of(2) {
                         dash.push(p);
                     }
                 }
             }
         }
-        if phase % 2 == 0 {
+        if phase.is_multiple_of(2) {
             flush(&mut dash, &mut out);
         }
         out

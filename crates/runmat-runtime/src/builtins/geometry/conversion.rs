@@ -9,10 +9,12 @@ pub(super) fn geometry_path_from_value(
     error: &'static BuiltinErrorDescriptor,
 ) -> BuiltinResult<String> {
     match value {
-        Value::String(path) => Ok(path.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::String(path) => Ok(path.as_str().to_owned()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(array.data()[0].as_str().to_owned())
+        }
         Value::CharArray(array) if array.rows == 1 && array.shape.len() <= 2 => {
-            Ok(array.data.iter().collect())
+            Ok(array.data().iter().collect())
         }
         _ => Err(builtin_error(
             builtin,
@@ -57,13 +59,13 @@ pub(crate) fn geometry_asset_from_value_with_error(
             format!("{builtin}: expected geometry.Asset"),
         ));
     };
-    if object.class_name != GEOMETRY_ASSET_CLASS {
+    if !object.class_name().is(GEOMETRY_ASSET_CLASS) {
         return Err(builtin_error(
             builtin,
             error,
             format!(
                 "{builtin}: expected {GEOMETRY_ASSET_CLASS}, got {}",
-                object.class_name
+                object.class_name()
             ),
         ));
     }
@@ -80,8 +82,8 @@ pub(super) fn geometry_meshes_value(asset: &GeometryAsset) -> BuiltinResult<Valu
         .surface_meshes
         .iter()
         .map(|surface| {
-            let mut mesh = StructValue::new();
-            mesh.insert("mesh_id", Value::String(surface.mesh_id.clone()));
+            let mut mesh = runmat_value::UnboundedStructValueBuilder::new();
+            mesh.insert("mesh_id", Value::string(surface.mesh_id.clone()));
             mesh.insert("vertices", vertices_tensor(&surface.vertices)?);
             mesh.insert("triangles", triangles_tensor(&surface.triangles)?);
             mesh.insert("faces", triangles_tensor(&surface.triangles)?);
@@ -89,7 +91,7 @@ pub(super) fn geometry_meshes_value(asset: &GeometryAsset) -> BuiltinResult<Valu
                 "region_mappings",
                 region_mappings_value(asset, &surface.mesh_id)?,
             );
-            Ok(Value::Struct(mesh))
+            Ok(Value::Struct(mesh.finish()))
         })
         .collect::<BuiltinResult<Vec<_>>>()?;
     crate::make_cell_with_shape(values, vec![1, asset.surface_meshes.len()])
@@ -138,11 +140,11 @@ pub(super) fn region_mappings_value(asset: &GeometryAsset, mesh_id: &str) -> Bui
         .iter()
         .filter(|mapping| mapping.mesh_id == mesh_id)
         .map(|mapping| {
-            let mut value = StructValue::new();
-            value.insert("region_id", Value::String(mapping.region_id.clone()));
+            let mut value = runmat_value::UnboundedStructValueBuilder::new();
+            value.insert("region_id", Value::string(mapping.region_id.clone()));
             value.insert(
                 "entity_kind",
-                Value::String(format!("{:?}", mapping.entity_kind).to_ascii_lowercase()),
+                Value::string(format!("{:?}", mapping.entity_kind).to_ascii_lowercase()),
             );
             let mut ranges = Vec::with_capacity(mapping.ranges.len() * 2);
             for col in 0..2 {
@@ -164,7 +166,7 @@ pub(super) fn region_mappings_value(asset: &GeometryAsset, mesh_id: &str) -> Bui
                     )
                 })?;
             value.insert("ranges", range_tensor);
-            Ok(Value::Struct(value))
+            Ok(Value::Struct(value.finish()))
         })
         .collect::<BuiltinResult<Vec<_>>>()?;
     let cols = values.len();
@@ -178,10 +180,10 @@ pub(super) fn object_json_property<T: DeserializeOwned>(
     property: &'static str,
     error: &'static BuiltinErrorDescriptor,
 ) -> BuiltinResult<T> {
-    let Some(Value::String(json)) = object.properties.get(property) else {
+    let Some(Value::String(json)) = object.properties().get(property) else {
         return Err(build_runtime_error(format!(
             "{} is missing required runtime payload property `{property}`",
-            object.class_name
+            object.class_name()
         ))
         .with_builtin(builtin)
         .with_identifier(error.identifier.unwrap_or("RunMat:geometry:Internal"))
@@ -235,16 +237,16 @@ pub(super) fn serializable_to_object<T: Serialize>(
         .map_err(|err| builtin_error_with_source(builtin, error, err.to_string(), err))?;
     let converted = value_from_json(&json)
         .map_err(|err| builtin_error_with_source(builtin, error, err.message().to_string(), err))?;
-    let mut object = ObjectInstance::new(class_identity);
+    let mut object = runmat_value::UnboundedObjectBuilder::new(class_identity);
     if let Value::Struct(fields) = converted {
-        object.properties = fields.fields.into_iter().collect();
+        for (name, value) in fields.into_fields_unbounded() {
+            object.insert(name, value);
+        }
     } else {
-        object.properties.insert("value".to_string(), converted);
+        object.insert("value".to_string(), converted);
     }
     if let Some(property) = hidden_json_property {
-        object
-            .properties
-            .insert(property.to_string(), Value::String(json.to_string()));
+        object.insert(property.to_string(), Value::string(json.to_string()));
     }
-    Ok(Value::Object(object))
+    Ok(Value::Object(object.finish()))
 }

@@ -8,7 +8,9 @@ pub(super) fn error_message(err: crate::RuntimeError) -> String {
 }
 
 pub(super) fn containers_map_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    block_on(super::containers_map_builtin(args))
+    block_on(super::containers_map_builtin(
+        crate::builtins::common::test_support::builtin_arguments(args),
+    ))
 }
 
 pub(super) fn containers_map_keys(map: Value) -> BuiltinResult<Value> {
@@ -16,7 +18,10 @@ pub(super) fn containers_map_keys(map: Value) -> BuiltinResult<Value> {
 }
 
 pub(super) fn containers_map_values(map: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    block_on(super::containers_map_values(map, rest))
+    block_on(super::containers_map_values(
+        map,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    ))
 }
 
 pub(super) fn containers_map_is_key(map: Value, key_spec: Value) -> BuiltinResult<Value> {

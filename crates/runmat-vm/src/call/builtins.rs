@@ -279,7 +279,7 @@ pub(crate) async fn vm_dynamic_workspace_builtin_with_driver(
     let _roots = crate::call::root_values(&args)?;
     execute_dynamic_workspace_builtin(
         runtime,
-        &args,
+        runmat_runtime::call::FunctionArgumentView::from_slice(&args),
         builtin,
         requested_outputs,
         function_registry,
@@ -290,7 +290,7 @@ pub(crate) async fn vm_dynamic_workspace_builtin_with_driver(
 
 async fn execute_dynamic_workspace_builtin(
     runtime: &runmat_runtime::context::RuntimeContext,
-    args: &[Value],
+    args: runmat_runtime::call::FunctionArgumentView<'_>,
     builtin: DynamicWorkspaceBuiltin,
     requested_outputs: usize,
     function_registry: &FunctionRegistry,
@@ -417,7 +417,11 @@ async fn execute_dynamic_workspace_builtin(
             .await
         }
         DynamicWorkspaceBuiltin::Assignin => {
-            runmat_runtime::context::execute_assignin_effect(runtime, args, requested_outputs)?;
+            runmat_runtime::context::execute_assignin_effect_view(
+                runtime,
+                args,
+                requested_outputs,
+            )?;
             runmat_runtime::execution::RootedValue::new(Value::Num(0.0))
                 .map_err(|error| error.into_runtime_error())
         }
@@ -502,7 +506,7 @@ fn evalc_output_value(
     }
 
     let mut outputs = Vec::with_capacity(requested_outputs.max(1));
-    outputs.push(Value::String(captured));
+    outputs.push(Value::String(captured.into()));
     if requested_outputs > 1 {
         match result {
             Value::OutputList(values) => {
@@ -537,9 +541,9 @@ fn evalc_output_value(
 
 fn workspace_text_arg(builtin: &str, value: &Value) -> Result<String, RuntimeError> {
     match value {
-        Value::String(text) => Ok(text.clone()),
-        Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data.iter().collect()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::String(text) => Ok(text.to_string()),
+        Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data().iter().collect()),
+        Value::StringArray(array) if array.data().len() == 1 => Ok(array.data()[0].to_string()),
         other => Err(mex(
             "DynamicWorkspaceArgumentType",
             &format!("{builtin}: expected a string scalar or character row, got {other:?}"),

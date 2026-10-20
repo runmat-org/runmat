@@ -55,8 +55,13 @@ pub(super) fn read_scalar_struct(
     if plan.indices.iter().any(|index| *index != 0) {
         return Err(index_out_of_bounds());
     }
-    runmat_value::StructArray::replicate_scalar(value, plan.output_shape.clone())
-        .map_err(|error| semantic_error("StructIndexing", error))
+    crate::aggregate::structure::operations::replicate_scalar(&value, &plan.output_shape).map_err(
+        |error| {
+            crate::aggregate::structure::operations::remap(error, |message| {
+                semantic_error("StructIndexing", message)
+            })
+        },
+    )
 }
 
 pub(super) fn assign_logical(
@@ -167,9 +172,19 @@ pub(super) fn grow_string_array(
     shape: &[usize],
 ) -> Result<(), RuntimeError> {
     let target_len = checked_shape_len(shape)?;
-    if value.data.len() < target_len {
-        value.data.resize(target_len, String::new());
-        value.shape = shape.to_vec();
+    if value.data().len() < target_len {
+        if value.data_owner().is_exact() || value.shape.is_admitted() {
+            return Err(semantic_error(
+                "StringGrowthOwner",
+                "exact string growth requires a newly admitted collection and shape",
+            ));
+        }
+        value.grow_unbounded(shape.to_vec()).map_err(|error| {
+            semantic_error(
+                "StringGrowthOwner",
+                format!("string growth owner unavailable: {error}"),
+            )
+        })?;
     }
     Ok(())
 }

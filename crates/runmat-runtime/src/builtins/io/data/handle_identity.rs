@@ -95,9 +95,9 @@ fn hash_value(
         Value::CharArray(chars) => {
             tag(hash, ValueTag::Character);
             shape(hash, budget, &chars.shape)?;
-            budget.nodes = budget.nodes.checked_sub(chars.data.len())?;
-            budget.bytes(chars.data.len().checked_mul(4)?)?;
-            for character in &chars.data {
+            budget.nodes = budget.nodes.checked_sub(chars.data().len())?;
+            budget.bytes(chars.data().len().checked_mul(4)?)?;
+            for character in chars.data() {
                 hash.update(u32::from(*character).to_le_bytes());
             }
         }
@@ -145,7 +145,7 @@ fn hash_value(
         Value::StringArray(array) => {
             tag(hash, ValueTag::StringArray);
             shape(hash, budget, &array.shape)?;
-            for text in &array.data {
+            for text in array.data() {
                 budget.node()?;
                 text_bytes(hash, budget, text)?;
             }
@@ -153,7 +153,7 @@ fn hash_value(
         Value::Cell(cell) => {
             tag(hash, ValueTag::Cell);
             shape(hash, budget, &cell.shape)?;
-            for child in &cell.data {
+            for child in cell.data() {
                 hash_value(hash, budget, child, depth + 1)?;
             }
         }

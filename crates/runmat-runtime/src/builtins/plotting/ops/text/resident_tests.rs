@@ -95,11 +95,11 @@ fn pending_coordinate_download_cancel_and_drop_do_not_publish_or_consume_input()
 
     let invalid = futures::executor::block_on(text_builtin(
         None,
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::GpuTensor(input.clone()),
             Value::Num(3.0),
             Value::Num(4.0),
-        ],
+        ]),
     ))
     .expect_err("missing label must reject before download or scene creation");
     assert_eq!(invalid.identifier(), TEXT_ERROR_INVALID_ARGUMENT.identifier);
@@ -114,11 +114,11 @@ fn pending_coordinate_download_cancel_and_drop_do_not_publish_or_consume_input()
         .unwrap();
     let invalid = futures::executor::block_on(text_builtin(
         None,
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::GpuTensor(nonscalar),
             Value::Num(3.0),
             Value::String("invalid shape".into()),
-        ],
+        ]),
     ))
     .expect_err("nonscalar resident coordinate must reject before download");
     assert_eq!(invalid.identifier(), TEXT_ERROR_INVALID_ARGUMENT.identifier);
@@ -131,8 +131,11 @@ fn pending_coordinate_download_cancel_and_drop_do_not_publish_or_consume_input()
         std::rc::Rc::new(crate::execution::RuntimeExecutionService::default()),
         pre_cancel.token(),
     );
-    let error = futures::executor::block_on(text_builtin(Some(runtime), args()))
-        .expect_err("pre-cancelled call must not poll provider or create scene");
+    let error = futures::executor::block_on(text_builtin(
+        Some(runtime),
+        crate::builtins::common::test_support::builtin_arguments(args()),
+    ))
+    .expect_err("pre-cancelled call must not poll provider or create scene");
     assert!(matches!(
         error
             .source()
@@ -142,7 +145,10 @@ fn pending_coordinate_download_cancel_and_drop_do_not_publish_or_consume_input()
     assert!(absent());
     assert_eq!(provider.attempts.load(Ordering::SeqCst), 0);
 
-    let mut dropped = Box::pin(text_builtin(None, args()));
+    let mut dropped = Box::pin(text_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(args()),
+    ));
     assert!(matches!(
         dropped
             .as_mut()
@@ -160,7 +166,10 @@ fn pending_coordinate_download_cancel_and_drop_do_not_publish_or_consume_input()
         std::rc::Rc::new(crate::execution::RuntimeExecutionService::default()),
         cancellation.token(),
     );
-    let mut cancelled = Box::pin(text_builtin(Some(runtime), args()));
+    let mut cancelled = Box::pin(text_builtin(
+        Some(runtime),
+        crate::builtins::common::test_support::builtin_arguments(args()),
+    ));
     assert!(matches!(
         cancelled
             .as_mut()
@@ -187,7 +196,11 @@ fn pending_coordinate_download_cancel_and_drop_do_not_publish_or_consume_input()
     assert_eq!(provider.finished_futures.load(Ordering::SeqCst), 2);
 
     *provider.mode.lock().unwrap() = DownloadMode::Ready;
-    futures::executor::block_on(text_builtin(None, args())).unwrap();
+    futures::executor::block_on(text_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(args()),
+    ))
+    .unwrap();
     assert_eq!(current_figure_handle(), figure);
     assert_eq!(
         clone_figure(figure).unwrap().axes_text_annotations(0).len(),

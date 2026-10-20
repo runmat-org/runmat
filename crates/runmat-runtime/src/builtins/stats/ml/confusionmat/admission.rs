@@ -5,18 +5,24 @@ pub(super) async fn gather(value: Value) -> BuiltinResult<Value> {
         .map_err(|err| invalid(format!("confusionmat: {err}")))
 }
 
-pub(super) async fn gather_values(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(values.len());
-    for value in values {
-        out.push(gather(value).await?);
+pub(super) async fn gather_values(
+    values: crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    if !values.iter().any(crate::dispatcher::value_contains_gpu) {
+        return Ok(values);
     }
-    Ok(out)
+    values
+        .try_map_preserving_roots_async(values.len(), runtime, async |index| {
+            gather(values[index].clone()).await
+        })
+        .await
 }
 
 pub(super) fn ensure_confusionmat_extensions(
     group: &Value,
     grouphat: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<()> {
     if is_typed_integer_value(group) {
         crate::compatibility::ensure_builtin_extension_enabled(

@@ -104,11 +104,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::math::linalg::ops::ctranspose"
 )]
 pub(super) async fn ctranspose_builtin(
-    mut args: Vec<Value>,
+    mut args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<crate::execution::RootedValue> {
     let value = match args.len() {
         0 => return Err(builtin_error(&CTRANSPOSE_ERROR_INVALID_ARGUMENT)),
-        1 => args.remove(0),
+        1 => args
+            .pop_front()
+            .expect("validated single transpose argument"),
         _ => return Err(invalid_argument("ctranspose: too many input arguments")),
     };
     let result = match value {
@@ -135,10 +137,13 @@ pub(super) async fn ctranspose_builtin(
         Value::StructArray(array) => {
             ensure_vector_or_matrix_shape(array.shape())?;
             let order = ctranspose_order(array.shape().len());
-            array
-                .permute(&order)
+            crate::aggregate::structure::operations::permute(array, &order)
                 .map(Value::StructArray)
-                .map_err(invalid_input)
+                .map_err(|error| {
+                    crate::aggregate::structure::operations::remap(error, |message| {
+                        invalid_input(message)
+                    })
+                })
         }
         Value::Num(n) => Ok(Value::Num(n)),
         Value::Int(i) => Ok(Value::Int(i)),
@@ -289,17 +294,17 @@ fn ctranspose_logical_array(la: LogicalArray) -> BuiltinResult<LogicalArray> {
 fn ctranspose_char_array(ca: CharArray) -> BuiltinResult<CharArray> {
     let rows = ca.rows;
     let cols = ca.cols;
-    if ca.data.is_empty() {
+    if ca.data().is_empty() {
         return CharArray::new(Vec::new(), cols, rows)
             .map_err(|e| internal_error(format!("{NAME}: {e}")));
     }
-    let mut out = vec!['\0'; ca.data.len()];
+    let mut out = vec!['\0'; ca.data().len()];
     for r in 0..rows {
         for c in 0..cols {
             let src = r * cols + c;
             let dst = c * rows + r;
-            if src < ca.data.len() && dst < out.len() {
-                out[dst] = ca.data[src];
+            if src < ca.data().len() && dst < out.len() {
+                out[dst] = ca.data()[src];
             }
         }
     }
@@ -315,18 +320,18 @@ fn ctranspose_string_array(sa: StringArray) -> BuiltinResult<StringArray> {
     if rank <= 2 {
         let rows = sa.rows;
         let cols = sa.cols;
-        let mut out = vec![String::new(); sa.data.len()];
+        let mut out = vec![runmat_value::Utf8Text::default(); sa.data().len()];
         for r in 0..rows {
             for c in 0..cols {
                 let src = r + c * rows;
                 let dst = c + r * cols;
-                if src < sa.data.len() && dst < out.len() {
-                    out[dst] = sa.data[src].clone();
+                if src < sa.data().len() && dst < out.len() {
+                    out[dst] = sa.data()[src].clone();
                 }
             }
         }
         let new_shape = if rank >= 2 {
-            let mut shape = sa.shape.clone();
+            let mut shape = sa.shape.as_slice().to_vec();
             if shape.len() >= 2 {
                 shape.swap(0, 1);
             }
@@ -334,7 +339,8 @@ fn ctranspose_string_array(sa: StringArray) -> BuiltinResult<StringArray> {
         } else {
             vec![cols, rows]
         };
-        StringArray::new(out, new_shape).map_err(|e| internal_error(format!("{NAME}: {e}")))
+        StringArray::from_texts_unbounded(out, new_shape)
+            .map_err(|e| internal_error(format!("{NAME}: {e}")))
     } else {
         let order = ctranspose_order(rank);
         permute_string_array(NAME, sa, &order)
@@ -344,11 +350,11 @@ fn ctranspose_string_array(sa: StringArray) -> BuiltinResult<StringArray> {
 fn ctranspose_cell_array(ca: CellArray) -> BuiltinResult<CellArray> {
     let rows = ca.rows;
     let cols = ca.cols;
-    let mut out = Vec::with_capacity(ca.data.len());
+    let mut out = Vec::with_capacity(ca.data().len());
     for c in 0..cols {
         for r in 0..rows {
             let idx = r * cols + c;
-            out.push(ca.data[idx].clone());
+            out.push(ca.data()[idx].clone());
         }
     }
     CellArray::new(out, cols, rows).map_err(|e| internal_error(format!("{NAME}: {e}")))
@@ -563,16 +569,19 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{
-        IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, StringArray, StructValue,
-        Tensor,
+        IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, StringArray, Tensor,
     };
 
     fn call_ctranspose(value: Value) -> BuiltinResult<crate::execution::RootedValue> {
-        block_on(super::ctranspose_builtin(vec![value]))
+        block_on(super::ctranspose_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![value]),
+        ))
     }
 
     fn call_ctranspose_args(args: Vec<Value>) -> BuiltinResult<crate::execution::RootedValue> {
-        block_on(super::ctranspose_builtin(args))
+        block_on(super::ctranspose_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
 
     fn all_integer_matrix_storages() -> [IntegerStorage; 8] {
@@ -789,7 +798,7 @@ pub(crate) mod tests {
             Value::CharArray(out) => {
                 assert_eq!(out.rows, 3);
                 assert_eq!(out.cols, 2);
-                assert_eq!(out.data, vec!['r', 'm', 'u', 'a', 'n', 't']);
+                assert_eq!(out.data(), vec!['r', 'm', 'u', 'a', 'n', 't']);
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -810,7 +819,7 @@ pub(crate) mod tests {
             Value::StringArray(out) => {
                 assert_eq!(out.shape, vec![2, 2]);
                 assert_eq!(
-                    out.data,
+                    out.data(),
                     vec![
                         "r0c0".to_string(),
                         "r0c1".to_string(),
@@ -929,9 +938,9 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ctranspose_scalar_struct_is_identity() {
-        let mut st = StructValue::new();
+        let mut st = runmat_value::UnboundedStructValueBuilder::new();
         st.fields.insert("field".to_string(), Value::Num(1.0));
-        let result = call_ctranspose(Value::Struct(st)).unwrap();
+        let result = call_ctranspose(Value::Struct(st.finish())).unwrap();
         let Value::Struct(out) = result.value() else {
             panic!("expected struct");
         };

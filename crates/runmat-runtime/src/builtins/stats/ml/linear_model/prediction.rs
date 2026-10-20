@@ -6,7 +6,7 @@ pub(super) fn predict_linear_model(
     options: PredictOptions,
 ) -> BuiltinResult<(Value, Value)> {
     let object = match model {
-        Value::Object(object) if object.class_name.is(runmat_types::standard::LINEAR_MODEL) => {
+        Value::Object(object) if object.class_name().is(runmat_types::standard::LINEAR_MODEL) => {
             object
         }
         other => {

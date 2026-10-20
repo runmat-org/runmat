@@ -62,10 +62,10 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 )]
 async fn fclose_builtin(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     preflight_fclose_outputs()?;
-    let eval = evaluate_in(runtime.as_ref(), &args).await?;
+    let eval = evaluate_retained(runtime.as_ref(), args).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Value::output_list(Vec::new()));
@@ -128,8 +128,17 @@ pub async fn evaluate_in(
     runtime: Option<&crate::context::RuntimeContext>,
     args: &[Value],
 ) -> BuiltinResult<FcloseEval> {
-    preflight_fclose_inputs(args)?;
-    let gathered = super::cooperation::await_io(runtime, BUILTIN_NAME, gather_args(args)).await??;
+    let args = crate::call::BuiltinArguments::from_borrowed(args, runtime)?;
+    evaluate_retained(runtime, args).await
+}
+
+async fn evaluate_retained(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<FcloseEval> {
+    preflight_fclose_inputs(args.view())?;
+    let gathered =
+        super::cooperation::await_io(runtime, BUILTIN_NAME, gather_args(runtime, &args)).await??;
     match gathered.len() {
         0 => close_all(runtime).await,
         1 => handle_single_argument(runtime, &gathered[0]).await,
@@ -159,13 +168,13 @@ fn preflight_fclose_outputs() -> BuiltinResult<()> {
     Ok(())
 }
 
-fn preflight_fclose_inputs(args: &[Value]) -> BuiltinResult<()> {
-    match args {
-        [] => crate::compatibility::ensure_builtin_extension_enabled(
+fn preflight_fclose_inputs(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<()> {
+    match args.len() {
+        0 => crate::compatibility::ensure_builtin_extension_enabled(
             &FCLOSE_NO_INPUT_EXTENSION,
             BUILTIN_NAME,
         ),
-        [value] => preflight_fclose_value(value),
+        1 => preflight_fclose_value(&args[0]),
         _ => Err(fclose_error_with_detail(
             &FCLOSE_ERROR_INVALID_INPUT,
             "too many input arguments",
@@ -222,7 +231,7 @@ fn preflight_fclose_value(value: &Value) -> BuiltinResult<()> {
                 &FCLOSE_CELL_ID_EXTENSION,
                 BUILTIN_NAME,
             )?;
-            for nested in &cell.data {
+            for nested in cell.data() {
                 preflight_fclose_value(nested)?;
             }
             Ok(())
@@ -389,8 +398,8 @@ fn collect_file_ids(value: &Value) -> BuiltinResult<Vec<i32>> {
             Ok(ids)
         }
         Value::Cell(ca) => {
-            let mut ids = Vec::with_capacity(ca.data.len());
-            for ptr in &ca.data {
+            let mut ids = Vec::with_capacity(ca.data().len());
+            for ptr in ca.data() {
                 let nested = collect_file_ids(ptr)?;
                 ids.extend(nested);
             }
@@ -453,16 +462,16 @@ fn parse_fid_from_f64(value: f64) -> BuiltinResult<i32> {
     Ok(rounded as i32)
 }
 
-async fn gather_args(args: &[Value]) -> BuiltinResult<Vec<Value>> {
-    let mut gathered = Vec::with_capacity(args.len());
-    for value in args {
-        gathered.push(
-            gather_if_needed_async(value)
-                .await
-                .map_err(map_control_flow)?,
-        );
-    }
-    Ok(gathered)
+async fn gather_args(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: &crate::call::BuiltinArguments,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    args.try_map_preserving_roots_async(args.len(), runtime, async |index| {
+        gather_if_needed_async(&args[index])
+            .await
+            .map_err(map_control_flow)
+    })
+    .await
 }
 
 fn matches_keyword(value: &Value, keyword: &str) -> bool {

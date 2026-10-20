@@ -15,7 +15,13 @@ mod admission;
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
 async fn xlswrite_call(filename: Value, data: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    xlswrite_builtin(None, filename, data, rest).await
+    xlswrite_builtin(
+        None,
+        filename,
+        data,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    )
+    .await
 }
 
 async fn table_from_value(value: Value) -> BuiltinResult<XlsTable> {

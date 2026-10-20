@@ -11,10 +11,11 @@ use crate::builtins::common::{random_args::keyword_of, tensor};
 use crate::builtins::stats::ml::pairwise_metric::{scalar_parameter, MetricCaller};
 use crate::BuiltinResult;
 
-pub(super) fn split_pdist2_options(
-    args: Vec<Value>,
-) -> BuiltinResult<(Vec<Value>, Option<Selection>)> {
-    let mut metric_args = Vec::with_capacity(args.len());
+pub(super) async fn split_pdist2_options(
+    args: crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<(crate::call::BuiltinArguments, Option<Selection>)> {
+    let mut selected_pair = None;
     let mut selection = None;
     let mut idx = 0usize;
     while idx < args.len() {
@@ -33,12 +34,25 @@ pub(super) fn split_pdist2_options(
                 DistanceSelectionKind::Smallest => Selection::Smallest(k),
                 DistanceSelectionKind::Largest => Selection::Largest(k),
             });
+            selected_pair = Some(idx);
             idx += 2;
         } else {
-            metric_args.push(args[idx].clone());
             idx += 1;
         }
     }
+    let Some(selected_pair) = selected_pair else {
+        return Ok((args, selection));
+    };
+    let metric_args = args
+        .try_map_preserving_roots_async(args.len() - 2, runtime, |index| {
+            std::future::ready(Ok(args[if index < selected_pair {
+                index
+            } else {
+                index + 2
+            }]
+            .clone()))
+        })
+        .await?;
     Ok((metric_args, selection))
 }
 
@@ -99,7 +113,9 @@ pub(super) struct ParsedKnnSearch {
     pub options: KnnOptions,
 }
 
-pub(super) fn parse_knnsearch_options(args: &[Value]) -> BuiltinResult<ParsedKnnSearch> {
+pub(super) fn parse_knnsearch_options(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<ParsedKnnSearch> {
     let mut k = 1usize;
     let mut include_ties = false;
     let mut sort_indices = true;

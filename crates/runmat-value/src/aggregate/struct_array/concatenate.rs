@@ -1,6 +1,6 @@
 use super::{column_major_strides, total_len, StructArray, StructValue};
+use crate::UnboundedOrderedMapBuilder;
 use crate::Value;
-use indexmap::IndexMap;
 use std::collections::HashSet;
 
 pub enum StructArrayOperand {
@@ -9,12 +9,12 @@ pub enum StructArrayOperand {
 }
 
 struct Columns {
-    fields: IndexMap<String, Vec<Value>>,
+    fields: UnboundedOrderedMapBuilder<Vec<Value>>,
     shape: Vec<usize>,
 }
 
 impl StructArray {
-    pub fn concatenate(
+    pub fn concatenate_unbounded(
         dimension: usize,
         operands: Vec<StructArrayOperand>,
     ) -> Result<Value, String> {
@@ -22,7 +22,11 @@ impl StructArray {
             return Err("structure array concatenation requires at least one input".into());
         }
         let mut inputs = operands.into_iter().map(Columns::from).collect::<Vec<_>>();
-        let schema = inputs[0].fields.keys().cloned().collect::<Vec<_>>();
+        let schema = inputs[0]
+            .fields
+            .keys()
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>();
         reorder_schemas(&mut inputs, &schema)?;
         let rank = inputs
             .iter()
@@ -47,7 +51,7 @@ impl StructArray {
                     .map(|input| {
                         Ok(input
                             .fields
-                            .shift_remove(&name)
+                            .remove(&name)
                             .ok_or_else(|| {
                                 "structure array concatenation field is missing".to_string()
                             })?
@@ -69,7 +73,7 @@ impl StructArray {
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok((name, values))
             })
-            .collect::<Result<IndexMap<_, _>, String>>()?;
+            .collect::<Result<UnboundedOrderedMapBuilder<_>, String>>()?;
         Self::normalize_columns(fields, output_shape)
     }
 }
@@ -79,32 +83,34 @@ impl From<StructArrayOperand> for Columns {
         match operand {
             StructArrayOperand::Scalar(value) => Self {
                 fields: value
-                    .fields
-                    .into_iter()
+                    .into_fields_unbounded()
                     .map(|(name, value)| (name, vec![value]))
                     .collect(),
                 shape: vec![1, 1],
             },
-            StructArrayOperand::Array(array) => Self {
-                fields: array.fields,
-                shape: array.shape,
-            },
+            StructArrayOperand::Array(array) => {
+                let shape = array.shape.to_vec();
+                Self {
+                    fields: array.into_columns_unbounded().collect(),
+                    shape,
+                }
+            }
         }
     }
 }
 
 fn reorder_schemas(inputs: &mut [Columns], schema: &[String]) -> Result<(), String> {
-    let expected = schema.iter().collect::<HashSet<_>>();
+    let expected = schema.iter().map(String::as_str).collect::<HashSet<_>>();
     for input in inputs {
         let actual = input.fields.keys().collect::<HashSet<_>>();
         if actual != expected || input.fields.len() != schema.len() {
             return Err("structure array concatenation requires one field set".into());
         }
-        let mut reordered = IndexMap::with_capacity(schema.len());
+        let mut reordered = UnboundedOrderedMapBuilder::with_capacity(schema.len());
         for name in schema {
             let values = input
                 .fields
-                .shift_remove(name)
+                .remove(name)
                 .ok_or_else(|| "structure array concatenation field is missing".to_string())?;
             reordered.insert(name.clone(), values);
         }

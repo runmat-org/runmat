@@ -7,31 +7,31 @@ fn jsonencode_preserves_rank_zero_and_rank_one_numeric_serialization() {
     for shape in [Vec::new(), vec![1]] {
         let real = Value::Tensor(Tensor::new(vec![7.0], shape.clone()).unwrap());
         assert_eq!(
-            as_string(block_on(jsonencode_builtin(real, Vec::new())).unwrap()),
+            as_string(block_on(jsonencode_builtin(None, real, Vec::new())).unwrap()),
             "7"
         );
         let integer = Value::Tensor(
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), shape.clone()).unwrap(),
         );
         assert_eq!(
-            as_string(block_on(jsonencode_builtin(integer, Vec::new())).unwrap()),
+            as_string(block_on(jsonencode_builtin(None, integer, Vec::new())).unwrap()),
             u64::MAX.to_string()
         );
         let complex = Value::ComplexTensor(ComplexTensor::new(vec![(1.0, 2.0)], shape).unwrap());
         assert_eq!(
-            as_string(block_on(jsonencode_builtin(complex, Vec::new())).unwrap()),
+            as_string(block_on(jsonencode_builtin(None, complex, Vec::new())).unwrap()),
             "{\"real\":1,\"imag\":2}"
         );
     }
     let vector = Value::Tensor(Tensor::new(vec![7.0, 8.0], vec![2]).unwrap());
     assert_eq!(
-        as_string(block_on(jsonencode_builtin(vector, Vec::new())).unwrap()),
+        as_string(block_on(jsonencode_builtin(None, vector, Vec::new())).unwrap()),
         "[7,8]"
     );
     let vector =
         Value::ComplexTensor(ComplexTensor::new(vec![(1.0, 2.0), (3.0, 4.0)], vec![2]).unwrap());
     assert_eq!(
-        as_string(block_on(jsonencode_builtin(vector, Vec::new())).unwrap()),
+        as_string(block_on(jsonencode_builtin(None, vector, Vec::new())).unwrap()),
         "[{\"real\":1,\"imag\":2},{\"real\":3,\"imag\":4}]"
     );
 }
@@ -41,6 +41,7 @@ fn jsonencode_preserves_rank_zero_and_rank_one_numeric_serialization() {
 fn jsonencode_options_reject_non_scalar_tensor_bool() {
     let tensor = Tensor::new(vec![1.0, 0.0], vec![1, 2]).expect("tensor");
     let err = block_on(jsonencode_builtin(
+        None,
         Value::Num(1.0),
         vec![Value::from("PrettyPrint"), Value::Tensor(tensor)],
     ))
@@ -53,7 +54,7 @@ fn jsonencode_options_reject_non_scalar_tensor_bool() {
 fn jsonencode_options_accept_scalar_logical_array() {
     let logical = LogicalArray::new(vec![1], vec![1]).expect("logical");
     let args = vec![Value::from("PrettyPrint"), Value::LogicalArray(logical)];
-    let encoded = block_on(jsonencode_builtin(Value::Num(7.0), args)).expect("jsonencode");
+    let encoded = block_on(jsonencode_builtin(None, Value::Num(7.0), args)).expect("jsonencode");
     assert_eq!(as_string(encoded), "7");
 }
 
@@ -62,6 +63,7 @@ fn jsonencode_options_accept_scalar_logical_array() {
 fn jsonencode_convert_inf_and_nan_controls_null_output() {
     let tensor = Tensor::new(vec![1.0, f64::NAN], vec![1, 2]).expect("tensor");
     let encoded = block_on(jsonencode_builtin(
+        None,
         Value::Tensor(tensor.clone()),
         Vec::new(),
     ))
@@ -69,6 +71,7 @@ fn jsonencode_convert_inf_and_nan_controls_null_output() {
     assert_eq!(as_string(encoded), "[1,null]");
 
     let err = block_on(jsonencode_builtin(
+        None,
         Value::Tensor(tensor),
         vec![Value::from("ConvertInfAndNaN"), Value::Bool(false)],
     ))
@@ -81,7 +84,8 @@ fn jsonencode_convert_inf_and_nan_controls_null_output() {
 fn jsonencode_cell_array() {
     let elements = vec![Value::from(1.0), Value::from("two")];
     let cell = CellArray::new(elements, 1, 2).expect("cell");
-    let encoded = block_on(jsonencode_builtin(Value::Cell(cell), Vec::new())).expect("jsonencode");
+    let encoded =
+        block_on(jsonencode_builtin(None, Value::Cell(cell), Vec::new())).expect("jsonencode");
     assert_eq!(as_string(encoded), "[1,\"two\"]");
 }
 
@@ -89,8 +93,12 @@ fn jsonencode_cell_array() {
 #[test]
 fn jsonencode_char_array_zero_rows_is_empty_array() {
     let chars = CharArray::new(Vec::new(), 0, 3).expect("char array");
-    let encoded =
-        block_on(jsonencode_builtin(Value::CharArray(chars), Vec::new())).expect("jsonencode");
+    let encoded = block_on(jsonencode_builtin(
+        None,
+        Value::CharArray(chars),
+        Vec::new(),
+    ))
+    .expect("jsonencode");
     assert_eq!(as_string(encoded), "[]");
 }
 
@@ -98,8 +106,12 @@ fn jsonencode_char_array_zero_rows_is_empty_array() {
 #[test]
 fn jsonencode_char_array_empty_strings_per_row() {
     let chars = CharArray::new(Vec::new(), 2, 0).expect("char array");
-    let encoded =
-        block_on(jsonencode_builtin(Value::CharArray(chars), Vec::new())).expect("jsonencode");
+    let encoded = block_on(jsonencode_builtin(
+        None,
+        Value::CharArray(chars),
+        Vec::new(),
+    ))
+    .expect("jsonencode");
     let encoded_str = as_string(encoded);
     assert_eq!(encoded_str, "[\"\",\"\"]");
 }
@@ -110,7 +122,7 @@ fn jsonencode_string_array_matrix() {
     let sa = StringArray::new(vec!["alpha".to_string(), "beta".to_string()], vec![2, 1])
         .expect("string array");
     let encoded =
-        block_on(jsonencode_builtin(Value::StringArray(sa), Vec::new())).expect("jsonencode");
+        block_on(jsonencode_builtin(None, Value::StringArray(sa), Vec::new())).expect("jsonencode");
     assert_eq!(as_string(encoded), "[\"alpha\",\"beta\"]");
 }
 
@@ -119,8 +131,12 @@ fn jsonencode_string_array_matrix() {
 fn jsonencode_complex_tensor_outputs_objects() {
     let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     let ct = ComplexTensor::new(vec![(1.0, 2.0), (3.5, -4.0)], vec![2, 1]).expect("complex");
-    let encoded =
-        block_on(jsonencode_builtin(Value::ComplexTensor(ct), Vec::new())).expect("jsonencode");
+    let encoded = block_on(jsonencode_builtin(
+        None,
+        Value::ComplexTensor(ct),
+        Vec::new(),
+    ))
+    .expect("jsonencode");
     assert_eq!(
         as_string(encoded),
         "[{\"real\":1,\"imag\":2},{\"real\":3.5,\"imag\":-4}]"
@@ -186,8 +202,12 @@ fn jsonencode_typed_complex_integers_preserves_every_class_exactly() {
         let storage = runmat_value::IntegerComplexStorage::new(real, imag)
             .expect("matching integer components");
         let tensor = ComplexTensor::new_integer(storage, vec![1, 1]).expect("typed complex");
-        let encoded = block_on(jsonencode_builtin(Value::ComplexTensor(tensor), Vec::new()))
-            .expect("jsonencode typed complex integer");
+        let encoded = block_on(jsonencode_builtin(
+            None,
+            Value::ComplexTensor(tensor),
+            Vec::new(),
+        ))
+        .expect("jsonencode typed complex integer");
         assert_eq!(as_string(encoded), expected, "{class}");
     }
 }
@@ -196,8 +216,12 @@ fn jsonencode_typed_complex_integers_preserves_every_class_exactly() {
 #[test]
 fn jsonencode_complex_input_is_rejected_by_compatibility_gate() {
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-    let error = block_on(jsonencode_builtin(Value::Complex(1.0, 2.0), Vec::new()))
-        .expect_err("complex encoding is a RunMat extension");
+    let error = block_on(jsonencode_builtin(
+        None,
+        Value::Complex(1.0, 2.0),
+        Vec::new(),
+    ))
+    .expect_err("complex encoding is a RunMat extension");
     assert_eq!(
         error.identifier(),
         JSONENCODE_COMPLEX_INPUT_EXTENSION.error_identifier
@@ -209,8 +233,12 @@ fn jsonencode_complex_input_is_rejected_by_compatibility_gate() {
 fn jsonencode_nested_complex_and_sparse_inputs_are_compatibility_gated() {
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
     let complex_cell = CellArray::new(vec![Value::Complex(1.0, 2.0)], 1, 1).expect("cell");
-    let complex_error = block_on(jsonencode_builtin(Value::Cell(complex_cell), Vec::new()))
-        .expect_err("nested complex input is an extension");
+    let complex_error = block_on(jsonencode_builtin(
+        None,
+        Value::Cell(complex_cell),
+        Vec::new(),
+    ))
+    .expect_err("nested complex input is an extension");
     assert_eq!(
         complex_error.identifier(),
         JSONENCODE_COMPLEX_INPUT_EXTENSION.error_identifier
@@ -218,12 +246,16 @@ fn jsonencode_nested_complex_and_sparse_inputs_are_compatibility_gated() {
 
     let sparse =
         runmat_value::SparseTensor::new(1, 1, vec![0, 1], vec![0], vec![1.0]).expect("sparse");
-    let mut fields = StructValue::new();
+    let mut fields = runmat_value::UnboundedStructValueBuilder::new();
     fields
         .fields
         .insert("value".to_string(), Value::SparseTensor(sparse));
-    let sparse_error = block_on(jsonencode_builtin(Value::Struct(fields), Vec::new()))
-        .expect_err("nested sparse input is an extension");
+    let sparse_error = block_on(jsonencode_builtin(
+        None,
+        Value::Struct(fields.finish()),
+        Vec::new(),
+    ))
+    .expect_err("nested sparse input is an extension");
     assert_eq!(
         sparse_error.identifier(),
         JSONENCODE_SPARSE_INPUT_EXTENSION.error_identifier
@@ -251,6 +283,7 @@ fn jsonencode_resident_gate_precedes_provider_access() {
         .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
         .expect("explicit immutable view");
     let error = block_on(jsonencode_builtin(
+        None,
         Value::GpuTensor(handle.clone()),
         Vec::new(),
     ))
@@ -297,8 +330,12 @@ fn jsonencode_gpu_tensor_gathers_host_data() {
             shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
-        let encoded =
-            block_on(jsonencode_builtin(Value::GpuTensor(handle), Vec::new())).expect("jsonencode");
+        let encoded = block_on(jsonencode_builtin(
+            None,
+            Value::GpuTensor(handle),
+            Vec::new(),
+        ))
+        .expect("jsonencode");
         assert_eq!(as_string(encoded), "[[1,0],[0,1]]");
     });
 }
@@ -319,7 +356,11 @@ fn jsonencode_gpu_tensor_wgpu_gathers_host_data() {
         shape: tensor.shape(),
     };
     let handle = provider.upload(&view).expect("upload");
-    let encoded =
-        block_on(jsonencode_builtin(Value::GpuTensor(handle), Vec::new())).expect("jsonencode");
+    let encoded = block_on(jsonencode_builtin(
+        None,
+        Value::GpuTensor(handle),
+        Vec::new(),
+    ))
+    .expect("jsonencode");
     assert_eq!(as_string(encoded), "[1,2,3]");
 }

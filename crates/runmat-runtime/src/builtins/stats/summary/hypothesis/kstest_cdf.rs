@@ -7,7 +7,7 @@ pub(super) fn parse_kstest_cdf(value: &Value) -> BuiltinResult<CdfSpec> {
             Ok(CdfSpec::StandardNormal)
         }
         Value::CharArray(chars) if chars.rows == 1 => {
-            let text = chars.data.iter().collect::<String>();
+            let text = chars.data().iter().collect::<String>();
             if KstestNamedCdf::from_public(&text).is_some() {
                 Ok(CdfSpec::StandardNormal)
             } else {
@@ -19,7 +19,7 @@ pub(super) fn parse_kstest_cdf(value: &Value) -> BuiltinResult<CdfSpec> {
         Value::FunctionHandle(name) if KstestNamedCdf::from_public(name).is_some() => {
             Ok(CdfSpec::StandardNormal)
         }
-        Value::Cell(cell) if cell.data.len() == 1 => parse_kstest_cdf(&cell.data[0]),
+        Value::Cell(cell) if cell.data().len() == 1 => parse_kstest_cdf(&cell.data()[0]),
         other => Err(kstest_invalid_argument(format!(
             "kstest: CDF must be a two-column numeric matrix or normcdf handle; probability distribution objects are not supported yet, got {other:?}"
         ))),

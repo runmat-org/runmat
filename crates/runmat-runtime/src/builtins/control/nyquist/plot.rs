@@ -46,7 +46,11 @@ pub(super) async fn render(response: &NyquistResponse) -> BuiltinResult<()> {
         ));
     }
     if let Some((&re, &im)) = response.re.first().zip(response.im.first()) {
-        hidden.push(colored(column_tensor(vec![re])?, column_tensor(vec![im])?, Some("x")));
+        hidden.push(colored(
+            column_tensor(vec![re])?,
+            column_tensor(vec![im])?,
+            Some("x"),
+        ));
         if response.mirror_negative_frequency {
             hidden.push(colored(
                 column_tensor(vec![re])?,

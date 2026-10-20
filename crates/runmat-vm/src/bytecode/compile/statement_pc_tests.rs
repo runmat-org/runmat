@@ -218,11 +218,13 @@ fn session_rebind_projection_tracks_issued_program_point_owner() {
         .expect("compiled helper")
         .clone();
     let portable_origin = function.portable_function;
-    function.rebind_identity(FunctionId(77), runmat_types::ProgramFunctionId(77));
+    function.rebind_identity(FunctionId(77));
     assert_eq!(function.portable_function, portable_origin);
     let ranges = function.statement_pc_ranges().expect("rebound projection");
     assert!(!ranges.is_empty());
-    assert!(ranges.iter().all(|range| range.statement.function.0 == 77));
+    assert!(ranges
+        .iter()
+        .all(|range| range.statement.function == portable_origin));
 
     let registry = FunctionRegistry::new(std::collections::HashMap::from([(
         FunctionId(77),

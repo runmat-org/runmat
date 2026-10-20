@@ -18,7 +18,7 @@ pub(super) fn struct_array(
         .field_names()
         .map(|name| {
             Ok(DurableStructArrayField {
-                name: name.clone(),
+                name: name.to_owned(),
                 values: value
                     .field_values(name)
                     .expect("field name from same array")
@@ -82,11 +82,11 @@ pub(super) fn plain_object(
         ));
     }
     let mut properties = value
-        .properties
+        .properties()
         .iter()
         .map(|(name, item)| {
             Ok(StructField {
-                name: name.clone(),
+                name: name.to_owned(),
                 value: encode(item, &field_path(path, name), purpose, runtime)?,
             })
         })
@@ -102,9 +102,9 @@ pub(super) fn plain_object(
                 ));
             }
             Ok(DurableDynamicProperty {
-                name: name.clone(),
-                definition_name: definition.name.clone(),
-                defining_class: definition.defining_class.clone(),
+                name: name.to_owned(),
+                definition_name: definition.name.to_string(),
+                defining_class: definition.defining_class.as_identity().clone(),
                 get_access: definition.get_access,
                 set_access: definition.set_access,
                 dependent: definition.dependent,
@@ -114,13 +114,13 @@ pub(super) fn plain_object(
                 abort_set: definition.abort_set,
                 set_observable: definition.set_observable,
                 get_observable: definition.get_observable,
-                description: definition.description.clone(),
+                description: definition.description.to_string(),
             })
         })
         .collect::<Result<Vec<_>, ValueCodecError>>()?;
     dynamic_properties.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(DurablePlainObject {
-        class_identity: value.class_name.clone(),
+        class_identity: value.class_name().clone(),
         properties,
         dynamic_properties,
     })

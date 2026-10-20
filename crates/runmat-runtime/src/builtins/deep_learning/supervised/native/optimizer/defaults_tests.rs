@@ -17,7 +17,7 @@ fn config_with_decay(override_decay: Option<f64>) -> TrainingConfig {
     });
     let options = block_on(training_options_builtin(
         Value::String("rmsprop".into()),
-        rest,
+        crate::builtins::common::test_support::builtin_arguments(rest),
     ))
     .unwrap();
     TrainingConfig::from_value(&options, "trainnet").unwrap()
@@ -73,15 +73,19 @@ fn rmsprop_default_and_explicit_decay_have_distinct_native_double_two_step_oracl
 }
 
 fn recurrent_step_oracle<T: Real>() {
-    let input = block_on(sequence_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
+    let input = block_on(sequence_input_layer_builtin(
+        Value::Num(2.0),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap();
     let layer = block_on(lstm_layer_builtin(
         Value::Num(2.0),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::String("InputWeightsLearnRateFactor".into()),
             Value::Tensor(Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![1, 4]).unwrap()),
             Value::String("InputWeightsL2Factor".into()),
             Value::Tensor(Tensor::new(vec![1.0, 0.0, 2.0, 0.0], vec![1, 4]).unwrap()),
-        ],
+        ]),
     ))
     .unwrap();
     let layers = vec![input, layer];

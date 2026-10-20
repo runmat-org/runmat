@@ -17,7 +17,7 @@ type HiddenAxesTarget = Option<(crate::builtins::plotting::state::FigureHandle, 
     binding_variant = "default",
     builtin_path = "crate::builtins::plotting::cmds::hidden"
 )]
-pub fn hidden_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
+pub fn hidden_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<bool> {
     crate::output_count::validate_fixed_outputs(
         &HIDDEN_DESCRIPTOR,
         &HIDDEN_ERROR_OUTPUTS,
@@ -73,7 +73,9 @@ pub fn hidden_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
     Ok(enabled)
 }
 
-fn parse_hidden_target(args: Vec<Value>) -> crate::BuiltinResult<(HiddenAxesTarget, Vec<Value>)> {
+fn parse_hidden_target(
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<(HiddenAxesTarget, Vec<Value>)> {
     let mut iter = args.into_iter();
     let Some(first) = iter.next() else {
         return Ok((None, Vec::new()));

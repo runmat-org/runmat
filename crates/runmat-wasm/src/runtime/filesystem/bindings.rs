@@ -449,23 +449,45 @@ impl JsFsFuncs {
         parse_save_file_selection(value)
     }
 
-    pub(super) async fn capture_workspace(&self, request: &runmat_filesystem::workspace::WorkspaceCaptureRequest) -> io::Result<runmat_filesystem::workspace::WorkspaceSnapshot> {
-        self.call_contract(&self.capture_workspace, "captureWorkspace", request).await
+    pub(super) async fn capture_workspace(
+        &self,
+        request: &runmat_filesystem::workspace::WorkspaceCaptureRequest,
+    ) -> io::Result<runmat_filesystem::workspace::WorkspaceSnapshot> {
+        self.call_contract(&self.capture_workspace, "captureWorkspace", request)
+            .await
     }
 
-    pub(super) async fn lookup_workspace_publication(&self, request: &runmat_filesystem::workspace::WorkspacePublicationRequest) -> io::Result<Option<runmat_filesystem::workspace::WorkspacePublicationOutcome>> {
-        self.call_contract(&self.lookup_workspace_publication, "lookupWorkspacePublication", request).await
+    pub(super) async fn lookup_workspace_publication(
+        &self,
+        request: &runmat_filesystem::workspace::WorkspacePublicationRequest,
+    ) -> io::Result<Option<runmat_filesystem::workspace::WorkspacePublicationOutcome>> {
+        self.call_contract(
+            &self.lookup_workspace_publication,
+            "lookupWorkspacePublication",
+            request,
+        )
+        .await
     }
 
-    pub(super) async fn publish_workspace(&self, request: &runmat_filesystem::workspace::WorkspacePublicationRequest) -> io::Result<runmat_filesystem::workspace::WorkspacePublicationOutcome> {
-        self.call_contract(&self.publish_workspace, "publishWorkspace", request).await
+    pub(super) async fn publish_workspace(
+        &self,
+        request: &runmat_filesystem::workspace::WorkspacePublicationRequest,
+    ) -> io::Result<runmat_filesystem::workspace::WorkspacePublicationOutcome> {
+        self.call_contract(&self.publish_workspace, "publishWorkspace", request)
+            .await
     }
 
-    async fn call_contract<I: serde::Serialize, O: serde::de::DeserializeOwned>(&self, function: &Option<Function>, operation: &'static str, request: &I) -> io::Result<O> {
+    async fn call_contract<I: serde::Serialize, O: serde::de::DeserializeOwned>(
+        &self,
+        function: &Option<Function>,
+        operation: &'static str,
+        request: &I,
+    ) -> io::Result<O> {
         let function = self.require_fn(function, operation)?;
         let request = serde_wasm_bindgen::to_value(request)
             .map_err(|error| io::Error::new(ErrorKind::InvalidInput, error.to_string()))?;
-        let response = function.call1(&self.bindings, &request)
+        let response = function
+            .call1(&self.bindings, &request)
             .map_err(|error| map_js_error(operation, error))?;
         let response = resolve_maybe_promise(response, operation).await?;
         serde_wasm_bindgen::from_value(response)

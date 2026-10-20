@@ -131,7 +131,7 @@ fn complex_inputs_error() {
 
 #[test]
 fn string_inputs_error() {
-    let err = call(Value::String("9".to_string())).unwrap_err();
+    let err = call(Value::String("9".to_string().into())).unwrap_err();
     assert_eq!(err.identifier(), ERROR_INVALID_INPUT.identifier);
 }
 

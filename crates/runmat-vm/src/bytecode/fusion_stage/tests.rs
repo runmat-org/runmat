@@ -127,7 +127,7 @@ fn selected_function_stage_owner_tracks_session_and_closed_unit_rebinding() {
     ));
 
     let mut session = original.clone();
-    session.rebind_identity(runmat_hir::FunctionId(701), ProgramFunctionId(901));
+    session.rebind_identity(runmat_hir::FunctionId(701));
     assert!(session.validate_fusion_stage_projection().is_ok());
     assert!(session
         .fusion_stage_projection
@@ -135,7 +135,7 @@ fn selected_function_stage_owner_tracks_session_and_closed_unit_rebinding() {
         .unwrap()
         .statements
         .iter()
-        .all(|row| row.contract.point.function == ProgramFunctionId(901)));
+        .all(|row| row.contract.point.function == original.portable_function));
     assert_eq!(session.portable_function, original.portable_function);
     assert_eq!(
         session
@@ -218,14 +218,8 @@ fn session_remap_seals_local_helper_callback_and_source_only_after_owned_transfo
     assert!(outer.validate_fusion_stage_projection().is_ok());
     let portable_origin = outer.portable_function;
     let source = outer.source_id.or(bytecode.source_id);
-    crate::bytecode::program::remap_session_function(
-        &mut outer,
-        remap[&outer_id],
-        ProgramFunctionId(901),
-        source,
-        &remap,
-    )
-    .expect("exact session remap");
+    crate::bytecode::program::remap_session_function(&mut outer, remap[&outer_id], source, &remap)
+        .expect("exact session remap");
     assert_eq!(outer.function, runmat_hir::FunctionId(701));
     assert_eq!(outer.portable_function, portable_origin);
     assert!(outer.validate_fusion_stage_projection().is_ok());
@@ -287,7 +281,6 @@ fn malformed_selected_projection_cannot_be_resealed_by_session_remap() {
     assert!(crate::bytecode::program::remap_session_function(
         &mut function,
         runmat_hir::FunctionId(701),
-        ProgramFunctionId(901),
         source,
         &std::collections::HashMap::from([(original_id, runmat_hir::FunctionId(701))]),
     )

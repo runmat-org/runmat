@@ -146,13 +146,19 @@ pub async fn set_properties_async(
     args: &[Value],
     builtin: &'static str,
 ) -> BuiltinResult<()> {
-    set_properties_async_with_runtime(None, handle, args, builtin).await
+    set_properties_async_with_runtime(
+        None,
+        handle,
+        crate::call::FunctionArgumentView::from_slice(args),
+        builtin,
+    )
+    .await
 }
 
 pub(crate) async fn set_properties_async_with_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
     handle: PlotHandle,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
     let PlotHandle::PlotChild(id, state) = &handle else {
@@ -181,7 +187,7 @@ pub(super) async fn set_selected_child_properties(
     authority: &super::super::state::PropertyMutationTarget,
     selection: &super::super::state::GraphicsPropertySelection,
     id: u64,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
     let snapshot = selection
@@ -214,7 +220,7 @@ async fn set_child_properties_from_source(
     id: f64,
     child: &PlotChildHandleState,
     plot: Option<&PlotElement>,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     builtin: &'static str,
     guard: Option<PlotUpdateGuard>,
 ) -> BuiltinResult<()> {
@@ -226,7 +232,10 @@ async fn set_child_properties_from_source(
     }
     let mut pairs = Vec::with_capacity(args.len() / 2);
     for pair in args.chunks_exact(2) {
-        pairs.push((property_name(&pair[0], builtin)?, &pair[1]));
+        pairs.push((
+            property_name(&pair[0], builtin)?,
+            pair.get(1).expect("paired property value"),
+        ));
     }
     match (child, plot) {
         (PlotChildHandleState::Line(state), Some(PlotElement::Line(line))) => {

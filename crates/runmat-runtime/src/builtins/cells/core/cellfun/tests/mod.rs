@@ -6,7 +6,8 @@ fn call(
     function: Value,
     arguments: Vec<Value>,
 ) -> crate::BuiltinResult<crate::execution::RootedValue> {
-    block_on(cellfun_builtin(function, arguments))
+    let arguments = crate::call::BuiltinArguments::from_borrowed(&arguments, None)?;
+    block_on(cellfun_builtin(None, function, arguments))
 }
 
 fn rooted_sequence(

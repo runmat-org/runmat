@@ -78,7 +78,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::randi"
 )]
-async fn randi_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn randi_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     let parsed = ParsedRandi::parse(args).await?;
     reject_disabled_wide_integer_extension(&parsed.template)?;
     build_output(parsed).await
@@ -170,13 +170,12 @@ impl Bounds {
 }
 
 impl ParsedRandi {
-    async fn parse(args: Vec<Value>) -> crate::BuiltinResult<Self> {
+    async fn parse(mut args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Self> {
         if args.is_empty() {
             return Err(builtin_error("randi: requires at least one input argument"));
         }
 
-        let mut iter = args.into_iter();
-        let bounds_value = iter.next().unwrap();
+        let bounds_value = args.pop_front().expect("nonempty randi arguments");
         let bounds = parse_bounds(bounds_value).await?;
 
         let mut dims: Vec<usize> = Vec::new();
@@ -186,7 +185,7 @@ impl ParsedRandi {
         let mut class_override: Option<OutputTemplate> = None;
         let mut implicit_proto: Option<Value> = None;
 
-        let rest: Vec<Value> = iter.collect();
+        let rest = args;
         let mut idx = 0;
         while idx < rest.len() {
             let arg = rest[idx].clone();
@@ -816,9 +815,9 @@ fn is_vector_like(tensor: &Tensor) -> bool {
 fn keyword_of(value: &Value) -> Option<String> {
     match value {
         Value::String(s) => Some(s.to_ascii_lowercase()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].to_ascii_lowercase()),
+        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].to_ascii_lowercase()),
         Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data.iter().collect();
+            let text: String = ca.data().iter().collect();
             Some(text.to_ascii_lowercase())
         }
         _ => None,
@@ -855,8 +854,8 @@ fn shape_from_value(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
         }
         Value::LogicalArray(l) => Ok(l.shape.to_vec()),
         Value::GpuTensor(h) => Ok(h.shape().to_vec()),
-        Value::CharArray(ca) => Ok(ca.shape.clone()),
-        Value::Cell(cell) => Ok(cell.shape.clone()),
+        Value::CharArray(ca) => Ok(ca.shape().to_vec()),
+        Value::Cell(cell) => Ok(cell.shape().to_vec()),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => Ok(vec![1, 1]),
         other => Err(builtin_error(format!(
             "randi: unsupported prototype {other:?}"
@@ -911,7 +910,10 @@ pub(crate) mod tests {
     fn randi_default_scalar() {
         let _guard = random::test_guard();
         let _guard = reset_rng_clean();
-        let result = block_on(randi_builtin(vec![Value::Num(6.0)])).expect("randi");
+        let result = block_on(randi_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(6.0)]),
+        ))
+        .expect("randi");
         let expected = expected_sequence(&Bounds::new(1, 6).unwrap(), 1)[0] as f64;
         match result {
             Value::Num(v) => {
@@ -948,7 +950,10 @@ pub(crate) mod tests {
         let _guard = reset_rng_clean();
         let bounds = Tensor::new(vec![3.0, 8.0], vec![1, 2]).unwrap();
         let args = vec![Value::Tensor(bounds), Value::Num(2.0), Value::Num(3.0)];
-        let result = block_on(randi_builtin(args)).expect("randi");
+        let result = block_on(randi_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect("randi");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape(), &[2, 3]);
@@ -972,7 +977,10 @@ pub(crate) mod tests {
         let _guard = reset_rng_clean();
         let proto = Tensor::new(vec![0.0; 4], vec![2, 2]).unwrap();
         let args = vec![Value::Num(5.0), Value::from("like"), Value::Tensor(proto)];
-        let result = block_on(randi_builtin(args)).expect("randi");
+        let result = block_on(randi_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect("randi");
         let Value::Num(value) = result else {
             panic!("expected scalar double result");
         };
@@ -996,12 +1004,14 @@ pub(crate) mod tests {
 
         for (class, target) in cases {
             reset_rng_clean();
-            let result = block_on(randi_builtin(vec![
-                Value::Num(5.0),
-                Value::Num(2.0),
-                Value::Num(3.0),
-                Value::from(class),
-            ]))
+            let result = block_on(randi_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(5.0),
+                    Value::Num(2.0),
+                    Value::Num(3.0),
+                    Value::from(class),
+                ]),
+            ))
             .expect("explicit integer randi");
             let Value::Tensor(tensor) = result else {
                 panic!("expected integer tensor");
@@ -1017,22 +1027,26 @@ pub(crate) mod tests {
 
         let prototype = Tensor::new_integer(IntegerStorage::U64(vec![0; 4]), vec![2, 2])
             .expect("uint64 prototype");
-        let result = block_on(randi_builtin(vec![
-            Value::Num(5.0),
-            Value::from("like"),
-            Value::Tensor(prototype),
-        ]))
+        let result = block_on(randi_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(5.0),
+                Value::from("like"),
+                Value::Tensor(prototype),
+            ]),
+        ))
         .expect("integer like randi");
         let Value::Int(IntValue::U64(value)) = result else {
             panic!("expected uint64 scalar");
         };
         assert!((1..=5).contains(&value));
 
-        let result = block_on(randi_builtin(vec![
-            Value::Num(5.0),
-            Value::Num(2.0),
-            Value::from("single"),
-        ]))
+        let result = block_on(randi_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(5.0),
+                Value::Num(2.0),
+                Value::from("single"),
+            ]),
+        ))
         .expect("single randi");
         let Value::Tensor(tensor) = result else {
             panic!("expected single tensor");
@@ -1049,12 +1063,14 @@ pub(crate) mod tests {
         let lower = u64::MAX - 4;
         let bounds = Tensor::new_integer(IntegerStorage::U64(vec![lower, u64::MAX]), vec![1, 2])
             .expect("uint64 bounds");
-        let result = block_on(randi_builtin(vec![
-            Value::Tensor(bounds),
-            Value::Num(1.0),
-            Value::Num(8.0),
-            Value::from("uint64"),
-        ]))
+        let result = block_on(randi_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Tensor(bounds),
+                Value::Num(1.0),
+                Value::Num(8.0),
+                Value::from("uint64"),
+            ]),
+        ))
         .expect("high uint64 randi");
         let Value::Tensor(tensor) = result else {
             panic!("expected uint64 tensor");
@@ -1068,12 +1084,14 @@ pub(crate) mod tests {
 
         for (value, expected) in [(300.0, u8::MAX), (-10.0, 0)] {
             let bounds = Tensor::new(vec![value, value], vec![1, 2]).expect("constant bounds");
-            let result = block_on(randi_builtin(vec![
-                Value::Tensor(bounds),
-                Value::Num(1.0),
-                Value::Num(4.0),
-                Value::from("uint8"),
-            ]))
+            let result = block_on(randi_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Tensor(bounds),
+                    Value::Num(1.0),
+                    Value::Num(4.0),
+                    Value::from("uint8"),
+                ]),
+            ))
             .expect("saturated uint8 randi");
             let Value::Tensor(tensor) = result else {
                 panic!("expected uint8 tensor");
@@ -1094,12 +1112,14 @@ pub(crate) mod tests {
         let signed_bounds =
             Tensor::new_integer(IntegerStorage::I64(vec![i64::MIN, i64::MAX]), vec![1, 2])
                 .expect("int64 full-width bounds");
-        let signed = block_on(randi_builtin(vec![
-            Value::Tensor(signed_bounds),
-            Value::Num(1.0),
-            Value::Num(256.0),
-            Value::from("int64"),
-        ]))
+        let signed = block_on(randi_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Tensor(signed_bounds),
+                Value::Num(1.0),
+                Value::Num(256.0),
+                Value::from("int64"),
+            ]),
+        ))
         .expect("full-width int64 randi");
         let Value::Tensor(signed) = signed else {
             panic!("expected int64 tensor");
@@ -1114,12 +1134,14 @@ pub(crate) mod tests {
         let unsigned_bounds =
             Tensor::new_integer(IntegerStorage::U64(vec![0, u64::MAX]), vec![1, 2])
                 .expect("uint64 full-width bounds");
-        let unsigned = block_on(randi_builtin(vec![
-            Value::Tensor(unsigned_bounds),
-            Value::Num(1.0),
-            Value::Num(256.0),
-            Value::from("uint64"),
-        ]))
+        let unsigned = block_on(randi_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Tensor(unsigned_bounds),
+                Value::Num(1.0),
+                Value::Num(256.0),
+                Value::from("uint64"),
+            ]),
+        ))
         .expect("full-width uint64 randi");
         let Value::Tensor(unsigned) = unsigned else {
             panic!("expected uint64 tensor");
@@ -1144,14 +1166,22 @@ pub(crate) mod tests {
             Value::from("uint64"),
         ];
         reset_rng_clean();
-        let first = block_on(randi_builtin(args.clone())).expect("first sequence");
+        let first = block_on(randi_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args.clone()),
+        ))
+        .expect("first sequence");
         reset_rng_clean();
-        let second = block_on(randi_builtin(args)).expect("second sequence");
+        let second = block_on(randi_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect("second sequence");
         assert_eq!(first, second);
 
         reset_rng_clean();
-        let error = block_on(randi_builtin(vec![Value::Tensor(bounds)]))
-            .expect_err("double output cannot represent a full-width range");
+        let error = block_on(randi_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(bounds)]),
+        ))
+        .expect_err("double output cannot represent a full-width range");
         assert!(error.to_string().contains("floating output range width"));
     }
 
@@ -1168,11 +1198,13 @@ pub(crate) mod tests {
             ("uint32", IntegerStorage::U32(vec![0])),
         ];
         for (class, prototype_storage) in documented {
-            let explicit = block_on(randi_builtin(vec![
-                Value::Num(5.0),
-                Value::Num(2.0),
-                Value::from(class),
-            ]))
+            let explicit = block_on(randi_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(5.0),
+                    Value::Num(2.0),
+                    Value::from(class),
+                ]),
+            ))
             .expect("documented explicit integer class");
             let Value::Tensor(explicit) = explicit else {
                 panic!("expected explicit integer tensor");
@@ -1185,12 +1217,14 @@ pub(crate) mod tests {
 
             let prototype =
                 Tensor::new_integer(prototype_storage, vec![1, 1]).expect("integer prototype");
-            let like = block_on(randi_builtin(vec![
-                Value::Num(5.0),
-                Value::Num(2.0),
-                Value::from("like"),
-                Value::Tensor(prototype),
-            ]))
+            let like = block_on(randi_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(5.0),
+                    Value::Num(2.0),
+                    Value::from("like"),
+                    Value::Tensor(prototype),
+                ]),
+            ))
             .expect("documented integer like class");
             let Value::Tensor(like) = like else {
                 panic!("expected like integer tensor");
@@ -1203,8 +1237,13 @@ pub(crate) mod tests {
     fn randi_matlab_mode_rejects_wide_integer_output_extensions_before_dispatch() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         for class in ["int64", "uint64"] {
-            let error = block_on(randi_builtin(vec![Value::Num(5.0), Value::from(class)]))
-                .expect_err("wide explicit class must be gated");
+            let error = block_on(randi_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(5.0),
+                    Value::from(class),
+                ]),
+            ))
+            .expect_err("wide explicit class must be gated");
             assert!(error.to_string().contains("RunMat extensions"), "{error}");
             assert_eq!(
                 error.identifier(),
@@ -1225,11 +1264,13 @@ pub(crate) mod tests {
             ),
         ];
         for prototype in host_prototypes {
-            let error = block_on(randi_builtin(vec![
-                Value::Num(5.0),
-                Value::from("like"),
-                prototype,
-            ]))
+            let error = block_on(randi_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(5.0),
+                    Value::from("like"),
+                    prototype,
+                ]),
+            ))
             .expect_err("wide host prototype must be gated");
             assert!(error.to_string().contains("RunMat extensions"), "{error}");
             assert_eq!(
@@ -1250,11 +1291,13 @@ pub(crate) mod tests {
                 )
                 .expect("genuine unregistered allocation")
                 .handle;
-            let error = block_on(randi_builtin(vec![
-                Value::Num(5.0),
-                Value::from("like"),
-                Value::GpuTensor(handle.clone()),
-            ]))
+            let error = block_on(randi_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(5.0),
+                    Value::from("like"),
+                    Value::GpuTensor(handle.clone()),
+                ]),
+            ))
             .expect_err("wide resident prototype must be gated before provider dispatch");
             assert!(error.to_string().contains("RunMat extensions"), "{error}");
         }
@@ -1265,10 +1308,12 @@ pub(crate) mod tests {
         let prototype = LogicalArray::zeros(vec![2, 3]);
         {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-            let error = block_on(randi_builtin(vec![
-                Value::Num(1.0),
-                Value::LogicalArray(prototype.clone()),
-            ]))
+            let error = block_on(randi_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(1.0),
+                    Value::LogicalArray(prototype.clone()),
+                ]),
+            ))
             .expect_err("MATLAB mode must reject the bare prototype shorthand");
             assert_eq!(
                 error.identifier(),
@@ -1277,10 +1322,12 @@ pub(crate) mod tests {
         }
         {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-            let result = block_on(randi_builtin(vec![
-                Value::Num(1.0),
-                Value::LogicalArray(prototype),
-            ]))
+            let result = block_on(randi_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(1.0),
+                    Value::LogicalArray(prototype),
+                ]),
+            ))
             .expect("RunMat mode accepts the bare prototype shorthand");
             let Value::LogicalArray(result) = result else {
                 panic!("expected logical output");
@@ -1320,7 +1367,10 @@ pub(crate) mod tests {
             Value::Num(2.0),
             Value::from("logical"),
         ];
-        let result = block_on(randi_builtin(args)).expect("randi logical");
+        let result = block_on(randi_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect("randi logical");
         match result {
             Value::LogicalArray(logical) => {
                 assert_eq!(logical.shape, vec![2, 2]);
@@ -1339,12 +1389,14 @@ pub(crate) mod tests {
     fn randi_logical_saturates_out_of_range_samples() {
         for (value, expected) in [(-3.0, 0), (3.0, 1)] {
             let bounds = Tensor::new(vec![value, value], vec![1, 2]).expect("constant bounds");
-            let result = block_on(randi_builtin(vec![
-                Value::Tensor(bounds),
-                Value::Num(1.0),
-                Value::Num(4.0),
-                Value::from("logical"),
-            ]))
+            let result = block_on(randi_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Tensor(bounds),
+                    Value::Num(1.0),
+                    Value::Num(4.0),
+                    Value::from("logical"),
+                ]),
+            ))
             .expect("logical randi");
             let Value::LogicalArray(logical) = result else {
                 panic!("expected logical array");
@@ -1365,7 +1417,10 @@ pub(crate) mod tests {
             Value::from("like"),
             Value::LogicalArray(proto),
         ];
-        let result = block_on(randi_builtin(args)).expect("randi logical like");
+        let result = block_on(randi_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect("randi logical like");
         match result {
             Value::LogicalArray(logical) => {
                 assert_eq!(logical.shape, vec![1, 1]);
@@ -1378,7 +1433,13 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randi_like_requires_prototype() {
-        let err = block_on(randi_builtin(vec![Value::Num(5.0), Value::from("like")])).unwrap_err();
+        let err = block_on(randi_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(5.0),
+                Value::from("like"),
+            ]),
+        ))
+        .unwrap_err();
         let message = err.to_string();
         assert!(message.contains("expected prototype"));
     }
@@ -1394,7 +1455,10 @@ pub(crate) mod tests {
             Value::from("like"),
             Value::Tensor(proto),
         ];
-        let err = block_on(randi_builtin(args)).unwrap_err();
+        let err = block_on(randi_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .unwrap_err();
         let message = err.to_string();
         assert!(message.contains("multiple 'like' specifications"));
     }
@@ -1409,7 +1473,10 @@ pub(crate) mod tests {
             Value::from("like"),
             Value::Tensor(proto),
         ];
-        let err = block_on(randi_builtin(args)).unwrap_err();
+        let err = block_on(randi_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .unwrap_err();
         let message = err.to_string();
         assert!(message.contains("cannot combine 'like' with 'logical'"));
     }
@@ -1418,12 +1485,14 @@ pub(crate) mod tests {
     fn randi_like_integer_class_conflict_is_error() {
         let proto = Tensor::new_integer(IntegerStorage::I64(vec![0]), vec![1, 1])
             .expect("integer prototype");
-        let err = block_on(randi_builtin(vec![
-            Value::Num(5.0),
-            Value::from("like"),
-            Value::Tensor(proto),
-            Value::from("int64"),
-        ]))
+        let err = block_on(randi_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(5.0),
+                Value::from("like"),
+                Value::Tensor(proto),
+                Value::from("int64"),
+            ]),
+        ))
         .expect_err("like and integer class must conflict");
         assert!(err
             .to_string()
@@ -1449,7 +1518,10 @@ pub(crate) mod tests {
                 Value::from("like"),
                 Value::GpuTensor(handle),
             ];
-            let result = block_on(randi_builtin(args)).expect("randi");
+            let result = block_on(randi_builtin(
+                crate::builtins::common::test_support::builtin_arguments(args),
+            ))
+            .expect("randi");
             let cpu_after = random::snapshot().expect("CPU stream after GPU randi");
             assert_eq!(cpu_before.state, cpu_after.state);
             assert_eq!(cpu_before.seed, cpu_after.seed);
@@ -1489,19 +1561,23 @@ pub(crate) mod tests {
                 .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
                 .expect("automatic prototype");
             let child_before = random::gpu::snapshot().expect("child before");
-            let expected = block_on(randi_builtin(vec![
-                Value::Num(9.0),
-                Value::Num(2.0),
-                Value::from("uint8"),
-            ]))
+            let expected = block_on(randi_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(9.0),
+                    Value::Num(2.0),
+                    Value::from("uint8"),
+                ]),
+            ))
             .expect("host integer");
             random::reset_rng();
-            let actual = block_on(randi_builtin(vec![
-                Value::Num(9.0),
-                Value::Num(2.0),
-                Value::from("like"),
-                Value::GpuTensor(source),
-            ]))
+            let actual = block_on(randi_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(9.0),
+                    Value::Num(2.0),
+                    Value::from("like"),
+                    Value::GpuTensor(source),
+                ]),
+            ))
             .expect("automatic integer");
             assert_eq!(actual, expected);
             assert_eq!(random::gpu::snapshot().expect("child after"), child_before);
@@ -1534,7 +1610,10 @@ pub(crate) mod tests {
                 Value::from("like"),
                 Value::GpuTensor(handle),
             ];
-            let result = block_on(randi_builtin(args)).expect("randi gpu override");
+            let result = block_on(randi_builtin(
+                crate::builtins::common::test_support::builtin_arguments(args),
+            ))
+            .expect("randi gpu override");
             match result {
                 Value::GpuTensor(gpu) => {
                     let gathered =
@@ -1565,12 +1644,14 @@ pub(crate) mod tests {
                 .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
                 .expect("explicit gpuArray prototype");
 
-            let result = block_on(randi_builtin(vec![
-                Value::Num(9.0),
-                Value::Num(3.0),
-                Value::from("like"),
-                Value::GpuTensor(prototype),
-            ]))
+            let result = block_on(randi_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(9.0),
+                    Value::Num(3.0),
+                    Value::from("like"),
+                    Value::GpuTensor(prototype),
+                ]),
+            ))
             .expect("randi int16 gpu like");
 
             let Value::GpuTensor(gpu) = result else {
@@ -1608,13 +1689,15 @@ pub(crate) mod tests {
                 .expect("explicit gpuArray prototype");
             let bounds = Tensor::new(vec![300.0, 300.0], vec![1, 2]).expect("constant bounds");
 
-            let result = block_on(randi_builtin(vec![
-                Value::Tensor(bounds),
-                Value::Num(1.0),
-                Value::Num(4.0),
-                Value::from("like"),
-                Value::GpuTensor(prototype),
-            ]))
+            let result = block_on(randi_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Tensor(bounds),
+                    Value::Num(1.0),
+                    Value::Num(4.0),
+                    Value::from("like"),
+                    Value::GpuTensor(prototype),
+                ]),
+            ))
             .expect("saturated gpu randi");
 
             let Value::GpuTensor(gpu) = result else {
@@ -1649,13 +1732,15 @@ pub(crate) mod tests {
             let bounds = Tensor::new_integer(IntegerStorage::U64(vec![0, u64::MAX]), vec![1, 2])
                 .expect("full-width uint64 bounds");
 
-            let result = block_on(randi_builtin(vec![
-                Value::Tensor(bounds),
-                Value::Num(1.0),
-                Value::Num(32.0),
-                Value::from("like"),
-                Value::GpuTensor(prototype),
-            ]))
+            let result = block_on(randi_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Tensor(bounds),
+                    Value::Num(1.0),
+                    Value::Num(32.0),
+                    Value::from("like"),
+                    Value::GpuTensor(prototype),
+                ]),
+            ))
             .expect("randi uint64 gpu like");
 
             let Value::GpuTensor(gpu) = result else {
@@ -1680,7 +1765,10 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn randi_invalid_upper_errors() {
-        let err = block_on(randi_builtin(vec![Value::Num(0.0)])).unwrap_err();
+        let err = block_on(randi_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(0.0)]),
+        ))
+        .unwrap_err();
         let message = err.to_string();
         assert!(message.contains("upper bound"));
     }
@@ -1713,7 +1801,10 @@ pub(crate) mod tests {
             Value::GpuTensor(handle),
         ];
 
-        let result = block_on(randi_builtin(args)).expect("randi");
+        let result = block_on(randi_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect("randi");
         match result {
             Value::GpuTensor(gpu) => {
                 let gathered =

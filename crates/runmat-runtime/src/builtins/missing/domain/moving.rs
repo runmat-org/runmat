@@ -9,7 +9,7 @@ pub(super) struct MovingOptions {
 }
 
 impl MovingOptions {
-    pub(super) fn parse(args: &[Value]) -> BuiltinResult<Self> {
+    pub(super) fn parse(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<Self> {
         let mut dim = None;
         let mut omit_nan = false;
         let mut idx = 0;

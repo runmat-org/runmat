@@ -15,7 +15,7 @@ fn preserves_owner_residency_and_exact_integer_bytes() {
         let handle = gpu_helpers::upload_tensor(provider, &source).expect("upload");
         let output = block_on(typecast_builtin(vec![
             Value::GpuTensor(handle),
-            Value::String("uint8".to_string()),
+            Value::String("uint8".to_string().into()),
         ]))
         .expect("resident typecast");
         assert!(matches!(output, Value::GpuTensor(_)));

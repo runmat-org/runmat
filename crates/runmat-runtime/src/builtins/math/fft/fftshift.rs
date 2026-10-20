@@ -113,7 +113,10 @@ fn compute_fftshift_dims(shape: &[usize], dims_arg: Option<&Value>) -> BuiltinRe
     binding_variant = "default",
     builtin_path = "crate::builtins::math::fft::fftshift"
 )]
-async fn fftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn fftshift_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(fftshift_error(&FFTSHIFT_ERROR_ARG_COUNT));
     }
@@ -776,6 +779,9 @@ pub(crate) mod tests {
     }
 
     fn fftshift_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::fftshift_builtin(value, rest))
+        block_on(super::fftshift_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 }

@@ -13,7 +13,7 @@ use crate::BuiltinResult;
 pub async fn hgsave_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let status = super::execute_hgsave(runtime, requested_outputs, args).await?;
     Ok(if requested_outputs == Some(0) {
@@ -25,10 +25,7 @@ pub async fn hgsave_builtin_registered(
 
 #[cfg(test)]
 pub(super) async fn hgsave_builtin(args: Vec<Value>) -> BuiltinResult<bool> {
-    super::execute_hgsave(
-        crate::context::legacy::active(),
-        crate::output_count::current_output_count(),
-        args,
-    )
-    .await
+    let runtime = crate::context::legacy::active();
+    let args = crate::call::BuiltinArguments::from_borrowed(&args, runtime.as_ref())?;
+    super::execute_hgsave(runtime, crate::output_count::current_output_count(), args).await
 }

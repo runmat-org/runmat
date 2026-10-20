@@ -65,7 +65,7 @@ fn cell_text(value: &Value, row: usize, col: usize) -> String {
     let Value::String(text) = cell.get(row, col).expect("cell value") else {
         panic!("expected string cell");
     };
-    text
+    text.to_string()
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -112,7 +112,7 @@ fn relative_import_reads_from_installed_memory_provider() {
     let out = block_on(importdata_builtin(
         None,
         Value::from("data.txt"),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("import from captured owner");
     assert_eq!(tensor_data(&out), (vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]));
@@ -125,7 +125,7 @@ fn excessive_outputs_reject_before_missing_file_read() {
     let err = block_on(importdata_builtin(
         None,
         Value::from("missing.txt"),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect_err("output bound");
     assert_eq!(err.identifier(), Some("RunMat:importdata:InvalidArgument"));
@@ -139,7 +139,7 @@ fn importdata_reads_plain_numeric_matrix() {
     let out = block_on(importdata_builtin(
         None,
         Value::from(path.to_string_lossy().into_owned()),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("importdata");
     let (data, shape) = tensor_data(&out);
@@ -155,7 +155,10 @@ fn importdata_headerlines_zero_numeric_input_returns_tensor() {
     let out = block_on(importdata_builtin(
         None,
         Value::from(path.to_string_lossy().into_owned()),
-        vec![Value::from(" "), Value::Num(0.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from(" "),
+            Value::Num(0.0),
+        ]),
     ))
     .expect("importdata");
     let (data, shape) = tensor_data(&out);
@@ -210,7 +213,7 @@ fn importdata_returns_documented_delimiter_and_header_count_outputs() {
     let result = block_on(importdata_builtin(
         None,
         Value::from(path.to_string_lossy().into_owned()),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("importdata outputs");
     let Value::OutputList(outputs) = result else {
@@ -240,8 +243,12 @@ fn importdata_rejects_resident_controls_before_provider_or_file_access() {
             .is_none()
     );
     let resident = Value::GpuTensor(allocation.handle.clone());
-    let error = block_on(importdata_builtin(None, resident, Vec::new()))
-        .expect_err("resident filename must reject");
+    let error = block_on(importdata_builtin(
+        None,
+        resident,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect_err("resident filename must reject");
     assert_eq!(
         error.identifier(),
         Some("RunMat:importdata:InvalidArgument")
@@ -259,7 +266,7 @@ fn importdata_detects_csv_header_and_colheaders() {
     let out = block_on(importdata_builtin(
         None,
         Value::from(path.to_string_lossy().into_owned()),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("importdata");
     let data = struct_field(&out, "data");
@@ -278,7 +285,10 @@ fn importdata_honors_explicit_delimiter_and_header_lines() {
     let out = block_on(importdata_builtin(
         None,
         Value::from(path.to_string_lossy().into_owned()),
-        vec![Value::from("|"), Value::Num(2.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("|"),
+            Value::Num(2.0),
+        ]),
     ))
     .expect("importdata");
     let data = struct_field(&out, "data");
@@ -299,7 +309,7 @@ fn importdata_preserves_rowheaders() {
     let out = block_on(importdata_builtin(
         None,
         Value::from(path.to_string_lossy().into_owned()),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("importdata");
     assert_eq!(cell_text(struct_field(&out, "rowheaders"), 0, 0), "r1");
@@ -316,7 +326,7 @@ fn importdata_reports_mixed_unsupported_data() {
     let err = block_on(importdata_builtin(
         None,
         Value::from(path.to_string_lossy().into_owned()),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect_err("parse error");
     assert!(err.message().contains("nonnumeric token"));
@@ -330,7 +340,7 @@ fn importdata_rejects_rows_with_extra_numeric_columns() {
     let err = block_on(importdata_builtin(
         None,
         Value::from(path.to_string_lossy().into_owned()),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect_err("width mismatch");
     assert!(err.message().contains("expected 2"));

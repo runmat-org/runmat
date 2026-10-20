@@ -20,7 +20,7 @@ fn core_operator_extensions_reject_before_semantic_dispatch_in_matlab_mode() {
         let args = [
             Value::Num(2.0),
             Value::Num(1.0),
-            Value::String("like".to_string()),
+            Value::String("like".to_string().into()),
             Value::Num(0.0),
         ];
         let error = futures::executor::block_on(call_builtin_async_with_outputs(name, &args, 1))

@@ -4,15 +4,10 @@
 
 use crate::builtins::common::random::gpu::{self, GpuRandomAlgorithm, GpuRandomSnapshot};
 use crate::builtins::common::random_args::keyword_of;
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
 use crate::builtins::common::tensor;
-use crate::builtins::stats::type_resolvers::rng_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_macros::runtime_builtin;
-use runmat_value::{IntegerStorage, StructValue, Tensor, Value};
+use runmat_value::{IntegerStorage, Tensor, Value};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 const NAME: &str = "gpurng";
@@ -21,45 +16,14 @@ const STATE_MAGIC: u32 = 0x524d_4731;
 const STATE_WORDS: usize = 17;
 static SHUFFLE_ORDINAL: AtomicU64 = AtomicU64::new(0);
 
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::stats::random::gpurng")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: NAME,
-    op_kind: GpuOpKind::Custom("state-control"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Controls the independent session GPU child stream; never a provider-global seed hook.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::stats::random::gpurng")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: NAME,
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "State mutation and query are not fusion-eligible.",
-};
-
 #[runtime_builtin(
     name = "gpurng",
-    category = "stats/random",
-    summary = "Query, seed, and restore the independent session GPU random stream.",
-    keywords = "gpurng,threefry,seed,gpu,random,state",
-    type_resolver(rng_type),
-    descriptor(runmat_builtins::GPURNG_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::stats::random::gpurng"
 )]
-async fn gpurng_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn gpurng_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     let previous = gpu::snapshot()?;
-    let Some(command) = parse_command(&args)? else {
+    let Some(command) = parse_command(args.view())? else {
         return snapshot_to_value(previous);
     };
     let replacement = match command {
@@ -103,10 +67,10 @@ enum Command {
     Restore(GpuRandomSnapshot),
 }
 
-fn parse_command(args: &[Value]) -> BuiltinResult<Option<Command>> {
-    match args {
-        [] => Ok(None),
-        [value] => {
+fn parse_command(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<Option<Command>> {
+    match (args.len(), args.get(0), args.get(1)) {
+        (0, _, _) => Ok(None),
+        (1, Some(value), _) => {
             if let Value::Struct(_) = value {
                 return snapshot_from_value(value).map(Command::Restore).map(Some);
             }
@@ -121,7 +85,7 @@ fn parse_command(args: &[Value]) -> BuiltinResult<Option<Command>> {
             }
             parse_seed(value).map(Command::Seed).map(Some)
         }
-        [seed, generator] => {
+        (2, Some(seed), Some(generator)) => {
             let Some(generator) = keyword_of(generator) else {
                 return Err(error("gpurng: generator must be a string scalar"));
             };
@@ -181,17 +145,17 @@ fn snapshot_to_value(snapshot: GpuRandomSnapshot) -> BuiltinResult<Value> {
         .fold(0x9e37_79b9_u32, |sum, word| sum ^ *word);
     let state = Tensor::new_integer(IntegerStorage::U32(words), vec![STATE_WORDS, 1])
         .map_err(|source| error(format!("gpurng: state construction failed: {source}")))?;
-    let mut value = StructValue::new();
+    let mut value = runmat_value::UnboundedStructValueBuilder::new();
     value
         .fields
-        .insert("Type".to_owned(), Value::String("threefry".to_owned()));
+        .insert("Type".to_owned(), Value::string("threefry".to_owned()));
     value
         .fields
         .insert("Seed".to_owned(), Value::Num(snapshot.seed as f64));
     value
         .fields
         .insert("State".to_owned(), Value::Tensor(state));
-    Ok(Value::Struct(value))
+    Ok(Value::Struct(value.finish()))
 }
 
 fn snapshot_from_value(value: &Value) -> BuiltinResult<GpuRandomSnapshot> {
@@ -264,9 +228,15 @@ mod tests {
     fn default_query_and_restore_do_not_touch_cpu_stream() {
         let cpu_before = crate::builtins::common::random::snapshot().expect("CPU snapshot");
         gpu::replace(GpuRandomSnapshot::default()).expect("GPU reset");
-        let original = futures::executor::block_on(gpurng_builtin(Vec::new())).expect("GPU query");
+        let original = futures::executor::block_on(gpurng_builtin(
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect("GPU query");
         gpu::reserve(7, NAME).expect("advance GPU stream");
-        futures::executor::block_on(gpurng_builtin(vec![original])).expect("GPU restore");
+        futures::executor::block_on(gpurng_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![original]),
+        ))
+        .expect("GPU restore");
         assert_eq!(gpu::snapshot().expect("restored").position, 0);
         let cpu_after = crate::builtins::common::random::snapshot().expect("CPU after");
         assert_eq!(cpu_after.state, cpu_before.state);
@@ -278,8 +248,10 @@ mod tests {
     fn unsupported_generator_does_not_mutate_the_gpu_child() {
         gpu::replace(GpuRandomSnapshot::default()).expect("GPU reset");
         let before = gpu::snapshot().expect("GPU snapshot");
-        let error = futures::executor::block_on(gpurng_builtin(vec![Value::from("philox")]))
-            .expect_err("unsupported generator must be rejected");
+        let error = futures::executor::block_on(gpurng_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from("philox")]),
+        ))
+        .expect_err("unsupported generator must be rejected");
         assert_eq!(
             error.identifier(),
             Some("RunMat:gpurng:GeneratorUnsupported")

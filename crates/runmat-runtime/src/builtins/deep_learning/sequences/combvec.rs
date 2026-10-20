@@ -11,7 +11,7 @@ use super::super::{deep_learning_error, tensor_value, MAX_COMBVEC_COLUMNS, MAX_P
     builtin_path = "crate::builtins::deep_learning::sequences"
 )]
 pub(in crate::builtins::deep_learning) async fn combvec_builtin(
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     super::super::errors::admit_single_output("combvec", &runmat_builtins::SEQUENCE_INVALID_INPUT)?;
     if args.is_empty() {
@@ -201,17 +201,20 @@ mod tests {
     #[cfg_attr(not(target_arch = "wasm32"), test)]
     fn combvec_preserves_dense_host_rank_boundaries() {
         let scalar = Value::Tensor(Tensor::new(vec![7.0], Vec::new()).unwrap());
-        let error = futures::executor::block_on(combvec_builtin(vec![scalar]))
-            .expect_err("rank-zero tensor has no matrix columns");
+        let error = futures::executor::block_on(combvec_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![scalar]),
+        ))
+        .expect_err("rank-zero tensor has no matrix columns");
         assert!(error
             .message()
             .contains("input 1 must have at least one column"));
 
         let row = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2]).unwrap());
         let other = Value::Tensor(Tensor::new(vec![10.0, 20.0], vec![1, 2]).unwrap());
-        let Value::Tensor(output) =
-            futures::executor::block_on(combvec_builtin(vec![row, other])).unwrap()
-        else {
+        let Value::Tensor(output) = futures::executor::block_on(combvec_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![row, other]),
+        ))
+        .unwrap() else {
             panic!("expected output matrix");
         };
         assert_eq!(output.shape(), [2, 4]);
@@ -219,9 +222,10 @@ mod tests {
             output.materialize_f64(),
             vec![1.0, 10.0, 2.0, 10.0, 1.0, 20.0, 2.0, 20.0]
         );
-        let Value::Tensor(scalar_output) =
-            futures::executor::block_on(combvec_builtin(vec![Value::Num(7.0)])).unwrap()
-        else {
+        let Value::Tensor(scalar_output) = futures::executor::block_on(combvec_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(7.0)]),
+        ))
+        .unwrap() else {
             panic!("expected scalar output matrix");
         };
         assert_eq!(scalar_output.shape(), [1, 1]);

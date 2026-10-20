@@ -13,21 +13,21 @@ fn decomposition_ldivide_is_not_a_public_method() {
 #[test]
 fn properties_expose_type_size_and_flags() {
     let a = tensor(&[2.0, 0.0, 0.0, 4.0], 2, 2);
-    let d =
-        call_constructor(vec![a, Value::String("diagonal".to_string())]).expect("decomposition");
+    let d = call_constructor(vec![a, Value::String("diagonal".to_string().into())])
+        .expect("decomposition");
 
     let ty = block_on(decomposition_subsref(
         d.clone(),
         OBJECT_INDEX_MEMBER.to_string(),
-        Value::String(TYPE_FIELD.to_string()),
+        Value::String(TYPE_FIELD.to_string().into()),
     ))
     .expect("Type");
-    assert_eq!(ty, Value::String("diagonal".to_string()));
+    assert_eq!(ty, Value::String("diagonal".to_string().into()));
 
     let size = block_on(decomposition_subsref(
         d,
         OBJECT_INDEX_MEMBER.to_string(),
-        Value::String(MATRIX_SIZE_FIELD.to_string()),
+        Value::String(MATRIX_SIZE_FIELD.to_string().into()),
     ))
     .expect("MatrixSize");
     assert_eq!(approx_vec_rooted(size), vec![2.0, 2.0]);
@@ -56,7 +56,7 @@ fn private_matrix_storage_is_not_publicly_readable() {
     let subsref_err = block_on(decomposition_subsref(
         d.clone(),
         OBJECT_INDEX_MEMBER.to_string(),
-        Value::String(MATRIX_FIELD.to_string()),
+        Value::String(MATRIX_FIELD.to_string().into()),
     ))
     .expect_err("private subsref should fail");
     assert!(subsref_err
@@ -65,7 +65,7 @@ fn private_matrix_storage_is_not_publicly_readable() {
 
     let getfield_err = block_on(crate::call_builtin_async(
         "getfield",
-        &[d, Value::String(MATRIX_FIELD.to_string())],
+        &[d, Value::String(MATRIX_FIELD.to_string().into())],
     ))
     .expect_err("private getfield should fail");
     assert!(matches!(
@@ -84,7 +84,7 @@ fn ctranspose_updates_rectangular_matrix_size_property() {
     let size = block_on(decomposition_subsref(
         dt,
         OBJECT_INDEX_MEMBER.to_string(),
-        Value::String(MATRIX_SIZE_FIELD.to_string()),
+        Value::String(MATRIX_SIZE_FIELD.to_string().into()),
     ))
     .expect("MatrixSize");
 
@@ -100,7 +100,7 @@ fn complex_scale_marks_decomposition_nonreal() {
     let is_real = block_on(decomposition_subsref(
         scaled,
         OBJECT_INDEX_MEMBER.to_string(),
-        Value::String(IS_REAL_FIELD.to_string()),
+        Value::String(IS_REAL_FIELD.to_string().into()),
     ))
     .expect("IsReal");
 
@@ -120,8 +120,8 @@ fn complex_single_decomposition_reports_single_datatype() {
     let datatype = block_on(decomposition_subsref(
         d,
         OBJECT_INDEX_MEMBER.to_string(),
-        Value::String(DATATYPE_FIELD.to_string()),
+        Value::String(DATATYPE_FIELD.to_string().into()),
     ))
     .expect("Datatype");
-    assert_eq!(datatype, Value::String("single".to_string()));
+    assert_eq!(datatype, Value::String("single".to_string().into()));
 }

@@ -63,7 +63,7 @@ async fn ind2rgb_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     indexed: Value,
     map: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<crate::execution::RootedValue> {
     if !rest.is_empty() {
         return Err(ind2rgb_error(&IND2RGB_ERROR_TOO_MANY_INPUTS));

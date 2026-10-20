@@ -117,13 +117,16 @@ struct MedianWeights {
     binding_variant = "default",
     builtin_path = "crate::builtins::math::reduction::median"
 )]
-pub(crate) async fn median_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub(crate) async fn median_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     median_with_nan_policy(value, rest, None).await
 }
 
 pub(crate) async fn median_with_nan_policy(
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
     imposed_nan_mode: Option<ReductionNaN>,
 ) -> crate::BuiltinResult<Value> {
     let protected = rest
@@ -144,7 +147,7 @@ pub(crate) async fn median_with_nan_policy(
                 _ => None,
             },
         ));
-    let mut parsed = parse_arguments(&rest, &mut admission).await?;
+    let mut parsed = parse_arguments(rest.view(), &mut admission).await?;
     if let Some(mode) = imposed_nan_mode {
         parsed.nan_mode = mode;
     }
@@ -157,7 +160,7 @@ pub(crate) async fn median_with_nan_policy(
 }
 
 async fn parse_arguments(
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     admission: &mut resident::InputAdmission<'_>,
 ) -> BuiltinResult<ParsedArguments> {
     let mut axes = MedianAxes::Default;
@@ -597,9 +600,9 @@ fn tensor_len(tensor: &Tensor) -> usize {
 
 fn value_as_str(value: &Value) -> Option<String> {
     match value {
-        Value::String(s) => Some(s.clone()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
+        Value::String(s) => Some(s.as_str().to_owned()),
+        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].as_str().to_owned()),
+        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data().iter().collect()),
         _ => None,
     }
 }
@@ -1156,7 +1159,10 @@ pub(crate) mod tests {
     }
 
     fn median_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::median_builtin(value, rest))
+        block_on(super::median_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1642,7 +1648,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn median_invalid_input_identifier() {
-        let err = median_builtin(Value::String("abc".to_string()), Vec::new()).unwrap_err();
+        let err = median_builtin(Value::String("abc".to_string().into()), Vec::new()).unwrap_err();
         assert_eq!(err.identifier(), MEDIAN_ERROR_INVALID_INPUT.identifier);
     }
 

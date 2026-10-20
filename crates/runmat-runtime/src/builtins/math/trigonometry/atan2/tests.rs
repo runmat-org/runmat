@@ -116,10 +116,11 @@ fn atan2_maps_tabular_variables_and_preserves_timetable_metadata() {
     let Value::Object(mut timetable) = table else {
         panic!("expected table object")
     };
-    timetable.class_name = runmat_types::standard::TIMETABLE.owned();
-    timetable
-        .properties
-        .insert("RowTimes".into(), Value::from("preserved"));
+    timetable = crate::builtins::common::test_support::reclassify_object_unbounded(
+        &timetable,
+        runmat_types::standard::TIMETABLE.display_name(),
+    );
+    timetable.replace_property_unbounded("RowTimes".into(), Value::from("preserved"));
 
     let Value::Object(output) = atan2_builtin(Value::Object(timetable), Value::Num(-1.0)).unwrap()
     else {
@@ -127,7 +128,7 @@ fn atan2_maps_tabular_variables_and_preserves_timetable_metadata() {
     };
     assert!(output.is_class(runmat_types::standard::TIMETABLE));
     assert_eq!(
-        output.properties.get("RowTimes"),
+        output.properties().get("RowTimes"),
         Some(&Value::from("preserved"))
     );
     let variables = crate::builtins::table::table_variables(&output).unwrap();

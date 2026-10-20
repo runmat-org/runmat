@@ -99,7 +99,10 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::solve::vecnorm"
 )]
-async fn vecnorm_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn vecnorm_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if !matches!(&value, Value::ComplexTensor(_)) {
         crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
             &value,
@@ -118,7 +121,7 @@ async fn vecnorm_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value>
         )
         .await?;
     }
-    let args = VecnormArgs::parse(&rest)?;
+    let args = VecnormArgs::parse(rest.view())?;
     match value {
         Value::GpuTensor(handle) => vecnorm_gpu(handle, args).await,
         Value::ComplexTensor(tensor) => {
@@ -148,7 +151,7 @@ struct VecnormArgs {
 }
 
 impl VecnormArgs {
-    fn parse(args: &[Value]) -> BuiltinResult<Self> {
+    fn parse(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<Self> {
         match args.len() {
             0 => Ok(Self {
                 order: NormOrder::Two,
@@ -528,7 +531,10 @@ mod tests {
     }
 
     fn call(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::vecnorm_builtin(value, rest))
+        block_on(super::vecnorm_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     #[test]

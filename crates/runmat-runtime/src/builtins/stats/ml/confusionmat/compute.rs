@@ -2,7 +2,7 @@ use super::*;
 pub(super) fn confusionmat_compute(
     group: Value,
     grouphat: Value,
-    rest: Vec<Value>,
+    rest: crate::call::FunctionArgumentView<'_>,
     output_limit: usize,
 ) -> BuiltinResult<Vec<Value>> {
     let group = labels_from_value(group, "group")?;
@@ -67,7 +67,9 @@ pub(super) fn confusionmat_compute(
     Ok(outputs)
 }
 
-pub(super) fn parse_options(rest: Vec<Value>) -> BuiltinResult<Option<LabelVector>> {
+pub(super) fn parse_options(
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Option<LabelVector>> {
     if rest.is_empty() {
         return Ok(None);
     }

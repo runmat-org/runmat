@@ -28,59 +28,6 @@ fn root_arguments(
     }
 }
 
-/// Invoke one bound closure without flattening its immutable capture
-/// generation into the explicit argument suffix. Callers that retain a
-/// callable across repeated invocations can clone `RetainedClosureValue`
-/// in O(1) and keep the same positional capture owner.
-pub(crate) async fn try_execute_retained_bound_closure_in_context(
-    runtime: Option<&RuntimeContext>,
-    closure: super::RetainedClosureValue,
-    supplied: Vec<Value>,
-    requested_outputs: usize,
-    input_callsite: Option<crate::callsite::CallsiteInfo>,
-) -> Result<Option<RootedValueSequence>, RuntimeError> {
-    let Some(binding) = closure.as_closure().binding.clone() else {
-        return Ok(None);
-    };
-    let lexical_environment = closure.as_closure().lexical_environment.clone();
-    let selected_runtime = runtime.cloned().or_else(|| {
-        lexical_environment
-            .as_ref()
-            .and_then(|_| crate::context::legacy::active())
-    });
-    let callable = closure.retain_for_call(selected_runtime.as_ref())?;
-    let supplied = root_arguments(selected_runtime.as_ref(), supplied)?;
-    let arguments = crate::call::RootedFunctionArguments::captured(callable, supplied)?;
-    match selected_runtime.as_ref() {
-        Some(runtime) => crate::callsite::with_function_input_callsite(
-            input_callsite,
-            crate::user_functions::try_call_rooted_bound_function_with_environment_in_context(
-                runtime,
-                binding,
-                arguments,
-                requested_outputs,
-                lexical_environment,
-            ),
-        )
-        .await?
-        .transpose(),
-        None if lexical_environment.is_some() => Err(crate::runtime_error::semantic_error(
-            "LexicalEnvironment",
-            "nested closure requires an explicit runtime context",
-        )),
-        None => crate::callsite::with_function_input_callsite(
-            input_callsite,
-            crate::user_functions::try_call_rooted_bound_function(
-                binding,
-                arguments,
-                requested_outputs,
-            ),
-        )
-        .await?
-        .transpose(),
-    }
-}
-
 #[inline(never)]
 fn captured_resolved(
     runtime: Option<&RuntimeContext>,
@@ -103,21 +50,29 @@ fn captured_resolved(
         Ok(arguments) => arguments,
         Err(error) => return Box::pin(async move { Err(error) }),
     };
-    // The unbound semantic/builtin/external port still requires a contiguous
-    // Value slice. Materialization is an explicit legacy boundary, denied
-    // before any effects when its physical backing is not finite-admitted.
-    let flattened = match arguments.materialize_legacy_contiguous(runtime) {
-        Ok(flattened) => flattened,
-        Err(error) => return Box::pin(async move { Err(error) }),
-    };
     Box::pin(async move {
-        let _source_roots = arguments;
-        resolved_execution::execute(
+        if let runmat_types::CallableIdentity::BoundFunction(function) = identity {
+            let Some(result) = crate::user_functions::try_call_rooted_semantic_function_in_context(
+                runtime,
+                function.0,
+                arguments,
+                requested_outputs,
+            )
+            .await
+            else {
+                return Err(function_unavailable_error(function.0, &metadata));
+            };
+            return result;
+        }
+        // The same selected-callee continuation handles both ordinary and
+        // managed calls. Semantic decline forwards the original capture owner,
+        // including its callsite/source metadata, to canonical builtin dispatch.
+        resolved_execution::invoke_descriptor_required(
             runtime,
             identity,
-            flattened,
+            arguments,
             requested_outputs,
-            metadata,
+            &metadata,
             fallback_policy,
         )
         .await
@@ -166,6 +121,12 @@ pub(super) fn execute(
             fallback_policy,
         ),
         CallableTarget::FevalForward(value) => forwarded(runtime, value, args, requested_outputs),
+        CallableTarget::RetainedFevalForward(_) => Box::pin(async move {
+            Err(crate::runtime_error::semantic_error(
+                "RunMat:Callable:RepeatableOwner",
+                "retained forwarded target requires its repeatable root owner",
+            ))
+        }),
     };
     selected.map_ok(move |value| {
         if requested_outputs == 0 {
@@ -224,6 +185,12 @@ pub(super) fn try_execute(
         CallableTarget::FevalForward(value) => {
             try_forwarded(runtime, value, args, requested_outputs)
         }
+        CallableTarget::RetainedFevalForward(_) => Box::pin(async move {
+            Err(crate::runtime_error::semantic_error(
+                "RunMat:Callable:RepeatableOwner",
+                "retained forwarded target requires its repeatable root owner",
+            ))
+        }),
     };
     selected.map_ok(move |value| {
         value.map(|value| {
@@ -328,7 +295,7 @@ fn try_bound(
     )
 }
 
-async fn invoke_bound(
+pub(super) async fn invoke_bound(
     runtime: Option<&RuntimeContext>,
     binding: BoundFunctionBinding,
     args: crate::call::RootedFunctionArguments,
@@ -337,6 +304,26 @@ async fn invoke_bound(
     lexical_environment: Option<runmat_value::LexicalEnvironment>,
 ) -> Result<RootedValueSequence, RuntimeError> {
     let function = binding.function;
+    try_invoke_bound(
+        runtime,
+        binding,
+        args,
+        requested_outputs,
+        metadata.clone(),
+        lexical_environment,
+    )
+    .await?
+    .ok_or_else(|| function_unavailable_error(function, &metadata))
+}
+
+async fn try_invoke_bound(
+    runtime: Option<&RuntimeContext>,
+    binding: BoundFunctionBinding,
+    args: crate::call::RootedFunctionArguments,
+    requested_outputs: usize,
+    metadata: CallableMetadata,
+    lexical_environment: Option<runmat_value::LexicalEnvironment>,
+) -> Result<Option<RootedValueSequence>, RuntimeError> {
     crate::callsite::with_function_input_callsite(metadata.function_input_callsite.clone(), async {
         match runtime {
             Some(runtime) => {
@@ -366,7 +353,7 @@ async fn invoke_bound(
         }
     })
     .await?
-    .unwrap_or_else(|| Err(function_unavailable_error(function, &metadata)))
+    .transpose()
 }
 
 #[inline(never)]
@@ -447,4 +434,43 @@ async fn invoke_forwarded(
             crate::call_feval_sequence_async_with_outputs(value, &args, requested_outputs).await
         }
     }
+}
+
+/// Invoke the already-selected closure with its original capture generation.
+/// This does not resolve its name again or normalize true captures as supplied.
+pub(crate) async fn invoke_selected_retained_closure(
+    runtime: Option<&RuntimeContext>,
+    closure: &super::RetainedClosureValue,
+    callable: crate::call::RetainedCallableTarget,
+    arguments: crate::call::BuiltinArguments,
+    requested_outputs: usize,
+) -> Result<Option<RootedValueSequence>, RuntimeError> {
+    let args = arguments
+        .rebind_callee(Some(callable), runtime)?
+        .into_function_arguments();
+    let closure = closure.as_closure();
+    let metadata = CallableMetadata::feval(Some(closure.function_name.clone()));
+    if let Some(binding) = closure.binding.clone() {
+        return try_invoke_bound(
+            runtime,
+            binding,
+            args,
+            requested_outputs,
+            metadata,
+            closure.lexical_environment.clone(),
+        )
+        .await;
+    }
+    crate::dispatch_prepared_callable_with_policy_in_runtime(
+        runtime,
+        runmat_types::CallableIdentity::DynamicName(runmat_types::SymbolName(
+            closure.function_name.to_string(),
+        )),
+        runmat_types::CallableFallbackPolicy::RuntimeNameResolution,
+        args,
+        requested_outputs,
+        metadata.function_input_callsite,
+    )
+    .await
+    .map(Some)
 }

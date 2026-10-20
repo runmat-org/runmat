@@ -19,7 +19,7 @@ pub async fn get_p_builtin(obj: Value) -> crate::BuiltinResult<Value> {
     )?;
     match obj {
         Value::Object(o) => {
-            if let Some(v) = o.properties.get("p_backing") {
+            if let Some(v) = o.property("p_backing") {
                 Ok(v.clone())
             } else {
                 Ok(Value::Num(0.0))
@@ -46,9 +46,15 @@ pub async fn set_p_builtin(obj: Value, val: Value) -> crate::BuiltinResult<Value
         "set.p",
     )?;
     match obj {
-        Value::Object(mut o) => {
-            o.properties.insert("p_backing".to_string(), val);
-            Ok(Value::Object(o))
+        Value::Object(o) => {
+            let mut o = o.into_unbounded_builder().map_err(|_| {
+                build_runtime_error("set.p: admitted receiver needs an admitted edit generation")
+                    .with_builtin("set.p")
+                    .with_identifier("RunMat:SetPReceiverInvalid")
+                    .build()
+            })?;
+            o.insert("p_backing".to_string(), val);
+            Ok(Value::Object(o.finish()))
         }
         other => Err(build_runtime_error(format!(
             "set.p: requires object receiver (got {other:?})"

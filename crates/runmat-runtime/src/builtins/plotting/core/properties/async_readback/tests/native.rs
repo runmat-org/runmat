@@ -174,13 +174,13 @@ fn exported_resident_line_retains_borrowed_allocations_until_coordinate_publicat
     assert!(provider.acquire_live(&x_wire).is_ok());
     assert!(provider.acquire_live(&y_wire).is_ok());
 
-    let Value::Tensor(x_before) =
-        block_on(crate::builtins::plotting::get::get_builtin_async(vec![
+    let Value::Tensor(x_before) = block_on(crate::builtins::plotting::get::get_builtin_async(
+        crate::builtins::common::test_support::builtin_arguments(vec![
             object.clone(),
             Value::String("XData".into()),
-        ]))
-        .expect("exact source read")
-    else {
+        ]),
+    ))
+    .expect("exact source read") else {
         panic!("expected typed source")
     };
     assert_eq!(x_before.materialize_f64(), vec![1.25, -3.5]);

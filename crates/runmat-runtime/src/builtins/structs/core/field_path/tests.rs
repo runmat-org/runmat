@@ -13,7 +13,10 @@ fn numeric_field_path_indices_preserve_scalar_and_vector_rank() {
         )
         .unwrap();
         let path = super::parse::parse(
-            vec![Value::Cell(selector), Value::from("values")],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Cell(selector),
+                Value::from("values"),
+            ]),
             "getfield",
         )
         .unwrap();

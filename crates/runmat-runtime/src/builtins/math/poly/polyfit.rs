@@ -11,7 +11,7 @@ use runmat_builtins::{
     POLYFIT_INTEGER_WEIGHTS_EXTENSION, POLYFIT_INTEGER_X_EXTENSION, POLYFIT_INTEGER_Y_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{ComplexTensor, StructValue, Tensor, Value};
+use runmat_value::{ComplexTensor, Tensor, Value};
 
 use super::normalization;
 use crate::builtins::common::gpu_helpers;
@@ -105,11 +105,11 @@ async fn polyfit_builtin(
     x: Value,
     y: Value,
     degree: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     let requested_count = crate::output_count::current_output_count();
     let outputs = requested_outputs(requested_count);
-    let eval = evaluate_requested(x, y, degree, &rest, outputs).await?;
+    let eval = evaluate_requested(x, y, degree, rest.view(), outputs).await?;
     if let Some(out_count) = requested_count {
         if out_count == 0 {
             return Ok(Value::output_list(Vec::new()));
@@ -150,14 +150,21 @@ pub async fn evaluate(
         .unwrap_or(2)
         .max(2);
     let outputs = requested_outputs(Some(count));
-    evaluate_requested(x, y, degree, rest, outputs).await
+    evaluate_requested(
+        x,
+        y,
+        degree,
+        crate::call::FunctionArgumentView::from_slice(rest),
+        outputs,
+    )
+    .await
 }
 
 async fn evaluate_requested(
     x: Value,
     y: Value,
     degree: Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     outputs: ProviderPolyfitOutputs,
 ) -> BuiltinResult<PolyfitEval> {
     if rest.len() > 1 {
@@ -234,7 +241,7 @@ async fn try_gpu_polyfit(
     x: &Value,
     y: &Value,
     degree: usize,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     outputs: ProviderPolyfitOutputs,
 ) -> BuiltinResult<Option<PolyfitEval>> {
     let x_handle = match x {
@@ -621,7 +628,7 @@ async fn complex_vector(
 }
 
 async fn parse_weights(
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     len: usize,
     degree: usize,
     outputs: ProviderPolyfitOutputs,
@@ -675,7 +682,7 @@ fn coefficients_to_value(coeffs: &[Complex64]) -> BuiltinResult<Value> {
 fn build_stats(r: &[f64], n: usize, normr: f64, df: f64) -> BuiltinResult<Value> {
     let tensor =
         Tensor::new(r.to_vec(), vec![n, n]).map_err(|e| polyfit_error(format!("polyfit: {e}")))?;
-    let mut st = StructValue::new();
+    let mut st = runmat_value::UnboundedStructValueBuilder::new();
     st.fields.insert(
         PolyfitStatField::R.public_name().to_string(),
         Value::Tensor(tensor),
@@ -688,7 +695,7 @@ fn build_stats(r: &[f64], n: usize, normr: f64, df: f64) -> BuiltinResult<Value>
         PolyfitStatField::ResidualNorm.public_name().to_string(),
         Value::Num(normr),
     );
-    Ok(Value::Struct(st))
+    Ok(Value::Struct(st.finish()))
 }
 
 fn build_mu(mean: f64, scale: f64) -> BuiltinResult<Value> {

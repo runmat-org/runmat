@@ -53,9 +53,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "nyquist",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::control::nyquist"
 )]
-async fn nyquist_builtin(system: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn nyquist_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    system: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if rest.len() > 1 || crate::output_count::current_output_count().is_some_and(|n| n > 3) {
         return Err(control_error(
             BUILTIN_NAME,
@@ -65,7 +70,7 @@ async fn nyquist_builtin(system: Value, rest: Vec<Value>) -> BuiltinResult<Value
     }
     let frequency = rest.first();
     admission::preflight(&system, frequency)?;
-    let model = admission::parse_model(system).await?;
+    let model = admission::parse_model(runtime.as_ref(), system).await?;
     let w = frequency::parse(&model, frequency).await?;
     let response = solver::evaluate(&model, w)?;
 

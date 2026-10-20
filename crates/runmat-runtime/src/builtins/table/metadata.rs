@@ -17,82 +17,7 @@ use crate::{build_runtime_error, RuntimeError};
 
 use super::TABLE_CLASS;
 
-const ANY_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "out",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Result value.",
-}];
-const READTABLE_INPUTS_FILENAME: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "filename",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Text or spreadsheet file path.",
-}];
-const READTABLE_INPUTS_NAME_VALUE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "filename",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Text or spreadsheet file path.",
-    },
-    BuiltinParamDescriptor {
-        name: "nameValuePairs",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name-value import options.",
-    },
-];
-const SPREADSHEET_IMPORT_OPTIONS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "opts",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Typed spreadsheet import-options object.",
-}];
-const SPREADSHEET_IMPORT_OPTIONS_INPUTS_NAME_VALUE: [BuiltinParamDescriptor; 1] =
-    [BuiltinParamDescriptor {
-        name: "nameValuePairs",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name-value option pairs.",
-    }];
-const DETECT_IMPORT_OPTIONS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "opts",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Typed text or spreadsheet import-options object for tabular readers.",
-}];
-const DETECT_IMPORT_OPTIONS_INPUTS_FILENAME: [BuiltinParamDescriptor; 1] =
-    [BuiltinParamDescriptor {
-        name: "filename",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Text or spreadsheet file path to inspect.",
-    }];
-const DETECT_IMPORT_OPTIONS_INPUTS_NAME_VALUE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "filename",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Text or spreadsheet file path to inspect.",
-    },
-    BuiltinParamDescriptor {
-        name: "nameValuePairs",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Detection overrides such as Delimiter, Range, Sheet, Encoding, or TextType.",
-    },
-];
+use runmat_builtins::TABLE_IMPORT_ANY_OUTPUT as ANY_OUTPUT;
 const TABLE_INPUTS_VALUES: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "variables",
     ty: BuiltinParamType::Any,
@@ -185,42 +110,6 @@ const VARIADIC_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
 }];
 const WRITE_NO_OUTPUT: [BuiltinParamDescriptor; 0] = [];
 
-const READTABLE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "T = readtable(filename)",
-        inputs: &READTABLE_INPUTS_FILENAME,
-        outputs: &ANY_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "T = readtable(filename, nameValuePairs...)",
-        inputs: &READTABLE_INPUTS_NAME_VALUE,
-        outputs: &ANY_OUTPUT,
-    },
-];
-const SPREADSHEET_IMPORT_OPTIONS_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "opts = spreadsheetImportOptions()",
-        inputs: &[],
-        outputs: &SPREADSHEET_IMPORT_OPTIONS_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "opts = spreadsheetImportOptions(nameValuePairs...)",
-        inputs: &SPREADSHEET_IMPORT_OPTIONS_INPUTS_NAME_VALUE,
-        outputs: &SPREADSHEET_IMPORT_OPTIONS_OUTPUT,
-    },
-];
-const DETECT_IMPORT_OPTIONS_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "opts = detectImportOptions(filename)",
-        inputs: &DETECT_IMPORT_OPTIONS_INPUTS_FILENAME,
-        outputs: &DETECT_IMPORT_OPTIONS_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "opts = detectImportOptions(filename, nameValuePairs...)",
-        inputs: &DETECT_IMPORT_OPTIONS_INPUTS_NAME_VALUE,
-        outputs: &DETECT_IMPORT_OPTIONS_OUTPUT,
-    },
-];
 const DICTIONARY_KEYS_VALUES_INPUTS: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "keys",
@@ -310,24 +199,9 @@ const WRITE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescr
     outputs: &WRITE_NO_OUTPUT,
 }];
 
-pub const READTABLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &READTABLE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &TABLE_ERRORS,
-};
-pub const SPREADSHEET_IMPORT_OPTIONS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SPREADSHEET_IMPORT_OPTIONS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &TABLE_ERRORS,
-};
-pub const DETECT_IMPORT_OPTIONS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &DETECT_IMPORT_OPTIONS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &TABLE_ERRORS,
-};
+pub use runmat_builtins::DETECT_IMPORT_OPTIONS_DESCRIPTOR;
+pub use runmat_builtins::READTABLE_DESCRIPTOR;
+pub use runmat_builtins::SPREADSHEET_IMPORT_OPTIONS_DESCRIPTOR;
 pub const DICTIONARY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &DICTIONARY_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,

@@ -26,7 +26,9 @@ const BUILTIN_NAME: &str = "findobj";
     binding_variant = "default",
     builtin_path = "crate::builtins::plotting::findobj"
 )]
-pub async fn findobj_builtin_async(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub async fn findobj_builtin_async(
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     let request = FindRequest::parse(args)?;
     let mut matches = Vec::new();
     for root in request.roots {
@@ -37,6 +39,7 @@ pub async fn findobj_builtin_async(args: Vec<Value>) -> crate::BuiltinResult<Val
 
 #[cfg(test)]
 pub fn findobj_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let args = crate::call::BuiltinArguments::from_borrowed(&args, None)?;
     futures::executor::block_on(findobj_builtin_async(args))
 }
 
@@ -48,17 +51,17 @@ struct FindRequest {
 }
 
 impl FindRequest {
-    fn parse(args: Vec<Value>) -> crate::BuiltinResult<Self> {
+    fn parse(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Self> {
         if args.first().is_some_and(is_host_integer_handle_alias) {
             crate::compatibility::ensure_builtin_extension_enabled(
                 &FINDOBJ_INTEGER_ROOT_EXTENSION,
                 BUILTIN_NAME,
             )?;
         }
-        let (roots, rest) = if let Some((roots, rest)) = split_root_handles(&args)? {
+        let (roots, rest) = if let Some((roots, rest)) = split_root_handles(args.view())? {
             (roots, rest)
         } else {
-            (vec![0.0], args.as_slice())
+            (vec![0.0], args.view())
         };
 
         let (max_depth, rest) = parse_depth(rest)?;
@@ -80,13 +83,18 @@ impl FindRequest {
     }
 }
 
-fn split_root_handles(args: &[Value]) -> crate::BuiltinResult<Option<(Vec<f64>, &[Value])>> {
+fn split_root_handles(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<Option<(Vec<f64>, crate::call::FunctionArgumentView<'_>)>> {
     let Some(first) = args.first() else {
         return Ok(None);
     };
     match first {
-        Value::Num(value) => Ok(Some((vec![*value], &args[1..]))),
-        Value::Int(value) => Ok(Some((vec![exact_numeric_root(value)?], &args[1..]))),
+        Value::Num(value) => Ok(Some((vec![*value], args.range(1..).expect("root tail")))),
+        Value::Int(value) => Ok(Some((
+            vec![exact_numeric_root(value)?],
+            args.range(1..).expect("root tail"),
+        ))),
         Value::Tensor(tensor) => {
             let roots = if let Some(storage) = tensor.integer_storage() {
                 storage
@@ -97,7 +105,7 @@ fn split_root_handles(args: &[Value]) -> crate::BuiltinResult<Option<(Vec<f64>, 
             } else {
                 tensor_utils::tensor_values_f64(tensor)
             };
-            Ok(Some((roots, &args[1..])))
+            Ok(Some((roots, args.range(1..).expect("root tail"))))
         }
         _ => Ok(None),
     }
@@ -114,7 +122,9 @@ fn is_host_integer_handle_alias(value: &Value) -> bool {
         || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
 }
 
-fn parse_depth(args: &[Value]) -> crate::BuiltinResult<(Option<usize>, &[Value])> {
+fn parse_depth(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<(Option<usize>, crate::call::FunctionArgumentView<'_>)> {
     let mut max_depth = None;
     let mut rest = args;
     loop {
@@ -123,7 +133,7 @@ fn parse_depth(args: &[Value]) -> crate::BuiltinResult<(Option<usize>, &[Value])
         };
         if option.eq_ignore_ascii_case("flat") {
             max_depth = Some(0);
-            rest = &rest[1..];
+            rest = rest.range(1..).expect("flat tail");
             continue;
         }
         if option.eq_ignore_ascii_case("-depth") {
@@ -131,7 +141,7 @@ fn parse_depth(args: &[Value]) -> crate::BuiltinResult<(Option<usize>, &[Value])
                 return Err(invalid_argument("-depth requires a nonnegative integer"));
             };
             max_depth = Some(depth_from_value(depth_value)?);
-            rest = &rest[2..];
+            rest = rest.range(2..).expect("depth tail");
             continue;
         }
         break;
@@ -189,12 +199,7 @@ impl Expr {
                     .is_some_and(|actual| values_match(prop, &actual, expected)),
                 Expr::Regex(prop, regexes) => property_value_async(handle, prop)
                     .await?
-                    .map(value_texts)
-                    .is_some_and(|texts| {
-                        texts
-                            .iter()
-                            .any(|text| regexes.iter().any(|regex| regex.is_match(text)))
-                    }),
+                    .is_some_and(|actual| value_matches_regex(&actual, regexes)),
                 Expr::Not(expr) => !expr.matches(handle).await?,
                 Expr::And(left, right) => {
                     left.matches(handle).await? && right.matches(handle).await?
@@ -210,7 +215,7 @@ impl Expr {
     }
 }
 
-fn parse_expr(args: &[Value]) -> crate::BuiltinResult<(Expr, usize)> {
+fn parse_expr(args: crate::call::FunctionArgumentView<'_>) -> crate::BuiltinResult<(Expr, usize)> {
     let (mut expr, mut consumed) = parse_factor(args)?;
     while consumed < args.len() {
         let (op, op_len) = match args.get(consumed).and_then(text_scalar) {
@@ -226,7 +231,10 @@ fn parse_expr(args: &[Value]) -> crate::BuiltinResult<(Expr, usize)> {
             }
             _ => (LogicalOp::And, 0),
         };
-        let (rhs, rhs_len) = parse_factor(&args[consumed + op_len..])?;
+        let (rhs, rhs_len) = parse_factor(
+            args.range(consumed + op_len..)
+                .expect("bounded predicate tail"),
+        )?;
         expr = match op {
             LogicalOp::And => Expr::And(Box::new(expr), Box::new(rhs)),
             LogicalOp::Or => Expr::Or(Box::new(expr), Box::new(rhs)),
@@ -237,13 +245,16 @@ fn parse_expr(args: &[Value]) -> crate::BuiltinResult<(Expr, usize)> {
     Ok((expr, consumed))
 }
 
-fn parse_factor(args: &[Value]) -> crate::BuiltinResult<(Expr, usize)> {
+fn parse_factor(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<(Expr, usize)> {
     let Some(first) = args.first() else {
         return Err(invalid_argument("expected a predicate"));
     };
     if let Value::Cell(cell) = first {
-        let (expr, consumed) = parse_expr(&cell.data)?;
-        if consumed != cell.data.len() {
+        let (expr, consumed) =
+            parse_expr(crate::call::FunctionArgumentView::from_slice(cell.data()))?;
+        if consumed != cell.data().len() {
             return Err(invalid_argument("unable to parse grouped predicate"));
         }
         return Ok((expr, 1));
@@ -254,7 +265,7 @@ fn parse_factor(args: &[Value]) -> crate::BuiltinResult<(Expr, usize)> {
     };
 
     if text.eq_ignore_ascii_case("-not") {
-        let (expr, consumed) = parse_factor(&args[1..])?;
+        let (expr, consumed) = parse_factor(args.range(1..).expect("not predicate tail"))?;
         return Ok((Expr::Not(Box::new(expr)), consumed + 1));
     }
     if text.eq_ignore_ascii_case("-property") {
@@ -296,7 +307,7 @@ fn regexes_from_value(value: &Value) -> crate::BuiltinResult<Vec<Regex>> {
     let patterns =
         match value {
             Value::Cell(cell) => cell
-                .data
+                .data()
                 .iter()
                 .map(|value| {
                     text_scalar(value).ok_or_else(|| {
@@ -304,7 +315,11 @@ fn regexes_from_value(value: &Value) -> crate::BuiltinResult<Vec<Regex>> {
                     })
                 })
                 .collect::<crate::BuiltinResult<Vec<_>>>()?,
-            Value::StringArray(strings) => strings.data.clone(),
+            Value::StringArray(strings) => strings
+                .data()
+                .iter()
+                .map(|text| text.as_str().to_owned())
+                .collect(),
             _ => vec![text_scalar(value)
                 .ok_or_else(|| invalid_argument("-regexp pattern must be text"))?],
         };
@@ -491,18 +506,18 @@ fn values_match(property: &str, actual: &Value, expected: &Value) -> bool {
         (Value::Num(_), Value::Int(_)) | (Value::Int(_), Value::Num(_)) => false,
         (Value::Bool(left), Value::Bool(right)) => left == right,
         (Value::String(left), Value::String(right)) => left == right,
-        (Value::CharArray(left), Value::CharArray(right)) => left.data == right.data,
+        (Value::CharArray(left), Value::CharArray(right)) => left.data() == right.data(),
         (Value::String(left), Value::CharArray(right)) => {
-            left == &right.data.iter().collect::<String>()
+            left == &right.data().iter().collect::<String>()
         }
         (Value::CharArray(left), Value::String(right)) => {
-            &left.data.iter().collect::<String>() == right
+            &left.data().iter().collect::<String>() == right
         }
         (Value::Tensor(left), Value::Tensor(right)) => {
             left.shape() == right.shape() && tensor_values_match(left, right)
         }
         (Value::StringArray(left), Value::StringArray(right)) => {
-            left.shape == right.shape && left.data == right.data
+            left.shape == right.shape && left.data() == right.data()
         }
         _ => false,
     }
@@ -584,21 +599,27 @@ fn on_off_bool(value: &Value) -> Option<bool> {
     }
 }
 
-fn value_texts(value: Value) -> Vec<String> {
+fn value_matches_regex(value: &Value, regexes: &[Regex]) -> bool {
+    let matches = |text: &str| regexes.iter().any(|regex| regex.is_match(text));
     match value {
-        Value::String(text) => vec![text],
-        Value::CharArray(chars) => vec![chars.data.into_iter().collect()],
-        Value::StringArray(strings) => strings.data,
-        Value::Cell(cell) => cell.data.into_iter().flat_map(value_texts).collect(),
-        _ => Vec::new(),
+        Value::String(text) => matches(text.as_str()),
+        Value::CharArray(chars) => matches(&chars.data().iter().collect::<String>()),
+        Value::StringArray(strings) => strings.data().iter().any(|text| matches(text.as_str())),
+        Value::Cell(cell) => cell
+            .data()
+            .iter()
+            .any(|child| value_matches_regex(child, regexes)),
+        _ => false,
     }
 }
 
 fn single_text(value: &Value) -> Option<String> {
     match value {
-        Value::String(text) => Some(text.clone()),
-        Value::CharArray(chars) => Some(chars.data.iter().collect()),
-        Value::StringArray(strings) if strings.data.len() == 1 => strings.data.first().cloned(),
+        Value::String(text) => Some(text.as_str().to_owned()),
+        Value::CharArray(chars) => Some(chars.data().iter().collect()),
+        Value::StringArray(strings) if strings.data().len() == 1 => {
+            strings.data().first().map(|text| text.as_str().to_owned())
+        }
         _ => None,
     }
 }
@@ -725,9 +746,11 @@ mod tests {
             IntegerStorage::U64(vec![3]),
         ] {
             let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer root");
-            let (roots, _) = split_root_handles(&[Value::Tensor(tensor)])
-                .expect("root parse")
-                .expect("root list");
+            let values = [Value::Tensor(tensor)];
+            let (roots, _) =
+                split_root_handles(crate::call::FunctionArgumentView::from_slice(&values))
+                    .expect("root parse")
+                    .expect("root list");
             assert_eq!(roots, vec![3.0]);
         }
         assert!(exact_numeric_root(&runmat_value::IntValue::I64(-1)).is_err());
@@ -746,9 +769,10 @@ mod tests {
     fn findobj_root_handles_reads_typed_integer_storage_exactly() {
         let roots = Tensor::new_integer(IntegerStorage::U16(vec![11, 13]), vec![1, 2]).unwrap();
         let args = vec![Value::Tensor(roots), Value::String("Type".into())];
-        let (handles, rest) = split_root_handles(&args)
-            .expect("split roots")
-            .expect("root handle list");
+        let (handles, rest) =
+            split_root_handles(crate::call::FunctionArgumentView::from_slice(&args))
+                .expect("split roots")
+                .expect("root handle list");
 
         assert_eq!(handles, vec![11.0, 13.0]);
         assert_eq!(rest.len(), 1);

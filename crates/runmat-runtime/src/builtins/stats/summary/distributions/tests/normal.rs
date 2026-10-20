@@ -2,17 +2,29 @@ use super::*;
 
 #[test]
 fn normal_distribution_scalar_values() {
-    let pdf = block_on(normpdf::normpdf_builtin(Value::Num(0.0), Vec::new())).unwrap();
+    let pdf = block_on(normpdf::normpdf_builtin(
+        Value::Num(0.0),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap();
     match pdf {
         Value::Num(value) => assert_close(value, INV_SQRT_2PI, 1e-12),
         other => panic!("expected scalar pdf, got {other:?}"),
     }
-    let cdf = block_on(normcdf::normcdf_builtin(Value::Num(0.0), Vec::new())).unwrap();
+    let cdf = block_on(normcdf::normcdf_builtin(
+        Value::Num(0.0),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap();
     match cdf {
         Value::Num(value) => assert_close(value, 0.5, 1e-12),
         other => panic!("expected scalar cdf, got {other:?}"),
     }
-    let inv = block_on(norminv::norminv_builtin(Value::Num(0.5), Vec::new())).unwrap();
+    let inv = block_on(norminv::norminv_builtin(
+        Value::Num(0.5),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap();
     match inv {
         Value::Num(value) => assert_close(value, 0.0, 1e-10),
         other => panic!("expected scalar inv, got {other:?}"),
@@ -24,7 +36,10 @@ fn normal_distribution_broadcasts_parameters() {
     let x = Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap());
     let out = block_on(normcdf::normcdf_builtin(
         x,
-        vec![Value::Num(0.0), Value::Num(1.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(0.0),
+            Value::Num(1.0),
+        ]),
     ))
     .unwrap();
     match out {
@@ -42,14 +57,17 @@ fn normal_distribution_broadcasts_parameters() {
 fn normal_distribution_canonicalizes_low_rank_inputs_through_scalar_broadcasting() {
     let scalar = block_on(normcdf::normcdf_builtin(
         Value::Tensor(Tensor::new(vec![0.0], Vec::new()).unwrap()),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap();
     assert_eq!(scalar, Value::Num(0.5));
 
     let Value::Tensor(vector) = block_on(normcdf::normcdf_builtin(
         Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![2]).unwrap()),
-        vec![Value::Num(0.0), Value::Num(1.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(0.0),
+            Value::Num(1.0),
+        ]),
     ))
     .unwrap() else {
         panic!("rank-one input must produce a broadcast tensor");
@@ -64,7 +82,7 @@ fn normal_distribution_integer_roles_are_independently_gated() {
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
     let x = block_on(normcdf::normcdf_builtin(
         Value::Int(runmat_value::IntValue::I16(0)),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap_err();
     assert_eq!(
@@ -73,7 +91,9 @@ fn normal_distribution_integer_roles_are_independently_gated() {
     );
     let mu = block_on(normcdf::normcdf_builtin(
         Value::Num(0.0),
-        vec![Value::Int(runmat_value::IntValue::I16(0))],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(
+            runmat_value::IntValue::I16(0),
+        )]),
     ))
     .unwrap_err();
     assert_eq!(
@@ -82,7 +102,10 @@ fn normal_distribution_integer_roles_are_independently_gated() {
     );
     let sigma = block_on(normcdf::normcdf_builtin(
         Value::Num(0.0),
-        vec![Value::Num(0.0), Value::Int(runmat_value::IntValue::U16(1))],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(0.0),
+            Value::Int(runmat_value::IntValue::U16(1)),
+        ]),
     ))
     .unwrap_err();
     assert_eq!(
@@ -97,10 +120,10 @@ fn normal_distribution_extensions_preserve_single_and_reject_lossy_integers() {
     let single = Value::Tensor(Tensor::from_f32(vec![0.0], vec![1, 1]).unwrap());
     let out = block_on(normpdf::normpdf_builtin(
         single,
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             mirrorless_int_tensor(IntegerStorage::I16(vec![0]), vec![1, 1]),
             mirrorless_int_tensor(IntegerStorage::U16(vec![1]), vec![1, 1]),
-        ],
+        ]),
     ))
     .unwrap();
     let Value::Tensor(out) = out else {
@@ -112,7 +135,7 @@ fn normal_distribution_extensions_preserve_single_and_reject_lossy_integers() {
     for storage in all_integer_binocdf_storages(0) {
         let out = block_on(normcdf::normcdf_builtin(
             Value::Tensor(Tensor::new_integer(storage, vec![1, 1]).unwrap()),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .unwrap();
         match out {
@@ -122,7 +145,11 @@ fn normal_distribution_extensions_preserve_single_and_reject_lossy_integers() {
     }
 
     let wide = mirrorless_int_tensor(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1]);
-    let error = block_on(norminv::norminv_builtin(wide, Vec::new())).unwrap_err();
+    let error = block_on(norminv::norminv_builtin(
+        wide,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap_err();
     assert!(error.message.contains("exactly representable"));
 }
 
@@ -138,7 +165,7 @@ fn normal_distribution_wgpu_integer_fallback_preserves_class_and_explicit_intent
     let handle = gpu_helpers::upload_tensor(provider, &input).expect("integer upload");
     let out = block_on(normcdf::normcdf_builtin(
         Value::GpuTensor(handle.clone()),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("normcdf");
     let Value::GpuTensor(out) = out else {
@@ -156,7 +183,7 @@ fn normal_distribution_wgpu_integer_fallback_preserves_class_and_explicit_intent
         .expect("validated provenance");
     let out = block_on(normcdf::normcdf_builtin(
         Value::GpuTensor(handle),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("explicit resident double output");
     let Value::GpuTensor(out) = out else {
@@ -173,7 +200,7 @@ fn normal_distribution_wgpu_integer_fallback_preserves_class_and_explicit_intent
 fn normal_distribution_accepts_mu_only_and_upper_tail() {
     let cdf = block_on(normcdf::normcdf_builtin(
         Value::Num(2.0),
-        vec![Value::Num(1.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
     ))
     .unwrap();
     match cdf {
@@ -183,7 +210,11 @@ fn normal_distribution_accepts_mu_only_and_upper_tail() {
 
     let upper = block_on(normcdf::normcdf_builtin(
         Value::Num(8.0),
-        vec![Value::Num(0.0), Value::Num(1.0), Value::from("upper")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(0.0),
+            Value::Num(1.0),
+            Value::from("upper"),
+        ]),
     ))
     .unwrap();
     match upper {
@@ -193,7 +224,7 @@ fn normal_distribution_accepts_mu_only_and_upper_tail() {
 
     let pdf = block_on(normpdf::normpdf_builtin(
         Value::Num(2.0),
-        vec![Value::Num(1.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
     ))
     .unwrap();
     match pdf {
@@ -203,7 +234,7 @@ fn normal_distribution_accepts_mu_only_and_upper_tail() {
 
     let inv = block_on(norminv::norminv_builtin(
         Value::Num(0.5),
-        vec![Value::Num(2.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(2.0)]),
     ))
     .unwrap();
     match inv {
@@ -216,21 +247,30 @@ fn normal_distribution_accepts_mu_only_and_upper_tail() {
 fn normal_distribution_rejects_invalid_sigma_with_nan_outputs() {
     let pdf = block_on(normpdf::normpdf_builtin(
         Value::Num(0.0),
-        vec![Value::Num(0.0), Value::Num(0.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(0.0),
+            Value::Num(0.0),
+        ]),
     ))
     .unwrap();
     assert!(matches!(pdf, Value::Num(value) if value.is_nan()));
 
     let inv = block_on(norminv::norminv_builtin(
         Value::Num(0.5),
-        vec![Value::Num(0.0), Value::Num(0.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(0.0),
+            Value::Num(0.0),
+        ]),
     ))
     .unwrap();
     assert!(matches!(inv, Value::Num(value) if value.is_nan()));
 
     let cdf = block_on(normcdf::normcdf_builtin(
         Value::Num(0.0),
-        vec![Value::Num(1.0), Value::Num(0.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(1.0),
+            Value::Num(0.0),
+        ]),
     ))
     .unwrap();
     assert_eq!(cdf, Value::Num(0.0));

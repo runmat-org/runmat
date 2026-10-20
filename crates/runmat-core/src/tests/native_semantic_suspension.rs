@@ -52,7 +52,7 @@ fn compiled_index_and_aggregate_operations_do_not_replay_nested_selector_effects
                 &unit,
                 ProcedureInvocation {
                     target: ProcedureTarget::Function("nativeSemanticSuspension".into()),
-                    arguments: Vec::new(),
+                    arguments: crate::ProcedureArguments::Source(Vec::new()),
                     requested_outputs: expected.len(),
                 },
                 &control,

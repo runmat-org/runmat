@@ -74,22 +74,26 @@ pub(super) fn parse_line_style_text(text: &str) -> BuiltinResult<LineStyle> {
 
 pub(super) fn style_text_entries(value: &Value, option_name: &str) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(text) => Ok(vec![text.clone()]),
-        Value::StringArray(array) => Ok(array.data.clone()),
+        Value::String(text) => Ok(vec![text.as_str().to_owned()]),
+        Value::StringArray(array) => Ok(array
+            .data()
+            .iter()
+            .map(|text| text.as_str().to_owned())
+            .collect()),
         Value::CharArray(chars) if chars.rows > 1 => Ok((0..chars.rows)
             .map(|row| {
                 let start = row * chars.cols;
                 let end = start + chars.cols;
-                chars.data[start..end]
+                chars.data()[start..end]
                     .iter()
                     .collect::<String>()
                     .trim()
                     .to_string()
             })
             .collect()),
-        Value::CharArray(chars) => Ok(vec![chars.data.iter().collect()]),
+        Value::CharArray(chars) => Ok(vec![chars.data().iter().collect()]),
         Value::Cell(cell) => cell
-            .data
+            .data()
             .iter()
             .map(|entry| {
                 scalar_text(entry).ok_or_else(|| {
@@ -125,11 +129,11 @@ pub(super) fn parse_color_cycle(value: &Value) -> BuiltinResult<Vec<Vec4>> {
     }
     match value {
         Value::StringArray(array) => array
-            .data
+            .data()
             .iter()
             .map(|entry| parse_color_text(entry))
             .collect(),
-        Value::Cell(cell) => cell.data.iter().map(parse_color_text_or_value).collect(),
+        Value::Cell(cell) => cell.data().iter().map(parse_color_text_or_value).collect(),
         _ => {
             let tensor = tensor::value_to_tensor(value)
                 .map_err(|_| invalid("scatterhist: Color must be text or an RGB matrix"))?;
@@ -158,9 +162,11 @@ pub(super) fn parse_color_cycle(value: &Value) -> BuiltinResult<Vec<Vec4>> {
 
 pub(super) fn scalar_text(value: &Value) -> Option<String> {
     match value {
-        Value::String(text) => Some(text.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
-        Value::CharArray(chars) if chars.rows == 1 => Some(chars.data.iter().collect()),
+        Value::String(text) => Some(text.as_str().to_owned()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Some(array.data()[0].as_str().to_owned())
+        }
+        Value::CharArray(chars) if chars.rows == 1 => Some(chars.data().iter().collect()),
         _ => None,
     }
 }
@@ -182,7 +188,7 @@ pub(super) fn parse_color_text(text: &str) -> BuiltinResult<Vec4> {
     }
     parse_color_value(
         &LineStyleParseOptions::generic(NAME),
-        &Value::String(trimmed.to_string()),
+        &Value::string(trimmed.to_string()),
     )
     .map_err(|err| invalid(format!("scatterhist: {}", err.message)))
 }

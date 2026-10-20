@@ -15,7 +15,7 @@ async fn data_array_name_builtin(
 ) -> BuiltinResult<Value> {
     let (owner, name) = authority::resolve_array(runtime.as_ref(), &base)?;
     handle_admission::execute(runtime.as_ref(), &owner, Op::ArrayName, &[], async {
-        Ok(Value::String(name))
+        Ok(Value::string(name))
     })
     .await
 }
@@ -32,7 +32,7 @@ async fn data_array_dtype_builtin(
 ) -> BuiltinResult<Value> {
     let (owner, name) = authority::resolve_array(runtime.as_ref(), &base)?;
     metadata(runtime.as_ref(), &owner, &name, Op::ArrayDType, |meta| {
-        Ok(Value::String(meta.dtype.clone()))
+        Ok(Value::string(meta.dtype.clone()))
     })
     .await
 }
@@ -116,7 +116,7 @@ async fn data_array_codec_builtin(
 ) -> BuiltinResult<Value> {
     let (owner, name) = authority::resolve_array(runtime.as_ref(), &base)?;
     metadata(runtime.as_ref(), &owner, &name, Op::ArrayCodec, |meta| {
-        Ok(Value::String(meta.codec.clone()))
+        Ok(Value::string(meta.codec.clone()))
     })
     .await
 }
@@ -130,7 +130,7 @@ async fn data_array_codec_builtin(
 async fn data_array_read_builtin(
     runtime: Option<RuntimeContext>,
     base: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(data_error("DataArray.read expects at most one slice"));
@@ -173,12 +173,12 @@ async fn data_array_read_builtin(
 async fn data_array_write_builtin(
     runtime: Option<RuntimeContext>,
     base: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let (owner, name) = authority::resolve_array(runtime.as_ref(), &base)?;
-    let (slice_spec, value) = match rest.as_slice() {
-        [v] => (None, v),
-        [slice, v] => (Some(slice), v),
+    let (slice_spec, value) = match (rest.len(), rest.get(0), rest.get(1)) {
+        (1, Some(v), _) => (None, v),
+        (2, Some(slice), Some(v)) => (Some(slice), v),
         _ => {
             return Err(data_error(
                 "DataArray.write expects values or (sliceSpec, values) arguments",
@@ -212,7 +212,7 @@ async fn data_array_resize_builtin(
     runtime: Option<RuntimeContext>,
     base: Value,
     new_shape: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     if !rest.is_empty() {
         return Err(data_error(
@@ -291,7 +291,7 @@ async fn data_array_fill_builtin(
     runtime: Option<RuntimeContext>,
     base: Value,
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     if !rest.is_empty() {
         return Err(data_error(

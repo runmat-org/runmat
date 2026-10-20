@@ -7,6 +7,8 @@
 //! gathers the tensor once, performs the rotation on the host, and re-uploads
 //! the result so downstream operations continue to benefit from gpu residency.
 
+use crate::aggregate::structure::operations as struct_ops;
+
 use crate::builtins::common::arg_tokens::{tokens_from_values, ArgToken};
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
@@ -60,7 +62,7 @@ fn circshift_internal(message: impl Into<String>) -> RuntimeError {
 async fn circshift_builtin(
     value: Value,
     shift: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &CIRCSHIFT_DESCRIPTOR,
@@ -72,7 +74,7 @@ async fn circshift_builtin(
             CIRCSHIFT_ERROR_TOO_MANY_INPUTS.message,
         ));
     }
-    let spec = parse_circshift_spec(&value, &shift, &rest)?;
+    let spec = parse_circshift_spec(&value, &shift, rest.view())?;
     let dims = &spec.dims;
     let shifts = &spec.shifts;
 
@@ -116,10 +118,9 @@ async fn circshift_builtin(
                     *axis_shift = shift;
                 }
             }
-            array
-                .circular_shift(&axis_shifts)
+            struct_ops::circular_shift(array, &axis_shifts)
                 .map(Value::StructArray)
-                .map_err(circshift_internal)
+                .map_err(|error| struct_ops::remap(error, |message| circshift_internal(message)))
         }
         Value::Cell(_) => Err(circshift_unsupported_input(
             "circshift: cell arrays are not yet supported",
@@ -160,7 +161,7 @@ struct CircshiftSpec {
 fn parse_circshift_spec(
     value: &Value,
     shift: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> crate::BuiltinResult<CircshiftSpec> {
     let shifts = value_to_shift_vector(shift)?;
     let dims: Vec<usize> = if rest.is_empty() {
@@ -678,10 +679,10 @@ fn circshift_string_array(
     dims: &[usize],
     shifts: &[isize],
 ) -> crate::BuiltinResult<StringArray> {
-    let StringArray { data, shape, .. } = array;
+    let (data, shape, _, _) = array.into_parts();
     let plan = build_shift_plan(&shape, dims, shifts)?;
     if data.is_empty() || plan.is_noop() {
-        return StringArray::new(data, shape)
+        return StringArray::from_shared_storage(data, shape)
             .map_err(|e| circshift_internal(format!("circshift: {e}")));
     }
     let ShiftPlan {
@@ -690,7 +691,8 @@ fn circshift_string_array(
         ..
     } = plan;
     let rotated = circshift_generic(&data, &ext_shape, &positive)?;
-    StringArray::new(rotated, ext_shape).map_err(|e| circshift_internal(format!("circshift: {e}")))
+    StringArray::from_texts_unbounded(rotated, ext_shape)
+        .map_err(|e| circshift_internal(format!("circshift: {e}")))
 }
 
 fn circshift_char_array(
@@ -698,7 +700,7 @@ fn circshift_char_array(
     dims: &[usize],
     shifts: &[isize],
 ) -> crate::BuiltinResult<Value> {
-    let shape = array.shape.clone();
+    let shape = array.shape.to_vec();
     let plan = build_shift_plan(&shape, dims, shifts)?;
     let data = array.to_column_major();
     if data.is_empty() || plan.is_noop() {
@@ -901,7 +903,11 @@ pub(crate) mod tests {
         shift: Value,
         rest: Vec<Value>,
     ) -> crate::BuiltinResult<Value> {
-        block_on(super::circshift_builtin(value, shift, rest))
+        block_on(super::circshift_builtin(
+            value,
+            shift,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
@@ -1247,7 +1253,7 @@ pub(crate) mod tests {
             Value::StringArray(out) => {
                 assert_eq!(out.shape, vec![3, 1]);
                 assert_eq!(
-                    out.data,
+                    out.data(),
                     vec!["b".to_string(), "c".to_string(), "a".to_string()]
                 );
             }
@@ -1269,7 +1275,7 @@ pub(crate) mod tests {
             Value::CharArray(out) => {
                 assert_eq!(out.rows, 2);
                 assert_eq!(out.cols, 2);
-                assert_eq!(out.data, vec!['c', 'd', 'a', 'b']);
+                assert_eq!(out.data(), vec!['c', 'd', 'a', 'b']);
             }
             other => panic!("expected CharArray, got {other:?}"),
         }

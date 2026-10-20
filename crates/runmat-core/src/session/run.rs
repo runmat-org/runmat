@@ -24,8 +24,8 @@ fn mir_local_fact_count_for_entrypoint(
     assembly: &runmat_hir::HirAssembly,
 ) -> usize {
     let function = entrypoint_target_function(assembly)
-        .and_then(|function| u32::try_from(function.0).ok())
-        .map(runmat_types::ProgramFunctionId);
+        .and_then(|function| analysis.function_for_local(function))
+        .map(|facts| facts.function);
     analysis.local_value_count(function)
 }
 
@@ -77,18 +77,21 @@ impl RunMatSession {
             #[cfg(not(target_arch = "wasm32"))]
             mex_runtime: std::rc::Rc::clone(&self.mex_runtime),
         };
+        let class_environment = dynamic_environment.clone();
+        let class_resolver: std::rc::Rc<runmat_runtime::context::CurrentClassProductResolver> =
+            std::rc::Rc::new(move |runtime, class| {
+                Box::pin(super::dynamic::resolve_current_class_product(
+                    runtime,
+                    class,
+                    class_environment.clone(),
+                ))
+            });
+        self.runtime_context
+            .set_current_class_product_resolver(Some(class_resolver));
         let loader: std::rc::Rc<runmat_runtime::user_functions::DynamicFunctionLoader> =
             std::rc::Rc::new(
                 move |runtime, name, args, requested_outputs, phase, input_callsite| {
                     let environment = dynamic_environment.clone();
-                    let args = match runmat_runtime::execution::RootedValues::new(args) {
-                        Ok(args) => args,
-                        Err(error) => {
-                            return Box::pin(async move {
-                                std::ops::ControlFlow::Break(Err(error.into_runtime_error()))
-                            });
-                        }
-                    };
                     Box::pin(super::dynamic::load_dynamic_function(
                         runtime,
                         name,
@@ -194,7 +197,10 @@ impl RunMatSession {
     > {
         self.runtime_context = self.runtime_context.clone().with_fresh_plot_receipts();
         self.configure_runtime_context();
-        let runtime = self.runtime_context.clone();
+        let runtime = self
+            .runtime_context
+            .clone()
+            .with_cancellation_token(self.runtime_context.cancellation());
         runtime.scope(self.run_in_context(input)).await
     }
 
@@ -286,6 +292,7 @@ impl RunMatSession {
         &mut self,
         request: crate::abi::ExecutionRequest,
     ) -> crate::abi::ExecutionResponse {
+        let _admission = self.admit_execution(None);
         #[cfg(not(target_arch = "wasm32"))]
         {
             let local_tasks = self.local_tasks.clone();
@@ -405,7 +412,6 @@ impl RunMatSession {
         &mut self,
         request: crate::abi::ExecutionRequest,
     ) -> crate::abi::ExecutionResponse {
-        let _admission = self.admit_execution(None);
         let requested_outputs = request.requested_outputs;
         let source_input = request.source.clone();
         if let Err(error) = self.ensure_user_path_hydrated().await {

@@ -35,7 +35,7 @@ fn frame_name(value: &Value, index: usize) -> Option<&Value> {
 fn invocation(function: &str, requested_outputs: usize) -> ProcedureInvocation {
     ProcedureInvocation {
         target: ProcedureTarget::Function(function.into()),
-        arguments: Vec::new(),
+        arguments: crate::ProcedureArguments::Source(Vec::new()),
         requested_outputs,
     }
 }

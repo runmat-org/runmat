@@ -30,7 +30,7 @@ pub(super) fn logical(
             promoted.push(value);
             return Ok(Some(LogicalPromotion::ComplexF64(promoted)));
         }
-        _ => return Err(UniformScalarError::Heterogeneous),
+        _ => return Err(UniformScalarError::HETEROGENEOUS),
     }
     Ok(None)
 }
@@ -50,7 +50,7 @@ pub(super) fn f64(
             promoted.push(value);
             return Ok(Some(promoted));
         }
-        _ => return Err(UniformScalarError::Heterogeneous),
+        _ => return Err(UniformScalarError::HETEROGENEOUS),
     }
     Ok(None)
 }
@@ -69,7 +69,7 @@ pub(super) fn f32(
             promoted.push(value);
             return Ok(Some(promoted));
         }
-        _ => return Err(UniformScalarError::Heterogeneous),
+        _ => return Err(UniformScalarError::HETEROGENEOUS),
     }
     Ok(None)
 }
@@ -80,10 +80,10 @@ pub(super) fn integer(
     value: ClassifiedValue,
 ) -> Result<(), UniformScalarError> {
     let ClassifiedValue::Integer(value) = value else {
-        return Err(UniformScalarError::Heterogeneous);
+        return Err(UniformScalarError::HETEROGENEOUS);
     };
     if IntegerStorage::from_scalar(value.clone()).numeric_dtype() != prototype.numeric_dtype() {
-        return Err(UniformScalarError::Heterogeneous);
+        return Err(UniformScalarError::HETEROGENEOUS);
     }
     values.push(value);
     Ok(())
@@ -97,7 +97,7 @@ pub(super) fn complex_f64(
         ClassifiedValue::Logical(value) => values.push((if value { 1.0 } else { 0.0 }, 0.0)),
         ClassifiedValue::F64(value) => values.push((value, 0.0)),
         ClassifiedValue::ComplexF64(value) => values.push(value),
-        _ => return Err(UniformScalarError::Heterogeneous),
+        _ => return Err(UniformScalarError::HETEROGENEOUS),
     }
     Ok(())
 }
@@ -109,7 +109,7 @@ pub(super) fn complex_f32(
     match value {
         ClassifiedValue::F32(value) => values.push((value, 0.0)),
         ClassifiedValue::ComplexF32(value) => values.push(value),
-        _ => return Err(UniformScalarError::Heterogeneous),
+        _ => return Err(UniformScalarError::HETEROGENEOUS),
     }
     Ok(())
 }
@@ -121,12 +121,12 @@ pub(super) fn integer_complex(
     value: ClassifiedValue,
 ) -> Result<(), UniformScalarError> {
     let ClassifiedValue::IntegerComplex(next_real, next_imaginary) = value else {
-        return Err(UniformScalarError::Heterogeneous);
+        return Err(UniformScalarError::HETEROGENEOUS);
     };
     let real_type = IntegerStorage::from_scalar(next_real.clone()).numeric_dtype();
     let imaginary_type = IntegerStorage::from_scalar(next_imaginary.clone()).numeric_dtype();
     if real_type != prototype.numeric_dtype() || imaginary_type != prototype.numeric_dtype() {
-        return Err(UniformScalarError::Heterogeneous);
+        return Err(UniformScalarError::HETEROGENEOUS);
     }
     real.push(next_real);
     imaginary.push(next_imaginary);
@@ -138,7 +138,7 @@ pub(super) fn character(
     value: ClassifiedValue,
 ) -> Result<(), UniformScalarError> {
     let ClassifiedValue::Char(value) = value else {
-        return Err(UniformScalarError::Heterogeneous);
+        return Err(UniformScalarError::HETEROGENEOUS);
     };
     values.push(value);
     Ok(())

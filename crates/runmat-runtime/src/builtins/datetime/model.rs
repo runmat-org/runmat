@@ -96,19 +96,22 @@ pub(super) fn ensure_datetime_class_registered() {
                 is_dependent: false,
                 get_access: MemberAccess::Public,
                 set_access: MemberAccess::Public,
-                default_value: Some(Value::String(DEFAULT_DATETIME_FORMAT.to_string())),
+                default_value: Some(Value::string(DEFAULT_DATETIME_FORMAT.to_string())),
             },
         );
 
         let methods = crate::class_registry::standard_runtime_methods(DATETIME_CLASS);
 
-        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            events: Default::default(),
-            name: DATETIME_CLASS.into(),
-            parent: None,
-            properties,
-            methods,
-        });
+        crate::class_registry::register_builtin_class(
+            DATETIME_CLASS,
+            crate::class_registry::RuntimeClass {
+                events: Default::default(),
+                name: DATETIME_CLASS.into(),
+                parent: None,
+                properties,
+                methods,
+            },
+        );
     });
 }
 
@@ -132,13 +135,16 @@ pub(super) fn ensure_calendar_duration_class_registered() {
 
         let methods = crate::class_registry::standard_runtime_methods(CALENDAR_DURATION_CLASS);
 
-        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            events: Default::default(),
-            name: CALENDAR_DURATION_CLASS.into(),
-            parent: None,
-            properties,
-            methods,
-        });
+        crate::class_registry::register_builtin_class(
+            CALENDAR_DURATION_CLASS,
+            crate::class_registry::RuntimeClass {
+                events: Default::default(),
+                name: CALENDAR_DURATION_CLASS.into(),
+                parent: None,
+                properties,
+                methods,
+            },
+        );
     });
 }
 
@@ -156,9 +162,11 @@ pub(super) async fn gather_args(args: &[Value]) -> BuiltinResult<Vec<Value>> {
 
 pub(super) fn scalar_text(value: &Value, context: &str) -> BuiltinResult<String> {
     match value {
-        Value::String(text) => Ok(text.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
-        Value::CharArray(array) if array.rows == 1 => Ok(array.data.iter().collect()),
+        Value::String(text) => Ok(text.as_str().to_owned()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(array.data()[0].as_str().to_owned())
+        }
+        Value::CharArray(array) if array.rows == 1 => Ok(array.data().iter().collect()),
         _ => Err(datetime_error(format!(
             "datetime: {context} must be a string scalar or character vector"
         ))),
@@ -172,7 +180,9 @@ pub(super) struct DatetimeOptions {
     pub(super) input_format: Option<String>,
 }
 
-pub(super) fn parse_trailing_options(args: &[Value]) -> BuiltinResult<(usize, DatetimeOptions)> {
+pub(super) fn parse_trailing_options(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<(usize, DatetimeOptions)> {
     let mut positional_end = args.len();
     let mut options = DatetimeOptions::default();
 
@@ -283,16 +293,18 @@ pub(super) fn serial_tensor_from_value(value: Value, context: &str) -> BuiltinRe
 }
 
 pub(super) fn format_for_object(obj: &ObjectInstance) -> String {
-    match obj.properties.get(FORMAT_FIELD) {
-        Some(Value::String(text)) => text.clone(),
-        Some(Value::StringArray(array)) if array.data.len() == 1 => array.data[0].clone(),
-        Some(Value::CharArray(array)) if array.rows == 1 => array.data.iter().collect(),
+    match obj.properties().get(FORMAT_FIELD) {
+        Some(Value::String(text)) => text.as_str().to_owned(),
+        Some(Value::StringArray(array)) if array.data().len() == 1 => {
+            array.data()[0].as_str().to_owned()
+        }
+        Some(Value::CharArray(array)) if array.rows == 1 => array.data().iter().collect(),
         _ => DEFAULT_DATETIME_FORMAT.to_string(),
     }
 }
 
 pub(crate) fn serial_tensor_for_object(obj: &ObjectInstance) -> BuiltinResult<Tensor> {
-    match obj.properties.get(SERIAL_FIELD) {
+    match obj.properties().get(SERIAL_FIELD) {
         Some(Value::Tensor(tensor)) => Ok(tensor.clone()),
         Some(Value::Num(value)) => Tensor::new(vec![*value], vec![1, 1])
             .map_err(|err| datetime_error(format!("datetime: {err}"))),
@@ -304,28 +316,32 @@ pub(crate) fn serial_tensor_for_object(obj: &ObjectInstance) -> BuiltinResult<Te
 }
 
 pub(crate) fn datetime_object_from_serial_tensor(
+    runtime: Option<&crate::context::RuntimeContext>,
     serials: Tensor,
     format: impl Into<String>,
 ) -> BuiltinResult<Value> {
     ensure_datetime_class_registered();
-    let mut object = ObjectInstance::new(DATETIME_CLASS.to_string());
-    object
-        .properties
-        .insert(SERIAL_FIELD.to_string(), Value::Tensor(serials));
-    object
-        .properties
-        .insert(FORMAT_FIELD.to_string(), Value::String(format.into()));
-    Ok(Value::Object(object))
+    let fields = [
+        (SERIAL_FIELD, Value::Tensor(serials)),
+        (FORMAT_FIELD, Value::string(format.into())),
+    ];
+    let object = crate::execution::object::construct_object_from_borrowed_fields(
+        runtime,
+        DATETIME_CLASS.display_name(),
+        fields.iter().map(|(name, value)| (*name, value)),
+    )?;
+    Ok(object.into_value_and_lease().0)
 }
 
 pub(super) fn datetime_object_from_serials(
+    runtime: Option<&crate::context::RuntimeContext>,
     serials: Vec<f64>,
     shape: Vec<usize>,
     format: impl Into<String>,
 ) -> BuiltinResult<Value> {
     let tensor =
         Tensor::new(serials, shape).map_err(|err| datetime_error(format!("datetime: {err}")))?;
-    datetime_object_from_serial_tensor(tensor, format)
+    datetime_object_from_serial_tensor(runtime, tensor, format)
 }
 
 pub(super) fn format_token_to_strftime(format: &str) -> String {
@@ -381,4 +397,29 @@ pub(crate) fn naive_from_datenum(serial: f64) -> BuiltinResult<NaiveDateTime> {
     base.checked_add_signed(duration).ok_or_else(|| {
         datetime_error("datetime: serial date number is outside the supported range")
     })
+}
+/// Retain logical argument generations through exact final-slot gathering.
+pub(super) async fn gather_retained_args(
+    args: crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    args.try_map_preserving_roots_async(args.len(), runtime, async |index| {
+        let gather = gather_if_needed_async(&args[index]);
+        match runtime {
+            Some(runtime) => runtime.scope(gather).await,
+            None => gather.await,
+        }
+        .map_err(|err| datetime_error(format!("datetime: {}", err.message())))
+    })
+    .await
+}
+pub(super) async fn gather_in_runtime(
+    runtime: Option<&crate::context::RuntimeContext>,
+    value: &Value,
+) -> BuiltinResult<Value> {
+    let gather = gather_if_needed_async(value);
+    match runtime {
+        Some(runtime) => runtime.scope(gather).await,
+        None => gather.await,
+    }
 }

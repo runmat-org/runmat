@@ -6,6 +6,18 @@ use runmat_value::{StructValue, Value};
 mod preparation;
 pub(crate) use preparation::prepare_solver_options;
 
+/// One prepared immutable generation and its original managed root ownership.
+pub(crate) struct PreparedSolverOptions(crate::execution::RootedValue);
+
+impl PreparedSolverOptions {
+    pub(crate) fn structure(&self) -> &StructValue {
+        let Value::Struct(value) = self.0.value() else {
+            unreachable!("solver option preparation publishes a structure")
+        };
+        value
+    }
+}
+
 #[derive(Clone, Copy)]
 struct ScalarOptionBinding<'a> {
     name: &'a str,

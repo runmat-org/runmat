@@ -22,7 +22,7 @@ async fn predict_builtin_registered(
     requested_outputs: Option<usize>,
     model: Value,
     xnew: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     predict_in_runtime(runtime.as_ref(), requested_outputs, model, xnew, rest).await
 }
@@ -38,7 +38,9 @@ pub(crate) async fn predict_builtin(
         crate::output_count::current_output_count(),
         model,
         xnew,
-        rest,
+        crate::execution::RootedValues::new(rest)
+            .map_err(|error| error.into_runtime_error())?
+            .into(),
     )
     .await
 }
@@ -48,7 +50,7 @@ async fn predict_in_runtime(
     requested_outputs: Option<usize>,
     model: Value,
     xnew: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let output = match model {
         Value::Object(object)
@@ -63,7 +65,7 @@ async fn predict_in_runtime(
             )
             .await?
         }
-        model => predict_statistical(model, xnew, rest).await?,
+        model => predict_statistical(runtime, model, xnew, rest).await?,
     };
     match requested_outputs {
         Some(0) => Ok(Value::output_list(Vec::new())),
@@ -82,18 +84,19 @@ async fn predict_in_runtime(
 }
 
 async fn predict_statistical(
+    runtime: Option<&crate::context::RuntimeContext>,
     model: Value,
     xnew: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Vec<Value>> {
     let statistical_model = matches!(
         &model,
         Value::Object(object)
             if object
-                .class_name
+                .class_name()
                 .is(runmat_types::standard::LINEAR_MODEL)
-                || object.class_name.is(runmat_types::standard::CLASSIFICATION_TREE)
-                || object.class_name.is(runmat_types::standard::CLASSIFICATION_LINEAR)
+                || object.class_name().is(runmat_types::standard::CLASSIFICATION_TREE)
+                || object.class_name().is(runmat_types::standard::CLASSIFICATION_LINEAR)
     );
     if statistical_model {
         crate::builtins::common::validation::reject_typed_complex_integer(&xnew, "predict")?;
@@ -123,25 +126,25 @@ async fn predict_statistical(
     let xnew = gather(xnew)
         .await
         .map_err(|err| predict_invalid(err.message))?;
-    let rest = gather_all(rest)
+    let rest = gather_all(rest, runtime)
         .await
         .map_err(|err| predict_invalid(err.message))?;
     match model {
         Value::Object(object)
             if object
-                .class_name
+                .class_name()
                 .is(runmat_types::standard::CLASSIFICATION_TREE) =>
         {
-            predict_classification_tree_object(object, xnew, rest)
+            predict_classification_tree_object(object, xnew, rest.view())
         }
         Value::Object(object)
             if object
-                .class_name
+                .class_name()
                 .is(runmat_types::standard::CLASSIFICATION_LINEAR) =>
         {
-            predict_classification_linear_object(object, xnew, rest)
+            predict_classification_linear_object(object, xnew, rest.view())
         }
-        other => predict_linear_model_dispatch(other, xnew, rest),
+        other => predict_linear_model_dispatch(other, xnew, rest.view()),
     }
 }
 
@@ -149,10 +152,13 @@ async fn gather(value: Value) -> BuiltinResult<Value> {
     gather_if_needed_async(&value).await
 }
 
-async fn gather_all(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(values.len());
-    for value in values {
-        out.push(gather(value).await?);
-    }
-    Ok(out)
+async fn gather_all(
+    values: crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    values
+        .try_map_preserving_roots_async(values.len(), runtime, |index| {
+            gather(values[index].clone())
+        })
+        .await
 }

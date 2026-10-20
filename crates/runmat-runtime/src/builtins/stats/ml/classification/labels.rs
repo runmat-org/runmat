@@ -30,17 +30,27 @@ pub(super) fn labels_from_value(value: Value, name: &str) -> BuiltinResult<Label
             kind: LabelKind::String,
         }),
         Value::CharArray(array) => Ok(LabelVector {
-            labels: char_rows(&array).into_iter().map(ClassLabel::Text).collect(),
+            labels: char_rows(&array)
+                .into_iter()
+                .map(|text| ClassLabel::Text(text.into()))
+                .collect(),
             kind: LabelKind::Char,
         }),
-        Value::StringArray(array) => Ok(LabelVector {
-            labels: array.data.into_iter().map(ClassLabel::Text).collect(),
-            kind: LabelKind::String,
-        }),
+        Value::StringArray(array) => {
+            let (data, _shape, _rows, _cols) = array.into_parts();
+            let labels = match data.try_into_owned() {
+                Ok(values) => values.into_iter().map(ClassLabel::Text).collect(),
+                Err(values) => values.iter().cloned().map(ClassLabel::Text).collect(),
+            };
+            Ok(LabelVector {
+                labels,
+                kind: LabelKind::String,
+            })
+        },
         Value::Cell(cell) => {
-            let mut labels = Vec::with_capacity(cell.data.len());
-            for item in cell.data {
-                labels.push(ClassLabel::Text(scalar_text(&item, name)?));
+            let mut labels = Vec::with_capacity(cell.data().len());
+            for item in cell.data() {
+                labels.push(ClassLabel::Text(scalar_text(item, name)?));
             }
             Ok(LabelVector {
                 labels,
@@ -263,11 +273,11 @@ pub(super) fn labels_from_indices(
                 .iter()
                 .map(|idx| match labels.get(*idx) {
                     Some(ClassLabel::Text(value)) => value.clone(),
-                    _ => String::new(),
+                    _ => runmat_value::Utf8Text::default(),
                 })
                 .collect::<Vec<_>>();
             Ok(Value::StringArray(
-                StringArray::new(data, vec![indices.len(), 1])
+                StringArray::from_texts_unbounded(data, vec![indices.len(), 1])
                     .map_err(|err| internal_error(format!("classify: {err}")))?,
             ))
         }
@@ -275,8 +285,8 @@ pub(super) fn labels_from_indices(
             let rows = indices
                 .iter()
                 .map(|idx| match labels.get(*idx) {
-                    Some(ClassLabel::Text(value)) => value.clone(),
-                    _ => String::new(),
+                    Some(ClassLabel::Text(value)) => value.as_str(),
+                    _ => "",
                 })
                 .collect::<Vec<_>>();
             Ok(Value::CharArray(char_array_from_rows(&rows)?))
@@ -314,20 +324,20 @@ pub(super) fn char_rows(array: &CharArray) -> Vec<String> {
     let mut rows = Vec::with_capacity(array.rows);
     for row in 0..array.rows {
         let start = row * array.cols;
-        rows.push(array.data[start..start + array.cols].iter().collect());
+        rows.push(array.data()[start..start + array.cols].iter().collect());
     }
     rows
 }
 
-pub(super) fn char_array_from_rows(rows: &[String]) -> BuiltinResult<CharArray> {
+pub(super) fn char_array_from_rows(rows: &[impl AsRef<str>]) -> BuiltinResult<CharArray> {
     let width = rows
         .iter()
-        .map(|row| row.chars().count())
+        .map(|row| row.as_ref().chars().count())
         .max()
         .unwrap_or(0);
     let mut data = Vec::with_capacity(rows.len() * width);
     for row in rows {
-        let mut chars = row.chars().collect::<Vec<_>>();
+        let mut chars = row.as_ref().chars().collect::<Vec<_>>();
         chars.resize(width, ' ');
         data.extend(chars);
     }
@@ -335,11 +345,11 @@ pub(super) fn char_array_from_rows(rows: &[String]) -> BuiltinResult<CharArray> 
         .map_err(|err| internal_error(format!("classify: {err}")))
 }
 
-pub(super) fn scalar_text(value: &Value, name: &str) -> BuiltinResult<String> {
+pub(super) fn scalar_text(value: &Value, name: &str) -> BuiltinResult<runmat_value::Utf8Text> {
     match value {
         Value::String(text) => Ok(text.clone()),
-        Value::CharArray(chars) => Ok(chars.data.iter().collect()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::CharArray(chars) => Ok(chars.data().iter().collect::<String>().into()),
+        Value::StringArray(array) if array.data().len() == 1 => Ok(array.data()[0].clone()),
         other => Err(invalid_argument(format!(
             "classify: {name} must be a string scalar, got {other:?}"
         ))),

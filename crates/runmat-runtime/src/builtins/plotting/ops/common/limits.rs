@@ -21,7 +21,7 @@ pub fn limit_state_error(
 pub fn prepare_limit_call(
     runtime: Option<&crate::context::RuntimeContext>,
     builtin: &'static str,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     color_limits: bool,
 ) -> BuiltinResult<PreparedLimitCall> {
     let (target, controls) = prepare_limit_controls(runtime, builtin, args)?;
@@ -35,8 +35,8 @@ pub fn prepare_limit_call(
 pub fn prepare_limit_controls<'a>(
     runtime: Option<&crate::context::RuntimeContext>,
     builtin: &'static str,
-    args: &'a [Value],
-) -> BuiltinResult<(PreparedAxesTarget, &'a [Value])> {
+    args: crate::call::FunctionArgumentView<'a>,
+) -> BuiltinResult<(PreparedAxesTarget, crate::call::FunctionArgumentView<'a>)> {
     prepare_axes_call(runtime, builtin, args)
 }
 
@@ -52,7 +52,7 @@ pub enum LimitCommand {
 
 pub fn parse_limit_command(
     builtin: &'static str,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     color_limits: bool,
 ) -> BuiltinResult<LimitCommand> {
     validate_limit_control_count(builtin, args)?;
@@ -84,7 +84,7 @@ pub fn parse_limit_command(
 
 pub fn validate_limit_control_count(
     builtin: &'static str,
-    controls: &[Value],
+    controls: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<()> {
     if controls.len() > 1 {
         return Err(plotting_error(

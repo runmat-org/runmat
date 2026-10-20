@@ -312,7 +312,7 @@ mod tests {
             })
             .expect("create local future");
         assert!(matches!(
-            service.begin_await(Value::Future(future.clone())),
+            service.begin_await(Value::Future(future.clone().into())),
             Ok(AwaitAction::ExecuteFuture { .. })
         ));
 
@@ -338,10 +338,10 @@ mod tests {
         assert!(has_typed_provider_source(immediate.as_ref()));
 
         let first = service
-            .begin_await(Value::Future(future.clone()))
+            .begin_await(Value::Future(future.clone().into()))
             .expect_err("first cached fetch must fail");
         let second = service
-            .begin_await(Value::Future(future))
+            .begin_await(Value::Future(future.into()))
             .expect_err("repeated cached fetch must fail");
         assert_eq!(first, second, "both fetches must share one failure owner");
         for failure in [first, second] {

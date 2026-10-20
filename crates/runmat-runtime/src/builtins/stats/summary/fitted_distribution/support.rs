@@ -90,7 +90,9 @@ pub(super) fn check_fitted_cancellation(
     Ok(())
 }
 
-pub(super) async fn parse_shape_args(rest: &[Value]) -> BuiltinResult<Vec<usize>> {
+pub(super) async fn parse_shape_args(
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Vec<usize>> {
     if rest.is_empty() {
         return Ok(vec![1, 1]);
     }

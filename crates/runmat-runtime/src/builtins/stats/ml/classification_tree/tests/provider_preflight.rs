@@ -57,12 +57,13 @@ fn invalid_host_option_value_precedes_resident_predictor_download() {
     let x = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]).unwrap();
     let x = crate::builtins::common::gpu_helpers::upload_tensor(provider, &x).unwrap();
     let error = block_on(fitctree_builtin(
+        None,
         Value::GpuTensor(x),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             tensor_value(vec![0.0, 0.0, 1.0, 1.0], 4, 1),
             Value::from("MinLeafSize"),
             Value::from("invalid"),
-        ],
+        ]),
     ))
     .expect_err("invalid structural control");
     assert!(error.message().contains("MinLeafSize"));
@@ -78,8 +79,13 @@ fn incompatible_response_geometry_precedes_resident_predictor_download() {
     let x = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]).unwrap();
     let x = crate::builtins::common::gpu_helpers::upload_tensor(provider, &x).unwrap();
     let error = block_on(fitctree_builtin(
+        None,
         Value::GpuTensor(x),
-        vec![tensor_value(vec![0.0, 1.0, 0.0], 3, 1)],
+        crate::builtins::common::test_support::builtin_arguments(vec![tensor_value(
+            vec![0.0, 1.0, 0.0],
+            3,
+            1,
+        )]),
     ))
     .expect_err("response row mismatch");
     assert!(error.message().contains("length(Y)"));

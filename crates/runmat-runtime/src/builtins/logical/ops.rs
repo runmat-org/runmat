@@ -81,7 +81,7 @@ fn logical_error_with_message(
 async fn logical_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<crate::execution::RootedValue> {
     if matches!(crate::output_count::current_output_count(), Some(count) if count > 1) {
         return Err(logical_error_with_message(
@@ -149,7 +149,7 @@ async fn convert_value_to_logical(value: Value) -> BuiltinResult<Value> {
         Value::Cell(_) => Err(conversion_error("cell")),
         Value::Struct(_) | Value::StructArray(_) => Err(conversion_error("struct")),
         Value::ObjectArray(array) => Err(conversion_error(array.class_name().display_name())),
-        Value::Object(obj) => Err(conversion_error(obj.class_name.display_name())),
+        Value::Object(obj) => Err(conversion_error(obj.class_name().display_name())),
         Value::HandleObject(handle) => Err(conversion_error(handle.class_name.display_name())),
         Value::Listener(_) => Err(conversion_error("event.listener")),
         Value::FunctionHandle(_)
@@ -236,7 +236,7 @@ fn logical_from_char_array(chars: CharArray) -> BuiltinResult<Value> {
 
 fn logical_from_string_array(strings: StringArray) -> BuiltinResult<Value> {
     let bits: Vec<u8> = strings
-        .data
+        .data()
         .iter()
         .map(|s| if s.is_empty() { 0 } else { 1 })
         .collect();

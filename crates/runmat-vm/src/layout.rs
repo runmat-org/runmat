@@ -140,16 +140,8 @@ pub fn remap_layout_function_ids(
         metadata.parent = metadata
             .parent
             .map(|parent| remap.get(&parent).copied().unwrap_or(parent));
-        metadata.resume_points = std::mem::take(&mut metadata.resume_points)
-            .into_iter()
-            .map(|(mut point, pc)| {
-                point.function = runmat_types::ProgramFunctionId(
-                    u32::try_from(published.0)
-                        .expect("published VM function identity exceeds portable schema"),
-                );
-                (point, pc)
-            })
-            .collect();
+        // Resume points belong to the body's original portable revision;
+        // changing its compiler coordinate does not rename program points.
         for capture in &mut metadata.captures {
             capture.from_function = remap
                 .get(&capture.from_function)

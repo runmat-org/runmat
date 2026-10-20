@@ -4,7 +4,10 @@ use super::*;
 fn wblinv_preserves_tiny_positive_probabilities() {
     let out = block_on(wblinv::wblinv_builtin(
         Value::Num(1.0e-20),
-        vec![Value::Num(3.0), Value::Num(4.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(3.0),
+            Value::Num(4.0),
+        ]),
     ))
     .unwrap();
     match out {
@@ -22,7 +25,7 @@ fn wblinv_gates_integer_roles_and_rejects_lossy_values() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = block_on(wblinv::wblinv_builtin(
             Value::Int(runmat_value::IntValue::U8(1)),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect_err("integer probability gate");
         assert_eq!(
@@ -31,7 +34,10 @@ fn wblinv_gates_integer_roles_and_rejects_lossy_values() {
         );
         let error = block_on(wblinv::wblinv_builtin(
             Value::Num(0.5),
-            vec![Value::Int(runmat_value::IntValue::U8(1)), Value::Num(1.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Int(runmat_value::IntValue::U8(1)),
+                Value::Num(1.0),
+            ]),
         ))
         .expect_err("integer scale gate");
         assert_eq!(
@@ -42,10 +48,10 @@ fn wblinv_gates_integer_roles_and_rejects_lossy_values() {
     let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     let error = block_on(wblinv::wblinv_builtin(
         Value::Num(0.5),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::Num(1.0),
             Value::Int(runmat_value::IntValue::U64((1_u64 << 53) + 1)),
-        ],
+        ]),
     ))
     .expect_err("lossy shape boundary");
     assert!(error.message().contains("exactly representable as double"));
@@ -55,7 +61,10 @@ fn wblinv_gates_integer_roles_and_rejects_lossy_values() {
 fn wblinv_preserves_documented_single_output() {
     let output = block_on(wblinv::wblinv_builtin(
         Value::Tensor(Tensor::from_f32(vec![0.5], vec![1, 1]).unwrap()),
-        vec![Value::Num(3.0), Value::Num(4.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(3.0),
+            Value::Num(4.0),
+        ]),
     ))
     .expect("single wblinv");
     let Value::Tensor(output) = output else {
@@ -75,7 +84,7 @@ fn wblinv_distinguishes_automatic_and_explicit_residency() {
         runmat_accelerate::fusion_residency::mark(&source);
         let automatic = block_on(wblinv::wblinv_builtin(
             Value::GpuTensor(source.clone()),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect("automatic fallback");
         let Value::GpuTensor(output) = automatic else {
@@ -91,8 +100,11 @@ fn wblinv_distinguishes_automatic_and_explicit_residency() {
             .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
             .expect("validated provenance");
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        let error = block_on(wblinv::wblinv_builtin(Value::GpuTensor(source), Vec::new()))
-            .expect_err("explicit gpu gate");
+        let error = block_on(wblinv::wblinv_builtin(
+            Value::GpuTensor(source),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect_err("explicit gpu gate");
         assert_eq!(
             error.identifier(),
             Some("RunMat:compatibility:WblinvExplicitGpuInputExtension")

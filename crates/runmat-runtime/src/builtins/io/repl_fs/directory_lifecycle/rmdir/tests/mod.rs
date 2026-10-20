@@ -13,11 +13,16 @@ pub(super) fn lock() -> MutexGuard<'static, ()> {
 
 pub(super) fn evaluate(args: Vec<Value>) -> crate::BuiltinResult<DirectoryOutcome> {
     futures::executor::block_on(async {
-        let request = super::options::parse(args).await?;
+        let request = super::options::parse(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        )
+        .await?;
         Ok(super::execute::remove(request).await)
     })
 }
 
 pub(super) fn invoke(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    futures::executor::block_on(super::rmdir_builtin(args))
+    futures::executor::block_on(super::rmdir_builtin(
+        crate::builtins::common::test_support::builtin_arguments(args),
+    ))
 }

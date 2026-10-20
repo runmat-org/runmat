@@ -99,10 +99,10 @@ pub(in crate::builtins::stats::summary::boxplot) fn char_rows(array: &CharArray)
 
 fn char_row(array: &CharArray, row: usize) -> String {
     if array.rows <= 1 {
-        return array.data.iter().collect();
+        return array.data().iter().collect();
     }
     (0..array.cols)
-        .filter_map(|col| array.data.get(row * array.cols + col).copied())
+        .filter_map(|col| array.data().get(row * array.cols + col).copied())
         .collect::<String>()
         .trim_end()
         .to_string()

@@ -39,7 +39,7 @@ pub fn is_supported_class(class_name: &runmat_types::ClassIdentity) -> bool {
 }
 
 pub fn is_codistributor(value: &Value) -> bool {
-    matches!(value, Value::Object(object) if is_supported_class(&object.class_name))
+    matches!(value, Value::Object(object) if is_supported_class(object.class_name()))
 }
 
 pub fn declared_global_shape(value: &Value) -> Result<Vec<u64>, RuntimeError> {
@@ -80,7 +80,9 @@ pub fn default_scheme(
     global_shape: &[u64],
     labs: LabCount,
 ) -> Result<DistributionScheme, RuntimeError> {
-    let Value::Object(object) = one_dimensional(&[])? else {
+    let Value::Object(object) =
+        one_dimensional(crate::call::FunctionArgumentView::from_slice(&[]))?
+    else {
         unreachable!("one-dimensional factory always returns an object")
     };
     resolve_one_dimensional(&object, global_shape, labs)
@@ -107,7 +109,7 @@ pub fn resolve_local_parts(
         None => {
             resolve_one_dimensional_local_parts(None, local_shapes, labs, validate_across_workers)
         }
-        Some(Value::Object(object)) if object.class_name.is(ONE_DIMENSIONAL_CLASS) => {
+        Some(Value::Object(object)) if object.class_name().is(ONE_DIMENSIONAL_CLASS) => {
             validate_definition(object)?;
             resolve_one_dimensional_local_parts(
                 Some(object),
@@ -116,7 +118,7 @@ pub fn resolve_local_parts(
                 validate_across_workers,
             )
         }
-        Some(Value::Object(object)) if object.class_name.is(TWO_DIMENSIONAL_CLASS) => {
+        Some(Value::Object(object)) if object.class_name().is(TWO_DIMENSIONAL_CLASS) => {
             validate_definition(object)?;
             let global_shape = optional_vector_property(object, CodistributorProperty::GlobalSize)?
                 .ok_or_else(|| {
@@ -217,9 +219,9 @@ fn resolve_one_dimensional_local_parts(
     ))
 }
 
-pub fn factory(arguments: &[Value]) -> Result<Value, RuntimeError> {
+pub fn factory(arguments: crate::call::FunctionArgumentView<'_>) -> Result<Value, RuntimeError> {
     let Some((scheme, parameters)) = arguments.split_first() else {
-        return one_dimensional(&[]);
+        return one_dimensional(crate::call::FunctionArgumentView::from_slice(&[]));
     };
     let scheme = string_scalar(scheme).ok_or_else(|| {
         error("codistributor scheme must be the character vector or string scalar '1d' or '2dbc'")
@@ -267,23 +269,23 @@ pub fn validate_definition(object: &ObjectInstance) -> Result<(), RuntimeError> 
         CodistributorProperty::Orientation,
         CodistributorProperty::GlobalSize,
     ];
-    let expected = match CodistributorClass::from_identity(&object.class_name) {
+    let expected = match CodistributorClass::from_identity(object.class_name()) {
         Some(CodistributorClass::OneDimensional) => ONE_DIMENSIONAL_PROPERTIES,
         Some(CodistributorClass::TwoDimensionalBlockCyclic) => TWO_DIMENSIONAL_PROPERTIES,
         _ => return Err(error("unsupported codistributor class")),
     };
     if object.has_native_payload()
-        || object.dynamic_properties.is_some()
-        || object.properties.len() != expected.len()
+        || object.dynamic_property_count() != 0
+        || object.properties().len() != expected.len()
         || expected
             .iter()
-            .any(|property| !object.properties.contains_key(property.name()))
+            .any(|property| !object.properties().contains_key(property.name()))
     {
         return Err(error(
             "codistributor properties do not match the immutable class schema",
         ));
     }
-    match CodistributorClass::from_identity(&object.class_name) {
+    match CodistributorClass::from_identity(object.class_name()) {
         Some(CodistributorClass::OneDimensional) => {
             optional_positive_property(object, CodistributorProperty::Dimension)?;
             optional_vector_property(object, CodistributorProperty::Partition)?;
@@ -298,7 +300,7 @@ pub fn validate_definition(object: &ObjectInstance) -> Result<(), RuntimeError> 
             optional_positive_property(object, CodistributorProperty::BlockSize)?;
             parse_orientation(
                 object
-                    .properties
+                    .properties()
                     .get(CodistributorProperty::Orientation.name())
                     .expect("validated property set"),
             )?;
@@ -313,7 +315,9 @@ pub fn validate_definition(object: &ObjectInstance) -> Result<(), RuntimeError> 
     Ok(())
 }
 
-pub fn one_dimensional(arguments: &[Value]) -> Result<Value, RuntimeError> {
+pub fn one_dimensional(
+    arguments: crate::call::FunctionArgumentView<'_>,
+) -> Result<Value, RuntimeError> {
     if arguments.len() > 3 {
         return Err(error("codistributor1d accepts zero to three arguments"));
     }
@@ -332,7 +336,9 @@ pub fn one_dimensional(arguments: &[Value]) -> Result<Value, RuntimeError> {
     Ok(one_dimensional_object(dimension, partition, global_shape))
 }
 
-pub fn two_dimensional(arguments: &[Value]) -> Result<Value, RuntimeError> {
+pub fn two_dimensional(
+    arguments: crate::call::FunctionArgumentView<'_>,
+) -> Result<Value, RuntimeError> {
     if arguments.len() > 4 {
         return Err(error("codistributor2dbc accepts zero to four arguments"));
     }
@@ -440,7 +446,7 @@ pub fn resolve(
         return Err(error("redistribute requires a codistributor object"));
     };
     validate_definition(object)?;
-    match CodistributorClass::from_identity(&object.class_name) {
+    match CodistributorClass::from_identity(object.class_name()) {
         Some(CodistributorClass::OneDimensional) => {
             resolve_one_dimensional(object, global_shape, labs)
         }
@@ -511,7 +517,7 @@ fn resolve_two_dimensional(
     let block_size =
         optional_positive_property(object, CodistributorProperty::BlockSize)?.unwrap_or(64);
     let orientation = object
-        .properties
+        .properties()
         .get(CodistributorProperty::Orientation.name())
         .map(parse_orientation)
         .transpose()?
@@ -548,9 +554,12 @@ fn object(
     class_name: runmat_types::StaticClassIdentity,
     properties: HashMap<String, Value>,
 ) -> Value {
-    let mut object = ObjectInstance::new(class_name);
-    object.properties = properties;
-    Value::Object(object)
+    let mut object =
+        runmat_value::UnboundedObjectBuilder::with_property_capacity(class_name, properties.len());
+    for (name, value) in properties {
+        object.insert(name, value);
+    }
+    Value::Object(object.finish())
 }
 
 fn empty_vector() -> Value {
@@ -571,7 +580,7 @@ fn exact_scalar(value: u64) -> Value {
 
 fn string_scalar(value: &Value) -> Option<String> {
     match value {
-        Value::String(value) => Some(value.clone()),
+        Value::String(value) => Some(value.as_str().to_owned()),
         Value::CharArray(value) => value.row_string(),
         _ => None,
     }
@@ -672,10 +681,10 @@ fn optional_positive_property(
     property: CodistributorProperty,
 ) -> Result<Option<u64>, RuntimeError> {
     let name = property.name();
-    let Some(value) = object.properties.get(name) else {
+    let Some(value) = object.properties().get(name) else {
         return Err(error(format!(
             "{} is missing its {name} property",
-            object.class_name
+            object.class_name()
         )));
     };
     if is_empty(value) {
@@ -690,10 +699,10 @@ fn optional_vector_property(
     property: CodistributorProperty,
 ) -> Result<Option<Vec<u64>>, RuntimeError> {
     let name = property.name();
-    let Some(value) = object.properties.get(name) else {
+    let Some(value) = object.properties().get(name) else {
         return Err(error(format!(
             "{} is missing its {name} property",
-            object.class_name
+            object.class_name()
         )));
     };
     if is_empty(value) {
@@ -746,11 +755,11 @@ mod tests {
 
     #[test]
     fn one_dimensional_resolution_preserves_exact_partition_lengths() {
-        let distributor = one_dimensional(&[
+        let distributor = one_dimensional(crate::call::FunctionArgumentView::from_slice(&[
             Value::Int(IntValue::U32(2)),
             vector_value(vec![1, 2, u64::MAX - 3]),
             vector_value(vec![4, u64::MAX]),
-        ])
+        ]))
         .expect("typed constructor");
         assert_eq!(
             resolve(&distributor, &[4, u64::MAX], LabCount(3)).unwrap(),
@@ -764,7 +773,10 @@ mod tests {
     #[test]
     fn structural_double_inputs_must_be_exact_integers() {
         let beyond_flintmax = Value::Num(9_007_199_254_740_994.0);
-        let error = one_dimensional(&[beyond_flintmax]).unwrap_err();
+        let error = one_dimensional(crate::call::FunctionArgumentView::from_slice(&[
+            beyond_flintmax,
+        ]))
+        .unwrap_err();
         assert!(error
             .to_string()
             .contains("exactly representable nonnegative integers"));
@@ -772,60 +784,73 @@ mod tests {
         let tensor = Value::Tensor(
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).unwrap(),
         );
-        assert!(one_dimensional(&[Value::Int(IntValue::U32(1)), tensor]).is_ok());
+        assert!(
+            one_dimensional(crate::call::FunctionArgumentView::from_slice(&[
+                Value::Int(IntValue::U32(1)),
+                tensor
+            ]))
+            .is_ok()
+        );
     }
 
     #[test]
     fn generic_factory_preserves_scheme_identity_and_completeness() {
-        let default = factory(&[]).expect("default codistributor");
+        let default = factory(crate::call::FunctionArgumentView::from_slice(&[]))
+            .expect("default codistributor");
         assert!(matches!(
             default,
-            Value::Object(ref object) if object.class_name == ONE_DIMENSIONAL_CLASS
+            Value::Object(ref object) if object.class_name().is(ONE_DIMENSIONAL_CLASS)
         ));
         assert!(!is_complete(&default).unwrap());
 
-        let two_dimensional = factory(&[
+        let two_dimensional = factory(crate::call::FunctionArgumentView::from_slice(&[
             Value::String("2dbc".into()),
             vector_value(vec![1, 2]),
             Value::Int(IntValue::U32(8)),
-        ])
+        ]))
         .expect("generic 2dbc codistributor");
         assert!(matches!(
             two_dimensional,
-            Value::Object(ref object) if object.class_name == TWO_DIMENSIONAL_CLASS
+            Value::Object(ref object) if object.class_name().is(TWO_DIMENSIONAL_CLASS)
         ));
         assert!(!is_complete(&two_dimensional).unwrap());
 
-        let complete = one_dimensional(&[
+        let complete = one_dimensional(crate::call::FunctionArgumentView::from_slice(&[
             Value::Int(IntValue::U32(1)),
             vector_value(vec![2, 2]),
             vector_value(vec![4, 3]),
-        ])
+        ]))
         .unwrap();
         assert!(is_complete(&complete).unwrap());
-        assert!(factory(&[Value::String("cyclic".into())]).is_err());
+        assert!(factory(crate::call::FunctionArgumentView::from_slice(&[
+            Value::String("cyclic".into())
+        ]))
+        .is_err());
     }
 
     #[test]
     fn declared_shape_partition_and_grid_are_validated_together() {
-        let wrong_partition = one_dimensional(&[
+        let wrong_partition = one_dimensional(crate::call::FunctionArgumentView::from_slice(&[
             Value::Int(IntValue::U32(2)),
             vector_value(vec![2, 2]),
             vector_value(vec![4, 5]),
-        ])
+        ]))
         .unwrap();
         assert!(resolve(&wrong_partition, &[4, 5], LabCount(2)).is_err());
 
-        let wrong_shape = one_dimensional(&[
+        let wrong_shape = one_dimensional(crate::call::FunctionArgumentView::from_slice(&[
             Value::Int(IntValue::U32(2)),
             vector_value(vec![2, 3]),
             vector_value(vec![4, 6]),
-        ])
+        ]))
         .unwrap();
         assert!(resolve(&wrong_shape, &[4, 5], LabCount(2)).is_err());
 
-        let wrong_grid =
-            two_dimensional(&[vector_value(vec![2, 2]), Value::Int(IntValue::U32(1))]).unwrap();
+        let wrong_grid = two_dimensional(crate::call::FunctionArgumentView::from_slice(&[
+            vector_value(vec![2, 2]),
+            Value::Int(IntValue::U32(1)),
+        ]))
+        .unwrap();
         assert!(resolve(&wrong_grid, &[4, 4], LabCount(3)).is_err());
     }
 

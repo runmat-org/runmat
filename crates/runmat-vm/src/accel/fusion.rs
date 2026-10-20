@@ -1,6 +1,5 @@
 use crate::bytecode::program::ExecutionContext;
 use crate::bytecode::Instr;
-use crate::interpreter::engine as interp_engine;
 use crate::interpreter::errors::mex;
 use crate::interpreter::vars::InterpreterVars;
 use runmat_accelerate::fusion::FusionStoreMaterialization;
@@ -15,12 +14,15 @@ use runmat_accelerate::placement::{
     record_event, PlacementCorrelationId, PlacementEventKind, PlacementVariant,
 };
 use runmat_accelerate::InstrSpan;
-use runmat_accelerate::{FusionKind, ValueOrigin, VarKind};
+use runmat_accelerate::{FusionKind, VarKind};
 use runmat_runtime::builtins::common::shape::is_scalar_shape;
 use runmat_runtime::RuntimeError;
 use runmat_time::{duration_ns_saturating, Instant};
 use runmat_value::Value;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
+
+#[path = "fusion/input_transport.rs"]
+pub(crate) mod input_transport;
 
 #[inline]
 pub fn value_kind(value: &Value) -> &'static str {
@@ -85,7 +87,7 @@ fn is_scalarish_runtime_value(value: &Value) -> bool {
         Value::ComplexTensor(tensor) => is_scalar_shape(tensor.shape()),
         Value::LogicalArray(array) => is_scalar_shape(&array.shape),
         Value::GpuTensor(handle) => is_scalar_shape(handle.shape()),
-        Value::CharArray(array) => array.data.len() == 1,
+        Value::CharArray(array) => array.data().len() == 1,
         _ => false,
     }
 }
@@ -210,251 +212,31 @@ impl Drop for StackSliceGuard<'_> {
     }
 }
 
-pub fn gather_fusion_inputs<'a>(
+pub(crate) struct GatheredFusionInputs<'a> {
+    pub guard: StackSliceGuard<'a>,
+    pub request: FusionExecutionRequest<'a>,
+}
+
+pub(crate) fn gather_fusion_inputs<'a>(
     plan: &'a runmat_accelerate::FusionGroupPlan,
-    graph: &runmat_accelerate::AccelGraph,
+    transport: &input_transport::VmFusionInputTransport,
     stack: &'a mut crate::interpreter::stack::InterpreterStack,
     vars: &InterpreterVars,
     context: &mut ExecutionContext,
     placement: Option<PlacementCorrelationId>,
-) -> Result<
-    (
-        StackSliceGuard<'a>,
-        FusionExecutionRequest<'a>,
-        Vec<Option<Value>>,
-    ),
-    RuntimeError,
-> {
+) -> Result<Option<GatheredFusionInputs<'a>>, RuntimeError> {
     let prepare_started = Instant::now();
-    if plan.group.stack_layout.is_none() && !plan.stack_pattern.is_empty() {
-        return Err(mex(
-            "FusionMissingStackLayout",
-            "fusion: missing compile-time stack layout metadata",
-        ));
+    let required = transport.required_stack_operands();
+    if !transport.matches(plan) || stack.len() < required {
+        return Ok(None);
     }
-    let required_stack_operands = plan
-        .group
-        .stack_layout
-        .as_ref()
-        .map(|layout| layout.required_stack_operands)
-        .unwrap_or_else(|| plan.stack_pattern.len());
-    let mut inputs: Vec<Option<Value>> = vec![None; plan.inputs.len()];
-
-    for (idx, value) in &plan.constants {
-        if let Some(slot) = inputs.get_mut(*idx) {
-            if slot.is_none() {
-                *slot = Some(value.clone());
-            }
-        }
-    }
-
-    for (idx, value_id) in plan.inputs.iter().enumerate() {
-        let info = graph
-            .value(*value_id)
-            .ok_or_else(|| format!("fusion: missing value metadata for id {value_id}"))?;
-        match &info.origin {
-            ValueOrigin::Variable { kind, index } => {
-                let value =
-                    match kind {
-                        VarKind::Global => vars
-                            .get(*index)
-                            .map(|value| (*value).clone())
-                            .ok_or_else(|| format!("fusion: global var {index} out of range"))?,
-                        VarKind::Local => {
-                            if let Some(frame) = context.call_stack.last() {
-                                let absolute = frame.locals_start + index;
-                                context.locals.get(absolute).cloned().ok_or_else(|| {
-                                    format!("fusion: local var {index} unavailable")
-                                })?
-                            } else {
-                                vars.get(*index).map(|value| value.clone()).ok_or_else(|| {
-                                    format!("fusion: local var {index} unavailable")
-                                })?
-                            }
-                        }
-                    };
-                debug_assert!(
-                    inputs[idx].is_none(),
-                    "fusion: duplicate input slot {} for plan {}",
-                    idx,
-                    plan.index
-                );
-                inputs[idx] = Some(value);
-            }
-            ValueOrigin::Constant | ValueOrigin::NodeOutput { .. } | ValueOrigin::Unknown => {}
-        }
-    }
-
-    if log::log_enabled!(log::Level::Debug) && interp_engine::fusion_debug_enabled() {
-        let stack_needed_preview = required_stack_operands;
-        let stack_snapshot: Vec<&Value> = stack.iter().rev().take(stack_needed_preview).collect();
-        let stack_kinds: Vec<&'static str> =
-            stack_snapshot.iter().rev().map(|v| value_kind(v)).collect();
-        let input_meta: Vec<String> = plan
-            .inputs
-            .iter()
-            .enumerate()
-            .map(|(i, value_id)| {
-                if let Some(info) = graph.value(*value_id) {
-                    format!("#{i}:id={} origin={:?}", value_id, info.origin)
-                } else {
-                    format!("#{i}:id={} origin=<missing>", value_id)
-                }
-            })
-            .collect();
-        log::debug!(
-            "fusion group {} gather: stack_depth={} stack_needed={} stack_kinds={:?} pattern={:?} inputs={:?}",
-            plan.index, stack.len(), stack_needed_preview, stack_kinds, &plan.stack_pattern, input_meta
-        );
-    }
-
-    if stack.len() < required_stack_operands {
-        if interp_engine::fusion_debug_enabled() {
-            log::debug!(
-                "fusion stack underflow: plan={} needed={} available={} pattern={:?}",
-                plan.index,
-                required_stack_operands,
-                stack.len(),
-                plan.stack_pattern
-            );
-        }
-        return Err(mex(
-            "FusionStackUnderflow",
-            "fusion: stack underflow gathering inputs",
-        ));
-    }
-    let available = required_stack_operands;
-    let slice_start = stack.len() - available;
-    let stack_guard = StackSliceGuard::new(stack, slice_start)?;
-    let slice = stack_guard.slice().to_vec();
-    let mut consumed_inputs: Vec<Option<Value>> = vec![None; plan.inputs.len()];
-    let input_positions: HashMap<runmat_accelerate::graph::ValueId, usize> = plan
-        .inputs
-        .iter()
-        .enumerate()
-        .map(|(idx, value_id)| (*value_id, idx))
-        .collect();
-
-    let allow_stack_value = |val: &Value| {
-        if plan.group.kind.is_reduction() {
-            matches!(val, Value::GpuTensor(_) | Value::Tensor(_))
-        } else {
-            true
-        }
+    // Read only the sealed input sources before taking ownership of operands.
+    // An unavailable source declines without changing the VM stack.
+    let slice_start = stack.len() - required;
+    let Some(inputs) = transport.gather(&stack.as_slice()[slice_start..], vars, context) else {
+        return Ok(None);
     };
-
-    if let Some(layout) = plan.group.stack_layout.as_ref() {
-        for binding in &layout.bindings {
-            let Some(input_idx) = input_positions.get(&binding.value_id).copied() else {
-                continue;
-            };
-            let Some(val) = slice.get(binding.stack_offset).cloned() else {
-                continue;
-            };
-            consumed_inputs[input_idx] = Some(val.clone());
-            if inputs[input_idx].is_none() && allow_stack_value(&val) {
-                inputs[input_idx] = Some(val);
-            }
-        }
-    } else {
-        for (offset, input_idx) in plan.stack_pattern.iter().enumerate() {
-            let Some(val) = slice.get(offset).cloned() else {
-                continue;
-            };
-            consumed_inputs[*input_idx] = Some(val.clone());
-            if inputs[*input_idx].is_none() && allow_stack_value(&val) {
-                inputs[*input_idx] = Some(val);
-            }
-        }
-    }
-
-    for (idx, slot) in inputs.iter_mut().enumerate() {
-        if slot.is_some() {
-            continue;
-        }
-        let vid = plan.inputs[idx];
-        let info = graph.value(vid);
-        if let Some(info) = info {
-            match &info.origin {
-                ValueOrigin::Variable { kind, index } => {
-                    let value_opt = match kind {
-                        VarKind::Global => vars.get(*index).map(|value| value.clone()),
-                        VarKind::Local => {
-                            if let Some(frame) = context.call_stack.last() {
-                                let absolute = frame.locals_start + index;
-                                context.locals.get(absolute).cloned()
-                            } else {
-                                vars.get(*index).map(|value| value.clone())
-                            }
-                        }
-                    };
-                    if let Some(value) = value_opt {
-                        *slot = Some(value);
-                        continue;
-                    }
-                }
-                ValueOrigin::Constant => {
-                    if let Some(value) = plan.const_values.get(&vid) {
-                        *slot = Some(value.clone());
-                        continue;
-                    }
-                }
-                _ => {}
-            }
-        }
-        if slot.is_none() {
-            if let Some(binding) = graph.var_binding(vid) {
-                let value_opt = match binding.kind {
-                    VarKind::Global => vars.get(binding.index).map(|value| value.clone()),
-                    VarKind::Local => {
-                        if let Some(frame) = context.call_stack.last() {
-                            let absolute = frame.locals_start + binding.index;
-                            context.locals.get(absolute).cloned()
-                        } else {
-                            vars.get(binding.index).map(|value| value.clone())
-                        }
-                    }
-                };
-                if let Some(value) = value_opt {
-                    *slot = Some(value);
-                    continue;
-                }
-            }
-        }
-        if slot.is_none() {
-            if let Some(info) = info {
-                if let ValueOrigin::NodeOutput { node, .. } = info.origin {
-                    if let Some(binding) = graph.node_binding(node) {
-                        let value_opt = match binding.kind {
-                            VarKind::Global => vars.get(binding.index).map(|value| value.clone()),
-                            VarKind::Local => {
-                                if let Some(frame) = context.call_stack.last() {
-                                    let absolute = frame.locals_start + binding.index;
-                                    context.locals.get(absolute).cloned()
-                                } else {
-                                    vars.get(binding.index).map(|value| value.clone())
-                                }
-                            }
-                        };
-                        if let Some(value) = value_opt {
-                            *slot = Some(value);
-                            continue;
-                        }
-                    }
-                }
-            }
-        }
-        if slot.is_none() {
-            if let Some(value) = plan.const_values.get(&vid) {
-                *slot = Some(value.clone());
-            }
-        }
-    }
-
-    let inputs: Vec<Value> = inputs
-        .into_iter()
-        .map(|opt| opt.ok_or_else(|| mex("FusionMissingInput", "fusion: missing input value")))
-        .collect::<Result<_, _>>()?;
+    let stack_guard = StackSliceGuard::new(stack, slice_start)?;
 
     if log::log_enabled!(log::Level::Debug) {
         let summaries: Vec<String> = inputs
@@ -465,16 +247,15 @@ pub fn gather_fusion_inputs<'a>(
         log::debug!("fusion inputs runtime: [{}]", summaries.join(", "));
     }
 
-    Ok((
-        stack_guard,
-        FusionExecutionRequest {
+    Ok(Some(GatheredFusionInputs {
+        guard: stack_guard,
+        request: FusionExecutionRequest {
             plan,
             inputs,
             placement,
             runtime: Some(context.runtime.clone()),
         },
-        consumed_inputs,
-    ))
+    }))
     .inspect(|_| {
         if let Some(correlation) = placement {
             record_event(
@@ -855,6 +636,9 @@ pub async fn try_execute_fusion_group(
     placement: Option<PlacementCorrelationId>,
     right: Option<runmat_runtime::context::VmFusionCompletionRight>,
 ) -> Result<FusionExecutionOutcome<FusionVmResult>, FusionAttemptError> {
+    // This compatibility entry point has no instruction transcript. It can
+    // transport evaluated operands/literals, but never skip a semantic load.
+    let transport = input_transport::VmFusionInputTransport::project(plan, graph, &[], &[]);
     try_execute_fusion_group_with_inputs(
         plan,
         graph,
@@ -866,6 +650,7 @@ pub async fn try_execute_fusion_group(
             right,
             decline: None,
             input_uses: None,
+            transport: transport.as_ref(),
         },
     )
     .await
@@ -875,11 +660,12 @@ pub(crate) struct VmFusionInvocation<'a> {
     pub right: Option<runmat_runtime::context::VmFusionCompletionRight>,
     pub decline: Option<runmat_runtime::context::VmFusionDeclineRight>,
     pub input_uses: Option<&'a runmat_accelerate::fusion_exec::VmHostInputUses>,
+    pub transport: Option<&'a input_transport::VmFusionInputTransport>,
 }
 
 pub(crate) async fn try_execute_fusion_group_with_inputs(
     plan: &runmat_accelerate::FusionGroupPlan,
-    graph: &runmat_accelerate::AccelGraph,
+    _graph: &runmat_accelerate::AccelGraph,
     stack: &mut crate::interpreter::stack::InterpreterStack,
     vars: &InterpreterVars,
     context: &mut ExecutionContext,
@@ -890,10 +676,25 @@ pub(crate) async fn try_execute_fusion_group_with_inputs(
         right,
         decline,
         input_uses,
+        transport,
     } = invocation;
-    let (stack_guard, request, _consumed_inputs) =
-        gather_fusion_inputs(plan, graph, stack, vars, context, placement)
-            .map_err(FusionAttemptError::Terminal)?;
+    let Some(transport) = transport else {
+        return Err(FusionAttemptError::Deopt(mex(
+            "FusionInputTransport",
+            "fusion input transport has not been installed",
+        )));
+    };
+    let GatheredFusionInputs {
+        guard: stack_guard,
+        request,
+    } = gather_fusion_inputs(plan, transport, stack, vars, context, placement)
+        .map_err(FusionAttemptError::Terminal)?
+        .ok_or_else(|| {
+            FusionAttemptError::Deopt(mex(
+                "FusionInputTransport",
+                "fusion input transport is unavailable before execution",
+            ))
+        })?;
     if plan.group.kind.is_elementwise()
         && !request.inputs.is_empty()
         && request.inputs.iter().all(is_scalarish_runtime_value)

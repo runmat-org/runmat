@@ -43,7 +43,7 @@ fn render(
         super::super::state::encode_plot_object_handle(handle, 0, PlotObjectKind::SuperTitle);
     let result = match property.map(canonical_property_name).as_deref() {
         None => {
-            let mut st = StructValue::new();
+            let mut st = runmat_value::UnboundedStructValueBuilder::new();
             st.insert("Handle", Value::Num(handle.as_u32() as f64));
             st.insert("Number", Value::Num(handle.as_u32() as f64));
             st.insert("Type", Value::String("figure".into()));
@@ -56,22 +56,19 @@ fn render(
             st.insert("Parent", Value::Num(f64::NAN));
             st.insert(
                 "Name",
-                Value::String(figure.name.clone().unwrap_or_default()),
+                Value::string(figure.name.clone().unwrap_or_default()),
             );
             st.insert("NumberTitle", Value::Bool(figure.number_title));
             st.insert("Visible", Value::Bool(figure.visible));
             st.insert("Position", figure_position_value(figure.position));
-            st.insert(
-                "Color",
-                rgb_triplet_value(figure.background_color),
-            );
-            st.insert("Tag", Value::String(tag));
+            st.insert("Color", rgb_triplet_value(figure.background_color));
+            st.insert("Tag", Value::string(tag));
             if let Some(waitbar) = waitbar {
                 st.insert("WaitbarProgress", Value::Num(waitbar.progress));
-                st.insert("WaitbarMessage", Value::String(waitbar.message));
+                st.insert("WaitbarMessage", Value::string(waitbar.message));
             }
             st.insert("SGTitle", Value::Num(sg_title_handle));
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("number") => Ok(Value::Num(handle.as_u32() as f64)),
         Some("type") => Ok(Value::String("figure".into())),
@@ -84,7 +81,7 @@ fn render(
             children
         })),
         Some("parent") => Ok(Value::Num(f64::NAN)),
-        Some("name") => Ok(Value::String(figure.name.clone().unwrap_or_default())),
+        Some("name") => Ok(Value::string(figure.name.clone().unwrap_or_default())),
         Some("numbertitle") => Ok(Value::Bool(figure.number_title)),
         Some("visible") => Ok(Value::Bool(figure.visible)),
         Some("position") => Ok(figure_position_value(figure.position)),
@@ -92,10 +89,10 @@ fn render(
         Some("waitbarprogress") => Ok(Value::Num(
             waitbar.map(|state| state.progress).unwrap_or(f64::NAN),
         )),
-        Some("waitbarmessage") => Ok(Value::String(
+        Some("waitbarmessage") => Ok(Value::string(
             waitbar.map(|state| state.message).unwrap_or_default(),
         )),
-        Some("tag") => Ok(Value::String(tag)),
+        Some("tag") => Ok(Value::string(tag)),
         Some("sgtitle") => Ok(Value::Num(sg_title_handle)),
         Some(other) => Err(plotting_error(
             builtin,

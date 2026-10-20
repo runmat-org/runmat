@@ -241,9 +241,12 @@ impl BrowserExecutionService {
     fn future_for_value(
         &self,
         value: Value,
-    ) -> Result<Result<FutureHandle, Value>, ExecutionServiceError> {
+    ) -> Result<
+        Result<runmat_runtime::execution::FutureExecutionHandle, Value>,
+        ExecutionServiceError,
+    > {
         match value {
-            Value::Future(handle) => Ok(Ok(handle)),
+            Value::Future(handle) => Ok(Ok(handle.into())),
             Value::Task(handle) => {
                 self.validate_scope(handle.scope_id)?;
                 let state = self.state.borrow();
@@ -254,11 +257,12 @@ impl BrowserExecutionService {
                 if task.generation != handle.generation {
                     return Err(ExecutionServiceError::UnknownHandle);
                 }
-                Ok(Ok(FutureHandle {
-                    id: task.future_id,
-                    scope_id: self.scope_id,
-                    outputs: handle.outputs,
-                }))
+                Ok(Ok(
+                    runmat_runtime::execution::FutureExecutionHandle::from_task(
+                        handle,
+                        task.future_id,
+                    ),
+                ))
             }
             value => Ok(Err(value)),
         }
@@ -406,15 +410,8 @@ impl BrowserExecutionService {
                     })
                     .and_then(runmat_runtime::execution::RootedValueSequence::new);
                 let report = AttemptReport::Succeeded {
-                    result: AttemptSuccess::new(
-                        &attempt,
-                        outputs,
-                        Vec::new(),
-                        wall_millis,
-                        0,
-                        0,
-                    )
-                    .expect("browser attempt resource accounting must remain bounded"),
+                    result: AttemptSuccess::new(&attempt, outputs, Vec::new(), wall_millis, 0, 0)
+                        .expect("browser attempt resource accounting must remain bounded"),
                 };
                 (
                     self.future_id(attempt.task_id),
@@ -924,7 +921,7 @@ impl RuntimeExecutionServices for BrowserExecutionService {
 
     fn claim_next_task_result(
         &self,
-        tasks: &[TaskHandle],
+        tasks: &[runmat_value::SharedTaskHandle],
     ) -> Result<TaskResultClaim, ExecutionServiceError> {
         let mut state = self.state.borrow_mut();
         let mut selected: Option<(u64, usize, TaskId)> = None;
@@ -1145,7 +1142,7 @@ impl RuntimeExecutionServices for BrowserExecutionService {
 
     fn complete_future(
         &self,
-        future: &FutureHandle,
+        future: runmat_runtime::execution::FutureCompletionRef<'_>,
         result: Result<runmat_runtime::execution::RootedValueSequence, ExecutionServiceError>,
     ) -> Result<(), ExecutionServiceError> {
         self.validate_scope(future.scope_id)?;
@@ -1338,7 +1335,9 @@ mod tests {
             .unwrap();
         let task = service.spawn(&future).unwrap();
         assert!(matches!(
-            service.begin_await(Value::Task(task.clone())).unwrap(),
+            service
+                .begin_await(Value::Task(task.clone().into()))
+                .unwrap(),
             AwaitAction::Pending(_)
         ));
         for _ in 0..8 {
@@ -1347,7 +1346,10 @@ mod tests {
             ))
             .await
             .unwrap();
-            if service.begin_await(Value::Task(task.clone())).is_err() {
+            if service
+                .begin_await(Value::Task(task.clone().into()))
+                .is_err()
+            {
                 return;
             }
         }
@@ -1373,12 +1375,12 @@ mod tests {
         let task = service.spawn(&future).unwrap();
         service
             .cancel(
-                &Value::Future(future),
+                &Value::Future(future.into()),
                 runmat_execution::CancellationReason::User,
             )
             .unwrap();
         assert_eq!(
-            service.begin_await(Value::Task(task)),
+            service.begin_await(Value::Task(task.into())),
             Err(ExecutionServiceError::Cancelled)
         );
     }

@@ -5,11 +5,19 @@ use std::rc::Rc;
 use runmat_gc_api::{Trace, Tracer};
 use runmat_types::ClassIdentity;
 
-use crate::{HandleRef, ObjectInstance, SelectedObjectClassFacts, Value};
+use crate::{
+    ExactArrayStorage, HandleRef, ObjectInstance, OutputListStorage, OwnedExactArrayValues,
+    SelectedObjectClassFacts, SharedClassIdentity, SharedShape, Value,
+};
 
 #[path = "array/admission.rs"]
 mod admission;
 pub use admission::{ObjectArrayAdmission, ValidatedObjectArrayParts};
+#[path = "array/builder.rs"]
+mod builder;
+pub use builder::{
+    ObjectArrayBuildError, ObjectArrayBuilder, ObjectArrayElementError, ObjectArrayQuote,
+};
 
 /// A homogeneous MATLAB object array.
 ///
@@ -20,69 +28,138 @@ pub use admission::{ObjectArrayAdmission, ValidatedObjectArrayParts};
 /// without falling back to a cell array.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObjectArray {
-    class_name: ClassIdentity,
-    data: Vec<Value>,
-    shape: Vec<usize>,
+    class_name: SharedClassIdentity,
+    data: OutputListStorage,
+    shape: SharedShape,
     // Empty-only exact products captured before slicing/deletion discards all
     // elements. Nonempty elements already own their own selected facts, so an
     // array-level copy would be redundant. Distinct old/new products of one
     // ClassIdentity remain distinct; no current-name lookup is licensed.
-    selected_provenance: Vec<Rc<SelectedObjectClassFacts>>,
+    selected_provenance: ExactArrayStorage<Rc<SelectedObjectClassFacts>>,
     unselected_provenance: bool,
 }
 
 impl ObjectArray {
+    /// Explicit ordinary publication retaining existing immutable storage.
+    /// This validates the same class/kind invariant as the owned admission
+    /// machine; it never turns an unpublished owned Vec into a hidden clone.
+    pub fn from_shared_storage_unbounded(
+        class_name: impl Into<SharedClassIdentity>,
+        data: OutputListStorage,
+        shape: SharedShape,
+    ) -> Result<Self, String> {
+        if !data.is_shallow_clone() {
+            return Err("object array requires shared slot storage".into());
+        }
+        if shape.len() < 2
+            || shape.iter().try_fold(1usize, |n, &d| n.checked_mul(d)) != Some(data.len())
+        {
+            return Err("object array shape differs from its element count".into());
+        }
+        let class_name = class_name.into();
+        let mut kind = None;
+        for child in &data {
+            admission::validate_value(child, class_name.as_identity(), &mut kind)?;
+        }
+        Ok(Self {
+            class_name,
+            data,
+            shape,
+            selected_provenance: ExactArrayStorage::empty(),
+            unselected_provenance: false,
+        })
+    }
     pub fn new(
-        class_name: impl Into<ClassIdentity>,
+        class_name: impl Into<SharedClassIdentity>,
         data: Vec<Value>,
         shape: Vec<usize>,
     ) -> Result<Self, String> {
-        Ok(
-            ObjectArrayAdmission::values(class_name.into(), data, shape)?
-                .finish_synchronously()?
-                .into_array(),
-        )
+        Ok(ObjectArrayAdmission::values(class_name, data, shape)?
+            .finish_synchronously()?
+            .into_array())
     }
 
     pub fn from_objects(
-        class_name: impl Into<ClassIdentity>,
+        class_name: impl Into<SharedClassIdentity>,
         objects: Vec<ObjectInstance>,
         shape: Vec<usize>,
     ) -> Result<Self, String> {
-        Ok(
-            ObjectArrayAdmission::objects(class_name.into(), objects, shape)?
-                .finish_synchronously()?
-                .into_array(),
-        )
+        Ok(ObjectArrayAdmission::objects(class_name, objects, shape)?
+            .finish_synchronously()?
+            .into_array())
     }
 
     pub fn from_handles(
-        class_name: impl Into<ClassIdentity>,
+        class_name: impl Into<SharedClassIdentity>,
         handles: Vec<HandleRef>,
         shape: Vec<usize>,
     ) -> Result<Self, String> {
-        Ok(
-            ObjectArrayAdmission::handles(class_name.into(), handles, shape)?
-                .finish_synchronously()?
-                .into_array(),
-        )
+        Ok(ObjectArrayAdmission::handles(class_name, handles, shape)?
+            .finish_synchronously()?
+            .into_array())
     }
 
-    pub fn row(class_name: impl Into<ClassIdentity>, data: Vec<Value>) -> Result<Self, String> {
+    pub fn row(
+        class_name: impl Into<SharedClassIdentity>,
+        data: Vec<Value>,
+    ) -> Result<Self, String> {
         let len = data.len();
         Self::new(class_name, data, vec![1, len])
     }
 
-    pub fn empty(class_name: impl Into<ClassIdentity>, shape: Vec<usize>) -> Result<Self, String> {
+    pub fn empty(
+        class_name: impl Into<SharedClassIdentity>,
+        shape: Vec<usize>,
+    ) -> Result<Self, String> {
         Self::new(class_name, Vec::new(), shape)
     }
 
     pub fn class_name(&self) -> &ClassIdentity {
-        &self.class_name
+        self.class_name.as_identity()
     }
 
     pub fn data(&self) -> &[Value] {
         &self.data
+    }
+    pub fn class_name_owner(&self) -> &SharedClassIdentity {
+        &self.class_name
+    }
+    pub fn data_owner(&self) -> &OutputListStorage {
+        &self.data
+    }
+    pub fn shape_owner(&self) -> &SharedShape {
+        &self.shape
+    }
+    pub fn provenance_owner(&self) -> &ExactArrayStorage<Rc<SelectedObjectClassFacts>> {
+        &self.selected_provenance
+    }
+
+    /// Replace one existing slot only when this generation is unique. Validate
+    /// before mutation; no alias copy and no unchecked homogeneous-array view.
+    pub fn try_replace_linear_unique(
+        &mut self,
+        index: usize,
+        value: Value,
+    ) -> Result<Value, Value> {
+        if index >= self.data.len() || !self.data.is_unique() {
+            return Err(value);
+        }
+        let mut kind = None;
+        if let Some(first) = self.data.first() {
+            if admission::validate_value(first, self.class_name.as_identity(), &mut kind).is_err() {
+                return Err(value);
+            }
+        }
+        if admission::validate_value(&value, self.class_name.as_identity(), &mut kind).is_err() {
+            return Err(value);
+        }
+        Ok(std::mem::replace(
+            &mut self
+                .data
+                .try_as_mut_slice_unique()
+                .expect("checked unique object slots")[index],
+            value,
+        ))
     }
 
     pub fn selected_provenance(&self) -> &[Rc<SelectedObjectClassFacts>] {
@@ -100,17 +177,18 @@ impl ObjectArray {
         self
     }
 
-    pub fn with_selected_provenance(
+    pub fn with_selected_provenance_unbounded(
         mut self,
         provenance: impl IntoIterator<Item = Rc<SelectedObjectClassFacts>>,
     ) -> Result<Self, String> {
+        let mut provenance_values = self.selected_provenance.iter().cloned().collect::<Vec<_>>();
         let mut seen = self
             .selected_provenance
             .iter()
             .map(Rc::as_ptr)
             .collect::<HashSet<_>>();
         for facts in provenance {
-            if facts.class() != &self.class_name {
+            if facts.class() != self.class_name.as_identity() {
                 return Err("object-array selected product has a different class".into());
             }
             if !self.is_empty() {
@@ -119,17 +197,54 @@ impl ObjectArray {
                 continue;
             }
             if seen.insert(Rc::as_ptr(&facts)) {
-                self.selected_provenance.push(facts);
+                provenance_values.push(facts);
             }
         }
+        self.selected_provenance = ExactArrayStorage::shared_unbounded(provenance_values);
         Ok(self)
     }
 
-    pub fn into_data(self) -> Vec<Value> {
-        self.data
+    /// Preserve a unique physical slot allocation and its retained claim.
+    pub fn try_into_values(self) -> Result<OwnedExactArrayValues<Value>, Self> {
+        let Self {
+            class_name,
+            data,
+            shape,
+            selected_provenance,
+            unselected_provenance,
+        } = self;
+        match data.try_into_owned() {
+            Ok(data) => Ok(data),
+            Err(data) => Err(Self {
+                class_name,
+                data,
+                shape,
+                selected_provenance,
+                unselected_provenance,
+            }),
+        }
+    }
+    /// Explicit ordinary materialization. Managed consumers construct admitted
+    /// successor slots or retain data_owner; aliases never copy implicitly.
+    pub fn into_data_unbounded(self) -> Vec<Value> {
+        match self.data.try_into_owned() {
+            Ok(values) => match values.try_into_unbounded_vec() {
+                Ok(values) => values,
+                Err(values) => values.into_iter().collect(),
+            },
+            Err(data) => data.iter().cloned().collect(),
+        }
     }
 
-    pub fn reshape_preserving_provenance(mut self, shape: Vec<usize>) -> Result<Self, String> {
+    pub fn reshape_preserving_provenance_unbounded(
+        self,
+        shape: Vec<usize>,
+    ) -> Result<Self, String> {
+        self.try_with_shape(shape.into())
+    }
+    /// Replace only an already-owned shape, without allocating or copying any
+    /// element/provenance slots. The runtime supplies admitted metadata.
+    pub fn try_with_shape(mut self, shape: SharedShape) -> Result<Self, String> {
         let expected = shape
             .iter()
             .try_fold(1usize, |length, axis| length.checked_mul(*axis))
@@ -157,7 +272,11 @@ impl ObjectArray {
         self.data.get(index)
     }
 
-    pub fn select_linear(&self, indices: &[usize], shape: Vec<usize>) -> Result<Self, String> {
+    pub fn select_linear_unbounded(
+        &self,
+        indices: &[usize],
+        shape: Vec<usize>,
+    ) -> Result<Self, String> {
         let data = indices
             .iter()
             .map(|index| {
@@ -169,8 +288,8 @@ impl ObjectArray {
             .collect::<Result<Vec<_>, _>>()?;
         let selected = Self::new(self.class_name.clone(), data, shape)?;
         if selected.is_empty() {
-            let selected =
-                selected.with_selected_provenance(self.selected_provenance.iter().cloned())?;
+            let selected = selected
+                .with_selected_provenance_unbounded(self.selected_provenance.iter().cloned())?;
             Ok(if self.unselected_provenance {
                 selected.with_unselected_provenance()
             } else {
@@ -217,6 +336,31 @@ mod tests {
         assert_eq!(array.shape(), &[1, 2]);
         assert_eq!(array.len(), 2);
         assert_eq!(array.class_name().display_name(), "pkg.Result");
+    }
+
+    #[test]
+    fn original_generation_aliases_retain_slots_shape_and_unique_validation() {
+        let values = vec![Value::Object(ObjectInstance::new("A"))];
+        let slots = values.as_ptr();
+        let shape = vec![1, 1];
+        let dimensions = shape.as_ptr();
+        let mut array = ObjectArray::new("A", values, shape).unwrap();
+        assert_eq!(array.data().as_ptr(), slots);
+        assert_eq!(array.shape().as_ptr(), dimensions);
+        let alias = array.clone();
+        assert_eq!(alias.data().as_ptr(), slots);
+        assert_eq!(alias.shape().as_ptr(), dimensions);
+        assert!(array
+            .try_replace_linear_unique(0, Value::Object(ObjectInstance::new("A")))
+            .is_err());
+        drop(alias);
+        assert!(array
+            .try_replace_linear_unique(0, Value::Object(ObjectInstance::new("B")))
+            .is_err());
+        assert_eq!(array.data().as_ptr(), slots);
+        assert!(array
+            .try_replace_linear_unique(0, Value::Object(ObjectInstance::new("A")))
+            .is_ok());
     }
 
     #[test]

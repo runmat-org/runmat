@@ -7,9 +7,22 @@ use runmat_macros::runtime_builtin;
 use runmat_value::{ObjectInstance, StructValue, Value};
 
 use crate::builtins::common::fs::path_to_string;
-use crate::builtins::io::repl_fs::compat::{char_value, compat_error, gather_args, value_to_path};
+use crate::builtins::io::repl_fs::compat::{char_value, compat_error, value_to_path};
 use crate::context::RuntimeContext;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+
+async fn gather_args(
+    name: &str,
+    args: &crate::call::BuiltinArguments,
+    runtime: Option<&RuntimeContext>,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    args.try_map_preserving_roots_async(args.len(), runtime, |index| async move {
+        crate::gather_if_needed_async(&args[index])
+            .await
+            .map_err(|error| crate::builtins::io::repl_fs::compat::map_control_flow(name, error))
+    })
+    .await
+}
 
 #[path = "xml/cooperation.rs"]
 mod cooperation;
@@ -115,8 +128,8 @@ fn known_document_preflight(value: &Value) -> BuiltinResult<()> {
     match value {
         Value::GpuTensor(_) | Value::Struct(_) => Ok(()),
         Value::Object(object)
-            if object.class_name.is(XML_DOCUMENT_CLASS)
-                || object.class_name.is(XML_ELEMENT_CLASS) =>
+            if object.class_name().is(XML_DOCUMENT_CLASS)
+                || object.class_name().is(XML_ELEMENT_CLASS) =>
         {
             Ok(())
         }
@@ -138,7 +151,7 @@ fn known_document_preflight(value: &Value) -> BuiltinResult<()> {
 )]
 async fn readstruct_builtin(
     runtime: Option<RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let operation = XmlOperation::ReadStruct;
     let mut cooperation = XmlCooperation::new(runtime.as_ref(), operation);
@@ -160,16 +173,16 @@ async fn readstruct_builtin(
     }
     known_text(&args[0], "readstruct", "filename")
         .map_err(|err| xml_error_with_source(operation, XmlDiagnosticKind::InvalidArgument, err))?;
-    ReadStructOptions::preflight(&args[1..])
+    ReadStructOptions::preflight(args.view().range(1..)?)
         .map_err(|err| xml_error_with_source(operation, XmlDiagnosticKind::InvalidOption, err))?;
     let target = CapturedXmlPath::capture(&args[0], operation)?;
     cooperation.completed(0).await?;
     let args = cooperation
-        .await_io(gather_args("readstruct", &args))
+        .await_io(gather_args("readstruct", &args, runtime.as_ref()))
         .await??;
     scalar_text(&args[0], "readstruct", "filename")
         .map_err(|err| xml_error_with_source(operation, XmlDiagnosticKind::InvalidArgument, err))?;
-    let options = ReadStructOptions::parse(&args[1..])
+    let options = ReadStructOptions::parse(args.view().range(1..)?)
         .map_err(|err| xml_error_with_source(operation, XmlDiagnosticKind::InvalidOption, err))?;
     let source = target
         .resolve(&args[0], operation)
@@ -213,8 +226,8 @@ async fn readstruct_builtin(
 )]
 async fn xmlread_builtin(
     runtime: Option<RuntimeContext>,
-    args: Vec<Value>,
-) -> BuiltinResult<Value> {
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<crate::execution::RootedValue> {
     let operation = XmlOperation::XmlRead;
     let mut cooperation = XmlCooperation::new(runtime.as_ref(), operation);
     requested_output_preflight("xmlread")
@@ -241,7 +254,7 @@ async fn xmlread_builtin(
     let target = CapturedXmlPath::capture(&args[0], operation)?;
     cooperation.completed(0).await?;
     let args = cooperation
-        .await_io(gather_args("xmlread", &args))
+        .await_io(gather_args("xmlread", &args, runtime.as_ref()))
         .await??;
     scalar_text(&args[0], "xmlread", "filename")
         .map_err(|err| xml_error_with_source(operation, XmlDiagnosticKind::InvalidArgument, err))?;
@@ -265,30 +278,31 @@ async fn xmlread_builtin(
             }
         })?;
     let root = parse_xml_document_with_context(&text, &mut cooperation).await?;
-    let mut object = ObjectInstance::new(XML_DOCUMENT_CLASS);
-    object
-        .properties
-        .insert("Filename".to_string(), char_value(&filename));
-    object
-        .properties
-        .insert("Text".to_string(), Value::String(text));
-    object
-        .properties
-        .insert("DocumentElementName".to_string(), char_value(&root.name));
-    object.properties.insert(
-        "DocumentElement".to_string(),
-        Value::Object(root.into_object(&mut cooperation).await.map_err(|err| {
+    let root_name = char_value(&root.name);
+    let element = root
+        .into_object(&mut cooperation, runtime.as_ref())
+        .await
+        .map_err(|err| {
             if cooperation.is_execution_error(&err) {
                 err
             } else {
                 xml_error_with_source(operation, XmlDiagnosticKind::Projection, err)
             }
-        })?),
-    );
+        })?;
     source
         .check_current()
         .map_err(|err| xml_io_error(operation, err))?;
-    Ok(Value::Object(object))
+    let fields = [
+        ("Filename", char_value(&filename)),
+        ("Text", Value::string(text)),
+        ("DocumentElementName", root_name),
+        ("DocumentElement", element.value().clone()),
+    ];
+    crate::execution::object::construct_object_from_borrowed_fields(
+        runtime.as_ref(),
+        XML_DOCUMENT_CLASS.display_name(),
+        fields.iter().map(|(name, value)| (*name, value)),
+    )
 }
 
 #[runtime_builtin(
@@ -299,7 +313,7 @@ async fn xmlread_builtin(
 )]
 async fn xmlwrite_builtin(
     runtime: Option<RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let operation = XmlOperation::XmlWrite;
     let mut cooperation = XmlCooperation::new(runtime.as_ref(), operation);
@@ -327,7 +341,7 @@ async fn xmlwrite_builtin(
     };
     cooperation.completed(0).await?;
     let args = cooperation
-        .await_io(gather_args("xmlwrite", &args))
+        .await_io(gather_args("xmlwrite", &args, runtime.as_ref()))
         .await??;
     match args.len() {
         1 => {

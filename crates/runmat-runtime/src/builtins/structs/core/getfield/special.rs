@@ -8,7 +8,7 @@ pub(super) fn listener_field(listener: &Listener, name: &str) -> BuiltinResult<V
     match name {
         "Enabled" | "enabled" => Ok(Value::Bool(listener.enabled)),
         "Valid" | "valid" => Ok(Value::Bool(listener.valid)),
-        "EventName" | "event_name" => Ok(Value::String(listener.event_name.clone())),
+        "EventName" | "event_name" => Ok(Value::string(listener.event_name.clone())),
         "Callback" | "callback" => read_listener_value(listener, true),
         "Target" | "target" => read_listener_value(listener, false),
         "Id" | "id" => Ok(Value::Int(runmat_value::IntValue::U64(listener.id))),
@@ -55,8 +55,8 @@ pub(super) fn exception_field(exception: &MException, name: &str) -> BuiltinResu
     }
 }
 
-fn exception_stack_to_value(stack: &[String]) -> BuiltinResult<Value> {
-    let values = stack.iter().cloned().map(Value::String).collect();
+fn exception_stack_to_value(stack: &[runmat_value::Utf8Text]) -> BuiltinResult<Value> {
+    let values = stack.iter().cloned().map(Value::string).collect();
     make_cell_with_shape(values, vec![stack.len(), 1])
         .map_err(|error| errors::internal(format!("getfield: {error}")))
 }

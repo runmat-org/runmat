@@ -1,5 +1,5 @@
 use super::*;
-type Validator = fn(Vec<Value>) -> BuiltinResult<Value>;
+type Validator = fn(crate::call::BuiltinArguments) -> BuiltinResult<Value>;
 fn validators() -> Vec<(&'static str, Validator, Vec<Value>)> {
     vec![
         (
@@ -92,7 +92,13 @@ fn zero_output_and_implicit_calls_execute_and_assigned_outputs_reject() {
         for count in [None, Some(0)] {
             let _outputs =
                 crate::output_count::push_output_count(count).expect("output-count scope");
-            assert!(evaluate(args.clone()).is_ok(), "{name} count {count:?}");
+            assert!(
+                evaluate(
+                    crate::builtins::common::validation::tests::retained_arguments(args.clone())
+                )
+                .is_ok(),
+                "{name} count {count:?}"
+            );
             assert!(
                 invoke_validator(name, args.clone()).is_ok(),
                 "{name} retained API"
@@ -101,7 +107,10 @@ fn zero_output_and_implicit_calls_execute_and_assigned_outputs_reject() {
         for count in [1, 2, 4] {
             let _outputs =
                 crate::output_count::push_output_count(Some(count)).expect("output-count scope");
-            let error = evaluate(args.clone()).unwrap_err();
+            let error = evaluate(
+                crate::builtins::common::validation::tests::retained_arguments(args.clone()),
+            )
+            .unwrap_err();
             assert_eq!(
                 error.identifier(),
                 Some(format!("RunMat:{name}:TooManyOutputs").as_str())
@@ -126,7 +135,8 @@ fn excess_outputs_and_invalid_controls_precede_provider_lookup() {
     for (name, evaluate, mut args) in validators() {
         args[0] = Value::GpuTensor(handle.clone());
         let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
-        let error = evaluate(args).unwrap_err();
+        let error = evaluate(crate::builtins::common::validation::tests::retained_arguments(args))
+            .unwrap_err();
         assert_eq!(
             error.identifier(),
             Some(format!("RunMat:{name}:TooManyOutputs").as_str())
@@ -137,15 +147,25 @@ fn excess_outputs_and_invalid_controls_precede_provider_lookup() {
         must_be_a::evaluate as Validator,
         must_be_underlying_type::evaluate,
     ] {
-        let error = evaluate(vec![Value::GpuTensor(handle.clone()), Value::Num(1.0)]).unwrap_err();
+        let error = evaluate(
+            crate::builtins::common::validation::tests::retained_arguments(vec![
+                Value::GpuTensor(handle.clone()),
+                Value::Num(1.0),
+            ]),
+        )
+        .unwrap_err();
         assert_eq!(
             error.identifier(),
             Some("RunMat:argumentValidation:InvalidArgument")
         );
     }
-    let error =
-        must_be_vector::evaluate(vec![Value::GpuTensor(handle), Value::String("bad".into())])
-            .unwrap_err();
+    let error = must_be_vector::evaluate(
+        crate::builtins::common::validation::tests::retained_arguments(vec![
+            Value::GpuTensor(handle),
+            Value::String("bad".into()),
+        ]),
+    )
+    .unwrap_err();
     assert_eq!(
         error.identifier(),
         Some("RunMat:mustBeVector:InvalidArgument")
@@ -158,15 +178,22 @@ fn vector_option_accepts_existing_single_text_cell_form() {
     let option =
         Value::Cell(CellArray::new(vec![Value::String("ALLOW-ALL-EMPTIES".into())], 1, 1).unwrap());
     let empty = Value::Tensor(Tensor::new(vec![], vec![0, 2, 3]).unwrap());
-    assert!(must_be_vector::evaluate(vec![empty, option]).is_ok());
+    assert!(must_be_vector::evaluate(
+        crate::builtins::common::validation::tests::retained_arguments(vec![empty, option])
+    )
+    .is_ok());
 }
 
 #[test]
 fn json_payload_extension_is_gated_without_filesystem_access() {
     let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let _mode = crate::compatibility::push_runmat_extensions_enabled(false);
-    let error =
-        validate_function_signatures_json::evaluate(vec![Value::String("{}".into())]).unwrap_err();
+    let error = validate_function_signatures_json::evaluate(
+        crate::builtins::common::validation::tests::retained_arguments(vec![Value::String(
+            "{}".into(),
+        )]),
+    )
+    .unwrap_err();
     assert_eq!(
         error.identifier(),
         Some("RunMat:compatibility:ValidateFunctionSignaturesJSONPayloadExtension")

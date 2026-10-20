@@ -11,18 +11,24 @@ pub(super) struct GpuCrossentropyOptions {
 }
 
 impl GpuCrossentropyOptions {
-    pub(super) fn from_args(args: Vec<Value>, shape: &[usize]) -> BuiltinResult<Option<Self>> {
+    pub(super) fn from_args(
+        args: crate::call::FunctionArgumentView<'_>,
+        shape: &[usize],
+    ) -> BuiltinResult<Option<Self>> {
         let len = checked_len(shape)?;
-        let mut args = args;
         let positional_weights = if args
             .first()
             .is_some_and(|value| !is_crossentropy_option_name(value))
         {
-            Some(args.remove(0))
+            Some(args.first().expect("positional loss weight").clone())
         } else {
             None
         };
-        let mut parsed = ParsedLossOptions::from_args(args)?;
+        let option_start = usize::from(positional_weights.is_some());
+        let mut parsed = ParsedLossOptions::from_view(
+            args.range(option_start..)
+                .expect("crossentropy option suffix"),
+        )?;
         let mode = parsed
             .remove(OptionKey::ClassificationMode)
             .or_else(|| parsed.remove(OptionKey::TargetCategories))

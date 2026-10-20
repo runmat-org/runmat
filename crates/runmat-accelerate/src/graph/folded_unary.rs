@@ -46,11 +46,7 @@ impl AccelGraph {
         let [source] = producer.inputs.as_slice() else {
             return None;
         };
-        let source_info = self.value(*source)?;
-        if !matches!(source_info.origin, ValueOrigin::Constant) {
-            return None;
-        }
-        let source = match source_info.constant.as_ref()? {
+        let source = match self.source_literal_constant(*source)? {
             BuiltinValue::Num(value) => *value,
             BuiltinValue::Bool(value) => f64::from(u8::from(*value)),
             _ => return None,

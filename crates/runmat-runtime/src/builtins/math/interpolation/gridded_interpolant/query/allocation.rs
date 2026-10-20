@@ -4,7 +4,7 @@ use super::*;
 
 pub(in crate::builtins::math::interpolation::gridded_interpolant) fn admit_spline2_from_object(
     receiver: &Value,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     runtime: Option<&crate::context::RuntimeContext>,
 ) -> BuiltinResult<Option<HostAllocationReceipt>> {
     let Some(runtime) = runtime else {
@@ -26,7 +26,7 @@ pub(in crate::builtins::math::interpolation::gridded_interpolant) fn admit_splin
     if !object.is_class(CLASS_IDENTITY) {
         return Ok(None);
     }
-    let Some(method) = object.properties.get(METHOD).and_then(text_from_value) else {
+    let Some(method) = object.properties().get(METHOD).and_then(text_from_value) else {
         return Ok(None);
     };
     let Some(method) = MethodKeyword::parse(&method) else {
@@ -35,18 +35,18 @@ pub(in crate::builtins::math::interpolation::gridded_interpolant) fn admit_splin
     if parse_interp_method(method)? != InterpMethod::Spline {
         return Ok(None);
     }
-    let Some(Value::Cell(grids)) = object.properties.get(GRID_VECTORS) else {
+    let Some(Value::Cell(grids)) = object.properties().get(GRID_VECTORS) else {
         return Ok(None);
     };
-    if grids.data.len() != 2 {
+    if grids.data().len() != 2 {
         return Ok(None);
     }
-    let Some(Value::Tensor(values)) = object.properties.get(VALUES) else {
+    let Some(Value::Tensor(values)) = object.properties().get(VALUES) else {
         return Ok(None);
     };
-    let rows = raw_count(&grids.data[0])
+    let rows = raw_count(&grids.data()[0])
         .map_err(|error| super::super::super::pp::host_allocation_error(BUILTIN_NAME, error))?;
-    let columns = raw_count(&grids.data[1])
+    let columns = raw_count(&grids.data()[1])
         .map_err(|error| super::super::super::pp::host_allocation_error(BUILTIN_NAME, error))?;
     let mut extra_shape = values.shape().get(2..).unwrap_or(&[]).to_vec();
     while extra_shape.last() == Some(&1) {
@@ -94,7 +94,7 @@ pub(in crate::builtins::math::interpolation::gridded_interpolant) fn admit_splin
 
 pub(super) fn admit_spline2_before_query(
     spec: &InterpolantSpec,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     grid_size: usize,
     extra_count: usize,
     extra_rank: usize,
@@ -127,7 +127,7 @@ fn admit_geometry(
     dtype: NumericDType,
     extra_count: usize,
     extra_rank: usize,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     object_scratch: u64,
     runtime: Option<&crate::context::RuntimeContext>,
 ) -> BuiltinResult<Option<HostAllocationReceipt>> {
@@ -193,25 +193,28 @@ fn admit_geometry(
     })
 }
 
-fn query_geometry(args: &[Value]) -> Option<Result<(usize, usize, u64), HostAllocationError>> {
-    let supported = matches!(args, [Value::Cell(cell)] if cell.data.len() == 2)
-        || matches!(args, [matrix] if raw_shape(matrix).len() == 2 && raw_shape(matrix)[1] == 2)
-        || matches!(args, [_, _]);
+fn query_geometry(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> Option<Result<(usize, usize, u64), HostAllocationError>> {
+    let operands = (args.len(), args.get(0), args.get(1));
+    let supported = matches!(operands, (1, Some(Value::Cell(cell)), _) if cell.data().len() == 2)
+        || matches!(operands, (1, Some(matrix), _) if raw_shape(matrix).len() == 2 && raw_shape(matrix)[1] == 2)
+        || matches!(operands, (2, Some(_), Some(_)));
     if !supported {
         return None;
     }
     let checked = |n: usize| u64::try_from(n).map_err(|_| HostAllocationError::Overflow);
-    Some((|| match args {
-        [Value::Cell(cell)] if cell.data.len() == 2 => {
-            let x = raw_count(&cell.data[0])?;
-            let y = raw_count(&cell.data[1])?;
+    Some((|| match operands {
+        (1, Some(Value::Cell(cell)), _) if cell.data().len() == 2 => {
+            let x = raw_count(&cell.data()[0])?;
+            let y = raw_count(&cell.data()[1])?;
             let total = x.checked_mul(y).ok_or(HostAllocationError::Overflow)?;
             let vectors = x.checked_add(y).ok_or(HostAllocationError::Overflow)?;
             let bytes = checked(vectors)?
                 .checked_mul(8)
                 .ok_or(HostAllocationError::Overflow)?;
-            let downloads = resident_bytes(&cell.data[0])?
-                .checked_add(resident_bytes(&cell.data[1])?)
+            let downloads = resident_bytes(&cell.data()[0])?
+                .checked_add(resident_bytes(&cell.data()[1])?)
                 .ok_or(HostAllocationError::Overflow)?;
             Ok((
                 total,
@@ -221,7 +224,7 @@ fn query_geometry(args: &[Value]) -> Option<Result<(usize, usize, u64), HostAllo
                     .ok_or(HostAllocationError::Overflow)?,
             ))
         }
-        [matrix] if raw_shape(matrix).len() == 2 && raw_shape(matrix)[1] == 2 => {
+        (1, Some(matrix), _) if raw_shape(matrix).len() == 2 && raw_shape(matrix)[1] == 2 => {
             let count = raw_shape(matrix)[0];
             let bytes = checked(count)?
                 .checked_mul(56)
@@ -235,7 +238,7 @@ fn query_geometry(args: &[Value]) -> Option<Result<(usize, usize, u64), HostAllo
                     .ok_or(HostAllocationError::Overflow)?,
             ))
         }
-        [left, right] => {
+        (2, Some(left), Some(right)) => {
             let count = raw_count(left)?;
             let other = raw_count(right)?;
             let temporary = count

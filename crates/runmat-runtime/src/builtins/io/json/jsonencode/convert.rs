@@ -37,7 +37,7 @@ pub(super) fn value_to_json(
         Value::Complex(re, im) => complex_scalar_to_json(*re, *im, options),
         Value::ComplexTensor(ct) => complex_tensor_to_json(ct, options),
         Value::String(s) => Ok(JsonValue::String(s.clone())),
-        Value::Symbolic(expr) => Ok(JsonValue::String(expr.to_string())),
+        Value::Symbolic(expr) => Ok(JsonValue::String(expr.to_string().into())),
         Value::SymbolicArray(array) => symbolic_array_to_json(array, options),
         Value::StringArray(sa) => string_array_to_json(sa, options),
         Value::CharArray(ca) => char_array_to_json(ca, options),
@@ -226,15 +226,15 @@ fn string_array_to_json(
     sa: &StringArray,
     _options: &JsonEncodeOptions,
 ) -> BuiltinResult<JsonValue> {
-    if sa.data.is_empty() {
+    if sa.data().is_empty() {
         return Ok(JsonValue::Array(Vec::new()));
     }
     let keep_dims = compute_keep_dims(&sa.shape, true);
     if keep_dims.is_empty() {
-        return Ok(JsonValue::String(sa.data[0].clone()));
+        return Ok(JsonValue::String(sa.data()[0].clone()));
     }
     build_strided_array(&sa.shape, &keep_dims, |offset| {
-        Ok(JsonValue::String(sa.data[offset].clone()))
+        Ok(JsonValue::String(sa.data()[offset].clone()))
     })
 }
 
@@ -242,15 +242,15 @@ fn symbolic_array_to_json(
     array: &SymbolicArray,
     _options: &JsonEncodeOptions,
 ) -> BuiltinResult<JsonValue> {
-    if array.data.is_empty() {
+    if array.data().is_empty() {
         return Ok(JsonValue::Array(Vec::new()));
     }
     let keep_dims = compute_keep_dims(&array.shape, true);
     if keep_dims.is_empty() {
-        return Ok(JsonValue::String(array.data[0].to_string()));
+        return Ok(JsonValue::String(array.data()[0].to_string().into()));
     }
     build_strided_array(&array.shape, &keep_dims, |offset| {
-        Ok(JsonValue::String(array.data[offset].to_string()))
+        Ok(JsonValue::String(array.data()[offset].to_string().into()))
     })
 }
 
@@ -261,26 +261,28 @@ fn char_array_to_json(ca: &CharArray, _options: &JsonEncodeOptions) -> BuiltinRe
 
     if ca.cols == 0 {
         if ca.rows == 1 {
-            return Ok(JsonValue::String(String::new()));
+            return Ok(JsonValue::String(runmat_value::Utf8Text::default()));
         }
         let mut rows = Vec::with_capacity(ca.rows);
         for _ in 0..ca.rows {
-            rows.push(JsonValue::String(String::new()));
+            rows.push(JsonValue::String(runmat_value::Utf8Text::default()));
         }
         return Ok(JsonValue::Array(rows));
     }
 
     if ca.rows == 1 {
-        return Ok(JsonValue::String(ca.data.iter().collect()));
+        return Ok(JsonValue::String(
+            ca.data().iter().collect::<String>().into(),
+        ));
     }
 
     let mut rows = Vec::with_capacity(ca.rows);
     for r in 0..ca.rows {
         let mut row_string = String::with_capacity(ca.cols);
         for c in 0..ca.cols {
-            row_string.push(ca.data[r * ca.cols + c]);
+            row_string.push(ca.data()[r * ca.cols + c]);
         }
-        rows.push(JsonValue::String(row_string));
+        rows.push(JsonValue::String(row_string.into()));
     }
     Ok(JsonValue::Array(rows))
 }
@@ -290,20 +292,20 @@ fn struct_to_json(sv: &StructValue, options: &JsonEncodeOptions) -> BuiltinResul
 }
 
 fn struct_fields_to_json<'a>(
-    fields: impl Iterator<Item = (&'a String, &'a Value)>,
+    fields: impl Iterator<Item = (&'a str, &'a Value)>,
     options: &JsonEncodeOptions,
 ) -> BuiltinResult<JsonValue> {
     let mut map = BTreeMap::new();
     for (key, value) in fields {
-        map.insert(key.clone(), value_to_json(value, options)?);
+        map.insert(key.to_owned(), value_to_json(value, options)?);
     }
     Ok(JsonValue::Object(map.into_iter().collect()))
 }
 
 fn object_to_json(obj: &ObjectInstance, options: &JsonEncodeOptions) -> BuiltinResult<JsonValue> {
     let mut map = BTreeMap::new();
-    for (key, value) in &obj.properties {
-        map.insert(key.clone(), value_to_json(value, options)?);
+    for (key, value) in obj.properties() {
+        map.insert(key.to_owned(), value_to_json(value, options)?);
     }
     Ok(JsonValue::Object(map.into_iter().collect()))
 }

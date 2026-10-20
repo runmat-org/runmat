@@ -21,26 +21,29 @@ use super::state::{
 )]
 pub fn zlim_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     zlim_with_runtime(runtime.as_ref(), args)
 }
 
 #[cfg(test)]
 pub fn zlim_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    zlim_with_runtime(None, args)
+    zlim_with_runtime(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(args),
+    )
 }
 
 fn zlim_with_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &ZLIM_DESCRIPTOR,
         &ZLIM_ERROR_TOO_MANY_OUTPUTS,
         "zlim",
     )?;
-    let call = prepare_limit_call(runtime, "zlim", &args, false)?;
+    let call = prepare_limit_call(runtime, "zlim", args.view(), false)?;
 
     if matches!(
         call.command,

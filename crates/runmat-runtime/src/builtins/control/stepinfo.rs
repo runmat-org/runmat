@@ -54,10 +54,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "stepinfo",
+    context = true,
     binding_variant = "default",
     builtin_path = "crate::builtins::control::stepinfo"
 )]
-async fn stepinfo_builtin(input: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn stepinfo_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    input: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if crate::output_count::current_output_count().is_some_and(|count| count > 1) {
         return Err(control_error(
             BUILTIN_NAME,
@@ -68,7 +73,7 @@ async fn stepinfo_builtin(input: Value, rest: Vec<Value>) -> BuiltinResult<Value
     let request = admission::preflight(input, rest)?;
     let threshold = admission::gather_threshold(&request).await?;
     let (y, t, y_final) = match request.form {
-        admission::Form::Model(model) => model_response(model).await?,
+        admission::Form::Model(model) => model_response(runtime.as_ref(), model).await?,
         admission::Form::Samples(samples) => {
             let admission::Samples { y, time, y_final } = *samples;
             admission::gather_samples(y, time, y_final).await?
@@ -77,11 +82,14 @@ async fn stepinfo_builtin(input: Value, rest: Vec<Value>) -> BuiltinResult<Value
     metrics::to_value(metrics::compute(&y, &t, y_final, threshold)?)
 }
 
-async fn model_response(system: Value) -> BuiltinResult<(Vec<f64>, Vec<f64>, f64)> {
+async fn model_response(
+    runtime: Option<&crate::context::RuntimeContext>,
+    system: Value,
+) -> BuiltinResult<(Vec<f64>, Vec<f64>, f64)> {
     // The response boundary owns exact coefficient admission and one model
     // parse. The simulation service is pure and does not redispatch `step`.
     preflight_response_model_operand(&system, ResponseKind::StepInfo)?;
-    let parsed = parse_admitted_model(system, ResponseKind::StepInfo).await?;
+    let parsed = parse_admitted_model(runtime, system, ResponseKind::StepInfo).await?;
     preflight_host_time(None, StepSimulationCaller::StepInfo)?;
     let time = admit_time(
         None,

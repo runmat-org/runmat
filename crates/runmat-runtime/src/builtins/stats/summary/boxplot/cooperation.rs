@@ -101,11 +101,11 @@ mod tests {
         source.cancel(CancellationReason::User);
         let error = block_on(super::super::boxplot_builtin_registered(
             Some(runtime),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
                 Value::from("FullFactors"),
                 Value::from("on"),
-            ],
+            ]),
         ))
         .expect_err("registered invocation uses its own cancellation token");
         assert!(error

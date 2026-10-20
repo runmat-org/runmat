@@ -24,8 +24,6 @@ use source_facts::{ensure_all_origins, exact_origin_resolver};
 #[path = "callable_artifacts/dynamic.rs"]
 mod dynamic;
 pub(in crate::session) use dynamic::{admit_dynamic_callable, DynamicCallableDependency};
-#[path = "callable_artifacts/selected_sites.rs"]
-mod selected_sites;
 
 enum BoundInvocationKind {
     SuperBody,
@@ -429,11 +427,10 @@ pub(in crate::session) fn install_bound_invoker(
                     let ports = runtime.service_ports().clone().without_foreign();
                     runtime.with_service_ports(ports)
                 };
-                let runtime = selected_sites::bind_selected_body_sites(
+                let runtime = registry.bind_selected_body_sites(
                     runtime,
                     &binding,
                     selected_body,
-                    registry.as_ref(),
                 )?;
                 let kind = if super_body {
                     BoundInvocationKind::SuperBody

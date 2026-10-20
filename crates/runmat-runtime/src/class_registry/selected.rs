@@ -21,7 +21,7 @@ pub fn checked_receiver_projection(
     let Some(facts) = object.selected_class() else {
         return Ok(None);
     };
-    if object.has_native_payload() || &object.class_name != facts.class() {
+    if object.has_native_payload() || object.class_name() != facts.class() {
         return Err(crate::build_runtime_error(
             "selected receiver has conflicting object authority",
         )

@@ -341,7 +341,7 @@ async fn call_getfield_with_indices_with_context(
     _requested_outputs: usize,
 ) -> Result<RootedValue, RuntimeError> {
     let mut getfield_args = Vec::with_capacity(2);
-    getfield_args.push(Value::String(field));
+    getfield_args.push(Value::string(field));
     if !indices.is_empty() {
         let idx_count = indices.len();
         let idx_cell = build_cell_array_with_shape(indices, 1, idx_count, "getfield idx build")?;
@@ -687,7 +687,7 @@ async fn call_method_or_member_index_with_fallback_in_scope(
 ) -> Result<RootedValueSequence, RuntimeError> {
     match base {
         Value::Object(obj) => {
-            let class_name = obj.class_name.clone();
+            let class_name = obj.class_name().clone();
             Box::pin(call_member_index_on_object_like(
                 runtime,
                 Value::Object(obj),
@@ -715,7 +715,7 @@ async fn call_method_or_member_index_with_fallback_in_scope(
             .await
         }
         Value::HandleObject(handle) => {
-            let class_name = handle.class_name.clone();
+            let class_name = handle.class_name.as_identity().clone();
             Box::pin(call_member_index_on_object_like(
                 runtime,
                 Value::HandleObject(handle),
@@ -776,6 +776,11 @@ async fn call_method_or_member_index_with_fallback_in_scope(
             .await
         }
         Value::Foreign(reference) => {
+            let args = match runtime {
+                Some(runtime) => crate::execution::RootedValues::in_context(args, runtime)?,
+                None => crate::execution::RootedValues::new(args)
+                    .map_err(|error| error.into_runtime_error())?,
+            };
             crate::foreign::invoke_foreign_method(reference, name, args, requested_outputs).await
         }
         other => {

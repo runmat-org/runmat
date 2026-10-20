@@ -74,7 +74,7 @@ fn invalid_callable_precedes_resident_count_materialization() {
     let error = block_on(timeit_builtin(
         Some(runtime()),
         Value::Num(7.0),
-        vec![Value::GpuTensor(resident)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(resident)]),
     ))
     .expect_err("invalid callable before provider access");
     assert_eq!(error.identifier(), TIMEIT_ERROR_FIRST_ARG_KIND.identifier);
@@ -88,7 +88,9 @@ fn host_count_validation_keeps_count_before_callable_error_order() {
     let error = block_on(timeit_builtin(
         Some(runtime()),
         Value::Num(7.0),
-        vec![Value::String("invalid count".into())],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+            "invalid count".into(),
+        )]),
     ))
     .expect_err("invalid host count first");
     assert_eq!(
@@ -159,7 +161,7 @@ fn timeit_uses_injected_monotonic_service_for_every_batch() {
     let result = block_on(timeit_builtin(
         Some(runtime),
         crate::user_functions::test_support::exact_local_value("test.monotonic.callback", binding),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap();
     let Value::Num(seconds) = result else {
@@ -221,14 +223,14 @@ fn cancelled_pending_callback_is_dropped_without_replay() {
             "test.pending.callback",
             binding.clone(),
         ),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     );
     drop(unpolled);
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     let mut call = Box::pin(timeit_builtin(
         Some(runtime),
         crate::user_functions::test_support::exact_local_value("test.pending.callback", binding),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ));
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     let waker = futures::task::noop_waker();
@@ -295,16 +297,7 @@ fn install_test_callbacks(
             assert_eq!(arguments.capture_count(), 0);
             let invoker = crate::user_functions::current_semantic_function_invoker()
                 .expect("timeit fixture numeric callback");
-            let future = invoker(
-                Some(runtime),
-                binding.function,
-                arguments.supplied(),
-                outputs,
-            );
-            Box::pin(async move {
-                let _arguments = arguments;
-                future.await
-            })
+            invoker(Some(runtime), binding.function, arguments, outputs)
         },
     ))
     .expect("call-port scope");
@@ -356,7 +349,7 @@ fn install_test_callbacks(
 }
 
 fn default_handle() -> Value {
-    Value::String("@__timeit_helper_counter_default".to_string())
+    Value::String("@__timeit_helper_counter_default".to_string().into())
 }
 
 fn assert_timeit_error_contains(err: &crate::RuntimeError, needle: &str) {
@@ -373,15 +366,15 @@ fn assert_timeit_error_identifier(err: &crate::RuntimeError, identifier: &'stati
 }
 
 fn outputs_handle() -> Value {
-    Value::String("@__timeit_helper_counter_outputs".to_string())
+    Value::String("@__timeit_helper_counter_outputs".to_string().into())
 }
 
 fn invalid_handle() -> Value {
-    Value::String("@__timeit_helper_counter_invalid".to_string())
+    Value::String("@__timeit_helper_counter_invalid".to_string().into())
 }
 
 fn zero_outputs_handle() -> Value {
-    Value::String("@__timeit_helper_zero_outputs".to_string())
+    Value::String("@__timeit_helper_zero_outputs".to_string().into())
 }
 
 #[test]
@@ -495,7 +488,7 @@ fn timeit_string_handle_prefers_semantic_resolver_identity() {
         })))
         .expect("call-port scope");
     let callable = prepare_callable(
-        Value::String("@__timeit_helper_counter_default".to_string()),
+        Value::String("@__timeit_helper_counter_default".to_string().into()),
         None,
     )
     .expect("timeit should accept string function handle");
@@ -563,7 +556,7 @@ fn timeit_name_only_closure_prefers_semantic_resolver_identity() {
             binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
-            captures: vec![Value::Num(9.0)],
+            captures: vec![Value::Num(9.0)].into(),
         })),
         None,
     )
@@ -576,7 +569,7 @@ fn timeit_name_only_closure_prefers_semantic_resolver_identity() {
             binding: Some(runmat_value::BoundFunctionBinding::unavailable(89)),
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
-            captures: vec![Value::Num(9.0)],
+            captures: vec![Value::Num(9.0)].into(),
         }))
     );
 }
@@ -590,7 +583,7 @@ fn timeit_name_only_closure_without_resolver_keeps_name_shaped_identity() {
             binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
-            captures: vec![Value::Num(9.0)],
+            captures: vec![Value::Num(9.0)].into(),
         })),
         None,
     )
@@ -603,7 +596,7 @@ fn timeit_name_only_closure_without_resolver_keeps_name_shaped_identity() {
             binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
-            captures: vec![Value::Num(9.0)],
+            captures: vec![Value::Num(9.0)].into(),
         }))
     );
 }

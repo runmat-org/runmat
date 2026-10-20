@@ -386,7 +386,7 @@ impl ParsedPolarHistogram {
             let normalized_data = normalize_theta_tensor(source, &parsed.histcounts_args)?;
             let eval = crate::builtins::stats::hist::histcounts::evaluate(
                 Value::Tensor(normalized_data.clone()),
-                &parsed.histcounts_args,
+                crate::call::FunctionArgumentView::from_slice(&parsed.histcounts_args),
             )
             .await
             .map_err(map_invalid_argument)?;

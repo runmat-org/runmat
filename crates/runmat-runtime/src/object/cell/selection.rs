@@ -10,7 +10,7 @@ pub(super) fn row_major_pos_from_linear(
     cell: &CellArray,
     index: usize,
 ) -> Result<usize, RuntimeError> {
-    if index == 0 || index > cell.data.len() {
+    if index == 0 || index > cell.data().len() {
         return Err(mex("CellIndexOutOfBounds", "Cell index out of bounds"));
     }
     if cell.rows <= 1 || cell.cols <= 1 {
@@ -51,7 +51,7 @@ pub(super) fn cell_selector_extent(
         ));
     }
     if selector_count == 1 {
-        return Ok(cell.data.len());
+        return Ok(cell.data().len());
     }
     if position + 1 == selector_count {
         return cell.shape[position.min(cell.shape.len())..]

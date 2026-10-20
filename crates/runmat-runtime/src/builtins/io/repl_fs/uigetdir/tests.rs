@@ -5,12 +5,15 @@ use std::sync::{Arc, Mutex};
 
 fn call(args: Vec<Value>, outputs: Option<usize>) -> BuiltinResult<Value> {
     let _guard = crate::output_count::push_output_count(outputs).expect("output-count scope");
-    futures::executor::block_on(uigetdir_builtin(crate::context::legacy::active(), args))
+    futures::executor::block_on(uigetdir_builtin(
+        crate::context::legacy::active(),
+        crate::builtins::common::test_support::builtin_arguments(args),
+    ))
 }
 
 fn text(value: &Value) -> String {
     match value {
-        Value::CharArray(chars) => chars.data.iter().collect(),
+        Value::CharArray(chars) => chars.data().iter().collect(),
         other => panic!("expected char array, got {other:?}"),
     }
 }

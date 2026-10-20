@@ -110,7 +110,7 @@ pub(super) async fn run() {
             &prepared,
             BTreeSet::new(),
             NamedCallableExecutionContext {
-                host: crate::test_fixtures::host_requirement(),
+                host: super::phase_execution_support::host_requirement(prepared.request()),
                 scope_id: session.scope_id(),
                 pool_id: session.pool_id(),
                 resources: resources.clone(),

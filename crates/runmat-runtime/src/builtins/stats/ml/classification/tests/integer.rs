@@ -161,8 +161,13 @@ fn classify_integer_roles_are_independently_gated() {
         ),
     ];
     for (sample, training, group, rest, identifier) in cases {
-        let err = block_on(classify_builtin(sample, training, group, rest))
-            .expect_err("integer role must be gated");
+        let err = block_on(classify_builtin(
+            sample,
+            training,
+            group,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
+        .expect_err("integer role must be gated");
         assert_eq!(err.identifier(), identifier);
     }
 }
@@ -177,7 +182,7 @@ fn classify_logical_numeric_roles_are_independently_gated() {
         logical_sample,
         training.clone(),
         group.clone(),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect_err("logical sample must be gated");
     assert_eq!(
@@ -192,7 +197,7 @@ fn classify_logical_numeric_roles_are_independently_gated() {
         sample.clone(),
         logical_training,
         group.clone(),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect_err("logical training must be gated");
     assert_eq!(
@@ -204,7 +209,10 @@ fn classify_logical_numeric_roles_are_independently_gated() {
         sample,
         training,
         group,
-        vec![Value::from("linear"), Value::Bool(true)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("linear"),
+            Value::Bool(true),
+        ]),
     ))
     .expect_err("logical prior must reject");
     assert_eq!(err.identifier(), Some("RunMat:classify:InvalidArgument"));
@@ -219,7 +227,7 @@ fn classify_guards_wide_integer_floating_boundaries_but_not_labels() {
         int_tensor(IntegerStorage::U64(vec![0, wide]), vec![2, 1]),
         training.clone(),
         group.clone(),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect_err("wide sample must reject");
     assert!(err.message().contains("sample integer values"));
@@ -228,7 +236,7 @@ fn classify_guards_wide_integer_floating_boundaries_but_not_labels() {
         sample.clone(),
         int_tensor(IntegerStorage::U64(vec![0, 1, 2, wide]), vec![4, 1]),
         group.clone(),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect_err("wide training must reject");
     assert!(err.message().contains("training integer values"));
@@ -237,10 +245,10 @@ fn classify_guards_wide_integer_floating_boundaries_but_not_labels() {
         sample,
         training,
         group,
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("linear"),
             int_tensor(IntegerStorage::U64(vec![1, wide]), vec![2, 1]),
-        ],
+        ]),
     ))
     .expect_err("wide prior must reject");
     assert!(err.message().contains("prior integer values"));
@@ -259,7 +267,7 @@ fn classify_resident_integer_gate_precedes_gather() {
             Value::GpuTensor(handle.clone()),
             training,
             group,
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect_err("resident integer sample must gate before gather");
         assert_eq!(
@@ -279,7 +287,7 @@ fn classify_resident_integer_gate_precedes_gather() {
             Value::GpuTensor(floating_handle.clone()),
             training,
             group,
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect_err("resident floating input must be independently gated");
         assert_eq!(
@@ -297,7 +305,7 @@ fn classify_resident_integer_gate_precedes_gather() {
             Value::GpuTensor(logical_handle.clone()),
             training,
             group,
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect_err("resident logical sample must gate by type before residency");
         assert_eq!(
@@ -322,7 +330,9 @@ fn classify_admits_known_geometry_and_type_before_resident_materialization() {
             Value::GpuTensor(handle.clone()),
             training.clone(),
             group.clone(),
-            vec![Value::from("unsupported")],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from(
+                "unsupported",
+            )]),
         ))
         .expect_err("invalid type must be rejected before materialization");
         assert!(err.message().contains("unsupported discriminant type"));
@@ -331,7 +341,7 @@ fn classify_admits_known_geometry_and_type_before_resident_materialization() {
             Value::GpuTensor(handle),
             tensor(vec![0.0, 0.5, 2.0, 2.5, 0.0, 0.5, 2.0, 2.5], vec![4, 2]),
             group,
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect_err("known mismatched columns must be rejected before materialization");
         assert!(err.message().contains("same number of columns"));
@@ -342,7 +352,7 @@ fn classify_admits_known_geometry_and_type_before_resident_materialization() {
             Value::GpuTensor(handle),
             training,
             tensor(vec![1.0, 1.0, 2.0, 2.0], vec![2, 2]),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect_err("known matrix labels must be rejected before materialization");
         assert!(err.message().contains("group must be a vector"));
@@ -365,7 +375,7 @@ fn classify_wgpu_integer_sample_uses_checked_host_fallback() {
         Value::GpuTensor(handle),
         training,
         group,
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("classify");
     let Value::Tensor(labels) = result else {

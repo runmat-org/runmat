@@ -20,34 +20,56 @@ pub(in crate::builtins::io::data) fn as_object<'a>(
 }
 
 pub(in crate::builtins::io::data) async fn hydrate_dataset_descriptor_on(
+    runtime: Option<&crate::context::RuntimeContext>,
     provider: &dyn runmat_filesystem::FsProvider,
     path: &std::path::Path,
-    dataset: &mut Value,
-) {
+    dataset: crate::execution::RootedValue,
+) -> BuiltinResult<crate::execution::RootedValue> {
     let request = runmat_filesystem::data_contract::DataManifestRequest {
         path: path.to_string_lossy().into_owned(),
         version: None,
     };
     let descriptor = match provider.data_manifest_descriptor(&request).await {
         Ok(descriptor) => descriptor,
-        Err(_) => return,
+        Err(_) => return Ok(dataset),
     };
-    let Value::Object(obj) = dataset else {
-        return;
+    // Roots precede the private payload, so every early error retires that
+    // payload before its last original GC registration.
+    let (_roots, mut value) = {
+        let (value, roots) = dataset.into_value_and_lease();
+        (roots, value)
     };
-    if !descriptor.dataset_id.is_empty() {
-        obj.properties.insert(
-            "__data_id".to_string(),
-            Value::String(descriptor.dataset_id),
-        );
-    }
-    obj.properties.insert(
-        "__data_version".to_string(),
-        Value::String(format!(
-            "{}:{}",
-            descriptor.updated_at, descriptor.txn_sequence
+    let Value::Object(obj) = &mut value else {
+        return Err(data_error("dataset descriptor receiver is not an object"));
+    };
+    let fields = [
+        (!descriptor.dataset_id.is_empty())
+            .then(|| ("__data_id", Value::string(descriptor.dataset_id))),
+        Some((
+            "__data_version",
+            Value::string(format!(
+                "{}:{}",
+                descriptor.updated_at, descriptor.txn_sequence
+            )),
         )),
-    );
+    ];
+    crate::execution::object::replacement::replace_properties(
+        runtime,
+        obj,
+        fields
+            .iter()
+            .filter_map(|field| field.as_ref().map(|(name, value)| (*name, value))),
+        |message, source| {
+            crate::context::host_allocation::host_allocation_runtime_error(
+                runtime,
+                "RunMat:data:HostAllocation",
+                message,
+                source,
+            )
+        },
+        data_error,
+    )?;
+    crate::execution::RootedValue::in_optional_context(value, runtime)
 }
 
 pub(in crate::builtins::io::data) fn sanitize_label(label: &str) -> String {

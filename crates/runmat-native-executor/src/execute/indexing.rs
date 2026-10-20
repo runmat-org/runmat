@@ -290,7 +290,8 @@ fn assign_inner_with_completion(
     let retains_inputs = indexing_requires_retention(indexing);
     let selectors = materialize_selectors(state, &base, indexing, retains_inputs)?;
     if indexing.kind == IndexKind::Brace {
-        return assign_brace(base, selectors, rhs, delete).map(IndexedAssignmentOutcome::Ordinary);
+        return assign_brace(&state.runtime, base, selectors, rhs, delete)
+            .map(IndexedAssignmentOutcome::Ordinary);
     }
     if matches!(
         base,
@@ -360,7 +361,13 @@ fn assign_inner_with_completion(
         if let Some(plan) =
             assignment_operation::plan_for_assignment_host(&base, &selectors, !delete)?
         {
-            let updated = assignment_operation::assign_host_with_plan(base, &plan, rhs, delete)?;
+            let updated = assignment_operation::assign_host_with_plan(
+                Some(&state.runtime),
+                base,
+                &plan,
+                rhs,
+                delete,
+            )?;
             let rooted = RootedValues::in_context(vec![updated], &state.runtime)
                 .map_err(NativeExecutorError::from)?;
             drop(roots);
@@ -372,7 +379,7 @@ fn assign_inner_with_completion(
         let _roots = roots;
         let updated = runtime
             .scope(assignment_operation::assign_paren_owned(
-                base, selectors, rhs, delete,
+                &runtime, base, selectors, rhs, delete,
             ))
             .await?;
         RootedValues::in_context(vec![updated], &runtime).map_err(NativeExecutorError::from)
@@ -679,6 +686,7 @@ fn read_brace(
 }
 
 fn assign_brace(
+    runtime: &runmat_runtime::context::RuntimeContext,
     base: Value,
     selectors: MaterializedSelectors,
     rhs: Value,
@@ -720,7 +728,8 @@ fn assign_brace(
             runmat_value::OutputListStorage::unbounded(vec![value; positions.len()])
         }
     };
-    runmat_runtime::object::cell::assign_cell_value_multi(
+    runmat_runtime::object::cell::assign_cell_value_multi_in_context(
+        Some(runtime),
         cell,
         &positions,
         values.as_slice(),
@@ -785,7 +794,7 @@ fn gather_logical(value: &LogicalArray, plan: &IndexPlan) -> NativeExecutorResul
 }
 
 fn gather_symbolic(value: &SymbolicArray, plan: &IndexPlan) -> NativeExecutorResult<Value> {
-    let values = gather(&value.data, plan, "symbolic")?;
+    let values = gather(value.data(), plan, "symbolic")?;
     if let [value] = values.as_slice() {
         return Ok(Value::Symbolic(value.clone()));
     }
@@ -855,13 +864,13 @@ fn value_shape(value: &Value) -> Vec<usize> {
         Value::ComplexTensor(value) => value.shape().to_vec(),
         Value::SparseTensor(value) => value.shape(),
         Value::GpuTensor(value) => value.shape().to_vec(),
-        Value::StringArray(value) => value.shape.clone(),
+        Value::StringArray(value) => value.shape.to_vec(),
         Value::LogicalArray(value) => value.shape.to_vec(),
         Value::CharArray(value) => value.shape().to_vec(),
-        Value::Cell(value) => value.shape.clone(),
+        Value::Cell(value) => value.shape.to_vec(),
         Value::StructArray(value) => value.shape().to_vec(),
         Value::ObjectArray(value) => value.shape().to_vec(),
-        Value::SymbolicArray(value) => value.shape.clone(),
+        Value::SymbolicArray(value) => value.shape.to_vec(),
         _ => vec![1, 1],
     }
 }
@@ -979,6 +988,6 @@ mod tests {
             panic!("expected character column");
         };
         assert_eq!(column.shape(), &[2, 1]);
-        assert_eq!(column.data, vec!['c', 'y']);
+        assert_eq!(column.data(), vec!['c', 'y']);
     }
 }

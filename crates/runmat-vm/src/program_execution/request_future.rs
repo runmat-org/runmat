@@ -99,7 +99,12 @@ pub(super) fn prepare(
                 });
             }
         };
-    let capabilities = match callable_capabilities(&registry, &request.callable) {
+    let origin_program = semantic_identity::revision_owner(
+        &request.recipe.program_revision,
+        &request.artifact.executable_bytes,
+    )
+    .map_err(|message| ProgramPreparationError { message })?;
+    let capabilities = match callable_capabilities(&registry, &request.callable, origin_program) {
         Ok(capabilities) => capabilities,
         Err(message) => return Err(ProgramPreparationError { message }),
     };

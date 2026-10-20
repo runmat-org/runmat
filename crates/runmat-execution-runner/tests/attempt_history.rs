@@ -68,12 +68,13 @@ fn lost_retry_retains_unknown_consumption_and_cannot_claim_winner_only_usage() {
     );
     assert!(history[0].terminal.as_ref().unwrap().resources.is_none());
     assert_eq!(
-        history[1].terminal.as_ref().unwrap().resources,
+        history[1].terminal.as_ref().unwrap().resources.as_deref(),
         original.tasks[&first.task_id]
             .committed
             .as_ref()
             .unwrap()
-            .resources
+            .result
+            .resources()
     );
     assert!(restored.task_resource_aggregate(first.task_id, 11).is_err());
     // A late report cannot retroactively replace the missing original evidence.

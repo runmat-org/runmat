@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use runmat_execution::resource::{Capability, ResourceRequest};
-use runmat_execution::{Digest, OutputContract, ProgramEnvironment, ProgramRevision};
+use runmat_execution::{Digest, OutputContract, ProgramRevision};
 use runmat_execution_artifact::{ExecutableForm, ProgramArtifact, ProgramBuildRecipe};
 use runmat_execution_runner::TaskSubmission;
 use runmat_execution_runner_native::supervisor::{LocalSupervisorClient, ProgramBatchSubmission};
@@ -130,23 +130,20 @@ async fn run_case(case: ControlCase) {
         program_revision: ProgramRevision::new(
             Digest::sha256(b"control-graph"),
             Digest::sha256(b"control-source"),
-            ProgramEnvironment::new(
-                1,
-                1,
-                Digest::sha256(b"control-runtime"),
-                Digest::sha256(b"control-catalog"),
-                "matlab",
-            )
-            .unwrap(),
+            runmat_core::program_environment(runmat_core::CompatMode::Matlab),
         )
         .unwrap(),
         entrypoint: "7".into(),
         outputs: OutputContract {
             owned_work: None,
             requested_outputs: 1,
+            owned_work: None,
         },
         execution_mode: "interpreter".into(),
         target: runmat_execution_artifact::ProgramTarget::portable("test-interpreter-bytecode-v1"),
+        interop: Default::default(),
+        accelerators: Vec::new(),
+        foreign_policy: None,
         features: Default::default(),
         compile_options: Default::default(),
         source_objects: Vec::new(),
@@ -160,20 +157,31 @@ async fn run_case(case: ControlCase) {
     .unwrap();
     let task = TaskSubmission {
         request: runmat_execution::task::TaskRequest {
+            schema_version: runmat_execution::task::TASK_REQUEST_SCHEMA_VERSION,
             console: None,
             environment: runmat_execution::EnvironmentSnapshot::default(),
             id: runmat_execution::TaskId::derive(&[b"controlled-original-task"]),
             scope_id: context.scope_id,
             pool_id: context.pool_id,
-            program_artifact_id: runmat_execution::identity::ArtifactId::derive(&[artifact
-                .id
-                .0
-                .bytes()]),
-            callable: runmat_execution::task::Callable {
-                owner_identity: "test".into(),
-                qualified_name: "7".into(),
-                entrypoint_digest: Digest::sha256(b"7"),
-            },
+            executable: runmat_execution::task::TaskExecutableIdentity::ProgramArtifact(
+                runmat_execution::identity::ArtifactId::derive(&[artifact.id.0.bytes()]),
+            ),
+            callable: runmat_execution::task::Callable::for_program(
+                "test",
+                &runmat_execution::ProgramCallable::semantic(
+                    runmat_execution::ProgramFunctionId(7),
+                    None,
+                ),
+            ),
+            host: artifact
+                .execution_host_requirement(
+                    &recipe,
+                    BTreeSet::from([
+                        runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
+                    ]),
+                )
+                .unwrap(),
+            invocation_context: runmat_execution::ProgramInvocationContext::Direct,
             inputs: Vec::new(),
             outputs: recipe.outputs.clone(),
             resources: ResourceRequest {
@@ -200,7 +208,11 @@ async fn run_case(case: ControlCase) {
             environment: runmat_execution::EnvironmentSnapshot::default(),
             recipe,
             artifact,
-            function: 7,
+            callable: runmat_execution::ProgramCallable::semantic(
+                runmat_execution::ProgramFunctionId(7),
+                None,
+            ),
+            invocation_context: runmat_execution::ProgramInvocationContext::Direct,
             arguments: Vec::new(),
             requested_outputs: 1,
             task: task.clone(),

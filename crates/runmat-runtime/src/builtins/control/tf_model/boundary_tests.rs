@@ -138,14 +138,14 @@ fn inverse_discrete_basis_roundtrips_and_uses_physical_z_poles() {
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn state_matrix_properties_preserve_dense_rank_boundaries() {
     let mut object = ObjectInstance::new(SS_CLASS.to_string());
-    object.properties.insert(
+    object.replace_property_unbounded(
         "A".into(),
         Value::Tensor(Tensor::new(vec![7.0], Vec::new()).unwrap()),
     );
     let empty = ss_state_matrix_property(&object, "A", "pole").unwrap();
     assert_eq!(empty.shape(), (0, 0));
 
-    object.properties.insert(
+    object.replace_property_unbounded(
         "A".into(),
         Value::Tensor(Tensor::new(vec![7.0], vec![1]).unwrap()),
     );
@@ -153,7 +153,7 @@ fn state_matrix_properties_preserve_dense_rank_boundaries() {
     assert_eq!(scalar.shape(), (1, 1));
     assert_eq!(scalar[(0, 0)], Complex64::new(7.0, 0.0));
 
-    object.properties.insert(
+    object.replace_property_unbounded(
         "A".into(),
         Value::Tensor(Tensor::new(vec![7.0, 8.0], vec![2]).unwrap()),
     );

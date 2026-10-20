@@ -66,7 +66,7 @@ pub(crate) async fn get_receiver_properties(
 async fn set_selected_properties_with_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
     selection: GraphicsPropertySelection,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     builtin: &'static str,
 ) -> BuiltinResult<PropertySetOutcome> {
     let kind = selection.receiver().kind();
@@ -97,7 +97,7 @@ async fn set_selected_properties_with_runtime(
 pub(crate) async fn set_receiver_properties_with_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
     value: &Value,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     builtin: &'static str,
 ) -> BuiltinResult<Option<()>> {
     let Some(selection) = select(value, builtin)? else {

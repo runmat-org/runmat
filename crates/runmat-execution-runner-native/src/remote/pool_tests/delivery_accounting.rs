@@ -49,14 +49,11 @@ impl RemoteWorkerChannel for DeliveryWorker {
             let AttemptReport::Succeeded { result } = &mut report else {
                 unreachable!()
             };
-            let runmat_execution_runner::AttemptSuccess::Values {
-                resources: Some(resources),
-                ..
-            } = result
-            else {
-                unreachable!()
+            let AttemptSuccess::Values { resources, .. } = result else {
+                panic!("value accounting fixture")
             };
-            resources.worker_id = WorkerId::derive(&[b"foreign-delivery-accounting"]);
+            resources.as_mut().unwrap().worker_id =
+                WorkerId::derive(&[b"foreign-delivery-accounting"]);
         }
         Ok(report)
     }
@@ -93,7 +90,7 @@ async fn failed_result_delivery_preserves_valid_original_accounting_through_cold
         pool.add_worker(Arc::new(DeliveryWorker {
             original: ResultObjectWorker {
                 spec: WorkerSpec {
-                    host: crate::test_fixtures::host_inventory(),
+                    host: crate::test_support::host_inventory(),
                     id: WorkerId::derive(&[scope.bytes(), b"producer"]),
                     pool_id,
                     resources: inventory(1_000),

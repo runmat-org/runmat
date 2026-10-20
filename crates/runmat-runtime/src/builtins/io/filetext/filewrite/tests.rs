@@ -13,7 +13,11 @@ fn unwrap_error_message(err: RuntimeError) -> String {
 
 fn run_filewrite(path: Value, data: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-    futures::executor::block_on(filewrite_builtin(path, data, rest))
+    futures::executor::block_on(filewrite_builtin(
+        path,
+        data,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    ))
 }
 
 mod controls;

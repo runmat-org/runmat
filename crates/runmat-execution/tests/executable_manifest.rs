@@ -200,9 +200,10 @@ fn round_trip_vector() {
 #[test]
 fn executable_manifest_round_trips_all_contract_families() {
     round_trip_vector();
+    // Includes the explicit original dependency inventory in the manifest.
     assert_eq!(
         manifest().cache_key().unwrap().to_string(),
-        "sha256:81de17f9e5502f8e8dfde65379636ab81ef9021949d45662189ab60855a13cd0"
+        "sha256:25e3e3b15dc6572dbc7eaf9476787f7130d459175ade2a21f23bc9cd4441cd9d"
     );
 }
 
@@ -279,6 +280,7 @@ fn source_map_v2_envelope(entries: serde_json::Value) -> ExecutableUnitEnvelope 
         schema_version: EXECUTABLE_UNIT_SCHEMA_VERSION,
         manifest,
         payloads,
+        dependency_products: Vec::new(),
     }
 }
 

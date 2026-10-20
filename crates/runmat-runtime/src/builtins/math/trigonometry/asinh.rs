@@ -219,7 +219,7 @@ fn asinh_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
 
 fn asinh_char_array(ca: CharArray) -> BuiltinResult<Value> {
     let data = ca
-        .data
+        .data()
         .iter()
         .map(|&ch| (ch as u32 as f64).asinh())
         .collect::<Vec<_>>();

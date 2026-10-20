@@ -16,7 +16,8 @@ fn explicit_resident_parameter_never_falls_back_through_host_download() {
                 ("Weights", Value::GpuTensor(handle.clone())),
                 ("OutputSize", Value::Num(1.0)),
             ],
-        ) else {
+        )
+        .expect("fixture object") else {
             panic!("layer object expected")
         };
         provider.reset_telemetry();
@@ -57,7 +58,8 @@ fn matching_resident_parameters_do_not_cross_the_host_boundary() {
                     ("Bias", Value::GpuTensor(bias.clone())),
                     ("OutputSize", Value::Num(2.0)),
                 ],
-            ) else {
+            )
+            .expect("fixture object") else {
                 panic!("expected layer object");
             };
             provider.reset_telemetry();

@@ -22,42 +22,31 @@ pub fn shape(value: &Value) -> Option<Vec<usize>> {
 }
 
 pub fn read_with_plan(value: &Value, plan: &IndexPlan) -> Result<Value, RuntimeError> {
+    if plan
+        .output_shape
+        .iter()
+        .try_fold(1usize, |n, &d| n.checked_mul(d))
+        != Some(plan.indices.len())
+    {
+        return Err(semantic_error(
+            "InvalidIndexSelectorPlan",
+            "Object-array index shape differs from its selection count",
+        ));
+    }
     let array = as_array(value.clone())?;
     if let [index] = plan.indices.as_slice() {
         return array.get_linear(*index as usize).cloned().ok_or_else(|| {
             semantic_error("IndexOutOfBounds", "Object array index is out of bounds")
         });
     }
-    let indices = plan
-        .indices
-        .iter()
-        .map(|index| *index as usize)
-        .collect::<Vec<_>>();
-    Ok(Value::ObjectArray(select_linear_with_provenance(
+    let context = crate::context::legacy::active();
+    crate::execution::object_array::select(
         &array,
-        &indices,
-        plan.output_shape.clone(),
-    )?))
-}
-
-pub(crate) fn select_linear_with_provenance(
-    array: &ObjectArray,
-    indices: &[usize],
-    shape: Vec<usize>,
-) -> Result<ObjectArray, RuntimeError> {
-    let mut selected = array
-        .select_linear(indices, shape)
-        .map_err(|error| semantic_error("IndexOutOfBounds", error))?;
-    if selected.is_empty() {
-        let (provenance, unselected) = empty_result_provenance(array)?;
-        selected = selected
-            .with_selected_provenance(provenance)
-            .map_err(|error| semantic_error("SelectedObjectReceiverInvalid", error))?;
-        if unselected {
-            selected = selected.with_unselected_provenance();
-        }
-    }
-    Ok(selected)
+        plan.indices.iter().map(|&index| index as usize),
+        &plan.output_shape,
+        context.as_ref(),
+    )
+    .map(|output| output.with_owned(|value| value))
 }
 
 pub fn assign_scalar_indices(
@@ -102,24 +91,7 @@ pub fn assign_with_plan(
     if delete {
         return delete_with_plan(array, plan, &rhs);
     }
-    let rhs_values = assignment_values(&rhs, array.class_name(), plan.indices.len())?;
-    let data = growth::assign(&array, plan, rhs_values)?;
-    let value = finish_array(array.class_name(), data, plan.base_shape.clone())?;
-    if let Value::ObjectArray(result) = value {
-        if result.is_empty() {
-            let (provenance, unselected) = empty_result_provenance(&array)?;
-            let result = result
-                .with_selected_provenance(provenance)
-                .map_err(|error| semantic_error("ObjectArrayAssignment", error))?;
-            return Ok(Value::ObjectArray(if unselected {
-                result.with_unselected_provenance()
-            } else {
-                result
-            }));
-        }
-        return Ok(Value::ObjectArray(result));
-    }
-    Ok(value)
+    growth::assign(&array, plan, &rhs)
 }
 
 fn delete_with_plan(
@@ -147,121 +119,85 @@ fn delete_with_plan(
             "Linear object-array deletion is only defined for vectors",
         ));
     }
-    let mut removed = plan
-        .indices
-        .iter()
-        .map(|index| *index as usize)
-        .collect::<Vec<_>>();
-    removed.sort_unstable();
-    removed.dedup();
-    let class_name = array.class_name().clone();
-    let empty_provenance = if removed.len() == array.len() {
-        Some(empty_result_provenance(&array)?)
-    } else {
-        None
-    };
-    let mut data = array.into_data();
-    for index in removed.into_iter().rev() {
-        if index >= data.len() {
-            return Err(semantic_error(
-                "IndexOutOfBounds",
-                "Object array index is out of bounds",
-            ));
+    let context = crate::context::legacy::active();
+    let mut removed =
+        crate::execution::object_array::indices::Indices::new(context.as_ref(), array.len())?;
+    let mut count = 0usize;
+    for (ordinal, &index) in plan.indices.iter().enumerate() {
+        if ordinal % 4096 == 0 {
+            removed.checkpoint()?;
         }
-        data.remove(index);
-    }
-    let shape = if rows == 1 {
-        vec![1, data.len()]
-    } else {
-        vec![data.len(), 1]
-    };
-    let value = finish_array(&class_name, data, shape)?;
-    if let Value::ObjectArray(array) = value {
-        if array.is_empty() {
-            let (selected_provenance, unselected_provenance) =
-                empty_provenance.expect("all object-array elements were removed");
-            let array = array
-                .with_selected_provenance(selected_provenance)
-                .map_err(|error| semantic_error("ObjectArrayAssignment", error))?;
-            return Ok(Value::ObjectArray(if unselected_provenance {
-                array.with_unselected_provenance()
-            } else {
-                array
-            }));
-        }
-        return Ok(Value::ObjectArray(array));
-    }
-    Ok(value)
-}
-
-pub(crate) fn empty_result_provenance(
-    array: &ObjectArray,
-) -> Result<
-    (
-        Vec<std::rc::Rc<runmat_value::SelectedObjectClassFacts>>,
-        bool,
-    ),
-    RuntimeError,
-> {
-    // A handle receiver keeps its selected facts in the GC target. Capture
-    // those exact facts before an empty operation discards every element.
-    let mut provenance = array.selected_provenance().to_vec();
-    let mut unselected = array.has_unselected_provenance();
-    for element in array.data() {
-        match crate::object::protocol::selected_receiver_facts(element)? {
-            Some(facts) => provenance.push(facts),
-            None => unselected = true,
+        let slot = removed
+            .values_mut()
+            .get_mut(index as usize)
+            .ok_or_else(|| {
+                semantic_error("IndexOutOfBounds", "Object array index is out of bounds")
+            })?;
+        if *slot == 0 {
+            *slot = 1;
+            count += 1;
         }
     }
-    Ok((provenance, unselected))
-}
-
-fn finish_array(
-    class_name: &ClassIdentity,
-    mut data: Vec<Value>,
-    shape: Vec<usize>,
-) -> Result<Value, RuntimeError> {
-    if data.len() == 1 && shape.as_slice() == [1, 1] {
-        return Ok(data.remove(0));
-    }
-    ObjectArray::new(class_name.clone(), data, shape)
-        .map(Value::ObjectArray)
-        .map_err(|error| semantic_error("ObjectArrayAssignment", error))
+    removed.checkpoint()?;
+    let length = array.len() - count;
+    let shape = if rows == 1 { [1, length] } else { [length, 1] };
+    let selected = crate::execution::object_array::select(
+        &array,
+        removed
+            .values()
+            .iter()
+            .enumerate()
+            .filter_map(|(index, &removed)| (removed == 0).then_some(index)),
+        &shape,
+        context.as_ref(),
+    )?;
+    removed.checkpoint()?;
+    Ok(selected.with_owned(|value| match value {
+        Value::ObjectArray(array) if array.len() == 1 && array.shape() == [1, 1] => {
+            array.data()[0].clone()
+        }
+        value => value,
+    }))
 }
 
 fn as_array(value: Value) -> Result<ObjectArray, RuntimeError> {
-    match value {
-        Value::Object(object) => {
-            let class_name = object.class_name.clone();
-            ObjectArray::new(class_name, vec![Value::Object(object)], vec![1, 1])
+    if let Value::ObjectArray(array) = value {
+        return Ok(array);
+    }
+    let context = crate::context::legacy::active();
+    let _roots = crate::execution::structure::replacement::lease(&value, context.as_ref())?;
+    let class = match &value {
+        Value::Object(object) => object.class_name_owner(),
+        Value::HandleObject(handle) => &handle.class_name,
+        _ => {
+            return Err(semantic_error(
+                "ObjectArrayIndexing",
+                "value is not an object array",
+            ))
         }
-        Value::HandleObject(handle) => {
-            let class_name = handle.class_name.clone();
-            ObjectArray::new(class_name, vec![Value::HandleObject(handle)], vec![1, 1])
-        }
+    };
+    let mut output = crate::execution::object_array::ObjectArrayConstruction::new(
+        context.as_ref(),
+        crate::execution::object_array::Class::Owner(class),
+        1,
+        &[1, 1],
+        std::iter::empty(),
+        false,
+    )?;
+    output.push(value)?;
+    output.finish()?.with_owned(|value| match value {
         Value::ObjectArray(array) => Ok(array),
-        _ => Err("value is not an object array".into()),
-    }
-    .map_err(|error| semantic_error("ObjectArrayIndexing", error))
+        _ => unreachable!("canonical array construction"),
+    })
 }
 
-fn assignment_values(
-    rhs: &Value,
+fn assignment_scalar<'a>(
+    rhs: &'a Value,
     class_name: &ClassIdentity,
-    count: usize,
-) -> Result<Vec<Value>, RuntimeError> {
-    match rhs {
-        Value::ObjectArray(array) if array.class_name() == class_name && array.len() == count => {
-            Ok(array.data().to_vec())
-        }
-        _ => Ok(vec![assignment_scalar(rhs, class_name)?; count]),
-    }
-}
-
-fn assignment_scalar(rhs: &Value, class_name: &ClassIdentity) -> Result<Value, RuntimeError> {
+) -> Result<&'a Value, RuntimeError> {
     let rhs_class = match rhs {
-        Value::Object(object) => Some(&object.class_name),
-        Value::HandleObject(handle) => Some(&handle.class_name),
+        Value::Object(object) => Some(object.class_name()),
+        Value::HandleObject(handle) => Some(handle.class_name.as_identity()),
         Value::ObjectArray(array) if array.len() == 1 => Some(array.class_name()),
         _ => None,
     };
@@ -272,8 +208,8 @@ fn assignment_scalar(rhs: &Value, class_name: &ClassIdentity) -> Result<Value, R
         ));
     }
     match rhs {
-        Value::Object(_) | Value::HandleObject(_) => Ok(rhs.clone()),
-        Value::ObjectArray(array) => Ok(array.data()[0].clone()),
+        Value::Object(_) | Value::HandleObject(_) => Ok(rhs),
+        Value::ObjectArray(array) => Ok(&array.data()[0]),
         _ => unreachable!("class check admitted only object values"),
     }
 }
@@ -300,9 +236,7 @@ mod tests {
 
     fn object(name: &str) -> Value {
         let mut object = ObjectInstance::new("parallel.FevalFuture");
-        object
-            .properties
-            .insert("Name".into(), Value::String(name.into()));
+        object.replace_property_unbounded("Name".into(), Value::String(name.into()));
         Value::Object(object)
     }
 
@@ -320,9 +254,7 @@ mod tests {
     #[test]
     fn assignment_rejects_class_drift_and_gap_filling_without_a_constructor() {
         let mut other = ObjectInstance::new("Other");
-        other
-            .properties
-            .insert("Name".into(), Value::String("other".into()));
+        other.replace_property_unbounded("Name".into(), Value::String("other".into()));
         assert!(assign_scalar_indices(object("first"), &[2], Value::Object(other), false).is_err());
         let error = assign_scalar_indices(object("first"), &[3], object("third"), false)
             .expect_err("gap requires class construction");

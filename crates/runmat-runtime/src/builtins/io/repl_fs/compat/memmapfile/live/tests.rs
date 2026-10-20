@@ -121,18 +121,18 @@ fn mapped_data_is_live_and_indexed_write_stays_on_original_provider() {
     vfs::set_current_dir(&root).unwrap();
     let mapped = futures::executor::block_on(super::super::super::memmapfile_builtin(
         None,
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::String("data.bin".into()),
             Value::String("Writable".into()),
             Value::Bool(true),
-        ],
+        ]),
     ))
     .expect("live memmap receiver");
     let Value::Object(object) = &mapped else {
         panic!("object receiver")
     };
     assert!(object.memmap_receiver().is_some());
-    assert!(!object.properties.contains_key("Data"));
+    assert!(!object.properties().contains_key("Data"));
     let alias =
         crate::execution::RootedValue::new(mapped.clone()).expect("root mapped receiver alias");
     let replacement = Arc::new(MemoryFsProvider::with_current_dir(root.join("replacement")));
@@ -191,13 +191,13 @@ fn mapped_receiver_controls_clone_independently_without_changing_backing() {
     vfs::set_current_dir(&root).unwrap();
     let original = futures::executor::block_on(super::super::super::memmapfile_builtin(
         None,
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::String("data.bin".into()),
             Value::String("Writable".into()),
             Value::Bool(true),
             Value::String("Repeat".into()),
             Value::Num(f64::INFINITY),
-        ],
+        ]),
     ))
     .unwrap();
     assert_eq!(
@@ -276,11 +276,11 @@ fn indexed_read_observes_only_current_selected_byte_and_forged_class_has_no_auth
     vfs::set_current_dir(&root).unwrap();
     let mapped = futures::executor::block_on(super::super::super::memmapfile_builtin(
         None,
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::String("data.bin".into()),
             Value::String("Writable".into()),
             Value::Bool(true),
-        ],
+        ]),
     ))
     .unwrap();
     let alias = mapped.clone();
@@ -334,13 +334,13 @@ fn indexed_named_field_write_preserves_other_fields_and_elements() {
     .unwrap();
     let mapped = futures::executor::block_on(super::super::super::memmapfile_builtin(
         None,
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::String("record.bin".into()),
             Value::String("Format".into()),
             format,
             Value::String("Writable".into()),
             Value::Bool(true),
-        ],
+        ]),
     ))
     .unwrap();
     let selected = indexed_field(1, "second", 1);

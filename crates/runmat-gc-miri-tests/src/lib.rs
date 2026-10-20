@@ -10,9 +10,7 @@
 #[cfg(test)]
 mod tests {
     use runmat_gc::*;
-    use runmat_value::{
-        CellArray, Closure, HandleRef, Listener, ObjectInstance, StructValue, Value,
-    };
+    use runmat_value::{CellArray, Closure, HandleRef, Listener, ObjectInstance, Value};
     use std::ptr::NonNull;
 
     #[test]
@@ -215,12 +213,10 @@ mod tests {
             let mut object = ObjectInstance::new("Owner".to_string());
             object.properties.insert("capture".to_string(), closure);
 
-            let mut root_struct = StructValue::new();
-            root_struct
-                .fields
-                .insert("object".to_string(), Value::Object(object));
+            let mut root_struct = runmat_value::UnboundedStructValueBuilder::with_capacity(1);
+            root_struct.insert("object".to_string(), Value::Object(object));
 
-            let rooted = gc_allocate_rooted(Value::Struct(root_struct))
+            let rooted = gc_allocate_rooted(Value::Struct(root_struct.finish()))
                 .expect("rooted nested value should allocate");
 
             gc_collect_minor().expect("minor collection should succeed");

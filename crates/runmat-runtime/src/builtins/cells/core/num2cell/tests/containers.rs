@@ -56,7 +56,7 @@ fn rank_zero_value_arrays_have_one_cell_but_an_empty_cell_array_stays_empty() {
         panic!("rank-zero logical output expected")
     };
     assert_eq!(logical.shape, vec![1, 1]);
-    assert_eq!(logical.data, vec![Value::Bool(true)]);
+    assert_eq!(logical.data(), vec![Value::Bool(true)]);
 
     let Value::Cell(strings) = run(
         Value::StringArray(StringArray::new(vec!["only".into()], vec![]).unwrap()),
@@ -65,7 +65,7 @@ fn rank_zero_value_arrays_have_one_cell_but_an_empty_cell_array_stays_empty() {
         panic!("rank-zero string output expected")
     };
     assert_eq!(strings.shape, vec![1, 1]);
-    assert_eq!(strings.data, vec![Value::String("only".into())]);
+    assert_eq!(strings.data(), vec![Value::String("only".into())]);
 
     let symbol = SymbolicExpr::constant(7.0);
     let Value::Cell(symbolic) = run(
@@ -75,45 +75,43 @@ fn rank_zero_value_arrays_have_one_cell_but_an_empty_cell_array_stays_empty() {
         panic!("rank-zero symbolic output expected")
     };
     assert_eq!(symbolic.shape, vec![1, 1]);
-    assert_eq!(symbolic.data, vec![Value::Symbolic(symbol)]);
+    assert_eq!(symbolic.data(), vec![Value::Symbolic(symbol)]);
 
     let empty = CellArray::new_with_shape(Vec::new(), vec![]).unwrap();
     let Value::Cell(output) = run(Value::Cell(empty), Vec::new()) else {
         panic!("empty cell output expected")
     };
     assert!(output.shape.is_empty());
-    assert!(output.data.is_empty());
+    assert!(output.data().is_empty());
     assert_eq!((output.rows, output.cols), (0, 0));
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn empty_cell_shape_revalidates_payload_cardinality_and_cached_geometry() {
-    let malformed = CellArray {
-        data: vec![Value::Num(1.0)],
-        shape: vec![],
-        rows: 0,
-        cols: 0,
-    };
+    let mut malformed =
+        CellArray::new(vec![Value::Num(1.0)], 1, 1).expect("valid original payload");
+    malformed.shape = vec![].into();
+    malformed.rows = 0;
+    malformed.cols = 0;
     let error = block_on(super::super::num2cell_builtin(
+        None,
         Value::Cell(malformed),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect_err("malformed empty cell must not become one scalar cell");
     assert_eq!(error.identifier(), Some("RunMat:num2cell:Internal"));
     assert!(error.to_string().contains("Cell data length 1"));
 
-    let stale_cache = CellArray {
-        data: Vec::new(),
-        shape: vec![],
-        rows: 7,
-        cols: 8,
-    };
+    let mut stale_cache =
+        CellArray::new_with_shape(Vec::new(), Vec::new()).expect("valid empty payload");
+    stale_cache.rows = 7;
+    stale_cache.cols = 8;
     let Value::Cell(output) = run(Value::Cell(stale_cache), Vec::new()) else {
         panic!("valid empty cell payload expected")
     };
     assert!(output.shape.is_empty());
-    assert!(output.data.is_empty());
+    assert!(output.data().is_empty());
     assert_eq!((output.rows, output.cols), (0, 0));
 }
 

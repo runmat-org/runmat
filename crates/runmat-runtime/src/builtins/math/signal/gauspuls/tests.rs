@@ -49,7 +49,10 @@ fn discarded_samples_still_validate_representation_and_exactness() {
 }
 
 fn call(t: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    block_on(gauspuls_builtin(t, rest))
+    block_on(gauspuls_builtin(
+        t,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    ))
 }
 
 fn expect_tensor(value: Value) -> Tensor {

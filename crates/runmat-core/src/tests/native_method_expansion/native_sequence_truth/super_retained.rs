@@ -47,7 +47,7 @@ fn compiled_derived_constructor_keeps_base_body_for_interpreted_and_native_entri
                 &unit,
                 ProcedureInvocation {
                     target: ProcedureTarget::Function("makeCompiled".into()),
-                    arguments: vec![Value::Num(value)],
+                    arguments: crate::ProcedureArguments::Source(vec![Value::Num(value)]),
                     requested_outputs: 1,
                 },
                 &control,
@@ -69,11 +69,11 @@ fn compiled_derived_constructor_keeps_base_body_for_interpreted_and_native_entri
                 panic!("derived instance was not live after superclass call")
             };
             assert_eq!(
-                properties.properties.get("baseValue"),
+                properties.properties().get("baseValue"),
                 Some(&Value::Num(value))
             );
             assert_eq!(
-                properties.properties.get("derivedValue"),
+                properties.properties().get("derivedValue"),
                 Some(&Value::Num(value + 1.0))
             );
         }

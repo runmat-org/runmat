@@ -25,7 +25,7 @@ use crate::BuiltinResult;
 pub(crate) async fn discretize_builtin(
     x: Value,
     edges_or_count: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     execute::apply(x, edges_or_count, rest).await
 }

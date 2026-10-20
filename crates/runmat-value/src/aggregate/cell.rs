@@ -1,12 +1,13 @@
 use super::*;
+use crate::{OutputListStorage, OwnedExactArrayValues, SharedShape};
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CellArray {
-    pub data: Vec<Value>,
+    pub(crate) data: OutputListStorage,
     /// Full MATLAB-visible shape vector. Cell payloads retain their historical
     /// row-major layout within each 2-D page.
-    pub shape: Vec<usize>,
+    pub shape: SharedShape,
     /// Cached row count for 2-D interop; equals `shape[0]` when present.
     pub rows: usize,
     /// Cached column count for 2-D interop; equals `shape[1]` when present, otherwise 1 (or 0 for empty).
@@ -29,8 +30,91 @@ impl CellArray {
                 expected
             ));
         }
+        Ok(Self::from_validated_storage(
+            OutputListStorage::shared_unbounded(data),
+            SharedShape::new_unmanaged(shape),
+        ))
+    }
+
+    /// Validate and move existing row-major collection and shape owners. No
+    /// child or shape backing is copied, and no new admission is implied.
+    pub fn from_shared_storage(
+        data: OutputListStorage,
+        shape: SharedShape,
+    ) -> Result<Self, String> {
+        let expected = total_len(&shape)
+            .ok_or_else(|| "Cell data shape exceeds platform limits".to_string())?;
+        if expected != data.len() {
+            return Err("Cell payload length does not match shape".into());
+        }
+        Ok(Self::from_validated_storage(data, shape))
+    }
+
+    fn from_validated_storage(data: OutputListStorage, shape: SharedShape) -> Self {
         let (rows, cols) = shape_rows_cols(&shape);
-        Ok(CellArray {
+        Self {
+            data: shared_original(data),
+            shape,
+            rows,
+            cols,
+        }
+    }
+
+    /// Publish separately admitted collection and shape owners without
+    /// cloning children or allocating a replacement collection.
+    pub fn from_admitted(data: OutputListStorage, shape: SharedShape) -> Result<Self, String> {
+        if !data.is_exact() || !shape.is_admitted() {
+            return Err("Cell payload and shape require exact admission".into());
+        }
+        let expected = total_len(&shape)
+            .ok_or_else(|| "Cell data shape exceeds platform limits".to_string())?;
+        if expected != data.len() {
+            return Err("Cell payload length does not match admitted shape".into());
+        }
+        Ok(Self::from_validated_storage(data, shape))
+    }
+
+    pub fn data(&self) -> &[Value] {
+        self.data.as_slice()
+    }
+    /// Borrow the immutable original physical owner, not a mutable Vec facade.
+    pub fn data_owner(&self) -> &OutputListStorage {
+        &self.data
+    }
+    /// Move the existing owners without dropping their retained claims or
+    /// silently repairing deliberately malformed legacy cached dimensions.
+    pub fn into_parts(self) -> (OutputListStorage, SharedShape, usize, usize) {
+        (self.data, self.shape, self.rows, self.cols)
+    }
+    /// Explicit ordinary alias separation. Publish the new original shared
+    /// owner before returning; subsequent Cell clones never clone slot Vecs.
+    pub fn make_data_unique_unbounded(&mut self) -> Result<(), crate::ExactArrayMutationError> {
+        if self.data.is_unique() {
+            return Ok(());
+        }
+        self.data.make_unique_unbounded()?;
+        self.data = shared_original(std::mem::take(&mut self.data));
+        Ok(())
+    }
+
+    pub fn shape(&self) -> &[usize] {
+        self.shape.as_slice()
+    }
+
+    /// The caller may replace existing children only when no alias can
+    /// observe this exact backing. Length and capacity remain unchanged.
+    pub fn try_data_mut_unique(&mut self) -> Option<&mut [Value]> {
+        self.data.try_as_mut_slice_unique()
+    }
+
+    pub fn into_owned_data(self) -> Result<OwnedExactArrayValues<Value>, Self> {
+        let Self {
+            data,
+            shape,
+            rows,
+            cols,
+        } = self;
+        data.try_into_owned().map_err(|data| Self {
             data,
             shape,
             rows,
@@ -41,16 +125,31 @@ impl CellArray {
     /// Append to a 1×N cell row while keeping its full shape and cached
     /// dimensions in sync. Reject a malformed or non-row array unchanged.
     pub fn push_row_element(&mut self, value: Value) -> Result<(), String> {
-        if self.shape != [1, self.data.len()] || self.rows != 1 || self.cols != self.data.len() {
+        if self.shape.as_slice() != [1, self.data.len()]
+            || self.rows != 1
+            || self.cols != self.data.len()
+        {
             return Err("Cell array is not a valid row vector".into());
+        }
+        if self.data.is_exact() || self.shape.is_admitted() {
+            return Err("Cell row growth requires a new admitted output".into());
         }
         let next_count = self
             .data
             .len()
             .checked_add(1)
             .ok_or_else(|| "Cell row length exceeds platform limits".to_string())?;
-        self.data.push(value);
-        self.shape[1] = next_count;
+        // Ordinary aliases explicitly copy on growth; finite exact payloads
+        // were rejected above and must be rebuilt under new admission.
+        self.data
+            .make_unique_unbounded()
+            .map_err(|_| "Cell row growth requires ordinary storage".to_string())?;
+        let next_shape = SharedShape::new_unmanaged(vec![1, next_count]);
+        self.data
+            .try_push_unbounded(value)
+            .map_err(|_| "Cell row growth requires ordinary storage".to_string())?;
+        self.data = shared_original(std::mem::take(&mut self.data));
+        self.shape = next_shape;
         self.cols = next_count;
         Ok(())
     }
@@ -101,18 +200,33 @@ impl CellArray {
         self.iter_column_major().cloned().collect()
     }
 
-    /// Move values into MATLAB-visible linear order without cloning payloads.
+    /// Move unique ordinary values into MATLAB-visible linear order. Ordinary
+    /// aliases copy on write; admitted backing requires an admitted destination
+    /// instead of shedding its allocation claim into a bare vector.
     pub fn into_column_major(self) -> Result<Vec<Value>, String> {
-        if self.data.is_empty() || self.rows <= 1 || self.cols <= 1 {
-            return Ok(self.data);
+        let Self {
+            mut data,
+            rows,
+            cols,
+            ..
+        } = self;
+        data.make_unique_unbounded()
+            .map_err(|_| "Admitted cell storage requires an admitted destination".to_string())?;
+        let source = data
+            .try_into_owned()
+            .map_err(|_| "Shared cell storage cannot be moved into an ordinary vector".to_string())?
+            .try_into_unbounded_vec()
+            .map_err(|_| "Admitted cell storage cannot shed its allocation claim".to_string())?;
+        if source.is_empty() || rows <= 1 || cols <= 1 {
+            return Ok(source);
         }
-        let page_len = self.rows * self.cols;
-        let mut source = self.data.into_iter().map(Some).collect::<Vec<_>>();
+        let page_len = rows * cols;
+        let mut source = source.into_iter().map(Some).collect::<Vec<_>>();
         let mut ordered = Vec::with_capacity(source.len());
         for page_offset in (0..source.len()).step_by(page_len) {
-            for column in 0..self.cols {
-                for row in 0..self.rows {
-                    let index = page_offset + row * self.cols + column;
+            for column in 0..cols {
+                for row in 0..rows {
+                    let index = page_offset + row * cols + column;
                     let value = source
                         .get_mut(index)
                         .and_then(Option::take)
@@ -144,6 +258,22 @@ impl CellArray {
             ));
         }
         Ok(self.data[row * self.cols + col].clone())
+    }
+}
+
+fn shared_original(data: OutputListStorage) -> OutputListStorage {
+    if data.is_shallow_clone() {
+        return data;
+    }
+    let values = data
+        .try_into_owned()
+        .expect("unpublished Cell slots are unique")
+        .try_into_unbounded_vec()
+        .expect("unpublished Cell slots have no physical claim");
+    if values.capacity() == 0 {
+        OutputListStorage::empty()
+    } else {
+        OutputListStorage::shared_unbounded(values)
     }
 }
 
@@ -222,11 +352,30 @@ mod tests {
         row.push_row_element(Value::Num(2.0)).unwrap();
         assert_eq!(row.shape, [1, 2]);
         assert_eq!((row.rows, row.cols), (1, 2));
-        assert_eq!(row.data, vec![Value::Num(1.0), Value::Num(2.0)]);
+        assert_eq!(row.data(), [Value::Num(1.0), Value::Num(2.0)]);
 
-        row.shape[1] = 1;
+        row.shape = SharedShape::new_unmanaged(vec![1, 1]);
         assert!(row.push_row_element(Value::Num(3.0)).is_err());
         assert_eq!(row.data.len(), 2);
+    }
+
+    #[test]
+    fn every_ordinary_publication_retains_original_shared_slots() {
+        let values = vec![Value::Num(1.)];
+        let pointer = values.as_ptr();
+        let mut cell = CellArray::from_shared_storage(
+            OutputListStorage::unbounded(values),
+            SharedShape::new_unmanaged(vec![1, 1]),
+        )
+        .unwrap();
+        assert_eq!(cell.data().as_ptr(), pointer);
+        let alias = cell.clone();
+        assert_eq!(alias.data().as_ptr(), pointer);
+        cell.push_row_element(Value::Num(2.)).unwrap();
+        assert_eq!(alias.data(), [Value::Num(1.)]);
+        let next = cell.clone();
+        assert_eq!(cell.data().as_ptr(), next.data().as_ptr());
+        assert_eq!(cell.data(), [Value::Num(1.), Value::Num(2.)]);
     }
 
     #[test]
@@ -238,6 +387,9 @@ mod tests {
             Value::Num(4.0),
         ];
         let array = CellArray::from_column_major(expected.clone(), vec![2, 2]).unwrap();
+        let alias = array.clone();
+        assert_eq!(array.data().as_ptr(), alias.data().as_ptr());
         assert_eq!(array.into_column_major().unwrap(), expected);
+        assert_eq!(alias.into_column_major().unwrap(), expected);
     }
 }

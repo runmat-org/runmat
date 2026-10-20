@@ -9,7 +9,12 @@ fn call(image: Value, rest: Vec<Value>, outputs: Option<usize>) -> Value {
     let _guard = outputs
         .map(|count| crate::output_count::push_output_count(Some(count)))
         .expect("output-count scope");
-    block_on(imhist_builtin(None, image, rest)).expect("imhist")
+    block_on(imhist_builtin(
+        None,
+        image,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    ))
+    .expect("imhist")
 }
 
 fn tensor(data: Vec<f64>, shape: Vec<usize>, dtype: NumericDType) -> Tensor {
@@ -115,8 +120,12 @@ fn colormap_argument_distinguishes_rank_zero_bin_count_from_rank_one_map() {
     assert_eq!(counts.materialize_f64(), vec![0.0, 0.0, 1.0]);
 
     let rank_one_map = Value::Tensor(Tensor::new(vec![0.0; 3], vec![3]).unwrap());
-    let error = block_on(imhist_builtin(None, Value::Num(1.0), vec![rank_one_map]))
-        .expect_err("rank-one map is not an Nx3 colormap");
+    let error = block_on(imhist_builtin(
+        None,
+        Value::Num(1.0),
+        crate::builtins::common::test_support::builtin_arguments(vec![rank_one_map]),
+    ))
+    .expect_err("rank-one map is not an Nx3 colormap");
     assert!(error.message().contains("Nx3"));
 
     let rank_two_map = Value::Tensor(Tensor::new(vec![0.0; 3], vec![1, 3]).unwrap());
@@ -247,7 +256,12 @@ fn bin_count_parser_rejects_unrepresentable_double_before_casting() {
 #[test]
 fn rejects_out_of_range_floating_grayscale_values() {
     let image = tensor(vec![0.0, 35.0, 220.0, 255.0], vec![2, 2], NumericDType::F64);
-    let err = block_on(imhist_builtin(None, Value::Tensor(image), vec![])).unwrap_err();
+    let err = block_on(imhist_builtin(
+        None,
+        Value::Tensor(image),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap_err();
     assert_eq!(err.identifier(), Some("RunMat:imhist:InvalidArgument"));
     assert!(err.message().contains("normalized to [0, 1]"));
 }
@@ -259,7 +273,7 @@ fn rejects_nan_indexed_image_values() {
     let err = block_on(imhist_builtin(
         None,
         Value::Tensor(image),
-        vec![Value::Tensor(map)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(map)]),
     ))
     .unwrap_err();
     assert_eq!(err.identifier(), Some("RunMat:imhist:InvalidArgument"));
@@ -273,7 +287,7 @@ fn rejects_colormap_values_outside_unit_range() {
     let err = block_on(imhist_builtin(
         None,
         Value::Tensor(image),
-        vec![Value::Tensor(map)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(map)]),
     ))
     .unwrap_err();
     assert_eq!(err.identifier(), Some("RunMat:imhist:InvalidArgument"));
@@ -285,7 +299,12 @@ fn rejects_more_than_two_outputs() {
     let image = tensor(vec![0.0, 1.0], vec![1, 2], NumericDType::U8);
     let err = {
         let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
-        block_on(imhist_builtin(None, Value::Tensor(image), vec![])).unwrap_err()
+        block_on(imhist_builtin(
+            None,
+            Value::Tensor(image),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap_err()
     };
     assert_eq!(err.identifier(), Some("RunMat:imhist:TooManyOutputs"));
 }
@@ -295,13 +314,21 @@ fn output_and_arity_rejection_precede_image_materialization() {
     let wide = Value::Int(IntValue::U64(u64::MAX));
     let excess = {
         let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
-        block_on(imhist_builtin(None, wide.clone(), vec![])).unwrap_err()
+        block_on(imhist_builtin(
+            None,
+            wide.clone(),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap_err()
     };
     assert_eq!(excess.identifier(), Some("RunMat:imhist:TooManyOutputs"));
     let arity = block_on(imhist_builtin(
         None,
         wide,
-        vec![Value::Num(2.0), Value::Num(3.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(2.0),
+            Value::Num(3.0),
+        ]),
     ))
     .unwrap_err();
     assert_eq!(arity.identifier(), Some("RunMat:imhist:InvalidArgument"));
@@ -310,9 +337,12 @@ fn output_and_arity_rejection_precede_image_materialization() {
 #[test]
 fn accepts_n_dimensional_grayscale_input_including_three_plane_shape() {
     let image = tensor(vec![0.0; 12], vec![2, 2, 3], NumericDType::F64);
-    let Value::Tensor(counts) =
-        block_on(imhist_builtin(None, Value::Tensor(image), vec![])).unwrap()
-    else {
+    let Value::Tensor(counts) = block_on(imhist_builtin(
+        None,
+        Value::Tensor(image),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap() else {
         panic!("expected counts tensor");
     };
     assert_eq!(counts.shape(), &[DEFAULT_GRAYSCALE_BINS, 1]);
@@ -334,7 +364,7 @@ fn resident_programmatic_outputs_are_deferred_unique_and_owner_preserving() {
             block_on(imhist_builtin(
                 None,
                 Value::GpuTensor(source.clone()),
-                vec![],
+                crate::builtins::common::test_support::builtin_arguments(vec![]),
             ))
             .expect("resident histogram")
         };
@@ -372,7 +402,11 @@ fn unpolled_resident_histogram_future_leaves_caller_lease_live() {
     test_support::with_test_provider(|provider| {
         let input = tensor(vec![0.0, 1.0], vec![1, 2], NumericDType::U8);
         let source = gpu_helpers::upload_tensor(provider, &input).expect("resident image");
-        let pending = imhist_builtin(None, Value::GpuTensor(source.clone()), vec![]);
+        let pending = imhist_builtin(
+            None,
+            Value::GpuTensor(source.clone()),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        );
         drop(pending);
         assert!(source.allocation_lease().validate_live().is_ok());
         let gathered = test_support::gather(Value::GpuTensor(source)).expect("caller remains live");
@@ -393,7 +427,7 @@ fn selected_host_histogram_reports_completed_owner_upload_once() {
             block_on(imhist_builtin(
                 Some(runtime),
                 Value::GpuTensor(source.clone()),
-                vec![],
+                crate::builtins::common::test_support::builtin_arguments(vec![]),
             ))
             .expect("selected histogram")
         };
@@ -421,14 +455,14 @@ fn selected_histogram_unpolled_and_statement_forms_do_not_probe() {
         drop(imhist_builtin(
             Some(runtime.clone()),
             Value::GpuTensor(source.clone()),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ));
         assert_eq!(witness.selections(), 0);
         let _requested = crate::output_context::push_output_count(0).expect("output-count scope");
         let counts = block_on(imhist_builtin(
             Some(runtime),
             Value::GpuTensor(source.clone()),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .expect("statement histogram");
         assert!(matches!(counts, Value::Tensor(_)));
@@ -495,7 +529,7 @@ fn resident_statement_form_returns_host_counts_without_plotting_or_publication()
             block_on(imhist_builtin(
                 None,
                 Value::GpuTensor(source.clone()),
-                vec![],
+                crate::builtins::common::test_support::builtin_arguments(vec![]),
             ))
             .expect("resident statement histogram")
         };
@@ -518,8 +552,12 @@ fn explicit_resident_input_preserves_unsupported_typed_upload_error() {
         let source = source
             .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
             .expect("publish provenance view");
-        let err = block_on(imhist_builtin(None, Value::GpuTensor(source), vec![]))
-            .expect_err("double output cannot silently become host output");
+        let err = block_on(imhist_builtin(
+            None,
+            Value::GpuTensor(source),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .expect_err("double output cannot silently become host output");
         assert!(
             err.message().contains("failed to restore GPU result")
                 && err
@@ -547,7 +585,7 @@ fn automatic_f32_resident_outputs_fall_back_to_host_without_publication() {
             block_on(imhist_builtin(
                 None,
                 Value::GpuTensor(source.clone()),
-                vec![],
+                crate::builtins::common::test_support::builtin_arguments(vec![]),
             ))
             .expect("automatic precision mismatch falls back")
         };
@@ -574,7 +612,7 @@ fn indexed_resident_image_rejects_before_download() {
         let err = block_on(imhist_builtin(
             None,
             Value::GpuTensor(source.clone()),
-            vec![Value::Tensor(map)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(map)]),
         ))
         .expect_err("indexed gpuArray input must reject");
         assert_eq!(err.identifier(), Some("RunMat:imhist:UnsupportedImage"));
@@ -615,7 +653,12 @@ fn statement_form_renders_bar_chart_without_value() {
     let _ = clear_figure(None);
     let _requested = crate::output_context::push_output_count(0).expect("output-count scope");
     let image = tensor(vec![0.0, 1.0, 1.0, 2.0], vec![2, 2], NumericDType::U8);
-    let out = block_on(imhist_builtin(None, Value::Tensor(image), vec![])).unwrap();
+    let out = block_on(imhist_builtin(
+        None,
+        Value::Tensor(image),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap();
     assert_eq!(out, Value::output_list(Vec::new()));
     if let Some(fig) = clone_figure(current_figure_handle()) {
         if let Some(plot) = fig.plots().next() {

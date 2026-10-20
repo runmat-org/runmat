@@ -1406,11 +1406,11 @@ mod tests {
             panic!("expected cell loc");
         };
         assert_eq!(cell.shape, vec![1, 2]);
-        match &cell.data[0] {
+        match &cell.data()[0] {
             Value::Tensor(indices) => assert_eq!(indices.materialize_f64(), vec![1.0, 2.0]),
             other => panic!("expected tensor indices, got {other:?}"),
         }
-        match &cell.data[1] {
+        match &cell.data()[1] {
             Value::Tensor(indices) => assert_eq!(indices.materialize_f64(), vec![0.0]),
             other => panic!("expected tensor zero indices, got {other:?}"),
         }
@@ -1517,7 +1517,7 @@ mod tests {
             panic!("expected cell loc");
         };
         assert_eq!(cell.shape, vec![1, 1]);
-        match &cell.data[0] {
+        match &cell.data()[0] {
             Value::Tensor(indices) => assert_eq!(indices.materialize_f64(), vec![1.0, 2.0]),
             other => panic!("expected tensor indices, got {other:?}"),
         }

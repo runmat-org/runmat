@@ -5,7 +5,8 @@ use runmat_builtins::builtin_function_by_name;
 use runmat_value::{CharArray, IntegerStorage, StringArray};
 
 fn call(t: Value, d: Value, pulse: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    block_on(pulstran_builtin(t, d, pulse, rest))
+    let rest = crate::call::BuiltinArguments::from_borrowed(&rest, None)?;
+    block_on(pulstran_builtin(None, t, d, pulse, rest))
 }
 
 fn expect_tensor(value: Value) -> Tensor {

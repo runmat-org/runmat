@@ -20,7 +20,7 @@ use std::path::PathBuf;
 use runmat_builtins::{DATA_CREATE_DESCRIPTOR, DATA_CREATE_INTEGER_CAPABILITIES};
 use runmat_filesystem::data_contract::{DataChunkDescriptor, DataChunkUploadRequest};
 use runmat_macros::runtime_builtin;
-use runmat_value::{IntValue, NumericScalar, ObjectInstance, StructValue, Tensor, Value};
+use runmat_value::{IntValue, NumericScalar, ObjectInstance, Tensor, Value};
 
 use crate::builtins::common::json::int_value_to_json;
 use crate::builtins::common::tensor as tensor_utils;

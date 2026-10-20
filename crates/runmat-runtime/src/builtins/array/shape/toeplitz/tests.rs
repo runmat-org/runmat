@@ -6,16 +6,22 @@ use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage};
 fn empty_and_nd_vectors_preserve_geometry() {
     for shape in [vec![0, 3], vec![1, 0, 1]] {
         let input = Tensor::new(vec![], shape).unwrap();
-        let Value::Tensor(output) =
-            block_on(toeplitz_builtin(vec![Value::Tensor(input), row(&[1., 2.])])).unwrap()
-        else {
+        let Value::Tensor(output) = block_on(toeplitz_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Tensor(input),
+                row(&[1., 2.]),
+            ]),
+        ))
+        .unwrap() else {
             panic!("tensor");
         };
         assert_eq!(output.shape(), [0, 2]);
     }
     let input = Tensor::new(vec![1., 2., 3.], vec![1, 1, 3]).unwrap();
-    let Value::Tensor(output) = block_on(toeplitz_builtin(vec![Value::Tensor(input)])).unwrap()
-    else {
+    let Value::Tensor(output) = block_on(toeplitz_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(input)]),
+    ))
+    .unwrap() else {
         panic!("tensor");
     };
     assert_eq!(output.shape(), [3, 3]);
@@ -24,18 +30,28 @@ fn empty_and_nd_vectors_preserve_geometry() {
 #[test]
 fn output_count_and_arity_fail_before_provider_lookup() {
     let _count = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
-    let error = block_on(toeplitz_builtin(vec![])).unwrap_err();
+    let error = block_on(toeplitz_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap_err();
     assert_eq!(
         error.identifier(),
         runmat_builtins::TOEPLITZ_ERROR_TOO_MANY_OUTPUTS.identifier
     );
     drop(_count);
     assert_eq!(
-        block_on(toeplitz_builtin(vec![])).unwrap_err().identifier(),
+        block_on(toeplitz_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![])
+        ))
+        .unwrap_err()
+        .identifier(),
         ERROR_INVALID_INPUT.identifier
     );
     let _discard = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
-    assert!(block_on(toeplitz_builtin(vec![row(&[1., 2.])])).is_ok());
+    assert!(block_on(toeplitz_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![row(&[1., 2.])])
+    ))
+    .is_ok());
 }
 
 #[test]
@@ -50,9 +66,12 @@ fn resident_exact_integer_construction_preserves_values_and_owner() {
             .unwrap()
             .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
             .expect("validated fixture provenance");
-        let Value::GpuTensor(output) =
-            block_on(toeplitz_builtin(vec![Value::GpuTensor(handle.clone())])).unwrap()
-        else {
+        let Value::GpuTensor(output) = block_on(toeplitz_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(
+                handle.clone(),
+            )]),
+        ))
+        .unwrap() else {
             panic!("resident output");
         };
         assert_eq!(output.device_id(), handle.device_id());
@@ -82,7 +101,10 @@ fn row(values: &[f64]) -> Value {
 
 #[test]
 fn toeplitz_one_real_vector_is_symmetric() {
-    let out = block_on(toeplitz_builtin(vec![row(&[1.0, 2.0, 3.0])])).expect("toeplitz");
+    let out = block_on(toeplitz_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![row(&[1.0, 2.0, 3.0])]),
+    ))
+    .expect("toeplitz");
     let Value::Tensor(tensor) = out else {
         panic!("expected tensor");
     };
@@ -95,10 +117,12 @@ fn toeplitz_one_real_vector_is_symmetric() {
 
 #[test]
 fn toeplitz_column_and_row_use_first_column_diagonal() {
-    let out = block_on(toeplitz_builtin(vec![
-        row(&[1.0, 2.0, 3.0]),
-        row(&[9.0, 4.0]),
-    ]))
+    let out = block_on(toeplitz_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            row(&[1.0, 2.0, 3.0]),
+            row(&[9.0, 4.0]),
+        ]),
+    ))
     .expect("toeplitz");
     let Value::Tensor(tensor) = out else {
         panic!("expected tensor");
@@ -110,7 +134,10 @@ fn toeplitz_column_and_row_use_first_column_diagonal() {
 #[test]
 fn toeplitz_complex_single_input_uses_row_and_conjugates_first_column() {
     let r = ComplexTensor::new(vec![(1.0, 2.0), (3.0, 4.0)], vec![1, 2]).unwrap();
-    let out = block_on(toeplitz_builtin(vec![Value::ComplexTensor(r)])).expect("toeplitz");
+    let out = block_on(toeplitz_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::ComplexTensor(r)]),
+    ))
+    .expect("toeplitz");
     let Value::ComplexTensor(tensor) = out else {
         panic!("expected complex tensor");
     };
@@ -124,7 +151,10 @@ fn toeplitz_complex_single_input_uses_row_and_conjugates_first_column() {
 #[test]
 fn toeplitz_preserves_native_single_storage() {
     let input = Tensor::from_f32(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
-    let out = block_on(toeplitz_builtin(vec![Value::Tensor(input)])).expect("toeplitz");
+    let out = block_on(toeplitz_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(input)]),
+    ))
+    .expect("toeplitz");
     let Value::Tensor(tensor) = out else {
         panic!("expected tensor");
     };
@@ -138,9 +168,10 @@ fn toeplitz_preserves_native_single_storage() {
 #[test]
 fn toeplitz_preserves_complex_single_storage() {
     let input = ComplexTensor::from_f32(vec![(1.0, 2.0), (3.0, 4.0)], vec![1, 2]).unwrap();
-    let Value::ComplexTensor(output) =
-        block_on(toeplitz_builtin(vec![Value::ComplexTensor(input)])).unwrap()
-    else {
+    let Value::ComplexTensor(output) = block_on(toeplitz_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::ComplexTensor(input)]),
+    ))
+    .unwrap() else {
         panic!("expected complex tensor")
     };
     assert_eq!(output.numeric_dtype(), NumericDType::F32);
@@ -150,10 +181,12 @@ fn toeplitz_preserves_complex_single_storage() {
 fn toeplitz_rejects_mixed_integer_classes_without_floating_conversion() {
     let column = Tensor::new_integer(IntegerStorage::I64(vec![1, i64::MAX]), vec![2, 1]).unwrap();
     let row = Tensor::new_integer(IntegerStorage::U64(vec![1, u64::MAX]), vec![1, 2]).unwrap();
-    let error = block_on(toeplitz_builtin(vec![
-        Value::Tensor(column),
-        Value::Tensor(row),
-    ]))
+    let error = block_on(toeplitz_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Tensor(column),
+            Value::Tensor(row),
+        ]),
+    ))
     .unwrap_err();
     assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
 }
@@ -187,9 +220,10 @@ fn toeplitz_preserves_all_exact_integer_classes() {
             ])
             .expect("expected toeplitz storage");
         let input = Tensor::new_integer(storage, vec![1, 3]).expect("integer vector");
-        let Value::Tensor(output) =
-            block_on(toeplitz_builtin(vec![Value::Tensor(input)])).expect("toeplitz")
-        else {
+        let Value::Tensor(output) = block_on(toeplitz_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(input)]),
+        ))
+        .expect("toeplitz") else {
             panic!("expected exact integer tensor");
         };
         assert_eq!(output.shape(), [3, 3]);
@@ -203,10 +237,12 @@ fn toeplitz_preserves_all_exact_integer_classes() {
         vec![1, 2],
     )
     .expect("row");
-    let Value::Tensor(output) = block_on(toeplitz_builtin(vec![
-        Value::Tensor(column),
-        Value::Tensor(row),
-    ]))
+    let Value::Tensor(output) = block_on(toeplitz_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Tensor(column),
+            Value::Tensor(row),
+        ]),
+    ))
     .expect("toeplitz") else {
         panic!("expected exact integer tensor");
     };
@@ -220,10 +256,12 @@ fn toeplitz_preserves_all_exact_integer_classes() {
         ]))
     );
 
-    let Value::Tensor(scalar) =
-        block_on(toeplitz_builtin(vec![Value::Int(IntValue::U64(u64::MAX))]))
-            .expect("scalar toeplitz")
-    else {
+    let Value::Tensor(scalar) = block_on(toeplitz_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(IntValue::U64(
+            u64::MAX,
+        ))]),
+    ))
+    .expect("scalar toeplitz") else {
         panic!("expected exact scalar tensor");
     };
     assert_eq!(
@@ -242,9 +280,10 @@ fn toeplitz_typed_complex_integer_vector_shape_uses_storage_len_not_mirror() {
     .expect("complex integer storage");
     let input = ComplexTensor::new_integer(storage, vec![1, 3]).expect("complex vector");
 
-    let Value::ComplexTensor(output) =
-        block_on(toeplitz_builtin(vec![Value::ComplexTensor(input)])).expect("toeplitz")
-    else {
+    let Value::ComplexTensor(output) = block_on(toeplitz_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::ComplexTensor(input)]),
+    ))
+    .expect("toeplitz") else {
         panic!("expected exact complex integer tensor");
     };
 
@@ -269,8 +308,10 @@ fn toeplitz_complex_integer_requires_runmat_extensions() {
     .expect("complex integer storage");
     let input = ComplexTensor::new_integer(storage, vec![1, 2]).expect("complex vector");
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-    let error = block_on(toeplitz_builtin(vec![Value::ComplexTensor(input)]))
-        .expect_err("MATLAB mode rejects typed complex integer input");
+    let error = block_on(toeplitz_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::ComplexTensor(input)]),
+    ))
+    .expect_err("MATLAB mode rejects typed complex integer input");
     assert_eq!(
         error.identifier(),
         COMPLEX_INTEGER_INPUT_EXTENSION.error_identifier
@@ -280,7 +321,9 @@ fn toeplitz_complex_integer_requires_runmat_extensions() {
 #[test]
 fn toeplitz_rejects_matrix_inputs() {
     let matrix = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-    let err = block_on(toeplitz_builtin(vec![Value::Tensor(matrix)]))
-        .expect_err("matrix input should fail");
+    let err = block_on(toeplitz_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(matrix)]),
+    ))
+    .expect_err("matrix input should fail");
     assert_eq!(err.identifier(), ERROR_INVALID_INPUT.identifier);
 }

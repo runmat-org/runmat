@@ -15,7 +15,7 @@ async fn paths_match(
 ) -> BuiltinResult<bool> {
     // Admit all text before performing any filesystem access.
     for path in value_texts(value)? {
-        if !runmat_filesystem::metadata_async(&path)
+        if !runmat_filesystem::metadata_async(path.as_ref())
             .await
             .is_ok_and(|metadata| predicate(&metadata))
         {

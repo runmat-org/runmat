@@ -8,7 +8,7 @@ fn with_uint32_revision(builtin: &'static str, value: Value) -> BuiltinResult<Va
     let Value::Object(mut object) = value else {
         return Ok(value);
     };
-    let revision = match object.properties.get("geometry_revision") {
+    let revision = match object.properties().get("geometry_revision") {
         Some(Value::Int(revision)) => revision.to_i64(),
         Some(Value::Num(revision)) if revision.fract() == 0.0 => *revision as i64,
         _ => return Ok(Value::Object(object)),
@@ -20,10 +20,12 @@ fn with_uint32_revision(builtin: &'static str, value: Value) -> BuiltinResult<Va
             "geometry revision does not fit the geometry revision type",
         )
     })?;
-    object.properties.insert(
-        "geometry_revision".into(),
+    crate::builtins::fea::object_api::replace(
+        builtin,
+        &mut object,
+        "geometry_revision",
         Value::Int(IntValue::U32(revision)),
-    );
+    )?;
     Ok(Value::Object(object))
 }
 
@@ -194,6 +196,8 @@ pub async fn fea_property_region_target_all_cells_builtin(geometry: Value) -> Bu
     binding_variant = "default",
     builtin_path = "crate::builtins::fea::material_assignments"
 )]
-pub async fn fea_material_assignment_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn fea_material_assignment_builtin(
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     create_material_assignment_object_from_args(args)
 }

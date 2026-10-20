@@ -3,7 +3,7 @@ use runmat_value::Tensor;
 
 #[test]
 fn maps_fields_in_order_into_a_column() {
-    let mut structure = StructValue::new();
+    let mut structure = runmat_value::UnboundedStructValueBuilder::new();
     structure.insert(
         "alpha",
         Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap()),
@@ -14,7 +14,7 @@ fn maps_fields_in_order_into_a_column() {
     );
     let result = call(
         Value::FunctionHandle("length".into()),
-        structure,
+        structure.finish(),
         Vec::new(),
     )
     .unwrap();
@@ -27,12 +27,12 @@ fn maps_fields_in_order_into_a_column() {
 
 #[test]
 fn nonuniform_output_preserves_names_and_values() {
-    let mut structure = StructValue::new();
+    let mut structure = runmat_value::UnboundedStructValueBuilder::new();
     structure.insert("name", Value::String("runmat".into()));
     structure.insert("flag", Value::Bool(true));
     let result = call(
         Value::FunctionHandle("class".into()),
-        structure,
+        structure.finish(),
         vec![Value::String("UniformOutput".into()), Value::Bool(false)],
     )
     .unwrap();
@@ -76,9 +76,10 @@ fn empty_structure_has_explicit_outputs() {
 #[test]
 fn rejects_non_struct_input() {
     let error = futures::executor::block_on(super::super::structfun_builtin(
+        None,
         Value::FunctionHandle("length".into()),
         Value::Num(1.0),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap_err();
     assert_eq!(

@@ -169,7 +169,7 @@ pub(crate) async fn assign_cell_contents_with_context(
     match base {
         Value::Cell(cell) => {
             let positions = if matches!(indices.as_slice(), [ObjectIndexComponent::Colon]) {
-                (1..=cell.data.len()).collect::<Vec<_>>()
+                (1..=cell.data().len()).collect::<Vec<_>>()
             } else {
                 crate::object::cell::resolve_cell_assignment_positions(
                     &cell,
@@ -179,7 +179,8 @@ pub(crate) async fn assign_cell_contents_with_context(
                         .collect::<Vec<_>>(),
                 )?
             };
-            crate::object::cell::assign_cell_value_multi(
+            crate::object::cell::assign_cell_value_multi_in_context(
+                context,
                 cell,
                 &positions,
                 &values,

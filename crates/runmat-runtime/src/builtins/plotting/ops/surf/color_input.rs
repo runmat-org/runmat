@@ -7,28 +7,32 @@ use super::{
 };
 use crate::BuiltinResult;
 
+#[cfg(test)]
+#[path = "color_input/tests.rs"]
+mod tests;
+
 pub(super) struct ParsedSurfaceInput {
     pub(super) x: Value,
     pub(super) y: Value,
     pub(super) z: Value,
     pub(super) color: Option<Value>,
-    pub(super) rest: Vec<Value>,
+    pub(super) rest: crate::call::BuiltinArguments,
 }
 
-pub(super) fn parse(mut args: Vec<Value>) -> BuiltinResult<ParsedSurfaceInput> {
-    if args.len() >= 4 && args[..4].iter().all(is_color_data) {
-        let color = args.remove(3);
-        let (x, y, z, rest) = parse_surface_call_args_matlab_xy(args, BUILTIN_NAME)
+pub(super) fn parse(args: crate::call::BuiltinArguments) -> BuiltinResult<ParsedSurfaceInput> {
+    if args.len() >= 4 && args.iter().take(4).all(is_color_data) {
+        let color = args[3].clone();
+        let (x, y, z, _) = parse_surface_call_args_matlab_xy(args.range(..3)?, BUILTIN_NAME)
             .map_err(map_surf_invalid_argument)?;
         return Ok(ParsedSurfaceInput {
             x,
             y,
             z,
             color: Some(color),
-            rest,
+            rest: args.into_range(4..)?,
         });
     }
-    if args.len() >= 3 && args[..3].iter().all(is_color_data) {
+    if args.len() >= 3 && args.iter().take(3).all(is_color_data) {
         let (x, y, z, rest) = parse_surface_call_args_matlab_xy(args, BUILTIN_NAME)
             .map_err(map_surf_invalid_argument)?;
         return Ok(ParsedSurfaceInput {
@@ -39,29 +43,27 @@ pub(super) fn parse(mut args: Vec<Value>) -> BuiltinResult<ParsedSurfaceInput> {
             rest,
         });
     }
-    if args.len() >= 2 && args[..2].iter().all(is_color_data) {
-        let z = args.remove(0);
-        let color = args.remove(0);
-        let (x, y, z, _) = parse_surface_call_args_matlab_xy(vec![z], BUILTIN_NAME)
+    if args.len() >= 2 && args.iter().take(2).all(is_color_data) {
+        let color = args[1].clone();
+        let (x, y, z, _) = parse_surface_call_args_matlab_xy(args.range(..1)?, BUILTIN_NAME)
             .map_err(map_surf_invalid_argument)?;
         return Ok(ParsedSurfaceInput {
             x,
             y,
             z,
             color: Some(color),
-            rest: args,
+            rest: args.into_range(2..)?,
         });
     }
     if args.len() >= 3 && is_property_name(&args[1]) {
-        let z = args.remove(0);
-        let (x, y, z, _) = parse_surface_call_args_matlab_xy(vec![z], BUILTIN_NAME)
+        let (x, y, z, _) = parse_surface_call_args_matlab_xy(args.range(..1)?, BUILTIN_NAME)
             .map_err(map_surf_invalid_argument)?;
         return Ok(ParsedSurfaceInput {
             x,
             y,
             z,
             color: None,
-            rest: args,
+            rest: args.into_range(1..)?,
         });
     }
     let (x, y, z, rest) =

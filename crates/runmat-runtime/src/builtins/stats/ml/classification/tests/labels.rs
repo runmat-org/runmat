@@ -1,5 +1,5 @@
 use super::*;
-use runmat_value::{CellArray, CharArray, StringArray, StructValue};
+use runmat_value::{CellArray, CharArray, StringArray};
 
 #[test]
 fn classify_group_geometry_accepts_row_and_column_label_vectors() {
@@ -54,7 +54,7 @@ fn classify_quadratic_preserves_text_labels() {
         let Value::StringArray(labels) = &values[0] else {
             panic!("labels");
         };
-        assert_eq!(labels.data, vec!["low", "high"]);
+        assert_eq!(labels.data(), vec!["low", "high"]);
         let Value::StructArray(coeff) = &values[4] else {
             panic!("coeff");
         };
@@ -107,7 +107,7 @@ fn classify_preserves_char_matrix_labels() {
         };
         assert_eq!(labels.rows, 2);
         assert_eq!(labels.cols, 2);
-        assert_eq!(labels.data, vec!['a', 'a', 'b', 'b']);
+        assert_eq!(labels.data(), vec!['a', 'a', 'b', 'b']);
     });
 }
 
@@ -127,7 +127,7 @@ fn classify_accepts_cellstr_labels_and_struct_priors() {
             )
             .unwrap(),
         );
-        let mut prior = StructValue::new();
+        let mut prior = runmat_value::UnboundedStructValueBuilder::new();
         prior.insert(
             "group",
             Value::StringArray(
@@ -142,7 +142,10 @@ fn classify_accepts_cellstr_labels_and_struct_priors() {
             tensor(vec![0.1, 3.2], vec![2, 1]),
             tensor(vec![0.0, 0.4, 3.0, 3.4], vec![4, 1]),
             groups,
-            vec![Value::String("linear".into()), Value::Struct(prior)],
+            vec![
+                Value::String("linear".into()),
+                Value::Struct(prior.finish()),
+            ],
         );
         let Value::Cell(labels) = &values[0] else {
             panic!("labels");
@@ -158,7 +161,7 @@ fn classify_rejects_bad_dimensions() {
         tensor(vec![1.0, 2.0], vec![1, 2]),
         tensor(vec![1.0, 2.0], vec![2, 1]),
         tensor(vec![1.0, 2.0], vec![2, 1]),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap_err();
     assert!(err.message.contains("same number of columns"));

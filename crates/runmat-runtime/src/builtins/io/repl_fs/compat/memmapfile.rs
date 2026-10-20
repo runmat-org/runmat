@@ -269,11 +269,11 @@ impl MemmapFormat {
                 ..Self::default()
             }),
             Value::Cell(cell) => {
-                if cell.data.is_empty() {
+                if cell.data().is_empty() {
                     return Err(format_error("memmapfile: Format cell is empty"));
                 }
                 if cell.shape.as_slice() != [cell.rows, cell.cols]
-                    || cell.rows.checked_mul(cell.cols) != Some(cell.data.len())
+                    || cell.rows.checked_mul(cell.cols) != Some(cell.data().len())
                     || cell.cols > 3
                     || (cell.rows > 1 && cell.cols != 3)
                 {
@@ -282,18 +282,18 @@ impl MemmapFormat {
                     ));
                 }
                 let dtype = MemmapDataType::parse(&text_with_category(
-                    &cell.data[0],
+                    &cell.data()[0],
                     "Format type",
                     &MEMMAPFILE_ERROR_INVALID_FORMAT,
                 )?)?;
                 let shape = if cell.cols >= 2 {
-                    shape_from_value(&cell.data[1])?
+                    shape_from_value(&cell.data()[1])?
                 } else {
                     vec![1, 1]
                 };
                 let field = if cell.cols == 3 {
                     Some(text_with_category(
-                        &cell.data[2],
+                        &cell.data()[2],
                         "Format field",
                         &MEMMAPFILE_ERROR_INVALID_FORMAT,
                     )?)
@@ -305,13 +305,13 @@ impl MemmapFormat {
                     let start = row * 3;
                     additional_fields.push(MemmapField {
                         dtype: MemmapDataType::parse(&text_with_category(
-                            &cell.data[start],
+                            &cell.data()[start],
                             "Format type",
                             &MEMMAPFILE_ERROR_INVALID_FORMAT,
                         )?)?,
-                        shape: shape_from_value(&cell.data[start + 1])?,
+                        shape: shape_from_value(&cell.data()[start + 1])?,
                         name: text_with_category(
-                            &cell.data[start + 2],
+                            &cell.data()[start + 2],
                             "Format field",
                             &MEMMAPFILE_ERROR_INVALID_FORMAT,
                         )?,

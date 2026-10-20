@@ -18,7 +18,7 @@ mod tests;
     binding_variant = "default",
     builtin_path = "crate::builtins::plotting::cmds::colorbar"
 )]
-pub fn colorbar_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub fn colorbar_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &COLORBAR_DESCRIPTOR,
         &COLORBAR_ERROR_OUTPUTS,
@@ -33,12 +33,12 @@ pub fn colorbar_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     }
     let (target, rest) = if let Some(first) = args.first() {
         if let Ok(PlotHandle::Axes(handle, axes)) = resolve_plot_handle(first, "colorbar") {
-            (Some((handle, axes)), &args[1..])
+            (Some((handle, axes)), args.view().range(1..)?)
         } else {
-            (None, args.as_slice())
+            (None, args.view())
         }
     } else {
-        (None, args.as_slice())
+        (None, args.view())
     };
     if rest.len() > 1 {
         return Err(cmd_error_with_message(
@@ -108,4 +108,8 @@ pub fn colorbar_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             Value::output_list(Vec::new())
         })
     }
+}
+#[cfg(test)]
+pub(crate) fn colorbar_builtin_source(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    colorbar_builtin(crate::call::BuiltinArguments::from_borrowed(&args, None)?)
 }

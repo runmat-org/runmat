@@ -18,8 +18,10 @@ pub(super) async fn fault_child(mode: &str) {
     reserved.validate().unwrap();
     drop(reserved);
     let mut response = ProgramExecutionResponse::Success {
-            outputs: vec![ValuePayload::Inline(Box::new(runmat_execution::value::InlineValue::Null))],
-        };
+        outputs: vec![ValuePayload::Inline(Box::new(
+            runmat_execution::value::InlineValue::Null,
+        ))],
+    };
     if mode == "--retry-observed-child" {
         // Test-only fault injection; no production formulation or physical output.
         let root = std::env::var_os(NATIVE_OBJECT_STORE_ROOT_ENV).unwrap();
@@ -179,13 +181,7 @@ async fn fault_parent() {
                     .as_ref()
                     .unwrap()
                     .wall_millis,
-                success
-                    .resources()
-                    .as_ref()
-                    .unwrap()
-                    .resources
-                    .usage
-                    .wall_millis
+                success.resources().unwrap().resources.usage.wall_millis
             );
         }
         let cold: Vec<runmat_execution_runner::task::AttemptRecord> =
@@ -227,7 +223,10 @@ pub(super) async fn run() {
         })
         .await
         .unwrap();
-        assert!(matches!(result, Err(message) if message.to_string().contains("cancelled")));
+        assert!(matches!(
+            result,
+            Err(runmat_execution_runner_native::NativeProgramFailure::Cancelled)
+        ));
         let history = task.try_attempt_history().unwrap();
         assert_eq!(history.len(), 1);
         let original = &history[0];

@@ -60,7 +60,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::math::optim::coneprog"
 )]
-async fn secondordercone_builtin_registered(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn secondordercone_builtin_registered(
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &SECONDORDERCONE_DESCRIPTOR,
         &ERROR_INVALID_ARGUMENT,
@@ -75,14 +77,9 @@ async fn secondordercone_builtin_registered(args: Vec<Value>) -> BuiltinResult<V
     crate::builtins::math::optim::common::preflight_catalog_inputs(
         &runmat_builtins::SECONDORDERCONE_CATALOG_ENTRY,
         &ERROR_INVALID_INPUT,
-        &args,
+        args.view(),
     )?;
-    let [a, b, d, gamma]: [Value; 4] = args.try_into().map_err(|_| {
-        coneprog_error(
-            &ERROR_INVALID_ARGUMENT,
-            "secondordercone: expected A, b, d, and gamma",
-        )
-    })?;
+    let [a, b, d, gamma]: [Value; 4] = std::array::from_fn(|index| args[index].clone());
     secondordercone_builtin(a, b, d, gamma).await
 }
 
@@ -109,13 +106,13 @@ async fn secondordercone_builtin(
     let gamma = numeric_scalar("gamma", gamma, FiniteMode::Finite).await?;
     validate_soc_dimensions(&a, &b, &d, gamma)?;
 
-    let mut st = StructValue::new();
+    let mut st = runmat_value::UnboundedStructValueBuilder::new();
     st.insert("A", matrix_value(&a)?);
     st.insert("b", vector_value_with_len(b));
     st.insert("d", vector_value_with_len(d));
     st.insert("gamma", Value::Num(gamma));
     st.insert("Type", Value::from("secondordercone"));
-    Ok(Value::Struct(st))
+    Ok(Value::Struct(st.finish()))
 }
 
 #[runtime_builtin(
@@ -126,19 +123,20 @@ async fn secondordercone_builtin(
 )]
 async fn coneprog_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     coneprog_in_runtime(runtime.as_ref(), args).await
 }
 
 #[cfg(test)]
 async fn coneprog_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    let args = crate::call::BuiltinArguments::from_borrowed(&args, None)?;
     coneprog_in_runtime(None, args).await
 }
 
 async fn coneprog_in_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     crate::output_count::validate_bounded_outputs(
         &CONEPROG_DESCRIPTOR,
@@ -148,11 +146,11 @@ async fn coneprog_in_runtime(
     let mut cooperation =
         ScalarCooperation::for_builtin(runmat_builtins::CONEPROG_CATALOG_ENTRY.identity, runtime);
     cooperation.completed(0).await?;
-    preflight::arguments(&args)?;
+    preflight::arguments(args.view())?;
     crate::builtins::math::optim::common::preflight_catalog_inputs(
         &runmat_builtins::CONEPROG_CATALOG_ENTRY,
         &ERROR_INVALID_INPUT,
-        &args,
+        args.view(),
     )?;
     let problem = parse_problem(args).await?;
     Ok(finalize(solve_coneprog(&problem, &mut cooperation).await?))
@@ -270,7 +268,7 @@ impl LambdaEstimate {
     }
 }
 
-async fn parse_problem(args: Vec<Value>) -> BuiltinResult<ConeProgram> {
+async fn parse_problem(args: crate::call::BuiltinArguments) -> BuiltinResult<ConeProgram> {
     if args.len() == 1 {
         let value = args.into_iter().next().unwrap();
         let Value::Struct(problem) = value else {
@@ -415,7 +413,7 @@ fn is_options_struct(st: &StructValue) -> bool {
 }
 
 async fn gathered_options(options: &StructValue) -> BuiltinResult<SolverOptions> {
-    let mut gathered = StructValue::new();
+    let mut gathered = runmat_value::UnboundedStructValueBuilder::new();
     for field in [
         runmat_builtins::OptimOptionField::TolFun,
         runmat_builtins::OptimOptionField::TolX,
@@ -425,6 +423,7 @@ async fn gathered_options(options: &StructValue) -> BuiltinResult<SolverOptions>
             gathered.insert(field.name(), gather(value.clone()).await?);
         }
     }
+    let gathered = gathered.finish();
     parse_options(Some(&gathered))
 }
 
@@ -462,19 +461,10 @@ async fn parse_soc_constraints(value: Value, n: usize) -> BuiltinResult<Vec<SocC
     }
     match value {
         Value::Struct(st) => parse_single_soc(st, n).await.map(|constraint| vec![constraint]),
-        Value::Cell(cell) => {
-            let mut out = Vec::with_capacity(cell.data.len());
-            for value in cell.data {
-                let Value::Struct(st) = value else {
-                    return Err(coneprog_error(
-                        &ERROR_INVALID_INPUT,
-                        "coneprog: socConstraints cell entries must be secondordercone structs",
-                    ));
-                };
-                out.push(parse_single_soc(st, n).await?);
-            }
-            Ok(out)
-        }
+        Value::Cell(cell) => match cell.into_owned_data() {
+            Ok(values) => parse_soc_cell_values(values.into_iter(), n).await,
+            Err(shared) => parse_soc_cell_values(shared.data().iter().cloned(), n).await,
+        },
         Value::OutputList(values) => {
             let mut out = Vec::with_capacity(values.len());
             let values = values.try_into_owned().map_err(|_| {
@@ -498,6 +488,23 @@ async fn parse_soc_constraints(value: Value, n: usize) -> BuiltinResult<Vec<SocC
             format!("coneprog: socConstraints must be a secondordercone struct or cell array, got {other:?}"),
         )),
     }
+}
+
+async fn parse_soc_cell_values(
+    values: impl Iterator<Item = Value>,
+    n: usize,
+) -> BuiltinResult<Vec<SocConstraint>> {
+    let mut out = Vec::with_capacity(values.size_hint().0);
+    for value in values {
+        let Value::Struct(st) = value else {
+            return Err(coneprog_error(
+                &ERROR_INVALID_INPUT,
+                "coneprog: socConstraints cell entries must be secondordercone structs",
+            ));
+        };
+        out.push(parse_single_soc(st, n).await?);
+    }
+    Ok(out)
 }
 
 async fn parse_single_soc(st: StructValue, n: usize) -> BuiltinResult<SocConstraint> {
@@ -1108,16 +1115,16 @@ fn finalize(outcome: ConeOutcome) -> Value {
 }
 
 fn build_output_struct(outcome: &ConeOutcome) -> StructValue {
-    let mut fields = StructValue::new();
+    let mut fields = runmat_value::UnboundedStructValueBuilder::new();
     fields.insert("iterations", Value::Num(outcome.iterations as f64));
     fields.insert("algorithm", Value::from(ALGORITHM));
     fields.insert("constrviolation", Value::Num(outcome.constrviolation));
     fields.insert("message", Value::from(outcome.message.clone()));
-    fields
+    fields.finish()
 }
 
 fn build_lambda_struct(outcome: &ConeOutcome) -> StructValue {
-    let mut fields = StructValue::new();
+    let mut fields = runmat_value::UnboundedStructValueBuilder::new();
     fields.insert(
         "ineqlin",
         vector_value_with_len(outcome.lambda.ineqlin.clone()),
@@ -1139,7 +1146,7 @@ fn build_lambda_struct(outcome: &ConeOutcome) -> StructValue {
             }),
         ),
     );
-    fields
+    fields.finish()
 }
 
 fn vector_value_with_len(values: Vec<f64>) -> Value {
@@ -1196,13 +1203,18 @@ mod tests {
         source.cancel(CancellationReason::User);
         let error = block_on(coneprog_builtin_registered(
             Some(runtime),
-            vec![Value::Num(1.0), empty()],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(1.0),
+                empty(),
+            ]),
         ))
         .expect_err("cancelled solver");
         assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
         assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
-        let error = block_on(secondordercone_builtin_registered(Vec::new()))
-            .expect_err("constructor arity is grammar, not numeric input");
+        let error = block_on(secondordercone_builtin_registered(
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect_err("constructor arity is grammar, not numeric input");
         assert_eq!(error.identifier(), ERROR_INVALID_ARGUMENT.identifier);
         for value in [Value::Bool(true), Value::Complex(1.0, 1.0)] {
             for field in [
@@ -1217,8 +1229,11 @@ mod tests {
             }
         }
         let _outputs = crate::output_count::push_output_count(Some(6)).expect("output-count scope");
-        let error = block_on(coneprog_builtin_registered(None, Vec::new()))
-            .expect_err("output preflight before argument parsing");
+        let error = block_on(coneprog_builtin_registered(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect_err("output preflight before argument parsing");
         assert_eq!(error.identifier(), ERROR_INVALID_ARGUMENT.identifier);
     }
 
@@ -1347,19 +1362,19 @@ mod tests {
 
     #[test]
     fn coneprog_accepts_problem_struct_and_options() {
-        let mut options = StructValue::new();
+        let mut options = runmat_value::UnboundedStructValueBuilder::new();
         options.insert("Solver", Value::from("coneprog"));
         options.insert("TolFun", Value::Num(1.0e-8));
         options.insert("MaxIter", Value::Num(120.0));
 
-        let mut problem = StructValue::new();
+        let mut problem = runmat_value::UnboundedStructValueBuilder::new();
         problem.insert("f", tensor(vec![0.0, 1.0], 2, 1));
         problem.insert("socConstraints", soc_unit_disk());
         problem.insert("Aineq", tensor(vec![0.0, -1.0], 1, 2));
         problem.insert("bineq", Value::Num(0.25));
-        problem.insert("options", Value::Struct(options));
+        problem.insert("options", Value::Struct(options.finish()));
 
-        let outputs = run(vec![Value::Struct(problem)], 3);
+        let outputs = run(vec![Value::Struct(problem.finish())], 3);
         let Value::Tensor(x) = &outputs[0] else {
             panic!("expected x");
         };

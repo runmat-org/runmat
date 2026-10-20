@@ -465,7 +465,7 @@ async fn execute_brace_operation(
                 Value::Composite(handle) => {
                     runmat_runtime::parallel::composite::read_composite_entry(
                         runtime,
-                        *handle,
+                        handle,
                         raw_indices,
                     )
                     .await?
@@ -489,7 +489,7 @@ async fn execute_brace_operation(
                 }
                 let value = runmat_runtime::parallel::composite::read_composite_entry(
                     runtime,
-                    *handle,
+                    handle,
                     raw_indices,
                 )
                 .await?;
@@ -509,7 +509,7 @@ async fn execute_brace_operation(
             if let Value::Composite(handle) = base {
                 let value = runmat_runtime::parallel::composite::read_composite_entry(
                     runtime,
-                    *handle,
+                    handle,
                     raw_indices,
                 )
                 .await?;
@@ -575,7 +575,8 @@ async fn execute_brace_operation(
                         match rhs_kind {
                             runmat_value::ValueSequenceKind::CommaSeparated
                                 if rhs_values.len() == 1 => {
-                                runmat_runtime::object::cell::assign_cell_value(
+                                runmat_runtime::object::cell::assign_cell_value_in_context(
+                                    Some(runtime),
                                     ca,
                                     &indices,
                                     rhs_values.pop().unwrap_or(Value::Num(0.0)),
@@ -590,7 +591,8 @@ async fn execute_brace_operation(
                                     "Cell brace assignment target count does not match source value count",
                                 ))
                             }
-                            runmat_value::ValueSequenceKind::Single => runmat_runtime::object::cell::assign_cell_value(
+                            runmat_value::ValueSequenceKind::Single => runmat_runtime::object::cell::assign_cell_value_in_context(
+                                Some(runtime),
                                 ca,
                                 &indices,
                                 rhs_values.pop().unwrap_or(Value::Num(0.0)),
@@ -606,7 +608,8 @@ async fn execute_brace_operation(
                                 raw_indices,
                             )?;
                         match rhs_kind {
-                            runmat_value::ValueSequenceKind::CommaSeparated => runmat_runtime::object::cell::assign_cell_value_multi(
+                            runmat_value::ValueSequenceKind::CommaSeparated => runmat_runtime::object::cell::assign_cell_value_multi_in_context(
+                                Some(runtime),
                                 ca,
                                 &positions,
                                 &rhs_values,
@@ -614,7 +617,8 @@ async fn execute_brace_operation(
                                     runmat_gc::gc_record_write(oldv, newv);
                                 },
                             )?,
-                            runmat_value::ValueSequenceKind::Single if positions.len() == 1 => runmat_runtime::object::cell::assign_cell_value(
+                            runmat_value::ValueSequenceKind::Single if positions.len() == 1 => runmat_runtime::object::cell::assign_cell_value_in_context(
+                                Some(runtime),
                                 ca,
                                 &positions,
                                 rhs_values.pop().unwrap_or(Value::Num(0.0)),
@@ -886,7 +890,7 @@ mod tests {
     use super::map_slice_plan_error;
     use futures::executor::block_on;
     use runmat_runtime::indexing::symbolic::scalar_from_value as symbolic_scalar_from_value;
-    use runmat_value::{IntegerStorage, ObjectArray, ObjectInstance, SymbolicExpr, Tensor, Value};
+    use runmat_value::{IntegerStorage, ObjectArray, SymbolicExpr, Tensor, Value};
 
     #[test]
     fn map_slice_plan_error_preserves_identifier_and_adds_context() {
@@ -956,11 +960,10 @@ mod tests {
         let values = ["first", "second"]
             .into_iter()
             .map(|name| {
-                let mut object = ObjectInstance::new("matlab.unittest.TestResult");
-                object
-                    .properties
-                    .insert("Name".into(), Value::String(name.into()));
-                Value::Object(object)
+                let mut object =
+                    runmat_value::UnboundedObjectBuilder::new("matlab.unittest.TestResult");
+                object.insert("Name".into(), Value::String(name.into()));
+                Value::Object(object.finish())
             })
             .collect();
         let array =
@@ -981,7 +984,7 @@ mod tests {
         assert!(matches!(
             scalar.value(),
             Value::Object(object)
-                if object.properties.get("Name") == Some(&Value::String("second".into()))
+                if object.properties().get("Name") == Some(&Value::String("second".into()))
         ));
 
         let selector =

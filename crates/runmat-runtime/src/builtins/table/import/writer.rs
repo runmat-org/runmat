@@ -10,10 +10,13 @@ pub(in crate::builtins::table) async fn write_tabular_file(
         return Err(invalid_argument("writetable: filename is required"));
     }
     let path = resolve_path(&rest[0])?;
-    let delimiter = parse_named_option(&rest[1..], "Delimiter")
-        .map(|value| scalar_text(value, "Delimiter"))
-        .transpose()?
-        .unwrap_or_else(|| ",".to_string());
+    let delimiter = parse_named_option(
+        crate::call::FunctionArgumentView::from_slice(&rest[1..]),
+        "Delimiter",
+    )
+    .map(|value| scalar_text(value, "Delimiter"))
+    .transpose()?
+    .unwrap_or_else(|| ",".to_string());
     let write_variable_names = parse_bool_option(
         &strip_known_text_option(&rest[1..], "Delimiter")?,
         "WriteVariableNames",
@@ -104,8 +107,8 @@ pub(in crate::builtins::table) fn table_delimited_text(
 
 pub(in crate::builtins::table) fn cell_to_text(value: &Value) -> String {
     match value {
-        Value::String(text) => text.clone(),
-        Value::CharArray(array) if array.rows == 1 => array.data.iter().collect(),
+        Value::String(text) => text.to_string(),
+        Value::CharArray(array) if array.rows == 1 => array.data().iter().collect(),
         Value::Num(value) => format_key_number(*value),
         Value::Int(value) => value.decimal_string(),
         Value::Bool(value) => {
@@ -120,7 +123,7 @@ pub(in crate::builtins::table) fn cell_to_text(value: &Value) -> String {
             .and_then(|storage| storage.value_at(0))
             .map(|value| value.decimal_string())
             .unwrap_or_else(|| format_key_number(tensor::tensor_value_f64(tensor, 0))),
-        Value::StringArray(array) if array.data.len() == 1 => array.data[0].clone(),
+        Value::StringArray(array) if array.data().len() == 1 => array.data()[0].to_string(),
         other => other.to_string(),
     }
 }
@@ -138,7 +141,7 @@ pub(in crate::builtins::table) fn char_rows(array: &CharArray) -> Vec<String> {
     let mut rows = Vec::with_capacity(array.rows);
     for row in 0..array.rows {
         let start = row * array.cols;
-        rows.push(array.data[start..start + array.cols].iter().collect());
+        rows.push(array.data()[start..start + array.cols].iter().collect());
     }
     rows
 }

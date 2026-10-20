@@ -2,7 +2,9 @@ use super::*;
 use runmat_value::{StringArray, Value};
 
 fn run(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    futures::executor::block_on(isenv_builtin(args))
+    futures::executor::block_on(isenv_builtin(
+        crate::builtins::common::test_support::builtin_arguments(args),
+    ))
 }
 
 #[test]

@@ -6,7 +6,9 @@ use runmat_value::Value;
     binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::r#false"
 )]
-pub(crate) async fn false_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub(crate) async fn false_builtin(
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     if matches!(crate::output_count::current_output_count(), Some(count) if count > 1) {
         let error = &runmat_builtins::FALSE_ERROR_TOO_MANY_OUTPUTS;
         return Err(crate::build_runtime_error(error.message)

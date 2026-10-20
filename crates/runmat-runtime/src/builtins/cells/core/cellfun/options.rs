@@ -6,17 +6,20 @@ use super::error;
 
 pub(super) struct Invocation {
     pub(super) callable: Callable,
-    pub(super) arguments: Vec<Value>,
+    pub(super) arguments: crate::call::BuiltinArguments,
     pub(super) uniform_output: bool,
     pub(super) error_handler: Option<Callable>,
 }
 
 impl Invocation {
-    pub(super) fn parse(function: Value, mut arguments: Vec<Value>) -> BuiltinResult<Self> {
+    pub(super) fn parse(
+        function: Value,
+        mut arguments: crate::call::BuiltinArguments,
+    ) -> BuiltinResult<Self> {
         let callable = Callable::parse(function)?;
         let mut uniform_output = true;
         let mut error_handler = None;
-        while let Some(option) = trailing_option(&arguments) {
+        while let Some(option) = trailing_option(arguments.view()) {
             let value = arguments
                 .pop()
                 .ok_or_else(|| error::invalid("cellfun: option requires a value"))?;
@@ -46,7 +49,7 @@ enum OptionName {
     Unknown(String),
 }
 
-fn trailing_option(arguments: &[Value]) -> Option<OptionName> {
+fn trailing_option(arguments: crate::call::FunctionArgumentView<'_>) -> Option<OptionName> {
     let index = arguments.len().checked_sub(2)?;
     let name = extract_string(arguments.get(index)?)?;
     Some(match name.trim().to_ascii_lowercase().as_str() {
@@ -83,9 +86,9 @@ fn invalid_uniform_output() -> crate::RuntimeError {
 
 pub(super) fn extract_string(value: &Value) -> Option<String> {
     match value {
-        Value::String(value) => Some(value.clone()),
-        Value::CharArray(value) if value.rows == 1 => Some(value.data.iter().collect()),
-        Value::StringArray(value) if value.data.len() == 1 => Some(value.data[0].clone()),
+        Value::String(value) => Some(value.to_string()),
+        Value::CharArray(value) if value.rows == 1 => Some(value.data().iter().collect()),
+        Value::StringArray(value) if value.data().len() == 1 => Some(value.data()[0].to_string()),
         _ => None,
     }
 }

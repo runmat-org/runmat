@@ -1,10 +1,11 @@
 use super::run;
-use runmat_value::{CellArray, StructArray, StructValue, Value};
+use runmat_value::{CellArray, StructArray, Value};
 
 #[test]
 fn scalar_structure_queries_are_exact_and_case_sensitive() {
-    let mut structure = StructValue::new();
+    let mut structure = runmat_value::UnboundedStructValueBuilder::new();
     structure.fields.insert("name".into(), Value::from("entry"));
+    let structure = structure.finish();
     assert_eq!(
         run(Value::Struct(structure.clone()), Value::from("name")).unwrap(),
         Value::Bool(true)
@@ -17,13 +18,14 @@ fn scalar_structure_queries_are_exact_and_case_sensitive() {
 
 #[test]
 fn typed_array_uses_its_homogeneous_schema() {
-    let mut first = StructValue::new();
+    let mut first = runmat_value::UnboundedStructValueBuilder::new();
     first.fields.insert("name".into(), Value::from("first"));
     first.fields.insert("id".into(), Value::Num(1.0));
-    let mut second = StructValue::new();
+    let mut second = runmat_value::UnboundedStructValueBuilder::new();
     second.fields.insert("name".into(), Value::from("second"));
     second.fields.insert("id".into(), Value::Num(2.0));
-    let array = StructArray::new(vec![first, second], vec![1, 2]).expect("structure array");
+    let array = StructArray::new(vec![first.finish(), second.finish()], vec![1, 2])
+        .expect("structure array");
     assert_eq!(
         run(Value::StructArray(array.clone()), Value::from("name")).unwrap(),
         Value::Bool(true)
@@ -49,7 +51,7 @@ fn non_structure_and_empty_cell_targets_return_false() {
 
 #[test]
 fn nested_resident_values_are_not_gathered() {
-    let mut structure = StructValue::new();
+    let mut structure = runmat_value::UnboundedStructValueBuilder::new();
     structure.fields.insert(
         "resident".into(),
         Value::GpuTensor(
@@ -64,7 +66,7 @@ fn nested_resident_values_are_not_gathered() {
         ),
     );
     assert_eq!(
-        run(Value::Struct(structure), Value::from("resident")).unwrap(),
+        run(Value::Struct(structure.finish()), Value::from("resident")).unwrap(),
         Value::Bool(true)
     );
 }

@@ -150,7 +150,7 @@ pub(in crate::builtins::fea) fn plot_request_from_args(
         ));
     };
     if !object
-        .class_name
+        .class_name()
         .is(runmat_builtins::fea_contract::identities::FEA_FIELD_CLASS)
     {
         return Err(builtin_error(
@@ -160,7 +160,7 @@ pub(in crate::builtins::fea) fn plot_request_from_args(
         ));
     }
     let field_id = object
-        .properties
+        .properties()
         .get("field_id")
         .and_then(|value| match value {
             Value::String(field_id) => Some(field_id.clone()),
@@ -178,7 +178,7 @@ pub(in crate::builtins::fea) fn plot_request_from_args(
         run_id: run_id_context_from_value(field).ok_or_else(|| {
             builtin_error(PLOT_NAME, &ERROR_INPUT, "fea.Field is missing run context")
         })?,
-        field_id,
+        field_id: field_id.to_string(),
         sample: super::super::field_access::selection_from_field_object(PLOT_NAME, object)?.sample,
         options,
     })

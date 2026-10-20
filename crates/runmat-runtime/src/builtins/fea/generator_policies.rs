@@ -36,10 +36,22 @@ macro_rules! no_input_domain_builtin {
     };
 }
 
-no_input_domain_builtin!(time_domain, "fea.SignalDomain.time", GeneratorDomain::TimeSeconds);
-no_input_domain_builtin!(frequency_domain, "fea.SignalDomain.frequency", GeneratorDomain::FrequencyHertz);
+no_input_domain_builtin!(
+    time_domain,
+    "fea.SignalDomain.time",
+    GeneratorDomain::TimeSeconds
+);
+no_input_domain_builtin!(
+    frequency_domain,
+    "fea.SignalDomain.frequency",
+    GeneratorDomain::FrequencyHertz
+);
 
-#[runtime_builtin(name = "fea.SignalDomain.studyParameter", binding_variant = "default", builtin_path = "crate::builtins::fea::generator_policies")]
+#[runtime_builtin(
+    name = "fea.SignalDomain.studyParameter",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::fea::generator_policies"
+)]
 pub async fn study_parameter_domain(parameter_id: String) -> BuiltinResult<Value> {
     if parameter_id.trim().is_empty() {
         return Err(builtin_error(
@@ -54,8 +66,11 @@ pub async fn study_parameter_domain(parameter_id: String) -> BuiltinResult<Value
     )
 }
 
-
-#[runtime_builtin(name = "fea.SignalSampling.uniform", binding_variant = "default", builtin_path = "crate::builtins::fea::generator_policies")]
+#[runtime_builtin(
+    name = "fea.SignalSampling.uniform",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::fea::generator_policies"
+)]
 pub async fn uniform_sampling(
     start: Value,
     end: Value,
@@ -72,8 +87,11 @@ pub async fn uniform_sampling(
     )
 }
 
-
-#[runtime_builtin(name = "fea.SignalSampling.adaptive", binding_variant = "default", builtin_path = "crate::builtins::fea::generator_policies")]
+#[runtime_builtin(
+    name = "fea.SignalSampling.adaptive",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::fea::generator_policies"
+)]
 pub async fn adaptive_sampling(
     start: Value,
     end: Value,
@@ -96,8 +114,11 @@ pub async fn adaptive_sampling(
     )
 }
 
-
-#[runtime_builtin(name = "fea.SignalSampling.canonicalPoints", binding_variant = "default", builtin_path = "crate::builtins::fea::generator_policies")]
+#[runtime_builtin(
+    name = "fea.SignalSampling.canonicalPoints",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::fea::generator_policies"
+)]
 pub async fn canonical_point_sampling(points: Value) -> BuiltinResult<Value> {
     let builtin = "fea.SignalSampling.canonicalPoints";
     sampling_object(
@@ -231,8 +252,8 @@ pub(super) fn ensure_generator_policy_classes_registered() {
 }
 
 fn validate_policy_object(object: &ObjectInstance) -> Result<(), String> {
-    if object.properties.len() != 1 {
-        return Err(format!("{} has malformed policy data", object.class_name));
+    if object.properties().len() != 1 {
+        return Err(format!("{} has malformed policy data", object.class_name()));
     }
     Ok(())
 }

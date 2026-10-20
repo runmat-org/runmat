@@ -30,7 +30,7 @@ pub(super) fn encode_form_payload(value: &Value) -> BuiltinResult<Vec<u8>> {
         Value::Struct(struct_value) => {
             for (key, val) in &struct_value.fields {
                 let text = value_to_query_string(val, key)?;
-                pairs.push((key.clone(), text));
+                pairs.push((key.to_owned(), text));
             }
         }
         Value::Cell(cell) => {
@@ -123,8 +123,8 @@ pub(super) fn encode_binary_payload(value: &Value) -> BuiltinResult<Vec<u8>> {
         Value::Bool(b) => Ok(vec![if *b { 1 } else { 0 }]),
         Value::LogicalArray(array) => Ok(array.data.to_vec()),
         Value::CharArray(ca) => {
-            let mut bytes = Vec::with_capacity(ca.data.len());
-            for ch in &ca.data {
+            let mut bytes = Vec::with_capacity(ca.data().len());
+            for ch in ca.data() {
                 let code = *ch as u32;
                 if code > 0xFF {
                     return Err(webwrite_error(
@@ -137,8 +137,8 @@ pub(super) fn encode_binary_payload(value: &Value) -> BuiltinResult<Vec<u8>> {
         }
         Value::String(s) => Ok(s.as_bytes().to_vec()),
         Value::StringArray(sa) => {
-            if sa.data.len() == 1 {
-                Ok(sa.data[0].as_bytes().to_vec())
+            if sa.data().len() == 1 {
+                Ok(sa.data()[0].as_bytes().to_vec())
             } else {
                 Err(webwrite_error(
                     "webwrite: binary payload string arrays must be scalar",

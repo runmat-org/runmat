@@ -41,9 +41,9 @@ pub(super) fn service_error(builtin: &'static str, source: PreferenceServiceErro
 }
 
 pub(super) fn values_struct(values: impl IntoIterator<Item = (String, Value)>) -> StructValue {
-    let mut output = StructValue::new();
+    let mut output = runmat_value::UnboundedStructValueBuilder::new();
     for (name, value) in values {
         output.insert(name, value);
     }
-    output
+    output.finish()
 }

@@ -83,7 +83,7 @@ fn run_write(
         Some(host.runtime.clone()),
         client,
         data,
-        rest,
+        crate::builtins::common::test_support::builtin_arguments(rest),
     ))
 }
 

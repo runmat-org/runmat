@@ -56,7 +56,9 @@ pub(super) enum PrecisionSpec {
     Format(String),
 }
 
-pub(super) fn parse_arguments(args: &[Value]) -> BuiltinResult<DlmWriteOptions> {
+pub(super) fn parse_arguments(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<DlmWriteOptions> {
     let mut options = DlmWriteOptions::default();
     if args.is_empty() {
         return Ok(options);

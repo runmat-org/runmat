@@ -7,7 +7,10 @@ use runmat_builtins::{
     WBLINV_LOGICAL_INPUT_EXTENSION as LOGICAL_INPUT_EXTENSION,
 };
 
-fn ensure_extensions(value: &Value, rest: &[Value]) -> BuiltinResult<()> {
+fn ensure_extensions(
+    value: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     if super::is_typed_integer_value(value) {
         crate::compatibility::ensure_builtin_extension_enabled(&INTEGER_P_EXTENSION, "wblinv")?;
     }
@@ -36,8 +39,11 @@ fn ensure_extensions(value: &Value, rest: &[Value]) -> BuiltinResult<()> {
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::summary::distributions::wblinv"
 )]
-pub(crate) async fn wblinv_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    ensure_extensions(&value, &rest)?;
+pub(crate) async fn wblinv_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    ensure_extensions(&value, rest.view())?;
     if !matches!(rest.len(), 0 | 2) {
         return Err(super::normal_error(
             "wblinv",
@@ -48,10 +54,10 @@ pub(crate) async fn wblinv_builtin(value: Value, rest: Vec<Value>) -> BuiltinRes
         .chain(rest.iter())
         .collect::<Vec<_>>();
     numeric_inputs("wblinv", &inputs, NumericShapePolicy::Broadcast)?;
-    let output = super::NormalOutputPlan::inspect("wblinv", &value, &rest)?;
-    let (a, b) = match rest.as_slice() {
-        [] => (super::scalar_tensor(1.0), super::scalar_tensor(1.0)),
-        [a, b] => (
+    let output = super::NormalOutputPlan::inspect("wblinv", &value, rest.view())?;
+    let (a, b) = match (rest.len(), rest.get(0), rest.get(1)) {
+        (0, _, _) => (super::scalar_tensor(1.0), super::scalar_tensor(1.0)),
+        (2, Some(a), Some(b)) => (
             super::normal_value_to_tensor("wblinv", "a", a.clone()).await?,
             super::normal_value_to_tensor("wblinv", "b", b.clone()).await?,
         ),

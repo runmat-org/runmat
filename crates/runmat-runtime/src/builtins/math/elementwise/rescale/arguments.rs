@@ -12,7 +12,7 @@ pub(super) struct ParsedArguments {
     pub input_max: Option<Value>,
 }
 
-pub(super) fn parse(rest: &[Value]) -> BuiltinResult<ParsedArguments> {
+pub(super) fn parse(rest: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<ParsedArguments> {
     let mut parsed = ParsedArguments {
         lower: Value::Num(0.0),
         upper: Value::Num(1.0),
@@ -37,13 +37,18 @@ pub(super) fn parse(rest: &[Value]) -> BuiltinResult<ParsedArguments> {
     Ok(parsed)
 }
 
-fn parse_options(rest: &[Value], start: usize, parsed: &mut ParsedArguments) -> BuiltinResult<()> {
+fn parse_options(
+    rest: crate::call::FunctionArgumentView<'_>,
+    start: usize,
+    parsed: &mut ParsedArguments,
+) -> BuiltinResult<()> {
     if !rest.len().saturating_sub(start).is_multiple_of(2) {
         return Err(error::invalid_argument(
             "name-value arguments must appear in pairs",
         ));
     }
-    for pair in rest[start..].chunks_exact(2) {
+    let options = rest.range(start..).expect("validated rescale option start");
+    for pair in options.chunks_exact(2) {
         let name = keyword_of(&pair[0])
             .ok_or_else(|| error::invalid_argument("expected name-value option name"))?;
         match name.as_str() {

@@ -13,9 +13,13 @@ async fn topk_rejects_typed_complex_integer_inputs() {
         )
         .expect("tensor"),
     );
-    let err = evaluate_topk(TopKKind::Max, input, &[Value::Num(1.0)])
-        .await
-        .expect_err("typed complex integer input must reject");
+    let err = evaluate_topk(
+        TopKKind::Max,
+        input,
+        crate::call::FunctionArgumentView::from_slice(&[Value::Num(1.0)]),
+    )
+    .await
+    .expect_err("typed complex integer input must reject");
     assert!(err.message().contains("complex numbers with integer types"));
 }
 
@@ -23,9 +27,13 @@ async fn topk_rejects_typed_complex_integer_inputs() {
 async fn topk_preserves_native_single_storage() {
     let input =
         Value::Tensor(Tensor::from_f32(vec![1.0, 3.0, 2.0], vec![3, 1]).expect("single input"));
-    let evaluation = evaluate_topk(TopKKind::Max, input, &[Value::Num(2.0)])
-        .await
-        .expect("topk");
+    let evaluation = evaluate_topk(
+        TopKKind::Max,
+        input,
+        crate::call::FunctionArgumentView::from_slice(&[Value::Num(2.0)]),
+    )
+    .await
+    .expect("topk");
     let Value::Tensor(output) = evaluation.values else {
         panic!("expected single tensor");
     };
@@ -44,11 +52,11 @@ async fn topk_preserves_native_complex_single_and_logical_storage() {
     let evaluation = evaluate_topk(
         TopKKind::Max,
         complex,
-        &[
+        crate::call::FunctionArgumentView::from_slice(&[
             Value::Num(2.0),
             Value::from("ComparisonMethod"),
             Value::from("real"),
-        ],
+        ]),
     )
     .await
     .expect("complex topk");
@@ -62,9 +70,13 @@ async fn topk_preserves_native_complex_single_and_logical_storage() {
 
     let logical =
         Value::LogicalArray(LogicalArray::new(vec![0, 1, 0], vec![3, 1]).expect("logical input"));
-    let evaluation = evaluate_topk(TopKKind::Max, logical, &[Value::Num(2.0)])
-        .await
-        .expect("logical topk");
+    let evaluation = evaluate_topk(
+        TopKKind::Max,
+        logical,
+        crate::call::FunctionArgumentView::from_slice(&[Value::Num(2.0)]),
+    )
+    .await
+    .expect("logical topk");
     let Value::LogicalArray(values) = evaluation.values else {
         panic!("expected logical output");
     };
@@ -81,7 +93,7 @@ async fn topk_preserves_wide_integer_scalar_exactly() {
     let evaluation = evaluate_topk(
         TopKKind::Max,
         Value::Int(IntValue::U64(u64::MAX)),
-        &[Value::Num(1.0)],
+        crate::call::FunctionArgumentView::from_slice(&[Value::Num(1.0)]),
     )
     .await
     .expect("topk");

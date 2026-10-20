@@ -89,7 +89,10 @@ fn fft_error_with_message(
     binding_variant = "default",
     builtin_path = "crate::builtins::math::fft::forward"
 )]
-async fn fft_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn fft_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     crate::builtins::common::validation::reject_typed_complex_integer(&value, "fft")?;
     if is_wide_integer_value(&value) {
         crate::compatibility::ensure_builtin_extension_enabled(
@@ -104,7 +107,7 @@ async fn fft_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Val
             BUILTIN_NAME,
         )?;
     }
-    let (length, dimension) = parse_arguments(&rest).await?;
+    let (length, dimension) = parse_arguments(rest.view()).await?;
     match value {
         Value::GpuTensor(handle) => fft_gpu(handle, length, dimension).await,
         other => fft_host(other, length, dimension),
@@ -202,7 +205,9 @@ async fn parse_dimension_arg(value: &Value) -> BuiltinResult<usize> {
         })
 }
 
-async fn parse_arguments(args: &[Value]) -> BuiltinResult<(Option<usize>, Option<usize>)> {
+async fn parse_arguments(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<(Option<usize>, Option<usize>)> {
     match args.len() {
         0 => Ok((None, None)),
         1 => {
@@ -277,7 +282,10 @@ pub(crate) mod tests {
     }
 
     fn fft_builtin_sync(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::fft_builtin(value, rest))
+        block_on(super::fft_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     #[test]
@@ -548,7 +556,10 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fft_rejects_non_numeric_length() {
-        let err = block_on(parse_arguments(&[Value::from("invalid")])).unwrap_err();
+        let err = block_on(parse_arguments(
+            crate::call::FunctionArgumentView::from_slice(&[Value::from("invalid")]),
+        ))
+        .unwrap_err();
         assert_eq!(error_identifier(&err), FFT_ERROR_INVALID_LENGTH.identifier);
         assert!(error_message(err).contains(FFT_ERROR_INVALID_LENGTH.message));
     }
@@ -556,7 +567,10 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fft_rejects_negative_length() {
-        let err = block_on(parse_arguments(&[Value::Num(-1.0)])).unwrap_err();
+        let err = block_on(parse_arguments(
+            crate::call::FunctionArgumentView::from_slice(&[Value::Num(-1.0)]),
+        ))
+        .unwrap_err();
         assert_eq!(error_identifier(&err), FFT_ERROR_INVALID_LENGTH.identifier);
         assert!(error_message(err).contains(FFT_ERROR_INVALID_LENGTH.message));
     }
@@ -564,7 +578,10 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fft_rejects_fractional_length() {
-        let err = block_on(parse_arguments(&[Value::Num(1.5)])).unwrap_err();
+        let err = block_on(parse_arguments(
+            crate::call::FunctionArgumentView::from_slice(&[Value::Num(1.5)]),
+        ))
+        .unwrap_err();
         assert_eq!(error_identifier(&err), FFT_ERROR_INVALID_LENGTH.identifier);
         assert!(error_message(err).contains(FFT_ERROR_INVALID_LENGTH.message));
     }
@@ -572,10 +589,12 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fft_rejects_dimension_zero() {
-        let err = block_on(parse_arguments(&[
-            Value::Num(4.0),
-            Value::Int(IntValue::I32(0)),
-        ]))
+        let err = block_on(parse_arguments(
+            crate::call::FunctionArgumentView::from_slice(&[
+                Value::Num(4.0),
+                Value::Int(IntValue::I32(0)),
+            ]),
+        ))
         .unwrap_err();
         assert_eq!(
             error_identifier(&err),
@@ -588,8 +607,10 @@ pub(crate) mod tests {
     #[test]
     fn fft_accepts_scalar_tensor_dimension_argument() {
         let dim = Tensor::new(vec![2.0], vec![1, 1]).unwrap();
-        let (len, parsed_dim) = block_on(parse_arguments(&[Value::Num(4.0), Value::Tensor(dim)]))
-            .expect("parse arguments");
+        let (len, parsed_dim) = block_on(parse_arguments(
+            crate::call::FunctionArgumentView::from_slice(&[Value::Num(4.0), Value::Tensor(dim)]),
+        ))
+        .expect("parse arguments");
         assert_eq!(len, Some(4));
         assert_eq!(parsed_dim, Some(2));
     }

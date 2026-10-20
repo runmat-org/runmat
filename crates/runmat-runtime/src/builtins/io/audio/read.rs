@@ -9,7 +9,7 @@ use super::*;
 pub(super) async fn audioread_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     filename: Value,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let outputs = crate::output_count::current_output_count();
     if outputs.is_some_and(|count| count > 2) {
@@ -26,7 +26,7 @@ pub(super) async fn audioread_builtin(
             "audioread: gpuArray inputs are not supported",
         ));
     }
-    let options = parse_audioread_options(&args)?;
+    let options = parse_audioread_options(args.view())?;
     let path = resolve_audioread_path(&filename)?;
     let input = FsInputLease::capture(path, &AUDIOREAD_ERROR_IO, AUDIOREAD_BUILTIN_NAME)?;
     let mut cooperation = AudioCooperation::new(runtime.as_ref(), AUDIOREAD_BUILTIN_NAME);
@@ -134,19 +134,23 @@ pub(super) struct DecodedAudio {
     pub(super) sample_rate: f64,
 }
 
-pub(super) fn parse_audioread_options(args: &[Value]) -> BuiltinResult<AudioreadOptions> {
+pub(super) fn parse_audioread_options(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<AudioreadOptions> {
     let mut range = None;
     let mut datatype = AudioReadDataType::Double;
-    match args {
-        [] => {}
-        [single] => {
+    match args.len() {
+        0 => {}
+        1 => {
+            let single = &args[0];
             if let Some(text) = scalar_text(single) {
                 datatype = parse_audioread_datatype(&text)?;
             } else {
                 range = Some(parse_sample_range(single)?);
             }
         }
-        [samples, datatype_value] => {
+        2 => {
+            let (samples, datatype_value) = (&args[0], &args[1]);
             range = Some(parse_sample_range(samples)?);
             let text = scalar_text(datatype_value).ok_or_else(|| {
                 audioread_error_with(
@@ -222,9 +226,9 @@ pub(super) fn parse_positive_integer(value: f64, label: &str) -> BuiltinResult<u
 
 pub(super) fn scalar_text(value: &Value) -> Option<String> {
     match value {
-        Value::String(s) => Some(s.clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
+        Value::String(s) => Some(s.as_str().to_owned()),
+        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data().iter().collect()),
+        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].as_str().to_owned()),
         _ => None,
     }
 }
@@ -287,10 +291,10 @@ pub(super) fn resolve_audioread_path(value: &Value) -> BuiltinResult<PathBuf> {
     match value {
         Value::String(s) => normalize_audioread_path(s),
         Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data.iter().collect();
+            let text: String = ca.data().iter().collect();
             normalize_audioread_path(&text)
         }
-        Value::StringArray(sa) if sa.data.len() == 1 => normalize_audioread_path(&sa.data[0]),
+        Value::StringArray(sa) if sa.data().len() == 1 => normalize_audioread_path(&sa.data()[0]),
         _ => Err(audioread_error(&AUDIOREAD_ERROR_ARGUMENT)),
     }
 }

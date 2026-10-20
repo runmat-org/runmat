@@ -9,7 +9,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{
-    CharArray, IntValue, LogicalArray, NumericScalar, ObjectInstance, StringArray, Tensor, Value,
+    CharArray, IntValue, LogicalArray, NumericScalar, StringArray, Tensor, Utf8Text, Value,
 };
 
 use crate::builtins::common::broadcast as matlab_broadcast;
@@ -17,6 +17,7 @@ use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::strings::common::{
     char_row_to_string_slice, contains_numeric_or_resident_text_input, is_missing_string,
+    scalar_text_input, text_input_admission, TextInput,
 };
 use crate::builtins::strings::core::numeric_length::parse_nonnegative_usize;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult};
@@ -32,9 +33,14 @@ fn map_flow(name: &'static str) -> impl Fn(crate::RuntimeError) -> crate::Runtim
 #[runtime_builtin(
     name = "strtok",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::strings::core::compat"
 )]
-async fn strtok_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn strtok_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    text: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     crate::output_count::validate_bounded_outputs(
         &STRTOK_DESCRIPTOR,
         &STRTOK_ERROR_TOO_MANY_OUTPUTS,
@@ -59,16 +65,25 @@ async fn strtok_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let text = gather_if_needed_async(&text)
         .await
         .map_err(map_flow("strtok"))?;
-    let delimiters = if let Some(value) = rest.first() {
-        let value = gather_if_needed_async(value)
-            .await
-            .map_err(map_flow("strtok"))?;
-        scalar_text(&value, "strtok")?
+    let delimiter_owner = if let Some(value) = rest.first() {
+        Some(
+            gather_if_needed_async(value)
+                .await
+                .map_err(map_flow("strtok"))?,
+        )
     } else {
-        " \t\n\r".to_string()
+        None
+    };
+    let delimiters = if let Some(value) = delimiter_owner.as_ref() {
+        scalar_text_input(value, runtime.as_ref(), |runtime, cause| {
+            text_input_admission("strtok", runtime, cause)
+        })?
+        .ok_or_else(|| compat_error("strtok", "strtok: expected text delimiters"))?
+    } else {
+        TextInput::Borrowed(" \t\n\r")
     };
     let (tokens, remainders) =
-        map_text_pair_preserve(text, "strtok", |s| strtok_pair(s, &delimiters))?;
+        map_text_pair_preserve(&text, "strtok", |s| strtok_pair(s, delimiters.as_str()))?;
     match crate::output_count::current_output_count() {
         Some(0) => Ok(Value::output_list(Vec::new())),
         Some(1) => Ok(Value::output_list(vec![tokens])),
@@ -89,14 +104,14 @@ async fn strtok_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
 async fn str2num_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     text: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<crate::execution::RootedValue> {
     crate::output_count::validate_bounded_outputs(
         &STR2NUM_DESCRIPTOR,
         &STR2NUM_ERROR_TOO_MANY_OUTPUTS,
         "str2num",
     )?;
-    let method = str2num_evaluation_method(&rest)?;
+    let method = str2num_evaluation_method(runtime.as_ref(), rest.view())?;
     if contains_numeric_or_resident_text_input(&text) {
         return Err(compat_error(
             "str2num",
@@ -106,7 +121,10 @@ async fn str2num_builtin(
     let text = gather_if_needed_async(&text)
         .await
         .map_err(map_flow("str2num"))?;
-    let text = scalar_text(&text, "str2num")?;
+    let text = scalar_text_input(&text, runtime.as_ref(), |runtime, cause| {
+        text_input_admission("str2num", runtime, cause)
+    })?
+    .ok_or_else(|| compat_error("str2num", "str2num: expected a text scalar"))?;
     let runtime = runtime.ok_or_else(|| {
         crate::context::RuntimeCapabilityError::new(
             crate::context::RuntimeCapability::SourceEvaluation,
@@ -114,8 +132,11 @@ async fn str2num_builtin(
         )
         .into_runtime_error()
     })?;
-    let request =
-        crate::context::SessionSourceEvaluation::prepare_numeric_text(&runtime, &text, method)?;
+    let request = crate::context::SessionSourceEvaluation::prepare_numeric_text(
+        &runtime,
+        text.as_str(),
+        method,
+    )?;
     let result = request.evaluate(runtime).await?;
     result.try_map_owned(
         |sequence| {
@@ -131,19 +152,36 @@ async fn str2num_builtin(
 }
 
 fn str2num_evaluation_method(
-    rest: &[Value],
+    runtime: Option<&crate::context::RuntimeContext>,
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<crate::context::NumericTextEvaluation> {
     use crate::context::NumericTextEvaluation;
-    match rest {
-        [] => Ok(NumericTextEvaluation::All),
-        [name, value] if scalar_text(name, "str2num")?.eq_ignore_ascii_case("Evaluation") => {
-            match scalar_text(value, "str2num")?.to_ascii_lowercase().as_str() {
-                "all" => Ok(NumericTextEvaluation::All),
-                "restricted" => Ok(NumericTextEvaluation::Restricted),
-                _ => Err(compat_error(
+    match (rest.len(), rest.get(0), rest.get(1)) {
+        (0, _, _) => Ok(NumericTextEvaluation::All),
+        (2, Some(name), Some(value)) => {
+            let name = scalar_text_input(name, runtime, |runtime, cause| {
+                text_input_admission("str2num", runtime, cause)
+            })?
+            .ok_or_else(|| compat_error("str2num", "str2num: expected a text scalar"))?;
+            if !name.as_str().eq_ignore_ascii_case("Evaluation") {
+                return Err(compat_error(
+                    "str2num",
+                    "str2num: expected one Evaluation name-value option",
+                ));
+            }
+            let method = scalar_text_input(value, runtime, |runtime, cause| {
+                text_input_admission("str2num", runtime, cause)
+            })?
+            .ok_or_else(|| compat_error("str2num", "str2num: expected a text scalar"))?;
+            if method.as_str().eq_ignore_ascii_case("all") {
+                Ok(NumericTextEvaluation::All)
+            } else if method.as_str().eq_ignore_ascii_case("restricted") {
+                Ok(NumericTextEvaluation::Restricted)
+            } else {
+                Err(compat_error(
                     "str2num",
                     "str2num: Evaluation must be 'all' or 'restricted'",
-                )),
+                ))
             }
         }
         _ => Err(compat_error(
@@ -165,9 +203,14 @@ fn str2num_outputs(value: Value, ok: bool) -> Value {
 #[runtime_builtin(
     name = "mat2str",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::strings::core::compat"
 )]
-async fn mat2str_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn mat2str_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &MAT2STR_DESCRIPTOR,
         &MAT2STR_ERROR_TOO_MANY_OUTPUTS,
@@ -194,8 +237,10 @@ async fn mat2str_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value>
     let mut include_class = false;
     for (index, arg) in rest.iter().enumerate() {
         reject_explicit_gpu_text_sink(arg, "mat2str", "precision")?;
-        if let Ok(keyword) = scalar_text(arg, "mat2str") {
-            if keyword.eq_ignore_ascii_case("class") && index + 1 == rest.len() {
+        if let Some(keyword) = scalar_text_input(arg, runtime.as_ref(), |runtime, cause| {
+            text_input_admission("mat2str", runtime, cause)
+        })? {
+            if keyword.as_str().eq_ignore_ascii_case("class") && index + 1 == rest.len() {
                 include_class = true;
                 continue;
             }
@@ -241,9 +286,14 @@ async fn mat2str_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value>
 #[runtime_builtin(
     name = "native2unicode",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::strings::core::compat"
 )]
-async fn native2unicode_builtin(bytes: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn native2unicode_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    bytes: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &NATIVE2UNICODE_DESCRIPTOR,
         &NATIVE2UNICODE_ERROR_TOO_MANY_OUTPUTS,
@@ -260,22 +310,31 @@ async fn native2unicode_builtin(bytes: Value, rest: Vec<Value>) -> BuiltinResult
         .await
         .map_err(map_flow("native2unicode"))?;
     if matches!(&bytes, Value::String(_) | Value::CharArray(_))
-        || matches!(&bytes, Value::StringArray(array) if array.data.len() == 1)
+        || matches!(&bytes, Value::StringArray(array) if array.data().len() == 1)
     {
         return Ok(bytes);
     }
-    let encoding = if let Some(value) = rest.first() {
+    let encoding_owner = if let Some(value) = rest.first() {
         reject_explicit_gpu_text_sink(value, "native2unicode", "encoding")?;
-        let value = gather_if_needed_async(value)
-            .await
-            .map_err(map_flow("native2unicode"))?;
-        scalar_text(&value, "native2unicode")?
+        Some(
+            gather_if_needed_async(value)
+                .await
+                .map_err(map_flow("native2unicode"))?,
+        )
     } else {
-        "UTF-8".to_string()
+        None
+    };
+    let encoding = if let Some(value) = encoding_owner.as_ref() {
+        scalar_text_input(value, runtime.as_ref(), |runtime, cause| {
+            text_input_admission("native2unicode", runtime, cause)
+        })?
+        .ok_or_else(|| compat_error("native2unicode", "native2unicode: expected text encoding"))?
+    } else {
+        TextInput::Borrowed("UTF-8")
     };
     let shape = byte_vector_shape(&bytes, "native2unicode")?;
     let bytes = bytes_from_value(&bytes, "native2unicode")?;
-    decode_bytes(&bytes, &encoding, shape)
+    decode_bytes(&bytes, encoding.as_str(), shape)
 }
 
 fn reject_explicit_gpu_text_sink(value: &Value, name: &str, role: &str) -> BuiltinResult<()> {
@@ -301,9 +360,14 @@ fn is_typed_integer_value(value: &Value) -> bool {
 #[runtime_builtin(
     name = "sscanf",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::strings::core::compat"
 )]
-async fn sscanf_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn sscanf_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    text: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     crate::output_count::validate_bounded_outputs(
         &SSCANF_DESCRIPTOR,
         &SSCANF_ERROR_TOO_MANY_OUTPUTS,
@@ -328,14 +392,26 @@ async fn sscanf_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let text = gather_if_needed_async(&text)
         .await
         .map_err(map_flow("sscanf"))?;
-    let text = scalar_text(&text, "sscanf")?;
-    let format = if let Some(fmt) = rest.first() {
-        let fmt = gather_if_needed_async(fmt)
-            .await
-            .map_err(map_flow("sscanf"))?;
-        scalar_text(&fmt, "sscanf")?
+    let text = scalar_text_input(&text, runtime.as_ref(), |runtime, cause| {
+        text_input_admission("sscanf", runtime, cause)
+    })?
+    .ok_or_else(|| compat_error("sscanf", "sscanf: expected a text scalar"))?;
+    let format_owner = if let Some(format) = rest.first() {
+        Some(
+            gather_if_needed_async(format)
+                .await
+                .map_err(map_flow("sscanf"))?,
+        )
     } else {
-        "%f".to_string()
+        None
+    };
+    let format = if let Some(format) = format_owner.as_ref() {
+        scalar_text_input(format, runtime.as_ref(), |runtime, cause| {
+            text_input_admission("sscanf", runtime, cause)
+        })?
+        .ok_or_else(|| compat_error("sscanf", "sscanf: expected a text scalar"))?
+    } else {
+        TextInput::Borrowed("%f")
     };
     let size = if let Some(size) = rest.get(1) {
         let size = gather_if_needed_async(size)
@@ -345,7 +421,7 @@ async fn sscanf_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     } else {
         None
     };
-    let scan = sscanf_scan(&text, &format, size)?;
+    let scan = sscanf_scan(text.as_str(), format.as_str(), size)?;
     match crate::output_count::current_output_count() {
         Some(0) => Ok(Value::output_list(Vec::new())),
         Some(1) => Ok(Value::output_list(vec![scan.value])),
@@ -364,11 +440,13 @@ async fn sscanf_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
 
 pub(crate) fn scalar_text(value: &Value, fn_name: &str) -> BuiltinResult<String> {
     match value {
-        Value::String(text) => Ok(text.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::String(text) => Ok(text.as_str().to_owned()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(array.data()[0].as_str().to_owned())
+        }
         Value::CharArray(array) if array.rows == 0 => Ok(String::new()),
         Value::CharArray(array) if array.rows == 1 => {
-            Ok(char_row_to_string_slice(&array.data, array.cols, 0))
+            Ok(char_row_to_string_slice(array.data(), array.cols, 0))
         }
         other => Err(compat_error(
             fn_name,
@@ -380,8 +458,8 @@ pub(crate) fn scalar_text(value: &Value, fn_name: &str) -> BuiltinResult<String>
 pub(crate) fn pattern_regex(value: &Value, fn_name: &str) -> BuiltinResult<String> {
     match value {
         Value::Object(object) if object.is_class(runmat_types::standard::PATTERN) => {
-            match object.properties.get("Regex") {
-                Some(Value::String(regex)) => Ok(regex.clone()),
+            match object.properties().get("Regex") {
+                Some(Value::String(regex)) => Ok(regex.as_str().to_owned()),
                 _ => Err(compat_error(
                     fn_name,
                     format!("{fn_name}: invalid pattern object"),
@@ -398,12 +476,25 @@ pub(crate) fn pattern_regex(value: &Value, fn_name: &str) -> BuiltinResult<Strin
     }
 }
 
+pub(crate) fn pattern_object_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    regex: &str,
+) -> BuiltinResult<Value> {
+    let fields = [(
+        "Regex",
+        Value::String(crate::call::argument_text::copy_str(regex, runtime)?),
+    )];
+    crate::execution::object::construct_object_from_borrowed_fields(
+        runtime,
+        runmat_types::standard::PATTERN.display_name(),
+        fields.iter().map(|(name, value)| (*name, value)),
+    )?
+    .with_owned(Ok)
+}
+
+#[cfg(test)]
 pub(crate) fn pattern_object(regex: &str) -> Value {
-    let mut object = ObjectInstance::new(runmat_types::standard::PATTERN.to_string());
-    object
-        .properties
-        .insert("Regex".to_string(), Value::String(regex.to_string()));
-    Value::Object(object)
+    pattern_object_in_context(None, regex).expect("ordinary test pattern")
 }
 
 pub(crate) fn text_items(value: Value, fn_name: &str) -> BuiltinResult<TextList> {
@@ -425,7 +516,7 @@ pub(crate) fn logical_value(
 }
 
 pub(crate) struct TextList {
-    pub(crate) items: Vec<Option<String>>,
+    pub(crate) items: Vec<Option<Utf8Text>>,
     pub(crate) shape: Vec<usize>,
 }
 
@@ -437,8 +528,8 @@ impl TextList {
                 shape: vec![1, 1],
             }),
             Value::StringArray(array) => Ok(Self {
-                items: array.data.into_iter().map(missing_to_none).collect(),
-                shape: array.shape,
+                items: array.data().iter().cloned().map(missing_to_none).collect(),
+                shape: array.shape().to_vec(),
             }),
             Value::CharArray(array) => {
                 let mut items = Vec::with_capacity(array.rows.max(1));
@@ -449,7 +540,11 @@ impl TextList {
                     });
                 }
                 for row in 0..array.rows {
-                    items.push(Some(char_row_to_string_slice(&array.data, array.cols, row)));
+                    items.push(Some(Utf8Text::new(char_row_to_string_slice(
+                        array.data(),
+                        array.cols,
+                        row,
+                    ))));
                 }
                 Ok(Self {
                     items,
@@ -457,13 +552,13 @@ impl TextList {
                 })
             }
             Value::Cell(cell) => {
-                let mut items = Vec::with_capacity(cell.data.len());
-                for value in cell.data {
-                    items.push(Some(scalar_text(&value, fn_name)?));
+                let mut items = Vec::with_capacity(cell.data().len());
+                for value in cell.data() {
+                    items.push(Some(Utf8Text::new(scalar_text(value, fn_name)?)));
                 }
                 Ok(Self {
                     items,
-                    shape: cell.shape,
+                    shape: cell.shape().to_vec(),
                 })
             }
             other => Err(compat_error(
@@ -495,8 +590,8 @@ pub(crate) fn broadcast_flat_index(
     matlab_broadcast::broadcast_index(linear, shape, &extended, &strides)
 }
 
-fn missing_to_none(text: String) -> Option<String> {
-    if is_missing_string(&text) {
+fn missing_to_none(text: Utf8Text) -> Option<Utf8Text> {
+    if is_missing_string(text.as_str()) {
         None
     } else {
         Some(text)
@@ -504,27 +599,28 @@ fn missing_to_none(text: String) -> Option<String> {
 }
 
 fn map_text_pair_preserve(
-    value: Value,
+    value: &Value,
     fn_name: &str,
     map: impl Fn(&str) -> (String, String) + Copy,
 ) -> BuiltinResult<(Value, Value)> {
     match value {
         Value::String(text) => {
-            let (first, second) = map(&text);
-            Ok((Value::String(first), Value::String(second)))
+            let (first, second) = map(text.as_str());
+            Ok((Value::string(first), Value::string(second)))
         }
         Value::StringArray(array) => {
-            let mut first = Vec::with_capacity(array.data.len());
-            let mut second = Vec::with_capacity(array.data.len());
-            for text in array.data {
-                let (a, b) = map(&text);
+            let shape = array.shape().to_vec();
+            let mut first = Vec::with_capacity(array.data().len());
+            let mut second = Vec::with_capacity(array.data().len());
+            for text in array.data() {
+                let (a, b) = map(text.as_str());
                 first.push(a);
                 second.push(b);
             }
-            let first = StringArray::new(first, array.shape.clone())
+            let first = StringArray::new(first, shape.clone())
                 .map(Value::StringArray)
                 .map_err(|e| compat_error(fn_name, e))?;
-            let second = StringArray::new(second, array.shape)
+            let second = StringArray::new(second, shape)
                 .map(Value::StringArray)
                 .map_err(|e| compat_error(fn_name, e))?;
             Ok((first, second))
@@ -533,7 +629,7 @@ fn map_text_pair_preserve(
             let mut first = Vec::with_capacity(array.rows);
             let mut second = Vec::with_capacity(array.rows);
             for row in 0..array.rows {
-                let (a, b) = map(&char_row_to_string_slice(&array.data, array.cols, row));
+                let (a, b) = map(&char_row_to_string_slice(array.data(), array.cols, row));
                 first.push(a);
                 second.push(b);
             }
@@ -543,17 +639,17 @@ fn map_text_pair_preserve(
             ))
         }
         Value::Cell(cell) => {
-            let mut first = Vec::with_capacity(cell.data.len());
-            let mut second = Vec::with_capacity(cell.data.len());
-            for value in cell.data {
+            let shape = cell.shape().to_vec();
+            let mut first = Vec::with_capacity(cell.data().len());
+            let mut second = Vec::with_capacity(cell.data().len());
+            for value in cell.data() {
                 let (a, b) = map_text_pair_preserve(value, fn_name, map)?;
                 first.push(a);
                 second.push(b);
             }
             Ok((
-                make_cell_with_shape(first, cell.shape.clone())
-                    .map_err(|e| compat_error(fn_name, e))?,
-                make_cell_with_shape(second, cell.shape).map_err(|e| compat_error(fn_name, e))?,
+                make_cell_with_shape(first, shape.clone()).map_err(|e| compat_error(fn_name, e))?,
+                make_cell_with_shape(second, shape).map_err(|e| compat_error(fn_name, e))?,
             ))
         }
         other => Err(compat_error(
@@ -610,7 +706,7 @@ fn mat2str_value(value: &Value, precision: Option<usize>, include_class: bool) -
         Value::CharArray(array) if array.rows <= 1 => {
             format!(
                 "'{}'",
-                char_row_to_string_slice(&array.data, array.cols, 0).replace('\'', "''")
+                char_row_to_string_slice(array.data(), array.cols, 0).replace('\'', "''")
             )
         }
         Value::Tensor(tensor) => tensor_to_matrix_string(tensor, precision),
@@ -765,7 +861,7 @@ fn bytes_from_value(value: &Value, fn_name: &str) -> BuiltinResult<Vec<u8>> {
         Value::Int(i) => Ok(vec![byte_from_intvalue(i, fn_name)?]),
         Value::Num(n) => Ok(vec![byte_from_f64(*n, fn_name)?]),
         Value::CharArray(array) => {
-            Ok(char_row_to_string_slice(&array.data, array.cols, 0).into_bytes())
+            Ok(char_row_to_string_slice(array.data(), array.cols, 0).into_bytes())
         }
         Value::String(text) => Ok(text.as_bytes().to_vec()),
         other => Err(compat_error(
@@ -874,7 +970,7 @@ mod tests {
         REGEXP_PATTERN_ERROR_TOO_MANY_OUTPUTS, STRNCMPI_ERROR_TOO_MANY_OUTPUTS,
         TEXT_BOUNDARY_ERROR_TOO_MANY_OUTPUTS, WILDCARD_PATTERN_ERROR_TOO_MANY_OUTPUTS,
     };
-    use runmat_value::{CellArray, IntValue, IntegerStorage, NumericDType, StructValue};
+    use runmat_value::{CellArray, IntValue, IntegerStorage, NumericDType};
 
     fn strncmpi_builtin(
         a: Value,
@@ -933,8 +1029,12 @@ mod tests {
         assert_eq!(format_number(12_345.0, Some(3)), "1.23e+04");
         assert_eq!(format_number(0.000_012_345, Some(3)), "1.23e-05");
         assert_eq!(format_number(999.9, Some(3)), "1e+03");
-        let error = block(mat2str_builtin(Value::Num(1.0), vec![Value::Num(0.0)]))
-            .expect_err("zero precision must reject");
+        let error = block(mat2str_builtin(
+            None,
+            Value::Num(1.0),
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(0.0)]),
+        ))
+        .expect_err("zero precision must reject");
         assert!(error.message().contains("positive"));
     }
 
@@ -942,16 +1042,23 @@ mod tests {
     fn mat2str_typed_precision_and_text_input_follow_extension_policy() {
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = block(mat2str_builtin(
+            None,
             Value::Int(IntValue::U16(12)),
-            vec![Value::Int(IntValue::U8(3))],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(
+                IntValue::U8(3),
+            )]),
         ))
         .expect_err("typed precision is extension-gated");
         assert_eq!(
             error.identifier(),
             Some("RunMat:compatibility:Mat2strIntegerPrecisionExtension")
         );
-        let error = block(mat2str_builtin(Value::String("x".into()), Vec::new()))
-            .expect_err("text input is extension-gated");
+        let error = block(mat2str_builtin(
+            None,
+            Value::String("x".into()),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect_err("text input is extension-gated");
         assert_eq!(
             error.identifier(),
             Some("RunMat:compatibility:Mat2strTextInputExtension")
@@ -970,8 +1077,13 @@ mod tests {
             parse_nonnegative_usize(&Value::Tensor(tensor), "digitsPattern").unwrap(),
             9
         );
-        let pattern =
-            block(digits_pattern_builtin(vec![Value::Int(IntValue::U8(3))])).expect("typed count");
+        let pattern = block(digits_pattern_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(
+                IntValue::U8(3),
+            )]),
+        ))
+        .expect("typed count");
         assert_eq!(pattern_regex(&pattern, "test").unwrap(), r"\d{3}");
 
         for value in [
@@ -1170,15 +1282,17 @@ mod tests {
     #[cfg_attr(not(target_arch = "wasm32"), test)]
     fn native2unicode_numeric_low_rank_shapes_remain_scalar_and_row() {
         let scalar = block(native2unicode_builtin(
+            None,
             Value::Tensor(Tensor::new(vec![104.0], Vec::new()).unwrap()),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect("rank-zero byte");
         assert_eq!(scalar, Value::CharArray(CharArray::new_row("h")));
 
         let row = block(native2unicode_builtin(
+            None,
             Value::Tensor(Tensor::new(vec![104.0, 105.0], vec![2]).unwrap()),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect("rank-one bytes");
         assert_eq!(row, Value::CharArray(CharArray::new_row("hi")));
@@ -1187,16 +1301,24 @@ mod tests {
             StringArray::new(vec!["hé".into()], vec![1, 1]).expect("string scalar"),
         );
         assert_eq!(
-            block(native2unicode_builtin(scalar_text.clone(), Vec::new()))
-                .expect("documented string-scalar pass-through"),
+            block(native2unicode_builtin(
+                None,
+                scalar_text.clone(),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new())
+            ))
+            .expect("documented string-scalar pass-through"),
             scalar_text
         );
         let array_text = Value::StringArray(
             StringArray::new(vec!["a".into(), "b".into()], vec![1, 2])
                 .expect("nonscalar string array"),
         );
-        let error = block(native2unicode_builtin(array_text, Vec::new()))
-            .expect_err("nonscalar string array must not pass through");
+        let error = block(native2unicode_builtin(
+            None,
+            array_text,
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect_err("nonscalar string array must not pass through");
         assert!(error.message().contains("numeric byte vector"));
     }
 
@@ -1204,26 +1326,43 @@ mod tests {
     fn native2unicode_reads_typed_integer_byte_storage_exactly() {
         let bytes = Tensor::new_integer(IntegerStorage::U8(vec![104, 105]), vec![1, 2]).unwrap();
         assert_eq!(
-            block(native2unicode_builtin(Value::Tensor(bytes), Vec::new())).unwrap(),
+            block(native2unicode_builtin(
+                None,
+                Value::Tensor(bytes),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new())
+            ))
+            .unwrap(),
             Value::CharArray(CharArray::new_row("hi"))
         );
         let single = Tensor::from_f32(vec![111.0, 107.0], vec![1, 2]).expect("single bytes");
         assert_eq!(
-            block(native2unicode_builtin(Value::Tensor(single), Vec::new())).unwrap(),
+            block(native2unicode_builtin(
+                None,
+                Value::Tensor(single),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new())
+            ))
+            .unwrap(),
             Value::CharArray(CharArray::new_row("ok"))
         );
 
         for value in [IntValue::I16(-1), IntValue::U16(256)] {
-            let error = block(native2unicode_builtin(Value::Int(value), Vec::new()))
-                .expect_err("out-of-range byte");
+            let error = block(native2unicode_builtin(
+                None,
+                Value::Int(value),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+            ))
+            .expect_err("out-of-range byte");
             assert!(error.message().contains("0 through 255"));
         }
 
         let column = Tensor::new_integer(IntegerStorage::U8(vec![104, 105]), vec![2, 1])
             .expect("column bytes");
-        let Value::CharArray(decoded) =
-            block(native2unicode_builtin(Value::Tensor(column), Vec::new())).unwrap()
-        else {
+        let Value::CharArray(decoded) = block(native2unicode_builtin(
+            None,
+            Value::Tensor(column),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap() else {
             panic!("expected character vector");
         };
         assert_eq!(decoded.shape, vec![2, 1]);
@@ -1343,9 +1482,10 @@ mod tests {
         .unwrap();
         assert_eq!(
             block(isstrprop_builtin(
+                None,
                 Value::Tensor(integer),
                 Value::String("alpha".into()),
-                Vec::new(),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
             ))
             .unwrap(),
             Value::LogicalArray(LogicalArray::new(vec![1, 0, 0], vec![1, 3]).unwrap())
@@ -1382,9 +1522,10 @@ mod tests {
             ISSPACE_ERROR_TOO_MANY_OUTPUTS.identifier
         );
         let isstrprop_error = block(isstrprop_builtin(
+            None,
             Value::String("a".into()),
             Value::String("alpha".into()),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect_err("isstrprop has one output");
         assert_eq!(
@@ -1458,9 +1599,10 @@ mod tests {
                 let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
                 assert_eq!(
                     block(isstrprop_builtin(
+                        None,
                         Value::GpuTensor(handle.clone()),
                         Value::String("alpha".into()),
-                        Vec::new(),
+                        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
                     ))
                     .unwrap(),
                     Value::LogicalArray(LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap())
@@ -1472,9 +1614,10 @@ mod tests {
             {
                 let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
                 let error = block(isstrprop_builtin(
+                    None,
                     Value::GpuTensor(handle.clone()),
                     Value::String("alpha".into()),
-                    Vec::new(),
+                    crate::builtins::common::test_support::builtin_arguments(Vec::new()),
                 ))
                 .unwrap_err();
                 assert_eq!(
@@ -1485,9 +1628,10 @@ mod tests {
             let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
             assert_eq!(
                 block(isstrprop_builtin(
+                    None,
                     Value::GpuTensor(handle),
                     Value::String("alpha".into()),
-                    Vec::new(),
+                    crate::builtins::common::test_support::builtin_arguments(Vec::new()),
                 ))
                 .unwrap(),
                 Value::LogicalArray(LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap())
@@ -1498,16 +1642,20 @@ mod tests {
     #[test]
     fn isstrprop_force_cell_output_wraps_numeric_result() {
         let result = block(isstrprop_builtin(
+            None,
             Value::Int(IntValue::U16(u16::from(b'A'))),
             Value::String("alpha".into()),
-            vec![Value::String("ForceCellOutput".into()), Value::Bool(true)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("ForceCellOutput".into()),
+                Value::Bool(true),
+            ]),
         ))
         .expect("documented ForceCellOutput form");
         assert!(matches!(
             result,
             Value::Cell(cell)
                 if cell.shape == vec![1, 1]
-                    && cell.data == vec![Value::Bool(true)]
+                    && cell.data() == vec![Value::Bool(true)]
         ));
     }
 
@@ -1515,17 +1663,19 @@ mod tests {
     #[cfg_attr(not(target_arch = "wasm32"), test)]
     fn isstrprop_numeric_low_rank_classification_scalarizes_only_one_element() {
         let scalar = block(isstrprop_builtin(
+            None,
             Value::Tensor(Tensor::new(vec![65.0], Vec::new()).unwrap()),
             Value::String("alpha".into()),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect("rank-zero character code");
         assert_eq!(scalar, Value::Bool(true));
 
         let vector = block(isstrprop_builtin(
+            None,
             Value::Tensor(Tensor::new(vec![65.0, 49.0], vec![2]).unwrap()),
             Value::String("alpha".into()),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect("rank-one character codes");
         assert_eq!(
@@ -1542,9 +1692,10 @@ mod tests {
         )
         .expect("Unicode code units");
         let digit = block(isstrprop_builtin(
+            None,
             Value::Tensor(codes.clone()),
             Value::String("digit".into()),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect("Unicode decimal classification");
         assert_eq!(
@@ -1552,9 +1703,10 @@ mod tests {
             Value::LogicalArray(LogicalArray::new(vec![1, 0, 0], vec![1, 3]).unwrap())
         );
         let punctuation = block(isstrprop_builtin(
+            None,
             Value::Tensor(codes),
             Value::String("punct".into()),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect("Unicode punctuation classification");
         assert_eq!(
@@ -1583,7 +1735,7 @@ mod tests {
         assert_eq!(
             block(convert_strings_to_chars_builtin(
                 Value::String("abc".into()),
-                Vec::new(),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
             ))
             .unwrap(),
             Value::CharArray(CharArray::new_row("abc"))
@@ -1592,7 +1744,7 @@ mod tests {
         assert!(matches!(
             block(convert_strings_to_chars_builtin(
                 Value::String("a".into()),
-                vec![Value::String("b".into())],
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::String("b".into())]),
             ))
             .unwrap(),
             Value::OutputList(outputs) if outputs.len() == 2
@@ -1602,7 +1754,7 @@ mod tests {
         assert!(matches!(
             block(convert_chars_to_strings_builtin(
                 Value::CharArray(CharArray::new_row("a")),
-                vec![Value::CharArray(CharArray::new_row("b"))],
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::CharArray(CharArray::new_row("b"))]),
             ))
             .unwrap(),
             Value::OutputList(outputs) if outputs.as_slice() == [Value::String("a".into()), Value::String("b".into())]
@@ -1610,7 +1762,7 @@ mod tests {
         assert!(matches!(
             block(convert_contained_strings_to_chars_builtin(
                 Value::String("a".into()),
-                vec![Value::String("b".into())],
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::String("b".into())]),
             ))
             .unwrap(),
             Value::OutputList(outputs) if outputs.as_slice() == [Value::CharArray(CharArray::new_row("a")), Value::CharArray(CharArray::new_row("b"))]
@@ -1619,7 +1771,7 @@ mod tests {
         assert_eq!(
             block(convert_chars_to_strings_builtin(
                 Value::CharArray(CharArray::new_row("abc")),
-                Vec::new(),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
             ))
             .unwrap(),
             Value::String("abc".into())
@@ -1627,7 +1779,7 @@ mod tests {
         let missing = block(str2num_builtin(
             None,
             Value::String("1 2; 3 4".into()),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect_err("expression evaluation needs an executor-owned source service");
         assert_eq!(
@@ -1637,17 +1789,18 @@ mod tests {
         let bad_method = block(str2num_builtin(
             None,
             Value::String("1 2".into()),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::String("Evaluation".into()),
                 Value::String("other".into()),
-            ],
+            ]),
         ))
         .expect_err("invalid Evaluation method must precede text evaluation");
         assert!(bad_method.message().contains("Evaluation must be"));
         assert_eq!(
             block(mat2str_builtin(
+                None,
                 Value::Tensor(Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap()),
-                Vec::new(),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
             ))
             .unwrap(),
             Value::CharArray(CharArray::new_row("[1 2;3 4]"))
@@ -1661,7 +1814,9 @@ mod tests {
                 crate::output_count::push_output_count(Some(3)).expect("output-count scope");
             let result = block(convert_strings_to_chars_builtin(
                 Value::String("a".into()),
-                vec![Value::String("b".into())],
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                    "b".into(),
+                )]),
             ))
             .unwrap();
             assert_eq!(
@@ -1678,7 +1833,9 @@ mod tests {
                 crate::output_count::push_output_count(Some(0)).expect("output-count scope");
             let result = block(convert_chars_to_strings_builtin(
                 Value::CharArray(CharArray::new_row("a")),
-                vec![Value::CharArray(CharArray::new_row("b"))],
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::CharArray(
+                    CharArray::new_row("b"),
+                )]),
             ))
             .unwrap();
             assert_eq!(result, Value::output_list(Vec::new()));
@@ -1699,17 +1856,25 @@ mod tests {
         ] {
             let value = Value::Int(int);
             assert_eq!(
-                block(convert_strings_to_chars_builtin(value.clone(), Vec::new())).unwrap(),
+                block(convert_strings_to_chars_builtin(
+                    value.clone(),
+                    crate::builtins::common::test_support::builtin_arguments(Vec::new())
+                ))
+                .unwrap(),
                 value
             );
             assert_eq!(
-                block(convert_chars_to_strings_builtin(value.clone(), Vec::new())).unwrap(),
+                block(convert_chars_to_strings_builtin(
+                    value.clone(),
+                    crate::builtins::common::test_support::builtin_arguments(Vec::new())
+                ))
+                .unwrap(),
                 value
             );
             assert_eq!(
                 block(convert_contained_strings_to_chars_builtin(
                     value.clone(),
-                    Vec::new()
+                    crate::builtins::common::test_support::builtin_arguments(Vec::new())
                 ))
                 .unwrap(),
                 value
@@ -1731,17 +1896,17 @@ mod tests {
             for output in [
                 block(convert_strings_to_chars_builtin(
                     Value::GpuTensor(handle.clone()),
-                    Vec::new(),
+                    crate::builtins::common::test_support::builtin_arguments(Vec::new()),
                 ))
                 .unwrap(),
                 block(convert_chars_to_strings_builtin(
                     Value::GpuTensor(handle.clone()),
-                    Vec::new(),
+                    crate::builtins::common::test_support::builtin_arguments(Vec::new()),
                 ))
                 .unwrap(),
                 block(convert_contained_strings_to_chars_builtin(
                     Value::GpuTensor(handle.clone()),
-                    Vec::new(),
+                    crate::builtins::common::test_support::builtin_arguments(Vec::new()),
                 ))
                 .unwrap(),
             ] {
@@ -1764,7 +1929,7 @@ mod tests {
         assert_eq!(
             block(convert_chars_to_strings_builtin(
                 Value::CharArray(matrix),
-                Vec::new(),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
             ))
             .unwrap(),
             Value::String("acbd".into())
@@ -1782,7 +1947,7 @@ mod tests {
         assert_eq!(
             block(convert_chars_to_strings_builtin(
                 Value::Cell(cellstr),
-                Vec::new(),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
             ))
             .unwrap(),
             Value::StringArray(StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap())
@@ -1800,14 +1965,18 @@ mod tests {
             .unwrap(),
         );
         assert_eq!(
-            block(convert_strings_to_chars_builtin(mixed.clone(), Vec::new())).unwrap(),
+            block(convert_strings_to_chars_builtin(
+                mixed.clone(),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new())
+            ))
+            .unwrap(),
             mixed
         );
 
         assert_eq!(
             block(convert_contained_strings_to_chars_builtin(
                 Value::String("top-level".into()),
-                Vec::new(),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
             ))
             .unwrap(),
             Value::CharArray(CharArray::new_row("top-level"))
@@ -1816,7 +1985,7 @@ mod tests {
             assert_eq!(
                 block(convert_strings_to_chars_builtin(
                     Value::String(text.into()),
-                    Vec::new()
+                    crate::builtins::common::test_support::builtin_arguments(Vec::new())
                 ))
                 .unwrap(),
                 Value::CharArray(CharArray::new(Vec::new(), 0, 0).unwrap())
@@ -1824,14 +1993,14 @@ mod tests {
         }
         let converted = block(convert_contained_strings_to_chars_builtin(
             mixed,
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .unwrap();
         let Value::Cell(cell) = converted else {
             panic!("expected cell");
         };
         assert_eq!(
-            cell.data,
+            cell.data(),
             vec![
                 Value::CharArray(CharArray::new_row("keep")),
                 Value::Int(IntValue::U64(u64::MAX))
@@ -1851,25 +2020,27 @@ mod tests {
         let nested = Value::Cell(CellArray::new(vec![resident.clone()], 1, 1).unwrap());
         let Value::Cell(preserved) = block(convert_contained_strings_to_chars_builtin(
             nested,
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .unwrap() else {
             panic!("expected cell");
         };
-        assert_eq!(preserved.data, vec![resident]);
+        assert_eq!(preserved.data(), vec![resident]);
     }
 
     #[test]
     fn convert_contained_strings_maps_typed_structure_arrays() {
-        let mut first = StructValue::new();
+        let mut first = runmat_value::UnboundedStructValueBuilder::new();
         first.insert("label", Value::String("first".into()));
-        let mut second = StructValue::new();
+        let mut second = runmat_value::UnboundedStructValueBuilder::new();
         second.insert("label", Value::String("second".into()));
+        let second = second.finish();
+        let first = first.finish();
         let array = runmat_value::StructArray::new(vec![first, second], vec![2, 1]).unwrap();
 
         let converted = block(convert_contained_strings_to_chars_builtin(
             Value::StructArray(array),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .unwrap();
         let Value::StructArray(converted) = converted else {
@@ -1878,11 +2049,11 @@ mod tests {
         assert_eq!(converted.shape(), [2, 1]);
         assert!(matches!(
             converted.get_linear(0).unwrap().fields.get("label"),
-            Some(Value::CharArray(value)) if value.data.iter().collect::<String>() == "first"
+            Some(Value::CharArray(value)) if value.data().iter().collect::<String>() == "first"
         ));
         assert!(matches!(
             converted.get_linear(1).unwrap().fields.get("label"),
-            Some(Value::CharArray(value)) if value.data.iter().collect::<String>() == "second"
+            Some(Value::CharArray(value)) if value.data().iter().collect::<String>() == "second"
         ));
     }
 
@@ -1890,27 +2061,34 @@ mod tests {
     fn tokenizing_encoding_and_scanning_work() {
         assert_eq!(
             block(strtok_builtin(
+                None,
                 Value::String("  alpha,beta".into()),
-                vec![Value::String(" ,".into())],
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                    " ,".into()
+                )]),
             ))
             .unwrap(),
             Value::String("alpha".into())
         );
         assert_eq!(
             block(native2unicode_builtin(
+                None,
                 Value::Tensor(
                     Tensor::new_with_dtype(vec![104.0, 105.0], vec![1, 2], NumericDType::U8)
                         .unwrap()
                 ),
-                Vec::new(),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
             ))
             .unwrap(),
             Value::CharArray(CharArray::new_row("hi"))
         );
         assert_eq!(
             block(sscanf_builtin(
+                None,
                 Value::String("1 2 x".into()),
-                vec![Value::String("%f".into())],
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                    "%f".into()
+                )]),
             ))
             .unwrap(),
             Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap())
@@ -1939,14 +2117,22 @@ mod tests {
         {
             let _outputs =
                 crate::output_count::push_output_count(Some(3)).expect("output-count scope");
-            let strtok = block(strtok_builtin(Value::Num(7.0), Vec::new()))
-                .expect_err("strtok must reject excess outputs first");
+            let strtok = block(strtok_builtin(
+                None,
+                Value::Num(7.0),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+            ))
+            .expect_err("strtok must reject excess outputs first");
             assert_eq!(
                 strtok.identifier(),
                 STRTOK_ERROR_TOO_MANY_OUTPUTS.identifier
             );
-            let str2num = block(str2num_builtin(None, Value::Num(7.0), Vec::new()))
-                .expect_err("str2num must reject excess outputs first");
+            let str2num = block(str2num_builtin(
+                None,
+                Value::Num(7.0),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+            ))
+            .expect_err("str2num must reject excess outputs first");
             assert_eq!(
                 str2num.identifier(),
                 STR2NUM_ERROR_TOO_MANY_OUTPUTS.identifier
@@ -1955,8 +2141,12 @@ mod tests {
         {
             let _outputs =
                 crate::output_count::push_output_count(Some(5)).expect("output-count scope");
-            let sscanf = block(sscanf_builtin(Value::Num(7.0), Vec::new()))
-                .expect_err("sscanf must reject excess outputs first");
+            let sscanf = block(sscanf_builtin(
+                None,
+                Value::Num(7.0),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+            ))
+            .expect_err("sscanf must reject excess outputs first");
             assert_eq!(
                 sscanf.identifier(),
                 SSCANF_ERROR_TOO_MANY_OUTPUTS.identifier
@@ -1965,8 +2155,12 @@ mod tests {
         {
             let _outputs =
                 crate::output_count::push_output_count(Some(2)).expect("output-count scope");
-            let mat2str = block(mat2str_builtin(Value::Num(7.0), Vec::new()))
-                .expect_err("mat2str must reject excess outputs first");
+            let mat2str = block(mat2str_builtin(
+                None,
+                Value::Num(7.0),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+            ))
+            .expect_err("mat2str must reject excess outputs first");
             assert_eq!(
                 mat2str.identifier(),
                 MAT2STR_ERROR_TOO_MANY_OUTPUTS.identifier
@@ -1981,42 +2175,86 @@ mod tests {
         };
         assert!(pattern.is_class(runmat_types::standard::PATTERN));
         assert_eq!(
-            pattern_regex(&block(digits_pattern_builtin(Vec::new())).unwrap(), "test").unwrap(),
+            pattern_regex(
+                &block(digits_pattern_builtin(
+                    None,
+                    crate::builtins::common::test_support::builtin_arguments(Vec::new())
+                ))
+                .unwrap(),
+                "test"
+            )
+            .unwrap(),
             r"\d+"
         );
-        let value = block(digits_pattern_builtin(vec![Value::Num(2.0)])).unwrap();
+        let value = block(digits_pattern_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(2.0)]),
+        ))
+        .unwrap();
         assert_eq!(pattern_regex(&value, "test").unwrap(), "\\d{2}");
-        let bounded = block(digits_pattern_builtin(vec![
-            Value::Int(IntValue::U8(2)),
-            Value::Int(IntValue::U16(4)),
-        ]))
+        let bounded = block(digits_pattern_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Int(IntValue::U8(2)),
+                Value::Int(IntValue::U16(4)),
+            ]),
+        ))
         .unwrap();
         assert_eq!(pattern_regex(&bounded, "test").unwrap(), r"\d{2,4}");
-        let unbounded = block(digits_pattern_builtin(vec![
-            Value::Int(IntValue::I8(3)),
-            Value::Num(f64::INFINITY),
-        ]))
+        let unbounded = block(digits_pattern_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Int(IntValue::I8(3)),
+                Value::Num(f64::INFINITY),
+            ]),
+        ))
         .unwrap();
         assert_eq!(pattern_regex(&unbounded, "test").unwrap(), r"\d{3,}");
         assert_eq!(
-            pattern_regex(&block(letters_pattern_builtin(Vec::new())).unwrap(), "test").unwrap(),
+            pattern_regex(
+                &block(letters_pattern_builtin(
+                    None,
+                    crate::builtins::common::test_support::builtin_arguments(Vec::new())
+                ))
+                .unwrap(),
+                "test"
+            )
+            .unwrap(),
             r"\p{Alphabetic}+"
         );
         assert_eq!(
             pattern_regex(
-                &block(wildcard_pattern_builtin(Vec::new())).unwrap(),
+                &block(wildcard_pattern_builtin(
+                    None,
+                    crate::builtins::common::test_support::builtin_arguments(Vec::new())
+                ))
+                .unwrap(),
                 "test"
             )
             .unwrap(),
             ".*?"
         );
         assert_eq!(
-            pattern_regex(&block(text_boundary_builtin(Vec::new())).unwrap(), "test").unwrap(),
+            pattern_regex(
+                &block(text_boundary_builtin(
+                    None,
+                    crate::builtins::common::test_support::builtin_arguments(Vec::new())
+                ))
+                .unwrap(),
+                "test"
+            )
+            .unwrap(),
             r"(?:^|$)"
         );
         assert_eq!(
             pattern_regex(
-                &block(text_boundary_builtin(vec![Value::String("start".into())])).unwrap(),
+                &block(text_boundary_builtin(
+                    None,
+                    crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                        "start".into()
+                    )])
+                ))
+                .unwrap(),
                 "test"
             )
             .unwrap(),
@@ -2024,7 +2262,13 @@ mod tests {
         );
         assert_eq!(
             pattern_regex(
-                &block(text_boundary_builtin(vec![Value::String("end".into())])).unwrap(),
+                &block(text_boundary_builtin(
+                    None,
+                    crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                        "end".into()
+                    )])
+                ))
+                .unwrap(),
                 "test"
             )
             .unwrap(),
@@ -2037,27 +2281,45 @@ mod tests {
         let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         for (result, identifier) in [
             (
-                block(pattern_builtin(Value::Num(7.0))),
+                block(pattern_builtin(None, Value::Num(7.0))),
                 PATTERN_ERROR_TOO_MANY_OUTPUTS.identifier,
             ),
             (
-                block(regexp_pattern_builtin(Value::Num(7.0))),
+                block(regexp_pattern_builtin(None, Value::Num(7.0))),
                 REGEXP_PATTERN_ERROR_TOO_MANY_OUTPUTS.identifier,
             ),
             (
-                block(digits_pattern_builtin(vec![Value::Num(-1.0)])),
+                block(digits_pattern_builtin(
+                    None,
+                    crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(
+                        -1.0,
+                    )]),
+                )),
                 DIGITS_PATTERN_ERROR_TOO_MANY_OUTPUTS.identifier,
             ),
             (
-                block(letters_pattern_builtin(vec![Value::Num(-1.0)])),
+                block(letters_pattern_builtin(
+                    None,
+                    crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(
+                        -1.0,
+                    )]),
+                )),
                 LETTERS_PATTERN_ERROR_TOO_MANY_OUTPUTS.identifier,
             ),
             (
-                block(wildcard_pattern_builtin(vec![Value::Num(-1.0)])),
+                block(wildcard_pattern_builtin(
+                    None,
+                    crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(
+                        -1.0,
+                    )]),
+                )),
                 WILDCARD_PATTERN_ERROR_TOO_MANY_OUTPUTS.identifier,
             ),
             (
-                block(text_boundary_builtin(vec![Value::Num(7.0)])),
+                block(text_boundary_builtin(
+                    None,
+                    crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(7.0)]),
+                )),
                 TEXT_BOUNDARY_ERROR_TOO_MANY_OUTPUTS.identifier,
             ),
         ] {
@@ -2067,7 +2329,13 @@ mod tests {
 
     #[test]
     fn digits_pattern_validates_range_controls_and_argument_count() {
-        let zero = block(digits_pattern_builtin(vec![Value::Int(IntValue::U64(0))])).unwrap();
+        let zero = block(digits_pattern_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(
+                IntValue::U64(0),
+            )]),
+        ))
+        .unwrap();
         assert_eq!(pattern_regex(&zero, "test").unwrap(), r"\d{0}");
         for args in [
             vec![Value::Num(-1.0)],
@@ -2075,26 +2343,36 @@ mod tests {
             vec![Value::Num(1.0), Value::Num(f64::NEG_INFINITY)],
             vec![Value::Bool(true)],
         ] {
-            let error = block(digits_pattern_builtin(args)).unwrap_err();
+            let error = block(digits_pattern_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(args),
+            ))
+            .unwrap_err();
             assert_eq!(
                 error.identifier(),
                 DIGITS_PATTERN_ERROR_INVALID_COUNT.identifier
             );
         }
-        let range_error = block(digits_pattern_builtin(vec![
-            Value::Num(4.0),
-            Value::Num(3.0),
-        ]))
+        let range_error = block(digits_pattern_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(4.0),
+                Value::Num(3.0),
+            ]),
+        ))
         .unwrap_err();
         assert_eq!(
             range_error.identifier(),
             DIGITS_PATTERN_ERROR_INVALID_RANGE.identifier
         );
-        let arity_error = block(digits_pattern_builtin(vec![
-            Value::Num(1.0),
-            Value::Num(2.0),
-            Value::Num(3.0),
-        ]))
+        let arity_error = block(digits_pattern_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(1.0),
+                Value::Num(2.0),
+                Value::Num(3.0),
+            ]),
+        ))
         .unwrap_err();
         assert_eq!(
             arity_error.identifier(),
@@ -2110,7 +2388,11 @@ mod tests {
                 .expect("admit unregistered resident fixture")
                 .handle,
         );
-        let resident_error = block(digits_pattern_builtin(vec![resident])).unwrap_err();
+        let resident_error = block(digits_pattern_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![resident]),
+        ))
+        .unwrap_err();
         assert_eq!(
             resident_error.identifier(),
             DIGITS_PATTERN_ERROR_INVALID_COUNT.identifier
@@ -2129,10 +2411,13 @@ mod tests {
             (IntValue::U32(2), IntValue::U32(4)),
             (IntValue::U64(2), IntValue::U64(4)),
         ] {
-            let pattern = block(digits_pattern_builtin(vec![
-                Value::Int(minimum),
-                Value::Int(maximum),
-            ]))
+            let pattern = block(digits_pattern_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Int(minimum),
+                    Value::Int(maximum),
+                ]),
+            ))
             .unwrap();
             assert_eq!(pattern_regex(&pattern, "test").unwrap(), r"\d{2,4}");
         }
@@ -2147,14 +2432,25 @@ mod tests {
 
     #[test]
     fn text_boundary_rejects_invalid_type() {
-        let err = block(text_boundary_builtin(vec![Value::String("middle".into())]))
-            .expect_err("expected invalid boundary type");
+        let err = block(text_boundary_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "middle".into(),
+            )]),
+        ))
+        .expect_err("expected invalid boundary type");
         assert!(err.to_string().contains("unsupported boundary type"));
     }
 
     #[test]
     fn text_boundary_pattern_works_with_replace() {
-        let pattern = block(text_boundary_builtin(vec![Value::String("start".into())])).unwrap();
+        let pattern = block(text_boundary_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "start".into(),
+            )]),
+        ))
+        .unwrap();
         let result = futures::executor::block_on(crate::call_builtin_async(
             "replace",
             &[

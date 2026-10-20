@@ -44,7 +44,7 @@ pub(super) fn validate_and_count(value: &Value) -> VariableResult<usize> {
         Value::Cell(value) => {
             ensure_vector(&[value.rows, value.cols], "cell grouping variable")?;
             if !value
-                .data
+                .data()
                 .iter()
                 .all(|item| matches!(item, Value::CharArray(chars) if chars.rows <= 1))
             {
@@ -111,7 +111,7 @@ fn atom_at(value: &Value, row: usize) -> VariableResult<KeyAtom> {
             .ok_or_else(|| "logical grouping row is out of bounds".into()),
         Value::Bool(value) if row == 0 => Ok(KeyAtom::Logical(*value)),
         Value::StringArray(value) => value
-            .data
+            .data()
             .get(row)
             .map(|value| KeyAtom::from_text(value).unwrap_or(KeyAtom::Missing))
             .ok_or_else(|| "string grouping row is out of bounds".into()),
@@ -119,7 +119,7 @@ fn atom_at(value: &Value, row: usize) -> VariableResult<KeyAtom> {
             Ok(KeyAtom::from_text(value).unwrap_or(KeyAtom::Missing))
         }
         Value::Cell(value) => value
-            .data
+            .data()
             .get(row)
             .map(cellstr_atom)
             .transpose()?
@@ -136,7 +136,7 @@ fn cellstr_atom(value: &Value) -> VariableResult<KeyAtom> {
     let Value::CharArray(value) = value else {
         return Err("cell grouping variables must contain character vectors".into());
     };
-    let text = value.data.iter().collect::<String>();
+    let text = value.data().iter().collect::<String>();
     Ok(if text.is_empty() {
         KeyAtom::Missing
     } else {

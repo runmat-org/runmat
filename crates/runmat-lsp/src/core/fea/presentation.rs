@@ -66,9 +66,14 @@ fn type_pattern_name(pattern: &OperationTypePattern) -> String {
         OperationTypePattern::NumericArray => "numeric_array".to_string(),
         OperationTypePattern::LogicalArray => "logical_array".to_string(),
         OperationTypePattern::LogicalScalar => "logical".to_string(),
-        OperationTypePattern::Record(fields) => format!("record<{}>", fields.iter()
-            .map(|(name, value)| format!("{name}: {}", type_pattern_name(value)))
-            .collect::<Vec<_>>().join(", ")),
+        OperationTypePattern::Record(fields) => format!(
+            "record<{}>",
+            fields
+                .iter()
+                .map(|(name, value)| format!("{name}: {}", type_pattern_name(value)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
         OperationTypePattern::Size => "size".to_string(),
         OperationTypePattern::Prototype => "prototype".to_string(),
         OperationTypePattern::Axes => "axes".to_string(),

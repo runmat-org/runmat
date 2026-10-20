@@ -6,7 +6,9 @@ use crate::BuiltinResult;
 
 use super::errors::drawnow_error;
 
-pub(super) fn parse_controls(arguments: &[Value]) -> BuiltinResult<DrawNowControl> {
+pub(super) fn parse_controls(
+    arguments: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<DrawNowControl> {
     if arguments.len() > 2 {
         return Err(drawnow_error(
             &DRAWNOW_ERROR_INVALID_CONTROL,
@@ -17,9 +19,9 @@ pub(super) fn parse_controls(arguments: &[Value]) -> BuiltinResult<DrawNowContro
     for (index, argument) in arguments.iter().enumerate() {
         let value = match argument {
             Value::String(value) => Cow::Borrowed(value.as_str()),
-            Value::CharArray(value) if value.rows == 1 => Cow::Owned(value.data.iter().collect()),
-            Value::StringArray(value) if value.data.len() == 1 => {
-                Cow::Borrowed(value.data[0].as_str())
+            Value::CharArray(value) if value.rows == 1 => Cow::Owned(value.data().iter().collect()),
+            Value::StringArray(value) if value.data().len() == 1 => {
+                Cow::Borrowed(value.data()[0].as_str())
             }
             _ => {
                 return Err(drawnow_error(

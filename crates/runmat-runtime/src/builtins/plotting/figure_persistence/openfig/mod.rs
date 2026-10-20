@@ -13,17 +13,14 @@ use crate::BuiltinResult;
 pub async fn openfig_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     super::execute_openfig(runtime, requested_outputs, args).await
 }
 
 #[cfg(test)]
 pub(super) async fn openfig_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    super::execute_openfig(
-        crate::context::legacy::active(),
-        crate::output_count::current_output_count(),
-        args,
-    )
-    .await
+    let runtime = crate::context::legacy::active();
+    let args = crate::call::BuiltinArguments::from_borrowed(&args, runtime.as_ref())?;
+    super::execute_openfig(runtime, crate::output_count::current_output_count(), args).await
 }

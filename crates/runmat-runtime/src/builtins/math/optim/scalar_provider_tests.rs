@@ -87,7 +87,7 @@ fn cancellation_after_first_bound_download_prevents_second_download_and_callback
         Value::FunctionHandle("sin".into()),
         Value::GpuTensor(lower.handle.clone()),
         Value::GpuTensor(upper.handle.clone()),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap_err();
     assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
@@ -260,7 +260,7 @@ fn host_visible_scalar_errors_precede_resident_transfer_and_preserve_borrowed_le
         Value::FunctionHandle("sin".into()),
         resident(),
         Value::GpuTensor(unavailable_upper.handle.clone()),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap_err();
     assert_eq!(
@@ -275,7 +275,7 @@ fn host_visible_scalar_errors_precede_resident_transfer_and_preserve_borrowed_le
         Value::Num(3.0),
         resident(),
         Value::Num(1.0),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap_err();
     assert_eq!(
@@ -290,7 +290,7 @@ fn host_visible_scalar_errors_precede_resident_transfer_and_preserve_borrowed_le
             runmat_value::StringArray::new_2d(vec!["sin".into(), "cos".into()], 1, 2).unwrap(),
         ),
         resident(),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap_err();
     assert_eq!(
@@ -304,7 +304,7 @@ fn host_visible_scalar_errors_precede_resident_transfer_and_preserve_borrowed_le
         function(),
         resident(),
         Value::Complex(1.0, 1.0),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap_err();
     assert_eq!(bad_upper.identifier(), Some("RunMat:fminbnd:InvalidInput"));
@@ -315,7 +315,7 @@ fn host_visible_scalar_errors_precede_resident_transfer_and_preserve_borrowed_le
         function(),
         resident(),
         Value::Int(IntValue::U64((1_u64 << 53) + 1)),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap_err();
     assert_eq!(wide_upper.identifier(), Some("RunMat:fminbnd:InvalidInput"));
@@ -325,7 +325,7 @@ fn host_visible_scalar_errors_precede_resident_transfer_and_preserve_borrowed_le
         function(),
         resident(),
         Value::Num(1.0),
-        vec![Value::Num(-1.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(-1.0)]),
     ))
     .unwrap_err();
     assert_eq!(
@@ -339,7 +339,7 @@ fn host_visible_scalar_errors_precede_resident_transfer_and_preserve_borrowed_le
         function(),
         Value::GpuTensor(unavailable_upper.handle.clone()),
         Value::Complex(1.0, 1.0),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap_err();
     assert_eq!(
@@ -352,7 +352,7 @@ fn host_visible_scalar_errors_precede_resident_transfer_and_preserve_borrowed_le
     let bad_initial = block_on(super::fzero::fzero_builtin(
         function(),
         Value::GpuTensor(complex.handle.clone()),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap_err();
     assert_eq!(bad_initial.identifier(), Some("RunMat:fzero:InvalidInput"));
@@ -363,7 +363,7 @@ fn host_visible_scalar_errors_precede_resident_transfer_and_preserve_borrowed_le
         function(),
         resident(),
         Value::Num(1.0),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap_err();
     assert_eq!(
@@ -377,7 +377,7 @@ fn host_visible_scalar_errors_precede_resident_transfer_and_preserve_borrowed_le
         function(),
         resident(),
         Value::Num(1.0),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap_err();
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);

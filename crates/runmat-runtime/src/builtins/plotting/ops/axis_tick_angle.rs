@@ -20,11 +20,11 @@ pub fn axis_tick_angle_builtin(
     runtime: Option<&crate::context::RuntimeContext>,
     builtin: &'static str,
     axis: TickAxis,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let (target, args) = prepare_call(runtime, builtin, args)?;
-    match args.as_slice() {
-        [] => {
+    match args.len() {
+        0 => {
             let mut targets = prepared_targets(runtime, target).into_iter();
             let first = targets.next().expect("current or nonempty admitted axes");
             if targets.next().is_some() {
@@ -35,7 +35,8 @@ pub fn axis_tick_angle_builtin(
             }
             query_angle(builtin, axis, &first.resolve(builtin)?)
         }
-        [value] => {
+        1 => {
+            let value = args.first().expect("one angle argument");
             let angle = angle_from_value(value, builtin)?;
             super::op_common::axes_output::validate_setter_output(builtin)?;
             for target in prepared_targets(runtime, target) {
@@ -53,8 +54,8 @@ pub fn axis_tick_angle_builtin(
 fn prepare_call(
     runtime: Option<&crate::context::RuntimeContext>,
     builtin: &'static str,
-    args: Vec<Value>,
-) -> BuiltinResult<(TickAngleTarget, Vec<Value>)> {
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<(TickAngleTarget, crate::call::BuiltinArguments)> {
     if let Some(first) = args
         .first()
         .filter(|value| matches!(value, Value::Object(_) | Value::HandleObject(_)))
@@ -64,7 +65,7 @@ fn prepare_call(
         {
             return Ok((
                 TickAngleTarget::Native(prepared.into_axes(builtin)?),
-                args.into_iter().skip(1).collect(),
+                args.into_range(1..).expect("nonempty axes arguments"),
             ));
         }
     }
@@ -88,17 +89,16 @@ fn prepared_targets(
 
 fn split_optional_axes_target(
     builtin: &'static str,
-    args: Vec<Value>,
-) -> BuiltinResult<(TickAngleTarget, Vec<Value>)> {
-    let mut iter = args.into_iter();
-    let Some(first) = iter.next() else {
-        return Ok((TickAngleTarget::Current, Vec::new()));
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<(TickAngleTarget, crate::call::BuiltinArguments)> {
+    let Some(first) = args.first() else {
+        return Ok((TickAngleTarget::Current, args));
     };
-    match resolve_plot_handle(&first, builtin) {
+    match resolve_plot_handle(first, builtin) {
         Ok(PlotHandle::Axes(handle, axes_index)) => {
             return Ok((
                 TickAngleTarget::Axes(vec![(handle, axes_index)]),
-                iter.collect(),
+                args.into_range(1..).expect("nonempty axes arguments"),
             ));
         }
         Ok(
@@ -114,13 +114,13 @@ fn split_optional_axes_target(
         }
         Ok(PlotHandle::Root | PlotHandle::Figure(_)) | Err(_) => {}
     }
-    if let Some(targets) = axes_array_targets(&first) {
-        return Ok((TickAngleTarget::Axes(targets), iter.collect()));
+    if let Some(targets) = axes_array_targets(first) {
+        return Ok((
+            TickAngleTarget::Axes(targets),
+            args.into_range(1..).expect("nonempty axes arguments"),
+        ));
     }
-    let mut rest = Vec::with_capacity(iter.size_hint().0 + 1);
-    rest.push(first);
-    rest.extend(iter);
-    Ok((TickAngleTarget::Current, rest))
+    Ok((TickAngleTarget::Current, args))
 }
 
 fn axes_array_targets(value: &Value) -> Option<Vec<(super::state::FigureHandle, usize)>> {

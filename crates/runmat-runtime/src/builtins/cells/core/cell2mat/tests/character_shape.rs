@@ -36,7 +36,7 @@ fn char_cell() {
         Value::CharArray(arr) => {
             assert_eq!(arr.rows, 2);
             assert_eq!(arr.cols, 2);
-            assert_eq!(arr.data, vec!['h', 'i', 'B', 'Y']);
+            assert_eq!(arr.data(), vec!['h', 'i', 'B', 'Y']);
         }
         other => panic!("expected char array, got {other:?}"),
     }

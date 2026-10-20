@@ -1,5 +1,7 @@
 //! MATLAB-compatible `squeeze` builtin with GPU-aware semantics for RunMat.
 
+use crate::aggregate::structure::operations as struct_ops;
+
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::GpuTensorHandle;
 pub use runmat_builtins::SQUEEZE_DESCRIPTOR;
@@ -36,10 +38,7 @@ async fn squeeze_value(value: Value) -> crate::BuiltinResult<Value> {
         Value::Cell(cell) => squeeze_cell_array(cell).map(Value::Cell),
         Value::StructArray(array) => {
             let shape = squeeze_shape(array.shape());
-            array
-                .reshape(shape)
-                .map(Value::StructArray)
-                .map_err(squeeze_error)
+            struct_ops::reshape(array,shape).map(Value::StructArray).map_err(|error|struct_ops::remap(error,|message|squeeze_error(message)))
         }
         Value::GpuTensor(handle) => squeeze_gpu(handle).await,
         Value::String(_) | Value::Struct(_) => Ok(value),
@@ -123,7 +122,8 @@ fn squeeze_string_array(strings: StringArray) -> crate::BuiltinResult<StringArra
     if shape == strings.shape {
         return Ok(strings);
     }
-    StringArray::new(strings.data, shape).map_err(|e| squeeze_error(format!("squeeze: {e}")))
+    StringArray::from_shared_storage(strings.into_parts().0, shape.into())
+        .map_err(|e| squeeze_error(format!("squeeze: {e}")))
 }
 
 fn squeeze_char_array(chars: CharArray) -> crate::BuiltinResult<CharArray> {

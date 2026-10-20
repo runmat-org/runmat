@@ -1,43 +1,48 @@
-use runmat_value::{StructValue, Value};
+use runmat_value::Value;
 
-pub(super) fn execute(target: Value, fields: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let Some((first, rest)) = fields.split_first() else {
+pub(super) fn execute(
+    runtime: Option<&crate::context::RuntimeContext>,
+    target: Value,
+    fields: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
+    let _input = super::super::construction::input(runtime, &target)?;
+    let Some((first, rest)) = fields.view().split_first() else {
         return Err(super::error::not_enough_inputs());
     };
     let names = super::names::parse(first, rest)?;
+    let names = names.as_slice();
     let target = super::target::Target::parse(target)?;
     if names.is_empty() {
-        return target.into_value();
+        return super::super::construction::root(runtime, target.into_value()?);
     }
     match target {
-        super::target::Target::Scalar(mut structure) => {
-            remove(&mut structure, names.as_slice())?;
-            Ok(Value::Struct(structure))
+        super::target::Target::Scalar(structure) => {
+            for name in names {
+                if !structure.fields.contains_key(name) {
+                    return Err(super::error::missing_field(name));
+                }
+            }
+            super::super::construction::scalar(
+                runtime,
+                structure
+                    .fields
+                    .iter()
+                    .filter(|(name, _)| !names.iter().any(|removed| removed.as_str() == *name)),
+            )
         }
-        super::target::Target::Array(mut array) => {
-            remove_array(&mut array, names.as_slice())?;
-            Ok(Value::StructArray(array))
+        super::target::Target::Array(array) => {
+            for name in names {
+                if array.column_owner(name).is_none() {
+                    return Err(super::error::missing_field(name));
+                }
+            }
+            super::super::construction::array(
+                runtime,
+                array
+                    .column_owners()
+                    .filter(|(name, _)| !names.iter().any(|removed| removed.as_str() == *name)),
+                array.shape_owner(),
+            )
         }
     }
-}
-
-fn remove_array(
-    array: &mut runmat_value::StructArray,
-    names: &[String],
-) -> crate::BuiltinResult<()> {
-    for name in names {
-        if array.remove_field(name).is_none() {
-            return Err(super::error::missing_field(name));
-        }
-    }
-    Ok(())
-}
-
-fn remove(structure: &mut StructValue, names: &[String]) -> crate::BuiltinResult<()> {
-    for name in names {
-        if structure.remove(name).is_none() {
-            return Err(super::error::missing_field(name));
-        }
-    }
-    Ok(())
 }

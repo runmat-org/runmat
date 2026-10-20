@@ -333,7 +333,7 @@ fn parse_ribbon_args(args: Vec<Value>) -> BuiltinResult<ParsedRibbon> {
 
     let style = parse_surface_style_args(
         BUILTIN_NAME,
-        rest,
+        crate::call::FunctionArgumentView::from_slice(rest),
         SurfaceStyleDefaults::new(
             ColorMap::Parula,
             ShadingMode::Smooth,
@@ -722,7 +722,7 @@ mod tests {
                 Value::String("DisplayName".into())
             ])
             .unwrap(),
-            Value::String(String::new())
+            Value::String(String::new().into())
         );
     }
 

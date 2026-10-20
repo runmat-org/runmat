@@ -5,6 +5,7 @@ use super::super::error::{arrayfun_error_with_detail, arrayfun_error_with_messag
 
 pub(super) fn parse(error: CallableParseError) -> crate::RuntimeError {
     match error {
+        CallableParseError::Runtime(error) => error,
         CallableParseError::EmptyText => {
             arrayfun_flow("arrayfun: expected function handle or builtin name, got empty string")
         }

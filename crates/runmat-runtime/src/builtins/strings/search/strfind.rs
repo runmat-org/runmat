@@ -55,13 +55,15 @@ fn remap_strfind_flow(err: RuntimeError) -> RuntimeError {
 
 #[runtime_builtin(
     name = "strfind",
+    context = true,
     binding_variant = "default",
     builtin_path = "crate::builtins::strings::search::strfind"
 )]
 async fn strfind_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     text: Value,
     pattern: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     if crate::dispatcher::value_contains_gpu(&text)
         || crate::dispatcher::value_contains_gpu(&pattern)
@@ -71,14 +73,14 @@ async fn strfind_builtin(
             &STRFIND_ERROR_INVALID_INPUT,
         ));
     }
-    let rest = validate_force_cell_output_extensions(rest).await?;
+    let rest = validate_force_cell_output_extensions(runtime.as_ref(), rest).await?;
     let text = gather_if_needed_async(&text)
         .await
         .map_err(remap_strfind_flow)?;
     let pattern = gather_if_needed_async(&pattern)
         .await
         .map_err(remap_strfind_flow)?;
-    let force_cell_output = parse_force_cell_output(&rest).map_err(|err| {
+    let force_cell_output = parse_force_cell_output(rest.view()).map_err(|err| {
         strfind_error_with_message(err.message().to_string(), &STRFIND_ERROR_INVALID_OPTION)
     })?;
 
@@ -92,7 +94,10 @@ async fn strfind_builtin(
     evaluate_strfind(&subject, &patterns, force_cell_output)
 }
 
-async fn validate_force_cell_output_extensions(rest: Vec<Value>) -> BuiltinResult<Vec<Value>> {
+async fn validate_force_cell_output_extensions(
+    runtime: Option<&crate::context::RuntimeContext>,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
     if rest.is_empty() {
         return Ok(rest);
     }
@@ -136,15 +141,12 @@ async fn validate_force_cell_output_extensions(rest: Vec<Value>) -> BuiltinResul
             BUILTIN_NAME,
         )?;
     }
-    let mut host = Vec::with_capacity(rest.len());
-    for value in rest {
-        host.push(
-            gather_if_needed_async(&value)
-                .await
-                .map_err(remap_strfind_flow)?,
-        );
-    }
-    Ok(host)
+    rest.try_map_preserving_roots_async(rest.len(), runtime, async |index| {
+        gather_if_needed_async(&rest[index])
+            .await
+            .map_err(remap_strfind_flow)
+    })
+    .await
 }
 
 fn validate_force_cell_output_shape(value: &Value) -> BuiltinResult<()> {
@@ -330,7 +332,7 @@ fn shape_to_rows_cols(shape: &[usize]) -> (usize, usize) {
     }
 }
 
-fn parse_force_cell_output(rest: &[Value]) -> BuiltinResult<bool> {
+fn parse_force_cell_output(rest: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<bool> {
     if rest.is_empty() {
         return Ok(false);
     }
@@ -342,7 +344,7 @@ fn parse_force_cell_output(rest: &[Value]) -> BuiltinResult<bool> {
     }
 
     let mut force_cell = None;
-    for pair in rest.chunks(2) {
+    for pair in rest.chunks_exact(2) {
         let name = value_to_owned_string(&pair[0]).ok_or_else(|| {
             strfind_error_with_message(
                 "strfind: option names must be text scalars",
@@ -440,7 +442,14 @@ pub(crate) mod tests {
     use runmat_value::{CellArray, CharArray, IntegerStorage, StringArray, Tensor};
 
     fn run_strfind(text: Value, pattern: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(strfind_builtin(text, pattern, rest))
+        futures::executor::block_on(strfind_builtin(
+            None,
+            text,
+            pattern,
+            crate::execution::RootedValues::new(rest)
+                .map_err(crate::execution::ExecutionServiceError::into_runtime_error)?
+                .into(),
+        ))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

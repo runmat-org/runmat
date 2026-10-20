@@ -166,11 +166,11 @@ fn invalid_repeat_forms_do_not_open_or_touch_mapped_bytes() {
     for value in &invalid {
         let error = futures::executor::block_on(super::super::super::super::memmapfile_builtin(
             None,
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::String("data.bin".into()),
                 Value::String("Repeat".into()),
                 value.clone(),
-            ],
+            ]),
         ))
         .unwrap_err();
         assert_eq!(error.identifier(), Some("RunMat:memmapfile:InvalidControl"));
@@ -181,7 +181,9 @@ fn invalid_repeat_forms_do_not_open_or_touch_mapped_bytes() {
 
     let mapped = futures::executor::block_on(super::super::super::super::memmapfile_builtin(
         None,
-        vec![Value::String("data.bin".into())],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+            "data.bin".into(),
+        )]),
     ))
     .unwrap();
     assert_eq!(provider.opens.load(Ordering::SeqCst), 1);
@@ -227,7 +229,9 @@ fn abandoned_pending_mapped_read_releases_session_backing_without_replay() {
     let runtime = crate::context::RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
     let mapped = futures::executor::block_on(super::super::super::super::memmapfile_builtin(
         Some(runtime.clone()),
-        vec![Value::String("data.bin".into())],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+            "data.bin".into(),
+        )]),
     ))
     .unwrap();
     let mut call = Box::pin(subsref(
@@ -333,13 +337,13 @@ fn explicit_gpu_mapped_rhs_is_gated_then_gathered_once_in_runmat_mode() {
     let _fs_selected = vfs::replace_provider(provider.clone());
     let mapped = futures::executor::block_on(super::super::super::super::memmapfile_builtin(
         None,
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::String("data.bin".into()),
             Value::String("Format".into()),
             Value::String("double".into()),
             Value::String("Writable".into()),
             Value::Bool(true),
-        ],
+        ]),
     ))
     .unwrap();
     let strict = crate::compatibility::push_runmat_extensions_enabled(false);

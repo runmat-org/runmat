@@ -46,12 +46,15 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::hist::histcounts"
 )]
-async fn histcounts_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn histcounts_builtin(
+    data: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     let requested_outputs = crate::output_count::current_output_count();
     if requested_outputs.is_some_and(|count| count > 3) {
         return Err(builtin_error("histcounts: too many output arguments"));
     }
-    let eval = evaluate_with_bins(data, &rest, requested_outputs == Some(3)).await?;
+    let eval = evaluate_with_bins(data, rest.view(), requested_outputs == Some(3)).await?;
     if let Some(out_count) = requested_outputs {
         if out_count == 0 {
             return Ok(Value::output_list(Vec::new()));
@@ -70,13 +73,16 @@ async fn histcounts_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinResu
 }
 
 /// Evaluate `histcounts` once and surface both primary outputs.
-pub async fn evaluate(data: Value, rest: &[Value]) -> BuiltinResult<HistcountsEvaluation> {
+pub async fn evaluate(
+    data: Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<HistcountsEvaluation> {
     evaluate_with_bins(data, rest, false).await
 }
 
 async fn evaluate_with_bins(
     data: Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     include_bins: bool,
 ) -> BuiltinResult<HistcountsEvaluation> {
     let options = parse_options(rest)?;

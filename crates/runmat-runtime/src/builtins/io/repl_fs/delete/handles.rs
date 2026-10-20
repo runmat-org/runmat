@@ -2,7 +2,7 @@ use super::*;
 
 pub(super) async fn delete_handles(
     context: Option<&crate::context::RuntimeContext>,
-    values: &[Value],
+    values: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<Value> {
     let mut mutated_last: Option<Value> = None;
     let mut total = 0usize;
@@ -104,7 +104,7 @@ async fn process_handle_value(
         }
         Value::Cell(cell) => {
             let mut total = 0usize;
-            for handle in &cell.data {
+            for handle in cell.data() {
                 let inner = handle;
                 total += Box::pin(process_handle_value(context, inner, mutated_last)).await?;
             }
@@ -120,7 +120,7 @@ async fn process_handle_value(
 pub(super) fn is_handle_input(value: &Value) -> bool {
     match value {
         Value::HandleObject(_) | Value::Listener(_) => true,
-        Value::Cell(cell) => cell.data.iter().all(|ptr| is_handle_input(ptr)),
+        Value::Cell(cell) => cell.data().iter().all(|ptr| is_handle_input(ptr)),
         _ => false,
     }
 }
@@ -128,7 +128,7 @@ pub(super) fn is_handle_input(value: &Value) -> bool {
 pub(super) fn contains_handle_input(value: &Value) -> bool {
     match value {
         Value::HandleObject(_) | Value::Listener(_) => true,
-        Value::Cell(cell) => cell.data.iter().any(|ptr| contains_handle_input(ptr)),
+        Value::Cell(cell) => cell.data().iter().any(|ptr| contains_handle_input(ptr)),
         _ => false,
     }
 }

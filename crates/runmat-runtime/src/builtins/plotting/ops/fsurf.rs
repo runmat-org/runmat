@@ -865,8 +865,12 @@ async fn sample_surface(parsed: &ParsedFsurf) -> BuiltinResult<SurfacePlot> {
         false,
         true,
     );
-    let style = parse_surface_style_args(BUILTIN_NAME, &parsed.style_args, defaults)
-        .map_err(map_fsurf_invalid)?;
+    let style = parse_surface_style_args(
+        BUILTIN_NAME,
+        crate::call::FunctionArgumentView::from_slice(&parsed.style_args),
+        defaults,
+    )
+    .map_err(map_fsurf_invalid)?;
     let mut surface = match &parsed.function {
         SurfaceFunction::Explicit(_) => SurfacePlot::new(x_axis, y_axis, z_grid)
             .map_err(|err| plotting_error(BUILTIN_NAME, format!("fsurf: {err}")))?,
@@ -1387,12 +1391,12 @@ mod tests {
         );
         let style = parse_surface_style_args(
             BUILTIN_NAME,
-            &[
+            crate::call::FunctionArgumentView::from_slice(&[
                 Value::String("FaceAlpha".into()),
                 Value::Int(IntValue::U8(1)),
                 Value::String("Visible".into()),
                 Value::Int(IntValue::U64(u64::MAX)),
-            ],
+            ]),
             defaults,
         )
         .expect("enabled supported integer styles");

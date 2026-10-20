@@ -117,10 +117,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 async fn interp2_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
-    let allocation = allocation::admit_before_gather(&args, runtime.as_ref())?;
-    preflight_interp2_inputs(&args).await?;
+    let allocation = allocation::admit_before_gather(args.view(), runtime.as_ref())?;
+    preflight_interp2_inputs(args.view()).await?;
     if let (Some(receipt), Some(runtime)) = (allocation.as_ref(), runtime.as_ref()) {
         receipt
             .checkpoint(runtime)
@@ -150,10 +150,13 @@ async fn interp2_builtin_registered(
 
 #[cfg(test)]
 async fn interp2_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let args = crate::call::BuiltinArguments::from_borrowed(&args, None)?;
     interp2_builtin_registered(None, args).await
 }
 
-async fn preflight_interp2_inputs(args: &[Value]) -> crate::BuiltinResult<()> {
+async fn preflight_interp2_inputs(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<()> {
     use crate::builtins::common::validation::{
         native_integer_value_is_exact_f64_async, value_has_logical_class,
         value_has_native_integer_class,
@@ -163,9 +166,15 @@ async fn preflight_interp2_inputs(args: &[Value]) -> crate::BuiltinResult<()> {
     }
     let explicit = args.len() >= 5 && !is_option_arg(&args[3]);
     let (samples, queries) = if explicit {
-        (&args[..3], &args[3..5])
+        (
+            args.range(..3).expect("interp2 samples"),
+            args.range(3..5).expect("interp2 queries"),
+        )
     } else {
-        (&args[..1], &args[1..3])
+        (
+            args.range(..1).expect("interp2 samples"),
+            args.range(1..3).expect("interp2 queries"),
+        )
     };
     for value in samples {
         if value_has_native_integer_class(value) {
@@ -239,7 +248,7 @@ struct ParsedInterp2 {
 
 impl ParsedInterp2 {
     async fn parse(
-        args: Vec<Value>,
+        mut args: crate::call::BuiltinArguments,
         runtime: Option<&crate::context::RuntimeContext>,
     ) -> crate::BuiltinResult<Self> {
         if args.len() < 3 {
@@ -253,26 +262,24 @@ impl ParsedInterp2 {
         let mut explicit_extrap = false;
         let explicit_axes = args.len() >= 5 && !is_option_arg(&args[3]);
         let (x_axis, y_axis, z, xq_value, yq_value, options) = if explicit_axes {
-            let mut iter = args.into_iter();
-            let x = iter.next().expect("X");
-            let y = iter.next().expect("Y");
-            let z_value = iter.next().expect("Z");
+            let x = args.pop_front().expect("X");
+            let y = args.pop_front().expect("Y");
+            let z_value = args.pop_front().expect("Z");
             let z = grid_samples(z_value).await?;
             let (rows, cols) = z.dimensions();
             let (x_axis, y_axis) = axes_from_values(x, y, rows, cols, runtime).await?;
-            let xq = iter.next().expect("Xq");
-            let yq = iter.next().expect("Yq");
-            (x_axis, y_axis, z, xq, yq, iter.collect::<Vec<_>>())
+            let xq = args.pop_front().expect("Xq");
+            let yq = args.pop_front().expect("Yq");
+            (x_axis, y_axis, z, xq, yq, args)
         } else {
-            let mut iter = args.into_iter();
-            let z_value = iter.next().expect("Z");
+            let z_value = args.pop_front().expect("Z");
             let z = grid_samples(z_value).await?;
             let (rows, cols) = z.dimensions();
             let x_axis: Vec<f64> = (1..=cols).map(|v| v as f64).collect();
             let y_axis: Vec<f64> = (1..=rows).map(|v| v as f64).collect();
-            let xq = iter.next().expect("Xq");
-            let yq = iter.next().expect("Yq");
-            (x_axis, y_axis, z, xq, yq, iter.collect::<Vec<_>>())
+            let xq = args.pop_front().expect("Xq");
+            let yq = args.pop_front().expect("Yq");
+            (x_axis, y_axis, z, xq, yq, args)
         };
 
         validate_axis(&x_axis, "X", runtime).await?;
@@ -756,7 +763,7 @@ mod tests {
             z,
             Value::Num(18.0),
             Value::Num(120.0),
-            Value::String("nearest".to_string()),
+            Value::String("nearest".to_string().into()),
         ]))
         .expect("interp2");
         assert_eq!(value, Value::Num(2.0));
@@ -858,8 +865,11 @@ mod tests {
                 Value::String("spline".into()),
             ]
         };
-        let output = block_on(interp2_builtin_registered(Some(runtime.clone()), args()))
-            .expect("managed complex spline");
+        let output = block_on(interp2_builtin_registered(
+            Some(runtime.clone()),
+            crate::builtins::common::test_support::builtin_arguments(args()),
+        ))
+        .expect("managed complex spline");
         let Value::ComplexTensor(output) = output else {
             panic!("complex output expected")
         };
@@ -880,7 +890,7 @@ mod tests {
         let narrow = crate::context::host_effect::ManagedHostEffectLedger::new_with_epoch(32, 18);
         let failure = block_on(interp2_builtin_registered(
             Some(managed_runtime(narrow.clone())),
-            args(),
+            crate::builtins::common::test_support::builtin_arguments(args()),
         ))
         .expect_err("finite admission must precede spline materialization");
         assert_eq!(
@@ -899,12 +909,12 @@ mod tests {
             .unwrap();
         let failure = block_on(interp2_builtin_registered(
             Some(managed_runtime(narrow.clone())),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::GpuTensor(resident.handle),
                 Value::Num(1.5),
                 Value::Num(1.5),
                 Value::String("spline".into()),
-            ],
+            ]),
         ))
         .expect_err("finite capacity must reject before provider download");
         assert_eq!(
@@ -940,7 +950,7 @@ mod tests {
                 integer_tensor(IntegerStorage::I16(vec![1, 3, 2, 4]), vec![2, 2]),
                 Value::Num(18.0),
                 Value::Num(120.0),
-                Value::String("nearest".to_string()),
+                Value::String("nearest".to_string().into()),
             ]
         };
         let error =
@@ -966,7 +976,7 @@ mod tests {
             integer_tensor(IntegerStorage::I16(vec![1, 3, 2, 4]), vec![2, 2]),
             Value::Num(18.0),
             Value::Num(120.0),
-            Value::String("nearest".to_string()),
+            Value::String("nearest".to_string().into()),
         ]))
         .expect("interp2");
 
@@ -980,7 +990,7 @@ mod tests {
                 Value::Tensor(Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).expect("tensor")),
                 Value::Num(0.0),
                 Value::Num(0.0),
-                Value::String("linear".to_string()),
+                Value::String("linear".to_string().into()),
                 Value::Int(runmat_value::IntValue::I16(99)),
             ]
         };

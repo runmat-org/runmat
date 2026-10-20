@@ -1,6 +1,8 @@
 use super::*;
 
-pub(super) fn parse_delete_options(args: &[Value]) -> BuiltinResult<(&[Value], Option<bool>)> {
+pub(super) fn parse_delete_options<'a>(
+    args: crate::call::FunctionArgumentView<'a>,
+) -> BuiltinResult<(crate::call::FunctionArgumentView<'a>, Option<bool>)> {
     if args.len() >= 2
         && args.last().and_then(option_name).is_some_and(|name| {
             DeleteOption::from_name(&name) == Some(DeleteOption::ResolveSymbolicLinks)
@@ -15,7 +17,7 @@ pub(super) fn parse_delete_options(args: &[Value]) -> BuiltinResult<(&[Value], O
         if let Some(name) = option_name(&args[args.len() - 2]) {
             if DeleteOption::from_name(&name) == Some(DeleteOption::ResolveSymbolicLinks) {
                 return Ok((
-                    &args[..args.len() - 2],
+                    args.range(..args.len() - 2)?,
                     Some(exact_zero_one(&args[args.len() - 1])?),
                 ));
             }
@@ -44,9 +46,11 @@ fn looks_like_option_value(value: &Value) -> bool {
 
 fn option_name(value: &Value) -> Option<String> {
     match value {
-        Value::String(text) => Some(text.clone()),
-        Value::CharArray(array) if array.rows == 1 => Some(array.data.iter().collect()),
-        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
+        Value::String(text) => Some(text.as_str().to_owned()),
+        Value::CharArray(array) if array.rows == 1 => Some(array.data().iter().collect()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Some(array.data()[0].as_str().to_owned())
+        }
         _ => None,
     }
 }
@@ -80,7 +84,7 @@ fn collect_char_array_targets(array: &CharArray, targets: &mut Vec<String>) -> B
     for row in 0..array.rows {
         let mut text = String::with_capacity(array.cols);
         for col in 0..array.cols {
-            text.push(array.data[row * array.cols + col]);
+            text.push(array.data()[row * array.cols + col]);
         }
         let trimmed = text.trim_end().to_string();
         if trimmed.is_empty() {
@@ -98,20 +102,20 @@ fn collect_string_array_targets(
     array: &StringArray,
     targets: &mut Vec<String>,
 ) -> BuiltinResult<()> {
-    for text in &array.data {
+    for text in array.data() {
         if text.is_empty() {
             return Err(delete_error_with(
                 &DELETE_ERROR_EMPTY_FILENAME,
                 DELETE_ERROR_EMPTY_FILENAME.message,
             ));
         }
-        targets.push(text.clone());
+        targets.push(text.as_str().to_owned());
     }
     Ok(())
 }
 
 fn collect_cell_targets(cell: &CellArray, targets: &mut Vec<String>) -> BuiltinResult<()> {
-    for handle in &cell.data {
+    for handle in cell.data() {
         let value = handle;
         collect_targets(value, targets)?;
     }

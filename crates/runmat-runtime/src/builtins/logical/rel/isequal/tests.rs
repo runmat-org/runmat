@@ -1,13 +1,18 @@
 use super::*;
+use crate::builtins::common::gpu_helpers;
 use futures::executor::block_on;
 use runmat_value::{CellArray, ComplexTensor, IntegerComplexStorage, IntegerStorage};
 
 fn run_isequal(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    block_on(isequal_builtin(args))
+    block_on(isequal_builtin(
+        crate::builtins::common::test_support::builtin_arguments(args),
+    ))
 }
 
 fn run_isequaln(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    block_on(isequaln_builtin(args))
+    block_on(isequaln_builtin(
+        crate::builtins::common::test_support::builtin_arguments(args),
+    ))
 }
 
 fn typed_complex_u64(real: u64, imag: u64) -> ComplexTensor {
@@ -413,14 +418,22 @@ fn errors_are_identity_specific_and_validate_before_materialization() {
                 .unwrap()
                 .handle,
         );
-        let error = block_on(equality_builtin(vec![resident.clone()], nan, name)).unwrap_err();
+        let error = block_on(equality_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![resident.clone()]),
+            nan,
+            name,
+        ))
+        .unwrap_err();
         assert_eq!(
             error.identifier(),
             Some(format!("RunMat:{name}:NotEnoughInputs").as_str())
         );
         let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let error = block_on(equality_builtin(
-            vec![resident.clone(), resident],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                resident.clone(),
+                resident,
+            ]),
             nan,
             name,
         ))
@@ -445,7 +458,7 @@ fn discarded_outputs_still_validate_and_compare() {
 #[test]
 fn nested_resident_values_gather_exactly_without_consuming_inputs() {
     use crate::builtins::common::test_support;
-    use runmat_value::{StructArray, StructValue};
+    use runmat_value::StructArray;
     test_support::with_test_provider(|provider| {
         let tensor = Tensor::new_integer(
             IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
@@ -453,21 +466,26 @@ fn nested_resident_values_gather_exactly_without_consuming_inputs() {
         )
         .unwrap();
         let handle = gpu_helpers::upload_tensor(provider, &tensor).unwrap();
-        let mut resident = StructValue::new();
+        let mut resident = runmat_value::UnboundedStructValueBuilder::new();
         resident.insert(
             "payload",
             Value::Cell(CellArray::new(vec![Value::GpuTensor(handle.clone())], 1, 1).unwrap()),
         );
-        let mut host = StructValue::new();
+        let mut host = runmat_value::UnboundedStructValueBuilder::new();
         host.insert(
             "payload",
             Value::Cell(CellArray::new(vec![Value::Tensor(tensor.clone())], 1, 1).unwrap()),
         );
+        let host = host.finish();
+        let resident = resident.finish();
         for nan in [false, true] {
             let name = if nan { "isequaln" } else { "isequal" };
             assert_eq!(
                 block_on(equality_builtin(
-                    vec![Value::Struct(resident.clone()), Value::Struct(host.clone())],
+                    crate::builtins::common::test_support::builtin_arguments(vec![
+                        Value::Struct(resident.clone()),
+                        Value::Struct(host.clone())
+                    ]),
                     nan,
                     name
                 ))
@@ -479,7 +497,10 @@ fn nested_resident_values_gather_exactly_without_consuming_inputs() {
             let right = StructArray::new(vec![host.clone(), host.clone()], vec![1, 2]).unwrap();
             assert_eq!(
                 block_on(equality_builtin(
-                    vec![Value::StructArray(left), Value::StructArray(right)],
+                    crate::builtins::common::test_support::builtin_arguments(vec![
+                        Value::StructArray(left),
+                        Value::StructArray(right)
+                    ]),
                     nan,
                     name
                 ))
@@ -543,9 +564,9 @@ fn empty_nd_and_complex_nan_boundaries() {
 
 #[test]
 fn structs_compare_by_field_name_not_insertion_order() {
-    use runmat_value::{StructArray, StructValue};
+    use runmat_value::StructArray;
     let record = |reverse: bool, nan: bool| {
-        let mut value = StructValue::new();
+        let mut value = runmat_value::UnboundedStructValueBuilder::new();
         let a = Value::Num(if nan { f64::NAN } else { 1.0 });
         if reverse {
             value.insert("b", Value::Bool(true));
@@ -554,7 +575,7 @@ fn structs_compare_by_field_name_not_insertion_order() {
             value.insert("a", a);
             value.insert("b", Value::Bool(true));
         }
-        value
+        value.finish()
     };
     for nan in [false, true] {
         for nan_equal in [false, true] {
@@ -583,8 +604,12 @@ fn structs_compare_by_field_name_not_insertion_order() {
     }
     let left = record(false, false);
     let mut renamed = record(true, false);
-    renamed.remove("a");
-    renamed.insert("c", Value::Num(1.0));
+    crate::builtins::common::test_support::remove_struct_field_unbounded(&mut renamed, "a");
+    crate::builtins::common::test_support::replace_struct_field_unbounded(
+        &mut renamed,
+        "c",
+        Value::Num(1.0),
+    );
     assert!(!values_equal(
         &Value::Struct(left.clone()),
         &Value::Struct(renamed.clone()),

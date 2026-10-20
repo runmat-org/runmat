@@ -96,7 +96,7 @@ pub fn load_string(
     stack: &mut crate::interpreter::stack::InterpreterStack,
     value: String,
 ) -> Result<(), RuntimeError> {
-    stack.try_push(Value::String(value))
+    stack.try_push(Value::String(value.into()))
 }
 
 pub fn load_char_row(

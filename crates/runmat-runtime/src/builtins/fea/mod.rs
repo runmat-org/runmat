@@ -57,6 +57,7 @@ pub(crate) mod domains;
 pub(crate) mod excitations;
 pub(crate) mod execution;
 mod field_access;
+mod object_api;
 pub(crate) mod field_selectors;
 pub(crate) mod generator_policies;
 pub(crate) mod initial_conditions;
@@ -139,7 +140,7 @@ pub use runmat_builtins::fea_contract::integer::FEA_STRUCTURAL_INTEGER_AUDIT;
     binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
-pub async fn fea_study_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn fea_study_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     create_study_object_from_args(args)
 }
 
@@ -148,7 +149,7 @@ pub async fn fea_study_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
-pub async fn fea_sweep_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn fea_sweep_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     create_sweep_object_from_args(args)
 }
 
@@ -157,7 +158,7 @@ pub async fn fea_sweep_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
-pub async fn fea_model_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn fea_model_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     create_model_object_from_args(args)
 }
 
@@ -166,7 +167,7 @@ pub async fn fea_model_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
-pub async fn fea_material_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn fea_material_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     create_material_object_from_args(args)
 }
 
@@ -245,7 +246,7 @@ pub async fn fea_run_builtin(input: Value) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
-pub async fn fea_results_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn fea_results_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     create_results_object_from_args(args)
 }
 
@@ -254,7 +255,7 @@ pub async fn fea_results_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
-pub async fn fea_field_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn fea_field_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     create_field_object_from_args(args)
 }
 
@@ -263,7 +264,8 @@ pub async fn fea_field_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
-pub async fn fea_field_page_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn fea_field_page_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     field_access::create_page_from_args(args)
 }
 
@@ -272,7 +274,8 @@ pub async fn fea_field_page_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
-pub async fn fea_plot_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn fea_plot_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     visualization::create_plot_from_args(args)
 }
 
@@ -281,7 +284,8 @@ pub async fn fea_plot_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
-pub async fn fea_mesh_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn fea_mesh_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     visualization::create_mesh_from_args(args)
 }
 
@@ -290,7 +294,7 @@ pub async fn fea_mesh_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
-pub async fn fea_compare_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn fea_compare_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     create_compare_object_from_args(args)
 }
 
@@ -299,7 +303,7 @@ pub async fn fea_compare_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
-pub async fn fea_trends_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn fea_trends_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     create_trends_object_from_args(args)
 }
 
@@ -308,12 +312,12 @@ async fn resolve_document_input(
     builtin: &'static str,
 ) -> BuiltinResult<RuntimeResolvedDocument> {
     match input {
-        Value::Object(ref object) if object.class_name.is(identities::FEA_STUDY_CLASS) => {
+        Value::Object(ref object) if object.class_name().is(identities::FEA_STUDY_CLASS) => {
             modeling::study_from_value_with_generators(builtin, &input)
                 .map(Box::new)
                 .map(RuntimeResolvedDocument::Study)
         }
-        Value::Object(ref object) if object.class_name.is(identities::FEA_SWEEP_CLASS) => {
+        Value::Object(ref object) if object.class_name().is(identities::FEA_SWEEP_CLASS) => {
             modeling::sweep_from_value_with_generators(builtin, &input)
                 .map(RuntimeResolvedDocument::Sweep)
         }
@@ -330,7 +334,7 @@ enum RuntimeResolvedDocument {
     Sweep(modeling::ComposedSweep),
 }
 
-fn create_results_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
+fn create_results_object_from_args(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     if args.is_empty() {
         return Err(builtin_error(
             RESULTS_NAME,
@@ -339,12 +343,12 @@ fn create_results_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
         ));
     }
     if let Value::Object(object) = &args[0] {
-        if object.class_name.is(identities::FEA_RESULTS_CLASS) && args.len() == 1 {
+        if object.class_name().is(identities::FEA_RESULTS_CLASS) && args.len() == 1 {
             return Ok(args[0].clone());
         }
     }
     let run_id = run_id_from_value(RESULTS_NAME, &args[0])?;
-    let query = results_query_from_args(&args[1..])?;
+    let query = results_query_from_args(args.view().range(1..)?)?;
     let envelope = analysis_results_by_run_id_op(&run_id, query, OperationContext::new(None, None))
         .map_err(|err| operation_error(RESULTS_NAME, &ERROR_OPERATION, err))?;
     let mut public_data = envelope.data;
@@ -399,14 +403,17 @@ fn create_results_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     let Value::Object(mut object) = value else {
         unreachable!("integer-preserving FEA result serialization returns an object")
     };
-    object
-        .properties
-        .insert("run_id".to_string(), Value::String(run_id.clone()));
-    copy_study_context_property(&args[0], &mut object);
+    crate::builtins::fea::object_api::replace(
+        RESULTS_NAME,
+        &mut object,
+        "run_id",
+        Value::String(run_id.clone().into()),
+    )?;
+    copy_study_context_property(&args[0], &mut object)?;
     Ok(Value::Object(object))
 }
 
-fn create_field_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
+fn create_field_object_from_args(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     if !(2..=3).contains(&args.len()) {
         return Err(builtin_error(
             FIELD_NAME,
@@ -461,12 +468,12 @@ fn create_field_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
         .data;
         field_object(&page.descriptor, None)?
     };
-    copy_study_context_property(&args[0], &mut object);
-    copy_run_id_context_property(&args[0], &mut object);
+    copy_study_context_property(&args[0], &mut object)?;
+    copy_run_id_context_property(&args[0], &mut object)?;
     Ok(Value::Object(object))
 }
 
-fn create_compare_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
+fn create_compare_object_from_args(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     if args.len() != 2 {
         return Err(builtin_error(
             COMPARE_NAME,
@@ -499,12 +506,14 @@ fn create_compare_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     )
 }
 
-fn create_trends_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
+fn create_trends_object_from_args(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     let mut window_size = AnalysisTrendsQuery::default().window_size;
     let mut window_size_seen = false;
-    for pair in expect_name_value_tail(TRENDS_NAME, args.as_slice())? {
-        match pair.key.as_str() {
-            "windowsize" => {
+    for pair in expect_name_value_tail(TRENDS_NAME, args.view())? {
+        match runmat_builtins::fea_contract::options::FeaTrendsOption::from_normalized(
+            pair.key.as_str(),
+        ) {
+            Some(runmat_builtins::fea_contract::options::FeaTrendsOption::WindowSize) => {
                 if window_size_seen {
                     return Err(builtin_error(
                         TRENDS_NAME,
@@ -522,11 +531,11 @@ fn create_trends_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
                     ));
                 }
             }
-            other => {
+            None => {
                 return Err(builtin_error(
                     TRENDS_NAME,
                     &ERROR_INPUT,
-                    format!("unsupported fea.trends option `{other}`"),
+                    format!("unsupported fea.trends option `{}`", pair.key),
                 ));
             }
         }
@@ -548,6 +557,15 @@ fn object_payload<T: DeserializeOwned>(
     value: &Value,
     expected_class: &'static str,
 ) -> BuiltinResult<T> {
+    object_payload_omitting(builtin, value, expected_class, &[])
+}
+
+fn object_payload_omitting<T: DeserializeOwned>(
+    builtin: &'static str,
+    value: &Value,
+    expected_class: &'static str,
+    omitted: &[&str],
+) -> BuiltinResult<T> {
     let Value::Object(object) = value else {
         return Err(builtin_error(
             builtin,
@@ -555,28 +573,36 @@ fn object_payload<T: DeserializeOwned>(
             format!("expected {expected_class} object"),
         ));
     };
-    if object.class_name.display_name() != expected_class {
+    if object.class_name().display_name() != expected_class {
         return Err(builtin_error(
             builtin,
             &ERROR_INPUT,
-            format!("expected {expected_class}, got {}", object.class_name),
+            format!("expected {expected_class}, got {}", object.class_name()),
         ));
     }
-    let json = value_to_json(builtin, value)?;
+    let mut fields = serde_json::Map::new();
+    for (name, value) in object.properties().iter() {
+        if !omitted.contains(&name) {
+            fields.insert(name.to_owned(), value_to_json(builtin, value)?);
+        }
+    }
+    let json = serde_json::Value::Object(fields);
     serde_json::from_value(json).map_err(|err| {
         builtin_error_with_source(
             builtin,
             &ERROR_INPUT,
             format!(
                 "{} cannot be decoded from its typed properties: {err}",
-                object.class_name
+                object.class_name()
             ),
             err,
         )
     })
 }
 
-fn results_query_from_args(args: &[Value]) -> BuiltinResult<AnalysisResultsQuery> {
+fn results_query_from_args(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<AnalysisResultsQuery> {
     let mut query = AnalysisResultsQuery::default();
     let mut seen = HashSet::new();
     for pair in expect_name_value_tail(RESULTS_NAME, args)? {
@@ -635,7 +661,7 @@ fn results_query_from_args(args: &[Value]) -> BuiltinResult<AnalysisResultsQuery
 
 fn run_id_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<String> {
     match value {
-        Value::Object(object) if object.class_name.is(identities::FEA_RUN_RESULT_CLASS) => {
+        Value::Object(object) if object.class_name().is(identities::FEA_RUN_RESULT_CLASS) => {
             let aggregate: crate::analysis::AnalysisStudyRunData =
                 object_payload(builtin, value, FEA_RUN_RESULT_CLASS)?;
             match aggregate.steps.as_slice() {
@@ -652,7 +678,11 @@ fn run_id_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<Stri
                 )),
             }
         }
-        Value::Object(object) if object.class_name.is(identities::FEA_STEP_RUN_RESULT_CLASS) => {
+        Value::Object(object)
+            if object
+                .class_name()
+                .is(identities::FEA_STEP_RUN_RESULT_CLASS) =>
+        {
             run_id_from_object(object).ok_or_else(|| {
                 builtin_error(
                     builtin,
@@ -661,7 +691,11 @@ fn run_id_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<Stri
                 )
             })
         }
-        Value::Object(object) if object.class_name.is(identities::FEA_SWEEP_RUN_RESULT_CLASS) => {
+        Value::Object(object)
+            if object
+                .class_name()
+                .is(identities::FEA_SWEEP_RUN_RESULT_CLASS) =>
+        {
             Err(builtin_error(
                 builtin,
                 &ERROR_INPUT,
@@ -681,10 +715,10 @@ fn run_id_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<Stri
 
 fn run_id_from_object(object: &ObjectInstance) -> Option<String> {
     object
-        .properties
+        .properties()
         .get("run_id")
         .and_then(|value| match value {
-            Value::String(run_id) => Some(run_id.clone()),
+            Value::String(run_id) => Some(run_id.to_string()),
             _ => None,
         })
 }
@@ -694,7 +728,7 @@ fn results_data_from_value(
     value: &Value,
 ) -> BuiltinResult<crate::analysis::AnalysisResultsData> {
     match value {
-        Value::Object(object) if object.class_name.is(identities::FEA_RESULTS_CLASS) => {
+        Value::Object(object) if object.class_name().is(identities::FEA_RESULTS_CLASS) => {
             object_payload(builtin, value, FEA_RESULTS_CLASS)
         }
         _ => {
@@ -747,38 +781,49 @@ fn insert_study_context(
     object: &mut ObjectInstance,
     spec: &AnalysisStudySpec,
 ) -> BuiltinResult<()> {
-    object.properties.insert(
-        FEA_STUDY_CONTEXT_PROPERTY.to_string(),
+    crate::builtins::fea::object_api::replace(
+        RUN_NAME,
+        object,
+        FEA_STUDY_CONTEXT_PROPERTY,
         study_to_object(spec.clone())?,
-    );
+    )?;
     Ok(())
 }
 
-fn copy_study_context_property(source: &Value, target: &mut ObjectInstance) {
+fn copy_study_context_property(source: &Value, target: &mut ObjectInstance) -> BuiltinResult<()> {
     if let Some(study) = study_context_value(source) {
-        target
-            .properties
-            .insert(FEA_STUDY_CONTEXT_PROPERTY.to_string(), study);
+        crate::builtins::fea::object_api::replace(
+            RUN_NAME,
+            target,
+            FEA_STUDY_CONTEXT_PROPERTY,
+            study,
+        )?;
     }
+    Ok(())
 }
 
-fn copy_run_id_context_property(source: &Value, target: &mut ObjectInstance) {
-    if let Some(run_id) = run_id_context_from_value(source) {
-        target
-            .properties
-            .entry("run_id".to_string())
-            .or_insert(Value::String(run_id));
+fn copy_run_id_context_property(source: &Value, target: &mut ObjectInstance) -> BuiltinResult<()> {
+    if target.property("run_id").is_none() {
+        if let Some(run_id) = run_id_context_from_value(source) {
+            crate::builtins::fea::object_api::replace(
+                RUN_NAME,
+                target,
+                "run_id",
+                Value::String(run_id.into()),
+            )?;
+        }
     }
+    Ok(())
 }
 
 fn study_context_value(value: &Value) -> Option<Value> {
     let Value::Object(object) = value else {
         return None;
     };
-    if object.class_name.is(identities::FEA_STUDY_CLASS) {
+    if object.class_name().is(identities::FEA_STUDY_CLASS) {
         return Some(value.clone());
     }
-    object.properties.get(FEA_STUDY_CONTEXT_PROPERTY).cloned()
+    object.properties().get(FEA_STUDY_CONTEXT_PROPERTY).cloned()
 }
 
 fn run_id_context_from_value(value: &Value) -> Option<String> {
@@ -801,42 +846,45 @@ fn field_object(
 ) -> BuiltinResult<ObjectInstance> {
     ensure_fea_classes_registered();
     let materialized = values.is_some();
-    let mut object = ObjectInstance::new(identities::FEA_FIELD_CLASS);
-    object.properties.insert(
+    let mut object =
+        crate::builtins::fea::object_api::ordinary_builder(FIELD_NAME, FEA_FIELD_CLASS)?;
+    object.insert(
         "field_id".to_string(),
-        Value::String(descriptor.field_id.clone()),
+        Value::String(descriptor.field_id.clone().into()),
     );
-    object.properties.insert(
+    object.insert(
         "shape".to_string(),
         usize_slice_tensor(&descriptor.shape, 1, descriptor.shape.len())?,
     );
     if let Some(values) = values {
-        object.properties.insert("values".to_string(), values);
+        object.insert("values".to_string(), values);
     }
-    object
-        .properties
-        .insert("materialized".to_string(), Value::Bool(materialized));
-    object.properties.insert(
+    object.insert("materialized".to_string(), Value::Bool(materialized));
+    object.insert(
         "unit".to_string(),
-        Value::String(descriptor.unit.clone().unwrap_or_default()),
+        Value::String(descriptor.unit.clone().unwrap_or_default().into()),
     );
-    object.properties.insert(
+    object.insert(
         "location".to_string(),
-        Value::String(format!("{:?}", descriptor.location).to_ascii_lowercase()),
+        Value::String(
+            format!("{:?}", descriptor.location)
+                .to_ascii_lowercase()
+                .into(),
+        ),
     );
-    object.properties.insert(
+    object.insert(
         "kind".to_string(),
-        Value::String(format!("{:?}", descriptor.kind).to_ascii_lowercase()),
+        Value::String(format!("{:?}", descriptor.kind).to_ascii_lowercase().into()),
     );
-    object.properties.insert(
+    object.insert(
         "family".to_string(),
-        Value::String(descriptor.family.clone()),
+        Value::String(descriptor.family.clone().into()),
     );
-    object.properties.insert(
+    object.insert(
         "quantity".to_string(),
-        Value::String(descriptor.quantity.clone()),
+        Value::String(descriptor.quantity.clone().into()),
     );
-    object.properties.insert(
+    object.insert(
         "statistic".to_string(),
         descriptor
             .statistic
@@ -845,49 +893,54 @@ fn field_object(
                     serde_json::to_value(statistic)
                         .ok()
                         .and_then(|value| value.as_str().map(str::to_string))
-                        .unwrap_or_default(),
+                        .unwrap_or_default()
+                        .into(),
                 )
             })
             .unwrap_or_else(empty_double_value),
     );
-    object.properties.insert(
+    object.insert(
         "topology_id".to_string(),
         descriptor
             .topology_id
             .as_ref()
-            .map(|value| Value::String(value.clone()))
+            .map(|value| Value::String(value.clone().into()))
             .unwrap_or_else(empty_double_value),
     );
-    object.properties.insert(
+    object.insert(
         "element_kind".to_string(),
         descriptor
             .element_kind
             .as_ref()
-            .map(|value| Value::String(value.clone()))
+            .map(|value| Value::String(value.clone().into()))
             .unwrap_or_else(empty_double_value),
     );
-    object.properties.insert(
+    object.insert(
         "component_count".to_string(),
         descriptor
             .component_count
             .map(|value| Value::Int(IntValue::U64(value as u64)))
             .unwrap_or_else(empty_double_value),
     );
-    object.properties.insert(
+    object.insert(
         "element_count".to_string(),
         Value::Int(IntValue::U64(descriptor.element_count as u64)),
     );
-    object.properties.insert(
+    object.insert(
         "entity_count".to_string(),
         Value::Int(IntValue::U64(descriptor.entity_count as u64)),
     );
-    object.properties.insert(
+    object.insert(
         "value_count".to_string(),
         Value::Int(IntValue::U64(descriptor.value_count as u64)),
     );
-    object.properties.insert(
+    object.insert(
         "storage".to_string(),
-        Value::String(format!("{:?}", descriptor.storage).to_ascii_lowercase()),
+        Value::String(
+            format!("{:?}", descriptor.storage)
+                .to_ascii_lowercase()
+                .into(),
+        ),
     );
     let sample = match descriptor.sample {
         Some(runmat_analysis_fea::results::field::RecoveredFieldSample::FrequencyHertz(value)) => {
@@ -902,8 +955,8 @@ fn field_object(
         )?,
         None => empty_double_value(),
     };
-    object.properties.insert("sample".to_string(), sample);
-    object.properties.insert(
+    object.insert("sample".to_string(), sample);
+    object.insert(
         "numeric_representation".to_string(),
         field_access::numeric_representation_value(descriptor.numeric_representation.or(
             materialized.then_some(
@@ -911,7 +964,7 @@ fn field_object(
             ),
         )),
     );
-    Ok(object)
+    Ok(object.finish())
 }
 
 fn field_values_value(field: &AnalysisField) -> BuiltinResult<Value> {
@@ -1010,7 +1063,7 @@ struct NameValuePair<'a> {
 
 fn expect_name_value_tail<'a>(
     builtin: &'static str,
-    args: &'a [Value],
+    args: crate::call::FunctionArgumentView<'a>,
 ) -> BuiltinResult<Vec<NameValuePair<'a>>> {
     if !args.len().is_multiple_of(2) {
         return Err(builtin_error(
@@ -1019,13 +1072,13 @@ fn expect_name_value_tail<'a>(
             format!("{builtin} options must be Name, Value pairs"),
         ));
     }
-    args.chunks(2)
+    args.chunks_exact(2)
         .map(|pair| {
             let key = option_key(&pair[0], builtin)?;
             Ok(NameValuePair {
-                name: &pair[0],
+                name: pair.get(0).expect("validated name/value pair"),
                 key,
-                value: &pair[1],
+                value: pair.get(1).expect("validated name/value pair"),
             })
         })
         .collect()
@@ -1033,7 +1086,7 @@ fn expect_name_value_tail<'a>(
 
 fn json_fields_from_name_values(
     builtin: &'static str,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<serde_json::Map<String, serde_json::Value>> {
     let mut fields = serde_json::Map::new();
     for pair in expect_name_value_tail(builtin, args)? {
@@ -1133,16 +1186,15 @@ fn value_to_json(builtin: &'static str, value: &Value) -> BuiltinResult<serde_js
         Value::Num(n) => json_number(builtin, *n),
         Value::Int(i) => Ok(int_value_to_json(i)),
         Value::Bool(b) => Ok(serde_json::Value::Bool(*b)),
-        Value::String(s) => Ok(serde_json::Value::String(s.clone())),
+        Value::String(s) => Ok(serde_json::Value::String(s.to_string())),
         Value::CharArray(chars) if chars.rows == 1 => {
-            Ok(serde_json::Value::String(chars.data.iter().collect()))
+            Ok(serde_json::Value::String(chars.data().iter().collect()))
         }
         Value::StringArray(array) => Ok(serde_json::Value::Array(
             array
-                .data
+                .data()
                 .iter()
-                .cloned()
-                .map(serde_json::Value::String)
+                .map(|text| serde_json::Value::String(text.to_string()))
                 .collect(),
         )),
         Value::LogicalArray(array) => nested_array_to_json(builtin, &array.shape, |index| {
@@ -1176,22 +1228,22 @@ fn value_to_json(builtin: &'static str, value: &Value) -> BuiltinResult<serde_js
             )
         }),
         Value::Cell(cell) => Ok(serde_json::Value::Array(
-            cell.data
+            cell.data()
                 .iter()
                 .map(|item| value_to_json(builtin, item))
                 .collect::<BuiltinResult<Vec<_>>>()?,
         )),
         Value::Struct(fields) => {
             let mut object = serde_json::Map::new();
-            for (key, value) in &fields.fields {
-                object.insert(key.clone(), value_to_json(builtin, value)?);
+            for (key, value) in fields.fields.iter() {
+                object.insert(key.to_owned(), value_to_json(builtin, value)?);
             }
             Ok(serde_json::Value::Object(object))
         }
         Value::Object(object) => {
             let mut object_json = serde_json::Map::new();
-            for (key, value) in &object.properties {
-                object_json.insert(key.clone(), value_to_json(builtin, value)?);
+            for (key, value) in object.properties().iter() {
+                object_json.insert(key.to_owned(), value_to_json(builtin, value)?);
             }
             Ok(serde_json::Value::Object(object_json))
         }
@@ -1350,7 +1402,11 @@ fn reject_unknown_fields(
     if fields.is_empty() {
         return Ok(());
     }
-    let keys = fields.keys().cloned().collect::<Vec<_>>().join(", ");
+    let keys = fields
+        .keys()
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>()
+        .join(", ");
     Err(builtin_error(
         builtin,
         &ERROR_INPUT,
@@ -1440,11 +1496,11 @@ fn ordinary_double_scalar(value: &Value) -> Option<f64> {
 fn string_vec_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
         Value::Cell(cell) => cell
-            .data
+            .data()
             .iter()
             .map(|item| scalar_string(item, builtin, &ERROR_INPUT))
             .collect(),
-        Value::StringArray(array) => Ok(array.data.clone()),
+        Value::StringArray(array) => Ok(array.data().iter().map(ToString::to_string).collect()),
         Value::String(_) | Value::CharArray(_) => {
             Ok(vec![scalar_string(value, builtin, &ERROR_INPUT)?])
         }
@@ -1683,9 +1739,16 @@ fn promote_named_integer_fields(
     match (value, json) {
         (Value::Object(object), serde_json::Value::Object(map)) => {
             for (name, child) in map {
-                let Some(target) = object.properties.get_mut(name) else {
+                if object.property(name).is_none() {
                     continue;
-                };
+                }
+                let target = object.try_property_mut_unique(name).ok_or_else(|| {
+                    builtin_error(
+                        builtin,
+                        error,
+                        "FEA integer promotion requires a unique object generation",
+                    )
+                })?;
                 if signed_fields.contains(&name.as_str()) {
                     if let Some(exact) = exact_integer_json_value(builtin, error, child, true)? {
                         *target = exact;
@@ -1708,9 +1771,16 @@ fn promote_named_integer_fields(
         }
         (Value::Struct(value), serde_json::Value::Object(map)) => {
             for (name, child) in map {
-                let Some(target) = value.fields.get_mut(name) else {
+                if !value.fields.contains_key(name) {
                     continue;
-                };
+                }
+                let target = value.fields.try_get_mut_unique(name).ok_or_else(|| {
+                    builtin_error(
+                        builtin,
+                        error,
+                        "FEA integer promotion requires a unique struct generation",
+                    )
+                })?;
                 if signed_fields.contains(&name.as_str()) {
                     if let Some(exact) = exact_integer_json_value(builtin, error, child, true)? {
                         *target = exact;
@@ -1732,7 +1802,14 @@ fn promote_named_integer_fields(
             }
         }
         (Value::Cell(cell), serde_json::Value::Array(items)) => {
-            for (target, child) in cell.data.iter_mut().zip(items) {
+            let values = cell.try_data_mut_unique().ok_or_else(|| {
+                builtin_error(
+                    builtin,
+                    error,
+                    "FEA integer promotion requires a unique cell backing",
+                )
+            })?;
+            for (target, child) in values.iter_mut().zip(items) {
                 promote_named_integer_fields(
                     builtin,
                     error,
@@ -1864,11 +1941,13 @@ fn typed_value_from_json(json: &serde_json::Value) -> BuiltinResult<Value> {
     }
     match json {
         serde_json::Value::Object(map) => {
-            let mut structure = runmat_value::StructValue::new();
-            for (name, child) in map {
-                structure.insert(name.clone(), typed_value_from_json(child)?);
-            }
-            Ok(Value::Struct(structure))
+            let fields = map
+                .iter()
+                .map(|(name, child)| Ok((name.clone(), typed_value_from_json(child)?)))
+                .collect::<BuiltinResult<Vec<_>>>()?;
+            Ok(Value::Struct(
+                runmat_value::StructValue::from_fields_unbounded(fields),
+            ))
         }
         serde_json::Value::Array(items) if items.iter().any(holds_object) => {
             let elements = items
@@ -1914,24 +1993,52 @@ fn orient_json_vectors_as_rows(
                 .reshape_in_place(vec![1, columns])
                 .map_err(|message| builtin_error(builtin, error, message))?;
         }
-        Value::StringArray(array) if array.shape.len() == 1 && array.shape[0] >= 2 => {
-            let columns = array.shape[0];
-            *array =
-                runmat_value::StringArray::new(std::mem::take(&mut array.data), vec![1, columns])
-                    .map_err(|message| builtin_error(builtin, error, message))?;
+        Value::StringArray(array) if array.shape().len() == 1 && array.shape()[0] >= 2 => {
+            let columns = array.shape()[0];
+            *array = runmat_value::StringArray::from_texts_unbounded(
+                array.data().to_vec(),
+                vec![1, columns],
+            )
+            .map_err(|message| builtin_error(builtin, error, message))?;
         }
         Value::Struct(structure) => {
-            for child in structure.fields.values_mut() {
+            let children = structure.fields.try_values_mut_unique().ok_or_else(|| {
+                builtin_error(
+                    builtin,
+                    error,
+                    "FEA vector orientation requires a unique struct generation",
+                )
+            })?;
+            for child in children {
                 orient_json_vectors_as_rows(builtin, error, child)?;
             }
         }
         Value::Object(object) => {
-            for child in object.properties.values_mut() {
+            let names = object
+                .properties()
+                .keys()
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
+            for name in names {
+                let child = object.try_property_mut_unique(&name).ok_or_else(|| {
+                    builtin_error(
+                        builtin,
+                        error,
+                        "FEA vector orientation requires a unique object generation",
+                    )
+                })?;
                 orient_json_vectors_as_rows(builtin, error, child)?;
             }
         }
         Value::Cell(cell) => {
-            for child in cell.data.iter_mut() {
+            let children = cell.try_data_mut_unique().ok_or_else(|| {
+                builtin_error(
+                    builtin,
+                    error,
+                    "FEA vector orientation requires a unique cell backing",
+                )
+            })?;
+            for child in children.iter_mut() {
                 orient_json_vectors_as_rows(builtin, error, child)?;
             }
         }
@@ -1948,7 +2055,7 @@ fn promote_json_scalar_kinds(
 ) -> BuiltinResult<()> {
     match (value, json) {
         (target, serde_json::Value::String(value)) => {
-            *target = Value::String(value.clone());
+            *target = Value::String(value.clone().into());
         }
         (target, serde_json::Value::Number(number)) if number.is_u64() => {
             *target = Value::Int(IntValue::U64(
@@ -1961,27 +2068,48 @@ fn promote_json_scalar_kinds(
             ));
         }
         (Value::Tensor(tensor), serde_json::Value::Array(_)) => {
-            if let Some(storage) = exact_json_integer_array(json, &tensor.shape()) {
+            if let Some(storage) = exact_json_integer_array(json, tensor.shape()) {
                 *tensor = Tensor::new_integer(storage, tensor.shared_shape())
                     .map_err(|message| builtin_error(builtin, error, message))?;
             }
         }
         (Value::Struct(structure), serde_json::Value::Object(map)) => {
             for (name, child) in map {
-                if let Some(target) = structure.fields.get_mut(name) {
+                if structure.fields.contains_key(name) {
+                    let target = structure.fields.try_get_mut_unique(name).ok_or_else(|| {
+                        builtin_error(
+                            builtin,
+                            error,
+                            "FEA integer promotion requires a unique struct generation",
+                        )
+                    })?;
                     promote_json_scalar_kinds(builtin, error, target, child)?;
                 }
             }
         }
         (Value::Object(object), serde_json::Value::Object(map)) => {
             for (name, child) in map {
-                if let Some(target) = object.properties.get_mut(name) {
+                if object.property(name).is_some() {
+                    let target = object.try_property_mut_unique(name).ok_or_else(|| {
+                        builtin_error(
+                            builtin,
+                            error,
+                            "FEA integer promotion requires a unique object generation",
+                        )
+                    })?;
                     promote_json_scalar_kinds(builtin, error, target, child)?;
                 }
             }
         }
         (Value::Cell(cell), serde_json::Value::Array(items)) => {
-            for (target, child) in cell.data.iter_mut().zip(items) {
+            let values = cell.try_data_mut_unique().ok_or_else(|| {
+                builtin_error(
+                    builtin,
+                    error,
+                    "FEA integer promotion requires a unique cell backing",
+                )
+            })?;
+            for (target, child) in values.iter_mut().zip(items) {
                 promote_json_scalar_kinds(builtin, error, target, child)?;
             }
         }
@@ -2062,13 +2190,15 @@ fn serializable_to_object_value<T: Serialize>(
         .map_err(|err| builtin_error_with_source(builtin, error, err.to_string(), err))?;
     let public_json = omit_null_object_fields(json.clone());
     let converted = value_from_json_preserving_integer_kinds(builtin, error, &public_json)?;
-    let mut object = ObjectInstance::new(class_name.to_string());
+    let mut object = crate::builtins::fea::object_api::ordinary_builder(builtin, class_name)?;
     if let Value::Struct(fields) = converted {
-        object.properties = fields.fields.into_iter().collect();
+        for (name, value) in fields.into_fields_unbounded() {
+            object.insert(name, value);
+        }
     } else {
-        object.properties.insert("value".to_string(), converted);
+        object.insert("value".to_string(), converted);
     }
-    Ok(object)
+    Ok(object.finish())
 }
 
 fn omit_null_object_fields(value: serde_json::Value) -> serde_json::Value {
@@ -2096,13 +2226,13 @@ fn geometry_asset_from_value(builtin: &'static str, value: &Value) -> BuiltinRes
             format!("{builtin} geometry must be {GEOMETRY_ASSET_CLASS}"),
         ));
     };
-    if object.class_name != GEOMETRY_ASSET_CLASS {
+    if !object.is_class(GEOMETRY_ASSET_CLASS) {
         return Err(builtin_error(
             builtin,
             &ERROR_INPUT,
             format!(
                 "{builtin} geometry must be {GEOMETRY_ASSET_CLASS}, got {}",
-                object.class_name
+                object.class_name()
             ),
         ));
     }
@@ -2115,13 +2245,13 @@ fn object_json_property<T: DeserializeOwned>(
     property: &'static str,
     error: &'static BuiltinErrorDescriptor,
 ) -> BuiltinResult<T> {
-    let Some(Value::String(json)) = object.properties.get(property) else {
+    let Some(Value::String(json)) = object.properties().get(property) else {
         return Err(builtin_error(
             builtin,
             error,
             format!(
                 "{} is missing required runtime payload property `{property}`",
-                object.class_name
+                object.class_name()
             ),
         ));
     };
@@ -2135,9 +2265,9 @@ fn scalar_string(
     error: &'static BuiltinErrorDescriptor,
 ) -> BuiltinResult<String> {
     match value {
-        Value::String(value) => Ok(value.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
-        Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data.iter().collect()),
+        Value::String(value) => Ok(value.to_string()),
+        Value::StringArray(array) if array.data().len() == 1 => Ok(array.data()[0].to_string()),
+        Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data().iter().collect()),
         _ => Err(builtin_error(
             builtin,
             error,
@@ -2432,14 +2562,14 @@ mod tests {
         )
         .expect("integer-preserving public mirror");
         assert!(matches!(
-            object.properties.get("signed"),
+            object.properties().get("signed"),
             Some(Value::Int(IntValue::I64(-9)))
         ));
         assert!(matches!(
-            object.properties.get("unsigned"),
+            object.properties().get("unsigned"),
             Some(Value::Int(IntValue::U64(u64::MAX)))
         ));
-        let Some(Value::Tensor(matrix)) = object.properties.get("matrix") else {
+        let Some(Value::Tensor(matrix)) = object.properties().get("matrix") else {
             panic!("exact integer matrix");
         };
         assert_eq!(matrix.shape(), vec![2, 2]);
@@ -2456,11 +2586,11 @@ mod tests {
             ]
         );
         assert!(matches!(
-            object.properties.get("floating"),
+            object.properties().get("floating"),
             Some(Value::Num(1.0))
         ));
         assert!(matches!(
-            object.properties.get("floating_vector"),
+            object.properties().get("floating_vector"),
             Some(Value::Tensor(values)) if values.integer_storage().is_none()
         ));
 
@@ -2485,7 +2615,7 @@ mod tests {
             panic!("results object");
         };
         for name in ["available_mode_indices", "iteration_counts"] {
-            let Some(Value::Tensor(values)) = empty.properties.get(name) else {
+            let Some(Value::Tensor(values)) = empty.properties().get(name) else {
                 panic!("empty exact vector {name}");
             };
             assert!(values.integer_storage().is_some());
@@ -2495,14 +2625,18 @@ mod tests {
 
     #[test]
     fn fea_execution_controls_enforce_exact_structural_boundaries() {
-        let empty_step = block_on(structural_modal_builtin(Value::String(String::new())))
-            .expect_err("step identity must not be empty");
+        let empty_step = block_on(structural_modal_builtin(Value::String(
+            String::new().into(),
+        )))
+        .expect_err("step identity must not be empty");
         assert_eq!(empty_step.identifier(), Some("RunMat:fea:InvalidInput"));
 
-        let zero_window = block_on(fea_trends_builtin(vec![
-            Value::String("WindowSize".into()),
-            Value::Int(IntValue::U8(0)),
-        ]))
+        let zero_window = block_on(fea_trends_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("WindowSize".into()),
+                Value::Int(IntValue::U8(0)),
+            ]),
+        ))
         .expect_err("trend window must be positive");
         assert_eq!(zero_window.identifier(), Some("RunMat:fea:InvalidInput"));
 
@@ -2673,41 +2807,45 @@ mod tests {
         }
 
         for class_name in [FEA_VALIDATION_CLASS, FEA_PLAN_CLASS, FEA_RUN_RESULT_CLASS] {
-            assert!(
-                crate::builtins::fea::test_support::lookup_property(class_name, "sweep_id")
-                    .is_none()
-            );
+            assert!(crate::class_registry::lookup_property(
+                &runmat_types::ClassIdentity::from(class_name),
+                &runmat_types::MemberName::from("sweep_id")
+            )
+            .is_none());
         }
-        assert!(
-            crate::builtins::fea::test_support::lookup_method(FEA_RUN_RESULT_CLASS, "results")
-                .is_some()
-        );
-        assert!(
-            crate::builtins::fea::test_support::lookup_method(FEA_RUN_RESULT_CLASS, "step")
-                .is_some()
-        );
-        assert!(
-            crate::builtins::fea::test_support::lookup_property(FEA_RUN_RESULT_CLASS, "steps")
-                .is_some()
-        );
-        assert!(crate::builtins::fea::test_support::lookup_property(
-            FEA_RUN_RESULT_CLASS,
-            "run_id"
+        assert!(crate::class_registry::lookup_method(
+            &runmat_types::ClassIdentity::from(FEA_RUN_RESULT_CLASS),
+            &runmat_types::MethodName::from("results")
+        )
+        .is_some());
+        assert!(crate::class_registry::lookup_method(
+            &runmat_types::ClassIdentity::from(FEA_RUN_RESULT_CLASS),
+            &runmat_types::MethodName::from("step"),
+        )
+        .is_some());
+        assert!(crate::class_registry::lookup_property(
+            &runmat_types::ClassIdentity::from(FEA_RUN_RESULT_CLASS),
+            &runmat_types::MemberName::from("steps")
+        )
+        .is_some());
+        assert!(crate::class_registry::lookup_property(
+            &runmat_types::ClassIdentity::from(FEA_RUN_RESULT_CLASS),
+            &runmat_types::MemberName::from("run_id")
         )
         .is_none());
-        assert!(crate::builtins::fea::test_support::lookup_property(
-            FEA_STEP_RUN_RESULT_CLASS,
-            "run_id"
+        assert!(crate::class_registry::lookup_property(
+            &runmat_types::ClassIdentity::from(FEA_STEP_RUN_RESULT_CLASS),
+            &runmat_types::MemberName::from("run_id")
         )
         .is_some());
-        assert!(crate::builtins::fea::test_support::lookup_method(
-            FEA_STEP_RUN_RESULT_CLASS,
-            "results"
+        assert!(crate::class_registry::lookup_method(
+            &runmat_types::ClassIdentity::from(FEA_STEP_RUN_RESULT_CLASS),
+            &runmat_types::MethodName::from("results")
         )
         .is_some());
-        assert!(crate::builtins::fea::test_support::lookup_method(
-            FEA_SWEEP_RUN_RESULT_CLASS,
-            "results"
+        assert!(crate::class_registry::lookup_method(
+            &runmat_types::ClassIdentity::from(FEA_SWEEP_RUN_RESULT_CLASS),
+            &runmat_types::MethodName::from("results")
         )
         .is_none());
     }
@@ -2784,13 +2922,15 @@ mod tests {
                 }
             );
 
-            let material = block_on(fea_material_builtin(vec![
-                Value::String("material".into()),
-                Value::String("YoungsModulusPa".into()),
-                Value::Int(integer),
-                Value::String("PoissonRatio".into()),
-                Value::Int(IntValue::U8(0)),
-            ]))
+            let material = block_on(fea_material_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::String("material".into()),
+                    Value::String("YoungsModulusPa".into()),
+                    Value::Int(integer),
+                    Value::String("PoissonRatio".into()),
+                    Value::Int(IntValue::U8(0)),
+                ]),
+            ))
             .expect("material integer field");
             let material: MaterialModel = object_payload(&material);
             assert_eq!(
@@ -2811,15 +2951,17 @@ mod tests {
             .expect("stiffness coefficient");
         let damping = block_on(mechanical_damping_rayleigh_builtin(mass, stiffness))
             .expect("Rayleigh damping");
-        let material = block_on(fea_material_builtin(vec![
-            Value::String("steel".into()),
-            Value::String("YoungsModulusPa".into()),
-            Value::Num(210.0e9),
-            Value::String("PoissonRatio".into()),
-            Value::Num(0.3),
-            Value::String("Damping".into()),
-            damping,
-        ]))
+        let material = block_on(fea_material_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("steel".into()),
+                Value::String("YoungsModulusPa".into()),
+                Value::Num(210.0e9),
+                Value::String("PoissonRatio".into()),
+                Value::Num(0.3),
+                Value::String("Damping".into()),
+                damping,
+            ]),
+        ))
         .expect("material");
         let material: MaterialModel = object_payload(&material);
         assert_eq!(
@@ -2832,40 +2974,50 @@ mod tests {
             })
         );
 
-        let error = block_on(fea_material_builtin(vec![
-            Value::String("steel".into()),
-            Value::String("YoungsModulusPa".into()),
-            Value::Num(210.0e9),
-            Value::String("PoissonRatio".into()),
-            Value::Num(0.3),
-            Value::String("Damping".into()),
-            Value::String("rayleigh".into()),
-        ]))
+        let error = block_on(fea_material_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("steel".into()),
+                Value::String("YoungsModulusPa".into()),
+                Value::Num(210.0e9),
+                Value::String("PoissonRatio".into()),
+                Value::Num(0.3),
+                Value::String("Damping".into()),
+                Value::String("rayleigh".into()),
+            ]),
+        ))
         .expect_err("untyped damping must be rejected");
         assert!(error.message().contains("typed fea.MechanicalDamping"));
     }
 
     #[test]
     fn fea_material_requires_explicit_capabilities_and_canonical_density_name() {
-        let material = block_on(fea_material_builtin(vec![
-            Value::String("air".into()),
-            Value::String("MassDensityKgPerM3".into()),
-            Value::Num(1.225),
-        ]))
+        let material = block_on(fea_material_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("air".into()),
+                Value::String("MassDensityKgPerM3".into()),
+                Value::Num(1.225),
+            ]),
+        ))
         .expect("a density-only material is valid for compatible formulations");
         let material: MaterialModel = object_payload(&material);
         assert_eq!(material.mass_density_kg_per_m3, Some(1.225));
         assert!(material.elasticity.is_none());
 
-        let empty = block_on(fea_material_builtin(vec![Value::String("empty".into())]))
-            .expect_err("an empty material must fail at construction");
+        let empty = block_on(fea_material_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "empty".into(),
+            )]),
+        ))
+        .expect_err("an empty material must fail at construction");
         assert!(empty.message().contains("constitutive capability"));
 
-        let retired = block_on(fea_material_builtin(vec![
-            Value::String("air".into()),
-            Value::String("DensityKgPerM3".into()),
-            Value::Num(1.225),
-        ]))
+        let retired = block_on(fea_material_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("air".into()),
+                Value::String("DensityKgPerM3".into()),
+                Value::Num(1.225),
+            ]),
+        ))
         .expect_err("the ambiguous retired density spelling must not be accepted");
         assert!(retired.message().contains("unsupported option field"));
         assert!(retired.message().contains("density_kg_per_m3"));
@@ -2915,24 +3067,24 @@ mod tests {
     #[test]
     fn fea_domain_classes_expose_only_their_own_constructors() {
         ensure_fea_classes_registered();
-        assert!(crate::builtins::fea::test_support::lookup_method(
-            FEA_THERMAL_DOMAIN_CLASS,
-            "atReferenceTemperature"
+        assert!(crate::class_registry::lookup_method(
+            &runmat_types::ClassIdentity::from(FEA_THERMAL_DOMAIN_CLASS),
+            &runmat_types::MethodName::from("atReferenceTemperature")
         )
         .is_some());
-        assert!(crate::builtins::fea::test_support::lookup_method(
-            FEA_THERMOMECHANICAL_DOMAIN_CLASS,
-            "atReferenceTemperature"
+        assert!(crate::class_registry::lookup_method(
+            &runmat_types::ClassIdentity::from(FEA_THERMOMECHANICAL_DOMAIN_CLASS),
+            &runmat_types::MethodName::from("atReferenceTemperature")
         )
         .is_some());
-        assert!(crate::builtins::fea::test_support::lookup_method(
-            FEA_THERMOMECHANICAL_DOMAIN_CLASS,
-            "atFrequency"
+        assert!(crate::class_registry::lookup_method(
+            &runmat_types::ClassIdentity::from(FEA_THERMOMECHANICAL_DOMAIN_CLASS),
+            &runmat_types::MethodName::from("atFrequency")
         )
         .is_none());
-        assert!(crate::builtins::fea::test_support::lookup_method(
-            FEA_FLUID_DOMAIN_CLASS,
-            "newtonian"
+        assert!(crate::class_registry::lookup_method(
+            &runmat_types::ClassIdentity::from(FEA_FLUID_DOMAIN_CLASS),
+            &runmat_types::MethodName::from("newtonian")
         )
         .is_some());
         assert!(runmat_builtins::builtin_function_by_name("fea.domain").is_none());
@@ -2965,7 +3117,7 @@ mod tests {
         };
         let descriptor = AnalysisFieldDescriptor::from_field(&field);
         let object = field_to_object(&field, &descriptor).expect("field object");
-        let Value::Tensor(shape) = object.properties.get("shape").expect("shape") else {
+        let Value::Tensor(shape) = object.properties().get("shape").expect("shape") else {
             panic!("expected integer shape tensor");
         };
         assert_eq!(shape.numeric_dtype(), runmat_value::NumericDType::U64);
@@ -2974,15 +3126,15 @@ mod tests {
             Some(&IntegerStorage::U64(vec![u64::from(u32::MAX), 0]))
         );
         assert_eq!(
-            object.properties.get("element_count"),
+            object.properties().get("element_count"),
             Some(&Value::Int(IntValue::U64(0)))
         );
         let reference = field_object(&descriptor, None).expect("artifact field reference");
         assert_eq!(
-            reference.properties.get("materialized"),
+            reference.properties().get("materialized"),
             Some(&Value::Bool(false))
         );
-        assert!(!reference.properties.contains_key("values"));
+        assert!(!reference.properties().contains_key("values"));
 
         let device_field = AnalysisField {
             field_id: "device".into(),
@@ -3011,7 +3163,7 @@ mod tests {
             panic!("expected structural field selector object");
         };
         assert_eq!(
-            object.class_name.display_name(),
+            object.class_name().display_name(),
             field_selectors::STRUCTURAL_FIELD_CLASS
         );
         assert_eq!(
@@ -3101,28 +3253,29 @@ mod tests {
 
     #[test]
     fn fea_numeric_constructors_reject_resident_fields_without_provider_access() {
-        let owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
         let resident = || {
             Value::GpuTensor(
-                owner
-                    .allocate_numeric(runmat_accelerate_api::HostNumericTensorOwned {
-                        data: runmat_accelerate_api::HostNumericDataOwned::F64(vec![1.0]),
-                        shape: vec![1, 1],
-                        storage: runmat_accelerate_api::GpuTensorStorage::Real,
-                    })
-                    .expect("resident fixture allocation")
+                runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                    .allocate_zeroed(
+                        vec![1, 1],
+                        runmat_accelerate_api::NumericElementType::F64,
+                        runmat_accelerate_api::GpuTensorStorage::Real,
+                    )
+                    .expect("owned resident fixture")
                     .handle,
             )
         };
         let cases = [
             block_on(frequency_builtin(resident())),
-            block_on(fea_material_builtin(vec![
-                Value::String("material".into()),
-                Value::String("YoungsModulusPa".into()),
-                resident(),
-                Value::String("PoissonRatio".into()),
-                Value::Num(0.3),
-            ])),
+            block_on(fea_material_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::String("material".into()),
+                    Value::String("YoungsModulusPa".into()),
+                    resident(),
+                    Value::String("PoissonRatio".into()),
+                    Value::Num(0.3),
+                ]),
+            )),
         ];
         for result in cases {
             let error = result.expect_err("resident FEA constructor field must reject");
@@ -3165,18 +3318,18 @@ mod tests {
             panic!("expected structural object");
         };
         assert_eq!(
-            object.properties.get("study_count"),
+            object.properties().get("study_count"),
             Some(&Value::Int(IntValue::U64(3)))
         );
         assert_eq!(
-            object.properties.get("quality_reason_count_delta"),
+            object.properties().get("quality_reason_count_delta"),
             Some(&Value::Int(IntValue::I64(-4)))
         );
-        assert!(!object.properties.contains_key("optional_delta"));
-        let Some(Value::Cell(entries)) = object.properties.get("failure_entries") else {
+        assert!(!object.properties().contains_key("optional_delta"));
+        let Some(Value::Cell(entries)) = object.properties().get("failure_entries") else {
             panic!("expected failure entry cell");
         };
-        let Some(Value::Struct(entry)) = entries.data.first() else {
+        let Some(Value::Struct(entry)) = entries.data().first() else {
             panic!("expected failure entry struct");
         };
         assert_eq!(
@@ -3198,39 +3351,47 @@ mod tests {
             assert_eq!(canonical_field_name(alias), expected, "{alias}");
         }
 
-        let field_error = create_field_object_from_args(vec![
-            Value::Num(1.0),
-            Value::Num(1.0),
-            Value::Num(2.0),
-            Value::Num(2.0),
-        ])
+        let field_error = create_field_object_from_args(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(1.0),
+                Value::Num(1.0),
+                Value::Num(2.0),
+                Value::Num(2.0),
+            ]),
+        )
         .expect_err("surplus fea.field argument");
         assert_eq!(field_error.context.builtin.as_deref(), Some(FIELD_NAME));
 
-        let compare_error = create_compare_object_from_args(vec![
-            Value::String("base".into()),
-            Value::String("candidate".into()),
-            Value::Num(2.0),
-        ])
+        let compare_error = create_compare_object_from_args(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("base".into()),
+                Value::String("candidate".into()),
+                Value::Num(2.0),
+            ]),
+        )
         .expect_err("surplus fea.compare argument");
         assert_eq!(compare_error.context.builtin.as_deref(), Some(COMPARE_NAME));
 
-        let model_error = block_on(fea_model_builtin(vec![
-            Value::String("model".into()),
-            Value::Num(1.0),
-        ]))
+        let model_error = block_on(fea_model_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("model".into()),
+                Value::Num(1.0),
+            ]),
+        ))
         .expect_err("invalid model geometry");
         assert_eq!(model_error.context.builtin.as_deref(), Some(MODEL_NAME));
 
-        let duplicate_error = block_on(fea_material_builtin(vec![
-            Value::String("material".into()),
-            Value::String("YoungsModulusPa".into()),
-            Value::Num(1.0),
-            Value::String("youngs_modulus_pa".into()),
-            Value::Num(2.0),
-            Value::String("PoissonRatio".into()),
-            Value::Num(0.3),
-        ]))
+        let duplicate_error = block_on(fea_material_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("material".into()),
+                Value::String("YoungsModulusPa".into()),
+                Value::Num(1.0),
+                Value::String("youngs_modulus_pa".into()),
+                Value::Num(2.0),
+                Value::String("PoissonRatio".into()),
+                Value::Num(0.3),
+            ]),
+        ))
         .expect_err("duplicate normalized field");
         assert_eq!(
             duplicate_error.context.builtin.as_deref(),
@@ -3241,10 +3402,12 @@ mod tests {
 
     #[test]
     fn fea_study_requires_geometry_asset() {
-        let err = block_on(fea_study_builtin(vec![
-            Value::String("demo".to_string()),
-            Value::Num(1.0),
-        ]))
+        let err = block_on(fea_study_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("demo".to_string().into()),
+                Value::Num(1.0),
+            ]),
+        ))
         .expect_err("invalid geometry should fail");
         assert_eq!(err.identifier(), Some("RunMat:fea:InvalidInput"));
     }
@@ -3277,7 +3440,11 @@ mod tests {
         ))
         .expect("validated meshing object");
 
-        let options = StudyConstructorOptions::parse(&[Value::String("Mesh".to_string()), mesh])
+        let options =
+            StudyConstructorOptions::parse(crate::call::FunctionArgumentView::from_slice(&[
+                Value::String("Mesh".to_string().into()),
+                mesh,
+            ]))
             .expect("study mesh option");
         let supplied = options.mesh.expect("typed mesh output");
 
@@ -3291,15 +3458,17 @@ mod tests {
         let geometry_path = tmp.path().join("part.step");
         std::fs::write(&geometry_path, SIMPLE_STEP).expect("geometry fixture should write");
         let geometry = block_on(crate::builtins::geometry::geometry_load_builtin(
-            Value::String(geometry_path.to_string_lossy().to_string()),
-            Vec::new(),
+            Value::String(geometry_path.to_string_lossy().to_string().into()),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .expect("geometry should load");
 
-        let err = block_on(fea_study_builtin(vec![
-            Value::String("missing_model".to_string()),
-            geometry,
-        ]))
+        let err = block_on(fea_study_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("missing_model".to_string().into()),
+                geometry,
+            ]),
+        ))
         .expect_err("missing model should fail");
         assert_eq!(err.identifier(), Some("RunMat:fea:InvalidInput"));
         assert!(err
@@ -3313,15 +3482,17 @@ mod tests {
         let geometry_path = tmp.path().join("part.step");
         std::fs::write(&geometry_path, SIMPLE_STEP).expect("geometry fixture should write");
         let geometry = block_on(crate::builtins::geometry::geometry_load_builtin(
-            Value::String(geometry_path.to_string_lossy().to_string()),
-            Vec::new(),
+            Value::String(geometry_path.to_string_lossy().to_string().into()),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .expect("geometry should load");
 
-        let err = block_on(fea_model_builtin(vec![
-            Value::String("missing_sequence_model".to_string()),
-            geometry,
-        ]))
+        let err = block_on(fea_model_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("missing_sequence_model".to_string().into()),
+                geometry,
+            ]),
+        ))
         .expect_err("missing sequence should fail");
         assert_eq!(err.identifier(), Some("RunMat:fea:InvalidInput"));
         assert!(err
@@ -3333,15 +3504,17 @@ mod tests {
     fn material_and_plan_objects_match_their_portable_schemas() {
         let _guard = crate::analysis::storage::artifact_store_test_guard();
         ensure_value_classes_registered();
-        let material = block_on(fea_material_builtin(vec![
-            Value::String("steel".into()),
-            Value::String("YoungsModulusPa".into()),
-            Value::Num(200e9),
-            Value::String("PoissonRatio".into()),
-            Value::Num(0.3),
-            Value::String("MassDensityKgPerM3".into()),
-            Value::Num(7850.0),
-        ]))
+        let material = block_on(fea_material_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("steel".into()),
+                Value::String("YoungsModulusPa".into()),
+                Value::Num(200e9),
+                Value::String("PoissonRatio".into()),
+                Value::Num(0.3),
+                Value::String("MassDensityKgPerM3".into()),
+                Value::Num(7850.0),
+            ]),
+        ))
         .expect("material");
         let encoded = crate::execution::value_codec::encode_inline_value(&material)
             .expect("a material must satisfy its portable schema");
@@ -3351,8 +3524,11 @@ mod tests {
         );
         for property in ["mass_density_kg_per_m3", "elasticity", "provenance"] {
             assert!(
-                crate::builtins::fea::test_support::lookup_property(FEA_MATERIAL_CLASS, property)
-                    .is_some(),
+                crate::class_registry::lookup_property(
+                    &runmat_types::ClassIdentity::from(FEA_MATERIAL_CLASS),
+                    &runmat_types::MemberName::from(property),
+                )
+                .is_some(),
                 "fea.Material must expose {property}"
             );
         }
@@ -3361,8 +3537,8 @@ mod tests {
         let geometry_path = tmp.path().join("part.step");
         std::fs::write(&geometry_path, SIMPLE_STEP).expect("geometry fixture should write");
         let geometry = block_on(crate::builtins::geometry::geometry_load_builtin(
-            Value::String(geometry_path.to_string_lossy().to_string()),
-            Vec::new(),
+            Value::String(geometry_path.to_string_lossy().to_string().into()),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect("geometry should load");
         let region_id = geometry_asset_from_value(MODEL_NAME, &geometry)
@@ -3380,33 +3556,39 @@ mod tests {
             .expect("region")
         };
         let target = block_on(fea_property_region_target_solid_builtin(region())).expect("target");
-        let assignment = block_on(fea_material_assignment_builtin(vec![
-            target,
-            material.clone(),
-        ]))
+        let assignment = block_on(fea_material_assignment_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                target,
+                material.clone(),
+            ]),
+        ))
         .expect("assignment");
         let fixed = block_on(structural_fixed_builtin("support".to_string(), region()))
             .expect("constraint");
         let step =
             block_on(structural_static_builtin(Value::String("static".into()))).expect("step");
-        let model = block_on(fea_model_builtin(vec![
-            Value::String("schema_model".into()),
-            geometry.clone(),
-            Value::String("Materials".into()),
-            cell(vec![material]),
-            Value::String("MaterialAssignments".into()),
-            cell(vec![assignment]),
-            Value::String("Constraints".into()),
-            cell(vec![fixed]),
-            Value::String("Steps".into()),
-            cell(vec![step]),
-        ]))
+        let model = block_on(fea_model_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("schema_model".into()),
+                geometry.clone(),
+                Value::String("Materials".into()),
+                cell(vec![material]),
+                Value::String("MaterialAssignments".into()),
+                cell(vec![assignment]),
+                Value::String("Constraints".into()),
+                cell(vec![fixed]),
+                Value::String("Steps".into()),
+                cell(vec![step]),
+            ]),
+        ))
         .expect("model");
-        let study = block_on(fea_study_builtin(vec![
-            Value::String("schema_study".into()),
-            geometry,
-            model,
-        ]))
+        let study = block_on(fea_study_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("schema_study".into()),
+                geometry,
+                model,
+            ]),
+        ))
         .expect("study");
         let plan = block_on(fea_plan_builtin(study)).expect("plan");
         let encoded = crate::execution::value_codec::encode_inline_value(&plan)
@@ -3417,8 +3599,11 @@ mod tests {
         );
         for property in ["sequence_id", "steps", "operation_sequence"] {
             assert!(
-                crate::builtins::fea::test_support::lookup_property(FEA_PLAN_CLASS, property)
-                    .is_some(),
+                crate::class_registry::lookup_property(
+                    &runmat_types::ClassIdentity::from(FEA_PLAN_CLASS),
+                    &runmat_types::MemberName::from(property),
+                )
+                .is_some(),
                 "fea.Plan must expose {property}"
             );
         }
@@ -3430,34 +3615,40 @@ mod tests {
         let geometry = test_support::load_stl_fixture(&tmp.path().join("part.stl"), 1.0);
         let step = block_on(structural_static_builtin(Value::String("static".into())))
             .expect("static step");
-        let frame_error = block_on(fea_model_builtin(vec![
-            Value::String("framed".into()),
-            geometry.clone(),
-            Value::String("Steps".into()),
-            step,
-            Value::String("Frame".into()),
-            Value::String("not_a_frame".into()),
-        ]))
+        let frame_error = block_on(fea_model_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("framed".into()),
+                geometry.clone(),
+                Value::String("Steps".into()),
+                step,
+                Value::String("Frame".into()),
+                Value::String("not_a_frame".into()),
+            ]),
+        ))
         .expect_err("an unknown frame must be rejected");
         assert_eq!(frame_error.context.builtin.as_deref(), Some(MODEL_NAME));
         assert_eq!(frame_error.identifier(), Some("RunMat:fea:InvalidInput"));
 
-        let material = block_on(fea_material_builtin(vec![
-            Value::String("steel".into()),
-            Value::String("YoungsModulusPa".into()),
-            Value::Num(200e9),
-            Value::String("PoissonRatio".into()),
-            Value::Num(0.3),
-        ]))
+        let material = block_on(fea_material_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("steel".into()),
+                Value::String("YoungsModulusPa".into()),
+                Value::Num(200e9),
+                Value::String("PoissonRatio".into()),
+                Value::Num(0.3),
+            ]),
+        ))
         .expect("material");
         let target = block_on(fea_property_region_target_all_solids_builtin(geometry))
             .expect("all-solids target");
-        let confidence_error = block_on(fea_material_assignment_builtin(vec![
-            target,
-            material,
-            Value::String("Confidence".into()),
-            Value::String("certain".into()),
-        ]))
+        let confidence_error = block_on(fea_material_assignment_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                target,
+                material,
+                Value::String("Confidence".into()),
+                Value::String("certain".into()),
+            ]),
+        ))
         .expect_err("an unknown confidence must be rejected");
         assert_eq!(
             confidence_error.context.builtin.as_deref(),
@@ -3472,42 +3663,48 @@ mod tests {
         let revision = geometry_asset_from_value(MODEL_NAME, &geometry)
             .expect("geometry payload")
             .revision;
-        let material = block_on(fea_material_builtin(vec![
-            Value::String("steel".into()),
-            Value::String("YoungsModulusPa".into()),
-            Value::Num(200e9),
-            Value::String("PoissonRatio".into()),
-            Value::Num(0.3),
-        ]))
+        let material = block_on(fea_material_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("steel".into()),
+                Value::String("YoungsModulusPa".into()),
+                Value::Num(200e9),
+                Value::String("PoissonRatio".into()),
+                Value::Num(0.3),
+            ]),
+        ))
         .expect("material");
         let target = block_on(fea_property_region_target_all_solids_builtin(
             geometry.clone(),
         ))
         .expect("all-solids target");
-        let assignment = block_on(fea_material_assignment_builtin(vec![
-            target,
-            material.clone(),
-        ]))
+        let assignment = block_on(fea_material_assignment_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                target,
+                material.clone(),
+            ]),
+        ))
         .expect("assignment");
         let Value::Object(object) = &assignment else {
             panic!("expected fea.MaterialAssignment");
         };
         assert_eq!(
-            object.properties.get("geometry_revision"),
+            object.properties().get("geometry_revision"),
             Some(&Value::Int(IntValue::U32(revision)))
         );
         let step = block_on(structural_static_builtin(Value::String("static".into())))
             .expect("static step");
-        block_on(fea_model_builtin(vec![
-            Value::String("uint32_revision".into()),
-            geometry,
-            Value::String("Materials".into()),
-            cell(vec![material]),
-            Value::String("MaterialAssignments".into()),
-            cell(vec![assignment]),
-            Value::String("Steps".into()),
-            step,
-        ]))
+        block_on(fea_model_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("uint32_revision".into()),
+                geometry,
+                Value::String("Materials".into()),
+                cell(vec![material]),
+                Value::String("MaterialAssignments".into()),
+                cell(vec![assignment]),
+                Value::String("Steps".into()),
+                step,
+            ]),
+        ))
         .expect("a uint32 revision must decode when the assignment enters a model");
     }
 
@@ -3517,23 +3714,25 @@ mod tests {
         let geometry_path = tmp.path().join("part.step");
         std::fs::write(&geometry_path, SIMPLE_STEP).expect("geometry fixture should write");
         let geometry = block_on(crate::builtins::geometry::geometry_load_builtin(
-            Value::String(geometry_path.to_string_lossy().to_string()),
-            vec![
-                Value::String("Units".to_string()),
-                Value::String("meter".to_string()),
-            ],
+            Value::String(geometry_path.to_string_lossy().to_string().into()),
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("Units".to_string().into()),
+                Value::String("meter".to_string().into()),
+            ]),
         ))
         .expect("geometry should load");
 
         for alias in ["Assignments", "Cases"] {
-            let error = block_on(fea_model_builtin(vec![
-                Value::String(format!("rejected_{alias}")),
-                geometry.clone(),
-                Value::String("Steps".to_string()),
-                modeling::static_test_steps_value(),
-                Value::String(alias.to_string()),
-                cell(Vec::new()),
-            ]))
+            let error = block_on(fea_model_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::String(format!("rejected_{alias}").into()),
+                    geometry.clone(),
+                    Value::String("Steps".to_string().into()),
+                    modeling::static_test_steps_value(),
+                    Value::String(alias.to_string().into()),
+                    cell(Vec::new()),
+                ]),
+            ))
             .expect_err("ambiguous component option alias must be rejected");
             assert!(error.message().contains("unsupported fea.model option"));
         }
@@ -3546,8 +3745,8 @@ mod tests {
         std::fs::write(&geometry_path, SIMPLE_STEP).expect("geometry fixture should write");
 
         let geometry = block_on(crate::builtins::geometry::geometry_load_builtin(
-            Value::String(geometry_path.to_string_lossy().to_string()),
-            Vec::new(),
+            Value::String(geometry_path.to_string_lossy().to_string().into()),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .expect("geometry should load");
         let asset = geometry_asset_from_value(MODEL_NAME, &geometry)
@@ -3559,13 +3758,15 @@ mod tests {
             .region_id
             .clone();
 
-        let material = block_on(fea_material_builtin(vec![
-            Value::String("steel".to_string()),
-            Value::String("YoungsModulusPa".to_string()),
-            Value::Num(200e9),
-            Value::String("PoissonRatio".to_string()),
-            Value::Num(0.30),
-        ]))
+        let material = block_on(fea_material_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("steel".to_string().into()),
+                Value::String("YoungsModulusPa".to_string().into()),
+                Value::Num(200e9),
+                Value::String("PoissonRatio".to_string().into()),
+                Value::Num(0.30),
+            ]),
+        ))
         .expect("material should build");
         assert_object_class(&material, FEA_MATERIAL_CLASS);
 
@@ -3628,34 +3829,43 @@ mod tests {
             let decoded: modeling::GeometryBoundPropertyRegionTarget = object_payload(&target);
             assert!(decoded.target().selects_all());
         }
-        let assignment = block_on(fea_material_assignment_builtin(vec![
-            material_target,
-            material.clone(),
-        ]))
+        let assignment = block_on(fea_material_assignment_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                material_target,
+                material.clone(),
+            ]),
+        ))
         .expect("material assignment should build");
         assert_object_class(&assignment, FEA_MATERIAL_ASSIGNMENT_CLASS);
-        assert!(block_on(fea_material_assignment_builtin(vec![
-            Value::String(region_id.clone()),
-            Value::String("steel".into()),
-        ]))
+        assert!(block_on(fea_material_assignment_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String(region_id.clone().into()),
+                Value::String("steel".into()),
+            ])
+        ))
         .is_err());
 
         let mut foreign_assignment = assignment.clone();
         let Value::Object(foreign_assignment_object) = &mut foreign_assignment else {
             unreachable!("material assignment is an object")
         };
-        foreign_assignment_object.properties.insert(
-            "geometry_id".into(),
+        crate::builtins::fea::object_api::replace(
+            "fea.fixture",
+            foreign_assignment_object,
+            "geometry_id",
             Value::String("different_geometry".into()),
-        );
-        assert!(block_on(fea_model_builtin(vec![
-            Value::String("cross_geometry_model".into()),
-            geometry.clone(),
-            Value::String("Materials".into()),
-            cell(vec![material.clone()]),
-            Value::String("MaterialAssignments".into()),
-            cell(vec![foreign_assignment]),
-        ]))
+        )
+        .expect("ordinary fixture property edit");
+        assert!(block_on(fea_model_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("cross_geometry_model".into()),
+                geometry.clone(),
+                Value::String("Materials".into()),
+                cell(vec![material.clone()]),
+                Value::String("MaterialAssignments".into()),
+                cell(vec![foreign_assignment]),
+            ])
+        ))
         .is_err());
 
         let fixed_region = block_on(crate::builtins::geometry::region::geometry_region_builtin(
@@ -3671,7 +3881,7 @@ mod tests {
         assert_object_class(&fixed, FEA_STRUCTURAL_CONSTRAINT_CLASS);
 
         let step = block_on(structural_static_builtin(Value::String(
-            "static_step".to_string(),
+            "static_step".to_string().into(),
         )))
         .expect("analysis step should build");
         assert_object_class(&step, FEA_STRUCTURAL_STEP_CLASS);
@@ -3692,30 +3902,34 @@ mod tests {
         .unwrap();
         let (force_callable, _catalog) =
             test_support::portable_closure_fixture("loads.force", 41, vec![Value::Num(2.0)]);
-        let generated_force = block_on(signals::callable::force(vec![
-            Value::String("generated_force".into()),
-            force_callable,
-            signal_domain,
-            signal_sampling,
-        ]))
+        let generated_force = block_on(signals::callable::force(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("generated_force".into()),
+                force_callable,
+                signal_domain,
+                signal_sampling,
+            ]),
+        ))
         .expect("callable force signal should build");
 
-        let model = block_on(fea_model_builtin(vec![
-            Value::String("bracket_static_model".to_string()),
-            geometry.clone(),
-            Value::String("Materials".to_string()),
-            cell(vec![material]),
-            Value::String("MaterialAssignments".to_string()),
-            cell(vec![assignment]),
-            Value::String("Constraints".to_string()),
-            cell(vec![fixed]),
-            Value::String("Steps".to_string()),
-            cell(vec![step.clone()]),
-            Value::String("Domains".to_string()),
-            cell(vec![domain]),
-            Value::String("Signals".to_string()),
-            cell(vec![generated_force]),
-        ]))
+        let model = block_on(fea_model_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("bracket_static_model".to_string().into()),
+                geometry.clone(),
+                Value::String("Materials".to_string().into()),
+                cell(vec![material]),
+                Value::String("MaterialAssignments".to_string().into()),
+                cell(vec![assignment]),
+                Value::String("Constraints".to_string().into()),
+                cell(vec![fixed]),
+                Value::String("Steps".to_string().into()),
+                cell(vec![step.clone()]),
+                Value::String("Domains".to_string().into()),
+                cell(vec![domain]),
+                Value::String("Signals".to_string().into()),
+                cell(vec![generated_force]),
+            ]),
+        ))
         .expect("model should build");
         assert_object_class(&model, FEA_MODEL_CLASS);
         let encoded_model = crate::execution::value_codec::encode_inline_value(&model)
@@ -3735,27 +3949,43 @@ mod tests {
             unreachable!()
         };
         let Value::Cell(bindings) = substituted
-            .properties
-            .get_mut(signals::bindings::FROZEN_GENERATORS_PROPERTY)
+            .try_property_mut_unique(signals::bindings::FROZEN_GENERATORS_PROPERTY)
             .unwrap()
         else {
             unreachable!()
         };
-        let Value::Struct(binding) = &mut bindings.data[0] else {
+        bindings
+            .make_data_unique_unbounded()
+            .expect("detach the unclaimed tampered fixture from the original model");
+        let Value::Struct(binding) = &mut bindings
+            .try_data_mut_unique()
+            .expect("tampered fixture owns its bindings")[0]
+        else {
             unreachable!()
         };
-        binding
-            .fields
-            .insert("signal_id".into(), Value::String("substituted".into()));
+        *binding = runmat_value::StructValue::from_fields_unbounded(
+            binding
+                .clone()
+                .into_fields_unbounded()
+                .map(|(name, value)| {
+                    if name == "signal_id" {
+                        (name, Value::String("substituted".into()))
+                    } else {
+                        (name, value)
+                    }
+                }),
+        );
         assert!(modeling::model_from_value("test", &substituted_model).is_err());
 
-        let sequence = block_on(sequences::sequence(vec![
-            Value::String("bracket_sequence".to_string()),
-            cell(vec![step]),
-            cell(Vec::new()),
-            cell(Vec::new()),
-            cell(Vec::new()),
-        ]))
+        let sequence = block_on(sequences::sequence(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("bracket_sequence".to_string().into()),
+                cell(vec![step]),
+                cell(Vec::new()),
+                cell(Vec::new()),
+                cell(Vec::new()),
+            ]),
+        ))
         .expect("sequence should build");
         let execution = block_on(execution::execution_plan_defaults(
             sequence,
@@ -3764,18 +3994,20 @@ mod tests {
         ))
         .expect("execution should build");
 
-        let study = block_on(fea_study_builtin(vec![
-            Value::String("bracket_static".to_string()),
-            geometry,
-            model,
-            Value::String("Execution".to_string()),
-            execution,
-        ]))
+        let study = block_on(fea_study_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("bracket_static".to_string().into()),
+                geometry,
+                model,
+                Value::String("Execution".to_string().into()),
+                execution,
+            ]),
+        ))
         .expect("study should build");
         assert_object_class(&study, FEA_STUDY_CLASS);
-        let (binding_property, owner) = crate::builtins::fea::test_support::lookup_property(
-            FEA_STUDY_CLASS,
-            signals::bindings::FROZEN_GENERATORS_PROPERTY,
+        let (binding_property, owner) = crate::class_registry::lookup_property(
+            &runmat_types::ClassIdentity::from(FEA_STUDY_CLASS),
+            &runmat_types::MemberName::from(signals::bindings::FROZEN_GENERATORS_PROPERTY),
         )
         .expect("study frozen-generator property should be registered");
         assert_eq!(owner.display_name(), FEA_STUDY_CLASS);
@@ -3790,24 +4022,28 @@ mod tests {
             .expect_err("unmaterialized callable must not enter a solver");
         assert!(error.message().contains("active RunMat runtime context"));
 
-        let sweep = block_on(fea_sweep_builtin(vec![
-            Value::String("bracket_sweep".to_string()),
-            cell(vec![study.clone(), study]),
-            Value::String("FailFast".to_string()),
-            Value::Bool(false),
-        ]))
+        let sweep = block_on(fea_sweep_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("bracket_sweep".to_string().into()),
+                cell(vec![study.clone(), study]),
+                Value::String("FailFast".to_string().into()),
+                Value::Bool(false),
+            ]),
+        ))
         .expect_err("duplicate study identities must be rejected");
         assert!(sweep.message().contains("declared more than once"));
 
         let study =
             study_to_object_with_generators(composed_study.study, composed_study.frozen_generators)
                 .unwrap();
-        let sweep = block_on(fea_sweep_builtin(vec![
-            Value::String("bracket_sweep".to_string()),
-            cell(vec![study]),
-            Value::String("FailFast".to_string()),
-            Value::Bool(false),
-        ]))
+        let sweep = block_on(fea_sweep_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("bracket_sweep".to_string().into()),
+                cell(vec![study]),
+                Value::String("FailFast".to_string().into()),
+                Value::Bool(false),
+            ]),
+        ))
         .expect("sweep should build");
         assert_object_class(&sweep, FEA_SWEEP_CLASS);
         let encoded_sweep = crate::execution::value_codec::encode_inline_value(&sweep)
@@ -3830,108 +4066,125 @@ mod tests {
         let _guard = crate::analysis::storage::artifact_store_test_guard();
         let (run_value, _study, run_id) = synthetic_plot_run_value();
 
-        let results = block_on(fea_results_builtin(vec![run_value])).expect("results should load");
+        let results = block_on(fea_results_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![run_value]),
+        ))
+        .expect("results should load");
         let Value::Object(results_object) = results.clone() else {
             panic!("expected results object");
         };
-        assert_eq!(results_object.class_name.display_name(), FEA_RESULTS_CLASS);
         assert_eq!(
-            results_object.properties.get("run_id"),
-            Some(&Value::String(run_id.clone()))
+            results_object.class_name().display_name(),
+            FEA_RESULTS_CLASS
+        );
+        assert_eq!(
+            results_object.class_name().display_name(),
+            FEA_RESULTS_CLASS
+        );
+        assert_eq!(
+            results_object.properties().get("run_id"),
+            Some(&Value::String(run_id.clone().into()))
         );
         assert!(results_object
-            .properties
+            .properties()
             .contains_key(FEA_STUDY_CONTEXT_PROPERTY));
 
-        let field = block_on(fea_field_builtin(vec![
-            results,
-            block_on(field_selectors::von_mises()).expect("typed field selector"),
-        ]))
+        let field = block_on(fea_field_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                results,
+                block_on(field_selectors::von_mises()).expect("typed field selector"),
+            ]),
+        ))
         .expect("field should resolve by unique suffix");
         let Value::Object(field_object) = &field else {
             panic!("expected field object");
         };
-        assert_eq!(field_object.class_name.display_name(), FEA_FIELD_CLASS);
+        assert_eq!(field_object.class_name().display_name(), FEA_FIELD_CLASS);
         assert_eq!(
-            field_object.properties.get("field_id"),
-            Some(&Value::String("structural.von_mises".to_string()))
+            field_object.properties().get("field_id"),
+            Some(&Value::String("structural.von_mises".to_string().into()))
         );
         assert_eq!(
-            field_object.properties.get("unit"),
-            Some(&Value::String("Pa".to_string()))
+            field_object.properties().get("unit"),
+            Some(&Value::String("Pa".to_string().into()))
         );
         assert_eq!(
-            field_object.properties.get("location"),
-            Some(&Value::String("element".to_string()))
+            field_object.properties().get("location"),
+            Some(&Value::String("element".to_string().into()))
         );
         assert_eq!(
-            field_object.properties.get("topology_id"),
-            Some(&Value::String("analysis_mesh".to_string()))
+            field_object.properties().get("topology_id"),
+            Some(&Value::String("analysis_mesh".to_string().into()))
         );
         assert_eq!(
-            field_object.properties.get("element_kind"),
-            Some(&Value::String("tetrahedron4".to_string()))
+            field_object.properties().get("element_kind"),
+            Some(&Value::String("tetrahedron4".to_string().into()))
         );
         assert_eq!(
-            field_object.properties.get("entity_count"),
+            field_object.properties().get("entity_count"),
             Some(&Value::Int(runmat_value::IntValue::U64(1)))
         );
         assert_eq!(
-            field_object.properties.get("value_count"),
+            field_object.properties().get("value_count"),
             Some(&Value::Int(runmat_value::IntValue::U64(1)))
         );
         assert_eq!(
-            field_object.properties.get("element_count"),
+            field_object.properties().get("element_count"),
             Some(&Value::Int(runmat_value::IntValue::U64(1)))
         );
-        let Some(Value::Tensor(values)) = field_object.properties.get("values") else {
+        let Some(Value::Tensor(values)) = field_object.properties().get("values") else {
             panic!("expected values tensor");
         };
         assert_eq!(
-            field_object.properties.get("materialized"),
+            field_object.properties().get("materialized"),
             Some(&Value::Bool(true))
         );
         assert_eq!(values.shape(), vec![1]);
         assert_eq!(values.materialize_f64(), vec![42.0]);
         assert!(field_object
-            .properties
+            .properties()
             .contains_key(FEA_STUDY_CONTEXT_PROPERTY));
         assert_eq!(
-            field_object.properties.get("run_id"),
-            Some(&Value::String(run_id.clone()))
+            field_object.properties().get("run_id"),
+            Some(&Value::String(run_id.clone().into()))
         );
 
-        let page = block_on(fea_field_page_builtin(vec![
-            field,
-            Value::Int(IntValue::U8(1)),
-            Value::Int(IntValue::U16(1)),
-        ]))
+        let page = block_on(fea_field_page_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                field,
+                Value::Int(IntValue::U8(1)),
+                Value::Int(IntValue::U16(1)),
+            ]),
+        ))
         .expect("persisted field page should load");
         let Value::Object(page) = page else {
             panic!("expected field page object")
         };
-        assert_eq!(page.class_name.display_name(), FEA_FIELD_PAGE_CLASS);
+        assert_eq!(page.class_name().display_name(), FEA_FIELD_PAGE_CLASS);
         assert_eq!(
-            crate::builtins::fea::test_support::lookup_method(FEA_FIELD_CLASS, "page")
-                .expect("fea.Field.page method")
-                .0
-                .function_name,
+            crate::class_registry::lookup_method(
+                &runmat_types::ClassIdentity::from(FEA_FIELD_CLASS),
+                &runmat_types::MethodName::from("page"),
+            )
+            .expect("fea.Field.page method")
+            .0
+            .function_name,
             FIELD_PAGE_NAME
         );
         assert_eq!(
-            page.properties.get("start"),
+            page.properties().get("start"),
             Some(&Value::Int(IntValue::U64(1)))
         );
         assert_eq!(
-            page.properties.get("count"),
+            page.properties().get("count"),
             Some(&Value::Int(IntValue::U64(1)))
         );
-        assert_eq!(page.properties.get("has_more"), Some(&Value::Bool(false)));
+        assert_eq!(page.properties().get("has_more"), Some(&Value::Bool(false)));
         assert!(matches!(
-            page.properties.get("next_start"),
+            page.properties().get("next_start"),
             Some(Value::Tensor(tensor)) if tensor.is_empty()
         ));
-        let Some(Value::Tensor(values)) = page.properties.get("values") else {
+        let Some(Value::Tensor(values)) = page.properties().get("values") else {
             panic!("expected real field page values")
         };
         assert_eq!(values.shape(), vec![1, 1]);
@@ -3956,24 +4209,29 @@ mod tests {
             "mesh",
             &[
                 run_value.clone(),
-                Value::String("Source".to_string()),
-                Value::String("solver".to_string()),
-                Value::String("Edges".to_string()),
+                Value::String("Source".to_string().into()),
+                Value::String("solver".to_string().into()),
+                Value::String("Edges".to_string().into()),
                 Value::Bool(true),
             ],
         ))
         .expect("run mesh should create a figure");
-        assert!(matches!(*mesh_handle, Value::Num(handle) if handle >= 1.0));
+        assert!(matches!(mesh_handle.value(), Value::Num(handle) if *handle >= 1.0));
 
-        let results = block_on(fea_results_builtin(vec![run_value])).expect("results should load");
-        let field = block_on(fea_field_builtin(vec![
-            results,
-            block_on(field_selectors::von_mises()).expect("typed field selector"),
-        ]))
+        let results = block_on(fea_results_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![run_value]),
+        ))
+        .expect("results should load");
+        let field = block_on(fea_field_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                results,
+                block_on(field_selectors::von_mises()).expect("typed field selector"),
+            ]),
+        ))
         .expect("field should resolve");
         let field_handle = block_on(crate::call_builtin_async("plot", &[field]))
             .expect("field plot should create a figure");
-        assert!(matches!(*field_handle, Value::Num(handle) if handle >= 1.0));
+        assert!(matches!(field_handle.value(), Value::Num(handle) if *handle >= 1.0));
     }
 
     #[test]
@@ -3990,9 +4248,9 @@ mod tests {
 
         let configured = mesh_request_from_args(&[
             run_value,
-            Value::String("Source".to_string()),
-            Value::String("cad_reference".to_string()),
-            Value::String("Edges".to_string()),
+            Value::String("Source".to_string().into()),
+            Value::String("cad_reference".to_string().into()),
+            Value::String("Edges".to_string().into()),
             Value::Bool(false),
         ])
         .expect("configured mesh request should parse");
@@ -4007,21 +4265,26 @@ mod tests {
     fn fea_plot_request_accepts_solver_mesh_edge_option() {
         let _guard = crate::analysis::storage::artifact_store_test_guard();
         let (run_value, _study, _run_id) = synthetic_plot_run_value();
-        let results = block_on(fea_results_builtin(vec![run_value])).expect("results should load");
-        let field = block_on(fea_field_builtin(vec![
-            results,
-            block_on(field_selectors::von_mises()).expect("typed field selector"),
-        ]))
+        let results = block_on(fea_results_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![run_value]),
+        ))
+        .expect("results should load");
+        let field = block_on(fea_field_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                results,
+                block_on(field_selectors::von_mises()).expect("typed field selector"),
+            ]),
+        ))
         .expect("field should resolve");
 
         let request = plot_request_from_args(&[
             field,
-            Value::String("Edges".to_string()),
+            Value::String("Edges".to_string().into()),
             Value::Bool(true),
-            Value::String("deformed".to_string()),
+            Value::String("deformed".to_string().into()),
             Value::Bool(false),
-            Value::String("overlay".to_string()),
-            Value::String("cad".to_string()),
+            Value::String("overlay".to_string().into()),
+            Value::String("cad".to_string().into()),
         ])
         .expect("plot request should parse mesh, deformation, and overlay options");
 
@@ -4063,8 +4326,14 @@ mod tests {
         std::fs::write(tmp.path().join("part.stl"), TRIANGLE_STL)
             .expect("geometry fixture should write");
         let geometry_value = block_on(crate::builtins::geometry::geometry_load_builtin(
-            Value::String(tmp.path().join("part.stl").to_string_lossy().to_string()),
-            Vec::new(),
+            Value::String(
+                tmp.path()
+                    .join("part.stl")
+                    .to_string_lossy()
+                    .to_string()
+                    .into(),
+            ),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .expect("geometry should load");
         let geometry = geometry_asset_from_value(STUDY_NAME, &geometry_value)
@@ -4200,12 +4469,20 @@ mod tests {
         crate::analysis::storage::persist_run_result(&run).expect("run should persist");
 
         let mut object = ObjectInstance::new(FEA_STEP_RUN_RESULT_CLASS.to_string());
-        object
-            .properties
-            .insert("run_id".to_string(), Value::String(run_id.clone()));
-        object
-            .properties
-            .insert(FEA_STUDY_CONTEXT_PROPERTY.to_string(), study.clone());
+        crate::builtins::fea::object_api::replace(
+            "fea.fixture",
+            &mut object,
+            "run_id",
+            Value::String(run_id.clone().into()),
+        )
+        .expect("ordinary fixture property edit");
+        crate::builtins::fea::object_api::replace(
+            "fea.fixture",
+            &mut object,
+            FEA_STUDY_CONTEXT_PROPERTY,
+            study.clone(),
+        )
+        .expect("ordinary fixture property edit");
         (Value::Object(object), study, run_id)
     }
 
@@ -4344,16 +4621,18 @@ mod tests {
     fn fea_results_translates_successful_snapshot_selectors_once() {
         let _guard = crate::analysis::storage::artifact_store_test_guard();
         let run_id = persist_synthetic_indexed_results();
-        let selected = block_on(fea_results_builtin(vec![
-            Value::String(run_id),
-            Value::String("TransientSnapshotIndices".to_string()),
-            Value::Tensor(Tensor::new(vec![2.0], vec![1, 1]).expect("double selector")),
-        ]))
+        let selected = block_on(fea_results_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String(run_id.into()),
+                Value::String("TransientSnapshotIndices".to_string().into()),
+                Value::Tensor(Tensor::new(vec![2.0], vec![1, 1]).expect("double selector")),
+            ]),
+        ))
         .expect("one-based selectors should resolve the second stored entries");
         let Value::Object(selected) = selected else {
             panic!("results object");
         };
-        let Some(Value::Struct(transient)) = selected.properties.get("transient_results") else {
+        let Some(Value::Struct(transient)) = selected.properties().get("transient_results") else {
             panic!("transient results");
         };
         let Some(Value::Tensor(time_points)) = transient.fields.get("time_points_s") else {
@@ -4384,10 +4663,10 @@ mod tests {
         };
         assert_eq!(
             initial_state.fields.get("procedure_step_id"),
-            Some(&Value::String("synthetic_transient".to_string()))
+            Some(&Value::String("synthetic_transient".to_string().into()))
         );
 
-        let Some(Value::Struct(summary)) = selected.properties.get("summary") else {
+        let Some(Value::Struct(summary)) = selected.properties().get("summary") else {
             panic!("results summary");
         };
         let Some(Value::Tensor(indices)) = summary.fields.get("available_mode_indices") else {
@@ -4404,10 +4683,10 @@ mod tests {
         let Value::Object(object) = value else {
             panic!("expected object value");
         };
-        assert_eq!(object.class_name.display_name(), expected);
-        assert!(!object.properties.is_empty());
+        assert_eq!(object.class_name().display_name(), expected);
+        assert!(!object.properties().is_empty());
         assert!(object
-            .properties
+            .properties()
             .keys()
             .all(|name| !name.starts_with("__runmat_")));
     }

@@ -50,7 +50,9 @@ pub(super) fn all_integer_coefficient_storages() -> [IntegerStorage; 8] {
 }
 
 pub(super) fn call_constructor(args: Vec<Value>) -> BuiltinResult<Value> {
-    block_on(decomposition_builtin(args))
+    block_on(decomposition_builtin(
+        crate::builtins::common::test_support::builtin_arguments(args),
+    ))
 }
 
 pub(super) fn call_mldivide(lhs: Value, rhs: Value) -> BuiltinResult<Value> {

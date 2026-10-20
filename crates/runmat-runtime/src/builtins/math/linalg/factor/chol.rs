@@ -109,8 +109,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::factor::chol"
 )]
-async fn chol_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let eval = evaluate(value, &rest).await?;
+async fn chol_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    let eval = evaluate(value, rest.view()).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Value::output_list(Vec::new()));
@@ -200,7 +203,10 @@ pub enum CholTriangle {
 }
 
 /// Compute the Cholesky factorization for the given value and option list.
-pub async fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<CholEval> {
+pub async fn evaluate(
+    value: Value,
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<CholEval> {
     let triangle = parse_triangle(args)?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
     let integer_input = is_typed_integer_value(&value);
@@ -382,7 +388,7 @@ async fn evaluate_gpu(
     Ok(None)
 }
 
-fn parse_triangle(args: &[Value]) -> BuiltinResult<CholTriangle> {
+fn parse_triangle(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<CholTriangle> {
     if args.is_empty() {
         return Ok(CholTriangle::Upper);
     }
@@ -1272,10 +1278,15 @@ pub(crate) mod tests {
     }
 
     fn chol_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::chol_builtin(value, rest))
+        let rest = crate::execution::RootedValues::new(rest)
+            .map_err(|error| error.into_runtime_error())?;
+        block_on(super::chol_builtin(value, rest.into()))
     }
 
     fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<CholEval> {
-        block_on(super::evaluate(value, args))
+        block_on(super::evaluate(
+            value,
+            crate::call::FunctionArgumentView::from_slice(args),
+        ))
     }
 }

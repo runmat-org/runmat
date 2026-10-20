@@ -34,7 +34,7 @@ async fn besselj_builtin(
     runtime: Option<RuntimeContext>,
     order: Value,
     argument: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     if matches!(crate::output_count::current_output_count(), Some(count) if count > 1) {
         return Err(error(
@@ -42,9 +42,9 @@ async fn besselj_builtin(
             "only one output is defined",
         ));
     }
-    let scaled = match rest.as_slice() {
-        [] => false,
-        [scale] => input::scale(scale)?,
+    let scaled = match (rest.len(), rest.first()) {
+        (0, _) => false,
+        (1, Some(scale)) => input::scale(scale)?,
         _ => {
             return Err(error(
                 &BESSELJ_ERROR_INVALID_ARGUMENT,

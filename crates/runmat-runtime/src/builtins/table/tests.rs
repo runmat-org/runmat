@@ -1,4 +1,41 @@
 use super::*;
+async fn table2array_builtin(value: Value) -> BuiltinResult<Value> {
+    super::table2array_builtin(None, value).await
+}
+async fn table2cell_builtin(value: Value) -> BuiltinResult<Value> {
+    super::table2cell_builtin(None, value).await
+}
+fn grpstats_impl(value: Value, group: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    super::object::grpstats_impl(
+        value,
+        group,
+        crate::call::FunctionArgumentView::from_slice(&rest),
+    )
+}
+fn groupsummary_impl(
+    value: Value,
+    group: Value,
+    method: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    super::object::groupsummary_impl(
+        value,
+        group,
+        method,
+        crate::call::FunctionArgumentView::from_slice(&rest),
+    )
+}
+
+async fn struct2table_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let rest = crate::call::BuiltinArguments::from_borrowed(&rest, None)?;
+    super::struct2table_builtin(None, value, rest).await
+}
+
+async fn table2struct_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let rest = crate::call::BuiltinArguments::from_borrowed(&rest, None)?;
+    super::table2struct_builtin(None, value, rest).await
+}
+
 use crate::{RuntimeError, OBJECT_INDEX_PAREN};
 #[cfg(not(target_arch = "wasm32"))]
 use async_trait::async_trait;
@@ -22,6 +59,110 @@ use std::io::Write;
 #[cfg(not(target_arch = "wasm32"))]
 mod timetable_detection;
 mod indexing_methods;
+
+fn run_parquetread(path: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let rest = crate::call::BuiltinArguments::from_borrowed(&rest, None)?;
+    block_on(parquetread_builtin(None, path, rest))
+}
+
+async fn readtable_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    path: Value,
+    arguments: Vec<Value>,
+) -> BuiltinResult<Value> {
+    let arguments = crate::call::BuiltinArguments::from_borrowed(&arguments, runtime.as_ref())?;
+    super::readtable_builtin(runtime, path, arguments).await
+}
+
+async fn readcell_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    path: Value,
+    arguments: Vec<Value>,
+) -> BuiltinResult<Value> {
+    let arguments = crate::call::BuiltinArguments::from_borrowed(&arguments, runtime.as_ref())?;
+    super::readcell_builtin(runtime, path, arguments).await
+}
+
+async fn detect_import_options_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    path: Value,
+    arguments: Vec<Value>,
+) -> BuiltinResult<Value> {
+    let arguments = crate::call::BuiltinArguments::from_borrowed(&arguments, runtime.as_ref())?;
+    super::detect_import_options_builtin(runtime, path, arguments).await
+}
+
+async fn spreadsheet_import_options_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    arguments: Vec<Value>,
+) -> BuiltinResult<Value> {
+    let arguments = crate::call::BuiltinArguments::from_borrowed(&arguments, runtime.as_ref())?;
+    super::spreadsheet_import_options_builtin(runtime, arguments).await
+}
+
+async fn timetable2table_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let rest = crate::call::BuiltinArguments::from_borrowed(&rest, None)?;
+    super::timetable2table_builtin(None, value, rest).await
+}
+
+async fn timetable_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    let args = crate::call::BuiltinArguments::from_borrowed(&args, None)?;
+    super::timetable_builtin(None, args).await
+}
+
+async fn array2timetable_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let rest = crate::call::BuiltinArguments::from_borrowed(&rest, None)?;
+    super::array2timetable_builtin(None, value, rest).await
+}
+
+async fn table2timetable_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let rest = crate::call::BuiltinArguments::from_borrowed(&rest, None)?;
+    super::table2timetable_builtin(None, value, rest).await
+}
+
+async fn array2table_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let rest = crate::call::BuiltinArguments::from_borrowed(&rest, None)?;
+    super::array2table_builtin(None, value, rest).await
+}
+
+async fn readtimetable_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let rest = crate::call::BuiltinArguments::from_borrowed(&rest, None)?;
+    super::readtimetable_builtin(None, value, rest).await
+}
+
+async fn timerange_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    let args = crate::call::BuiltinArguments::from_borrowed(&args, None)?;
+    super::timerange_builtin(None, args).await
+}
+
+async fn vartype_builtin(value: Value) -> BuiltinResult<Value> {
+    super::vartype_builtin(None, value).await
+}
+
+async fn rowfilter_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    let args = crate::call::BuiltinArguments::from_borrowed(&args, None)?;
+    super::rowfilter_builtin(None, args).await
+}
+
+async fn array_datastore_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    let args = crate::call::BuiltinArguments::from_borrowed(&args, None)?;
+    super::array_datastore_builtin(None, args).await
+}
+
+async fn file_datastore_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    let args = crate::call::BuiltinArguments::from_borrowed(&args, None)?;
+    super::file_datastore_builtin(None, args).await
+}
+
+async fn parquet_datastore_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    let args = crate::call::BuiltinArguments::from_borrowed(&args, None)?;
+    super::parquet_datastore_builtin(None, args).await
+}
+
+async fn uitable_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    let args = crate::call::BuiltinArguments::from_borrowed(&args, None)?;
+    super::uitable_builtin(None, args).await
+}
 
 #[cfg(feature = "wgpu")]
 fn register_wgpu_provider_available() -> bool {
@@ -177,6 +318,7 @@ fn unique_path(prefix: &str) -> PathBuf {
 
 fn read_table(path: &Path, args: Vec<Value>) -> Value {
     block_on(readtable_builtin(
+        None,
         Value::from(path.to_string_lossy().to_string()),
         args,
     ))
@@ -185,6 +327,7 @@ fn read_table(path: &Path, args: Vec<Value>) -> Value {
 
 fn read_table_err(path: &Path, args: Vec<Value>) -> RuntimeError {
     block_on(readtable_builtin(
+        None,
         Value::from(path.to_string_lossy().to_string()),
         args,
     ))
@@ -193,8 +336,8 @@ fn read_table_err(path: &Path, args: Vec<Value>) -> RuntimeError {
 
 fn spreadsheet_options(args: Vec<Value>) -> StructValue {
     let value =
-        block_on(spreadsheet_import_options_builtin(args)).expect("spreadsheetImportOptions");
-    crate::builtins::io::tabular::import_options::ImportOptions::decode(&value)
+        block_on(spreadsheet_import_options_builtin(None, args)).expect("spreadsheetImportOptions");
+    crate::builtins::io::tabular::import_options::ImportOptions::decode(None, &value)
         .expect("decode spreadsheet options")
         .expect("spreadsheet options object")
         .base()
@@ -203,11 +346,12 @@ fn spreadsheet_options(args: Vec<Value>) -> StructValue {
 
 fn detect_options(path: &Path, args: Vec<Value>) -> StructValue {
     let value = block_on(detect_import_options_builtin(
+        None,
         Value::from(path.to_string_lossy().to_string()),
         args,
     ))
     .expect("detectImportOptions");
-    crate::builtins::io::tabular::import_options::ImportOptions::decode(&value)
+    crate::builtins::io::tabular::import_options::ImportOptions::decode(None, &value)
         .expect("decode detected options")
         .expect("detected options object")
         .base()
@@ -223,54 +367,80 @@ fn variable_import_options_modify_real_table_columns_and_preserve_object_identit
     )
     .expect("write import fixture");
     let filename = Value::from(path.to_string_lossy().to_string());
-    let detected = block_on(detect_import_options_builtin(filename.clone(), Vec::new()))
-        .expect("detect import options");
-    let numeric = block_on(setvartype_builtin(vec![
-        detected,
-        Value::from("Force_N"),
-        Value::from("double"),
-    ]))
+    let detected = block_on(detect_import_options_builtin(
+        None,
+        filename.clone(),
+        Vec::new(),
+    ))
+    .expect("detect import options");
+    let numeric = block_on(setvartype_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            detected,
+            Value::from("Force_N"),
+            Value::from("double"),
+        ]),
+    ))
     .expect("set numeric variable type");
-    let typed = block_on(setvartype_builtin(vec![
-        numeric,
-        Value::from("When"),
-        Value::from("datetime"),
-    ]))
+    let typed = block_on(setvartype_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            numeric,
+            Value::from("When"),
+            Value::from("datetime"),
+        ]),
+    ))
     .expect("set datetime variable type");
-    let missing = block_on(setvaropts_builtin(vec![
-        typed,
-        Value::from("Force_N"),
-        Value::from("TreatAsMissing"),
-        Value::from("N/A"),
-        Value::from("FillValue"),
-        Value::Num(-1.0),
-    ]))
+    let missing = block_on(setvaropts_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            typed,
+            Value::from("Force_N"),
+            Value::from("TreatAsMissing"),
+            Value::from("N/A"),
+            Value::from("FillValue"),
+            Value::Num(-1.0),
+        ]),
+    ))
     .expect("set missing rule");
-    let separated = block_on(setvaropts_builtin(vec![
-        missing,
-        Value::from("Amount"),
-        Value::from("DecimalSeparator"),
-        Value::from(","),
-        Value::from("ThousandsSeparator"),
-        Value::from("."),
-    ]))
+    let separated = block_on(setvaropts_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            missing,
+            Value::from("Amount"),
+            Value::from("DecimalSeparator"),
+            Value::from(","),
+            Value::from("ThousandsSeparator"),
+            Value::from("."),
+        ]),
+    ))
     .expect("set separators");
-    let formatted = block_on(setvaropts_builtin(vec![
-        separated,
-        Value::from("When"),
-        Value::from("InputFormat"),
-        Value::from("dd.MM.yyyy"),
-    ]))
+    let formatted = block_on(setvaropts_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            separated,
+            Value::from("When"),
+            Value::from("InputFormat"),
+            Value::from("dd.MM.yyyy"),
+        ]),
+    ))
     .expect("set datetime input format");
-    let variable = block_on(getvaropts_builtin(vec![
-        formatted.clone(),
-        Value::from("Amount"),
-    ]))
+    let variable = block_on(getvaropts_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            formatted.clone(),
+            Value::from("Amount"),
+        ]),
+    ))
     .expect("get variable options");
     assert!(matches!(variable, Value::Object(_)));
     let table = object(
-        block_on(readtable_builtin(filename.clone(), vec![formatted.clone()]))
-            .expect("readtable with variable options"),
+        block_on(readtable_builtin(
+            None,
+            filename.clone(),
+            vec![formatted.clone()],
+        ))
+        .expect("readtable with variable options"),
     );
     let Value::Tensor(force) = table_member_get(&table, &Value::from("Force_N")).unwrap() else {
         panic!("expected numeric Force_N variable")
@@ -286,6 +456,7 @@ fn variable_import_options_modify_real_table_columns_and_preserve_object_identit
     assert!(when.is_class(runmat_types::standard::DATETIME));
     let ranged = object(
         block_on(readtable_builtin(
+            None,
             filename,
             vec![formatted, Value::from("Range"), Value::from("B:C")],
         ))
@@ -301,21 +472,26 @@ fn variable_import_options_modify_real_table_columns_and_preserve_object_identit
     };
     assert_eq!(ranged_amount.materialize_f64(), vec![1234.0, 2500.0]);
     let range_detected = block_on(detect_import_options_builtin(
+        None,
         Value::from(path.to_string_lossy().to_string()),
         vec![Value::from("Range"), Value::from("B:C")],
     ))
     .expect("detect projected variables");
-    let range_set = block_on(setvaropts_builtin(vec![
-        range_detected,
-        Value::from("Amount"),
-        Value::from("DecimalSeparator"),
-        Value::from(","),
-        Value::from("ThousandsSeparator"),
-        Value::from("."),
-    ]))
+    let range_set = block_on(setvaropts_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            range_detected,
+            Value::from("Amount"),
+            Value::from("DecimalSeparator"),
+            Value::from(","),
+            Value::from("ThousandsSeparator"),
+            Value::from("."),
+        ]),
+    ))
     .expect("configure detected ranged variable");
     let from_range_detected = object(
         block_on(readtable_builtin(
+            None,
             Value::from(path.to_string_lossy().to_string()),
             vec![range_set],
         ))
@@ -335,7 +511,7 @@ fn variable_import_options_modify_real_table_columns_and_preserve_object_identit
 
 fn char_row(array: &CharArray, row: usize) -> String {
     let start = row * array.cols;
-    array.data[start..start + array.cols].iter().collect()
+    array.data()[start..start + array.cols].iter().collect()
 }
 
 fn object(value: Value) -> ObjectInstance {
@@ -459,7 +635,10 @@ fn readtable_imports_headered_numeric_and_text_columns() {
     }
     match table_member_get(&table, &Value::from("Name")).unwrap() {
         Value::StringArray(array) => {
-            assert_eq!(array.data, vec!["item-a".to_string(), "item-b".to_string()]);
+            assert_eq!(
+                array.data(),
+                vec!["item-a".to_string(), "item-b".to_string()]
+            );
         }
         other => panic!("expected string array, got {other:?}"),
     }
@@ -473,11 +652,8 @@ fn parquetread_imports_common_column_types() {
     write_sample_parquet(&path);
 
     let table = object(
-        block_on(parquetread_builtin(
-            Value::from(path.to_string_lossy().to_string()),
-            Vec::new(),
-        ))
-        .expect("parquetread"),
+        run_parquetread(Value::from(path.to_string_lossy().to_string()), Vec::new())
+            .expect("parquetread"),
     );
     assert_eq!(
         table_variable_names_from_object(&table).unwrap(),
@@ -492,7 +668,7 @@ fn parquetread_imports_common_column_types() {
         Value::StringArray(array) => {
             assert_eq!(array.shape, vec![3, 1]);
             assert_eq!(
-                array.data,
+                array.data(),
                 vec![
                     "item-a".to_string(),
                     "item-b".to_string(),
@@ -545,11 +721,8 @@ fn parquetread_preserves_all_integer_physical_column_classes() {
             Vec::new()
         };
         let table = object(
-            block_on(parquetread_builtin(
-                Value::from(path.to_string_lossy().to_string()),
-                options,
-            ))
-            .expect("parquetread"),
+            run_parquetread(Value::from(path.to_string_lossy().to_string()), options)
+                .expect("parquetread"),
         );
         let cases = [
             ("I8", IntegerStorage::I8(vec![i8::MIN, 0])),
@@ -592,7 +765,7 @@ fn parquetread_supports_selected_variables_and_row_groups() {
         )
         .expect("selected variables");
         let table = object(
-            block_on(parquetread_builtin(
+            run_parquetread(
                 Value::from(path.to_string_lossy().to_string()),
                 vec![
                     Value::from("SelectedVariableNames"),
@@ -604,7 +777,7 @@ fn parquetread_supports_selected_variables_and_row_groups() {
                         Value::Num(2.0)
                     },
                 ],
-            ))
+            )
             .expect("parquetread selected"),
         );
         assert_eq!(
@@ -637,7 +810,7 @@ fn parquetread_supports_selected_variables_and_row_groups() {
         let name = table_member_get(&table, &Value::from("Name")).unwrap();
         assert!(
             matches!(name, Value::StringArray(array) if array.shape == [usize::from(!empty_selection), 1]
-            && array.data == if empty_selection { Vec::new() } else { vec!["item-c".to_string()] })
+            && array.data() == if empty_selection { Vec::new() } else { vec!["item-c".to_string()] })
         );
         let passed = table_member_get(&table, &Value::from("Passed")).unwrap();
         assert!(
@@ -665,7 +838,7 @@ fn parquetinfo_reports_schema_and_row_groups() {
     assert_eq!(info.fields.get("NumVariables"), Some(&Value::Num(4.0)));
     match info.fields.get("VariableNames").unwrap() {
         Value::StringArray(array) => assert_eq!(
-            array.data,
+            array.data(),
             vec![
                 "Name".to_string(),
                 "Score".to_string(),
@@ -724,7 +897,7 @@ fn canonical_parquet_example_bytes_have_authentic_schema_and_selected_values() {
             assert!(matches!(info.fields.get(name), Some(Value::Num(actual)) if *actual == count));
         }
         let table = object(
-            block_on(parquetread_builtin(
+            run_parquetread(
                 path_value,
                 vec![
                     Value::from("SelectedVariableNames"),
@@ -738,7 +911,7 @@ fn canonical_parquet_example_bytes_have_authentic_schema_and_selected_values() {
                     Value::from("RowGroups"),
                     Value::Num(2.0),
                 ],
-            ))
+            )
             .unwrap(),
         );
         for (name, expected) in [("time", vec![3.0, 4.0]), ("value", vec![30.0, 40.0])] {
@@ -756,10 +929,10 @@ fn parquetread_rejects_rowfilter_until_predicates_are_available() {
     let path = unique_path("parquetread_rowfilter").with_extension("parquet");
     write_sample_parquet(&path);
 
-    let err = block_on(parquetread_builtin(
+    let err = run_parquetread(
         Value::from(path.to_string_lossy().to_string()),
         vec![Value::from("RowFilter"), Value::Bool(true)],
-    ))
+    )
     .expect_err("expected rowfilter failure");
     assert!(err.to_string().contains("RowFilter is not supported"));
 
@@ -814,7 +987,7 @@ fn readtable_handles_quoted_delimiters_and_newlines() {
     let table = object(read_table(&path, Vec::new()));
     match table_member_get(&table, &Value::from("Note")).unwrap() {
         Value::StringArray(array) => assert_eq!(
-            array.data,
+            array.data(),
             vec!["hello, world".to_string(), "line one\nline two".to_string()]
         ),
         other => panic!("expected string array, got {other:?}"),
@@ -987,7 +1160,14 @@ fn readtable_imports_xlsx_sheet_and_range() {
 
 #[test]
 fn spreadsheet_import_options_registers_public_descriptor() {
-    assert!(runmat_builtins::builtin_function_by_name("spreadsheetImportOptions").is_some());
+    let entry = &runmat_builtins::SPREADSHEET_IMPORT_OPTIONS_CATALOG_ENTRY;
+    let bindings = crate::builtin::runtime_builtin_bindings_by_name(entry.identity.name);
+    assert_eq!(bindings.len(), 1);
+    assert_eq!(
+        bindings[0].identity,
+        entry.binding_identity(&entry.bindings[0])
+    );
+    assert!(runmat_builtins::builtin_function_by_name(entry.identity.name).is_none());
     let labels = SPREADSHEET_IMPORT_OPTIONS_DESCRIPTOR
         .signatures
         .iter()
@@ -1005,6 +1185,7 @@ fn table_import_integer_control_gates_match_documented_forms() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
 
     let readtable_error = block_on(readtable_builtin(
+        None,
         missing.clone(),
         vec![
             Value::from("NumHeaderLines"),
@@ -1018,6 +1199,7 @@ fn table_import_integer_control_gates_match_documented_forms() {
     );
 
     let readcell_error = block_on(readcell_builtin(
+        None,
         missing.clone(),
         vec![
             Value::from("Range"),
@@ -1045,10 +1227,13 @@ fn table_import_integer_control_gates_match_documented_forms() {
         READTIMETABLE_TYPED_INTEGER_CONTROL_EXTENSION.error_identifier
     );
 
-    let spreadsheet_error = block_on(spreadsheet_import_options_builtin(vec![
-        Value::from("DataRange"),
-        Value::Int(runmat_value::IntValue::U8(2)),
-    ]))
+    let spreadsheet_error = block_on(spreadsheet_import_options_builtin(
+        None,
+        vec![
+            Value::from("DataRange"),
+            Value::Int(runmat_value::IntValue::U8(2)),
+        ],
+    ))
     .expect_err("typed spreadsheet location must be gated before option construction");
     assert_eq!(
         spreadsheet_error.identifier(),
@@ -1064,6 +1249,7 @@ fn documented_table_import_integer_controls_remain_enabled_in_matlab_mode() {
 
     let table = object(
         block_on(readtable_builtin(
+            None,
             Value::from(path.to_string_lossy().to_string()),
             vec![
                 Value::from("VariableNamesLine"),
@@ -1083,6 +1269,7 @@ fn documented_table_import_integer_controls_remain_enabled_in_matlab_mode() {
     );
 
     let cells = block_on(readcell_builtin(
+        None,
         Value::from(path.to_string_lossy().to_string()),
         vec![
             Value::from("NumHeaderLines"),
@@ -1098,14 +1285,18 @@ fn documented_table_import_integer_controls_remain_enabled_in_matlab_mode() {
         Value::from("A")
     );
 
-    let options = block_on(spreadsheet_import_options_builtin(vec![
-        Value::from("NumVariables"),
-        Value::Int(runmat_value::IntValue::U8(2)),
-    ]))
+    let options = block_on(spreadsheet_import_options_builtin(
+        None,
+        vec![
+            Value::from("NumVariables"),
+            Value::Int(runmat_value::IntValue::U8(2)),
+        ],
+    ))
     .expect("documented integer NumVariables");
-    let options = crate::builtins::io::tabular::import_options::ImportOptions::decode(&options)
-        .expect("decode constructed options")
-        .expect("import options object");
+    let options =
+        crate::builtins::io::tabular::import_options::ImportOptions::decode(None, &options)
+            .expect("decode constructed options")
+            .expect("import options object");
     assert_eq!(
         options.base().fields.get("NumVariables"),
         Some(&Value::Num(2.0))
@@ -1115,7 +1306,14 @@ fn documented_table_import_integer_controls_remain_enabled_in_matlab_mode() {
 
 #[test]
 fn detect_import_options_registers_public_descriptor() {
-    assert!(runmat_builtins::builtin_function_by_name("detectImportOptions").is_some());
+    let entry = &runmat_builtins::DETECT_IMPORT_OPTIONS_CATALOG_ENTRY;
+    let bindings = crate::builtin::runtime_builtin_bindings_by_name(entry.identity.name);
+    assert_eq!(bindings.len(), 1);
+    assert_eq!(
+        bindings[0].identity,
+        entry.binding_identity(&entry.bindings[0])
+    );
+    assert!(runmat_builtins::builtin_function_by_name(entry.identity.name).is_none());
     let labels = DETECT_IMPORT_OPTIONS_DESCRIPTOR
         .signatures
         .iter()
@@ -1135,7 +1333,7 @@ fn detect_import_options_integer_num_header_lines_is_gated_before_file_access() 
         Value::Int(runmat_value::IntValue::U8(1)),
     ];
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-    let error = block_on(detect_import_options_builtin(missing, args))
+    let error = block_on(detect_import_options_builtin(None, missing, args))
         .expect_err("typed NumHeaderLines must be gated before opening the file");
     assert_eq!(
         error.identifier(),
@@ -1148,8 +1346,13 @@ fn detect_import_options_rejects_nested_resident_input_before_provider_access() 
     let allocation = unregistered_table_allocation(vec![1, 1]);
     let resident = Value::GpuTensor(allocation.handle.clone());
     let mut options = runmat_value::StructValue::new();
-    options.fields.insert("Range".to_string(), resident);
+    crate::builtins::common::test_support::replace_struct_field_unbounded(
+        &mut options,
+        "Range",
+        resident,
+    );
     let error = block_on(detect_import_options_builtin(
+        None,
         Value::from("definitely-missing.csv"),
         vec![Value::Struct(options)],
     ))
@@ -1196,7 +1399,7 @@ fn detect_import_options_infers_text_delimiter_names_and_types() {
     );
     match options.fields.get("VariableNames").unwrap() {
         Value::StringArray(array) => assert_eq!(
-            array.data,
+            array.data(),
             vec![
                 "Name".to_string(),
                 "Score".to_string(),
@@ -1208,7 +1411,7 @@ fn detect_import_options_infers_text_delimiter_names_and_types() {
     }
     match options.fields.get("VariableTypes").unwrap() {
         Value::StringArray(array) => assert_eq!(
-            array.data,
+            array.data(),
             vec![
                 "string".to_string(),
                 "double".to_string(),
@@ -1244,7 +1447,7 @@ fn detect_import_options_struct_can_drive_readmatrix() {
         crate::builtins::io::tabular::readmatrix::readmatrix_builtin(
             None,
             Value::from(path.to_string_lossy().to_string()),
-            vec![Value::Struct(options)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Struct(options)]),
         ),
     )
     .expect("readmatrix");
@@ -1265,7 +1468,7 @@ fn detect_import_options_strips_bom_from_detected_names() {
     let options = detect_options(&path, Vec::new());
     match options.fields.get("VariableNames").unwrap() {
         Value::StringArray(array) => {
-            assert_eq!(array.data, vec!["A".to_string(), "B".to_string()])
+            assert_eq!(array.data(), vec!["A".to_string(), "B".to_string()])
         }
         other => panic!("expected string array, got {other:?}"),
     }
@@ -1320,7 +1523,7 @@ fn detect_import_options_read_row_names_replays_through_readtable() {
     assert_eq!(options.fields.get("NumVariables"), Some(&Value::Num(2.0)));
     match options.fields.get("VariableNames").unwrap() {
         Value::StringArray(array) => assert_eq!(
-            array.data,
+            array.data(),
             vec!["Row".to_string(), "Name".to_string(), "Score".to_string()]
         ),
         other => panic!("expected string array, got {other:?}"),
@@ -1333,7 +1536,7 @@ fn detect_import_options_read_row_names_replays_through_readtable() {
     let props = table_public_properties(&table).unwrap();
     match props.fields.get(ROW_NAMES).unwrap() {
         Value::StringArray(array) => {
-            assert_eq!(array.data, vec!["r1".to_string(), "r2".to_string()])
+            assert_eq!(array.data(), vec!["r1".to_string(), "r2".to_string()])
         }
         other => panic!("expected row names, got {other:?}"),
     }
@@ -1356,7 +1559,7 @@ fn detect_import_options_encoding_replays_through_readmatrix() {
         crate::builtins::io::tabular::readmatrix::readmatrix_builtin(
             None,
             Value::from(path.to_string_lossy().to_string()),
-            vec![Value::Struct(options)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Struct(options)]),
         ),
     )
     .expect("readmatrix");
@@ -1413,7 +1616,9 @@ fn detect_import_options_replays_through_filesystem_provider() {
             crate::builtins::io::tabular::readmatrix::readmatrix_builtin(
                 None,
                 Value::from("/provider_numeric.csv"),
-                vec![Value::Struct(matrix_options)],
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::Struct(
+                    matrix_options,
+                )]),
             ),
         )
         .expect("readmatrix");
@@ -1453,14 +1658,14 @@ fn detect_import_options_honors_overrides_and_range() {
     );
     match options.fields.get("VariableNames").unwrap() {
         Value::StringArray(array) => {
-            assert_eq!(array.data, vec!["Raw A".to_string(), "Raw B".to_string()])
+            assert_eq!(array.data(), vec!["Raw A".to_string(), "Raw B".to_string()])
         }
         other => panic!("expected string array, got {other:?}"),
     }
     match options.fields.get("VariableTypes").unwrap() {
         Value::StringArray(array) => {
             assert_eq!(
-                array.data,
+                array.data(),
                 vec!["double".to_string(), "logical".to_string()]
             )
         }
@@ -1489,14 +1694,17 @@ fn spreadsheet_import_options_builds_editable_options_struct() {
     assert_eq!(options.fields.get("DataRange"), Some(&Value::from("A2:B5")));
     match options.fields.get("VariableNames").unwrap() {
         Value::StringArray(array) => {
-            assert_eq!(array.data, vec!["Var1".to_string(), "Var2".to_string()]);
+            assert_eq!(array.data(), vec!["Var1".to_string(), "Var2".to_string()]);
             assert_eq!(array.shape, vec![1, 2]);
         }
         other => panic!("expected string array, got {other:?}"),
     }
     match options.fields.get("VariableTypes").unwrap() {
         Value::StringArray(array) => {
-            assert_eq!(array.data, vec!["double".to_string(), "string".to_string()]);
+            assert_eq!(
+                array.data(),
+                vec!["double".to_string(), "string".to_string()]
+            );
             assert_eq!(array.shape, vec![1, 2]);
         }
         other => panic!("expected string array, got {other:?}"),
@@ -1509,13 +1717,23 @@ fn readtable_consumes_spreadsheet_import_options_struct() {
     let path = path.with_extension("xlsx");
     write_minimal_xlsx(&path);
     let mut options = spreadsheet_options(vec![Value::from("NumVariables"), Value::Num(1.0)]);
-    options.insert("Sheet", Value::from("Data"));
-    options.insert("DataRange", Value::from("C2:C3"));
-    options.insert(
+    crate::builtins::common::test_support::replace_struct_field_unbounded(
+        &mut options,
+        "Sheet",
+        Value::from("Data"),
+    );
+    crate::builtins::common::test_support::replace_struct_field_unbounded(
+        &mut options,
+        "DataRange",
+        Value::from("C2:C3"),
+    );
+    crate::builtins::common::test_support::replace_struct_field_unbounded(
+        &mut options,
         "VariableNames",
         Value::StringArray(StringArray::new(vec!["Amount".into()], vec![1, 1]).unwrap()),
     );
-    options.insert(
+    crate::builtins::common::test_support::replace_struct_field_unbounded(
+        &mut options,
         "VariableTypes",
         Value::StringArray(StringArray::new(vec!["double".into()], vec![1, 1]).unwrap()),
     );
@@ -1734,11 +1952,12 @@ fn table_properties_variable_names_rename_columns() {
     let b = Value::Tensor(Tensor::new(vec![3.0, 4.0], vec![2, 1]).unwrap());
     let mut table = object(table_from_columns(vec!["A".into(), "B".into()], vec![a, b]).unwrap());
     let mut props = table_public_properties(&table).unwrap();
-    props.insert(
+    crate::builtins::common::test_support::replace_struct_field_unbounded(
+        &mut props,
         VARIABLE_NAMES,
         Value::StringArray(StringArray::new(vec!["X".into(), "Y".into()], vec![1, 2]).unwrap()),
     );
-    table_member_set(&mut table, PROPERTIES_MEMBER, Value::Struct(props)).unwrap();
+    table_member_set(None, &mut table, PROPERTIES_MEMBER, Value::Struct(props)).unwrap();
     assert_eq!(
         table_variable_names_from_object(&table).unwrap(),
         vec!["X".to_string(), "Y".to_string()]
@@ -1753,13 +1972,15 @@ fn table_properties_variable_names_rename_columns() {
         vec!["Z".to_string(), "A".to_string()]
     );
     let mut properties = table_public_properties(&nonlexical).unwrap();
-    properties.insert(
+    crate::builtins::common::test_support::replace_struct_field_unbounded(
+        &mut properties,
         VARIABLE_NAMES,
         Value::StringArray(
             StringArray::new(vec!["First".into(), "Second".into()], vec![1, 2]).unwrap(),
         ),
     );
     table_member_set(
+        None,
         &mut nonlexical,
         PROPERTIES_MEMBER,
         Value::Struct(properties),
@@ -1830,7 +2051,7 @@ fn table_paren_selects_rows_by_row_names() {
     }
     let props = table_public_properties(&subset).unwrap();
     match props.fields.get(ROW_NAMES).unwrap() {
-        Value::StringArray(array) => assert_eq!(array.data, vec!["r3", "r1"]),
+        Value::StringArray(array) => assert_eq!(array.data(), vec!["r3", "r1"]),
         other => panic!("expected selected row names, got {other:?}"),
     }
 }
@@ -1849,7 +2070,10 @@ fn sortrows_preserves_row_names() {
     let props = table_public_properties(&sorted).unwrap();
     match props.fields.get(ROW_NAMES).unwrap() {
         Value::StringArray(array) => {
-            assert_eq!(array.data, vec!["first".to_string(), "second".to_string()]);
+            assert_eq!(
+                array.data(),
+                vec!["first".to_string(), "second".to_string()]
+            );
         }
         other => panic!("expected row names, got {other:?}"),
     }
@@ -2077,6 +2301,7 @@ fn groupsummary_places_undefined_categorical_and_nan_duration_groups_last() {
     assert_eq!(cell_key_string(&categorical_groups, 2), "<undefined>");
 
     let duration = crate::builtins::duration::duration_object_from_days_tensor(
+        None,
         Tensor::new(vec![2.0, f64::NAN, 1.0], vec![3, 1]).unwrap(),
         "dd:hh:mm:ss",
     )
@@ -2138,7 +2363,7 @@ fn grpstats_matrix_returns_multiple_statistics_and_group_names() {
         Value::Cell(cell) => {
             assert_eq!(cell.rows, 2);
             assert_eq!(cell.cols, 1);
-            assert_eq!(cell.data, vec![Value::from("1"), Value::from("2")]);
+            assert_eq!(cell.data(), vec![Value::from("1"), Value::from("2")]);
         }
         other => panic!("expected group-name cell, got {other:?}"),
     }
@@ -2160,7 +2385,7 @@ fn grpstats_matrix_handles_empty_group_missing_groups_and_output_count_contract(
     let group = Value::Tensor(Tensor::new(vec![f64::NAN, 2.0, 1.0, 2.0], vec![4, 1]).unwrap());
     let names = grpstats_impl(x.clone(), group.clone(), vec![Value::from("gname")]).unwrap();
     match names {
-        Value::Cell(cell) => assert_eq!(cell.data, vec![Value::from("1"), Value::from("2")]),
+        Value::Cell(cell) => assert_eq!(cell.data(), vec![Value::from("1"), Value::from("2")]),
         other => panic!("expected group names, got {other:?}"),
     }
     let means = grpstats_impl(x.clone(), group, vec![Value::from("mean")]).unwrap();
@@ -2216,7 +2441,7 @@ fn grpstats_matrix_preserves_text_group_first_seen_order_and_builtin_handles() {
         other => panic!("expected mean tensor, got {other:?}"),
     }
     match &outputs[1] {
-        Value::Cell(cell) => assert_eq!(cell.data, vec![Value::from("b"), Value::from("a")]),
+        Value::Cell(cell) => assert_eq!(cell.data(), vec![Value::from("b"), Value::from("a")]),
         other => panic!("expected group names, got {other:?}"),
     }
 }
@@ -2276,7 +2501,9 @@ fn grpstats_table_supports_datavars_varnames_and_multiple_stats() {
         ]
     );
     match table_member_get(&summary, &Value::from("Group")).unwrap() {
-        Value::StringArray(array) => assert_eq!(array.data, vec!["b".to_string(), "a".to_string()]),
+        Value::StringArray(array) => {
+            assert_eq!(array.data(), vec!["b".to_string(), "a".to_string()])
+        }
         other => panic!("expected group strings, got {other:?}"),
     }
     match table_member_get(&summary, &Value::from("N")).unwrap() {
@@ -2669,6 +2896,7 @@ fn array2table_metadata_classifies_integer_and_gpu_forms() {
 
 fn array2timetable_duration_row_times(days: Vec<f64>) -> Value {
     crate::builtins::duration::duration_object_from_days_tensor(
+        None,
         Tensor::new(days.clone(), vec![days.len(), 1]).unwrap(),
         "hh:mm:ss".to_string(),
     )
@@ -2839,16 +3067,17 @@ fn array2timetable_supports_current_timing_and_name_rules() {
 #[test]
 fn array2timetable_calendar_step_uses_datetime_calendar_arithmetic() {
     let start = crate::builtins::datetime::datetime_object_from_serial_tensor(
+        None,
         Tensor::new(vec![739_282.0], vec![1, 1]).unwrap(),
         "yyyy-MM-dd".to_string(),
     )
     .unwrap();
     let mut step = ObjectInstance::new("calendarDuration".to_string());
-    step.properties.insert(
+    step.replace_property_unbounded(
         "__months".to_string(),
         Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
     );
-    step.properties.insert(
+    step.replace_property_unbounded(
         "__days".to_string(),
         Value::Tensor(Tensor::new(vec![0.0], vec![1, 1]).unwrap()),
     );
@@ -3045,9 +3274,14 @@ fn timetable_conversion_predicates_and_head_work() {
         block_on(istimetable_builtin(timetable.clone())).unwrap(),
         Value::Bool(true)
     ));
-    let first_two = block_on(head_builtin(timetable.clone(), vec![Value::Num(2.0)])).unwrap();
+    let first_two = block_on(head_builtin(
+        None,
+        timetable.clone(),
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(2.0)]),
+    ))
+    .unwrap();
     let first_two_object = object(first_two);
-    assert!(first_two_object.class_name.is(TIMETABLE_CLASS));
+    assert!(first_two_object.class_name().is(TIMETABLE_CLASS));
     assert_eq!(table_height(&first_two_object).unwrap(), 2);
     match timetable_row_times(&first_two_object).unwrap().unwrap() {
         Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![1.0, 2.0]),
@@ -3064,7 +3298,7 @@ fn timetable_conversion_predicates_and_head_work() {
     );
     let converted = block_on(table2timetable_builtin(table, Vec::new())).unwrap();
     let converted_object = object(converted);
-    assert!(converted_object.class_name.is(TIMETABLE_CLASS));
+    assert!(converted_object.class_name().is(TIMETABLE_CLASS));
     assert_eq!(
         table_variable_names_from_object(&converted_object).unwrap(),
         vec!["Time".to_string(), "X".to_string()]
@@ -3090,8 +3324,11 @@ fn head_preserves_exact_integer_rows_and_requires_positive_count() {
         .unwrap(),
     );
     let selected = block_on(head_builtin(
+        None,
         source,
-        vec![Value::Int(runmat_value::IntValue::U8(1))],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(
+            runmat_value::IntValue::U8(1),
+        )]),
     ))
     .unwrap();
     let Value::Tensor(selected) = selected else {
@@ -3107,7 +3344,12 @@ fn head_preserves_exact_integer_rows_and_requires_positive_count() {
         vec![Value::Num(0.0)],
         vec![Value::Num(1.0), Value::Num(2.0)],
     ] {
-        assert!(block_on(head_builtin(Value::Num(1.0), controls)).is_err());
+        assert!(block_on(head_builtin(
+            None,
+            Value::Num(1.0),
+            crate::builtins::common::test_support::builtin_arguments(controls)
+        ))
+        .is_err());
     }
 }
 
@@ -3124,9 +3366,12 @@ fn head_host_preserves_every_integer_class() {
         IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX, 1, 2]),
     ] {
         let source = Tensor::new_integer(storage.clone(), vec![2, 2]).unwrap();
-        let Value::Tensor(selected) =
-            block_on(head_builtin(Value::Tensor(source), vec![Value::Num(1.0)])).unwrap()
-        else {
+        let Value::Tensor(selected) = block_on(head_builtin(
+            None,
+            Value::Tensor(source),
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
+        ))
+        .unwrap() else {
             panic!("expected exact integer tensor")
         };
         assert_eq!(selected.shape(), &[1, 2]);
@@ -3143,9 +3388,12 @@ fn head_host_preserves_every_integer_class() {
 #[test]
 fn head_preserves_nd_real_complex_and_logical_pages() {
     let real_f64 = Tensor::new((1..=12).map(f64::from).collect(), vec![2, 2, 3]).unwrap();
-    let Value::Tensor(real_f64) =
-        block_on(head_builtin(Value::Tensor(real_f64), vec![Value::Num(1.0)])).unwrap()
-    else {
+    let Value::Tensor(real_f64) = block_on(head_builtin(
+        None,
+        Value::Tensor(real_f64),
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
+    ))
+    .unwrap() else {
         panic!("expected double tensor")
     };
     assert_eq!(real_f64.shape(), &[1, 2, 3]);
@@ -3156,9 +3404,12 @@ fn head_preserves_nd_real_complex_and_logical_pages() {
 
     let real = Tensor::from_f32((1..=12).map(|value| value as f32).collect(), vec![2, 2, 3])
         .expect("single pages");
-    let Value::Tensor(real) =
-        block_on(head_builtin(Value::Tensor(real), vec![Value::Num(1.0)])).unwrap()
-    else {
+    let Value::Tensor(real) = block_on(head_builtin(
+        None,
+        Value::Tensor(real),
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
+    ))
+    .unwrap() else {
         panic!("expected single tensor");
     };
     assert_eq!(real.shape(), &[1, 2, 3]);
@@ -3173,8 +3424,9 @@ fn head_preserves_nd_real_complex_and_logical_pages() {
     )
     .expect("complex pages");
     let Value::ComplexTensor(complex) = block_on(head_builtin(
+        None,
         Value::ComplexTensor(complex),
-        vec![Value::Num(1.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
     ))
     .unwrap() else {
         panic!("expected complex tensor");
@@ -3201,8 +3453,9 @@ fn head_preserves_nd_real_complex_and_logical_pages() {
     )
     .unwrap();
     let Value::ComplexTensor(complex_f64) = block_on(head_builtin(
+        None,
         Value::ComplexTensor(complex_f64),
-        vec![Value::Num(1.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
     ))
     .unwrap() else {
         panic!("expected double complex tensor")
@@ -3219,8 +3472,9 @@ fn head_preserves_nd_real_complex_and_logical_pages() {
     )
     .unwrap();
     let Value::ComplexTensor(integer_complex) = block_on(head_builtin(
+        None,
         Value::ComplexTensor(integer_complex),
-        vec![Value::Num(1.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
     ))
     .unwrap() else {
         panic!("expected integer complex tensor")
@@ -3234,8 +3488,9 @@ fn head_preserves_nd_real_complex_and_logical_pages() {
     )
     .expect("logical pages");
     let Value::LogicalArray(logical) = block_on(head_builtin(
+        None,
         Value::LogicalArray(logical),
-        vec![Value::Num(1.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
     ))
     .unwrap() else {
         panic!("expected logical array");
@@ -3249,8 +3504,12 @@ fn head_strict_gpu_row_count_extension_rejects_before_provider_access() {
     let allocation = unregistered_table_allocation(vec![2, 2]);
     let resident = Value::GpuTensor(allocation.handle.clone());
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-    let count_error = block_on(head_builtin(Value::Num(1.0), vec![resident]))
-        .expect_err("resident row count must be gated");
+    let count_error = block_on(head_builtin(
+        None,
+        Value::Num(1.0),
+        crate::builtins::common::test_support::builtin_arguments(vec![resident]),
+    ))
+    .expect_err("resident row count must be gated");
     assert_eq!(
         count_error.identifier(),
         runmat_builtins::HEAD_EXTENSIONS[0].error_identifier
@@ -3272,9 +3531,10 @@ fn head_preserves_resident_integer_class_owner_and_source() {
         let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &source)
             .expect("upload exact integer source");
         let result = block_on(head_builtin(
+            None,
             crate::builtins::common::gpu_helpers::resident_gpu_value(handle.clone())
                 .expect("resident view"),
-            vec![Value::Num(1.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
         ))
         .expect("resident head");
         let Value::GpuTensor(result) = result else {
@@ -3325,9 +3585,10 @@ fn head_wgpu_preserves_every_integer_class_exactly() {
         let handle =
             crate::builtins::common::gpu_helpers::upload_tensor(provider, &source).unwrap();
         let output = block_on(head_builtin(
+            None,
             crate::builtins::common::gpu_helpers::resident_gpu_value(handle.clone())
                 .expect("resident view"),
-            vec![Value::Num(1.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
         ))
         .expect("resident integer head");
         let Value::GpuTensor(output) = output else {
@@ -3374,8 +3635,8 @@ fn categorical_dictionary_and_selector_objects_materialize() {
     let Value::Object(cat) = categorical else {
         panic!("expected categorical object");
     };
-    match cat.properties.get("Categories").unwrap() {
-        Value::StringArray(array) => assert_eq!(array.data, vec!["blue", "red"]),
+    match cat.properties().get("Categories").unwrap() {
+        Value::StringArray(array) => assert_eq!(array.data(), vec!["blue", "red"]),
         other => panic!("expected categories, got {other:?}"),
     }
 
@@ -3384,14 +3645,14 @@ fn categorical_dictionary_and_selector_objects_materialize() {
         Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
     ]))
     .unwrap();
-    assert!(matches!(dictionary, Value::Object(obj) if obj.class_name == DICTIONARY_CLASS));
+    assert!(matches!(dictionary, Value::Object(obj) if obj.class_name().is(DICTIONARY_CLASS)));
     assert!(matches!(
         block_on(timerange_builtin(vec![Value::Num(1.0), Value::Num(3.0)])).unwrap(),
-        Value::Object(obj) if obj.class_name == TIMERANGE_CLASS
+        Value::Object(obj) if obj.class_name().is(TIMERANGE_CLASS)
     ));
     assert!(matches!(
         block_on(vartype_builtin(Value::from("numeric"))).unwrap(),
-        Value::Object(obj) if obj.class_name == VARTYPE_CLASS
+        Value::Object(obj) if obj.class_name().is(VARTYPE_CLASS)
     ));
 }
 
@@ -3471,18 +3732,21 @@ fn array_datastore_preserves_every_integer_storage_class_and_options() {
         let Value::Object(datastore) = datastore else {
             panic!("expected ArrayDatastore object");
         };
-        assert!(datastore.class_name.is(ARRAY_DATASTORE_CLASS));
-        let Some(Value::Tensor(data)) = datastore.properties.get("Data") else {
+        assert!(datastore.class_name().is(ARRAY_DATASTORE_CLASS));
+        let Some(Value::Tensor(data)) = datastore.properties().get("Data") else {
             panic!("expected typed datastore data");
         };
         assert_eq!(data.integer_storage(), Some(&storage));
-        assert_eq!(datastore.properties.get("ReadSize"), Some(&Value::Num(2.0)));
         assert_eq!(
-            datastore.properties.get("IterationDimension"),
+            datastore.properties().get("ReadSize"),
+            Some(&Value::Num(2.0))
+        );
+        assert_eq!(
+            datastore.properties().get("IterationDimension"),
             Some(&Value::Num(1.0))
         );
         assert_eq!(
-            datastore.properties.get("OutputType"),
+            datastore.properties().get("OutputType"),
             Some(&Value::from("same"))
         );
     }
@@ -3580,7 +3844,7 @@ fn array_datastore_resident_integer_input_is_mode_gated_and_gathers_exactly() {
                 let Value::Object(datastore) = datastore else {
                     panic!("expected ArrayDatastore object");
                 };
-                let Some(Value::Tensor(data)) = datastore.properties.get("Data") else {
+                let Some(Value::Tensor(data)) = datastore.properties().get("Data") else {
                     panic!("expected gathered typed data");
                 };
                 assert_eq!(data.integer_storage(), Some(&storage));
@@ -3610,6 +3874,83 @@ fn parquet_datastore_rejects_typed_integer_arguments_before_gather() {
 }
 
 #[test]
+fn canonical_constructor_contracts_are_shared_with_runtime() {
+    assert_eq!(TIMERANGE_DESCRIPTOR.signatures.len(), 1);
+    assert_eq!(TIMERANGE_EXTENSIONS.len(), 2);
+    assert_eq!(TIMERANGE_INTEGER_CAPABILITIES.len(), 1);
+    assert_eq!(
+        ROWFILTER_INTEGER_AUDIT.kind,
+        runmat_builtins::BuiltinIntegerAuditKind::NotApplicable
+    );
+    assert_eq!(UITABLE_EXTENSIONS.len(), 1);
+    assert_eq!(UITABLE_INTEGER_CAPABILITIES.len(), 1);
+}
+
+#[test]
+fn rowfilter_rejects_surplus_payload_before_gather_and_keeps_default_forms() {
+    let Value::Object(empty) = block_on(rowfilter_builtin(Vec::new())).unwrap() else {
+        panic!("expected rowfilter descriptor");
+    };
+    assert_eq!(empty.properties().get("Predicate"), Some(&Value::from("")));
+    let Value::Cell(variables) = empty.properties().get("Variables").unwrap() else {
+        panic!("expected empty Variables");
+    };
+    assert!(variables.data().is_empty());
+    let Value::Object(source) = block_on(rowfilter_builtin(vec![Value::from("A")])).unwrap() else {
+        panic!("expected source descriptor");
+    };
+    assert_eq!(
+        source.properties().get("Variables"),
+        Some(&Value::from("A"))
+    );
+    let allocation = unregistered_table_allocation(vec![1, 1]);
+    let error = block_on(rowfilter_builtin(vec![
+        Value::from("A"),
+        Value::from("@gt0"),
+        Value::GpuTensor(allocation.handle.clone()),
+    ]))
+    .expect_err("surplus argument must not be discarded or gathered");
+    assert!(error.message().contains("at most a source"));
+    assert!(!error.message().contains("provider"));
+    assert_eq!(allocation.probe.retirements(), 0);
+    drop(allocation.handle);
+    assert_eq!(allocation.probe.retirements(), 1);
+}
+
+#[test]
+fn parquet_datastore_rejects_sparse_complex_and_nested_integer_storage() {
+    let sparse = Value::SparseTensor(
+        runmat_value::SparseTensor::new_integer(
+            2,
+            1,
+            vec![0, 1],
+            vec![1],
+            IntegerStorage::I64(vec![i64::MIN]),
+        )
+        .unwrap(),
+    );
+    let complex = Value::ComplexTensor(
+        ComplexTensor::new_integer(
+            runmat_value::IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![u64::MAX]),
+                IntegerStorage::U64(vec![1]),
+            )
+            .unwrap(),
+            vec![1, 1],
+        )
+        .unwrap(),
+    );
+    for value in [sparse, complex] {
+        let nested = Value::Cell(CellArray::new(vec![value.clone()], 1, 1).unwrap());
+        for argument in [value, nested] {
+            let error = block_on(parquet_datastore_builtin(vec![argument]))
+                .expect_err("native integer locations reject before descriptor construction");
+            assert!(error.message().contains("typed-integer"));
+        }
+    }
+}
+
+#[test]
 fn parquet_datastore_records_supported_double_controls_and_rejects_unknown_options() {
     let datastore = block_on(parquet_datastore_builtin(vec![
         Value::from("sample.parquet"),
@@ -3623,13 +3964,23 @@ fn parquet_datastore_records_supported_double_controls_and_rejects_unknown_optio
         panic!("expected parquet datastore object");
     };
     assert_eq!(
-        datastore.properties.get("ReadSize"),
+        datastore.properties().get("ReadSize"),
         Some(&Value::Num(32.0))
     );
     assert_eq!(
-        datastore.properties.get("BlockSize"),
+        datastore.properties().get("BlockSize"),
         Some(&Value::Num(1_000_000.0))
     );
+    for property in ["Files", "ReadSize", "BlockSize"] {
+        assert!(
+            crate::class_registry::lookup_property(
+                &PARQUET_DATASTORE_CLASS.owned(),
+                &property.into(),
+            )
+            .is_some(),
+            "constructor property must be registered: {property}"
+        );
+    }
 
     let error = block_on(parquet_datastore_builtin(vec![
         Value::from("sample.parquet"),
@@ -3668,7 +4019,7 @@ fn array_datastore_wgpu_gathers_every_resident_integer_class_exactly() {
         let Value::Object(datastore) = datastore else {
             panic!("expected ArrayDatastore object");
         };
-        let Some(Value::Tensor(data)) = datastore.properties.get("Data") else {
+        let Some(Value::Tensor(data)) = datastore.properties().get("Data") else {
             panic!("expected gathered typed data");
         };
         assert_eq!(data.integer_storage(), Some(&storage));
@@ -3716,22 +4067,22 @@ fn file_datastore_preserves_constructor_metadata() {
     let Value::Object(datastore) = datastore else {
         panic!("expected fileDatastore object");
     };
-    assert!(datastore.class_name.is(FILE_DATASTORE_CLASS));
-    assert_eq!(datastore.properties.get("Files"), Some(&files));
+    assert!(datastore.class_name().is(FILE_DATASTORE_CLASS));
+    assert_eq!(datastore.properties().get("Files"), Some(&files));
     assert_eq!(
-        datastore.properties.get("ReadFcn"),
+        datastore.properties().get("ReadFcn"),
         Some(&Value::FunctionHandle("readlines".into()))
     );
     assert_eq!(
-        datastore.properties.get("FileExtensions"),
+        datastore.properties().get("FileExtensions"),
         Some(&extensions)
     );
     assert_eq!(
-        datastore.properties.get("IncludeSubfolders"),
+        datastore.properties().get("IncludeSubfolders"),
         Some(&Value::Bool(true))
     );
     assert_eq!(
-        datastore.properties.get("ReadMode"),
+        datastore.properties().get("ReadMode"),
         Some(&Value::from("partialfile"))
     );
 }
@@ -3770,8 +4121,8 @@ fn ordinal_constructor_sets_ordered_categorical_semantics() {
     let Value::Object(default_cat) = default_ordered else {
         panic!("expected default ordinal categorical object");
     };
-    match default_cat.properties.get("Categories").unwrap() {
-        Value::StringArray(array) => assert_eq!(array.data, vec!["high", "low", "medium"]),
+    match default_cat.properties().get("Categories").unwrap() {
+        Value::StringArray(array) => assert_eq!(array.data(), vec!["high", "low", "medium"]),
         other => panic!("expected sorted categories, got {other:?}"),
     }
 
@@ -3815,7 +4166,7 @@ fn ordinal_constructor_sets_ordered_categorical_semantics() {
     let Value::Object(max_cat) = max_value.value() else {
         panic!("expected categorical max result");
     };
-    match max_cat.properties.get("Codes").unwrap() {
+    match max_cat.properties().get("Codes").unwrap() {
         Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![3.0]),
         other => panic!("expected categorical max code, got {other:?}"),
     }
@@ -3827,7 +4178,7 @@ fn ordinal_constructor_sets_ordered_categorical_semantics() {
     let Value::Object(min_cat) = min_value.value() else {
         panic!("expected categorical min result");
     };
-    match min_cat.properties.get("Codes").unwrap() {
+    match min_cat.properties().get("Codes").unwrap() {
         Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![1.0]),
         other => panic!("expected categorical min code, got {other:?}"),
     }
@@ -3843,7 +4194,7 @@ fn ordinal_constructor_sets_ordered_categorical_semantics() {
     let Value::Object(all_max_cat) = all_max.value() else {
         panic!("expected categorical all max result");
     };
-    match all_max_cat.properties.get("Codes").unwrap() {
+    match all_max_cat.properties().get("Codes").unwrap() {
         Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![3.0]),
         other => panic!("expected categorical all max code, got {other:?}"),
     }
@@ -3851,15 +4202,15 @@ fn ordinal_constructor_sets_ordered_categorical_semantics() {
     let Value::Object(cat) = ordinal else {
         panic!("expected ordinal categorical object");
     };
-    assert_eq!(cat.properties.get("Ordinal"), Some(&Value::Bool(true)));
-    match cat.properties.get("Categories").unwrap() {
+    assert_eq!(cat.properties().get("Ordinal"), Some(&Value::Bool(true)));
+    match cat.properties().get("Categories").unwrap() {
         Value::StringArray(array) => {
-            assert_eq!(array.data, vec!["low", "medium", "high"]);
+            assert_eq!(array.data(), vec!["low", "medium", "high"]);
             assert_eq!(array.shape, vec![1, 3]);
         }
         other => panic!("expected categories, got {other:?}"),
     }
-    match cat.properties.get("Codes").unwrap() {
+    match cat.properties().get("Codes").unwrap() {
         Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![2.0, 1.0, 3.0]),
         other => panic!("expected categorical codes, got {other:?}"),
     }
@@ -3885,11 +4236,11 @@ fn ordinal_constructor_sets_ordered_categorical_semantics() {
     let Value::Object(renamed_cat) = renamed else {
         panic!("expected renamed categorical");
     };
-    match renamed_cat.properties.get("Categories").unwrap() {
-        Value::StringArray(array) => assert_eq!(array.data, vec!["child", "adult", "senior"]),
+    match renamed_cat.properties().get("Categories").unwrap() {
+        Value::StringArray(array) => assert_eq!(array.data(), vec!["child", "adult", "senior"]),
         other => panic!("expected renamed categories, got {other:?}"),
     }
-    match renamed_cat.properties.get("Codes").unwrap() {
+    match renamed_cat.properties().get("Codes").unwrap() {
         Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![3.0, 1.0, 2.0]),
         other => panic!("expected renamed codes, got {other:?}"),
     }
@@ -3926,8 +4277,8 @@ fn ordinal_constructor_preserves_adjacent_wide_integer_levels() {
     else {
         panic!("ordinal object")
     };
-    let categories = match ordinal.properties.get("Categories") {
-        Some(Value::StringArray(array)) => array.data.clone(),
+    let categories = match ordinal.properties().get("Categories") {
+        Some(Value::StringArray(array)) => array.data(),
         other => panic!("categories {other:?}"),
     };
     assert_eq!(categories, vec!["lower", "upper"]);
@@ -4002,11 +4353,11 @@ fn categorical_compatibility_edges_match_matlab_surface() {
     let Value::Object(option_word_category) = option_word_category else {
         panic!("expected option-word categorical");
     };
-    match option_word_category.properties.get("Categories").unwrap() {
-        Value::StringArray(array) => assert_eq!(array.data, vec!["Ordinal"]),
+    match option_word_category.properties().get("Categories").unwrap() {
+        Value::StringArray(array) => assert_eq!(array.data(), vec!["Ordinal"]),
         other => panic!("expected option-word categories, got {other:?}"),
     }
-    match option_word_category.properties.get("Codes").unwrap() {
+    match option_word_category.properties().get("Codes").unwrap() {
         Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![1.0]),
         other => panic!("expected option-word codes, got {other:?}"),
     }
@@ -4018,11 +4369,11 @@ fn categorical_compatibility_edges_match_matlab_surface() {
     let Value::Object(whitespace) = whitespace else {
         panic!("expected whitespace categorical");
     };
-    match whitespace.properties.get("Categories").unwrap() {
-        Value::StringArray(array) => assert_eq!(array.data, vec!["a"]),
+    match whitespace.properties().get("Categories").unwrap() {
+        Value::StringArray(array) => assert_eq!(array.data(), vec!["a"]),
         other => panic!("expected whitespace categories, got {other:?}"),
     }
-    match whitespace.properties.get("Codes").unwrap() {
+    match whitespace.properties().get("Codes").unwrap() {
         Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![1.0, 1.0, 1.0]),
         other => panic!("expected whitespace codes, got {other:?}"),
     }
@@ -4045,11 +4396,11 @@ fn categorical_compatibility_edges_match_matlab_surface() {
     let Value::Object(merged_names) = merged_names else {
         panic!("expected merged categorical");
     };
-    match merged_names.properties.get("Categories").unwrap() {
-        Value::StringArray(array) => assert_eq!(array.data, vec!["same"]),
+    match merged_names.properties().get("Categories").unwrap() {
+        Value::StringArray(array) => assert_eq!(array.data(), vec!["same"]),
         other => panic!("expected merged categories, got {other:?}"),
     }
-    match merged_names.properties.get("Codes").unwrap() {
+    match merged_names.properties().get("Codes").unwrap() {
         Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![1.0, 1.0]),
         other => panic!("expected merged codes, got {other:?}"),
     }
@@ -4061,8 +4412,8 @@ fn categorical_compatibility_edges_match_matlab_surface() {
     let Value::Object(rounded) = rounded else {
         panic!("expected rounded numeric categories");
     };
-    match rounded.properties.get("Categories").unwrap() {
-        Value::StringArray(array) => assert_eq!(array.data, vec!["1", "1.2346"]),
+    match rounded.properties().get("Categories").unwrap() {
+        Value::StringArray(array) => assert_eq!(array.data(), vec!["1", "1.2346"]),
         other => panic!("expected rounded categories, got {other:?}"),
     }
 
@@ -4083,7 +4434,7 @@ fn categorical_compatibility_edges_match_matlab_surface() {
         panic!("expected protected ordinal categorical");
     };
     assert_eq!(
-        protected_ordinal.properties.get("Protected"),
+        protected_ordinal.properties().get("Protected"),
         Some(&Value::Bool(true))
     );
 
@@ -4176,7 +4527,7 @@ fn categorical_integer_constructor_surface_is_exact_for_every_class() {
         .unwrap() else {
             panic!("expected categorical object");
         };
-        match result.properties.get("Codes").unwrap() {
+        match result.properties().get("Codes").unwrap() {
             Value::Tensor(codes) => assert_eq!(codes.materialize_f64(), vec![2.0, 1.0]),
             other => panic!("expected categorical codes, got {other:?}"),
         }
@@ -4206,7 +4557,7 @@ fn categorical_integer_constructor_surface_is_exact_for_every_class() {
     .unwrap() else {
         panic!("expected wide categorical object");
     };
-    match wide.properties.get("Codes").unwrap() {
+    match wide.properties().get("Codes").unwrap() {
         Value::Tensor(codes) => assert_eq!(codes.materialize_f64(), vec![2.0, 1.0]),
         other => panic!("expected wide categorical codes, got {other:?}"),
     }
@@ -4271,7 +4622,10 @@ fn categorical_integer_flags_accept_only_exact_zero_or_one() {
         .unwrap() else {
             panic!("expected nominal categorical");
         };
-        assert_eq!(nominal.properties.get("Ordinal"), Some(&Value::Bool(false)));
+        assert_eq!(
+            nominal.properties().get("Ordinal"),
+            Some(&Value::Bool(false))
+        );
 
         let Value::Object(ordinal) = block_on(categorical_builtin(vec![
             Value::from("x"),
@@ -4281,7 +4635,10 @@ fn categorical_integer_flags_accept_only_exact_zero_or_one() {
         .unwrap() else {
             panic!("expected ordinal categorical");
         };
-        assert_eq!(ordinal.properties.get("Ordinal"), Some(&Value::Bool(true)));
+        assert_eq!(
+            ordinal.properties().get("Ordinal"),
+            Some(&Value::Bool(true))
+        );
         assert!(block_on(categorical_builtin(vec![
             Value::from("x"),
             Value::from("Protected"),
@@ -4317,7 +4674,7 @@ fn categorical_resident_integer_input_is_mode_gated_and_gathered_exactly() {
             else {
                 panic!("expected resident categorical object");
             };
-            match result.properties.get("Codes").unwrap() {
+            match result.properties().get("Codes").unwrap() {
                 Value::Tensor(codes) => assert_eq!(codes.materialize_f64(), vec![1.0, 2.0]),
                 other => panic!("expected categorical codes, got {other:?}"),
             }
@@ -4333,7 +4690,10 @@ fn categorical_resident_integer_input_is_mode_gated_and_gathered_exactly() {
             .unwrap() else {
                 panic!("expected resident-flag categorical object");
             };
-            assert_eq!(ordinal.properties.get("Ordinal"), Some(&Value::Bool(true)));
+            assert_eq!(
+                ordinal.properties().get("Ordinal"),
+                Some(&Value::Bool(true))
+            );
         }
     });
 }
@@ -4365,7 +4725,7 @@ fn categorical_wgpu_gathers_every_resident_integer_class_exactly() {
         else {
             panic!("expected categorical object");
         };
-        match result.properties.get("Codes").unwrap() {
+        match result.properties().get("Codes").unwrap() {
             Value::Tensor(codes) => assert_eq!(codes.materialize_f64(), vec![1.0, 2.0]),
             other => panic!("expected categorical codes, got {other:?}"),
         }
@@ -4388,7 +4748,7 @@ fn ordinal_min_max_preserve_categorical_results_for_missing_dims_and_indices() {
     let Value::Object(default_max) = default_max.value() else {
         panic!("expected categorical max with missing");
     };
-    match default_max.properties.get("Codes").unwrap() {
+    match default_max.properties().get("Codes").unwrap() {
         Value::Tensor(tensor) => assert!(tensor.materialize_f64()[0].is_nan()),
         other => panic!("expected missing max code, got {other:?}"),
     }
@@ -4405,7 +4765,7 @@ fn ordinal_min_max_preserve_categorical_results_for_missing_dims_and_indices() {
     let Value::Object(omitnan_max) = omitnan_max.value() else {
         panic!("expected omitnan categorical max");
     };
-    match omitnan_max.properties.get("Codes").unwrap() {
+    match omitnan_max.properties().get("Codes").unwrap() {
         Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![1.0]),
         other => panic!("expected omitnan max code, got {other:?}"),
     }
@@ -4464,7 +4824,7 @@ fn ordinal_min_max_preserve_categorical_results_for_missing_dims_and_indices() {
     let Value::Object(row_max) = row_max.value() else {
         panic!("expected categorical row max");
     };
-    match row_max.properties.get("Codes").unwrap() {
+    match row_max.properties().get("Codes").unwrap() {
         Value::Tensor(tensor) => {
             assert_eq!(tensor.shape(), &[2, 1]);
             assert_eq!(tensor.materialize_f64(), vec![2.0, 3.0]);
@@ -4493,6 +4853,7 @@ fn writetable_and_readcell_cover_delimited_interop() {
     .unwrap();
     assert!(matches!(bytes, Value::Num(n) if n > 0.0));
     let cells = block_on(readcell_builtin(
+        None,
         Value::from(path.to_string_lossy().to_string()),
         Vec::new(),
     ))
@@ -4626,7 +4987,7 @@ fn table_selector_objects_filter_rows_and_variables() {
         )
         .unwrap(),
     );
-    assert!(ranged.class_name.is(TIMETABLE_CLASS));
+    assert!(ranged.class_name().is(TIMETABLE_CLASS));
     assert_eq!(table_height(&ranged).unwrap(), 1);
 
     let open_left = block_on(timerange_builtin(vec![
@@ -4666,11 +5027,13 @@ fn table_selector_objects_filter_rows_and_variables() {
     }
 
     let datetime_row_times = crate::builtins::datetime::datetime_object_from_serial_tensor(
+        None,
         Tensor::new(vec![100.0, 200.0, 300.0], vec![3, 1]).unwrap(),
         "yyyy-MM-dd",
     )
     .unwrap();
     let datetime_selector = crate::builtins::datetime::datetime_object_from_serial_tensor(
+        None,
         Tensor::new(vec![200.0], vec![1, 1]).unwrap(),
         "yyyy-MM-dd",
     )
@@ -4690,7 +5053,7 @@ fn table_selector_objects_filter_rows_and_variables() {
         )
         .unwrap(),
     );
-    assert!(selected.class_name.is(TIMETABLE_CLASS));
+    assert!(selected.class_name().is(TIMETABLE_CLASS));
     match table_member_get(&selected, &Value::from("X")).unwrap() {
         Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![20.0]),
         other => panic!("expected datetime row-time selection, got {other:?}"),
@@ -4707,7 +5070,7 @@ fn vartype_accepts_text_and_rejects_integer_or_resident_values_before_gather() {
         panic!("expected vartype selector");
     };
     assert_eq!(
-        selector.properties.get("Type"),
+        selector.properties().get("Type"),
         Some(&Value::from("integer"))
     );
 
@@ -4747,9 +5110,10 @@ fn timerange_defaults_to_half_open_and_orders_wide_integer_row_times_exactly() {
         Value::Int(IntValue::U64(base + 2)),
     ]))
     .unwrap();
+    let timetable = object(tt);
     let selected = object(
         table_paren_get(
-            &object(tt),
+            &timetable,
             &Value::Cell(CellArray::new(vec![selector, Value::from(":")], 1, 2).unwrap()),
         )
         .unwrap(),
@@ -4757,6 +5121,27 @@ fn timerange_defaults_to_half_open_and_orders_wide_integer_row_times_exactly() {
     match table_member_get(&selected, &Value::from("X")).unwrap() {
         Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![20.0]),
         other => panic!("expected exact half-open range result, got {other:?}"),
+    }
+    let closed = block_on(timerange_builtin(vec![
+        Value::Int(IntValue::U64(base + 1)),
+        Value::Int(IntValue::U64(base + 2)),
+        Value::from(" CLOSED "),
+    ]))
+    .unwrap();
+    assert_eq!(
+        object(closed.clone()).properties().get("Inclusivity"),
+        Some(&Value::from("closed"))
+    );
+    let selected = object(
+        table_paren_get(
+            &timetable,
+            &Value::Cell(CellArray::new(vec![closed, Value::from(":")], 1, 2).unwrap()),
+        )
+        .unwrap(),
+    );
+    match table_member_get(&selected, &Value::from("X")).unwrap() {
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![20.0, 30.0]),
+        other => panic!("expected normalized closed range result, got {other:?}"),
     }
 }
 
@@ -4866,11 +5251,12 @@ fn pivot_builds_wide_summary_table() {
     )
     .unwrap();
     let out = block_on(pivot_builtin(
+        None,
         t,
         Value::from("Group"),
         Value::from("Kind"),
         Value::from("Value"),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap();
     let out_obj = object(out);
@@ -4901,11 +5287,12 @@ fn pivot_preserves_wide_integer_groups_and_rejects_lossy_integer_data() {
     .unwrap();
     let output = object(
         block_on(pivot_builtin(
+            None,
             table,
             Value::from("Group"),
             Value::from("Kind"),
             Value::from("Value"),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .unwrap(),
     );
@@ -4930,11 +5317,12 @@ fn pivot_preserves_wide_integer_groups_and_rejects_lossy_integer_data() {
     )
     .unwrap();
     let error = block_on(pivot_builtin(
+        None,
         table,
         Value::from("Group"),
         Value::from("Kind"),
         Value::from("Value"),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect_err("wide integer data must not round through double");
     assert!(error.to_string().contains("exactly representable"));
@@ -4953,7 +5341,13 @@ fn table2struct_defaults_to_row_structs_and_to_scalar_preserves_columns() {
     match block_on(table2struct_builtin(t.clone(), Vec::new())).unwrap() {
         Value::StructArray(array) => {
             assert_eq!(array.shape(), [2, 1]);
-            assert_eq!(array.field_names().cloned().collect::<Vec<_>>(), ["A", "B"]);
+            assert_eq!(
+                array
+                    .field_names()
+                    .map(ToOwned::to_owned)
+                    .collect::<Vec<_>>(),
+                ["A", "B"]
+            );
             assert_eq!(
                 array.get_linear(0).unwrap().fields.get("A"),
                 Some(&Value::Num(1.0))
@@ -4990,7 +5384,7 @@ fn categorical_categories_and_dictionary_lookup_have_semantics() {
     let Value::Object(cat) = categorical else {
         panic!("expected categorical");
     };
-    match cat.properties.get("Codes").unwrap() {
+    match cat.properties().get("Codes").unwrap() {
         Value::Tensor(tensor) => {
             assert_eq!(tensor.materialize_f64()[0], 2.0);
             assert_eq!(tensor.materialize_f64()[1], 1.0);
@@ -5030,7 +5424,7 @@ fn uitable_data_property_preserves_wide_integer_class_and_values() {
     let Value::Object(object) = output else {
         panic!("expected uitable object");
     };
-    let Value::Tensor(stored) = object.properties.get("Data").expect("Data property") else {
+    let Value::Tensor(stored) = object.properties().get("Data").expect("Data property") else {
         panic!("expected numeric Data property");
     };
     assert_eq!(

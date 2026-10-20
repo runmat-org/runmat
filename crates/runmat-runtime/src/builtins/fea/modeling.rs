@@ -1,3 +1,7 @@
+use runmat_builtins::fea_contract::options::{
+    FeaMaterialAssignmentOption, FeaModelOption, FeaStudyOption, FeaSweepOption,
+};
+
 use super::signals::bindings::{
     FrozenGeneratorInventory, FrozenStudyGeneratorInventory, FROZEN_GENERATORS_PROPERTY,
     FROZEN_STUDY_GENERATORS_PROPERTY,
@@ -120,7 +124,9 @@ pub(super) struct StudyConstructorOptions {
     pub(super) mesh: Option<crate::meshing::MeshingExecutionOutput>,
 }
 
-pub(super) fn create_study_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) fn create_study_object_from_args(
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if args.len() < 3 {
         return Err(builtin_error(
             STUDY_NAME,
@@ -131,7 +137,7 @@ pub(super) fn create_study_object_from_args(args: Vec<Value>) -> BuiltinResult<V
     let study_id = scalar_string(&args[0], STUDY_NAME, &ERROR_INPUT)?;
     let geometry = geometry_asset_from_value(STUDY_NAME, &args[1])?;
     let composed_model = model_from_value(STUDY_NAME, &args[2])?;
-    let options = StudyConstructorOptions::parse(&args[3..])?;
+    let options = StudyConstructorOptions::parse(args.view().range(3..)?)?;
     let supplied_mesh = options.mesh.clone();
     let supplied_execution = options.execution.clone();
     let (mut model, frozen_generators) = (composed_model.model, composed_model.frozen_generators);
@@ -188,7 +194,7 @@ pub(super) fn create_study_object_from_args(args: Vec<Value>) -> BuiltinResult<V
 }
 
 impl StudyConstructorOptions {
-    pub(super) fn parse(args: &[Value]) -> BuiltinResult<Self> {
+    pub(super) fn parse(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<Self> {
         if !args.len().is_multiple_of(2) {
             return Err(builtin_error(
                 STUDY_NAME,
@@ -198,7 +204,7 @@ impl StudyConstructorOptions {
         }
         let mut options = Self::default();
         let mut seen = HashSet::new();
-        for pair in args.chunks(2) {
+        for pair in args.chunks_exact(2) {
             let key = option_key(&pair[0], STUDY_NAME)?;
             let canonical = key.as_str();
             if !seen.insert(canonical.to_string()) {
@@ -208,22 +214,22 @@ impl StudyConstructorOptions {
                     format!("duplicate fea.study option `{canonical}`"),
                 ));
             }
-            match key.as_str() {
-                "execution" => {
+            match FeaStudyOption::from_normalized(key.as_str()) {
+                Some(FeaStudyOption::Execution) => {
                     options.execution = Some(super::execution::execution_plan_from_value(
                         STUDY_NAME, &pair[1],
                     )?)
                 }
-                "mesh" => {
+                Some(FeaStudyOption::Mesh) => {
                     options.mesh = Some(crate::builtins::meshing::execution_output_from_value(
                         STUDY_NAME, &pair[1],
                     )?);
                 }
-                other => {
+                None => {
                     return Err(builtin_error(
                         STUDY_NAME,
                         &ERROR_INPUT,
-                        format!("unsupported fea.study option `{other}`"),
+                        format!("unsupported fea.study option `{key}`"),
                     ));
                 }
             }
@@ -251,7 +257,9 @@ struct ModelConstructorOptions {
     interfaces: Vec<GeometryBoundInterface>,
 }
 
-pub(super) fn create_sweep_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) fn create_sweep_object_from_args(
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if args.len() < 2 {
         return Err(builtin_error(
             SWEEP_NAME,
@@ -263,9 +271,9 @@ pub(super) fn create_sweep_object_from_args(args: Vec<Value>) -> BuiltinResult<V
     let studies = study_vec_from_value(SWEEP_NAME, &args[1])?;
     let mut fail_fast = true;
     let mut fail_fast_seen = false;
-    for pair in expect_name_value_tail(SWEEP_NAME, &args[2..])? {
-        match pair.key.as_str() {
-            "failfast" => {
+    for pair in expect_name_value_tail(SWEEP_NAME, args.view().range(2..)?)? {
+        match FeaSweepOption::from_normalized(pair.key.as_str()) {
+            Some(FeaSweepOption::FailFast) => {
                 if fail_fast_seen {
                     return Err(builtin_error(
                         SWEEP_NAME,
@@ -276,11 +284,11 @@ pub(super) fn create_sweep_object_from_args(args: Vec<Value>) -> BuiltinResult<V
                 fail_fast_seen = true;
                 fail_fast = logical_from_value(SWEEP_NAME, pair.value)?;
             }
-            other => {
+            None => {
                 return Err(builtin_error(
                     SWEEP_NAME,
                     &ERROR_INPUT,
-                    format!("unsupported fea.sweep option `{other}`"),
+                    format!("unsupported fea.sweep option `{}`", pair.key),
                 ));
             }
         }
@@ -300,7 +308,9 @@ pub(super) fn create_sweep_object_from_args(args: Vec<Value>) -> BuiltinResult<V
     sweep_to_object_with_generators(spec, inventory)
 }
 
-pub(super) fn create_model_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) fn create_model_object_from_args(
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if args.len() < 2 {
         return Err(builtin_error(
             MODEL_NAME,
@@ -310,7 +320,7 @@ pub(super) fn create_model_object_from_args(args: Vec<Value>) -> BuiltinResult<V
     }
     let model_id = scalar_string(&args[0], MODEL_NAME, &ERROR_INPUT)?;
     let geometry = geometry_asset_from_value(MODEL_NAME, &args[1])?;
-    let options = parse_model_constructor_options(MODEL_NAME, &args[2..])?;
+    let options = parse_model_constructor_options(MODEL_NAME, args.view().range(2..)?)?;
     let model = build_model_from_parts(
         MODEL_NAME,
         &geometry,
@@ -357,60 +367,68 @@ pub(super) fn static_test_steps_value() -> Value {
 
 fn parse_model_constructor_options(
     builtin: &'static str,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<ModelConstructorOptions> {
     let mut options = ModelConstructorOptions::default();
     for pair in expect_name_value_tail(builtin, args)? {
-        match pair.key.as_str() {
-            "frame" => {
+        match FeaModelOption::from_normalized(pair.key.as_str()) {
+            Some(FeaModelOption::Frame) => {
                 let text = scalar_string(pair.value, builtin, &ERROR_INPUT)?;
                 options.frame = Some(parse_scalar_enum_for_builtin(builtin, &text, "Frame")?);
             }
-            "materials" => options.materials = material_vec_from_value(builtin, pair.value)?,
-            "materialassignments" => {
+            Some(FeaModelOption::Materials) => {
+                options.materials = material_vec_from_value(builtin, pair.value)?
+            }
+            Some(FeaModelOption::MaterialAssignments) => {
                 options.material_assignments =
                     material_assignment_vec_from_value(builtin, pair.value)?;
             }
-            "constraints" => {
+            Some(FeaModelOption::Constraints) => {
                 options.constraints = constraint_vec_from_value(builtin, pair.value)?;
             }
-            "boundaries" => {
+            Some(FeaModelOption::Boundaries) => {
                 options.boundaries = boundary_vec_from_value(builtin, pair.value)?;
             }
-            "signals" => {
+            Some(FeaModelOption::Signals) => {
                 let signals = signal_vec_from_value(builtin, pair.value)?;
                 options.signals = signals.signals;
                 options.frozen_generators = signals.frozen_generators;
             }
-            "excitations" => {
+            Some(FeaModelOption::Excitations) => {
                 options.excitations =
                     super::excitations::bound_excitation_vec_from_value(builtin, pair.value)?
             }
-            "excitationcases" => {
+            Some(FeaModelOption::ExcitationCases) => {
                 options.excitation_cases =
                     super::excitations::excitation_case_vec_from_value(builtin, pair.value)?
             }
-            "initialconditions" => {
+            Some(FeaModelOption::InitialConditions) => {
                 options.initial_conditions =
                     super::initial_conditions::initial_condition_vec_from_value(
                         builtin, pair.value,
                     )?
             }
-            "responsespectra" => {
+            Some(FeaModelOption::ResponseSpectra) => {
                 options.response_spectra =
                     super::response_spectra::response_spectrum_vec_from_value(builtin, pair.value)?
             }
-            "steps" => options.steps = step_vec_from_value(builtin, pair.value)?,
-            "sequence" => {
+            Some(FeaModelOption::Steps) => {
+                options.steps = step_vec_from_value(builtin, pair.value)?
+            }
+            Some(FeaModelOption::Sequence) => {
                 options.sequence = Some(super::sequences::sequence_from_value(builtin, pair.value)?)
             }
-            "domains" => options.domains = domain_vec_from_value(builtin, pair.value)?,
-            "interfaces" => options.interfaces = interface_vec_from_value(builtin, pair.value)?,
-            other => {
+            Some(FeaModelOption::Domains) => {
+                options.domains = domain_vec_from_value(builtin, pair.value)?
+            }
+            Some(FeaModelOption::Interfaces) => {
+                options.interfaces = interface_vec_from_value(builtin, pair.value)?
+            }
+            None => {
                 return Err(builtin_error(
                     builtin,
                     &ERROR_INPUT,
-                    format!("unsupported {builtin} option `{other}`"),
+                    format!("unsupported {builtin} option `{}`", pair.key),
                 ));
             }
         }
@@ -418,7 +436,9 @@ fn parse_model_constructor_options(
     Ok(options)
 }
 
-pub(super) fn create_material_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) fn create_material_object_from_args(
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if args.is_empty() {
         return Err(builtin_error(
             MATERIAL_NAME,
@@ -427,9 +447,9 @@ pub(super) fn create_material_object_from_args(args: Vec<Value>) -> BuiltinResul
         ));
     }
     let material_id = scalar_string(&args[0], MATERIAL_NAME, &ERROR_INPUT)?;
-    let mut fields = json_fields_from_name_values(MATERIAL_NAME, &args[1..])?;
+    let mut fields = json_fields_from_name_values(MATERIAL_NAME, args.view().range(1..)?)?;
     let mut authored_damping = None;
-    for pair in expect_name_value_tail(MATERIAL_NAME, &args[1..])? {
+    for pair in expect_name_value_tail(MATERIAL_NAME, args.view().range(1..)?)? {
         let raw_name = scalar_string(pair.name, MATERIAL_NAME, &ERROR_INPUT)?;
         if canonical_field_name(&raw_name) == "damping" {
             authored_damping = Some(super::damping::mechanical_damping_from_value(
@@ -607,7 +627,7 @@ pub(super) fn create_material_object_from_args(args: Vec<Value>) -> BuiltinResul
 }
 
 pub(super) fn create_material_assignment_object_from_args(
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     if args.len() < 2 {
         return Err(builtin_error(
@@ -626,23 +646,23 @@ pub(super) fn create_material_assignment_object_from_args(
     let assigned_material_id = material.material_id;
     let mut expected_material_id = assigned_material_id.clone();
     let mut confidence = EvidenceConfidence::Verified;
-    for pair in expect_name_value_tail(MATERIAL_ASSIGNMENT_NAME, &args[2..])? {
-        match pair.key.as_str() {
-            "expectedmaterial" | "expectedmaterialid" => {
+    for pair in expect_name_value_tail(MATERIAL_ASSIGNMENT_NAME, args.view().range(2..)?)? {
+        match FeaMaterialAssignmentOption::from_normalized(pair.key.as_str()) {
+            Some(FeaMaterialAssignmentOption::ExpectedMaterial) => {
                 let material: MaterialModel =
                     object_payload(MATERIAL_ASSIGNMENT_NAME, pair.value, FEA_MATERIAL_CLASS)?;
                 expected_material_id = material.material_id;
             }
-            "confidence" => {
+            Some(FeaMaterialAssignmentOption::Confidence) => {
                 let text = scalar_string(pair.value, MATERIAL_ASSIGNMENT_NAME, &ERROR_INPUT)?;
                 confidence =
                     parse_scalar_enum_for_builtin(MATERIAL_ASSIGNMENT_NAME, &text, "Confidence")?;
             }
-            other => {
+            None => {
                 return Err(builtin_error(
                     MATERIAL_ASSIGNMENT_NAME,
                     &ERROR_INPUT,
-                    format!("unsupported fea.materialAssignment option `{other}`"),
+                    format!("unsupported fea.materialAssignment option `{}`", pair.key),
                 ));
             }
         }
@@ -918,10 +938,12 @@ fn material_assignment_to_object(
     )?;
     // Same revision type as `geometry.Asset` and every other geometry-bound
     // FEA model object.
-    object.properties.insert(
-        "geometry_revision".into(),
+    crate::builtins::fea::object_api::replace(
+        MATERIAL_ASSIGNMENT_NAME,
+        &mut object,
+        "geometry_revision",
         Value::Int(IntValue::U32(assignment.geometry_revision)),
-    );
+    )?;
     Ok(Value::Object(object))
 }
 
@@ -972,11 +994,13 @@ pub(super) fn study_from_value_with_generators(
             format!("expected {FEA_STUDY_CLASS} object"),
         ));
     };
-    let sidecar = object.properties.get(FROZEN_GENERATORS_PROPERTY).cloned();
-    let mut stripped = object.clone();
-    stripped.properties.remove(FROZEN_GENERATORS_PROPERTY);
-    let study: AnalysisStudySpec =
-        object_payload(builtin, &Value::Object(stripped), FEA_STUDY_CLASS)?;
+    let sidecar = object.properties().get(FROZEN_GENERATORS_PROPERTY).cloned();
+    let study: AnalysisStudySpec = super::object_payload_omitting(
+        builtin,
+        value,
+        FEA_STUDY_CLASS,
+        &[FROZEN_GENERATORS_PROPERTY],
+    )?;
     let signals = study.model.signals.as_slice();
     let frozen_generators =
         FrozenGeneratorInventory::from_property_value(builtin, sidecar.as_ref(), signals)?;
@@ -1010,13 +1034,15 @@ pub(super) fn sweep_from_value_with_generators(
         ));
     };
     let sidecar = object
-        .properties
+        .properties()
         .get(FROZEN_STUDY_GENERATORS_PROPERTY)
         .cloned();
-    let mut stripped = object.clone();
-    stripped.properties.remove(FROZEN_STUDY_GENERATORS_PROPERTY);
-    let sweep: AnalysisStudySweepSpec =
-        object_payload(builtin, &Value::Object(stripped), FEA_SWEEP_CLASS)?;
+    let sweep: AnalysisStudySweepSpec = super::object_payload_omitting(
+        builtin,
+        value,
+        FEA_SWEEP_CLASS,
+        &[FROZEN_STUDY_GENERATORS_PROPERTY],
+    )?;
     let frozen_generators = FrozenStudyGeneratorInventory::from_property_value(
         builtin,
         sidecar.as_ref(),
@@ -1039,10 +1065,13 @@ pub(super) fn model_from_value(
             format!("expected {FEA_MODEL_CLASS} object"),
         ));
     };
-    let sidecar = object.properties.get(FROZEN_GENERATORS_PROPERTY).cloned();
-    let mut stripped = object.clone();
-    stripped.properties.remove(FROZEN_GENERATORS_PROPERTY);
-    let model: AnalysisModel = object_payload(builtin, &Value::Object(stripped), FEA_MODEL_CLASS)?;
+    let sidecar = object.properties().get(FROZEN_GENERATORS_PROPERTY).cloned();
+    let model: AnalysisModel = super::object_payload_omitting(
+        builtin,
+        value,
+        FEA_MODEL_CLASS,
+        &[FROZEN_GENERATORS_PROPERTY],
+    )?;
     let frozen_generators =
         FrozenGeneratorInventory::from_property_value(builtin, sidecar.as_ref(), &model.signals)?;
     Ok(ComposedModel {
@@ -1053,7 +1082,7 @@ pub(super) fn model_from_value(
 
 fn study_vec_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<Vec<ComposedStudy>> {
     let values = match value {
-        Value::Cell(cell) => cell.data.iter().collect::<Vec<_>>(),
+        Value::Cell(cell) => cell.data().iter().collect::<Vec<_>>(),
         Value::Object(_) => vec![value],
         other => {
             return Err(builtin_error(
@@ -1088,7 +1117,7 @@ fn constraint_vec_from_value(
     value: &Value,
 ) -> BuiltinResult<Vec<BoundConstraintPayload>> {
     let values = match value {
-        Value::Cell(cell) => cell.data.iter().collect::<Vec<_>>(),
+        Value::Cell(cell) => cell.data().iter().collect::<Vec<_>>(),
         Value::Object(_) => vec![value],
         other => {
             return Err(builtin_error(
@@ -1102,37 +1131,37 @@ fn constraint_vec_from_value(
         .into_iter()
         .map(|value| match value {
             Value::Object(object)
-                if object.class_name.display_name() == FEA_STRUCTURAL_CONSTRAINT_CLASS =>
+                if object.class_name().display_name() == FEA_STRUCTURAL_CONSTRAINT_CLASS =>
             {
                 object_payload(builtin, value, FEA_STRUCTURAL_CONSTRAINT_CLASS)
                     .map(BoundConstraintPayload::BoundStructural)
             }
             Value::Object(object)
-                if object.class_name.display_name() == FEA_THERMAL_CONSTRAINT_CLASS =>
+                if object.class_name().display_name() == FEA_THERMAL_CONSTRAINT_CLASS =>
             {
                 object_payload(builtin, value, FEA_THERMAL_CONSTRAINT_CLASS)
                     .map(BoundConstraintPayload::BoundThermal)
             }
             Value::Object(object)
-                if object.class_name.display_name() == FEA_ELECTRICAL_CONSTRAINT_CLASS =>
+                if object.class_name().display_name() == FEA_ELECTRICAL_CONSTRAINT_CLASS =>
             {
                 object_payload(builtin, value, FEA_ELECTRICAL_CONSTRAINT_CLASS)
                     .map(BoundConstraintPayload::BoundElectrical)
             }
             Value::Object(object)
-                if object.class_name.display_name() == FEA_MAGNETIC_CONSTRAINT_CLASS =>
+                if object.class_name().display_name() == FEA_MAGNETIC_CONSTRAINT_CLASS =>
             {
                 object_payload(builtin, value, FEA_MAGNETIC_CONSTRAINT_CLASS)
                     .map(BoundConstraintPayload::BoundMagnetic)
             }
             Value::Object(object)
-                if object.class_name.display_name() == FEA_ACOUSTIC_CONSTRAINT_CLASS =>
+                if object.class_name().display_name() == FEA_ACOUSTIC_CONSTRAINT_CLASS =>
             {
                 object_payload(builtin, value, FEA_ACOUSTIC_CONSTRAINT_CLASS)
                     .map(BoundConstraintPayload::BoundAcoustic)
             }
             Value::Object(object)
-                if object.class_name.display_name() == FEA_FLUID_CONSTRAINT_CLASS =>
+                if object.class_name().display_name() == FEA_FLUID_CONSTRAINT_CLASS =>
             {
                 object_payload(builtin, value, FEA_FLUID_CONSTRAINT_CLASS)
                     .map(BoundConstraintPayload::BoundFluid)
@@ -1140,7 +1169,7 @@ fn constraint_vec_from_value(
             Value::Object(object) => Err(builtin_error(
                 builtin,
                 &ERROR_INPUT,
-                format!("unsupported FEA constraint class `{}`", object.class_name),
+                format!("unsupported FEA constraint class `{}`", object.class_name()),
             )),
             _ => unreachable!("constraint inputs were classified above"),
         })
@@ -1152,7 +1181,7 @@ fn boundary_vec_from_value(
     value: &Value,
 ) -> BuiltinResult<Vec<GeometryBoundBoundary>> {
     let values = match value {
-        Value::Cell(cell) => cell.data.iter().collect::<Vec<_>>(),
+        Value::Cell(cell) => cell.data().iter().collect::<Vec<_>>(),
         Value::Object(_) => vec![value],
         other => {
             return Err(builtin_error(
@@ -1166,34 +1195,34 @@ fn boundary_vec_from_value(
         .into_iter()
         .map(|value| match value {
             Value::Object(object)
-                if object.class_name.display_name() == FEA_STRUCTURAL_BOUNDARY_CLASS =>
+                if object.class_name().display_name() == FEA_STRUCTURAL_BOUNDARY_CLASS =>
             {
                 bound_boundary_payload(builtin, value, FEA_STRUCTURAL_BOUNDARY_CLASS)
             }
             Value::Object(object)
-                if object.class_name.display_name() == FEA_THERMAL_BOUNDARY_CLASS =>
+                if object.class_name().display_name() == FEA_THERMAL_BOUNDARY_CLASS =>
             {
                 bound_boundary_payload(builtin, value, FEA_THERMAL_BOUNDARY_CLASS)
             }
             Value::Object(object)
-                if object.class_name.display_name() == FEA_MAGNETIC_BOUNDARY_CLASS =>
+                if object.class_name().display_name() == FEA_MAGNETIC_BOUNDARY_CLASS =>
             {
                 bound_boundary_payload(builtin, value, FEA_MAGNETIC_BOUNDARY_CLASS)
             }
             Value::Object(object)
-                if object.class_name.display_name() == FEA_ACOUSTIC_BOUNDARY_CLASS =>
+                if object.class_name().display_name() == FEA_ACOUSTIC_BOUNDARY_CLASS =>
             {
                 bound_boundary_payload(builtin, value, FEA_ACOUSTIC_BOUNDARY_CLASS)
             }
             Value::Object(object)
-                if object.class_name.display_name() == FEA_FLUID_BOUNDARY_CLASS =>
+                if object.class_name().display_name() == FEA_FLUID_BOUNDARY_CLASS =>
             {
                 bound_boundary_payload(builtin, value, FEA_FLUID_BOUNDARY_CLASS)
             }
             Value::Object(object) => Err(builtin_error(
                 builtin,
                 &ERROR_INPUT,
-                format!("unsupported FEA boundary class `{}`", object.class_name),
+                format!("unsupported FEA boundary class `{}`", object.class_name()),
             )),
             _ => unreachable!("boundary inputs were classified above"),
         })
@@ -1212,7 +1241,7 @@ fn bound_boundary_payload(
 
 fn signal_vec_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<RuntimeSignals> {
     let values = match value {
-        Value::Cell(cell) => cell.data.iter().collect::<Vec<_>>(),
+        Value::Cell(cell) => cell.data().iter().collect::<Vec<_>>(),
         Value::Object(_) => vec![value],
         other => Err(builtin_error(
             builtin,
@@ -1243,7 +1272,7 @@ pub(super) fn step_vec_from_value(
     value: &Value,
 ) -> BuiltinResult<Vec<ProcedureStep>> {
     let values = match value {
-        Value::Cell(cell) => cell.data.iter().collect::<Vec<_>>(),
+        Value::Cell(cell) => cell.data().iter().collect::<Vec<_>>(),
         Value::Object(_) => vec![value],
         other => {
             return Err(builtin_error(
@@ -1259,7 +1288,7 @@ pub(super) fn step_vec_from_value(
             let Value::Object(object) = value else {
                 unreachable!("step inputs were classified above")
             };
-            let class_name = match object.class_name.display_name() {
+            let class_name = match object.class_name().display_name() {
                 FEA_STRUCTURAL_STEP_CLASS => FEA_STRUCTURAL_STEP_CLASS,
                 FEA_THERMAL_STEP_CLASS => FEA_THERMAL_STEP_CLASS,
                 FEA_ELECTROMAGNETIC_STEP_CLASS => FEA_ELECTROMAGNETIC_STEP_CLASS,
@@ -1289,7 +1318,7 @@ pub(super) fn domain_vec_from_value(
     value: &Value,
 ) -> BuiltinResult<Vec<DomainPayload>> {
     let values = match value {
-        Value::Cell(cell) => cell.data.iter().collect::<Vec<_>>(),
+        Value::Cell(cell) => cell.data().iter().collect::<Vec<_>>(),
         Value::Object(_) => vec![value],
         other => {
             return Err(builtin_error(
@@ -1305,7 +1334,7 @@ pub(super) fn domain_vec_from_value(
             let Value::Object(object) = value else {
                 unreachable!("domain inputs were classified above")
             };
-            match object.class_name.display_name() {
+            match object.class_name().display_name() {
                 FEA_THERMAL_DOMAIN_CLASS => {
                     object_payload(builtin, value, FEA_THERMAL_DOMAIN_CLASS)
                         .map(DomainPayload::Thermal)
@@ -1354,7 +1383,7 @@ fn interface_vec_from_value(
     value: &Value,
 ) -> BuiltinResult<Vec<GeometryBoundInterface>> {
     let values = match value {
-        Value::Cell(cell) => cell.data.iter().collect::<Vec<_>>(),
+        Value::Cell(cell) => cell.data().iter().collect::<Vec<_>>(),
         Value::Object(_) => vec![value],
         other => {
             return Err(builtin_error(
@@ -1370,7 +1399,7 @@ fn interface_vec_from_value(
             let Value::Object(object) = value else {
                 unreachable!("interface inputs were classified above")
             };
-            let class_name = match object.class_name.display_name() {
+            let class_name = match object.class_name().display_name() {
                 FEA_CONTACT_INTERFACE_CLASS => FEA_CONTACT_INTERFACE_CLASS,
                 FEA_FLUID_STRUCTURE_INTERFACE_CLASS => FEA_FLUID_STRUCTURE_INTERFACE_CLASS,
                 FEA_CONJUGATE_HEAT_TRANSFER_INTERFACE_CLASS => {
@@ -1398,7 +1427,7 @@ pub(super) fn object_vec_from_value<T: DeserializeOwned>(
 ) -> BuiltinResult<Vec<T>> {
     match value {
         Value::Cell(cell) => cell
-            .data
+            .data()
             .iter()
             .map(|item| object_payload(builtin, item, expected_class))
             .collect(),

@@ -176,7 +176,7 @@ fn abandoned_await_releases_only_its_running_service_future(cancel: bool) {
     let source = CancellationSource::new();
     let runtime = RuntimeContext::with_cancellation(service.clone(), source.token())
         .with_service_ports(RuntimeServicePorts::default().with_builtin(Rc::new(PendingBuiltin)));
-    let mut vars = vec![Value::Future(owned.clone())];
+    let mut vars = vec![Value::Future(owned.clone().into())];
     let calls_before = CALLS.load(Ordering::SeqCst);
     let drops_before = DROPS.load(Ordering::SeqCst);
     let mut execution = Box::pin(runmat_vm::interpret_with_vars_in_context(
@@ -195,7 +195,7 @@ fn abandoned_await_releases_only_its_running_service_future(cancel: bool) {
             Poll::Ready(Err(_))
         ));
         assert!(matches!(
-            service.begin_await(Value::Future(owned.clone())),
+            service.begin_await(Value::Future(owned.clone().into())),
             Err(ExecutionServiceError::Cancelled)
         ));
     }
@@ -207,16 +207,16 @@ fn abandoned_await_releases_only_its_running_service_future(cancel: bool) {
         "catch must not replay work"
     );
     assert!(matches!(
-        service.begin_await(Value::Future(owned)),
+        service.begin_await(Value::Future(owned.into())),
         Err(ExecutionServiceError::Cancelled)
     ));
     assert!(matches!(
-        service.begin_await(Value::Future(sibling.clone())),
+        service.begin_await(Value::Future(sibling.clone().into())),
         Ok(AwaitAction::ExecuteFuture { .. })
     ));
     service
         .complete_future(
-            &sibling,
+            (&sibling).into(),
             Ok(runmat_runtime::execution::RootedValueSequence::new(
                 runmat_value::ValueSequence::empty(),
             )

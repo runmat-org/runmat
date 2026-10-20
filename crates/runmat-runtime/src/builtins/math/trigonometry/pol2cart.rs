@@ -49,7 +49,7 @@ async fn pol2cart_builtin(
     runtime: Option<RuntimeContext>,
     theta: Value,
     rho: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<RootedValue> {
     let requested_outputs = crate::output_count::current_output_count();
     let mut inputs = vec![theta, rho];

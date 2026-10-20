@@ -130,16 +130,20 @@ fn value_footprint(value: &Value, path: &str) -> Result<(u64, u64, u64), ValueCo
             len(tensor.shape().len())?,
         ),
         Value::LogicalArray(array) => (len(array.data.len())?, 0, len(array.shape.len())?),
-        Value::CharArray(array) => (mul(len(array.data.len())?, 4)?, 0, len(array.shape.len())?),
+        Value::CharArray(array) => (
+            mul(len(array.data().len())?, 4)?,
+            0,
+            len(array.shape.len())?,
+        ),
         Value::String(text) => (0, len(text.len())?, 0),
         Value::StringArray(array) => {
             let text = array
-                .data
+                .data()
                 .iter()
                 .try_fold(0_u64, |bytes, item| add(bytes, len(item.len())?))?;
             (
                 0,
-                add(text, mul(len(array.data.len())?, 64)?)?,
+                add(text, mul(len(array.data().len())?, 64)?)?,
                 len(array.shape.len())?,
             )
         }

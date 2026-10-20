@@ -89,9 +89,9 @@ fn compiled_integer_decomposition_dispatches_transpose_and_both_solves() {
         matches!(
             value,
             Value::Object(object)
-                if object.class_name.is(runmat_types::StaticClassIdentity::new("decomposition"))
+                if object.class_name().is(runmat_types::StaticClassIdentity::new("decomposition"))
                     && matches!(
-                        object.properties.get("__matrix"),
+                        object.properties().get("__matrix"),
                         Some(Value::Tensor(tensor))
                             if tensor.integer_storage()
                                 == Some(&IntegerStorage::U64(vec![2, 1, 0, 4]))

@@ -49,6 +49,26 @@ fn pure_dag() -> Bytecode {
 }
 
 #[test]
+fn private_chain_later_unassigned_and_missing_formal_reads_keep_ordinary_errors() {
+    for (parameters, initialization, identifier) in [
+        (
+            "",
+            "if false; missing = 1; end;",
+            "RunMat:UndefinedVariable",
+        ),
+        ("missing", "", "RunMat:NotEnoughInputs"),
+    ] {
+        runmat_gc::gc_test_context(|| {
+            let bytecode = compiled(&format!(
+                "caught = false; try; result = probe(); catch e; caught = strcmp(e.identifier, '{identifier}'); end; assert(caught);\nfunction value = probe({parameters})\n{initialization}\nvalue = (ones(1,3) + [1,2,3]) .* missing;\nend\n"
+            ));
+            futures::executor::block_on(crate::interpreter::runner::interpret(&bytecode))
+                .expect("later semantic read must be caught, not replaced with a zero-filled slot");
+        });
+    }
+}
+
+#[test]
 fn authentic_elementwise_private_dag_closes_without_materializing_private_stores() {
     for expression in ["(x + x) + (x + x)", "exp(-x) .* sin(4*x) + tanh(x).^2"] {
         let bytecode = compiled(&format!(
@@ -105,6 +125,10 @@ fn assert_elementwise_private_closure(bytecode: &Bytecode) {
                 })
         })
         .expect("one complete elementwise dependency closure");
+    assert!(
+        selected.kernel.supported,
+        "complete private DAG retains fusion"
+    );
     assert!(
         selected.materialized_stores.is_empty(),
         "private temporaries are not publication outputs"
@@ -429,6 +453,10 @@ fn assert_private_dag_uses_exact_vm_stack(bytecode: &Bytecode) {
         .iter()
         .find(|group| group.group.kind == FusionKind::Reduction)
         .expect("one folded reduction");
+    assert!(
+        selected.kernel.supported,
+        "complete reduction retains fusion"
+    );
     assert_complete_external_dag_inputs(selected);
     let source_group = bytecode
         .runtime_fusion_groups_for_graph(&graph)
@@ -476,16 +504,26 @@ fn assert_private_dag_uses_exact_vm_stack(bytecode: &Bytecode) {
         bytecode.var_count
     ]);
     let mut context = crate::bytecode::program::ExecutionContext::default();
-    let (guard, request, _) = crate::accel::fusion::gather_fusion_inputs(
-        selected,
-        &graph,
-        &mut stack,
-        &vars,
-        &mut context,
-        None,
+    let (_, stores, loads) = crate::accel::graph::build_accel_graph_with_transcript(
+        &bytecode.instructions,
+        &bytecode.var_types,
+    );
+    let transport = crate::accel::fusion::input_transport::VmFusionInputTransport::project(
+        selected, &graph, &loads, &stores,
     )
-    .expect("the one external leaf has its exact variable source");
-    assert_eq!(request.inputs, vec![Value::Num(11.0)]);
+    .expect("every external input has a certified transport");
+    let crate::accel::fusion::GatheredFusionInputs { guard, request } =
+        crate::accel::fusion::gather_fusion_inputs(
+            selected,
+            &transport,
+            &mut stack,
+            &vars,
+            &mut context,
+            None,
+        )
+        .expect("gather has no terminal resource failure")
+        .expect("the one external leaf has its exact evaluated stack source");
+    assert_eq!(request.inputs, vec![Value::Num(3.0)]);
     drop(request);
     guard.commit();
     assert_eq!(stack.as_slice(), std::slice::from_ref(&lower));
@@ -494,17 +532,18 @@ fn assert_private_dag_uses_exact_vm_stack(bytecode: &Bytecode) {
         crate::interpreter::stack::InterpreterStack::from_unbounded(vec![lower.clone()]);
     assert!(crate::accel::fusion::gather_fusion_inputs(
         selected,
-        &graph,
+        &transport,
         &mut too_shallow,
         &vars,
         &mut context,
         None,
     )
-    .is_err());
+    .expect("insufficient operands are an admission decline, not a terminal failure")
+    .is_none());
     assert_eq!(too_shallow.as_slice(), std::slice::from_ref(&lower));
 
-    // A malformed plan that asks for an internal private result must fail
-    // before execution, restoring the exact original stack slice on error.
+    // A malformed plan that asks for an internal private result must decline
+    // before execution, preserving the exact original stack slice.
     let internal = graph
         .nodes
         .iter()
@@ -515,17 +554,20 @@ fn assert_private_dag_uses_exact_vm_stack(bytecode: &Bytecode) {
     let mut malformed = selected.clone();
     malformed.inputs.push(internal);
     stack = crate::interpreter::stack::InterpreterStack::from_unbounded(original.clone());
-    let error = crate::accel::fusion::gather_fusion_inputs(
+    let gathered = crate::accel::fusion::gather_fusion_inputs(
         &malformed,
-        &graph,
+        &transport,
         &mut stack,
         &vars,
         &mut context,
         None,
     )
-    .err()
-    .expect("internal output has no independent source");
-    assert!(error.to_string().contains("missing input"));
+    .expect("malformed transport declines without a terminal resource failure");
+    assert!(
+        gathered.is_none(),
+        "internal output has no independent source"
+    );
+    drop(gathered);
     assert_eq!(stack.as_slice(), original.as_slice());
 }
 

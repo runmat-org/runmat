@@ -6,7 +6,7 @@ pub(super) fn guess_request_format(value: &Value) -> RequestFormat {
         Value::CharArray(ca) if ca.rows == 1 => RequestFormat::Text,
         Value::String(_) => RequestFormat::Text,
         Value::StringArray(sa) => {
-            if sa.data.len() == 1 {
+            if sa.data().len() == 1 {
                 RequestFormat::Text
             } else {
                 RequestFormat::Json

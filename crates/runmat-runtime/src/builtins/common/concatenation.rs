@@ -55,6 +55,12 @@ fn numeric_matrix_columns(value: &Value) -> Option<usize> {
 /// then constructs a single-character array. The `error_prefix` is prepended to error
 /// messages (e.g., "cat" or "char concat").
 pub fn char_array_from_f64_with_prefix(value: f64, error_prefix: &str) -> BuiltinResult<CharArray> {
+    let ch = char_from_f64_code_point(value, error_prefix)?;
+    CharArray::new(vec![ch], 1, 1).map_err(concat_error)
+}
+
+/// The same code-point validation without allocating a character array.
+pub fn char_from_f64_code_point(value: f64, error_prefix: &str) -> BuiltinResult<char> {
     if !value.is_finite() || value.fract() != 0.0 {
         return Err(concat_error(format!(
             "{error_prefix}: expected integer code point"
@@ -66,9 +72,7 @@ pub fn char_array_from_f64_with_prefix(value: f64, error_prefix: &str) -> Builti
         )));
     }
     let code = value as u32;
-    let ch = char::from_u32(code)
-        .ok_or_else(|| concat_error(format!("{error_prefix}: invalid code point")))?;
-    CharArray::new(vec![ch], 1, 1).map_err(concat_error)
+    char::from_u32(code).ok_or_else(|| concat_error(format!("{error_prefix}: invalid code point")))
 }
 
 fn char_array_from_f64(value: f64) -> BuiltinResult<CharArray> {
@@ -103,12 +107,21 @@ fn normalize_symbolic_concat_shape(shape: &[usize]) -> Vec<usize> {
 
 #[derive(Clone)]
 struct SymbolicConcatBlock {
-    data: Vec<SymbolicExpr>,
+    data: runmat_value::ExactArrayStorage<SymbolicExpr>,
     shape: Vec<usize>,
 }
 
 impl SymbolicConcatBlock {
     fn new(data: Vec<SymbolicExpr>, shape: Vec<usize>) -> BuiltinResult<Self> {
+        Self::from_shared(
+            runmat_value::ExactArrayStorage::shared_unbounded(data),
+            shape,
+        )
+    }
+    fn from_shared(
+        data: runmat_value::ExactArrayStorage<SymbolicExpr>,
+        shape: Vec<usize>,
+    ) -> BuiltinResult<Self> {
         let expected_len = checked_shape_len(&shape)?;
         if data.len() != expected_len {
             return Err(concat_error(format!(
@@ -148,7 +161,7 @@ fn symbolic_block_from_value(value: &Value) -> BuiltinResult<Option<SymbolicConc
             if shape[0] == 0 && shape[1] == 0 {
                 return Ok(None);
             }
-            SymbolicConcatBlock::new(array.data.clone(), shape).map(Some)
+            SymbolicConcatBlock::from_shared(array.data_owner().clone(), shape).map(Some)
         }
         Value::Tensor(tensor) => {
             let shape = normalize_symbolic_concat_shape(tensor.shape());
@@ -592,7 +605,11 @@ pub fn hcat_values(values: &[Value]) -> BuiltinResult<Value> {
                     blocks.push(sa.clone());
                 }
                 Value::String(s) => {
-                    let sa = runmat_value::StringArray::new(vec![s.clone()], vec![1, 1]).unwrap();
+                    let sa = runmat_value::StringArray::from_texts_unbounded(
+                        vec![s.clone()],
+                        vec![1, 1],
+                    )
+                    .unwrap();
                     if rows.is_none() {
                         rows = Some(1);
                     } else if rows != Some(1) {
@@ -615,7 +632,7 @@ pub fn hcat_values(values: &[Value]) -> BuiltinResult<Value> {
                     for r in 0..ca.rows {
                         let mut s = String::with_capacity(ca.cols);
                         for c in 0..ca.cols {
-                            s.push(ca.data[r * ca.cols + c]);
+                            s.push(ca.data()[r * ca.cols + c]);
                         }
                         out.push(s);
                     }
@@ -672,7 +689,7 @@ pub fn hcat_values(values: &[Value]) -> BuiltinResult<Value> {
             }
         }
         let rows = rows.unwrap_or(0);
-        let mut data: Vec<String> = Vec::with_capacity(rows * cols_total);
+        let mut data = Vec::with_capacity(rows * cols_total);
         for cacc in 0..cols_total {
             let _ = cacc;
         }
@@ -681,11 +698,11 @@ pub fn hcat_values(values: &[Value]) -> BuiltinResult<Value> {
             for c in 0..block.cols() {
                 for r in 0..rows {
                     let idx = r + c * rows;
-                    data.push(block.data[idx].clone());
+                    data.push(block.data()[idx].clone());
                 }
             }
         }
-        let sa = runmat_value::StringArray::new(data, vec![rows, cols_total])
+        let sa = runmat_value::StringArray::from_texts_unbounded(data, vec![rows, cols_total])
             .map_err(|e| concat_error(format!("string hcat: {e}")))?;
         return Ok(Value::StringArray(sa));
     }
@@ -750,7 +767,7 @@ pub fn hcat_values(values: &[Value]) -> BuiltinResult<Value> {
         for r in 0..rows {
             for block in &blocks {
                 for c in 0..block.cols {
-                    data.push(block.data[r * block.cols + c]);
+                    data.push(block.data()[r * block.cols + c]);
                 }
             }
         }
@@ -878,7 +895,11 @@ pub fn vcat_values(values: &[Value]) -> BuiltinResult<Value> {
                     blocks.push(sa.clone());
                 }
                 Value::String(s) => {
-                    let sa = runmat_value::StringArray::new(vec![s.clone()], vec![1, 1]).unwrap();
+                    let sa = runmat_value::StringArray::from_texts_unbounded(
+                        vec![s.clone()],
+                        vec![1, 1],
+                    )
+                    .unwrap();
                     rows_total += 1;
                     if cols.is_none() {
                         cols = Some(1);
@@ -891,7 +912,7 @@ pub fn vcat_values(values: &[Value]) -> BuiltinResult<Value> {
                     if ca.cols == 0 {
                         continue;
                     }
-                    let out: String = ca.data.iter().collect();
+                    let out: String = ca.data().iter().collect();
                     let sa = runmat_value::StringArray::new(vec![out], vec![1, 1]).unwrap();
                     rows_total += 1;
                     if cols.is_none() {
@@ -945,17 +966,17 @@ pub fn vcat_values(values: &[Value]) -> BuiltinResult<Value> {
             }
         }
         let cols = cols.unwrap_or(0);
-        let mut data: Vec<String> = Vec::with_capacity(rows_total * cols);
-        // Stack rows: copy columns for each block into data
-        for block in &blocks {
-            for c in 0..cols {
+        let mut data = Vec::with_capacity(rows_total * cols);
+        // Each output column contains that column from every stacked block.
+        for c in 0..cols {
+            for block in &blocks {
                 for r in 0..block.rows() {
                     let idx = r + c * block.rows();
-                    data.push(block.data[idx].clone());
+                    data.push(block.data()[idx].clone());
                 }
             }
         }
-        let sa = runmat_value::StringArray::new(data, vec![rows_total, cols])
+        let sa = runmat_value::StringArray::from_texts_unbounded(data, vec![rows_total, cols])
             .map_err(|e| concat_error(format!("string vcat: {e}")))?;
         return Ok(Value::StringArray(sa));
     }
@@ -1020,7 +1041,7 @@ pub fn vcat_values(values: &[Value]) -> BuiltinResult<Value> {
         for block in &blocks {
             for r in 0..block.rows {
                 for c in 0..cols {
-                    data.push(block.data[r * block.cols + c]);
+                    data.push(block.data()[r * block.cols + c]);
                 }
             }
         }
@@ -1402,7 +1423,7 @@ mod tests {
             assert_eq!(array.shape, vec![1, 3]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
@@ -1436,7 +1457,7 @@ mod tests {
             assert_eq!(array.shape, vec![2, 3]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
@@ -1461,7 +1482,7 @@ mod tests {
             assert_eq!(array.shape, vec![1, 2]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
@@ -1486,7 +1507,7 @@ mod tests {
             assert_eq!(array.shape, vec![1, 3]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
@@ -1511,7 +1532,7 @@ mod tests {
             assert_eq!(array.shape, vec![1, 1]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
@@ -1540,7 +1561,7 @@ mod tests {
             assert_eq!(array.shape, vec![1, 3]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
@@ -1565,7 +1586,7 @@ mod tests {
             assert_eq!(array.shape, vec![1, 1]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
@@ -1596,7 +1617,7 @@ mod tests {
             assert_eq!(array.shape, vec![1, 2, 2]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
@@ -1637,7 +1658,7 @@ mod tests {
             assert_eq!(array.shape, vec![2, 2, 2]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
@@ -1698,7 +1719,7 @@ mod tests {
             assert_eq!(array.shape, vec![3, 1]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
@@ -1766,7 +1787,7 @@ mod tests {
             assert_eq!(array.shape, vec![2, 1, 2]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
@@ -1844,7 +1865,7 @@ mod tests {
             assert_eq!(array.shape, vec![2, 2, 2]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
@@ -1930,19 +1951,48 @@ mod tests {
         let maximum = Value::Int(runmat_value::IntValue::U64(u64::MAX));
 
         let Value::StringArray(horizontal) =
-            hcat_values(&[Value::String("id".to_string()), maximum.clone()]).expect("hcat")
+            hcat_values(&[Value::string("id".to_string()), maximum.clone()]).expect("hcat")
         else {
             panic!("expected string array");
         };
         assert_eq!(horizontal.shape, vec![1, 2]);
-        assert_eq!(horizontal.data, vec!["id", "18446744073709551615"]);
+        assert_eq!(horizontal.data(), vec!["id", "18446744073709551615"]);
 
         let Value::StringArray(vertical) =
-            vcat_values(&[Value::String("id".to_string()), maximum]).expect("vcat")
+            vcat_values(&[Value::string("id".to_string()), maximum]).expect("vcat")
         else {
             panic!("expected string array");
         };
         assert_eq!(vertical.shape, vec![2, 1]);
-        assert_eq!(vertical.data, vec!["id", "18446744073709551615"]);
+        assert_eq!(vertical.data(), vec!["id", "18446744073709551615"]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn string_vertical_concatenation_stacks_each_column() {
+        let top = runmat_value::StringArray::new(
+            ["a", "b", "c", "d"].into_iter().map(String::from).collect(),
+            vec![2, 2],
+        )
+        .unwrap();
+        let bottom = runmat_value::StringArray::new(
+            ["e", "f", "g", "h"].into_iter().map(String::from).collect(),
+            vec![2, 2],
+        )
+        .unwrap();
+        let Value::StringArray(output) =
+            vcat_values(&[Value::StringArray(top), Value::StringArray(bottom)]).unwrap()
+        else {
+            panic!("expected string array")
+        };
+        assert_eq!(output.shape.as_slice(), &[4, 2]);
+        assert_eq!(
+            output
+                .data()
+                .iter()
+                .map(|text| text.as_str())
+                .collect::<Vec<_>>(),
+            ["a", "b", "e", "f", "c", "d", "g", "h"]
+        );
     }
 }

@@ -110,11 +110,13 @@ pub(super) fn constraint_form(first: &Value, second: &Value) -> bool {
     looks_like_point_matrix(first) && (!is_vector_value(first) || empty_constraints(second))
 }
 
-pub(super) fn constructor(args: &[Value]) -> BuiltinResult<()> {
-    match args {
-        [] => Ok(()),
-        [points] => matrix(points, BUILTIN_NAME),
-        [first, second] if constraint_form(first, second) => {
+pub(super) fn constructor(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<()> {
+    match args.len() {
+        0 => Ok(()),
+        1 => matrix(&args[0], BUILTIN_NAME),
+        2 if constraint_form(&args[0], &args[1]) => {
+            let first = &args[0];
+            let second = &args[1];
             matrix(first, BUILTIN_NAME)?;
             let (rows, columns, len) = numeric_shape(second, BUILTIN_NAME)?;
             if rows == 0 || len == 0 {
@@ -127,8 +129,11 @@ pub(super) fn constructor(args: &[Value]) -> BuiltinResult<()> {
                 ))
             }
         }
-        [x, y] => vector_pair(x, y, BUILTIN_NAME),
-        [x, y, third] => {
+        2 => vector_pair(&args[0], &args[1], BUILTIN_NAME),
+        3 => {
+            let x = &args[0];
+            let y = &args[1];
+            let third = &args[2];
             vector_pair(x, y, BUILTIN_NAME)?;
             if !looks_like_constraints(third)
                 && !matches!(third, Value::GpuTensor(handle) if handle.shape().get(1) == Some(&2))
@@ -152,10 +157,13 @@ pub(super) fn constructor(args: &[Value]) -> BuiltinResult<()> {
     }
 }
 
-pub(super) fn query(args: &[Value], builtin: &'static str) -> BuiltinResult<()> {
-    match args {
-        [points] => matrix(points, builtin),
-        [x, y] => vector_pair(x, y, builtin),
+pub(super) fn query(
+    args: crate::call::FunctionArgumentView<'_>,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    match args.len() {
+        1 => matrix(&args[0], builtin),
+        2 => vector_pair(&args[0], &args[1], builtin),
         _ => Err(invalid(format!(
             "{builtin}: expected query matrix or x,y vectors"
         ))),

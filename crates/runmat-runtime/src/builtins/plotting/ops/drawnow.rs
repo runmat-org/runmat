@@ -33,7 +33,7 @@ use errors::{attach_disposition, cancelled_flush, drawnow_error};
 pub async fn drawnow_builtin(
     runtime: Option<RuntimeContext>,
     requested_outputs: Option<usize>,
-    arguments: Vec<Value>,
+    arguments: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let selected = runtime.clone();
     let operation = drawnow_in_context(runtime.as_ref(), requested_outputs, arguments);
@@ -46,7 +46,7 @@ pub async fn drawnow_builtin(
 async fn drawnow_in_context(
     runtime: Option<&RuntimeContext>,
     requested_outputs: Option<usize>,
-    arguments: Vec<Value>,
+    arguments: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     match requested_outputs {
         Some(count) if count > 1 => {
@@ -72,7 +72,7 @@ async fn drawnow_in_context(
         _ => {}
     }
 
-    let control = parse_controls(&arguments)?;
+    let control = parse_controls(arguments.view())?;
     let runtime = runtime.ok_or_else(|| {
         crate::context::RuntimeCapabilityError::new(
             crate::context::RuntimeCapability::GraphicsPresentation,

@@ -161,7 +161,7 @@ fn admit_axis_column(value: &Value, height: usize) -> BuiltinResult<()> {
             tensor.cols() == 1 && tensor.rows() == height && tensor.len() == height
         }
         Value::StringArray(array) => {
-            array.cols() == 1 && array.rows() == height && array.data.len() == height
+            array.cols() == 1 && array.rows() == height && array.data().len() == height
         }
         Value::LogicalArray(array) => {
             array.shape.first().copied() == Some(height)
@@ -170,8 +170,8 @@ fn admit_axis_column(value: &Value, height: usize) -> BuiltinResult<()> {
         Value::Cell(array) => {
             array.cols == 1
                 && array.rows == height
-                && array.data.len() == height
-                && array.data.iter().all(|item| {
+                && array.data().len() == height
+                && array.data().iter().all(|item| {
                     matches!(item, Value::String(_))
                         || matches!(item, Value::CharArray(chars) if chars.rows == 1)
                 })

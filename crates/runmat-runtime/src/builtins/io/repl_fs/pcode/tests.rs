@@ -21,7 +21,12 @@ fn source_admission_precedes_resolution_and_provider_access() {
     let row = Value::CharArray(
         runmat_value::CharArray::new_with_shape(vec!['a', 'b'], vec![1, 2, 1]).unwrap(),
     );
-    assert_eq!(parse_options(&[row]).unwrap().items, vec!["ab"]);
+    assert_eq!(
+        parse_options(crate::call::FunctionArgumentView::from_slice(&[row]))
+            .unwrap()
+            .items,
+        vec!["ab"]
+    );
     let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     assert_eq!(
         block_on(evaluate(&[])).unwrap_err().identifier(),

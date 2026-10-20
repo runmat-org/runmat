@@ -86,8 +86,14 @@ async fn store_member_in_scope<OnWrite>(
 where
     OnWrite: FnMut(&Value, &Value),
 {
-    let _inputs_root = RootedValueLease::for_values([&base, &rhs].into_iter())
-        .map_err(|error| error.into_runtime_error())?;
+    let _inputs_root = match context {
+        Some(context) => RootedValueLease::for_value_slices_in_context(
+            &[std::slice::from_ref(&base), std::slice::from_ref(&rhs)],
+            context,
+        )?,
+        None => RootedValueLease::for_values([&base, &rhs].into_iter())
+            .map_err(|error| error.into_runtime_error())?,
+    };
     match base {
         Value::Object(obj) => {
             let base = Value::Object(obj.clone());
@@ -195,9 +201,9 @@ where
             crate::foreign::store_foreign_member(reference, field, rhs).await
         }
         Value::Num(0.0) if allow_init => {
-            let mut st = StructValue::new();
-            st.fields.insert(field, rhs);
-            RootedValue::new(Value::Struct(st)).map_err(|error| error.into_runtime_error())
+            crate::execution::structure::construct_struct_from_fields_in_optional_context(
+                context, std::iter::once((field.as_str(), &rhs)),
+            )
         }
         base @ (Value::Num(_) | Value::Int(_)) => {
             if !is_possible_graphics_handle_value(&base) {
@@ -213,12 +219,17 @@ where
                     }
                 })
         }
-        Value::Struct(mut st) => {
+        Value::Struct(st) => {
             if let Some(oldv) = st.fields.get(&field) {
                 on_write(oldv, &rhs);
             }
-            st.fields.insert(field, rhs);
-            RootedValue::new(Value::Struct(st)).map_err(|error| error.into_runtime_error())
+            let existing = st.fields.contains_key(&field);
+            crate::execution::structure::construct_struct_from_fields_in_optional_context(
+                context,
+                st.fields.iter()
+                    .map(|(name, value)| (name, if name == field { &rhs } else { value }))
+                    .chain((!existing).then_some((field.as_str(), &rhs))),
+            )
         }
         Value::StructArray(_) => Err(mex(
             "RunMat:CommaSeparatedListAssignmentArity",

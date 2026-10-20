@@ -78,7 +78,7 @@ impl Options {
     }
 
     pub(super) fn headers(
-        args: Vec<Value>,
+        args: crate::call::BuiltinArguments,
     ) -> BuiltinResult<Vec<(OptimizableVariableOption, Value)>> {
         if !args.len().is_multiple_of(2) {
             return Err(error(

@@ -11,7 +11,7 @@ pub(super) fn admit(
     sample: &Value,
     training: &Value,
     group: Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<AdmittedHeader> {
     let sample_geometry = predictor_geometry(sample, "sample")?;
     let training_geometry = predictor_geometry(training, "training")?;
@@ -211,16 +211,20 @@ pub(super) fn group_count(value: &Value) -> BuiltinResult<Option<usize>> {
         }
         Value::StringArray(array) => {
             ensure_group_vector(&array.shape)?;
-            Some(array.data.len())
+            Some(array.data().len())
         }
         Value::Cell(array) => {
             ensure_group_vector(&array.shape)?;
-            if array.data.iter().any(crate::dispatcher::value_contains_gpu) {
+            if array
+                .data()
+                .iter()
+                .any(crate::dispatcher::value_contains_gpu)
+            {
                 return Err(invalid_argument(
                     "classify: group cell entries must be text",
                 ));
             }
-            Some(array.data.len())
+            Some(array.data().len())
         }
         Value::CharArray(array) => Some(array.rows),
         Value::GpuTensor(handle) => {

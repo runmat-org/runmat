@@ -35,7 +35,10 @@ fn flag(value: &Value) -> BuiltinResult<bool> {
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::summary::order_stats::tiedrank"
 )]
-pub(crate) async fn tiedrank_builtin(value: Value, flags: Vec<Value>) -> BuiltinResult<Value> {
+pub(crate) async fn tiedrank_builtin(
+    value: Value,
+    flags: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if flags.len() > 2 {
         return Err(order_error(
             "tiedrank",

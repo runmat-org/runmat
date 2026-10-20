@@ -25,7 +25,7 @@ use runmat_builtins::{
     LASSO_INTEGER_PARAMETER_EXTENSION, LASSO_RESIDENT_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{CellArray, CharArray, LogicalArray, StructValue, Tensor, Value};
+use runmat_value::{CellArray, CharArray, LogicalArray, Tensor, Value};
 
 use crate::builtins::common::tensor;
 use crate::builtins::stats::ml::regularized::{
@@ -142,7 +142,11 @@ struct OptionInput {
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::ml::lasso"
 )]
-pub(crate) async fn lasso_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(crate) async fn lasso_builtin(
+    x: Value,
+    y: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     let rest = admit_options(rest)?;
     ensure_extensions(&x, &y, &rest)?;
     let (rows, cols) = predictor_matrix_dimensions(&x)

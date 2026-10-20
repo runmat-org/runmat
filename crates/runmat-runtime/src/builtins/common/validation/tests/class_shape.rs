@@ -31,9 +31,20 @@ fn underlying_type_uses_allocation_class_not_owner_preference() {
         let value = Value::GpuTensor(source);
         assert!(value_underlying_type_matches(&value, vec!["single".into()]).unwrap());
         assert!(!value_underlying_type_matches(&value, vec!["double".into()]).unwrap());
-        must_be_underlying_type::evaluate(vec![value.clone(), Value::from("single")]).unwrap();
-        let error =
-            must_be_underlying_type::evaluate(vec![value, Value::from("double")]).unwrap_err();
+        must_be_underlying_type::evaluate(
+            crate::builtins::common::validation::tests::retained_arguments(vec![
+                value.clone(),
+                Value::from("single"),
+            ]),
+        )
+        .unwrap();
+        let error = must_be_underlying_type::evaluate(
+            crate::builtins::common::validation::tests::retained_arguments(vec![
+                value,
+                Value::from("double"),
+            ]),
+        )
+        .unwrap_err();
         assert_eq!(
             error.identifier(),
             Some("RunMat:mustBeUnderlyingType:ValidationFailed")

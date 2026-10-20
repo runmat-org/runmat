@@ -5,7 +5,10 @@ use runmat_value::{
 };
 
 fn call(value: Value, shift: Option<Value>) -> crate::BuiltinResult<Value> {
-    block_on(shiftdim_builtin(value, shift.into_iter().collect()))
+    block_on(shiftdim_builtin(
+        value,
+        crate::builtins::common::test_support::builtin_arguments(shift.into_iter().collect()),
+    ))
 }
 
 fn tensor_shape(value: &Value) -> &[usize] {
@@ -301,7 +304,7 @@ fn logical_string_cell_and_char_arrays_follow_shape_contract() {
         panic!("expected chars")
     };
     assert_eq!(chars.shape, vec![1, 1, 3]);
-    assert_eq!(chars.data.iter().collect::<String>(), "abc");
+    assert_eq!(chars.data().iter().collect::<String>(), "abc");
 }
 
 #[test]

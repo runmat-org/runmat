@@ -28,7 +28,7 @@ pub enum ExecutionServiceError {
     /// Exact receipt-localized V8 failure. Repeated fetches share this error
     /// owner, including its selected source-frame provenance and cause chain.
     #[error("execution failed: {}", .0.message)]
-    LocalizedRuntimeFailure(crate::runtime_error::RuntimeErrorOwner),
+    LocalizedRuntimeFailure(#[source] crate::runtime_error::RuntimeErrorOwner),
     #[error("requested output count exceeds the execution contract")]
     InvalidOutputContract,
 }

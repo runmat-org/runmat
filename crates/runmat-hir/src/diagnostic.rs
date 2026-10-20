@@ -2,6 +2,15 @@ use crate::Span;
 use runmat_types::ProgramSourceId;
 use serde::{Deserialize, Serialize};
 
+/// Static presentation and executable admission are separate decisions.
+/// A known failing value operation remains a diagnostic error, but it is
+/// valid executable code whose failure can be handled by its caller.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DiagnosticExecution {
+    RejectOnError,
+    RuntimeCheck,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HirDiagnosticSeverity {
     Error,
@@ -36,6 +45,7 @@ pub struct HirDiagnosticSuggestion {
 pub struct HirDiagnostic {
     pub code: String,
     pub severity: HirDiagnosticSeverity,
+    pub execution: DiagnosticExecution,
     pub message: String,
     pub primary: HirDiagnosticSpan,
     pub secondary: Vec<HirDiagnosticSpan>,
@@ -55,6 +65,7 @@ impl HirDiagnostic {
         Self {
             code: code.into(),
             severity,
+            execution: DiagnosticExecution::RejectOnError,
             message: message.into(),
             primary: HirDiagnosticSpan {
                 span,
@@ -67,6 +78,16 @@ impl HirDiagnostic {
             suggestions: Vec::new(),
             category: None,
         }
+    }
+
+    pub fn with_runtime_check(mut self) -> Self {
+        self.execution = DiagnosticExecution::RuntimeCheck;
+        self
+    }
+
+    pub fn blocks_execution(&self) -> bool {
+        self.severity == HirDiagnosticSeverity::Error
+            && self.execution == DiagnosticExecution::RejectOnError
     }
 
     pub fn with_primary_label(mut self, label: impl Into<String>) -> Self {

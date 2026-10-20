@@ -62,8 +62,11 @@ fn with_linkage_context(mut error: RuntimeError) -> RuntimeError {
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::ml::linkage"
 )]
-async fn linkage_builtin(input: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let options = parse_options(&rest)?;
+async fn linkage_builtin(
+    input: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let options = parse_options(rest.view())?;
     ensure_extensions(&input, &options)?;
     preflight_input_geometry(&input, &options)?;
     let tensor = value_to_tensor(input).await?;
@@ -116,7 +119,7 @@ async fn linkage_builtin(input: Value, rest: Vec<Value>) -> BuiltinResult<Value>
             MetricCaller::Linkage,
             &tensor,
             metric.kind,
-            metric.parameters,
+            crate::call::FunctionArgumentView::from_slice(&metric.parameters),
         )
         .await?;
         let distances = condensed_distances(MetricCaller::Linkage, &tensor, &metric)?;

@@ -9073,7 +9073,7 @@ impl AccelProvider for InProcessProvider {
             }
             let eval = runmat_runtime::builtins::math::linalg::factor::chol::evaluate(
                 Value::Tensor(tensor),
-                &args,
+                runmat_runtime::call::FunctionArgumentView::from_slice(&args),
             )
             .await
             .map_err(runtime_flow_to_provider_error)?;

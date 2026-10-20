@@ -36,17 +36,17 @@ impl EnvironmentValues {
                 Ok(Self::scalar(EnvironmentValue::Set(character_row(array))))
             }
             Value::StringArray(array) => Ok(Self {
-                values: array.data.iter().map(|text| string_value(text)).collect(),
-                shape: Some(array.shape.clone()),
+                values: array.data().iter().map(|text| string_value(text)).collect(),
+                shape: Some(array.shape.as_slice().to_vec()),
             }),
             Value::Cell(array) => {
-                let mut values = Vec::with_capacity(array.data.len());
+                let mut values = Vec::with_capacity(array.data().len());
                 for value in array.iter_column_major() {
                     values.push(Self::decode_scalar(value).ok_or(ValueError::InvalidCellElement)?);
                 }
                 Ok(Self {
                     values,
-                    shape: Some(array.shape.clone()),
+                    shape: Some(array.shape.as_slice().to_vec()),
                 })
             }
             value => Self::decode_scalar(value)
@@ -110,7 +110,7 @@ fn string_value(text: &str) -> EnvironmentValue {
 }
 
 fn character_row(array: &runmat_value::CharArray) -> String {
-    let mut text: String = array.data.iter().collect();
+    let mut text: String = array.data().iter().collect();
     while text.ends_with(' ') {
         text.pop();
     }

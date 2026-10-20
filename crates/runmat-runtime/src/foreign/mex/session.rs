@@ -385,7 +385,12 @@ impl MexRuntimeSession {
 
     async fn service_isolated_background_once(&self) -> bool {
         loop {
-            let paths = self.isolated.borrow().keys().cloned().collect::<Vec<_>>();
+            let paths = self
+                .isolated
+                .borrow()
+                .keys()
+                .map(ToOwned::to_owned)
+                .collect::<Vec<_>>();
             if paths.is_empty() {
                 return futures::future::pending().await;
             }
@@ -425,7 +430,7 @@ impl MexRuntimeSession {
     pub fn load_and_call<'a>(
         self: &'a Rc<Self>,
         name: &'a str,
-        arguments: Vec<Value>,
+        arguments: crate::call::RootedFunctionArguments,
         requested_outputs: usize,
         runtime: RuntimeContext,
     ) -> impl std::future::Future<Output = crate::user_functions::DynamicFunctionLoadAttempt> + 'a
@@ -444,7 +449,7 @@ impl MexRuntimeSession {
     pub fn load_installed_and_call<'a>(
         self: &'a Rc<Self>,
         name: &'a str,
-        arguments: Vec<Value>,
+        arguments: crate::call::RootedFunctionArguments,
         requested_outputs: usize,
         runtime: RuntimeContext,
     ) -> impl std::future::Future<Output = crate::user_functions::DynamicFunctionLoadAttempt> + 'a
@@ -461,15 +466,11 @@ impl MexRuntimeSession {
     async fn load_with_resolution(
         self: &Rc<Self>,
         name: &str,
-        arguments: Vec<Value>,
+        arguments: crate::call::RootedFunctionArguments,
         requested_outputs: usize,
         runtime: RuntimeContext,
         resolution: MexResolutionScope,
     ) -> crate::user_functions::DynamicFunctionLoadAttempt {
-        let input_roots = match crate::execution::RootedValueLease::for_values(arguments.iter()) {
-            Ok(roots) => roots,
-            Err(error) => return ControlFlow::Break(Err(error.into_runtime_error())),
-        };
         if self.abandoned.get() || self.shutdown_in_progress.get() {
             return ControlFlow::Break(Err(runtime_error(
                 "MEX:Lifecycle",
@@ -504,30 +505,23 @@ impl MexRuntimeSession {
             .await
             .unwrap_or(path);
         ControlFlow::Break(
-            self.dispatch_admitted_path(
-                canonical,
-                arguments,
-                requested_outputs,
-                runtime,
-                input_roots,
-            )
-            .await
-            .unwrap_or_else(|| {
-                Err(runtime_error(
-                    "MEX:SelectionChanged",
-                    "selected MEX target retired during invocation",
-                ))
-            }),
+            self.dispatch_admitted_path(canonical, arguments, requested_outputs, runtime)
+                .await
+                .unwrap_or_else(|| {
+                    Err(runtime_error(
+                        "MEX:SelectionChanged",
+                        "selected MEX target retired during invocation",
+                    ))
+                }),
         )
     }
 
     async fn dispatch_admitted_path(
         self: &Rc<Self>,
         canonical: PathBuf,
-        arguments: Vec<Value>,
+        arguments: crate::call::RootedFunctionArguments,
         requested_outputs: usize,
         runtime: RuntimeContext,
-        input_roots: crate::execution::RootedValueLease,
     ) -> Option<Result<crate::execution::RootedValueSequence, RuntimeError>> {
         let Some(tasks) = runtime.service_ports().local_tasks().cloned() else {
             return Some(Err(runtime_error(
@@ -549,7 +543,6 @@ impl MexRuntimeSession {
             move |task_runtime| {
                 let scoped_runtime = task_runtime.clone();
                 Box::pin(scoped_runtime.scope(async move {
-                    let _input_roots = input_roots;
                     let result = if task_runtime.is_cancelled() {
                         Some(Err(runtime_error(
                             "Cancelled",
@@ -599,7 +592,7 @@ impl MexRuntimeSession {
     async fn load_selected_and_call(
         &self,
         canonical: PathBuf,
-        arguments: Vec<Value>,
+        arguments: crate::call::RootedFunctionArguments,
         requested_outputs: usize,
         runtime: RuntimeContext,
     ) -> Option<Result<crate::execution::RootedValueSequence, RuntimeError>> {
@@ -691,7 +684,7 @@ impl MexRuntimeSession {
         };
         let values = registration.context();
         let mut inputs = Vec::with_capacity(arguments.len());
-        for argument in &arguments {
+        for argument in arguments.iter() {
             let argument = match crate::gather_if_needed_async(argument).await {
                 Ok(argument) => argument,
                 Err(error) => return Some(Err(error)),
@@ -1032,7 +1025,12 @@ impl MexRuntimeSession {
             return MexSessionRetirement::Retained(error);
         }
         let policy = *self.isolation_policy.borrow();
-        let paths = self.isolated.borrow().keys().cloned().collect::<Vec<_>>();
+        let paths = self
+            .isolated
+            .borrow()
+            .keys()
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>();
         let mut first_error = abandoned_operation;
         let mut retained = false;
         for path in paths {
@@ -1246,7 +1244,7 @@ impl MexRuntimeSession {
     async fn invoke_isolated(
         &self,
         path: &Path,
-        arguments: &[Value],
+        arguments: &crate::call::RootedFunctionArguments,
         requested_outputs: usize,
         api: Option<MexApi>,
         tier: MexBinaryTier,
@@ -1746,7 +1744,9 @@ mod tests {
         cancellation.cancel(runmat_execution::CancellationReason::User);
         let result = futures::executor::block_on(Rc::new(MexRuntimeSession::new()).load_and_call(
             "module_that_must_not_be_resolved",
-            Vec::new(),
+            crate::call::RootedFunctionArguments::ordinary(
+                crate::execution::RootedValues::new(Vec::new()).expect("empty arguments"),
+            ),
             0,
             runtime,
         ))
@@ -1759,17 +1759,25 @@ mod tests {
         let available = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
         let text = String::from("selected MEX argument owner");
         let payload = text.as_ptr();
-        let missing =
-            futures::executor::block_on(Rc::new(MexRuntimeSession::new()).load_installed_and_call(
+        let missing = futures::executor::block_on(
+            Rc::new(MexRuntimeSession::new()).load_installed_and_call(
                 "module_not_installed_in_this_owner",
-                vec![Value::String(text)],
+                crate::call::RootedFunctionArguments::ordinary(
+                    crate::execution::RootedValues::in_context(
+                        vec![Value::String(text.into())],
+                        &available,
+                    )
+                    .expect("root the original MEX argument"),
+                ),
                 0,
                 available,
-            ));
+            ),
+        );
         let std::ops::ControlFlow::Continue(arguments) = missing else {
             panic!("missing installed MEX returns original arguments");
         };
-        let [Value::String(text)] = arguments.as_slice() else {
+        assert_eq!(arguments.len(), 1);
+        let Some(Value::String(text)) = arguments.first() else {
             panic!("missing MEX returned original string argument");
         };
         assert_eq!(text.as_ptr(), payload);

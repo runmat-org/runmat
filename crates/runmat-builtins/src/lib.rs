@@ -412,14 +412,14 @@ impl Type {
                 shape: Some(array.shape.iter().map(|&d| Some(d)).collect()),
             },
             Value::Cell(cells) => {
-                if cells.data.is_empty() {
+                if cells.data().is_empty() {
                     Type::cell()
                 } else {
                     // Infer element type from first element
-                    let element_type = Type::from_value(&cells.data[0]);
+                    let element_type = Type::from_value(&cells.data()[0]);
                     Type::Cell {
                         element_type: Some(Box::new(element_type)),
-                        length: Some(cells.data.len()),
+                        length: Some(cells.data().len()),
                     }
                 }
             }
@@ -427,7 +427,7 @@ impl Type {
                 shape: Some(h.shape().iter().map(|&d| Some(d)).collect()),
             },
             Value::Object(object) => Type::Object {
-                class_name: Some(object.class_name.clone()),
+                class_name: Some(object.class_name().clone()),
                 shape: Some(vec![Some(1), Some(1)]),
             },
             Value::ObjectArray(array) => Type::Object {
@@ -435,7 +435,7 @@ impl Type {
                 shape: Some(array.shape().iter().copied().map(Some).collect()),
             },
             Value::HandleObject(handle) => Type::Object {
-                class_name: Some(handle.class_name.clone()),
+                class_name: Some(handle.class_name.as_identity().clone()),
                 shape: Some(vec![Some(1), Some(1)]),
             },
             Value::Listener(_) => Type::Unknown,
@@ -464,7 +464,7 @@ impl Type {
                 // Treat as cell of char for type purposes; or a 2-D char matrix conceptually
                 Type::Cell {
                     element_type: Some(Box::new(Type::String)),
-                    length: Some(ca.data.len()),
+                    length: Some(ca.data().len()),
                 }
             }
             Value::OutputList(values) => {

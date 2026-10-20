@@ -216,13 +216,13 @@ fn validate_reference(reference: &ValueRef) -> Result<(), ContractError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::VALUE_PAYLOAD_SCHEMA_V1;
+    use crate::schema::VALUE_PAYLOAD_SCHEMA_VERSION;
 
     fn reference(name: &str, scope: &str) -> ValueRef {
         let logical_digest = Digest::sha256(name);
         let encryption_context = Digest::sha256(scope);
         ValueRef {
-            schema_version: VALUE_PAYLOAD_SCHEMA_V1,
+            schema_version: VALUE_PAYLOAD_SCHEMA_VERSION,
             id: artifact_object_value_id(logical_digest, encryption_context, scope),
             logical_digest,
             encoded_length: name.len() as u64,

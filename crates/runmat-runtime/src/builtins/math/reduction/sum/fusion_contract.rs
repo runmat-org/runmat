@@ -17,7 +17,10 @@ fn prepare(controls: FusionReductionControls<'_>) -> FusionReductionPrepareFutur
         if !controls.supported() {
             return Ok(None);
         }
-        let parsed = parse_arguments(controls.values).await?;
+        let parsed = parse_arguments(crate::call::FunctionArgumentView::from_slice(
+            controls.values,
+        ))
+        .await?;
         Ok(Some(
             Box::new(Prepared(parsed)) as Box<dyn PreparedFusionReduction>
         ))
@@ -91,9 +94,14 @@ mod tests {
         value: Value,
         rest: Vec<Value>,
     ) -> BuiltinResult<Value> {
-        super::super::sum_builtin(None, observation, value, rest)
-            .await
-            .map(|owned| owned.value().clone())
+        super::super::sum_builtin(
+            None,
+            observation,
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        )
+        .await
+        .map(|owned| owned.value().clone())
     }
 
     fn receipt(value: &Value, controls: &[Value]) -> Option<FusionReductionContract> {

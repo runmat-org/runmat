@@ -9,9 +9,12 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 use runmat_types::MemberAccess;
-use runmat_value::{MemmapReceiverAuthority, Value};
+use runmat_value::{ExactObjectBuilder, MemmapReceiverAuthority, MemmapReceiverState, Value};
 
 use super::{format_error, MemmapFormat};
+use crate::context::host_allocation::{
+    host_allocation_runtime_error, HostAllocationError, HostAllocationPlan, HostAllocationReceipt,
+};
 use crate::execution::{RootedValue, RootedValueLease};
 use crate::object::indexing::{ObjectIndexKind, ObjectIndexSelector, ObjectSubscript};
 use crate::{BuiltinResult, OBJECT_SUBSASGN_METHOD, OBJECT_SUBSREF_METHOD};
@@ -19,6 +22,165 @@ use crate::{BuiltinResult, OBJECT_SUBSASGN_METHOD, OBJECT_SUBSREF_METHOD};
 mod data;
 use data::{read_data, write_data};
 mod ranges;
+
+fn replace_receiver_state(
+    runtime: Option<&crate::context::RuntimeContext>,
+    object: runmat_value::ObjectInstance,
+    state: MemmapReceiverState,
+) -> BuiltinResult<runmat_value::ObjectInstance> {
+    let policy = HostAllocationReceipt::policy(runtime).map_err(|source| {
+        host_allocation_runtime_error(
+            runtime,
+            "RunMat:memmapfile:Allocation",
+            "memmapfile receiver authority is no longer current",
+            source,
+        )
+    })?;
+    if policy == crate::context::host_allocation::HostAllocationPolicy::Unbounded {
+        let mut builder = object.into_unbounded_builder().map_err(|_| {
+            format_error("memmapfile: admitted receiver cannot enter an unbounded edit")
+        })?;
+        builder.replace_memmap_receiver(state);
+        return Ok(builder.finish());
+    }
+    let runtime = runtime.expect("Managed allocation policy has a selected runtime");
+    let allocation = |message: &'static str, source: HostAllocationError| {
+        host_allocation_runtime_error(
+            Some(runtime),
+            "RunMat:memmapfile:Allocation",
+            message,
+            source,
+        )
+    };
+    let replacement = ExactObjectBuilder::replacement_quote(
+        object.property_count(),
+        object.dynamic_property_count(),
+    )
+    .map_err(|source| {
+        host_allocation_runtime_error(
+            Some(runtime),
+            "RunMat:memmapfile:Allocation",
+            "memmapfile replacement geometry is invalid",
+            HostAllocationError::Numeric(source),
+        )
+    })?;
+    let metadata = object.unclaimed_metadata_quote().map_err(|source| {
+        host_allocation_runtime_error(
+            Some(runtime),
+            "RunMat:memmapfile:Allocation",
+            "memmapfile metadata geometry is invalid",
+            HostAllocationError::Numeric(source),
+        )
+    })?;
+    let native =
+        ExactObjectBuilder::memmap_receiver_native_requested_bytes(&state).map_err(|source| {
+            host_allocation_runtime_error(
+                Some(runtime),
+                "RunMat:memmapfile:Allocation",
+                "memmapfile receiver geometry is invalid",
+                HostAllocationError::Numeric(source),
+            )
+        })?;
+    let physical = replacement
+        .requested_bytes
+        .checked_add(metadata.requested_bytes)
+        .and_then(|bytes| bytes.checked_add(native))
+        .ok_or_else(|| {
+            host_allocation_runtime_error(
+                Some(runtime),
+                "RunMat:memmapfile:Allocation",
+                "memmapfile replacement geometry overflow",
+                HostAllocationError::Overflow,
+            )
+        })?;
+    let claims = replacement
+        .retained_claims
+        .checked_add(metadata.retained_claims)
+        .and_then(|claims| {
+            claims.checked_add(ExactObjectBuilder::memmap_receiver_native_retained_claim_count())
+        })
+        .ok_or_else(|| {
+            host_allocation_runtime_error(
+                Some(runtime),
+                "RunMat:memmapfile:Allocation",
+                "memmapfile replacement claim count overflow",
+                HostAllocationError::Overflow,
+            )
+        })?;
+    let retained = HostAllocationPlan::retained_exact_output_bytes(
+        u64::try_from(physical).map_err(|_| {
+            host_allocation_runtime_error(
+                Some(runtime),
+                "RunMat:memmapfile:Allocation",
+                "memmapfile replacement geometry overflow",
+                HostAllocationError::Overflow,
+            )
+        })?,
+        claims,
+    )
+    .map_err(|source| allocation("memmapfile replacement retained quote failed", source))?;
+    let receipt = HostAllocationReceipt::admit(
+        Some(runtime),
+        HostAllocationPlan::new(0, retained)
+            .map_err(|source| allocation("memmapfile replacement quote failed", source))?,
+    )
+    .map_err(|source| allocation("memmapfile replacement admission failed", source))?
+    .ok_or_else(|| {
+        host_allocation_runtime_error(
+            Some(runtime),
+            "RunMat:memmapfile:Allocation",
+            "memmapfile replacement has no managed owner",
+            HostAllocationError::MissingManagedOwner,
+        )
+    })?;
+    let permit = receipt
+        .output_permit(runtime)
+        .map_err(|source| allocation("memmapfile replacement permit is stale", source))?;
+    object.try_admit_metadata_exact(&permit).map_err(|source| {
+        host_allocation_runtime_error(
+            Some(runtime),
+            "RunMat:memmapfile:Allocation",
+            "memmapfile metadata admission failed",
+            HostAllocationError::Numeric(source),
+        )
+    })?;
+    let builder = ExactObjectBuilder::prepare_copy(
+        &object,
+        object.property_count(),
+        object.dynamic_property_count(),
+        &permit,
+    );
+    receipt
+        .checkpoint(runtime)
+        .map_err(|source| allocation("memmapfile replacement was cancelled", source))?;
+    let mut builder = builder
+        .map_err(|source| format_error(format!("memmapfile: replacement failed: {source}")))?;
+    let native = builder.replace_memmap_receiver(state, &permit);
+    receipt
+        .checkpoint(runtime)
+        .map_err(|source| allocation("memmapfile replacement was cancelled", source))?;
+    native.map_err(|source| {
+        host_allocation_runtime_error(
+            Some(runtime),
+            "RunMat:memmapfile:Allocation",
+            "memmapfile receiver allocation failed",
+            HostAllocationError::Numeric(source),
+        )
+    })?;
+    let replacement = builder.finish();
+    receipt
+        .checkpoint(runtime)
+        .map_err(|source| allocation("memmapfile replacement was cancelled", source))?;
+    let replacement = replacement.map_err(|source| {
+        host_allocation_runtime_error(
+            Some(runtime),
+            "RunMat:memmapfile:Allocation",
+            "memmapfile replacement publication failed",
+            HostAllocationError::Numeric(source),
+        )
+    })?;
+    Ok(replacement)
+}
 
 #[cfg(test)]
 #[path = "live/tests.rs"]
@@ -69,13 +231,16 @@ pub(in crate::builtins::io::repl_fs::compat) fn ensure_class_registered() {
                 },
             );
         }
-        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            events: Default::default(),
-            name: MEMMAPFILE_CLASS.into(),
-            parent: None,
-            properties,
-            methods,
-        });
+        crate::class_registry::register_builtin_class(
+            MEMMAPFILE_CLASS,
+            crate::class_registry::RuntimeClass {
+                events: Default::default(),
+                name: MEMMAPFILE_CLASS.into(),
+                parent: None,
+                properties,
+                methods,
+            },
+        );
     });
 }
 
@@ -219,7 +384,7 @@ async fn read_first(
     };
     let value = match property {
         Property::Filename => object
-            .properties
+            .properties()
             .get("Filename")
             .cloned()
             .ok_or_else(|| format_error("memmapfile: Filename presentation is missing")),
@@ -251,13 +416,13 @@ async fn write_first(
     let _input_roots = RootedValueLease::for_values([&receiver, &rhs].into_iter())
         .map_err(|error| error.into_runtime_error())?;
     let property = member(&step)?;
-    let Value::Object(mut object) = receiver else {
+    let Value::Object(object) = receiver else {
         return Err(format_error("memmapfile: receiver is not an object"));
     };
     if !object.is_class(MEMMAPFILE_CLASS) {
         return Err(format_error("memmapfile: receiver has the wrong class"));
     }
-    let state = object
+    let mut state = object
         .memmap_receiver()
         .cloned()
         .ok_or_else(|| format_error("memmapfile: receiver has no sealed state"))?;
@@ -313,10 +478,7 @@ async fn write_first(
             if writable && !opened_writable {
                 return Err(format_error("memmapfile: opened backing is read-only"));
             }
-            object
-                .memmap_receiver_mut()
-                .expect("resolved state")
-                .writable = writable;
+            state.writable = writable;
         }
         Property::Offset => {
             let offset = super::numeric_usize(&rhs, "Offset")?;
@@ -326,21 +488,28 @@ async fn write_first(
             {
                 return Err(format_error("memmapfile: Offset exceeds opened extent"));
             }
-            object.memmap_receiver_mut().expect("resolved state").offset = offset;
+            state.offset = offset;
         }
         Property::Repeat => {
             let repeat = super::repeat_count(&rhs)?;
             MemmapFormat::from_receiver(&state)?.validate_layout(repeat)?;
-            object.memmap_receiver_mut().expect("resolved state").repeat = repeat;
+            state.repeat = repeat;
         }
         Property::Format => {
             let format = MemmapFormat::from_value(&rhs)?;
             format.validate_layout(state.repeat)?;
-            let receiver = object.memmap_receiver_mut().expect("resolved state");
-            receiver.fields = format.receiver_fields();
-            receiver.format_presentation = format.receiver_presentation();
+            state.fields = format.receiver_fields();
+            state.format_presentation = format.receiver_presentation();
         }
         Property::Filename => return Err(format_error("memmapfile: property is not assignable")),
     }
-    RootedValue::new(Value::Object(object)).map_err(|error| error.into_runtime_error())
+    let object = if property == Property::Data {
+        object
+    } else {
+        replace_receiver_state(runtime, object, state)?
+    };
+    match runtime {
+        Some(runtime) => RootedValue::in_context(Value::Object(object), runtime),
+        None => RootedValue::new(Value::Object(object)).map_err(|error| error.into_runtime_error()),
+    }
 }

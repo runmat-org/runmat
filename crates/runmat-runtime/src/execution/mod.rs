@@ -10,11 +10,22 @@ mod program_capture;
 mod retained_value;
 pub(crate) mod rooted_continuation;
 mod running_future;
+mod future_handle;
+pub use future_handle::{FutureCompletionRef, FutureExecutionHandle, FutureExecutionIdentity};
 mod services;
 pub(crate) mod staged_file;
 mod storable;
+pub(crate) mod object;
+pub(crate) mod structure;
+pub(crate) mod object_array;
+pub use object::construct_object_in_context;
 pub use program_capture::{
     capture_deferred_environment, capture_deferred_program, DeferredProgramCapture,
+};
+pub(crate) use structure::construct_struct_from_fields_in_optional_context;
+pub use structure::{
+    construct_struct_array_from_columns_in_context, construct_struct_array_from_values_in_context,
+    construct_struct_from_fields_in_context, construct_struct_in_context,
 };
 pub mod value_codec;
 
@@ -22,12 +33,13 @@ pub mod value_codec;
 pub use blocking_cpu::native_default_blocking_cpu_service;
 pub use blocking_cpu::{OwnedCpuJob, RuntimeBlockingCpuService};
 pub use capture::{validate_spawn_capture, validate_spawn_captures};
+pub(crate) use completion::{
+    ArgumentProjection, RootedValueAdmissionError, RootedValueChildren, RootedValueHandles,
+    RootedValueMember,
+};
 pub use completion::{
     RootedResult, RootedValue, RootedValueLease, RootedValueSequence, RootedValues,
-    RootedValuesBuilder,
-};
-pub(crate) use completion::{
-    RootedValueAdmissionError, RootedValueChildren, RootedValueHandles, RootedValueMember,
+    RootedValuesBuilder, RootedValuesIntoIter,
 };
 pub use cooperation::{CpuCooperationBudget, CpuCooperationPolicy};
 pub use errors::{

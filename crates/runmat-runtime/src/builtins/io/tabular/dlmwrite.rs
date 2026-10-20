@@ -79,7 +79,7 @@ async fn dlmwrite_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     filename: Value,
     data: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     let mut cooperation = TabularCooperation::new(runtime.as_ref(), BUILTIN_NAME);
     let outputs = crate::output_count::current_output_count();
@@ -112,7 +112,7 @@ async fn dlmwrite_builtin(
         .iter()
         .all(|value| !matches!(value, Value::GpuTensor(_)))
     {
-        Some(parse_arguments(&rest)?)
+        Some(parse_arguments(rest.view())?)
     } else {
         None
     };
@@ -141,22 +141,22 @@ async fn dlmwrite_builtin(
             )
         })?;
 
-    let mut gathered_args = Vec::with_capacity(rest.len());
-    for value in &rest {
-        gathered_args.push(
-            await_io(
+    let gathered_args = rest
+        .try_map_preserving_roots_async(rest.len(), runtime.as_ref(), async |index| {
+            let value = await_io(
                 runtime.as_ref(),
                 BUILTIN_NAME,
-                gather_if_needed_async(value),
+                gather_if_needed_async(&rest[index]),
             )
             .await?
-            .map_err(map_control_flow)?,
-        );
-        cooperation.completed(0).await?;
-    }
+            .map_err(map_control_flow)?;
+            cooperation.completed(0).await?;
+            Ok(value)
+        })
+        .await?;
     let options = match prepared_host_options {
         Some(options) => options,
-        None => parse_arguments(&gathered_args)?,
+        None => parse_arguments(gathered_args.view())?,
     };
 
     let gathered_data = await_io(

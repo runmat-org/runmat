@@ -158,8 +158,11 @@ const MAX_NORMALIZE_DIM: usize = 64;
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::summary::normalize"
 )]
-async fn normalize_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    ensure_compatibility(&value, &rest)?;
+async fn normalize_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    ensure_compatibility(&value, rest.view())?;
     let domain = arguments::InputDomain::of(&value)?;
     let admitted = admit_args(domain, rest)?;
     let output = NormalizeOutputPlan::inspect(&value)?;
@@ -168,7 +171,10 @@ async fn normalize_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Valu
     output.finish(evaluate(input, parsed)?)
 }
 
-fn ensure_compatibility(value: &Value, rest: &[Value]) -> BuiltinResult<()> {
+fn ensure_compatibility(
+    value: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     if is_typed_integer(value) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &NORMALIZE_INTEGER_DATA_EXTENSION,

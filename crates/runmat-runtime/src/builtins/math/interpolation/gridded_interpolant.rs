@@ -34,9 +34,7 @@ use runmat_builtins::{
 #[cfg(test)]
 use runmat_builtins::{GRIDDED_INTERPOLANT_EXTENSIONS, GRIDDED_INTERPOLANT_INTEGER_CAPABILITIES};
 use runmat_macros::runtime_builtin;
-use runmat_value::{
-    CellArray, IntValue, IntegerStorage, NumericDType, ObjectInstance, Tensor, Value,
-};
+use runmat_value::{CellArray, IntValue, IntegerStorage, NumericDType, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -252,27 +250,34 @@ fn ensure_gridded_interpolant_class_registered() {
                 role: runmat_types::ClassMethodRole::Ordinary,
             },
         );
-        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            events: Default::default(),
-            name: CLASS_IDENTITY.into(),
-            parent: None,
-            properties,
-            methods,
-        });
+        crate::class_registry::register_builtin_class(
+            CLASS_IDENTITY,
+            crate::class_registry::RuntimeClass {
+                events: Default::default(),
+                name: CLASS_IDENTITY.into(),
+                parent: None,
+                properties,
+                methods,
+            },
+        );
     });
 }
 
 #[runtime_builtin(
     name = "griddedInterpolant",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::interpolation::gridded_interpolant"
 )]
-async fn gridded_interpolant_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    ensure_constructor_integer_extensions(&args)?;
-    let args = gather_values(args).await?;
+async fn gridded_interpolant_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<crate::execution::RootedValue> {
+    ensure_constructor_integer_extensions(args.view())?;
+    let args = gather_values(&args, runtime.as_ref()).await?;
     ensure_gridded_interpolant_class_registered();
     let spec = parse_constructor(args)?;
-    Ok(Value::Object(spec_to_object(spec)?))
+    spec_to_object(runtime.as_ref(), spec)
 }
 
 #[runtime_builtin(
@@ -314,11 +319,11 @@ async fn gridded_interpolant_read_step(
     let value = match step.kind() {
         crate::object::indexing::ObjectIndexKind::Member => gridded_member(obj, payload),
         crate::object::indexing::ObjectIndexKind::Paren => {
-            let query_args = payload_to_args(payload)?;
-            let allocation = admit_spline2_from_object(&obj, &query_args, runtime)?;
+            let query_args = payload_to_args(payload, runtime)?;
+            let allocation = admit_spline2_from_object(&obj, query_args.view(), runtime)?;
             let spec = object_to_spec(&obj)?;
-            ensure_query_integer_extensions(&query_args)?;
-            let query_args = gather_values(query_args).await?;
+            ensure_query_integer_extensions(query_args.view())?;
+            let query_args = gather_values(&query_args, runtime).await?;
             if let (Some(receipt), Some(runtime)) = (allocation.as_ref(), runtime) {
                 receipt
                     .checkpoint(runtime)
@@ -330,5 +335,5 @@ async fn gridded_interpolant_read_step(
             Err(invalid("brace indexing is not supported"))
         }
     }?;
-    crate::execution::RootedValue::new(value).map_err(|error| error.into_runtime_error())
+    crate::execution::RootedValue::in_optional_context(value, runtime)
 }

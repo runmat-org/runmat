@@ -1,4 +1,4 @@
-use runmat_value::{StringArray, Value};
+use runmat_value::Value;
 
 #[path = "support/mod.rs"]
 mod test_helpers;
@@ -12,7 +12,7 @@ fn datetime_construction_and_component_access_work_in_scripts() {
 
     assert!(vars
         .iter()
-        .any(|value| matches!(value, Value::Object(obj) if obj.class_name.is(runmat_types::StaticClassIdentity::new("datetime")))));
+        .any(|value| matches!(value, Value::Object(obj) if obj.class_name().is(runmat_types::StaticClassIdentity::new("datetime")))));
     assert!(vars
         .iter()
         .any(|value| matches!(value, Value::Num(n) if (*n - 2024.0).abs() < f64::EPSILON)));
@@ -35,9 +35,9 @@ fn datetime_string_and_indexing_work_for_arrays() {
         .iter()
         .any(|value| matches!(value, Value::Num(n) if (*n - 2025.0).abs() < f64::EPSILON)));
     assert!(vars.iter().any(|value| match value {
-        Value::StringArray(StringArray { data, .. }) => {
-            data.iter().any(|text| text == "15-Jan-2024")
-                && data.iter().any(|text| text == "20-Jun-2025")
+        Value::StringArray(array) => {
+            array.data().iter().any(|text| text == "15-Jan-2024")
+                && array.data().iter().any(|text| text == "20-Jun-2025")
         }
         _ => false,
     }));
@@ -59,7 +59,7 @@ fn datetime_comparisons_and_format_assignment_work() {
         .any(|value| matches!(value, Value::Num(n) if (*n - 1.0).abs() < f64::EPSILON)));
     assert!(vars.iter().any(|value| match value {
         Value::CharArray(array) => {
-            let rendered: String = array.data.iter().collect();
+            let rendered: String = array.data().iter().collect();
             rendered.trim_end() == "2024-01-01"
         }
         _ => false,
@@ -114,7 +114,7 @@ fn datetime_legacy_conversion_helpers_execute_in_scripts() {
         .any(|value| matches!(value, Value::Num(n) if (*n - 29.0).abs() < f64::EPSILON)));
     assert!(vars.iter().any(|value| match value {
         Value::CharArray(array) => {
-            let rendered: String = array.data.iter().collect();
+            let rendered: String = array.data().iter().collect();
             rendered.trim_end() == "2024-03-14"
         }
         _ => false,
@@ -136,7 +136,7 @@ fn calendar_duration_helpers_execute_in_scripts() {
 
     assert!(vars.iter().any(|value| match value {
         Value::CharArray(array) => {
-            let rendered: String = array.data.iter().collect();
+            let rendered: String = array.data().iter().collect();
             rendered.trim_end() == "2024-02-29"
         }
         _ => false,

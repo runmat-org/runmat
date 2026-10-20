@@ -15,6 +15,6 @@ use crate::BuiltinResult;
     binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::pwd"
 )]
-async fn pwd_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn pwd_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     execute::run(args)
 }

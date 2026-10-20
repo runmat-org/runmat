@@ -16,7 +16,7 @@ pub(super) async fn bytes_to_value(
 ) -> BuiltinResult<Value> {
     match datatype {
         DataType::Char => char_row(bytes, work).await,
-        DataType::String => latin1_string(bytes, work).await.map(Value::String),
+        DataType::String => latin1_string(bytes, work).await.map(Value::string),
         DataType::UInt8
         | DataType::Int8
         | DataType::UInt16

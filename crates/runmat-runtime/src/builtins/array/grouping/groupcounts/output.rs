@@ -79,7 +79,7 @@ fn column_labels(
                 .ok_or_else(|| error::internal("groupcounts: malformed group key"))
         })
         .collect::<BuiltinResult<Vec<_>>>()?;
-    match &column.value {
+    match column.value() {
         Value::Object(value) if value.is_class(runmat_types::standard::CATEGORICAL) => {
             categorical_labels(value, atoms)
         }
@@ -152,5 +152,5 @@ fn select_observed_rows(column: &GroupColumn, atoms: &[KeyAtom]) -> BuiltinResul
                 .ok_or_else(|| error::internal("groupcounts: group label has no source value"))
         })
         .collect::<BuiltinResult<Vec<_>>>()?;
-    select_group_rows(&column.value, &rows).map_err(error::internal)
+    select_group_rows(column.value(), &rows).map_err(error::internal)
 }

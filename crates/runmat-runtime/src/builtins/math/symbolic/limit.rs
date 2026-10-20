@@ -345,10 +345,7 @@ fn evaluate_limit(
             if substituted {
                 Ok(SymbolicExpr::function_call(name.clone(), args))
             } else {
-                Ok(SymbolicExpr::function_reference(
-                    name.clone(),
-                    parameters.clone(),
-                ))
+                Ok(SymbolicExpr::FunctionReference(name.clone(), parameters.clone()).simplify())
             }
         }
         SymbolicExpr::FunctionCall(name, args) => Ok(SymbolicExpr::function_call(
@@ -374,7 +371,9 @@ fn evaluate_limit(
                 });
             }
             Ok(SymbolicExpr::Derivative {
-                expr: Box::new(evaluate_limit(expr, variable, point, direction, depth)?),
+                expr: runmat_value::symbolic::SymbolicOwner::new_unbounded(evaluate_limit(
+                    expr, variable, point, direction, depth,
+                )?),
                 variable: derivative_variable.clone(),
                 order: *order,
             }
@@ -450,8 +449,10 @@ fn evaluate_product_limit(
         let numerator = SymbolicExpr::mul_expr(lhs_fraction.numerator, rhs_fraction.numerator);
         let denominator =
             SymbolicExpr::mul_expr(lhs_fraction.denominator, rhs_fraction.denominator);
-        let quotient =
-            SymbolicExpr::Div(Box::new(numerator.clone()), Box::new(denominator.clone()));
+        let quotient = SymbolicExpr::Div(
+            runmat_value::symbolic::SymbolicOwner::new_unbounded(numerator.clone()),
+            runmat_value::symbolic::SymbolicOwner::new_unbounded(denominator.clone()),
+        );
         return evaluate_division_limit(
             &numerator,
             &denominator,

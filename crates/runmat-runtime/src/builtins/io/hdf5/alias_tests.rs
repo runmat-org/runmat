@@ -1,3 +1,4 @@
+use super::test_arguments::{hdf5read_builtin, hdf5write_builtin};
 use futures::executor::block_on;
 use runmat_value::{IntegerStorage, Tensor, Value};
 use tempfile::tempdir;
@@ -8,12 +9,13 @@ use super::*;
 fn legacy_read_write_and_info_share_exact_native_dataset_semantics() {
     let _fs_lock = runmat_filesystem::provider_override_lock();
     let dir = tempdir().expect("isolated HDF5 fixture");
-    let filename = Value::String(dir.path().join("aliases.h5").display().to_string());
+    let filename = Value::String(dir.path().join("aliases.h5").display().to_string().into());
     let data = Value::Tensor(
         Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]), vec![1, 2])
             .expect("exact uint64 tensor"),
     );
     let written = block_on(hdf5write_builtin(
+        None,
         filename.clone(),
         Value::String("/group/A".into()),
         data,
@@ -23,6 +25,7 @@ fn legacy_read_write_and_info_share_exact_native_dataset_semantics() {
     assert!(matches!(written, Value::OutputList(outputs) if outputs.is_empty()));
 
     let read = block_on(hdf5read_builtin(
+        None,
         filename.clone(),
         Value::String("/group/A".into()),
         Vec::new(),
@@ -37,7 +40,11 @@ fn legacy_read_write_and_info_share_exact_native_dataset_semantics() {
         Some(&IntegerStorage::U64(vec![u64::MAX, 1_u64 << 63]))
     );
 
-    let info = block_on(hdf5info_builtin(filename, Vec::new())).expect("legacy metadata");
+    let info = block_on(hdf5info_builtin(
+        filename,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect("legacy metadata");
     let Value::Struct(info) = info else {
         panic!("expected metadata struct")
     };

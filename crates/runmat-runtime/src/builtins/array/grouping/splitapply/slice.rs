@@ -132,12 +132,12 @@ fn string_columns(value: &StringArray, columns: &[usize]) -> BuiltinResult<Value
     let data = indices
         .into_iter()
         .map(|index| {
-            value.data.get(index).cloned().ok_or_else(|| {
+            value.data().get(index).cloned().ok_or_else(|| {
                 error::invalid("splitapply: string data storage is inconsistent with its shape")
             })
         })
         .collect::<BuiltinResult<Vec<_>>>()?;
-    StringArray::new(data, output_shape)
+    StringArray::from_texts_unbounded(data, output_shape)
         .map(Value::StringArray)
         .map_err(error::invalid)
 }
@@ -147,7 +147,7 @@ fn cell_columns(value: &CellArray, columns: &[usize]) -> BuiltinResult<Value> {
     let data = indices
         .into_iter()
         .map(|index| {
-            value.data.get(index).cloned().ok_or_else(|| {
+            value.data().get(index).cloned().ok_or_else(|| {
                 error::invalid("splitapply: cell data storage is inconsistent with its shape")
             })
         })
@@ -166,7 +166,7 @@ fn char_columns(value: &CharArray, columns: &[usize]) -> BuiltinResult<Value> {
                     "splitapply: character data column is out of bounds",
                 ));
             }
-            data.push(value.data[row * value.cols + *column]);
+            data.push(value.data()[row * value.cols + *column]);
         }
     }
     CharArray::new(data, value.rows, columns.len())

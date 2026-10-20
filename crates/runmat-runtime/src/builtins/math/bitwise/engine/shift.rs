@@ -1,8 +1,8 @@
 use super::*;
 
-pub(crate) async fn evaluate_bitshift(args: Vec<Value>) -> BuiltinResult<Value> {
-    let protected = borrowed_gpu_inputs(&args);
-    enforce_bitshift_compatibility(&args)?;
+pub(crate) async fn evaluate_bitshift(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let protected = borrowed_gpu_inputs(args.view());
+    enforce_bitshift_compatibility(args.view())?;
     let output_source = args.iter().find_map(|value| {
         let Value::GpuTensor(handle) = value else {
             return None;
@@ -46,7 +46,9 @@ pub(crate) async fn evaluate_bitshift(args: Vec<Value>) -> BuiltinResult<Value> 
     restore_binary_bitwise_gpu_result(BITSHIFT_NAME, result, output_source.as_ref(), &protected)
 }
 
-fn enforce_bitshift_compatibility(args: &[Value]) -> BuiltinResult<()> {
+fn enforce_bitshift_compatibility(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     if !(2..=3).contains(&args.len()) {
         return Ok(());
     }

@@ -35,7 +35,7 @@ mod tests {
                 binding: None,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
-                captures: vec![Value::output_list(Vec::new())],
+                captures: vec![Value::output_list(Vec::new())].into(),
             },
         ));
         assert_eq!(

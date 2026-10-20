@@ -68,7 +68,7 @@ pub(crate) fn analysis() -> AnalysisStore {
         functions: vec![FunctionAnalysis {
             function: ProgramFunctionId(7),
             callable: CallableFact {
-                capabilities: Default::default(),
+                capabilities: CapabilitySet::default(),
                 identity: None,
                 parameters: vec![parameter],
                 parameters_complete: true,
@@ -140,6 +140,7 @@ pub(crate) fn envelope(analysis: &AnalysisStore) -> ExecutableUnitEnvelope {
                 entrypoint: "pulse".into(),
                 entrypoint_function: Some(ProgramFunctionId(7)),
                 entrypoint_kind: ExecutableEntrypointKind::Function,
+                declaration_class: None,
                 source_digest: Digest::sha256("executable-source"),
             },
             revisions: ExecutableComponentRevisions {

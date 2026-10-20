@@ -916,10 +916,8 @@ fn compile_semantic_functions(
                     })
                     .transpose()?,
                 binding_origin: None,
-                capabilities: u32::try_from(function.id.0)
-                    .ok()
-                    .map(runmat_types::ProgramFunctionId)
-                    .and_then(|function| analysis.function(function))
+                capabilities: analysis
+                    .function_for_local(function.id)
                     .map(|analysis| analysis.capabilities.clone())
                     .ok_or_else(|| {
                         CompileError::new(format!(
@@ -4012,7 +4010,7 @@ out = weekly.AvgRevenue;\n",
         let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
         assert!(matches!(&vars[imported.slot.0], Value::StringArray(array)
         if array.shape == [3, 1]
-            && array.data.iter().map(String::as_str).eq([
+            && array.data().iter().map(|text| text.as_str()).eq([
                 "2024-03-11", "2024-03-12", "2024-03-18"
             ])));
         let Value::Tensor(tensor) = &vars[output.slot.0] else {
@@ -4338,7 +4336,7 @@ y = x^[1 2; 3 4];\n",
                 assert_eq!(array.shape, vec![2, 2]);
                 assert_eq!(
                     array
-                        .data
+                        .data()
                         .iter()
                         .map(ToString::to_string)
                         .collect::<Vec<_>>(),
@@ -7484,7 +7482,8 @@ y = x^[1 2; 3 4];\n",
         let _invoker_guard = runmat_runtime::user_functions::install_external_function_invoker(
             Some(Arc::new(|call| {
                 assert_eq!(call.function, 9001);
-                assert_eq!(call.arguments, [Value::Num(2.0)]);
+                assert_eq!(call.arguments.len(), 1);
+                assert_eq!(call.arguments.first(), Some(&Value::Num(2.0)));
                 assert_eq!(call.requested_outputs, 1);
                 Box::pin(async move {
                     runmat_runtime::execution::RootedValueSequence::new(

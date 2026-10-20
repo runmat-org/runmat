@@ -75,7 +75,7 @@ pub(super) fn sign_integer_storage(storage: &IntegerStorage) -> IntegerStorage {
 
 pub(super) fn sign_char_array(ca: CharArray) -> BuiltinResult<Value> {
     let data = ca
-        .data
+        .data()
         .iter()
         .map(|&ch| sign_real_scalar(ch as u32 as f64))
         .collect::<Vec<_>>();

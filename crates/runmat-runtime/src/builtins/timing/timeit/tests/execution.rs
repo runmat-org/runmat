@@ -5,7 +5,7 @@ fn timeit_external_function_handle_surfaces_undefined_function() {
     let err = block_on(timeit_builtin(
         Some(runtime()),
         Value::ExternalFunctionHandle("pkg.missing_callback".into()),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect_err("unresolved external callback should fail");
     assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
@@ -17,8 +17,12 @@ fn timeit_measures_time() {
     let runtime = runtime();
     let _callbacks = install_test_callbacks(&runtime);
     COUNTER_DEFAULT.store(0, Ordering::SeqCst);
-    let result =
-        block_on(timeit_builtin(Some(runtime), default_handle(), Vec::new())).expect("timeit");
+    let result = block_on(timeit_builtin(
+        Some(runtime),
+        default_handle(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect("timeit");
     match result {
         Value::Num(v) => assert!(v >= 0.0),
         other => panic!("expected numeric result, got {other:?}"),
@@ -41,8 +45,12 @@ fn timeit_accepts_num_outputs_argument() {
     let _callbacks = install_test_callbacks(&runtime);
     COUNTER_NUM_OUTPUTS.store(0, Ordering::SeqCst);
     let args = vec![Value::Int(IntValue::I32(3))];
-    let _ =
-        block_on(timeit_builtin(Some(runtime), outputs_handle(), args)).expect("timeit numOutputs");
+    let _ = block_on(timeit_builtin(
+        Some(runtime),
+        outputs_handle(),
+        crate::builtins::common::test_support::builtin_arguments(args),
+    ))
+    .expect("timeit numOutputs");
     assert!(
         COUNTER_NUM_OUTPUTS.load(Ordering::SeqCst) >= MIN_SAMPLE_COUNT,
         "expected at least {} invocations",
@@ -58,8 +66,12 @@ fn timeit_supports_zero_outputs() {
     let _callbacks = install_test_callbacks(&runtime);
     COUNTER_ZERO_OUTPUTS.store(0, Ordering::SeqCst);
     let args = vec![Value::Int(IntValue::I32(0))];
-    let _ = block_on(timeit_builtin(Some(runtime), zero_outputs_handle(), args))
-        .expect("timeit zero outputs");
+    let _ = block_on(timeit_builtin(
+        Some(runtime),
+        zero_outputs_handle(),
+        crate::builtins::common::test_support::builtin_arguments(args),
+    ))
+    .expect("timeit zero outputs");
     assert!(
         COUNTER_ZERO_OUTPUTS.load(Ordering::SeqCst) >= MIN_SAMPLE_COUNT,
         "expected at least {} invocations",
@@ -76,8 +88,12 @@ fn timeit_runs_with_wgpu_provider_registered() {
     let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
         runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
     );
-    let result = block_on(timeit_builtin(Some(runtime), default_handle(), Vec::new()))
-        .expect("timeit with wgpu");
+    let result = block_on(timeit_builtin(
+        Some(runtime),
+        default_handle(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect("timeit with wgpu");
     match result {
         Value::Num(v) => assert!(v >= 0.0),
         other => panic!("expected numeric result, got {other:?}"),
@@ -87,7 +103,12 @@ fn timeit_runs_with_wgpu_provider_registered() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn timeit_rejects_non_function_input() {
-    let err = block_on(timeit_builtin(Some(runtime()), Value::Num(1.0), Vec::new())).unwrap_err();
+    let err = block_on(timeit_builtin(
+        Some(runtime()),
+        Value::Num(1.0),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap_err();
     assert_timeit_error_contains(&err, "function");
     assert_timeit_error_identifier(&err, TIMEIT_ERROR_FIRST_ARG_KIND.identifier.unwrap());
 }
@@ -101,7 +122,7 @@ fn timeit_rejects_invalid_num_outputs() {
     let err = block_on(timeit_builtin(
         Some(runtime),
         invalid_handle(),
-        vec![Value::Num(-1.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(-1.0)]),
     ))
     .unwrap_err();
     assert_timeit_error_contains(&err, "nonnegative");
@@ -121,7 +142,9 @@ fn timeit_gates_typed_integer_output_counts_before_invoking_the_callback() {
     let err = block_on(timeit_builtin(
         Some(runtime),
         outputs_handle(),
-        vec![Value::Int(IntValue::I32(3))],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(IntValue::I32(
+            3,
+        ))]),
     ))
     .expect_err("strict compatibility must reject native integer output counts");
     assert_eq!(
@@ -139,7 +162,9 @@ fn timeit_decodes_typed_integer_output_counts_without_an_f64_boundary() {
         block_on(parse_num_outputs(
             &runtime,
             &Value::FunctionHandle("fixture".into()),
-            &[Value::Int(IntValue::U64(usize::MAX as u64))]
+            crate::call::FunctionArgumentView::from_slice(&[Value::Int(IntValue::U64(
+                usize::MAX as u64
+            ))])
         ))
         .expect("platform-sized integer should decode exactly"),
         Some(usize::MAX)
@@ -147,7 +172,7 @@ fn timeit_decodes_typed_integer_output_counts_without_an_f64_boundary() {
     assert!(block_on(parse_num_outputs(
         &runtime,
         &Value::FunctionHandle("fixture".into()),
-        &[Value::Int(IntValue::I64(-1))]
+        crate::call::FunctionArgumentView::from_slice(&[Value::Int(IntValue::I64(-1))])
     ))
     .is_err());
 }
@@ -163,7 +188,7 @@ fn output_count_extension_policy_is_owned_by_each_invocation() {
         block_on(parse_num_outputs(
             &enabled,
             &Value::FunctionHandle("fixture".into()),
-            &count
+            crate::call::FunctionArgumentView::from_slice(&count)
         ))
         .unwrap(),
         Some(3)
@@ -171,7 +196,7 @@ fn output_count_extension_policy_is_owned_by_each_invocation() {
     let error = block_on(parse_num_outputs(
         &disabled,
         &Value::FunctionHandle("fixture".into()),
-        &count,
+        crate::call::FunctionArgumentView::from_slice(&count),
     ))
     .unwrap_err();
     assert_eq!(
@@ -186,7 +211,10 @@ fn timeit_rejects_extra_arguments() {
     let err = block_on(timeit_builtin(
         Some(runtime()),
         default_handle(),
-        vec![Value::from(1.0), Value::from(2.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from(1.0),
+            Value::from(2.0),
+        ]),
     ))
     .unwrap_err();
     assert_timeit_error_contains(&err, "too many");

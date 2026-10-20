@@ -72,7 +72,7 @@ pub(super) async fn evaluate_network_gpu(
             )
         })?;
     let layers = object
-        .properties
+        .properties()
         .get("Layers")
         .map(|value| layer_slice(value, function))
         .transpose()?
@@ -123,22 +123,22 @@ pub(super) async fn evaluate_network_gpu(
         let Value::Object(layer) = layer else {
             unreachable!("GPU admission accepts layer objects only");
         };
-        if layer.class_name.is(super::FULLY_CONNECTED_LAYER_CLASS) {
+        if layer.class_name().is(super::FULLY_CONNECTED_LAYER_CLASS) {
             current = fully_connected_forward_gpu(provider, current, layer, function).await?;
-        } else if layer.class_name.is(super::RELU_LAYER_CLASS) {
+        } else if layer.class_name().is(super::RELU_LAYER_CLASS) {
             let output = provider
                 .activation_relu(&current)
                 .await
                 .map_err(|err| provider_failure(function, "provider-resident ReLU", err.into()))?;
             current = validate_unary_forward_result(output, &current, provider, function)?;
-        } else if layer.class_name.is(super::ELU_LAYER_CLASS) {
+        } else if layer.class_name().is(super::ELU_LAYER_CLASS) {
             let alpha = elu_alpha(layer, function)?;
             let output = provider
                 .activation_elu(&current, alpha)
                 .await
                 .map_err(|err| provider_failure(function, "provider-resident ELU", err.into()))?;
             current = validate_unary_forward_result(output, &current, provider, function)?;
-        } else if layer.class_name.is(super::SOFTMAX_LAYER_CLASS) {
+        } else if layer.class_name().is(super::SOFTMAX_LAYER_CLASS) {
             let output = provider
                 .activation_softmax_rows(&current)
                 .await
@@ -153,7 +153,7 @@ pub(super) async fn evaluate_network_gpu(
             return None;
         };
         layer
-            .class_name
+            .class_name()
             .is(super::FULLY_CONNECTED_LAYER_CLASS)
             .then_some(layer)
     });
@@ -284,11 +284,11 @@ fn resident_parameter_handle(
     layer: &ObjectInstance,
     role: ParameterRole,
 ) -> Option<&GpuTensorHandle> {
-    let value = layer.properties.get(role.name())?;
+    let value = layer.properties().get(role.name())?;
     match value {
         Value::GpuTensor(handle) => Some(handle),
-        Value::Object(object) if object.class_name.is(super::DLARRAY_CLASS) => {
-            match object.properties.get("Data") {
+        Value::Object(object) if object.class_name().is(super::DLARRAY_CLASS) => {
+            match object.properties().get("Data") {
                 Some(Value::GpuTensor(handle)) => Some(handle),
                 _ => None,
             }

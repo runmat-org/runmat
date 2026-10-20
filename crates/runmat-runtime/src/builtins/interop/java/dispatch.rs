@@ -64,11 +64,25 @@ impl JavaOperation {
 pub(super) async fn invoke_java(
     context: Option<crate::context::RuntimeContext>,
     operation: JavaOperation,
-    arguments: Vec<Value>,
+    arguments: crate::call::BuiltinArguments,
+) -> BuiltinResult<RootedValue> {
+    invoke_java_prepared(context, operation, |_| Ok(arguments)).await
+}
+
+/// Resolve the Java host before allocating a synthesized argument layout.
+/// Public validation remains at the builtin boundary; exact text and final
+/// slots are admitted only after the same host-availability decision that
+/// precedes invocation.
+pub(super) async fn invoke_java_prepared(
+    context: Option<crate::context::RuntimeContext>,
+    operation: JavaOperation,
+    prepare: impl FnOnce(
+        &crate::context::RuntimeContext,
+    ) -> BuiltinResult<crate::call::BuiltinArguments>,
 ) -> BuiltinResult<RootedValue> {
     #[cfg(target_arch = "wasm32")]
     {
-        let _ = (context, operation, arguments);
+        let _ = (context, operation, prepare);
         Err(java_error(
             &JAVA_ERROR_UNAVAILABLE,
             JAVA_ERROR_UNAVAILABLE.message,
@@ -89,6 +103,7 @@ pub(super) async fn invoke_java(
             .require_foreign(symbol)
             .map_err(|error| error.into_runtime_error())?
             .clone();
+        let arguments = prepare(&context)?.into_supplied_function_arguments(Some(&context))?;
         let sequence = context
             .scope(service.invoke(
                 context.clone(),
@@ -123,38 +138,185 @@ pub(super) async fn invoke_java(
     }
 }
 
-pub(super) fn text_entries(arguments: Vec<Value>, builtin: &str) -> BuiltinResult<Vec<String>> {
-    use crate::builtins::common::validation::value_text_scalar_string;
+pub(super) struct TextEntries {
+    source: crate::call::BuiltinArguments,
+    count: usize,
+}
 
-    let mut entries = Vec::new();
-    for value in arguments {
-        match value {
-            Value::Cell(cell) => {
-                for value in cell.data {
-                    entries.push(
-                        value_text_scalar_string(&value)
-                            .filter(|text| !text.trim().is_empty())
-                            .ok_or_else(|| {
-                                invalid_call(format!("{builtin} entries must be non-empty text"))
-                            })?,
-                    );
+impl TextEntries {
+    pub(super) fn len(&self) -> usize {
+        self.count
+    }
+
+    pub(super) fn get(&self, index: usize) -> Option<&Value> {
+        flattened_text_at(self.source.view(), index)
+    }
+
+    pub(super) fn entry_arguments(
+        &self,
+        index: usize,
+        suffix: Option<&str>,
+        runtime: &crate::context::RuntimeContext,
+    ) -> BuiltinResult<crate::call::BuiltinArguments> {
+        let count = 1 + usize::from(suffix.is_some());
+        self.source
+            .fork()
+            .try_map_preserving_roots_in_context(count, runtime, |slot, source| {
+                if slot == 0 {
+                    let value = flattened_text_at(source.view(), index)
+                        .expect("validated Java text entry index");
+                    return crate::call::argument_text::convert(value, Some(runtime))
+                        .map(Value::String);
                 }
+                crate::call::argument_text::copy_str(
+                    suffix.expect("second Java argument has a suffix"),
+                    Some(runtime),
+                )
+                .map(Value::String)
+            })
+    }
+
+    pub(super) fn all_arguments(
+        self,
+        runtime: &crate::context::RuntimeContext,
+    ) -> BuiltinResult<crate::call::BuiltinArguments> {
+        let count = self.count;
+        let mut outer = 0usize;
+        let mut inner = 0usize;
+        self.source
+            .try_map_preserving_roots_in_context(count, runtime, move |_, source| {
+                let value = next_flattened_text(source.view(), &mut outer, &mut inner)
+                    .expect("validated Java text entry count");
+                crate::call::argument_text::convert(value, Some(runtime)).map(Value::String)
+            })
+    }
+}
+
+pub(super) fn text_entries(
+    arguments: crate::call::BuiltinArguments,
+    builtin: &str,
+) -> BuiltinResult<TextEntries> {
+    let mut count = 0usize;
+    for value in arguments.iter() {
+        let values = match value {
+            Value::Cell(cell) => cell.data(),
+            value => std::slice::from_ref(value),
+        };
+        for value in values {
+            if !nonempty_text_scalar(value) {
+                return Err(invalid_call(format!(
+                    "{builtin} entries must be non-empty text"
+                )));
             }
-            value => entries.push(
-                value_text_scalar_string(&value)
-                    .filter(|text| !text.trim().is_empty())
-                    .ok_or_else(|| {
-                        invalid_call(format!("{builtin} entries must be non-empty text"))
-                    })?,
-            ),
+            count = count
+                .checked_add(1)
+                .ok_or_else(|| invalid_call(format!("{builtin} has too many entries")))?;
         }
     }
-    if entries.is_empty() {
+    if count == 0 {
         return Err(invalid_call(format!(
             "{builtin} requires a classpath entry"
         )));
     }
-    Ok(entries)
+    Ok(TextEntries {
+        source: arguments,
+        count,
+    })
+}
+
+pub(super) fn flattened_text_at(
+    arguments: crate::call::FunctionArgumentView<'_>,
+    mut index: usize,
+) -> Option<&Value> {
+    for value in arguments {
+        let values = match value {
+            Value::Cell(cell) => cell.data(),
+            value => std::slice::from_ref(value),
+        };
+        if index < values.len() {
+            return values.get(index);
+        }
+        index -= values.len();
+    }
+    None
+}
+
+fn next_flattened_text<'a>(
+    arguments: crate::call::FunctionArgumentView<'a>,
+    outer: &mut usize,
+    inner: &mut usize,
+) -> Option<&'a Value> {
+    loop {
+        let value = arguments.get(*outer)?;
+        let values = match value {
+            Value::Cell(cell) => cell.data(),
+            value => std::slice::from_ref(value),
+        };
+        if let Some(value) = values.get(*inner) {
+            *inner += 1;
+            if *inner == values.len() {
+                *outer += 1;
+                *inner = 0;
+            }
+            return Some(value);
+        }
+        *outer += 1;
+        *inner = 0;
+    }
+}
+
+pub(super) fn text_scalar_eq(value: &Value, expected: &str, ignore_ascii_case: bool) -> bool {
+    let compare = |actual: &str| {
+        if ignore_ascii_case {
+            actual.eq_ignore_ascii_case(expected)
+        } else {
+            actual == expected
+        }
+    };
+    match value {
+        Value::String(text) => compare(text.as_str()),
+        Value::StringArray(strings)
+            if strings.data().len() == 1 && strings.rows == 1 && strings.cols == 1 =>
+        {
+            compare(strings.data()[0].as_str())
+        }
+        Value::CharArray(chars)
+            if chars.rows == 1
+                && crate::builtins::common::shape::effective_rank(&chars.shape) == 2 =>
+        {
+            chars.data().iter().copied().eq(expected.chars())
+                || (ignore_ascii_case
+                    && chars
+                        .data()
+                        .iter()
+                        .copied()
+                        .zip(expected.chars())
+                        .all(|(left, right)| left.eq_ignore_ascii_case(&right))
+                    && chars.data().len() == expected.chars().count())
+        }
+        _ => false,
+    }
+}
+
+fn nonempty_text_scalar(value: &Value) -> bool {
+    match value {
+        Value::String(text) => !text.as_str().trim().is_empty(),
+        Value::StringArray(strings)
+            if strings.data().len() == 1 && strings.rows == 1 && strings.cols == 1 =>
+        {
+            !strings.data()[0].as_str().trim().is_empty()
+        }
+        Value::CharArray(chars)
+            if chars.rows == 1
+                && crate::builtins::common::shape::effective_rank(&chars.shape) == 2 =>
+        {
+            chars
+                .data()
+                .iter()
+                .any(|character| !character.is_whitespace())
+        }
+        _ => false,
+    }
 }
 
 pub(super) fn invalid_call(message: impl Into<String>) -> crate::RuntimeError {

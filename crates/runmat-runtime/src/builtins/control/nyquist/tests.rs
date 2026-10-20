@@ -15,18 +15,12 @@ fn frequency_admission_accepts_low_rank_vectors_but_rejects_matrices() {
 
 fn raw_tf(numerator: Value, denominator: Value, sample_time: f64) -> Value {
     let mut object = ObjectInstance::new("tf".to_string());
-    object.properties.insert("Numerator".into(), numerator);
-    object.properties.insert("Denominator".into(), denominator);
-    object
-        .properties
-        .insert("Ts".into(), Value::Num(sample_time));
-    object
-        .properties
-        .insert("InputDelay".into(), Value::Num(0.0));
-    object
-        .properties
-        .insert("OutputDelay".into(), Value::Num(0.0));
-    object.properties.insert(
+    object.replace_property_unbounded("Numerator".into(), numerator);
+    object.replace_property_unbounded("Denominator".into(), denominator);
+    object.replace_property_unbounded("Ts".into(), Value::Num(sample_time));
+    object.replace_property_unbounded("InputDelay".into(), Value::Num(0.0));
+    object.replace_property_unbounded("OutputDelay".into(), Value::Num(0.0));
+    object.replace_property_unbounded(
         "Variable".into(),
         Value::CharArray(CharArray::new_row(if sample_time > 0.0 {
             "z"
@@ -45,7 +39,11 @@ fn tf(num: Vec<f64>, den: Vec<f64>, ts: f64) -> Value {
 }
 fn run(model: Value, frequency: Option<Value>, outputs: usize) -> BuiltinResult<Value> {
     let _count = crate::output_count::push_output_count(Some(outputs)).expect("output-count scope");
-    block_on(nyquist_builtin(model, frequency.into_iter().collect()))
+    block_on(nyquist_builtin(
+        None,
+        model,
+        crate::builtins::common::test_support::builtin_arguments(frequency.into_iter().collect()),
+    ))
 }
 fn values(value: &Value) -> Vec<f64> {
     let Value::Tensor(tensor) = value else {
@@ -149,9 +147,7 @@ fn tiny_nonzero_coefficients_and_responses_are_not_zeroed_by_a_tolerance() {
     let Value::Object(ref mut object) = model else {
         unreachable!()
     };
-    object
-        .properties
-        .insert("InputDelay".into(), Value::Num(1.0e-20));
+    object.replace_property_unbounded("InputDelay".into(), Value::Num(1.0e-20));
     let error = run(model, None, 1).expect_err("nonzero delay is structural");
     assert_eq!(error.identifier(), Some("RunMat:nyquist:UnsupportedModel"));
 }
@@ -217,9 +213,7 @@ fn valid_nested_resident_coefficients_gather_only_consumed_values() {
         let Value::Object(ref mut object) = model else {
             unreachable!()
         };
-        object
-            .properties
-            .insert("Unrelated".into(), Value::GpuTensor(unused_gpu));
+        object.replace_property_unbounded("Unrelated".into(), Value::GpuTensor(unused_gpu));
         let _mode = crate::compatibility::push_runmat_extensions_enabled(true);
         provider.reset_telemetry();
         let Value::OutputList(outputs) = run(model, Some(Value::Num(0.0)), 1).unwrap() else {

@@ -146,11 +146,13 @@ fn business_day_period(value: Option<&Value>, context: &str) -> BuiltinResult<Bu
 #[runmat_macros::runtime_builtin(
     name = "isbusday",
     binding_variant = "default",
-    builtin_path = "crate::builtins::datetime"
+    builtin_path = "crate::builtins::datetime",
+    context = true
 )]
 pub(super) async fn isbusday_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     if rest.len() > 2 {
         return Err(datetime_error(
@@ -168,10 +170,10 @@ pub(super) async fn isbusday_builtin(
             .collect::<Vec<_>>(),
         &[&value],
     )?;
-    let value = gather_if_needed_async(&value)
+    let value = gather_in_runtime(runtime.as_ref(), &value)
         .await
         .map_err(|err| datetime_error(format!("isbusday: {}", err.message())))?;
-    let rest = gather_args(&rest).await?;
+    let rest = gather_retained_args(rest, runtime.as_ref()).await?;
     let serials = numeric_or_datetime_serial_tensor(value, "isbusday")?;
     let (start_key, end_key) = date_key_range(&[&serials])?;
     let holidays = holiday_set_from_optional_or_default(
@@ -205,9 +207,13 @@ pub(super) async fn isbusday_builtin(
 #[runmat_macros::runtime_builtin(
     name = "holidays",
     binding_variant = "default",
-    builtin_path = "crate::builtins::datetime"
+    builtin_path = "crate::builtins::datetime",
+    context = true
 )]
-pub(super) async fn holidays_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub(super) async fn holidays_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     if args.len() > 3 {
         return Err(datetime_error(
             "holidays: expected zero, one, two, or three inputs",
@@ -236,7 +242,7 @@ pub(super) async fn holidays_builtin(args: Vec<Value>) -> crate::BuiltinResult<V
         &numeric_inputs,
     )?;
     let output_datetime = args.len() < 2 || args.iter().any(is_datetime_object);
-    let args = gather_args(&args).await?;
+    let args = gather_retained_args(args, runtime.as_ref()).await?;
     let keys = match args.len() {
         0 => {
             let year = current_naive_local().year();
@@ -293,7 +299,7 @@ pub(super) async fn holidays_builtin(args: Vec<Value>) -> crate::BuiltinResult<V
     let len = keys.len();
     let serials: Vec<f64> = keys.into_iter().map(|key| key as f64).collect();
     if output_datetime {
-        datetime_object_from_serials(serials, vec![len, 1], DEFAULT_DATE_FORMAT)
+        datetime_object_from_serials(runtime.as_ref(), serials, vec![len, 1], DEFAULT_DATE_FORMAT)
     } else {
         Tensor::new(serials, vec![len, 1])
             .map(Value::Tensor)
@@ -304,12 +310,14 @@ pub(super) async fn holidays_builtin(args: Vec<Value>) -> crate::BuiltinResult<V
 #[runmat_macros::runtime_builtin(
     name = "busdays",
     binding_variant = "default",
-    builtin_path = "crate::builtins::datetime"
+    builtin_path = "crate::builtins::datetime",
+    context = true
 )]
 pub(super) async fn busdays_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     start: Value,
     end: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     if rest.len() > 2 {
         return Err(datetime_error(
@@ -331,13 +339,13 @@ pub(super) async fn busdays_builtin(
             .flatten()
             .collect::<Vec<_>>(),
     )?;
-    let start = gather_if_needed_async(&start)
+    let start = gather_in_runtime(runtime.as_ref(), &start)
         .await
         .map_err(|err| datetime_error(format!("busdays: {}", err.message())))?;
-    let end = gather_if_needed_async(&end)
+    let end = gather_in_runtime(runtime.as_ref(), &end)
         .await
         .map_err(|err| datetime_error(format!("busdays: {}", err.message())))?;
-    let rest = gather_args(&rest).await?;
+    let rest = gather_retained_args(rest, runtime.as_ref()).await?;
     let period = business_day_period(rest.first(), "busdays")?;
     let output_datetime = is_datetime_object(&start)
         || is_datetime_object(&end)
@@ -417,7 +425,12 @@ pub(super) async fn busdays_builtin(
     }
     let len = out.len();
     if output_datetime {
-        return datetime_object_from_serials(out, vec![len, 1], DEFAULT_DATE_FORMAT);
+        return datetime_object_from_serials(
+            runtime.as_ref(),
+            out,
+            vec![len, 1],
+            DEFAULT_DATE_FORMAT,
+        );
     }
     Tensor::new(out, vec![len, 1])
         .map(Value::Tensor)
@@ -427,12 +440,14 @@ pub(super) async fn busdays_builtin(
 #[runmat_macros::runtime_builtin(
     name = "days252bus",
     binding_variant = "default",
-    builtin_path = "crate::builtins::datetime"
+    builtin_path = "crate::builtins::datetime",
+    context = true
 )]
 pub(super) async fn days252bus_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     start: Value,
     end: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(datetime_error(
@@ -454,18 +469,18 @@ pub(super) async fn days252bus_builtin(
             .flatten()
             .collect::<Vec<_>>(),
     )?;
-    let start = gather_if_needed_async(&start)
+    let start = gather_in_runtime(runtime.as_ref(), &start)
         .await
         .map_err(|err| datetime_error(format!("days252bus: {}", err.message())))?;
-    let end = gather_if_needed_async(&end)
+    let end = gather_in_runtime(runtime.as_ref(), &end)
         .await
         .map_err(|err| datetime_error(format!("days252bus: {}", err.message())))?;
-    let rest = gather_args(&rest).await?;
+    let rest = gather_retained_args(rest, runtime.as_ref()).await?;
     let starts = numeric_or_datetime_serial_tensor(start, "days252bus")?;
     let ends = numeric_or_datetime_serial_tensor(end, "days252bus")?;
     let (start_key, end_key) = date_key_range(&[&starts, &ends])?;
     let holidays = holiday_set_from_optional_or_default(
-        rest.into_iter().next(),
+        rest.first().cloned(),
         "days252bus",
         start_key,
         end_key,
@@ -488,12 +503,14 @@ pub(super) async fn days252bus_builtin(
 #[runmat_macros::runtime_builtin(
     name = "daysdif",
     binding_variant = "default",
-    builtin_path = "crate::builtins::datetime"
+    builtin_path = "crate::builtins::datetime",
+    context = true
 )]
 pub(super) async fn daysdif_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     start: Value,
     end: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(datetime_error(
@@ -512,13 +529,13 @@ pub(super) async fn daysdif_builtin(
             .flatten()
             .collect::<Vec<_>>(),
     )?;
-    let start = gather_if_needed_async(&start)
+    let start = gather_in_runtime(runtime.as_ref(), &start)
         .await
         .map_err(|err| datetime_error(format!("daysdif: {}", err.message())))?;
-    let end = gather_if_needed_async(&end)
+    let end = gather_in_runtime(runtime.as_ref(), &end)
         .await
         .map_err(|err| datetime_error(format!("daysdif: {}", err.message())))?;
-    let rest = gather_args(&rest).await?;
+    let rest = gather_retained_args(rest, runtime.as_ref()).await?;
     let basis = match rest.first() {
         None => 0,
         Some(value) => {
@@ -577,14 +594,17 @@ pub(super) async fn daysdif_builtin(
 #[runmat_macros::runtime_builtin(
     name = "fbusdate",
     binding_variant = "default",
-    builtin_path = "crate::builtins::datetime"
+    builtin_path = "crate::builtins::datetime",
+    context = true
 )]
 pub(super) async fn fbusdate_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     year: Value,
     month: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     month_business_date_builtin(
+        runtime.as_ref(),
         year,
         month,
         rest,
@@ -597,14 +617,17 @@ pub(super) async fn fbusdate_builtin(
 #[runmat_macros::runtime_builtin(
     name = "lbusdate",
     binding_variant = "default",
-    builtin_path = "crate::builtins::datetime"
+    builtin_path = "crate::builtins::datetime",
+    context = true
 )]
 pub(super) async fn lbusdate_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     year: Value,
     month: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     month_business_date_builtin(
+        runtime.as_ref(),
         year,
         month,
         rest,
@@ -617,9 +640,10 @@ pub(super) async fn lbusdate_builtin(
 type MonthBusinessDate = fn(i32, u32, &HashSet<i64>, &[bool; 7]) -> BuiltinResult<i64>;
 
 async fn month_business_date_builtin(
+    runtime: Option<&crate::context::RuntimeContext>,
     year: Value,
     month: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
     name: &'static str,
     find: MonthBusinessDate,
 ) -> BuiltinResult<Value> {
@@ -656,13 +680,13 @@ async fn month_business_date_builtin(
         },
         None => rest.first().is_some_and(is_datetime_object),
     };
-    let year = gather_if_needed_async(&year)
+    let year = gather_in_runtime(runtime, &year)
         .await
         .map_err(|err| datetime_error(format!("{name}: {}", err.message())))?;
-    let month = gather_if_needed_async(&month)
+    let month = gather_in_runtime(runtime, &month)
         .await
         .map_err(|err| datetime_error(format!("{name}: {}", err.message())))?;
-    let rest = gather_args(&rest).await?;
+    let rest = gather_retained_args(rest, runtime).await?;
     let years = component_tensor(year, name)?;
     let months = component_tensor(month, name)?;
     let (year_data, month_data, shape) =
@@ -700,8 +724,98 @@ async fn month_business_date_builtin(
         })
         .collect::<BuiltinResult<Vec<_>>>()?;
     if output_datetime {
-        datetime_object_from_serials(out, shape, DEFAULT_DATE_FORMAT)
+        datetime_object_from_serials(runtime, out, shape, DEFAULT_DATE_FORMAT)
     } else {
         tensor_or_scalar(out, shape)
     }
+}
+#[cfg(test)]
+pub(crate) async fn isbusday_builtin_source(
+    value: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    isbusday_builtin(
+        None,
+        value,
+        crate::call::BuiltinArguments::from_borrowed(&rest, None)?,
+    )
+    .await
+}
+#[cfg(test)]
+pub(crate) async fn holidays_builtin_source(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    holidays_builtin(
+        None,
+        crate::call::BuiltinArguments::from_borrowed(&args, None)?,
+    )
+    .await
+}
+#[cfg(test)]
+pub(crate) async fn busdays_builtin_source(
+    start: Value,
+    end: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    busdays_builtin(
+        None,
+        start,
+        end,
+        crate::call::BuiltinArguments::from_borrowed(&rest, None)?,
+    )
+    .await
+}
+#[cfg(test)]
+pub(crate) async fn days252bus_builtin_source(
+    start: Value,
+    end: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    days252bus_builtin(
+        None,
+        start,
+        end,
+        crate::call::BuiltinArguments::from_borrowed(&rest, None)?,
+    )
+    .await
+}
+#[cfg(test)]
+pub(crate) async fn daysdif_builtin_source(
+    start: Value,
+    end: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    daysdif_builtin(
+        None,
+        start,
+        end,
+        crate::call::BuiltinArguments::from_borrowed(&rest, None)?,
+    )
+    .await
+}
+#[cfg(test)]
+pub(crate) async fn fbusdate_builtin_source(
+    year: Value,
+    month: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    fbusdate_builtin(
+        None,
+        year,
+        month,
+        crate::call::BuiltinArguments::from_borrowed(&rest, None)?,
+    )
+    .await
+}
+#[cfg(test)]
+pub(crate) async fn lbusdate_builtin_source(
+    year: Value,
+    month: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    lbusdate_builtin(
+        None,
+        year,
+        month,
+        crate::call::BuiltinArguments::from_borrowed(&rest, None)?,
+    )
+    .await
 }

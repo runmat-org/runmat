@@ -92,7 +92,7 @@ fn target_from_value(
     builtin: &'static str,
     value: &Value,
 ) -> BuiltinResult<(Option<(String, u32)>, InitialConditionTarget)> {
-    if matches!(value, Value::Object(object) if object.class_name.is(runmat_builtins::fea_contract::model_types::classes::FEA_INITIAL_CONDITION_TARGET_CLASS))
+    if matches!(value, Value::Object(object) if object.class_name().is(runmat_builtins::fea_contract::model_types::classes::FEA_INITIAL_CONDITION_TARGET_CLASS))
     {
         let target: WholeModelTarget = object_payload(builtin, value, TARGET_CLASS)?;
         if !target.whole_model {
@@ -132,10 +132,12 @@ fn condition_to_object(
         },
     )?;
     if let Some(revision) = revision {
-        object.properties.insert(
-            "geometry_revision".into(),
+        crate::builtins::fea::object_api::replace(
+            builtin,
+            &mut object,
+            "geometry_revision",
             Value::Int(IntValue::U32(revision)),
-        );
+        )?;
     }
     Ok(Value::Object(object))
 }
@@ -146,10 +148,10 @@ macro_rules! initial_condition_builtin {
         $signal_variant:path, $condition_variant:path, $shape:pat
     ) => {
         #[runtime_builtin(
-                    name = $builtin,
-                    binding_variant = "default",
-                    builtin_path = "crate::builtins::fea::initial_conditions"
-                )]
+                                    name = $builtin,
+                                    binding_variant = "default",
+                                    builtin_path = "crate::builtins::fea::initial_conditions"
+                                )]
         pub async fn $function(
             id: String,
             target: Value,
@@ -293,7 +295,7 @@ pub(super) fn initial_condition_vec_from_value(
     value: &Value,
 ) -> BuiltinResult<Vec<GeometryBoundInitialCondition>> {
     let values = match value {
-        Value::Cell(cell) => cell.data.iter().collect::<Vec<_>>(),
+        Value::Cell(cell) => cell.data().iter().collect::<Vec<_>>(),
         Value::Object(_) => vec![value],
         other => {
             return Err(builtin_error(
@@ -316,13 +318,13 @@ pub(super) fn initial_condition_vec_from_value(
                 ));
             };
             let class_name =
-                condition_class(object.class_name.display_name()).ok_or_else(|| {
+                condition_class(object.class_name().display_name()).ok_or_else(|| {
                     builtin_error(
                         builtin,
                         &ERROR_INPUT,
                         format!(
                             "unsupported FEA initial-condition class `{}`",
-                            object.class_name
+                            object.class_name()
                         ),
                     )
                 })?;
@@ -450,7 +452,7 @@ fn condition_schemas() -> [ConditionSchema; 6] {
 
 fn validate_target_object(object: &ObjectInstance) -> Result<(), String> {
     if matches!(
-        object.properties.get("whole_model"),
+        object.properties().get("whole_model"),
         Some(Value::Bool(true))
     ) {
         Ok(())
@@ -462,17 +464,17 @@ fn validate_target_object(object: &ObjectInstance) -> Result<(), String> {
 fn validate_condition_object(object: &ObjectInstance) -> Result<(), String> {
     let binding_valid = matches!(
         (
-            object.properties.get("geometry_id"),
-            object.properties.get("geometry_revision")
+            object.properties().get("geometry_id"),
+            object.properties().get("geometry_revision")
         ),
         (Some(Value::String(_)), Some(Value::Int(IntValue::U32(_)))) | (None, None)
     );
-    if binding_valid && matches!(object.properties.get("condition"), Some(Value::Struct(_))) {
+    if binding_valid && matches!(object.properties().get("condition"), Some(Value::Struct(_))) {
         Ok(())
     } else {
         Err(format!(
             "{} has malformed initial-condition data",
-            object.class_name
+            object.class_name()
         ))
     }
 }
@@ -488,18 +490,34 @@ mod tests {
     fn region() -> Value {
         ensure_region_class_registered();
         let mut object = ObjectInstance::new(GEOMETRY_REGION_CLASS);
-        object
-            .properties
-            .insert("geometry_id".into(), Value::String("geom".into()));
-        object
-            .properties
-            .insert("geometry_revision".into(), Value::Int(IntValue::U32(4)));
-        object
-            .properties
-            .insert("region_id".into(), Value::String("fluid".into()));
-        object
-            .properties
-            .insert("name".into(), Value::String("Fluid".into()));
+        crate::builtins::fea::object_api::replace(
+            "fea.fixture",
+            &mut object,
+            "geometry_id",
+            Value::String("geom".into()),
+        )
+        .expect("ordinary fixture property edit");
+        crate::builtins::fea::object_api::replace(
+            "fea.fixture",
+            &mut object,
+            "geometry_revision",
+            Value::Int(IntValue::U32(4)),
+        )
+        .expect("ordinary fixture property edit");
+        crate::builtins::fea::object_api::replace(
+            "fea.fixture",
+            &mut object,
+            "region_id",
+            Value::String("fluid".into()),
+        )
+        .expect("ordinary fixture property edit");
+        crate::builtins::fea::object_api::replace(
+            "fea.fixture",
+            &mut object,
+            "name",
+            Value::String("Fluid".into()),
+        )
+        .expect("ordinary fixture property edit");
         Value::Object(object)
     }
 

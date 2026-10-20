@@ -203,11 +203,15 @@ pub(super) async fn dispatch(
                     }
                     stack.try_push(Value::StringArray(sa))?;
                 }
-                Value::Cell(ca) => {
-                    stack.try_push(runmat_runtime::object::cell::assign_cell_paren_with_policy(
-                        ca, &indices, &rhs, delete,
-                    )?)?
-                }
+                Value::Cell(ca) => stack.try_push(
+                    runmat_runtime::object::cell::assign_cell_paren_with_policy_in_context(
+                        Some(runtime),
+                        ca,
+                        &indices,
+                        &rhs,
+                        delete,
+                    )?,
+                )?,
                 Value::Struct(structure) => {
                     let selectors = indices
                         .iter()

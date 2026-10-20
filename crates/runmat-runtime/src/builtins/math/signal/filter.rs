@@ -97,9 +97,9 @@ async fn filter_builtin(
     b: Value,
     a: Value,
     x: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
-    let eval = evaluate_with_runtime(runtime.as_ref(), b, a, x, &rest).await?;
+    let eval = evaluate_with_runtime(runtime.as_ref(), b, a, x, rest.view()).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Value::output_list(Vec::new()));
@@ -123,7 +123,14 @@ pub async fn evaluate(
     x: Value,
     rest: &[Value],
 ) -> BuiltinResult<FilterEvaluation> {
-    evaluate_with_runtime(None, b, a, x, rest).await
+    evaluate_with_runtime(
+        None,
+        b,
+        a,
+        x,
+        crate::call::FunctionArgumentView::from_slice(rest),
+    )
+    .await
 }
 
 async fn evaluate_with_runtime(
@@ -131,7 +138,7 @@ async fn evaluate_with_runtime(
     b: Value,
     a: Value,
     x: Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<FilterEvaluation> {
     let mut cooperation = SignalCooperation::new(runtime, BUILTIN_NAME);
     cooperation.completed(0).await?;

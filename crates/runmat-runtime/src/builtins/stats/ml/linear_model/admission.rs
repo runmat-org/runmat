@@ -2,7 +2,7 @@ use super::*;
 
 pub(super) fn build_fit_spec(
     first: Value,
-    mut rest: Vec<Value>,
+    rest: crate::call::FunctionArgumentView<'_>,
     arguments: FitlmArguments,
 ) -> BuiltinResult<FitSpec> {
     if is_table_value(&first) {
@@ -13,7 +13,8 @@ pub(super) fn build_fit_spec(
                 "fitlm: matrix input requires response vector y",
             ));
         }
-        let y = rest.remove(0);
+        let y = rest[0].clone();
+        let rest = rest.range(1..)?;
         build_matrix_fit_spec(first, y, rest, arguments)
     }
 }
@@ -25,7 +26,7 @@ pub(super) fn is_table_value(value: &Value) -> bool {
 fn build_matrix_fit_spec(
     x_value: Value,
     y_value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::FunctionArgumentView<'_>,
     arguments: FitlmArguments,
 ) -> BuiltinResult<FitSpec> {
     let x = tensor::value_into_tensor_for(FITLM_NAME, x_value)
@@ -49,7 +50,7 @@ fn build_matrix_fit_spec(
     if arguments.option_start == 2 {
         model_spec = parse_model_spec(&rest[0], cols)?;
     }
-    parse_fit_name_values(&rest, arguments.options, 1, &mut options)?;
+    parse_fit_name_values(rest, arguments.options, 1, &mut options)?;
     if options.response_var.is_some() {
         return Err(fitlm_invalid(
             "fitlm: ResponseVar is only valid for table input",
@@ -101,7 +102,7 @@ fn build_matrix_fit_spec(
 
 fn build_table_fit_spec(
     first: Value,
-    rest: Vec<Value>,
+    rest: crate::call::FunctionArgumentView<'_>,
     arguments: FitlmArguments,
 ) -> BuiltinResult<FitSpec> {
     let object = match first {
@@ -124,17 +125,17 @@ fn build_table_fit_spec(
     if arguments.option_start == 1 {
         if let Some(text) = scalar_text(&rest[0]) {
             if text.contains('~') {
-                formula = Some(text);
+                formula = Some(text.into_owned());
             } else if is_known_model_spec(&text) {
                 model_spec = parse_model_spec_text(&text, variable_names.len() - 1)?;
             } else {
-                response_arg = Some(text);
+                response_arg = Some(text.into_owned());
             }
         } else {
             model_spec = parse_model_spec(&rest[0], variable_names.len() - 1)?;
         }
     }
-    parse_fit_name_values(&rest, arguments.options, 0, &mut options)?;
+    parse_fit_name_values(rest, arguments.options, 0, &mut options)?;
     let response_name = formula
         .as_ref()
         .and_then(|text| text.split_once('~').map(|(lhs, _)| lhs.trim().to_string()))

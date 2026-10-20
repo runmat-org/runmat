@@ -4,7 +4,10 @@ use futures::executor::block_on;
 use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage};
 
 fn call(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    block_on(normalize_builtin(value, rest))
+    block_on(normalize_builtin(
+        value,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    ))
 }
 
 fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {

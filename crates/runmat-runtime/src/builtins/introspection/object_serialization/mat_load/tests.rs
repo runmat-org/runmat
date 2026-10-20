@@ -1,7 +1,7 @@
 use super::*;
 use runmat_value::{
     CellArray, CharArray, ComplexTensor, IntValue, IntegerStorage, LogicalArray, SparseTensor,
-    StringArray, StructArray, StructValue, Tensor,
+    StringArray, StructArray, Tensor,
 };
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -34,15 +34,10 @@ fn flat_mat_classes_root_without_recursive_restoration_and_preserve_exact_values
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
-fn containers_and_serialized_envelopes_keep_recursive_restoration() {
-    let mut structure = StructValue::new();
+fn containers_keep_recursive_restoration() {
+    let mut structure = runmat_value::UnboundedStructValueBuilder::new();
     structure.insert("value", Value::Num(1.0));
-    let envelope = super::super::serialized_object_envelope(
-        "Container".into(),
-        super::super::SERIALIZED_KIND_VALUE,
-        false,
-        Value::Struct(structure.clone()),
-    );
+    let structure = structure.finish();
     let array = StructArray::with_fields(
         vec!["value".into()],
         vec![structure.clone(), structure.clone()],
@@ -53,7 +48,6 @@ fn containers_and_serialized_envelopes_keep_recursive_restoration() {
         Value::Struct(structure),
         Value::StructArray(array),
         Value::Cell(CellArray::new_with_shape(vec![Value::Num(1.0)], vec![1, 1]).unwrap()),
-        envelope,
     ] {
         assert!(matches!(
             classify_mat_load_restoration(value),
@@ -67,9 +61,9 @@ fn containers_and_serialized_envelopes_keep_recursive_restoration() {
 fn recursive_restore_still_enforces_the_declared_depth_limit() {
     let mut nested = Value::Num(1.0);
     for _ in 0..=super::super::MAX_SERIALIZATION_DEPTH {
-        let mut structure = StructValue::new();
+        let mut structure = runmat_value::UnboundedStructValueBuilder::new();
         structure.insert("next", nested);
-        nested = Value::Struct(structure);
+        nested = Value::Struct(structure.finish());
     }
     let error = futures::executor::block_on(super::super::restore_value_from_mat_load(nested))
         .expect_err("recursive MAT values must retain the depth bound");

@@ -11,6 +11,6 @@ use runmat_value::Value;
     binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::path_syntax::fullfile"
 )]
-async fn fullfile_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn fullfile_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     execute::run(args).await
 }

@@ -16,7 +16,7 @@ pub(super) fn characters(
     let characters = values
         .into_iter()
         .map(|value| match value {
-            Value::CharArray(chars) => chars.data.first().copied().ok_or_else(class_mismatch),
+            Value::CharArray(chars) => chars.data().first().copied().ok_or_else(class_mismatch),
             _ => Err(class_mismatch()),
         })
         .collect::<BuiltinResult<Vec<_>>>()?;

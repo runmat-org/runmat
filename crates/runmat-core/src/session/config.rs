@@ -101,6 +101,7 @@ impl RunMatSession {
         self.configure_dynamic_function_services();
         self.runtime_context
             .clone()
+            .with_cancellation_token(self.runtime_context.cancellation())
             .with_program_revision(Some(revision))
     }
 

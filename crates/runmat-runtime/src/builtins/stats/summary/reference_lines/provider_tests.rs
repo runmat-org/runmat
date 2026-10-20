@@ -51,8 +51,12 @@ fn invalid_later_host_coefficient_and_style_precede_resident_download() {
         vec![resident(), Value::Num(0.0), Value::String("Color".into())],
     ];
     for args in bad_calls {
-        let err = block_on(run_reference_lines(args, ReferenceLineOwner::Refline))
-            .expect_err("host-invalid call");
+        let err = block_on(run_reference_lines(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args),
+            ReferenceLineOwner::Refline,
+        ))
+        .expect_err("host-invalid call");
         assert_eq!(
             err.identifier(),
             runmat_builtins::REFLINE_ERROR_INVALID_ARGUMENT.identifier
@@ -74,7 +78,11 @@ fn resident_download_failure_preserves_nested_cause_and_borrowed_lease() {
         .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
         .unwrap();
     let err = block_on(run_reference_lines(
-        vec![Value::GpuTensor(sample.handle.clone()), Value::Num(0.0)],
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::GpuTensor(sample.handle.clone()),
+            Value::Num(0.0),
+        ]),
         ReferenceLineOwner::Refline,
     ))
     .expect_err("rejected download");

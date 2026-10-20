@@ -178,7 +178,7 @@ fn fminunc_uses_objective_gradient_and_returns_six_outputs() {
         },
     )))
     .expect("call-port scope");
-    let mut opts = StructValue::new();
+    let mut opts = runmat_value::UnboundedStructValueBuilder::new();
     opts.insert("SpecifyObjectiveGradient", Value::Bool(true));
     opts.insert("TolX", Value::Num(1.0e-10));
     opts.insert("TolFun", Value::Num(1.0e-10));
@@ -186,7 +186,7 @@ fn fminunc_uses_objective_gradient_and_returns_six_outputs() {
     let result = block_on(runtime.scope(fminunc_builtin(
         objective,
         tensor(vec![0.0, 0.0, 0.0]),
-        vec![Value::Struct(opts)],
+        vec![Value::Struct(opts.finish())],
     )))
     .expect("fminunc");
     let Value::OutputList(outputs) = result else {
@@ -252,12 +252,12 @@ fn fminunc_rejects_invalid_gradient_length() {
         },
     )))
     .expect("call-port scope");
-    let mut opts = StructValue::new();
+    let mut opts = runmat_value::UnboundedStructValueBuilder::new();
     opts.insert("SpecifyObjectiveGradient", Value::Bool(true));
     let err = block_on(runtime.scope(fminunc_builtin(
         objective,
         tensor(vec![0.0, 0.0, 0.0]),
-        vec![Value::Struct(opts)],
+        vec![Value::Struct(opts.finish())],
     )))
     .unwrap_err();
     assert!(err.message().contains("gradient length"));
@@ -311,12 +311,12 @@ fn fminunc_rejects_budget_too_small_for_finite_difference_gradient() {
         },
     )))
     .expect("call-port scope");
-    let mut opts = StructValue::new();
+    let mut opts = runmat_value::UnboundedStructValueBuilder::new();
     opts.insert("MaxFunEvals", Value::Num(3.0));
     let err = block_on(fminunc_builtin(
         bound(108),
         tensor(vec![0.0, 0.0, 0.0]),
-        vec![Value::Struct(opts)],
+        vec![Value::Struct(opts.finish())],
     ))
     .unwrap_err();
     assert!(err.message().contains("MaxFunEvals"));
@@ -329,9 +329,10 @@ fn options_read_typed_integer_tensor_storage_exactly() {
     let gradient = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1])
         .expect("SpecifyObjectiveGradient");
 
-    let mut opts = StructValue::new();
+    let mut opts = runmat_value::UnboundedStructValueBuilder::new();
     opts.insert("MaxIter", Value::Tensor(max_iter));
     opts.insert("SpecifyObjectiveGradient", Value::Tensor(gradient));
+    let opts = opts.finish();
     let parsed = FminuncOptions::from_struct(Some(&opts), 1).expect("options");
     assert_eq!(parsed.max_iter, 5);
     assert!(parsed.specify_objective_gradient);
@@ -340,15 +341,18 @@ fn options_read_typed_integer_tensor_storage_exactly() {
 #[test]
 fn documented_logical_option_flag_is_not_extension_gated() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-    let mut opts = StructValue::new();
+    let mut opts = runmat_value::UnboundedStructValueBuilder::new();
     opts.insert("SpecifyObjectiveGradient", Value::Bool(true));
+    let opts = opts.finish();
     let parsed = FminuncOptions::from_struct(Some(&opts), 1).expect("logical option");
     assert!(parsed.specify_objective_gradient);
 
+    let mut opts = runmat_value::UnboundedStructValueBuilder::from_structure(opts);
     opts.insert(
         "SpecifyObjectiveGradient",
         Value::Tensor(Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap()),
     );
+    let opts = opts.finish();
     let error = FminuncOptions::from_struct(Some(&opts), 1)
         .expect_err("typed-integer spelling is independently gated");
     assert_eq!(
@@ -361,8 +365,9 @@ fn documented_logical_option_flag_is_not_extension_gated() {
 fn options_reject_typed_integer_limits_exactly() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let negative = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("MaxIter");
-    let mut opts = StructValue::new();
+    let mut opts = runmat_value::UnboundedStructValueBuilder::new();
     opts.insert("MaxIter", Value::Tensor(negative));
+    let opts = opts.finish();
     assert!(FminuncOptions::from_struct(Some(&opts), 1).is_err());
 
     let too_large = Tensor::new_integer(
@@ -370,8 +375,9 @@ fn options_reject_typed_integer_limits_exactly() {
         vec![1, 1],
     )
     .expect("MaxFunEvals");
-    let mut opts = StructValue::new();
+    let mut opts = runmat_value::UnboundedStructValueBuilder::new();
     opts.insert("MaxFunEvals", Value::Tensor(too_large));
+    let opts = opts.finish();
     assert!(FminuncOptions::from_struct(Some(&opts), 1).is_err());
 }
 
@@ -387,12 +393,12 @@ fn fminunc_rejects_problem_too_large_for_dense_bfgs() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn fminunc_rejects_huge_direct_iteration_limits() {
-    let mut opts = StructValue::new();
+    let mut opts = runmat_value::UnboundedStructValueBuilder::new();
     opts.insert("MaxFunEvals", Value::Num((MAX_FUN_EVAL_LIMIT as f64) + 1.0));
     let err = block_on(fminunc_builtin(
         bound(110),
         Value::Num(0.0),
-        vec![Value::Struct(opts)],
+        vec![Value::Struct(opts.finish())],
     ))
     .unwrap_err();
     assert!(err.message().contains("MaxFunEvals"));

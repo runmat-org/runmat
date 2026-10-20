@@ -275,7 +275,7 @@ pub async fn materialize_expansion(
                 match base {
                     Value::Cell(cell) => crate::object::cell::expand_all_cell_values(&cell)?,
                     Value::Composite(handle) => {
-                        return expand_composite_values(runtime, *handle, &[], true)
+                        return expand_composite_values(runtime, handle, &[], true)
                             .await?
                             .with_owned_output_storage(rooted_sequence_from_storage);
                     }
@@ -297,7 +297,7 @@ pub async fn materialize_expansion(
                         crate::object::cell::expand_cell_indices(&cell, &indices)?
                     }
                     (Value::Composite(handle), _) => {
-                        return expand_composite_values(runtime, *handle, &indices, false)
+                        return expand_composite_values(runtime, handle, &indices, false)
                             .await?
                             .with_owned_output_storage(rooted_sequence_from_storage);
                     }
@@ -389,7 +389,7 @@ pub(crate) fn project_rooted_legacy_builtin_value_abi(
 
 async fn expand_composite_values(
     runtime: &RuntimeContext,
-    handle: runmat_execution::CompositeHandle,
+    handle: runmat_value::SharedCompositeHandle,
     indices: &[Value],
     expand_all: bool,
 ) -> Result<RootedValues, RuntimeError> {

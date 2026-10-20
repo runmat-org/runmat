@@ -33,6 +33,10 @@ pub(crate) use draft::ExecutableUnitDraft;
 mod class_products;
 #[path = "unit/selected_runtime.rs"]
 mod selected_runtime;
+#[path = "unit/function_identity.rs"]
+mod function_identity;
+#[path = "unit/code_cache.rs"]
+mod code_cache;
 
 /// Immutable canonical compilation product reusable across invocations.
 #[derive(Clone, Debug)]
@@ -47,9 +51,10 @@ pub struct ExecutableUnit {
     layout: Rc<runmat_vm::VmAssemblyLayout>,
     functions: Rc<runmat_vm::FunctionRegistry>,
     portable_selection: Option<Rc<PortableSelection>>,
+    direct_code_cache: Rc<code_cache::DirectCodeCache>,
     /// Original compiler products this unit's deferred callables depend on.
     pub(super) original_dependencies:
-        std::collections::BTreeMap<runmat_types::ProgramFunctionId, Rc<ExecutableUnit>>,
+        std::collections::BTreeMap<runmat_types::FunctionId, Rc<ExecutableUnit>>,
     /// Contracts of a restored portable product, reproduced exactly on re-export.
     pub(super) imported_contract: Option<Rc<ImportedPortableContract>>,
     #[cfg(not(target_arch = "wasm32"))]
@@ -65,12 +70,13 @@ pub(super) struct ImportedPortableContract {
 }
 
 /// Compiler-selected bodies and their exact outbound product references.
-/// Only immutable wire facts live here; selected target products and definition
-/// leases remain with the separate graph owner.
+/// The wire section and its original selected dependency owners are kept
+/// together. Targets never point back to this unit or to its direct-code cache.
 #[derive(Debug)]
 struct PortableSelection {
     current: HashSet<FunctionId>,
     imports: Vec<ExecutableStaticImport>,
+    targets: Vec<crate::session::SelectedStaticTarget>,
 }
 
 impl ExecutableUnit {
@@ -78,6 +84,7 @@ impl ExecutableUnit {
         mut self,
         current: HashSet<FunctionId>,
         imports: Vec<ExecutableStaticImport>,
+        targets: Vec<crate::session::SelectedStaticTarget>,
     ) -> Result<Self, String> {
         let compiled = self.compiled_product_owners()?;
         if !current
@@ -86,8 +93,25 @@ impl ExecutableUnit {
         {
             return Err("selected portable body is not owned by this compiled product".into());
         }
-        self.portable_selection = Some(Rc::new(PortableSelection { current, imports }));
+        if !imports
+            .iter()
+            .eq(targets.iter().map(|target| &target.import))
+        {
+            return Err("selected portable imports differ from their original targets".into());
+        }
+        self.reset_direct_code_cache();
+        self.portable_selection = Some(Rc::new(PortableSelection {
+            current,
+            imports,
+            targets,
+        }));
         Ok(self)
+    }
+
+    pub(crate) fn original_static_targets(&self) -> &[crate::session::SelectedStaticTarget] {
+        self.portable_selection
+            .as_ref()
+            .map_or(&[], |selection| &selection.targets)
     }
 
     pub(crate) fn compiled_current_body_ids(&self) -> Result<HashSet<FunctionId>, String> {
@@ -98,7 +122,7 @@ impl ExecutableUnit {
             .collect())
     }
 
-    pub(super) fn compiled_script_owner_ids(
+    pub(crate) fn compiled_script_owner_ids(
         &self,
     ) -> Result<std::collections::BTreeSet<FunctionId>, String> {
         let owners = self.compiled_product_owners()?;
@@ -322,10 +346,17 @@ impl ExecutableUnit {
                 ))
             }
         };
-        let program_function = runmat_types::ProgramFunctionId(
-            u32::try_from(function.0)
-                .map_err(|_| "function identity exceeds the portable analysis schema")?,
-        );
+        let bytecode = self
+            .functions
+            .get(*function)
+            .ok_or_else(|| format!("function `{name}` has no executable interface"))?;
+        let program_function = bytecode.portable_function;
+        let origin = bytecode
+            .binding_origin
+            .ok_or("function has no original binding identity")?;
+        if self.local_function_for_origin(origin)? != Some(*function) {
+            return Err("function interface is not owned by this executable revision".into());
+        }
         let analysis = self
             .function_analysis(program_function)
             .ok_or_else(|| format!("function `{name}` has no static analysis facts"))?;
@@ -334,10 +365,6 @@ impl ExecutableUnit {
                 "static callable facts for function `{name}` are incomplete"
             ));
         }
-        let bytecode = self
-            .functions
-            .get(*function)
-            .ok_or_else(|| format!("function `{name}` has no executable interface"))?;
         if bytecode.input_slots.len() != analysis.callable.parameters.len() {
             return Err(format!(
                 "parameter identities and static facts for function `{name}` do not agree"

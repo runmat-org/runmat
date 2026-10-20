@@ -108,9 +108,11 @@ impl SelectedGraphUnits {
             .retained_callable_origin_fingerprints()
             .map_err(|_| invalid("selected primary V3 definitions are invalid"))?;
         if primary.retained_origin().is_none() {
-            let selected = primary
-                .current_body_fingerprints()
-                .map_err(|_| invalid("current selected V3 definitions are invalid"))?;
+            let selected = primary.current_body_fingerprints().map_err(|reason| {
+                invalid(format!(
+                    "current selected V3 definitions are invalid: {reason}"
+                ))
+            })?;
             if selected != fingerprints {
                 return Err(invalid(
                     "selected primary V3 bodies differ from their published definitions",

@@ -80,9 +80,9 @@ async fn fwrite_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     fid: Value,
     data: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
-    let eval = evaluate_in(runtime.as_ref(), &fid, &data, &rest).await?;
+    let eval = evaluate_in_view(runtime.as_ref(), &fid, &data, rest.view()).await?;
     Ok(Value::Num(eval.count as f64))
 }
 
@@ -117,6 +117,21 @@ pub async fn evaluate_in(
     fid_value: &Value,
     data_value: &Value,
     rest: &[Value],
+) -> BuiltinResult<FwriteEval> {
+    evaluate_in_view(
+        runtime,
+        fid_value,
+        data_value,
+        crate::call::FunctionArgumentView::from_slice(rest),
+    )
+    .await
+}
+
+pub async fn evaluate_in_view(
+    runtime: Option<&crate::context::RuntimeContext>,
+    fid_value: &Value,
+    data_value: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<FwriteEval> {
     let mut cooperation = super::cooperation::FileCooperation::new(runtime, BUILTIN_NAME);
     preflight_data(data_value)?;

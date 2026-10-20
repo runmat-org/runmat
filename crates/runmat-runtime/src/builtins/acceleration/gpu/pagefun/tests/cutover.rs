@@ -7,7 +7,7 @@ fn nonscalar_single_matrix_pages_keep_single_after_host_product() {
     let result = block_on(pagefun_impl(
         Value::FunctionHandle("mtimes".into()),
         left,
-        vec![right],
+        crate::builtins::common::test_support::builtin_arguments(vec![right]),
     ))
     .unwrap();
     let Value::Tensor(result) = result else {
@@ -35,7 +35,7 @@ fn empty_and_nonempty_integer_pages_share_class_admission() {
             let error = block_on(pagefun_impl(
                 Value::FunctionHandle("mtimes".into()),
                 integer.clone(),
-                vec![other],
+                crate::builtins::common::test_support::builtin_arguments(vec![other]),
             ))
             .unwrap_err();
             assert_eq!(error.identifier(), PAGEFUN_ERROR_INVALID_INPUT.identifier);
@@ -44,7 +44,7 @@ fn empty_and_nonempty_integer_pages_share_class_admission() {
         let result = block_on(pagefun_impl(
             Value::FunctionHandle("mtimes".into()),
             integer,
-            vec![double],
+            crate::builtins::common::test_support::builtin_arguments(vec![double]),
         ))
         .unwrap();
         let Value::Tensor(result) = result else {
@@ -88,7 +88,7 @@ fn illegal_outputs_and_nested_inputs_fail_before_provider_ownership_access() {
         let error = block_on(pagefun_builtin(
             Value::FunctionHandle("mtimes".into()),
             resident.clone(),
-            vec![resident.clone()],
+            crate::builtins::common::test_support::builtin_arguments(vec![resident.clone()]),
         ))
         .unwrap_err();
         assert_eq!(error.identifier(), PAGEFUN_ERROR_OUTPUTS.identifier);
@@ -97,7 +97,7 @@ fn illegal_outputs_and_nested_inputs_fail_before_provider_ownership_access() {
     let error = block_on(pagefun_impl(
         Value::FunctionHandle("mtimes".into()),
         resident,
-        vec![nested],
+        crate::builtins::common::test_support::builtin_arguments(vec![nested]),
     ))
     .unwrap_err();
     assert_eq!(error.identifier(), PAGEFUN_ERROR_INVALID_INPUT.identifier);
@@ -116,7 +116,7 @@ fn empty_page_broadcast_rejects_non_singleton_mismatch() {
     let error = block_on(pagefun_impl(
         Value::FunctionHandle("mtimes".into()),
         empty,
-        vec![two],
+        crate::builtins::common::test_support::builtin_arguments(vec![two]),
     ))
     .unwrap_err();
     assert_eq!(
@@ -136,7 +136,7 @@ fn complex_integer_pages_reject_before_floating_materialization() {
     let error = block_on(pagefun_impl(
         Value::FunctionHandle("mtimes".into()),
         value,
-        vec![Value::Num(1.)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.)]),
     ))
     .unwrap_err();
     assert_eq!(error.identifier(), PAGEFUN_ERROR_INVALID_INPUT.identifier);
@@ -154,7 +154,7 @@ fn single_complex_pages_and_empty_pages_retain_class() {
         let result = block_on(pagefun_impl(
             Value::FunctionHandle("mtimes".into()),
             value,
-            vec![Value::Num(1.)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.)]),
         ))
         .unwrap();
         let Value::ComplexTensor(result) = result else {

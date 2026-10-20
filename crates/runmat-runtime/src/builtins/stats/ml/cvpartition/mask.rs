@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) fn mask_output_source(
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     builtin: &'static str,
 ) -> BuiltinResult<Option<GpuTensorHandle>> {
     crate::builtins::common::gpu_helpers::select_resident_output_source(
@@ -26,7 +26,10 @@ pub(super) fn restore_mask_output(
     }
 }
 
-pub(super) fn ensure_mask_extensions(rest: &[Value], training: bool) -> BuiltinResult<()> {
+pub(super) fn ensure_mask_extensions(
+    rest: crate::call::FunctionArgumentView<'_>,
+    training: bool,
+) -> BuiltinResult<()> {
     let Some(index) = rest.first() else {
         return Ok(());
     };
@@ -63,7 +66,10 @@ pub(super) struct AdmittedMask {
     resubstitution: bool,
 }
 
-pub(super) fn admit_mask(c: &Value, rest: &[Value]) -> BuiltinResult<AdmittedMask> {
+pub(super) fn admit_mask(
+    c: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<AdmittedMask> {
     if crate::output_count::current_output_count().is_some_and(|count| count > 1) {
         return Err(invalid_argument(
             "cvpartition: training/test return one output",
@@ -82,7 +88,7 @@ pub(super) fn admit_mask(c: &Value, rest: &[Value]) -> BuiltinResult<AdmittedMas
             )))
         }
     };
-    let test_sets = match object.properties.get(TEST_SETS_PROPERTY) {
+    let test_sets = match object.properties().get(TEST_SETS_PROPERTY) {
         Some(Value::LogicalArray(array)) => array,
         _ => {
             return Err(invalid_argument(
@@ -96,7 +102,7 @@ pub(super) fn admit_mask(c: &Value, rest: &[Value]) -> BuiltinResult<AdmittedMas
             "cvpartition: object test-set metadata is inconsistent",
         ));
     }
-    let active_rows = match object.properties.get(ACTIVE_ROWS_PROPERTY) {
+    let active_rows = match object.properties().get(ACTIVE_ROWS_PROPERTY) {
         Some(Value::LogicalArray(array)) => array,
         _ => {
             return Err(invalid_argument(
@@ -111,7 +117,7 @@ pub(super) fn admit_mask(c: &Value, rest: &[Value]) -> BuiltinResult<AdmittedMas
         ));
     }
     let kind = object
-        .properties
+        .properties()
         .get("Type")
         .and_then(|value| scalar_text(value, "partition type").ok())
         .and_then(|name| PartitionKind::from_property_name(&name))
@@ -136,7 +142,7 @@ pub(super) fn admit_mask(c: &Value, rest: &[Value]) -> BuiltinResult<AdmittedMas
 
 pub(super) fn mask_from_partition(
     c: Value,
-    rest: Vec<Value>,
+    rest: crate::call::FunctionArgumentView<'_>,
     admitted: AdmittedMask,
     training: bool,
 ) -> BuiltinResult<Value> {
@@ -266,7 +272,7 @@ pub(super) fn selected_indices(value: &Value, cols: usize) -> BuiltinResult<Vec<
 }
 
 pub(super) fn test_sets_property(object: &ObjectInstance) -> BuiltinResult<LogicalArray> {
-    match object.properties.get(TEST_SETS_PROPERTY) {
+    match object.properties().get(TEST_SETS_PROPERTY) {
         Some(Value::LogicalArray(array)) => Ok(array.clone()),
         _ => Err(invalid_argument(
             "cvpartition: object is missing internal test-set data",
@@ -275,7 +281,7 @@ pub(super) fn test_sets_property(object: &ObjectInstance) -> BuiltinResult<Logic
 }
 
 pub(super) fn active_rows_property(object: &ObjectInstance) -> BuiltinResult<LogicalArray> {
-    match object.properties.get(ACTIVE_ROWS_PROPERTY) {
+    match object.properties().get(ACTIVE_ROWS_PROPERTY) {
         Some(Value::LogicalArray(array)) => Ok(array.clone()),
         _ => Err(invalid_argument(
             "cvpartition: object is missing internal active-row data",

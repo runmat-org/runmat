@@ -3,7 +3,9 @@ use runmat_value::{StringArray, Value};
 
 fn run(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-    futures::executor::block_on(unsetenv_builtin(args))
+    futures::executor::block_on(unsetenv_builtin(
+        crate::builtins::common::test_support::builtin_arguments(args),
+    ))
 }
 
 #[test]

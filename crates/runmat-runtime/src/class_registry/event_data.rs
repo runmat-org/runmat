@@ -1,5 +1,5 @@
 use runmat_types::{standard, ClassIdentity};
-use runmat_value::{CharArray, ObjectInstance, Value};
+use runmat_value::{CharArray, UnboundedObjectBuilder, Value};
 use thiserror::Error;
 
 use super::is_class_or_subclass;
@@ -54,7 +54,7 @@ pub fn is_event_data_value(value: &Value) -> bool {
                     let Value::Object(object) = value else {
                         return false;
                     };
-                    if object.class_name != handle.class_name
+                    if object.class_name() != &handle.class_name
                         || object.has_native_payload() && object.selected_class().is_some()
                     {
                         return false;
@@ -94,16 +94,16 @@ pub fn default_event_data(
     let _source_root =
         runmat_gc::gc_root(source_handle.target).map_err(EventDataError::SourceRoot)?;
     let class_name: ClassIdentity = standard::EVENT_DATA.owned();
-    let mut instance = ObjectInstance::new(class_name.clone());
-    instance.properties.insert("Source".into(), source.clone());
-    instance.properties.insert(
+    let mut instance = UnboundedObjectBuilder::new(class_name.clone());
+    instance.insert("Source".into(), source.clone());
+    instance.insert(
         "EventName".into(),
         Value::CharArray(CharArray::new_row(event_name)),
     );
-    let data_root = runmat_gc::gc_allocate_rooted(Value::Object(instance))
+    let data_root = runmat_gc::gc_allocate_rooted(Value::Object(instance.finish()))
         .map_err(EventDataError::Allocation)?;
     let value = Value::HandleObject(runmat_value::HandleRef {
-        class_name,
+        class_name: class_name.into(),
         target: data_root.handle(),
         valid: true,
     });
@@ -137,14 +137,23 @@ pub fn prepare_event_data(
         runmat_gc::gc_root(source_handle.target).map_err(EventDataError::SourceRoot)?;
     let _data_root = runmat_gc::gc_root(data_handle.target).map_err(EventDataError::DataRoot)?;
     runmat_gc::gc_with_value_mut(&data_handle.target, |value| {
-        let Value::Object(object) = value else {
+        let Value::Object(_) = value else {
             return Err(EventDataError::InvalidTarget);
         };
-        object.properties.insert("Source".into(), source.clone());
-        object.properties.insert(
+        let replacement = std::mem::replace(value, Value::Num(0.0));
+        let Value::Object(object) = replacement else {
+            unreachable!("target was validated as an object")
+        };
+        let mut object = object.into_unbounded_builder().map_err(|object| {
+            *value = Value::Object(object);
+            EventDataError::InvalidTarget
+        })?;
+        object.insert("Source".into(), source.clone());
+        object.insert(
             "EventName".into(),
             Value::CharArray(CharArray::new_row(event_name)),
         );
+        *value = Value::Object(object.finish());
         Ok(())
     })
     .map_err(EventDataError::Binding)??;
@@ -159,6 +168,7 @@ pub fn prepare_event_data(
 mod tests {
     use super::*;
     use crate::class_registry::{register_class, RuntimeClass};
+    use runmat_value::ObjectInstance;
     use std::error::Error;
 
     #[test]
@@ -195,7 +205,7 @@ mod tests {
             events: Default::default(),
         });
         let derived = runmat_value::HandleRef {
-            class_name: name,
+            class_name: name.into(),
             target: runmat_gc::gc_allocate(Value::Object(ObjectInstance::new(
                 "EventDataDerivedSourceTest",
             )))
@@ -208,7 +218,7 @@ mod tests {
         ))));
         assert!(!is_event_data_value(&Value::Num(1.0)));
         let mismatched = Value::HandleObject(runmat_value::HandleRef {
-            class_name: standard::EVENT_DATA.owned(),
+            class_name: standard::EVENT_DATA.owned().into(),
             target: runmat_gc::gc_allocate(Value::Object(ObjectInstance::new("ForgedData")))
                 .expect("forged object"),
             valid: true,
@@ -220,7 +230,7 @@ mod tests {
     fn default_data_binds_actual_source_and_event_name() {
         let source_name = ClassIdentity::from("EventDataSourceTest");
         let source = Value::HandleObject(runmat_value::HandleRef {
-            class_name: source_name.clone(),
+            class_name: source_name.clone().into(),
             target: runmat_gc::gc_allocate(Value::Object(ObjectInstance::new(source_name)))
                 .expect("source"),
             valid: true,
@@ -234,9 +244,9 @@ mod tests {
             let Value::Object(object) = value else {
                 panic!("EventData target must be an object");
             };
-            assert_eq!(object.properties.get("Source"), Some(&source));
+            assert_eq!(object.property("Source"), Some(&source));
             assert_eq!(
-                object.properties.get("EventName"),
+                object.property("EventName"),
                 Some(&Value::CharArray(CharArray::new_row("Changed")))
             );
         })
@@ -253,9 +263,9 @@ mod tests {
             let Value::Object(object) = value else {
                 panic!("supplied data target");
             };
-            assert_eq!(object.properties.get("Source"), Some(&source));
+            assert_eq!(object.property("Source"), Some(&source));
             assert_eq!(
-                object.properties.get("EventName"),
+                object.property("EventName"),
                 Some(&Value::CharArray(CharArray::new_row("Again")))
             );
         })

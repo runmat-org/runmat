@@ -7,7 +7,7 @@ fn selected_target_facts(
     target: &runmat_value::HandleRef,
 ) -> Result<Option<Rc<runmat_value::SelectedObjectClassFacts>>, RuntimeError> {
     runmat_gc::gc_with_value(&target.target, |value| match value {
-        runmat_value::Value::Object(object) if object.class_name == target.class_name => {
+        runmat_value::Value::Object(object) if object.class_name() == &*target.class_name => {
             if object
                 .selected_class()
                 .is_some_and(|facts| !facts.is_handle_class())
@@ -173,7 +173,7 @@ impl EventAdmission {
             ));
         }
         Ok(Self {
-            receiver_class: target.class_name.clone(),
+            receiver_class: (*target.class_name).clone(),
             name,
             declaration,
             owner,
@@ -359,7 +359,7 @@ mod admission_tests {
         let admission = EventAdmission::new(&child, "Changed", EventOperation::Notify)
             .expect("inherited event");
         let target = runmat_value::HandleRef {
-            class_name: child.clone(),
+            class_name: child.clone().into(),
             target: runmat_gc::gc_allocate(Value::Object(runmat_value::ObjectInstance::new(child)))
                 .expect("event target"),
             valid: true,

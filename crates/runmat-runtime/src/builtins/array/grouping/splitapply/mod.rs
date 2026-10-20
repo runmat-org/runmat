@@ -25,7 +25,7 @@ use crate::BuiltinResult;
 pub(crate) async fn splitapply_builtin(
     function: Value,
     first_data: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<crate::execution::RootedValue> {
     execute::apply(function, first_data, rest).await
 }

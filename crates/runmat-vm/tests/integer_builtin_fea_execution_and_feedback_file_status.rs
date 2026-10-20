@@ -13,7 +13,7 @@ fn object_of_class<'a>(values: &'a [Value], class_name: &str) -> &'a runmat_valu
     values
         .iter()
         .find_map(|value| match value {
-            Value::Object(object) if object.class_name == class_name => Some(object),
+            Value::Object(object) if object.class_name() == &class_name => Some(object),
             _ => None,
         })
         .unwrap_or_else(|| panic!("expected {class_name} object"))
@@ -130,7 +130,7 @@ fn feedback_gains_and_feof_file_ids_accept_every_runmat_integer_extension_class(
             .iter()
             .any(|value| matches!(value, Value::Bool(false))));
         assert!(values.iter().any(|value| {
-            matches!(value, Value::Object(object) if object.class_name.is(runmat_types::standard::TRANSFER_FUNCTION))
+            matches!(value, Value::Object(object) if object.class_name().is(runmat_types::standard::TRANSFER_FUNCTION))
         }));
     }
 }

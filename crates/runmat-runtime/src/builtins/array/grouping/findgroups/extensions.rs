@@ -5,7 +5,10 @@ use crate::BuiltinResult;
 
 use super::error;
 
-pub(super) fn validate(first: &Value, rest: &[Value]) -> BuiltinResult<()> {
+pub(super) fn validate(
+    first: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     if crate::value_contains_gpu(first) || rest.iter().any(crate::value_contains_gpu) {
         require(&runmat_builtins::FINDGROUPS_RESIDENT_INPUT_EXTENSION)?;
     }

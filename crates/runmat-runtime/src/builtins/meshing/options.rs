@@ -92,9 +92,9 @@ fn text_set(
 ) -> BuiltinResult<std::collections::BTreeSet<String>> {
     let values = match value {
         Value::String(_) | Value::CharArray(_) => vec![text(builtin, value)?],
-        Value::StringArray(array) => array.data.clone(),
+        Value::StringArray(array) => array.data().iter().map(ToString::to_string).collect(),
         Value::Cell(cell) => cell
-            .data
+            .data()
             .iter()
             .map(|value| text(builtin, value))
             .collect::<BuiltinResult<Vec<_>>>()?,
@@ -151,8 +151,8 @@ pub(super) fn parse_force_option(args: &[Value]) -> BuiltinResult<bool> {
 
 pub(super) fn text(builtin: &'static str, value: &Value) -> BuiltinResult<String> {
     match value {
-        Value::String(value) => Ok(value.clone()),
-        Value::CharArray(value) if value.rows == 1 => Ok(value.data.iter().collect()),
+        Value::String(value) => Ok(value.to_string()),
+        Value::CharArray(value) if value.rows == 1 => Ok(value.data().iter().collect()),
         _ => Err(error(builtin, "expected a text scalar")),
     }
 }
@@ -201,9 +201,9 @@ mod tests {
     #[test]
     fn generation_controls_preserve_wide_integers() {
         let settings = parse_settings(&[
-            Value::String("MaximumElements".to_string()),
+            Value::String("MaximumElements".to_string().into()),
             Value::Int(runmat_value::IntValue::U64(u64::MAX)),
-            Value::String("Seed".to_string()),
+            Value::String("Seed".to_string().into()),
             Value::Int(runmat_value::IntValue::U64(42)),
         ])
         .expect("valid generation controls");
@@ -214,7 +214,7 @@ mod tests {
     #[test]
     fn generation_controls_reject_negative_integers() {
         let error = parse_settings(&[
-            Value::String("Seed".to_string()),
+            Value::String("Seed".to_string().into()),
             Value::Int(runmat_value::IntValue::I64(-1)),
         ])
         .expect_err("negative seed");
@@ -224,7 +224,7 @@ mod tests {
     #[test]
     fn generation_controls_reject_double_above_the_u64_domain() {
         let error = parse_settings(&[
-            Value::String("MaximumElements".to_string()),
+            Value::String("MaximumElements".to_string().into()),
             Value::Num(u64::MAX as f64),
         ])
         .expect_err("2^64 is outside the u64 domain");

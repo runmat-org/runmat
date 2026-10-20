@@ -28,7 +28,7 @@ pub(super) struct NamedOption {
 }
 
 impl HeaderInspection {
-    pub fn inspect(first: &Value, rest: &[Value]) -> Self {
+    pub fn inspect(first: &Value, rest: crate::call::FunctionArgumentView<'_>) -> Self {
         let first_name = rest.first().and_then(scalar_text);
         let first_identity = first_name
             .as_deref()
@@ -56,7 +56,7 @@ impl HeaderInspection {
                 };
                 OptionSlot {
                     index,
-                    spelling,
+                    spelling: spelling.map(std::borrow::Cow::into_owned),
                     identity,
                 }
             })
@@ -112,7 +112,10 @@ impl HeaderInspection {
 }
 
 impl FitlmArguments {
-    pub fn preflight_values(mut self, rest: &[Value]) -> BuiltinResult<Self> {
+    pub fn preflight_values(
+        mut self,
+        rest: crate::call::FunctionArgumentView<'_>,
+    ) -> BuiltinResult<Self> {
         for option in &mut self.options {
             let value = &rest[option.name.index + 1];
             if !crate::dispatcher::value_contains_gpu(value) {
@@ -139,7 +142,10 @@ pub(super) fn preflight_matrix_rank(first: &Value) -> BuiltinResult<()> {
     Ok(())
 }
 
-pub(super) fn preflight_response_shape(first: &Value, rest: &[Value]) -> BuiltinResult<()> {
+pub(super) fn preflight_response_shape(
+    first: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     if is_table_value(first) {
         return Ok(());
     }

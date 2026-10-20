@@ -11,7 +11,7 @@ use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
 use crate::builtins::common::format::{
-    decode_escape_sequences, flatten_arguments, format_variadic_with_cursor, ArgCursor,
+    decode_escape_sequences, flatten_argument_elements, format_variadic_with_cursor, ArgCursor,
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -22,6 +22,7 @@ mod encoding;
 mod prepared;
 mod target;
 
+#[cfg(test)]
 use admission::coerce_single_integer_string_argument;
 use encoding::encode_output;
 
@@ -96,6 +97,14 @@ pub async fn evaluate_in(
     runtime: Option<&crate::context::RuntimeContext>,
     args: &[Value],
 ) -> BuiltinResult<FprintfEval> {
+    let args = crate::call::BuiltinArguments::from_borrowed(args, runtime)?;
+    evaluate_retained(runtime, args).await
+}
+
+async fn evaluate_retained(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<FprintfEval> {
     let prepared = prepared::prepare(runtime, args).await?;
     let raw_format = prepared.format;
     let mut target = prepared.target;
@@ -103,17 +112,23 @@ pub async fn evaluate_in(
         decode_escape_sequences("fprintf", &raw_format).map_err(map_control_flow)?;
     let format_summary = crate::builtins::common::format::validate_format_syntax(&format_string)
         .map_err(remap_format_error)?;
-    let mut data_args = Vec::with_capacity(prepared.data_args.len());
-    for value in prepared.data_args {
-        data_args.push(
-            super::cooperation::await_io(runtime, BUILTIN_NAME, gather_value(&value)).await??,
-        );
-    }
-    let data_args = coerce_single_integer_string_argument(format_summary, data_args)?;
+    let input = prepared.data_args;
+    let data_args = input
+        .try_map_preserving_roots_async(input.len(), runtime, async |index| {
+            let value =
+                super::cooperation::await_io(runtime, BUILTIN_NAME, gather_value(&input[index]))
+                    .await??;
+            if input.len() == 1 && format_summary.sole_string_conversion_without_star() {
+                admission::coerce_single_integer_string_value(value)
+            } else {
+                Ok(value)
+            }
+        })
+        .await?;
     let flattened_args = super::cooperation::await_io(
         runtime,
         BUILTIN_NAME,
-        flatten_arguments(&data_args, "fprintf"),
+        flatten_argument_elements(data_args.view(), "fprintf"),
     )
     .await?
     .map_err(map_control_flow)?;
@@ -139,12 +154,28 @@ pub async fn evaluate_in(
 async fn fprintf_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     first: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
-    let mut args = Vec::with_capacity(rest.len() + 1);
-    args.push(first);
-    args.extend(rest);
-    let eval = evaluate_in(runtime.as_ref(), &args).await?;
+    use crate::context::host_allocation::{host_allocation_runtime_error, HostAllocationReceipt};
+    HostAllocationReceipt::capture_owner(runtime.as_ref()).map_err(|source| {
+        host_allocation_runtime_error(
+            runtime.as_ref(),
+            "RunMat:fprintf:Allocation",
+            "fprintf prefix policy unavailable",
+            source,
+        )
+    })?;
+    let first = match runtime.as_ref() {
+        Some(runtime) => crate::execution::RootedValue::in_context(first, runtime)?,
+        None => crate::execution::RootedValue::new(first).map_err(|e| e.into_runtime_error())?,
+    };
+    let args = crate::builtins::common::mapped_callable::prepend_rooted_argument(
+        &rest,
+        first,
+        runtime.as_ref(),
+    )
+    .await?;
+    let eval = evaluate_retained(runtime.as_ref(), args).await?;
     Ok(Value::Num(eval.bytes_written() as f64))
 }
 

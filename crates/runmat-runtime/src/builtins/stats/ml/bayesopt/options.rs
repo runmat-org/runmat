@@ -36,7 +36,9 @@ pub(super) struct BayesoptOptions {
 }
 
 impl BayesoptOptions {
-    pub(super) fn headers(args: Vec<Value>) -> BuiltinResult<Vec<(BayesoptOption, Value)>> {
+    pub(super) fn headers(
+        args: crate::call::BuiltinArguments,
+    ) -> BuiltinResult<Vec<(BayesoptOption, Value)>> {
         if !args.len().is_multiple_of(2) {
             return Err(bayesopt_error(
                 "bayesopt: name-value options must be paired",
@@ -114,7 +116,7 @@ impl BayesoptOptions {
     }
 
     fn parse(args: Vec<(BayesoptOption, Value, ParsedOption)>) -> BuiltinResult<Self> {
-        let mut raw_options = StructValue::new();
+        let mut raw_options = runmat_value::UnboundedStructValueBuilder::new();
         let mut max_evals = DEFAULT_MAX_EVALS;
         let mut num_seed_points = DEFAULT_SEED_POINTS;
         let mut acquisition = Acquisition::ExpectedImprovementPlus;
@@ -146,12 +148,13 @@ impl BayesoptOptions {
         raw_options.insert("NumSeedPoints", Value::Num(num_seed_points as f64));
         raw_options.insert(
             "AcquisitionFunctionName",
-            Value::String(acquisition.public_name().to_string()),
+            Value::string(acquisition.public_name().to_string()),
         );
         raw_options.insert("ExplorationRatio", Value::Num(exploration_ratio));
         raw_options.insert("IsObjectiveDeterministic", Value::Bool(deterministic));
         raw_options.insert("Verbose", Value::Bool(verbose));
         raw_options.insert("UseParallel", Value::Bool(false));
+        let raw_options = raw_options.finish();
 
         Ok(Self {
             max_evals,

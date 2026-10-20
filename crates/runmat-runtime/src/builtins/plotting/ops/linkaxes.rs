@@ -20,7 +20,7 @@ type ParsedLinkAxesArgs = (Vec<AxesTarget>, Option<LinkAxesMode>);
     binding_variant = "default",
     builtin_path = "crate::builtins::plotting::linkaxes"
 )]
-pub fn linkaxes_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub fn linkaxes_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &LINKAXES_DESCRIPTOR,
         &LINKAXES_ERROR_TOO_MANY_OUTPUTS,
@@ -41,12 +41,14 @@ pub fn linkaxes_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     Ok(Value::output_list(vec![]))
 }
 
-fn parse_linkaxes_args(args: Vec<Value>) -> crate::BuiltinResult<ParsedLinkAxesArgs> {
-    match args.as_slice() {
-        [axes] => Ok((axes_handles_from_value(axes)?, Some(LinkAxesMode::XY))),
-        [axes, option] => Ok((
-            axes_handles_from_value(axes)?,
-            link_mode_from_value(option)?,
+fn parse_linkaxes_args(
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<ParsedLinkAxesArgs> {
+    match args.len() {
+        1 => Ok((axes_handles_from_value(&args[0])?, Some(LinkAxesMode::XY))),
+        2 => Ok((
+            axes_handles_from_value(&args[0])?,
+            link_mode_from_value(&args[1])?,
         )),
         _ => Err(plotting_error(
             "linkaxes",
@@ -132,3 +134,7 @@ fn contextual_error(mut error: crate::RuntimeError, identifier: &str) -> crate::
 #[cfg(test)]
 #[path = "linkaxes/tests.rs"]
 mod tests;
+#[cfg(test)]
+pub(crate) fn linkaxes_builtin_source(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    linkaxes_builtin(crate::call::BuiltinArguments::from_borrowed(&args, None)?)
+}

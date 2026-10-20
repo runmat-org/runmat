@@ -34,7 +34,7 @@ pub(super) const BUILTIN_NAME: &str = "arrayfun";
 async fn arrayfun_builtin(
     context: Option<crate::context::RuntimeContext>,
     func: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<crate::execution::RootedValue> {
     execution::execute(context.as_ref(), func, rest).await
 }

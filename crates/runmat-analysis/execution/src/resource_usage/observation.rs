@@ -191,7 +191,13 @@ mod acceleration_resource_tests {
     }
 
     fn allocation(class: &str, minimum_allocation_bytes: u64) -> AcceleratorRequest {
-        crate::test_fixtures::accelerator_request(class, minimum_allocation_bytes)
+        AcceleratorRequest {
+            class: runmat_execution::resource::AcceleratorClass::new(class).unwrap(),
+            count: 1,
+            minimum_allocation_bytes,
+            provider: None,
+            required_features: BTreeSet::new(),
+        }
     }
 
     #[test]
@@ -275,12 +281,14 @@ mod acceleration_resource_tests {
         // Accelerator requests are accounted against the leased device that satisfies them.
         let device = crate::test_fixtures::accelerator_device("exact-f64", 8 << 30);
         let assignment = runmat_execution::resource::ResourceAssignment {
-            accelerator_leases: vec![runmat_execution::resource::AcceleratorDeviceLease::for_attempt(
-                runmat_execution::identity::AttemptId::derive(&[b"exact-accelerator-attempt"]),
-                1,
-                &device,
-            )
-            .unwrap()],
+            accelerator_leases: vec![
+                runmat_execution::resource::AcceleratorDeviceLease::for_attempt(
+                    runmat_execution::identity::AttemptId::derive(&[b"exact-accelerator-attempt"]),
+                    1,
+                    &device,
+                )
+                .unwrap(),
+            ],
         };
         let exact =
             ResourceAccounting::for_assigned_interval(request.clone(), &assignment, 1, 0, 0, 0)

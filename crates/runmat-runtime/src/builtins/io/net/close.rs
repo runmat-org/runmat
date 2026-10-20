@@ -43,13 +43,13 @@ fn selector_value(value: &Value) -> Option<RuntimeTcpCloseScope> {
 fn is_network_target(value: &Value) -> bool {
     match value {
         Value::Object(object) => {
-            object.class_name.is(TCPCLIENT_CLASS) || object.class_name.is(TCPSERVER_CLASS)
+            object.class_name().is(TCPCLIENT_CLASS) || object.class_name().is(TCPSERVER_CLASS)
         }
         Value::Struct(_) => true,
         Value::String(_) | Value::CharArray(_) | Value::StringArray(_) => {
             selector_value(value).is_some()
         }
-        Value::Cell(cell) => !cell.data.is_empty() && cell.data.iter().all(is_network_target),
+        Value::Cell(cell) => !cell.data().is_empty() && cell.data().iter().all(is_network_target),
         _ => false,
     }
 }
@@ -57,7 +57,8 @@ fn is_network_target(value: &Value) -> bool {
 fn collect(value: &Value, targets: &mut Vec<Target>) -> BuiltinResult<()> {
     match value {
         Value::Object(object)
-            if object.class_name.is(TCPCLIENT_CLASS) || object.class_name.is(TCPSERVER_CLASS) =>
+            if object.class_name().is(TCPCLIENT_CLASS)
+                || object.class_name().is(TCPSERVER_CLASS) =>
         {
             let authority = object.tcp_authority().cloned().ok_or_else(invalid_handle)?;
             targets.push(Target::Endpoint(authority));
@@ -71,12 +72,12 @@ fn collect(value: &Value, targets: &mut Vec<Target>) -> BuiltinResult<()> {
             )?;
             targets.push(Target::Scope(scope));
         }
-        Value::Cell(cell) if !cell.data.is_empty() => {
+        Value::Cell(cell) if !cell.data().is_empty() => {
             crate::compatibility::ensure_builtin_extension_enabled(
                 &CLOSE_TCP_CELL_EXTENSION,
                 "close",
             )?;
-            for value in &cell.data {
+            for value in cell.data() {
                 collect(value, targets)?;
             }
         }
@@ -87,7 +88,7 @@ fn collect(value: &Value, targets: &mut Vec<Target>) -> BuiltinResult<()> {
 
 pub(crate) async fn close_if_network_targets(
     runtime: Option<&RuntimeContext>,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<Option<f64>> {
     if args.is_empty() || !args.iter().all(is_network_target) {
         return Ok(None);
@@ -145,14 +146,15 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn graphics_all_and_bare_close_never_claim_tcp_scope() {
-        assert!(
-            futures::executor::block_on(close_if_network_targets(None, &[]))
-                .unwrap()
-                .is_none()
-        );
         assert!(futures::executor::block_on(close_if_network_targets(
             None,
-            &[Value::String("all".into())]
+            crate::call::FunctionArgumentView::from_slice(&[])
+        ))
+        .unwrap()
+        .is_none());
+        assert!(futures::executor::block_on(close_if_network_targets(
+            None,
+            crate::call::FunctionArgumentView::from_slice(&[Value::String("all".into())])
         ))
         .unwrap()
         .is_none());
@@ -169,7 +171,7 @@ mod tests {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
             let error = futures::executor::block_on(close_if_network_targets(
                 None,
-                std::slice::from_ref(&trailing),
+                crate::call::FunctionArgumentView::from_slice(std::slice::from_ref(&trailing)),
             ))
             .expect_err("selector extension is rejected before target service");
             assert_eq!(
@@ -197,12 +199,18 @@ mod tests {
     #[test]
     fn forged_tcp_class_and_legacy_struct_reject_before_service() {
         let forged = Value::Object(ObjectInstance::new(TCPCLIENT_CLASS));
-        let error =
-            futures::executor::block_on(close_if_network_targets(None, &[forged])).unwrap_err();
+        let error = futures::executor::block_on(close_if_network_targets(
+            None,
+            crate::call::FunctionArgumentView::from_slice(&[forged]),
+        ))
+        .unwrap_err();
         assert_eq!(error.identifier(), Some("RunMat:close:InvalidHandle"));
         let legacy = Value::Struct(StructValue::new());
-        let error =
-            futures::executor::block_on(close_if_network_targets(None, &[legacy])).unwrap_err();
+        let error = futures::executor::block_on(close_if_network_targets(
+            None,
+            crate::call::FunctionArgumentView::from_slice(&[legacy]),
+        ))
+        .unwrap_err();
         assert_eq!(error.identifier(), Some("RunMat:close:InvalidHandle"));
     }
 
@@ -219,9 +227,11 @@ mod tests {
             2,
         )
         .unwrap();
-        let error =
-            futures::executor::block_on(close_if_network_targets(None, &[Value::Cell(cell)]))
-                .unwrap_err();
+        let error = futures::executor::block_on(close_if_network_targets(
+            None,
+            crate::call::FunctionArgumentView::from_slice(&[Value::Cell(cell)]),
+        ))
+        .unwrap_err();
         assert_eq!(error.identifier(), Some("RunMat:close:InvalidHandle"));
     }
 
@@ -276,7 +286,7 @@ mod tests {
         assert!(driver
             .block_on(close_if_network_targets(
                 Some(&other_session),
-                std::slice::from_ref(&client)
+                crate::call::FunctionArgumentView::from_slice(std::slice::from_ref(&client))
             ))
             .is_err());
         let foreign = driver
@@ -297,7 +307,7 @@ mod tests {
         let error = driver
             .block_on(close_if_network_targets(
                 Some(&runtime),
-                &[client.clone(), foreign.clone()],
+                crate::call::FunctionArgumentView::from_slice(&[client.clone(), foreign.clone()]),
             ))
             .expect_err("later foreign target must not replay or roll back earlier close");
         assert!(error.message().contains("TCP close failed"));
@@ -305,20 +315,26 @@ mod tests {
             driver
                 .block_on(close_if_network_targets(
                     Some(&runtime),
-                    std::slice::from_ref(&client)
+                    crate::call::FunctionArgumentView::from_slice(std::slice::from_ref(&client))
                 ))
                 .unwrap(),
             Some(0.0),
         );
         assert_eq!(
             driver
-                .block_on(close_if_network_targets(Some(&runtime), &[client]))
+                .block_on(close_if_network_targets(
+                    Some(&runtime),
+                    crate::call::FunctionArgumentView::from_slice(&[client])
+                ))
                 .unwrap(),
             Some(0.0)
         );
         assert_eq!(
             driver
-                .block_on(close_if_network_targets(Some(&other_session), &[foreign]))
+                .block_on(close_if_network_targets(
+                    Some(&other_session),
+                    crate::call::FunctionArgumentView::from_slice(&[foreign])
+                ))
                 .unwrap(),
             Some(1.0),
         );

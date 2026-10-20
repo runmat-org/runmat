@@ -22,7 +22,7 @@ pub(crate) mod tests {
     use runmat_value::{
         CellArray, CharArray, Closure, ComplexTensor, HandleRef, IntValue, IntegerComplexStorage,
         IntegerStorage, Listener, LogicalArray, MException, ObjectInstance, StringArray,
-        StructValue, SymbolicExpr, Tensor,
+        SymbolicExpr, Tensor,
     };
 
     fn test_handle_target() -> runmat_gc::GcHandle {
@@ -160,7 +160,7 @@ pub(crate) mod tests {
         );
         assert_eq!(class_name_for_value(&logical_array), "logical");
 
-        let string_scalar = Value::String("hello".to_string());
+        let string_scalar = Value::String("hello".to_string().into());
         assert_eq!(class_name_for_value(&string_scalar), "string");
 
         let string_array = Value::StringArray(
@@ -187,9 +187,9 @@ pub(crate) mod tests {
             Value::Cell(CellArray::new(vec![Value::Num(1.0), Value::Bool(false)], 1, 2).unwrap());
         assert_eq!(class_name_for_value(&cell), "cell");
 
-        let mut st = StructValue::new();
+        let mut st = runmat_value::UnboundedStructValueBuilder::new();
         st.fields.insert("field".into(), Value::Num(42.0));
-        let struct_value = Value::Struct(st);
+        let struct_value = Value::Struct(st.finish());
         assert_eq!(class_name_for_value(&struct_value), "struct");
 
         let func_handle = Value::FunctionHandle("sin".into());
@@ -201,7 +201,7 @@ pub(crate) mod tests {
             binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
-            captures: vec![],
+            captures: vec![].into(),
         }));
         assert_eq!(class_name_for_value(&closure), "function_handle");
 

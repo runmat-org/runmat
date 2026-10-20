@@ -5,15 +5,16 @@ use super::super::{error, names::*};
 
 const IDENTITY: &str = "isenv";
 
-pub(super) fn run(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub(super) fn run(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &runmat_builtins::ISENV_DESCRIPTOR,
         &runmat_builtins::ISENV_ERROR_TOO_MANY_OUTPUTS,
         IDENTITY,
     )?;
-    let [value] = args.as_slice() else {
+    if args.len() != 1 {
         return Err(error::builtin(IDENTITY, &ISENV_ERROR_ARITY));
-    };
+    }
+    let value = args.first().expect("validated one argument");
     let names = EnvironmentNames::decode(value)
         .map_err(|_| error::builtin(IDENTITY, &ISENV_ERROR_INVALID_NAME))?;
     if names.features().next().is_some() {

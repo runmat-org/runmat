@@ -38,8 +38,8 @@ pub(super) async fn flatten_keys(
 ) -> BuiltinResult<Vec<Value>> {
     match value {
         Value::Cell(cell) => {
-            let mut out = Vec::with_capacity(cell.data.len());
-            for ptr in &cell.data {
+            let mut out = Vec::with_capacity(cell.data().len());
+            for ptr in cell.data() {
                 let element = ptr;
                 if matches!(element, Value::Cell(_)) {
                     return Err(map_error(
@@ -56,7 +56,7 @@ pub(super) async fn flatten_keys(
             Ok(out)
         }
         Value::StringArray(sa) => Ok(sa
-            .data
+            .data()
             .iter()
             .map(|text| Value::String(text.clone()))
             .collect()),
@@ -97,8 +97,8 @@ pub(super) async fn flatten_values(
 ) -> BuiltinResult<Vec<Value>> {
     match value {
         Value::Cell(cell) => {
-            let mut out = Vec::with_capacity(cell.data.len());
-            for ptr in &cell.data {
+            let mut out = Vec::with_capacity(cell.data().len());
+            for ptr in cell.data() {
                 out.push(
                     gather_if_needed_async(ptr)
                         .await
@@ -108,7 +108,7 @@ pub(super) async fn flatten_values(
             Ok(out)
         }
         Value::StringArray(sa) => Ok(sa
-            .data
+            .data()
             .iter()
             .map(|text| Value::String(text.clone()))
             .collect()),
@@ -138,7 +138,7 @@ pub(super) fn char_array_rows(ca: &CharArray, builtin: &'static str) -> BuiltinR
     for row in 0..ca.rows {
         let mut text = String::with_capacity(ca.cols);
         for col in 0..ca.cols {
-            text.push(ca.data[row * ca.cols + col]);
+            text.push(ca.data()[row * ca.cols + col]);
         }
         let chars: Vec<char> = text.chars().collect();
         let array = CharArray::new(chars.clone(), 1, chars.len())
@@ -318,7 +318,7 @@ pub(super) fn value_matches_key_type(value: &Value, key_type: KeyType) -> bool {
                 value,
                 Value::CharArray(chars) if chars.rows == 1
             ) || matches!(value, Value::String(_))
-                || matches!(value, Value::StringArray(strings) if strings.data.len() == 1)
+                || matches!(value, Value::StringArray(strings) if strings.data().len() == 1)
         }
         KeyType::Double => {
             matches!(value, Value::Num(_))
@@ -352,9 +352,9 @@ pub(super) fn string_from_value(
     builtin: &'static str,
 ) -> BuiltinResult<String> {
     match value {
-        Value::String(s) => Ok(s.clone()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
+        Value::String(s) => Ok(s.to_string()),
+        Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].to_string()),
+        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data().iter().collect()),
         _ => Err(map_error(context, builtin)),
     }
 }
@@ -370,8 +370,8 @@ pub(super) fn char_array_from_value(
             CharArray::new(chars.clone(), 1, chars.len())
                 .map_err(|e| map_error(format!("containers.Map: {e}"), builtin))
         }
-        Value::StringArray(sa) if sa.data.len() == 1 => {
-            let chars: Vec<char> = sa.data[0].chars().collect();
+        Value::StringArray(sa) if sa.data().len() == 1 => {
+            let chars: Vec<char> = sa.data()[0].chars().collect();
             CharArray::new(chars.clone(), 1, chars.len())
                 .map_err(|e| map_error(format!("containers.Map: {e}"), builtin))
         }

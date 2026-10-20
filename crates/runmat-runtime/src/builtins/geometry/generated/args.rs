@@ -106,9 +106,9 @@ pub(super) fn transform(
 
 pub(super) fn text(value: &Value, builtin: &'static str, name: &str) -> BuiltinResult<String> {
     match value {
-        Value::String(text) => Ok(text.clone()),
-        Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data.iter().collect()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::String(text) => Ok(text.to_string()),
+        Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data().iter().collect()),
+        Value::StringArray(array) if array.data().len() == 1 => Ok(array.data()[0].to_string()),
         _ => Err(invalid(builtin, format!("{name} must be scalar text"))),
     }
 }

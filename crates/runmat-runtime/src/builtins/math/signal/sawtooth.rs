@@ -106,20 +106,22 @@ fn sawtooth_scalar(t: f64, xmax: f64) -> f64 {
 async fn sawtooth_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
     t: Value,
-    varargin: Vec<Value>,
+    varargin: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     sawtooth_in_runtime(runtime.as_ref(), t, varargin).await
 }
 
 #[cfg(test)]
 async fn sawtooth_builtin(t: Value, varargin: Vec<Value>) -> BuiltinResult<Value> {
-    sawtooth_in_runtime(None, t, varargin).await
+    let varargin = crate::execution::RootedValues::new(varargin)
+        .map_err(|error| error.into_runtime_error())?;
+    sawtooth_in_runtime(None, t, varargin.into()).await
 }
 
 async fn sawtooth_in_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
     t: Value,
-    varargin: Vec<Value>,
+    varargin: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let mut cooperation = SignalCooperation::new(runtime, BUILTIN_NAME)
         .with_integer_error_descriptor(&SAWTOOTH_ERROR_INTERNAL);
@@ -143,7 +145,7 @@ async fn sawtooth_in_runtime(
             BUILTIN_NAME,
         )?;
     }
-    let mut xmax = prepare_xmax(&varargin)?;
+    let mut xmax = prepare_xmax(varargin.view())?;
     admit_real_waveform_sample(&t).map_err(|error| match error {
         WaveformSampleError::Complex => sawtooth_error(&SAWTOOTH_ERROR_COMPLEX_UNSUPPORTED),
         WaveformSampleError::Unsupported => sawtooth_error(&SAWTOOTH_ERROR_INVALID_INPUT),
@@ -193,12 +195,14 @@ fn is_supported_nondouble_argument(value: &Value) -> bool {
     }
 }
 
-fn prepare_xmax(varargin: &[Value]) -> BuiltinResult<Option<PreparedWaveformControl<'_>>> {
+fn prepare_xmax<'a>(
+    varargin: crate::call::FunctionArgumentView<'a>,
+) -> BuiltinResult<Option<PreparedWaveformControl<'a>>> {
     match varargin.len() {
         0 => Ok(None),
         1 => {
             let control = PreparedWaveformControl::admit(
-                &varargin[0],
+                varargin.first().expect("single xmax operand was checked"),
                 &SAWTOOTH_NONDOUBLE_INPUT_EXTENSION,
                 BUILTIN_NAME,
                 "xmax",

@@ -22,7 +22,7 @@ end
 fn invocation(name: &str, arguments: Vec<Value>, outputs: usize) -> ProcedureInvocation {
     ProcedureInvocation {
         target: ProcedureTarget::Function(name.into()),
-        arguments,
+        arguments: crate::ProcedureArguments::Source(arguments),
         requested_outputs: outputs,
     }
 }

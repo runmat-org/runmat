@@ -53,7 +53,7 @@ fn map_get_error(err: RuntimeError) -> RuntimeError {
     binding_variant = "default",
     builtin_path = "crate::builtins::plotting::get"
 )]
-pub async fn get_builtin_async(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub async fn get_builtin_async(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     if args.is_empty() || args.len() > 2 {
         return Err(get_error_with_detail(
             &GET_ERROR_INVALID_ARGUMENT,
@@ -115,7 +115,9 @@ pub async fn get_builtin_async(args: Vec<Value>) -> crate::BuiltinResult<Value> 
 
 #[cfg(test)]
 pub fn get_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    futures::executor::block_on(get_builtin_async(args))
+    futures::executor::block_on(get_builtin_async(
+        crate::builtins::common::test_support::builtin_arguments(args),
+    ))
 }
 
 fn is_typed_integer_handle_alias(value: &Value) -> bool {
@@ -208,10 +210,21 @@ mod tests {
     fn control_object_type_is_not_a_supported_property() {
         let _guard = setup();
         let controls = [
-            crate::builtins::plotting::zoom::zoom_builtin(Vec::new()).expect("zoom object"),
-            crate::builtins::plotting::pan::pan_builtin(Vec::new()).expect("pan object"),
-            crate::builtins::plotting::datacursormode::datacursormode_builtin(Vec::new())
-                .expect("data cursor object"),
+            crate::builtins::plotting::zoom::zoom_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+            )
+            .expect("zoom object"),
+            crate::builtins::plotting::pan::pan_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+            )
+            .expect("pan object"),
+            crate::builtins::plotting::datacursormode::datacursormode_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+            )
+            .expect("data cursor object"),
         ];
         for control in controls {
             let error = get_builtin(vec![control.clone(), Value::String("Type".into())])
@@ -279,11 +292,13 @@ mod tests {
     #[test]
     fn get_reads_text_handle_properties() {
         let _guard = setup();
-        let h = title_builtin(vec![
-            Value::String("Signal".into()),
-            Value::String("FontSize".into()),
-            Value::Num(16.0),
-        ])
+        let h = title_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![
+                Value::String("Signal".into()),
+                Value::String("FontSize".into()),
+                Value::Num(16.0),
+            ],
+        ))
         .unwrap();
 
         let value = get_builtin(vec![Value::Num(h)]).unwrap();
@@ -312,12 +327,10 @@ mod tests {
         let _ = crate::builtins::plotting::set::set_builtin(vec![
             Value::Num(h),
             Value::String("String".into()),
-            Value::StringArray(runmat_value::StringArray {
-                data: vec!["Top".into(), "Bottom".into()],
-                shape: vec![1, 2],
-                rows: 1,
-                cols: 2,
-            }),
+            Value::StringArray(
+                runmat_value::StringArray::new(vec!["Top".into(), "Bottom".into()], vec![1, 2])
+                    .unwrap(),
+            ),
         ])
         .unwrap();
         let multiline = get_builtin(vec![Value::Num(h), Value::String("String".into())]).unwrap();
@@ -335,7 +348,10 @@ mod tests {
         );
         let handle = crate::builtins::plotting::import_figure(figure);
         let ax = crate::builtins::plotting::state::encode_axes_handle(handle, 0);
-        let legend = legend_builtin(vec![Value::Num(ax)]).unwrap();
+        let legend = legend_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::Num(ax)],
+        ))
+        .unwrap();
 
         let axes_value = get_builtin(vec![Value::Num(ax)]).unwrap();
         assert!(matches!(axes_value, Value::Struct(_)));
@@ -469,9 +485,12 @@ mod tests {
             Value::Num(1.0),
         )
         .unwrap();
-        let title =
-            crate::builtins::plotting::title::title_builtin(vec![Value::String("Signal".into())])
-                .unwrap();
+        let title = crate::builtins::plotting::title::title_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "Signal".into(),
+            )]),
+        )
+        .unwrap();
 
         let axes_value = get_builtin(vec![Value::Num(ax)]).unwrap();
         let Value::Struct(axes_struct) = axes_value else {

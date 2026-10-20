@@ -3,9 +3,7 @@ use crate::execution::RuntimeExecutionService;
 use futures::executor::block_on;
 use runmat_execution::cancellation::CancellationSource;
 use runmat_execution::CancellationReason;
-use runmat_value::{
-    CellArray, CharArray, DynamicPropertyDef, IntValue, ObjectInstance, StructValue,
-};
+use runmat_value::{CellArray, CharArray, DynamicPropertyDef, IntValue};
 
 #[path = "tests/lifecycle.rs"]
 mod lifecycle;
@@ -175,10 +173,11 @@ fn late_unsupported_value_and_missing_name_leave_transaction_unchanged() {
 #[test]
 fn defaults_are_one_ordered_transaction_and_nested_bits_round_trip() {
     let service = IsolatedMemoryPreferenceService::new();
-    let mut structure = StructValue::new();
+    let mut structure = runmat_value::UnboundedStructValueBuilder::new();
     structure.insert("wide", Value::Int(IntValue::I64(i64::MIN)));
     structure.insert("nan", Value::Num(f64::from_bits(0x7ff8_0000_0000_0042)));
-    let nested = Value::Cell(CellArray::new(vec![Value::Struct(structure)], 1, 1).unwrap());
+    let nested =
+        Value::Cell(CellArray::new(vec![Value::Struct(structure.finish())], 1, 1).unwrap());
     let values = block_on(service.read_or_create_many(
         runtime(),
         "app".into(),
@@ -197,7 +196,7 @@ fn defaults_are_one_ordered_transaction_and_nested_bits_round_trip() {
     let Value::Cell(cell) = &stored["same"] else {
         panic!("nested cell");
     };
-    let Value::Struct(structure) = &cell.data[0] else {
+    let Value::Struct(structure) = &cell.data()[0] else {
         panic!("nested structure");
     };
     assert_eq!(
@@ -255,12 +254,12 @@ fn cancelled_generation_cannot_publish_or_reuse_another_authority() {
 #[test]
 fn admitted_character_ranks_and_dynamic_definition_names_survive_reopen() {
     let service = IsolatedMemoryPreferenceService::new();
-    let mut object = ObjectInstance::new("PreferencePayload");
+    let mut object = runmat_value::UnboundedObjectBuilder::new("PreferencePayload");
     let definition = DynamicPropertyDef::new(
         "definition_name".into(),
         runmat_types::ClassIdentity::new("PreferencePayload").unwrap(),
     );
-    object.insert_dynamic_property("map_key".into(), definition);
+    object.insert_dynamic("map_key".into(), definition);
     let entries = vec![
         (
             "rank_one".into(),
@@ -274,7 +273,7 @@ fn admitted_character_ranks_and_dynamic_definition_names_survive_reopen() {
             "paged".into(),
             Value::CharArray(CharArray::new_with_shape(vec!['x', 'y'], vec![1, 1, 2]).unwrap()),
         ),
-        ("object".into(), Value::Object(object)),
+        ("object".into(), Value::Object(object.finish())),
     ];
     block_on(service.set_many(runtime(), "app".into(), entries.clone())).unwrap();
     let current = block_on(service.group_values(runtime(), "app".into()))

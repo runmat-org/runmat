@@ -158,20 +158,25 @@ struct EmbeddingResult {
 pub(crate) async fn tsne_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
     x: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     tsne_in_runtime(runtime.as_ref(), x, rest).await
 }
 
 #[cfg(test)]
 async fn tsne_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    tsne_in_runtime(None, x, rest).await
+    tsne_in_runtime(
+        None,
+        x,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    )
+    .await
 }
 
 async fn tsne_in_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
     x: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let mut cooperation = cooperation::TsneCooperation::new(runtime);
     cooperation.completed(0).await?;
@@ -206,7 +211,7 @@ fn tsne_value_contains_typed_integer(value: &Value) -> bool {
         Value::Int(_) => true,
         Value::Tensor(tensor) => tensor.integer_storage().is_some(),
         Value::GpuTensor(handle) => runmat_accelerate_api::handle_integer_type(handle).is_some(),
-        Value::Cell(cell) => cell.data.iter().any(tsne_value_contains_typed_integer),
+        Value::Cell(cell) => cell.data().iter().any(tsne_value_contains_typed_integer),
         Value::Struct(value) => value.fields.values().any(tsne_value_contains_typed_integer),
         Value::OutputList(values) => values.iter().any(tsne_value_contains_typed_integer),
         _ => false,
@@ -216,7 +221,7 @@ fn tsne_value_contains_typed_integer(value: &Value) -> bool {
 fn tsne_value_contains_explicit_gpu(value: &Value) -> bool {
     match value {
         Value::GpuTensor(handle) => runmat_accelerate_api::handle_is_explicit(handle),
-        Value::Cell(cell) => cell.data.iter().any(tsne_value_contains_explicit_gpu),
+        Value::Cell(cell) => cell.data().iter().any(tsne_value_contains_explicit_gpu),
         Value::Struct(value) => value.fields.values().any(tsne_value_contains_explicit_gpu),
         Value::OutputList(values) => values.iter().any(tsne_value_contains_explicit_gpu),
         _ => false,

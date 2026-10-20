@@ -1,103 +1,23 @@
 //! MATLAB-compatible standalone `normalizeWords` helper.
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
-};
-use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
+use runmat_builtins::NORMALIZE_WORDS_ERROR_INVALID_INPUT;
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, StringArray, Value};
 
+use crate::builtins::strings::common::text_input_admission;
 use crate::builtins::strings::common::{
     char_row_to_string_slice, contains_numeric_or_resident_text_input, is_missing_string,
+    scalar_text_input,
 };
-use crate::builtins::strings::core::compat::scalar_text;
 use crate::builtins::strings::text_analytics::documents::{
     tokenized_document_language, transform_tokenized_document, DocumentTokenType,
     TOKENIZED_DOCUMENT_CLASS,
 };
 use crate::{build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult};
 
-const OUT_WORDS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "updatedWords",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Normalized words or tokenizedDocument object.",
-}];
-
-const IN_WORDS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "words",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Words to stem or lemmatize.",
-}];
-
-const IN_WORDS_REST: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "words",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Words to stem or lemmatize.",
-    },
-    BuiltinParamDescriptor {
-        name: "NameValue",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name-value options: Language and Style.",
-    },
-];
-
-const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.NORMALIZEWORDS.INVALID_INPUT",
-    identifier: Some("RunMat:normalizeWords:InvalidInput"),
-    when: "Inputs are not a supported normalizeWords form.",
-    message: "normalizeWords: invalid input",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_INVALID_INPUT];
-
-pub const NORMALIZE_WORDS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &[
-        BuiltinSignatureDescriptor {
-            label: "updatedDocuments = normalizeWords(documents)",
-            inputs: &IN_WORDS,
-            outputs: &OUT_WORDS,
-        },
-        BuiltinSignatureDescriptor {
-            label: "updatedWords = normalizeWords(words)",
-            inputs: &IN_WORDS,
-            outputs: &OUT_WORDS,
-        },
-        BuiltinSignatureDescriptor {
-            label: "updatedWords = normalizeWords(words, Name, Value, ...)",
-            inputs: &IN_WORDS_REST,
-            outputs: &OUT_WORDS,
-        },
-    ],
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
-pub const NORMALIZE_WORDS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "normalizeWords accepts tokenizedDocument objects or host string, character, and cell text plus textual Language and Style values. Numeric, logical, symbolic, and provider-resident inputs reject before gather or provider access.",
-    };
-
-fn any_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Unknown
-}
-
 fn normalize_error(message: impl Into<String>) -> crate::RuntimeError {
     let mut builder = build_runtime_error(message).with_builtin("normalizeWords");
-    if let Some(identifier) = ERROR_INVALID_INPUT.identifier {
+    if let Some(identifier) = NORMALIZE_WORDS_ERROR_INVALID_INPUT.identifier {
         builder = builder.with_identifier(identifier);
     }
     builder.build()
@@ -105,28 +25,27 @@ fn normalize_error(message: impl Into<String>) -> crate::RuntimeError {
 
 #[runtime_builtin(
     name = "normalizeWords",
-    category = "strings/text_analytics",
-    summary = "Stem or lemmatize standalone word arrays.",
-    keywords = "normalizeWords,stem,lemma,text analytics,words",
-    accel = "sink",
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::text_analytics::normalize::NORMALIZE_WORDS_DESCRIPTOR),
-    integer_audit(
-        crate::builtins::strings::text_analytics::normalize::NORMALIZE_WORDS_INTEGER_AUDIT
-    ),
-    builtin_path = "crate::builtins::strings::text_analytics::normalize"
+    binding_variant = "default",
+    builtin_path = "crate::builtins::strings::text_analytics::normalize",
+    context = true
 )]
-async fn normalize_words_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn normalize_words_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if args.iter().any(contains_numeric_or_resident_text_input) {
         return Err(normalize_error(
             "normalizeWords: inputs and option values must be text or tokenizedDocument objects",
         ));
     }
-    let (words, options) = parse_args(args).await?;
+    let (words, options) = parse_args(runtime.as_ref(), args).await?;
     normalize_words_value(words, options)
 }
 
-async fn parse_args(args: Vec<Value>) -> BuiltinResult<(Value, NormalizeOptions)> {
+async fn parse_args(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<(Value, NormalizeOptions)> {
     if args.is_empty() {
         return Err(normalize_error(
             "normalizeWords: expected words input and optional name-value pairs",
@@ -158,26 +77,28 @@ async fn parse_args(args: Vec<Value>) -> BuiltinResult<(Value, NormalizeOptions)
                     "normalizeWords: failed to gather option value: {err}"
                 ))
             })?;
-        let name = scalar_text(&name, "normalizeWords")
-            .map_err(|err| normalize_error(err.to_string()))?
-            .to_ascii_lowercase();
-        match name.as_str() {
-            "language" => {
-                let value = scalar_text(&value, "normalizeWords")
-                    .map_err(|err| normalize_error(err.to_string()))?;
-                options.language = Language::parse(&value)?;
-                options.language_explicit = true;
-            }
-            "style" => {
-                let value = scalar_text(&value, "normalizeWords")
-                    .map_err(|err| normalize_error(err.to_string()))?;
-                options.style = Style::parse(&value)?
-            }
-            _ => {
-                return Err(normalize_error(format!(
-                    "normalizeWords: unsupported option '{name}'"
-                )));
-            }
+        let name = scalar_text_input(&name, runtime, |runtime, cause| {
+            text_input_admission("normalizeWords", runtime, cause)
+        })?
+        .ok_or_else(|| normalize_error("normalizeWords: expected text option"))?;
+        if name.as_str().eq_ignore_ascii_case("language") {
+            let value = scalar_text_input(&value, runtime, |runtime, cause| {
+                text_input_admission("normalizeWords", runtime, cause)
+            })?
+            .ok_or_else(|| normalize_error("normalizeWords: expected text language"))?;
+            options.language = Language::parse(value.as_str())?;
+            options.language_explicit = true;
+        } else if name.as_str().eq_ignore_ascii_case("style") {
+            let value = scalar_text_input(&value, runtime, |runtime, cause| {
+                text_input_admission("normalizeWords", runtime, cause)
+            })?
+            .ok_or_else(|| normalize_error("normalizeWords: expected text style"))?;
+            options.style = Style::parse(value.as_str())?;
+        } else {
+            return Err(normalize_error(format!(
+                "normalizeWords: unsupported option '{}'",
+                name.as_str()
+            )));
         }
         idx += 2;
     }
@@ -220,28 +141,34 @@ enum Language {
 
 impl Language {
     fn parse(value: &str) -> BuiltinResult<Self> {
-        match value.to_ascii_lowercase().as_str() {
-            "en" => Ok(Self::English),
-            "de" => Ok(Self::German),
-            "ja" | "ko" => Err(normalize_error(
+        if value.eq_ignore_ascii_case("en") {
+            Ok(Self::English)
+        } else if value.eq_ignore_ascii_case("de") {
+            Ok(Self::German)
+        } else if value.eq_ignore_ascii_case("ja") || value.eq_ignore_ascii_case("ko") {
+            Err(normalize_error(
                 "normalizeWords: standalone word input supports Language 'en' or 'de'; use tokenizedDocument for Japanese or Korean",
-            )),
-            other => Err(normalize_error(format!(
-                "normalizeWords: Language must be 'en' or 'de', got '{other}'"
-            ))),
+            ))
+        } else {
+            Err(normalize_error(format!(
+                "normalizeWords: Language must be 'en' or 'de', got '{value}'"
+            )))
         }
     }
 
     fn parse_document_language(value: &str) -> BuiltinResult<Self> {
-        match value.to_ascii_lowercase().as_str() {
-            "en" => Ok(Self::English),
-            "de" => Ok(Self::German),
-            "ja" | "ko" => Err(normalize_error(
+        if value.eq_ignore_ascii_case("en") {
+            Ok(Self::English)
+        } else if value.eq_ignore_ascii_case("de") {
+            Ok(Self::German)
+        } else if value.eq_ignore_ascii_case("ja") || value.eq_ignore_ascii_case("ko") {
+            Err(normalize_error(
                 "normalizeWords: Japanese and Korean tokenizedDocument normalization requires MeCab-compatible token details and remains tracked",
-            )),
-            other => Err(normalize_error(format!(
-                "normalizeWords: unsupported tokenizedDocument language '{other}'"
-            ))),
+            ))
+        } else {
+            Err(normalize_error(format!(
+                "normalizeWords: unsupported tokenizedDocument language '{value}'"
+            )))
         }
     }
 }
@@ -254,12 +181,14 @@ enum Style {
 
 impl Style {
     fn parse(value: &str) -> BuiltinResult<Self> {
-        match value.to_ascii_lowercase().as_str() {
-            "stem" => Ok(Self::Stem),
-            "lemma" => Ok(Self::Lemma),
-            other => Err(normalize_error(format!(
-                "normalizeWords: Style must be 'stem' or 'lemma', got '{other}'"
-            ))),
+        if value.eq_ignore_ascii_case("stem") {
+            Ok(Self::Stem)
+        } else if value.eq_ignore_ascii_case("lemma") {
+            Ok(Self::Lemma)
+        } else {
+            Err(normalize_error(format!(
+                "normalizeWords: Style must be 'stem' or 'lemma', got '{value}'"
+            )))
         }
     }
 }
@@ -268,16 +197,16 @@ fn normalize_words_value(value: Value, options: NormalizeOptions) -> BuiltinResu
     match value {
         Value::String(text) => {
             options.validate_standalone()?;
-            Ok(Value::String(normalize_word_or_missing(&text, options)?))
+            Ok(Value::string(normalize_word_or_missing(&text, options)?))
         }
         Value::StringArray(array) => {
             options.validate_standalone()?;
             let data = array
-                .data
+                .data()
                 .iter()
                 .map(|text| normalize_word_or_missing(text, options))
                 .collect::<BuiltinResult<Vec<_>>>()?;
-            StringArray::new(data, array.shape)
+            StringArray::new(data, array.shape().to_vec())
                 .map(Value::StringArray)
                 .map_err(|err| normalize_error(format!("normalizeWords: {err}")))
         }
@@ -286,7 +215,7 @@ fn normalize_words_value(value: Value, options: NormalizeOptions) -> BuiltinResu
             let rows = (0..array.rows)
                 .map(|row| {
                     normalize_word_or_missing(
-                        &char_row_to_string_slice(&array.data, array.cols, row),
+                        &char_row_to_string_slice(array.data(), array.cols, row),
                         options,
                     )
                 })
@@ -295,10 +224,10 @@ fn normalize_words_value(value: Value, options: NormalizeOptions) -> BuiltinResu
         }
         Value::Cell(cell) => {
             options.validate_standalone()?;
-            let shape = cell.shape.clone();
+            let shape = cell.shape().to_vec();
             let data = cell
-                .data
-                .into_iter()
+                .data()
+                .iter()
                 .map(|item| normalize_cell_item(item, options))
                 .collect::<BuiltinResult<Vec<_>>>()?;
             make_cell_with_shape(data, shape).map_err(|err| normalize_error(err.to_string()))
@@ -308,7 +237,7 @@ fn normalize_words_value(value: Value, options: NormalizeOptions) -> BuiltinResu
         }
         Value::Object(object) => Err(normalize_error(format!(
             "normalizeWords: expected tokenizedDocument object, got {}",
-            object.class_name
+            object.class_name()
         ))),
         other => Err(normalize_error(format!(
             "normalizeWords: expected string scalar/array, character vector/array, or cell text input, got {other:?}"
@@ -338,13 +267,13 @@ fn normalize_tokenized_document(
     })
 }
 
-fn normalize_cell_item(value: Value, options: NormalizeOptions) -> BuiltinResult<Value> {
+fn normalize_cell_item(value: &Value, options: NormalizeOptions) -> BuiltinResult<Value> {
     match value {
-        Value::String(text) => Ok(Value::String(normalize_word_or_missing(&text, options)?)),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(Value::StringArray(
+        Value::String(text) => Ok(Value::string(normalize_word_or_missing(text, options)?)),
+        Value::StringArray(array) if array.data().len() == 1 => Ok(Value::StringArray(
             StringArray::new(
-                vec![normalize_word_or_missing(&array.data[0], options)?],
-                array.shape,
+                vec![normalize_word_or_missing(&array.data()[0], options)?],
+                array.shape().to_vec(),
             )
             .map_err(|err| normalize_error(format!("normalizeWords: {err}")))?,
         )),
@@ -352,7 +281,7 @@ fn normalize_cell_item(value: Value, options: NormalizeOptions) -> BuiltinResult
             let text = if array.rows == 0 {
                 String::new()
             } else {
-                char_row_to_string_slice(&array.data, array.cols, 0)
+                char_row_to_string_slice(array.data(), array.cols, 0)
             };
             Ok(Value::CharArray(CharArray::new_row(&normalize_word_or_missing(
                 &text, options,
@@ -736,7 +665,10 @@ mod tests {
     use crate::builtins::strings::text_analytics::documents::documents_from_object;
 
     fn run(args: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(normalize_words_builtin(args))
+        futures::executor::block_on(normalize_words_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
 
     fn tokenized_document(documents: Vec<Vec<&str>>, language: &str) -> Value {
@@ -752,21 +684,22 @@ mod tests {
                 .unwrap()
             })
             .collect::<Vec<_>>();
-        object.properties.insert(
+        object.replace_property_unbounded(
             "Documents".to_string(),
             Value::Cell(CellArray::new(cells, documents.len(), 1).unwrap()),
         );
-        object.properties.insert(
+        object.replace_property_unbounded(
             "Shape".to_string(),
             Value::Tensor(Tensor::new(vec![documents.len() as f64, 1.0], vec![1, 2]).unwrap()),
         );
-        object.properties.insert(
+        object.replace_property_unbounded(
             "TokenizeMethod".to_string(),
-            Value::String("unicode".to_string()),
+            Value::String("unicode".to_string().into()),
         );
-        object
-            .properties
-            .insert("Language".to_string(), Value::String(language.to_string()));
+        object.replace_property_unbounded(
+            "Language".to_string(),
+            Value::String(language.to_string().into()),
+        );
         Value::Object(object)
     }
 
@@ -788,7 +721,7 @@ mod tests {
             panic!("expected string array");
         };
         assert_eq!(array.shape, vec![2, 2]);
-        assert_eq!(array.data, vec!["strongli", "word", "collect", "word"]);
+        assert_eq!(array.data(), vec!["strongli", "word", "collect", "word"]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -796,8 +729,8 @@ mod tests {
     fn lemmatizes_english_char_vector() {
         let out = run(vec![
             Value::CharArray(CharArray::new_row("running")),
-            Value::String("Style".to_string()),
-            Value::String("lemma".to_string()),
+            Value::String("Style".to_string().into()),
+            Value::String("lemma".to_string().into()),
         ])
         .expect("normalize");
         assert_eq!(out, Value::CharArray(CharArray::new_row("run")));
@@ -817,7 +750,7 @@ mod tests {
         let Value::StringArray(array) = out else {
             panic!("expected string array");
         };
-        assert_eq!(array.data, vec!["morg", "gut"]);
+        assert_eq!(array.data(), vec!["morg", "gut"]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -831,7 +764,7 @@ mod tests {
         assert_eq!(array.rows, 2);
         assert_eq!(array.cols, 4);
         assert_eq!(
-            array.data.into_iter().collect::<String>(),
+            array.data().iter().copied().collect::<String>(),
             "run word".to_string()
         );
     }
@@ -842,7 +775,7 @@ mod tests {
         let cell = CellArray::new(
             vec![
                 Value::CharArray(CharArray::new_row("running")),
-                Value::String("children".to_string()),
+                Value::String("children".to_string().into()),
             ],
             1,
             2,
@@ -850,16 +783,16 @@ mod tests {
         .unwrap();
         let out = run(vec![
             Value::Cell(cell),
-            Value::String("Style".to_string()),
-            Value::String("lemma".to_string()),
+            Value::String("Style".to_string().into()),
+            Value::String("lemma".to_string().into()),
         ])
         .expect("normalize");
         let Value::Cell(cell) = out else {
             panic!("expected cell");
         };
         assert_eq!(cell.shape, vec![1, 2]);
-        assert_eq!(cell.data[0], Value::CharArray(CharArray::new_row("run")));
-        assert_eq!(cell.data[1], Value::String("child".to_string()));
+        assert_eq!(cell.data()[0], Value::CharArray(CharArray::new_row("run")));
+        assert_eq!(cell.data()[1], Value::String("child".to_string().into()));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -867,7 +800,7 @@ mod tests {
     fn preserves_missing_strings() {
         let input = StringArray::new(vec!["<missing>".to_string()], vec![1, 1]).unwrap();
         let out = run(vec![Value::StringArray(input)]).expect("normalize");
-        assert!(matches!(out, Value::StringArray(array) if array.data == vec!["<missing>"]));
+        assert!(matches!(out, Value::StringArray(array) if array.data() == vec!["<missing>"]));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -892,8 +825,8 @@ mod tests {
     fn rejects_language_override_for_tokenized_documents() {
         let err = run(vec![
             tokenized_document(vec![vec!["word"]], "en"),
-            Value::String("Language".to_string()),
-            Value::String("de".to_string()),
+            Value::String("Language".to_string().into()),
+            Value::String("de".to_string().into()),
         ])
         .expect_err("expected Language option rejection");
         assert!(err.to_string().contains("document Language metadata"));
@@ -903,9 +836,9 @@ mod tests {
     #[test]
     fn rejects_unsupported_language_for_standalone_words() {
         let err = run(vec![
-            Value::String("word".to_string()),
-            Value::String("Language".to_string()),
-            Value::String("ja".to_string()),
+            Value::String("word".to_string().into()),
+            Value::String("Language".to_string().into()),
+            Value::String("ja".to_string().into()),
         ])
         .expect_err("expected unsupported language");
         assert!(err.to_string().contains("tokenizedDocument"));
@@ -915,11 +848,11 @@ mod tests {
     #[test]
     fn rejects_german_lemma_for_standalone_words() {
         let err = run(vec![
-            Value::String("wort".to_string()),
-            Value::String("Language".to_string()),
-            Value::String("de".to_string()),
-            Value::String("Style".to_string()),
-            Value::String("lemma".to_string()),
+            Value::String("wort".to_string().into()),
+            Value::String("Language".to_string().into()),
+            Value::String("de".to_string().into()),
+            Value::String("Style".to_string().into()),
+            Value::String("lemma".to_string().into()),
         ])
         .expect_err("expected unsupported German lemma");
         assert!(err.to_string().contains("English only"));
@@ -929,9 +862,9 @@ mod tests {
     #[test]
     fn wraps_non_text_option_errors_with_normalize_identifier() {
         let err = run(vec![
-            Value::String("word".to_string()),
+            Value::String("word".to_string().into()),
             Value::Num(1.0),
-            Value::String("stem".to_string()),
+            Value::String("stem".to_string().into()),
         ])
         .expect_err("expected option name error");
         assert!(err.to_string().contains("normalizeWords"));
@@ -941,7 +874,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_multi_word_elements() {
-        let err = run(vec![Value::String("two words".to_string())])
+        let err = run(vec![Value::String("two words".to_string().into())])
             .expect_err("expected single word error");
         assert!(err.to_string().contains("single word"));
     }

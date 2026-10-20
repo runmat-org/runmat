@@ -10,7 +10,7 @@ use runmat_value::Value;
 pub(crate) async fn fitdist_builtin(
     data: Value,
     distname: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     super::fitted_distribution::fit_sample_distribution(data, distname, rest).await
 }

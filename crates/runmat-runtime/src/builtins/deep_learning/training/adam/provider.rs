@@ -109,7 +109,9 @@ impl AdamUpdateGpuEval {
     }
 }
 
-pub(super) fn try_adamupdate_gpu(args: &[Value]) -> BuiltinResult<Option<AdamUpdateGpuEval>> {
+pub(super) fn try_adamupdate_gpu(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Option<AdamUpdateGpuEval>> {
     if !(5..=9).contains(&args.len()) {
         return Err(deep_learning_error(
             "adamupdate",
@@ -123,7 +125,9 @@ pub(super) fn try_adamupdate_gpu(args: &[Value]) -> BuiltinResult<Option<AdamUpd
     let Value::GpuTensor(gradient) = &args[1] else {
         return Ok(None);
     };
-    if args[4..]
+    if args
+        .range(4..)
+        .expect("Adam scalar-control suffix")
         .iter()
         .any(|value| matches!(value, Value::GpuTensor(_)))
     {

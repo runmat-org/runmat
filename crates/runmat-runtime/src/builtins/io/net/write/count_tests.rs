@@ -153,7 +153,7 @@ fn short_and_oversized_service_successes_never_publish_element_count() {
             Some(runtime),
             receiver(),
             Value::Num(1.0),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .expect_err("invalid accepted byte count must not publish one element");
         assert_eq!(error.identifier(), WRITE_ERROR_INTERNAL.identifier);
@@ -195,7 +195,7 @@ fn pending_write_cancellation_wakes_and_preserves_indeterminate_progress() {
         Some(runtime),
         receiver(),
         Value::Num(1.0),
-        vec![],
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
     ));
     let wakes = Arc::new(Wakes(AtomicUsize::new(0)));
     let waker = waker_ref(&wakes);
@@ -247,7 +247,12 @@ fn cancelling_during_full_call_encoding_starts_no_socket_write() {
     let data = Value::Tensor(
         runmat_value::Tensor::new(vec![1.0; 2048], vec![1, 2048]).expect("fixture payload"),
     );
-    let mut call = Box::pin(write_builtin(Some(runtime), receiver(), data, vec![]));
+    let mut call = Box::pin(write_builtin(
+        Some(runtime),
+        receiver(),
+        data,
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ));
     let waker = futures::task::noop_waker();
     assert!(matches!(
         call.as_mut().poll(&mut Context::from_waker(&waker)),

@@ -259,7 +259,7 @@ mod tests {
         NATIVE_OBJECT_SCHEMA_VERSION,
     };
     use runmat_native_codegen::NativeTarget;
-    use runmat_types::ProgramFunctionId;
+    use runmat_types::FunctionId;
 
     use super::{
         execution_object_format, materialize_native_object_artifact,
@@ -296,7 +296,7 @@ mod tests {
         let target = NativeTarget::current();
         let runtime = Digest::sha256(b"runtime");
         let catalog = Digest::sha256(b"catalog");
-        let function = ProgramFunctionId(7);
+        let function = FunctionId(7);
         let executable_cache_key = Digest::sha256(b"executable");
         let entrypoint_body = Digest::sha256(b"entrypoint-body");
         let native_cache_key = target

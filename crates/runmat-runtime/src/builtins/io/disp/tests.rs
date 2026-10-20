@@ -29,8 +29,11 @@ fn disp_preserves_rank_zero_scalar_and_rank_one_row_display() {
     ];
     for (value, expected) in cases {
         crate::console::reset_thread_buffer();
-        futures::executor::block_on(disp_builtin(value, Vec::new()))
-            .expect("display exact-rank tensor");
+        futures::executor::block_on(disp_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect("display exact-rank tensor");
         let entries = crate::console::take_thread_buffer();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].text, expected);
@@ -51,13 +54,17 @@ fn disp_descriptor_signatures_cover_core_forms() {
 #[test]
 fn disp_rejects_outputs_and_prints_nothing_for_empty_builtin_values() {
     let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
-    let err = futures::executor::block_on(disp_builtin(Value::Num(1.0), Vec::new())).unwrap_err();
+    let err = futures::executor::block_on(disp_builtin(
+        Value::Num(1.0),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap_err();
     assert_eq!(err.identifier(), Some("RunMat:disp:TooManyOutputs"));
     drop(_outputs);
     crate::console::reset_thread_buffer();
     futures::executor::block_on(disp_builtin(
         Value::Tensor(Tensor::zeros(vec![0, 0])),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap();
     assert!(crate::console::take_thread_buffer().is_empty());
@@ -66,7 +73,11 @@ fn disp_rejects_outputs_and_prints_nothing_for_empty_builtin_values() {
         Value::StringArray(StringArray::new(Vec::new(), vec![0, 1, 2]).unwrap()),
     ] {
         crate::console::reset_thread_buffer();
-        futures::executor::block_on(disp_builtin(value, Vec::new())).unwrap();
+        futures::executor::block_on(disp_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap();
         assert!(crate::console::take_thread_buffer().is_empty());
     }
 }
@@ -89,9 +100,9 @@ fn symbolic_scalar_displays_expression() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn struct_field_string_has_quotes() {
-    let mut sv = StructValue::new();
+    let mut sv = runmat_value::UnboundedStructValueBuilder::new();
     sv.insert("msg", Value::String("ok".into()));
-    let lines = render_value(&Value::Struct(sv), RenderMode::TopLevel);
+    let lines = render_value(&Value::Struct(sv.finish()), RenderMode::TopLevel);
     assert_eq!(lines, vec!["    msg: \"ok\"".to_string()]);
 }
 
@@ -189,9 +200,9 @@ fn cell_array_summaries() {
 #[test]
 fn struct_field_matrix_summarised() {
     let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("tensor");
-    let mut sv = StructValue::new();
+    let mut sv = runmat_value::UnboundedStructValueBuilder::new();
     sv.insert("A", Value::Tensor(tensor));
-    let lines = render_value(&Value::Struct(sv), RenderMode::TopLevel);
+    let lines = render_value(&Value::Struct(sv.finish()), RenderMode::TopLevel);
     assert_eq!(lines, vec!["    A: [2x2 double]".to_string()]);
 }
 
@@ -268,10 +279,10 @@ fn integer_tensor_display_uses_exact_backing_storage() {
 fn integer_tensor_nested_summary_preserves_class() {
     let tensor =
         Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![1, 2]).expect("integer tensor");
-    let mut fields = StructValue::new();
+    let mut fields = runmat_value::UnboundedStructValueBuilder::new();
     fields.insert("values", Value::Tensor(tensor));
 
-    let lines = render_value(&Value::Struct(fields), RenderMode::TopLevel);
+    let lines = render_value(&Value::Struct(fields.finish()), RenderMode::TopLevel);
 
     assert_eq!(lines, vec!["    values: [1x2 int16]".to_string()]);
 }
@@ -312,10 +323,10 @@ fn native_single_tensor_nested_summary_preserves_class() {
         vec![1, 2],
     )
     .expect("single tensor");
-    let mut fields = StructValue::new();
+    let mut fields = runmat_value::UnboundedStructValueBuilder::new();
     fields.insert("values", Value::Tensor(tensor));
 
-    let lines = render_value(&Value::Struct(fields), RenderMode::TopLevel);
+    let lines = render_value(&Value::Struct(fields.finish()), RenderMode::TopLevel);
 
     assert_eq!(lines, vec!["    values: [1x2 single]".to_string()]);
 }
@@ -338,10 +349,10 @@ fn integer_sparse_cell_summary_preserves_class() {
         vec!["    [2x2 sparse uint64]".to_string()]
     );
 
-    let mut fields = StructValue::new();
+    let mut fields = runmat_value::UnboundedStructValueBuilder::new();
     fields.insert("values", Value::SparseTensor(sparse));
     assert_eq!(
-        format_for_disp(&Value::Struct(fields)),
+        format_for_disp(&Value::Struct(fields.finish())),
         vec!["    values: <sparse 2x2 uint64 nnz=2>".to_string()]
     );
 }
@@ -360,10 +371,10 @@ fn typed_complex_integer_display_uses_exact_components_and_class() {
         vec![format!("{}+7i  {}", u64::MAX, 1_u64 << 63)]
     );
 
-    let mut fields = StructValue::new();
+    let mut fields = runmat_value::UnboundedStructValueBuilder::new();
     fields.insert("values", Value::ComplexTensor(tensor.clone()));
     assert_eq!(
-        render_value(&Value::Struct(fields), RenderMode::TopLevel),
+        render_value(&Value::Struct(fields.finish()), RenderMode::TopLevel),
         vec!["    values: [1x2 complex uint64]".to_string()]
     );
 
@@ -384,9 +395,11 @@ fn disp_accepts_gpu_tensor() {
             shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
-        let result =
-            futures::executor::block_on(disp_builtin(Value::GpuTensor(handle), Vec::new()))
-                .expect("disp should succeed");
+        let result = futures::executor::block_on(disp_builtin(
+            Value::GpuTensor(handle),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect("disp should succeed");
         assert_eq!(result, Value::Tensor(Tensor::zeros(vec![0, 0])));
     });
 }
@@ -408,7 +421,11 @@ fn disp_gathers_wgpu_integer_tensor_exactly() {
         })
         .expect("upload integer");
     crate::console::reset_thread_buffer();
-    futures::executor::block_on(disp_builtin(Value::GpuTensor(handle), Vec::new())).expect("disp");
+    futures::executor::block_on(disp_builtin(
+        Value::GpuTensor(handle),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect("disp");
     let text =
         crate::console::take_thread_buffer()
             .into_iter()
@@ -425,7 +442,9 @@ fn disp_gathers_wgpu_integer_tensor_exactly() {
 fn disp_rejects_extra_arguments() {
     let err = futures::executor::block_on(disp_builtin(
         Value::Num(1.0),
-        vec![Value::Int(IntValue::I32(2))],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(IntValue::I32(
+            2,
+        ))]),
     ))
     .expect_err("expected error");
     assert!(err.contains("too many input arguments"));

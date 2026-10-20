@@ -1046,7 +1046,7 @@ pub fn gather_string_slice(sa: &StringArray, plan: &IndexPlan) -> Result<Value, 
     }
     if plan.indices.len() == 1 {
         let lin = plan.indices[0] as usize;
-        let value = sa.data.get(lin).cloned().ok_or_else(|| {
+        let value = sa.data().get(lin).cloned().ok_or_else(|| {
             crate::runtime_error::semantic_error(
                 "IndexOutOfBounds",
                 "Slice error: string index out of bounds",
@@ -1057,7 +1057,7 @@ pub fn gather_string_slice(sa: &StringArray, plan: &IndexPlan) -> Result<Value, 
     let mut out = Vec::with_capacity(plan.indices.len());
     for &lin in &plan.indices {
         let idx = lin as usize;
-        let value = sa.data.get(idx).cloned().ok_or_else(|| {
+        let value = sa.data().get(idx).cloned().ok_or_else(|| {
             crate::runtime_error::semantic_error(
                 "IndexOutOfBounds",
                 "Slice error: string index out of bounds",
@@ -1065,7 +1065,8 @@ pub fn gather_string_slice(sa: &StringArray, plan: &IndexPlan) -> Result<Value, 
         })?;
         out.push(value);
     }
-    let out_sa = StringArray::new(out, plan.output_shape.clone()).map_err(map_slice_shape_error)?;
+    let out_sa = StringArray::from_texts_unbounded(out, plan.output_shape.clone())
+        .map_err(map_slice_shape_error)?;
     Ok(Value::StringArray(out_sa))
 }
 
@@ -1355,7 +1356,7 @@ mod tests {
         match result {
             Value::StringArray(out) => {
                 assert_eq!(out.shape, vec![1, 2]);
-                assert_eq!(out.data, vec!["a".to_string(), "c".to_string()]);
+                assert_eq!(out.data(), vec!["a".to_string(), "c".to_string()]);
             }
             other => panic!("expected string array result, got {other:?}"),
         }
@@ -1378,7 +1379,7 @@ mod tests {
         match result {
             Value::StringArray(out) => {
                 assert_eq!(out.shape, vec![2, 1]);
-                assert_eq!(out.data, vec!["c".to_string(), "d".to_string()]);
+                assert_eq!(out.data(), vec!["c".to_string(), "d".to_string()]);
             }
             other => panic!("expected string array result, got {other:?}"),
         }

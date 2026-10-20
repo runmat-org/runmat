@@ -177,7 +177,8 @@ pub async fn equivalence_absolute(value: Value) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::fea::accuracy"
 )]
-pub async fn resources(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn resources(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     const NAME: &str = "fea.AccuracyResourceCeiling.new";
     if args.len() != 5 {
         return Err(builtin_error(
@@ -203,7 +204,8 @@ pub async fn resources(args: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::fea::accuracy"
 )]
-pub async fn criterion(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn criterion(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     const NAME: &str = "fea.AccuracyCriterion.new";
     if args.len() != 6 {
         return Err(builtin_error(
@@ -236,7 +238,8 @@ pub async fn criterion(args: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::fea::accuracy"
 )]
-pub async fn plan(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn plan(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     const NAME: &str = "fea.AccuracyPlan.new";
     if args.len() != 6 {
         return Err(builtin_error(
@@ -376,25 +379,29 @@ mod tests {
     }
 
     fn tip_criterion() -> Value {
-        block_on(criterion(vec![
-            Value::String("tip_mesh".into()),
-            block_on(target_observation("tip_displacement".into())).unwrap(),
-            block_on(policy::contribution_spatial()).unwrap(),
-            block_on(tolerance_relative(Value::Num(0.01))).unwrap(),
-            block_on(policy::evidence_convergence()).unwrap(),
-            Value::Bool(true),
-        ]))
+        block_on(criterion(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("tip_mesh".into()),
+                block_on(target_observation("tip_displacement".into())).unwrap(),
+                block_on(policy::contribution_spatial()).unwrap(),
+                block_on(tolerance_relative(Value::Num(0.01))).unwrap(),
+                block_on(policy::evidence_convergence()).unwrap(),
+                Value::Bool(true),
+            ]),
+        ))
         .unwrap()
     }
 
     fn ceiling(bytes: Value) -> BuiltinResult<Value> {
-        block_on(resources(vec![
-            Value::Num(3.0),
-            Value::Int(IntValue::U8(2)),
-            Value::Num(100.0),
-            Value::Num(600_000.0),
-            bytes,
-        ]))
+        block_on(resources(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(3.0),
+                Value::Int(IntValue::U8(2)),
+                Value::Num(100.0),
+                Value::Num(600_000.0),
+                bytes,
+            ]),
+        ))
     }
 
     #[test]
@@ -498,7 +505,10 @@ mod tests {
         assert_eq!(ceiling_value.maximum_wall_time_milliseconds, 600_000);
         assert!(ceiling(Value::Num(-1.0)).is_err());
         assert!(ceiling(Value::Num(2.5)).is_err());
-        assert!(block_on(resources(vec![Value::Num(1.0)])).is_err());
+        assert!(block_on(resources(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)])
+        ))
+        .is_err());
     }
 
     #[test]
@@ -518,30 +528,39 @@ mod tests {
         );
         assert!(criterion_value.mandatory);
 
-        let numeric_flag = block_on(criterion(vec![
-            Value::String("tip_mesh".into()),
-            block_on(target_global()).unwrap(),
-            block_on(policy::contribution_algebraic()).unwrap(),
-            block_on(tolerance_relative(Value::Num(1e-8))).unwrap(),
-            block_on(policy::evidence_residual()).unwrap(),
-            Value::Num(1.0),
-        ]));
+        let numeric_flag = block_on(criterion(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("tip_mesh".into()),
+                block_on(target_global()).unwrap(),
+                block_on(policy::contribution_algebraic()).unwrap(),
+                block_on(tolerance_relative(Value::Num(1e-8))).unwrap(),
+                block_on(policy::evidence_residual()).unwrap(),
+                Value::Num(1.0),
+            ]),
+        ));
         assert!(numeric_flag.unwrap_err().to_string().contains("logical"));
-        assert!(block_on(criterion(vec![Value::String("tip_mesh".into())])).is_err());
+        assert!(block_on(criterion(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "tip_mesh".into()
+            )])
+        ))
+        .is_err());
     }
 
     #[test]
     fn plans_accept_criteria_cells_and_round_trip_portably() {
         registered();
         let criteria = Value::Cell(CellArray::new(vec![tip_criterion()], 1, 1).unwrap());
-        let value = block_on(plan(vec![
-            Value::String("static_acceptance".into()),
-            criteria,
-            block_on(policy::unavailable_fail()).unwrap(),
-            block_on(policy::limit_refine()).unwrap(),
-            block_on(equivalence_relative(Value::Num(1e-12))).unwrap(),
-            ceiling(Value::Num(2e9)).unwrap(),
-        ]))
+        let value = block_on(plan(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("static_acceptance".into()),
+                criteria,
+                block_on(policy::unavailable_fail()).unwrap(),
+                block_on(policy::limit_refine()).unwrap(),
+                block_on(equivalence_relative(Value::Num(1e-12))).unwrap(),
+                ceiling(Value::Num(2e9)).unwrap(),
+            ]),
+        ))
         .unwrap();
         let encoded = crate::execution::value_codec::encode_inline_value(&value).unwrap();
         let decoded = crate::execution::value_codec::decode_inline_value(&encoded).unwrap();
@@ -553,7 +572,12 @@ mod tests {
             UnavailableEvidencePolicy::Fail
         );
         assert_eq!(plan_value.exceeded_limit, AccuracyLimitAction::Refine);
-        assert!(block_on(plan(vec![Value::String("p".into())])).is_err());
+        assert!(block_on(plan(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "p".into()
+            )])
+        ))
+        .is_err());
     }
 
     #[test]

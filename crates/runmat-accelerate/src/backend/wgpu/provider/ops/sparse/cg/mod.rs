@@ -13,7 +13,7 @@ use runmat_accelerate_api::{
 };
 use runmat_time::Instant;
 
-use self::encoding::CgInputs;
+use self::encoding::{CgInputs, CgOperator};
 use self::workspace::{decode_state, CgTerminalState, CgWorkspace};
 use super::super::{BufferUsageClass, NumericBufferRegistration, WgpuProvider};
 use crate::backend::wgpu::dispatch::observation::ProfiledEncoder;
@@ -136,8 +136,10 @@ pub(crate) fn execute<'a>(
                     encoder,
                     pipelines,
                     CgInputs {
-                        matrix: &matrix,
-                        preconditioner: &preconditioner,
+                        operator: CgOperator {
+                            matrix: &matrix,
+                            preconditioner: &preconditioner,
+                        },
                         rhs: &rhs,
                         initial_guess: initial_guess.as_ref(),
                     },
@@ -194,8 +196,10 @@ pub(crate) fn execute<'a>(
                             emission,
                             encoder,
                             pipelines,
-                            &matrix,
-                            &preconditioner,
+                            CgOperator {
+                                matrix: &matrix,
+                                preconditioner: &preconditioner,
+                            },
                             &workspace,
                             vector_groups,
                         )

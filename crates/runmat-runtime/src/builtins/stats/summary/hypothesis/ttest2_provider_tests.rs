@@ -81,7 +81,10 @@ fn known_bad_controls_and_output_count_precede_registered_owner_download() {
     let error = block_on(ttest2_builtin(
         resident(),
         host_sample(),
-        vec![Value::from("Tail"), Value::from("sideways")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("Tail"),
+            Value::from("sideways"),
+        ]),
     ))
     .unwrap_err();
     assert!(error.message().contains("unsupported Tail"), "{error}");
@@ -92,19 +95,24 @@ fn known_bad_controls_and_output_count_precede_registered_owner_download() {
     let error = block_on(ttest2_builtin(
         host_sample(),
         host_sample(),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("Dim"),
             resident(),
             Value::from("Tail"),
             Value::from("sideways"),
-        ],
+        ]),
     ))
     .unwrap_err();
     assert!(error.message().contains("unsupported Tail"), "{error}");
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
 
     let _outputs = crate::output_count::push_output_count(Some(5)).expect("output-count scope");
-    let error = block_on(ttest2_builtin(resident(), host_sample(), Vec::new())).unwrap_err();
+    let error = block_on(ttest2_builtin(
+        resident(),
+        host_sample(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap_err();
     assert!(
         error.message().contains("too many output arguments"),
         "{error}"
@@ -130,7 +138,12 @@ fn rejected_sample_and_control_downloads_retain_cause_and_borrowed_owner() {
         .unwrap();
     let resident = || Value::GpuTensor(allocation.handle.clone());
 
-    let error = block_on(ttest2_builtin(resident(), host_sample(), Vec::new())).unwrap_err();
+    let error = block_on(ttest2_builtin(
+        resident(),
+        host_sample(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap_err();
     assert_provider_cause(&error);
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
     allocation
@@ -143,7 +156,10 @@ fn rejected_sample_and_control_downloads_retain_cause_and_borrowed_owner() {
     let error = block_on(ttest2_builtin(
         host_sample(),
         host_sample(),
-        vec![Value::from("Dim"), resident()],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("Dim"),
+            resident(),
+        ]),
     ))
     .unwrap_err();
     assert_provider_cause(&error);

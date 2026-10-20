@@ -5,11 +5,14 @@ use super::*;
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::summary::order_stats::prctile"
 )]
-pub(crate) async fn prctile_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(crate) async fn prctile_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     super::ensure_quantile_integer_extensions(
         "prctile",
         &value,
-        &rest,
+        rest.view(),
         &runmat_builtins::PRCTILE_DATA_EXTENSION,
         &runmat_builtins::PRCTILE_PROBABILITY_EXTENSION,
     )?;

@@ -9,7 +9,7 @@ fn object_includes_inherited_and_dynamic_instance_properties() {
     register_class(parent, None, &["ParentValue"], &[]);
     register_class(child, Some(parent), &["ChildValue"], &["Version"]);
     let mut object = ObjectInstance::new(child);
-    object.properties.insert("Step".into(), Value::Num(2.0));
+    object.replace_property_unbounded("Step".into(), Value::Num(2.0));
     let (names, _) = strings(run(Value::Object(object)).expect("fieldnames object"));
     assert_eq!(names, ["ChildValue", "ParentValue", "Step"]);
 }
@@ -22,9 +22,7 @@ fn handle_merges_inherited_class_and_target_names() {
     register_class(parent, None, &["ParentEnabled"], &[]);
     register_class(child, Some(parent), &["ChildEnabled"], &[]);
     let mut payload = ObjectInstance::new(child);
-    payload
-        .properties
-        .insert("Status".into(), Value::from("ready"));
+    payload.replace_property_unbounded("Status".into(), Value::from("ready"));
     let target = runmat_gc::gc_allocate(Value::Object(payload)).expect("target");
     let handle = HandleRef {
         class_name: child.into(),

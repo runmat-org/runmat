@@ -312,7 +312,10 @@ fn acoustic_task_submission_requires_the_exact_resource_allocation() {
         .iter()
         .map(|argument| match argument {
             ValuePayload::Object(root) => (**root).clone(),
-            other => panic!("canonical inputs must be externalized: {other:?}"),
+            ValuePayload::Inline(_) => panic!("canonical inputs must be externalized"),
+            ValuePayload::Distributed(_) | ValuePayload::Composite(_) => {
+                panic!("canonical analysis inputs must be artifact object roots")
+            }
         })
         .collect::<Vec<_>>();
     let mut resources = task.resource_plan.request.clone();
@@ -320,7 +323,11 @@ fn acoustic_task_submission_requires_the_exact_resource_allocation() {
         .required_capabilities
         .extend(task.host.workload.generic_capabilities().unwrap());
     let context = |resources| AnalysisExecutionContext {
-        host: crate::test_fixtures::host_requirement(),
+        host: crate::program_host::program_host(
+            &task.program.request,
+            crate::program_host::local_trust(),
+        )
+        .expect("compiled acoustic task host contract"),
         scope_id: ExecutionScopeId::derive(&[b"acoustic-study"]),
         pool_id: PoolId::derive(&[b"acoustic-pool"]),
         program_artifact_id: runmat_execution::identity::ArtifactId::derive(&[b"acoustic-program"]),

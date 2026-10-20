@@ -103,7 +103,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::summary::cov"
 )]
-async fn cov_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn cov_builtin(value: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let _argument_sources = rest.fork();
     let args = CovArgs::parse(value, rest)?;
     ensure_cov_extensions(&args)?;
     let precision = CovariancePrecision::observations(&args.first, args.second.as_ref());

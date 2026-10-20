@@ -6,7 +6,7 @@ use crate::BuiltinResult;
 
 pub(crate) fn convert_variadic(
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
     convert: fn(Value) -> BuiltinResult<Value>,
 ) -> BuiltinResult<Value> {
     // All inputs are evaluated and converted before selecting requested outputs.
@@ -20,7 +20,7 @@ pub(crate) fn convert_variadic(
         None => Ok(outputs
             .into_iter()
             .next()
-            .unwrap_or(Value::String(String::new()))),
+            .unwrap_or_else(|| Value::string(String::new()))),
     }
 }
 
@@ -35,16 +35,16 @@ pub(crate) fn string_scalar_to_chars(text: &str) -> CharArray {
 pub(crate) fn string_to_chars(value: Value, name: &'static str) -> BuiltinResult<Value> {
     match value {
         Value::String(text) => Ok(Value::CharArray(string_scalar_to_chars(&text))),
-        Value::StringArray(array) if array.data.len() == 1 => {
-            Ok(Value::CharArray(string_scalar_to_chars(&array.data[0])))
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(Value::CharArray(string_scalar_to_chars(&array.data()[0])))
         }
         Value::StringArray(array) => {
             let values = array
-                .data
-                .into_iter()
-                .map(|text| Value::CharArray(string_scalar_to_chars(&text)))
+                .data()
+                .iter()
+                .map(|text| Value::CharArray(string_scalar_to_chars(text.as_str())))
                 .collect();
-            crate::make_cell_with_shape(values, array.shape).map_err(|message| {
+            crate::make_cell_with_shape(values, array.shape().to_vec()).map_err(|message| {
                 crate::build_runtime_error(message)
                     .with_builtin(name)
                     .build()

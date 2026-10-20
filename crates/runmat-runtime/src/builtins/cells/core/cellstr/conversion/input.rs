@@ -13,7 +13,7 @@ pub(super) enum Input {
 pub(super) fn classify(value: Value) -> Input {
     match value {
         Value::CharArray(array) => Input::Character(array),
-        Value::String(text) => Input::String(text),
+        Value::String(text) => Input::String(text.to_string()),
         Value::StringArray(array) => Input::StringArray(array),
         Value::Cell(array) => Input::Cell(array),
         Value::Symbolic(expression) => Input::Symbolic(expression),

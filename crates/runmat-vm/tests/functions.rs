@@ -73,7 +73,7 @@ fn numeric_workspace_value(values: &[runmat_value::Value], expected: f64) -> boo
 fn has_object_class(values: &[runmat_value::Value], class_name: &str) -> bool {
     let class_name = runmat_types::ClassIdentity::new(class_name).expect("test class identity");
     values.iter().any(|v| match v {
-        runmat_value::Value::Object(obj) => obj.class_name == class_name,
+        runmat_value::Value::Object(obj) => obj.class_name() == &class_name,
         runmat_value::Value::HandleObject(obj) => obj.class_name == class_name,
         _ => false,
     })
@@ -105,10 +105,10 @@ fn cell_char_row_values(value: &runmat_value::Value) -> Option<((usize, usize), 
         return None;
     };
     let values = cell
-        .data
+        .data()
         .iter()
         .map(|entry| match entry {
-            runmat_value::Value::CharArray(chars) => Some(chars.data.iter().collect::<String>()),
+            runmat_value::Value::CharArray(chars) => Some(chars.data().iter().collect::<String>()),
             _ => None,
         })
         .collect::<Option<Vec<_>>>()?;
@@ -137,9 +137,9 @@ fn has_object_num_property(
 ) -> bool {
     let class_name = runmat_types::ClassIdentity::new(class_name).expect("test class identity");
     values.iter().any(|v| match v {
-        runmat_value::Value::Object(obj) if obj.class_name == class_name => {
+        runmat_value::Value::Object(obj) if obj.class_name() == &class_name => {
             matches!(
-                obj.properties.get(property_name),
+                obj.properties().get(property_name),
                 Some(runmat_value::Value::Num(n)) if (*n - expected).abs() < 1e-9
             )
         }
@@ -155,9 +155,9 @@ fn has_object_string_property(
 ) -> bool {
     let class_name = runmat_types::ClassIdentity::new(class_name).expect("test class identity");
     values.iter().any(|v| match v {
-        runmat_value::Value::Object(obj) if obj.class_name == class_name => {
+        runmat_value::Value::Object(obj) if obj.class_name() == &class_name => {
             matches!(
-                obj.properties.get(property_name),
+                obj.properties().get(property_name),
                 Some(runmat_value::Value::String(s)) if s == expected
             )
         }
@@ -2171,14 +2171,14 @@ fn inputname_reports_direct_caller_argument_names() {
     "#;
     let vars = execute_source_with_catalog(source, "/tmp/runmat_vm_inputname_probe.m");
     assert!(vars.iter().any(|v| {
-        matches!(v, runmat_value::Value::CharArray(chars) if chars.data.iter().collect::<String>() == "alpha")
+        matches!(v, runmat_value::Value::CharArray(chars) if chars.data().iter().collect::<String>() == "alpha")
     }), "expected alpha character row; vars={vars:?}");
     assert!(vars.iter().any(|v| {
-        matches!(v, runmat_value::Value::CharArray(chars) if chars.data.iter().collect::<String>() == "beta")
+        matches!(v, runmat_value::Value::CharArray(chars) if chars.data().iter().collect::<String>() == "beta")
     }), "expected beta character row; vars={vars:?}");
     let empty_strings = vars
         .iter()
-        .filter(|v| matches!(v, runmat_value::Value::CharArray(chars) if chars.data.is_empty()))
+        .filter(|v| matches!(v, runmat_value::Value::CharArray(chars) if chars.data().is_empty()))
         .count();
     assert!(
         empty_strings >= 2,
@@ -2198,11 +2198,11 @@ fn inputname_reports_feval_caller_argument_names() {
     "#;
     let vars = execute_source_with_catalog(source, "/tmp/runmat_vm_inputname_feval_probe.m");
     assert!(vars.iter().any(|v| {
-        matches!(v, runmat_value::Value::CharArray(chars) if chars.data.iter().collect::<String>() == "beta")
+        matches!(v, runmat_value::Value::CharArray(chars) if chars.data().iter().collect::<String>() == "beta")
     }), "expected beta character row; vars={vars:?}");
     assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_value::Value::CharArray(chars) if chars.data.is_empty())));
+        .any(|v| matches!(v, runmat_value::Value::CharArray(chars) if chars.data().is_empty())));
 }
 
 #[test]
@@ -3198,7 +3198,7 @@ fn sprintf_inline_cast_argument_formats_value() {
     let vars = execute_source(program);
     assert!(vars.iter().any(|value| {
         if let runmat_value::Value::CharArray(chars) = value {
-            let rendered: String = chars.data.iter().collect();
+            let rendered: String = chars.data().iter().collect();
             rendered == "Value: 3.1400"
         } else {
             false
@@ -4003,11 +4003,11 @@ fn cellfun_upper_function_handle_round_trip() {
     let mut found = false;
     for value in vars.values() {
         if let runmat_value::Value::Cell(ca) = value {
-            if ca.data.len() != 3 {
+            if ca.data().len() != 3 {
                 continue;
             }
             let texts: Vec<String> = ca
-                .data
+                .data()
                 .iter()
                 .map(String::try_from)
                 .collect::<Result<_, _>>()
@@ -4078,7 +4078,7 @@ fn compiled_cell_container_integer_cohort_preserves_native_storage() {
         runmat_value::Value::Int(runmat_value::IntValue::U64(9_007_199_254_740_993))
     )));
     assert!(vars.iter().any(
-        |value| matches!(value, runmat_value::Value::CharArray(chars) if chars.data == vec!['A', 'B'])
+        |value| matches!(value, runmat_value::Value::CharArray(chars) if chars.data() == vec!['A', 'B'])
     ));
 }
 
@@ -4119,7 +4119,7 @@ fn compiled_colon_to_cond_integer_cohort_preserves_exact_values_and_boundaries()
     }));
     assert!(has_object_class(&vars, "table"));
     assert!(vars.iter().any(|value| {
-        matches!(value, runmat_value::Value::StringArray(strings) if strings.data == vec!["9007199254740993"])
+        matches!(value, runmat_value::Value::StringArray(strings) if strings.data() == vec!["9007199254740993"])
     }));
     assert!(has_num(&vars, 2.0));
 }
@@ -4918,7 +4918,7 @@ fn typed_complex_integer_jsonencode_script_surface_preserves_exact_components() 
         vars.iter().any(|value| matches!(
             value,
             runmat_value::Value::CharArray(chars)
-                if chars.data.iter().collect::<String>()
+                if chars.data().iter().collect::<String>()
                     == "{\"real\":18446744073709551615,\"imag\":9223372036854775808}"
         )),
         "jsonencode must use exact typed-complex integer components: {vars:?}"
@@ -6485,11 +6485,11 @@ fn containers_map_dot_properties() {
     let vars = execute_source(program);
 
     assert!(vars.iter().any(|v| match v {
-        runmat_value::Value::CharArray(ca) => ca.data.iter().collect::<String>() == "char",
+        runmat_value::Value::CharArray(ca) => ca.data().iter().collect::<String>() == "char",
         _ => false,
     }));
     assert!(vars.iter().any(|v| match v {
-        runmat_value::Value::CharArray(ca) => ca.data.iter().collect::<String>() == "any",
+        runmat_value::Value::CharArray(ca) => ca.data().iter().collect::<String>() == "any",
         _ => false,
     }));
     assert!(vars
@@ -6533,7 +6533,7 @@ fn string_array_literal_concat_index_and_compare() {
                 if sa.shape == vec![3, 2] {
                     saw_c = true;
                 }
-                if sa.data.iter().any(|s| s == "ccc") {
+                if sa.data().iter().any(|s| s == "ccc") {
                     saw_x = true;
                 }
             }
@@ -6543,7 +6543,7 @@ fn string_array_literal_concat_index_and_compare() {
                 }
             }
             runmat_value::Value::CharArray(ca) => {
-                let s: String = ca.data.iter().collect();
+                let s: String = ca.data().iter().collect();
                 if s == "ccc" {
                     saw_x = true;
                 }
@@ -6570,7 +6570,7 @@ fn string_literal_and_num2str_horzcat_promotes_and_runs() {
     let mut saw_label = false;
     for value in vars.values() {
         if let runmat_value::Value::StringArray(sa) = value {
-            if sa.shape == vec![1, 3] && sa.data == vec!["wn = ", "6", " rad/s"] {
+            if sa.shape == vec![1, 3] && sa.data() == vec!["wn = ", "6", " rad/s"] {
                 saw_label = true;
             }
         }

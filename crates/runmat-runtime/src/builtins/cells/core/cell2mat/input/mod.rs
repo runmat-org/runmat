@@ -1,7 +1,7 @@
 mod parse;
 mod prototype;
 
-use runmat_value::{ComplexStorage, IntegerComplexStorage, NumericStorage};
+use runmat_value::{ComplexStorage, ExactArrayStorage, IntegerComplexStorage, NumericStorage};
 
 use super::error::{cell2mat_error_with_message, CELL2MAT_ERROR_INVALID_CONTENTS};
 use crate::{gather_if_needed_async, BuiltinResult};
@@ -28,7 +28,7 @@ pub(super) enum EntryData {
     Complex(ComplexStorage),
     TypedComplexInteger(IntegerComplexStorage),
     Logical(Vec<u8>),
-    Character(Vec<char>),
+    Character(ExactArrayStorage<char>),
 }
 
 impl EntryData {
@@ -52,7 +52,7 @@ impl CellEntry {
 pub(super) async fn gather(
     cells: &runmat_value::CellArray,
 ) -> BuiltinResult<(ElementKind, Vec<CellEntry>)> {
-    let mut entries = Vec::with_capacity(cells.data.len());
+    let mut entries = Vec::with_capacity(cells.data().len());
     let mut kind = None;
     for value in cells.iter_column_major() {
         let entry = parse::value(gather_if_needed_async(value).await?)?;

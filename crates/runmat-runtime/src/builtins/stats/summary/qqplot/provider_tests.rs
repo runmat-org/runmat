@@ -55,11 +55,15 @@ fn unpolled_and_abandoned_gather_keep_caller_lease_live() {
         .unwrap();
     let value = || Value::GpuTensor(sample.handle.clone());
 
-    drop(qqplot_builtin(vec![value()]));
+    drop(qqplot_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![value()]),
+    ));
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
     sample.handle.allocation_lease().validate_live().unwrap();
 
-    let mut pending = Box::pin(qqplot_builtin(vec![value()]));
+    let mut pending = Box::pin(qqplot_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![value()]),
+    ));
     let waker = futures::task::noop_waker();
     let mut context = std::task::Context::from_waker(&waker);
     assert!(matches!(
@@ -102,7 +106,10 @@ fn known_invalid_host_roles_reject_without_resident_download() {
             Value::Num(2.0),
         ],
     ] {
-        let error = block_on(qqplot_builtin(args)).expect_err("known-invalid call");
+        let error = block_on(qqplot_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect_err("known-invalid call");
         assert_eq!(error.identifier(), QQPLOT_ERROR_INVALID_ARGUMENT.identifier);
         assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
         sample.handle.allocation_lease().validate_live().unwrap();
@@ -116,9 +123,11 @@ fn known_invalid_host_roles_reject_without_resident_download() {
             GpuTensorStorage::Real,
         )
         .unwrap();
-    let error = block_on(qqplot_builtin(vec![Value::GpuTensor(
-        wrong_shape.handle.clone(),
-    )]))
+    let error = block_on(qqplot_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(
+            wrong_shape.handle.clone(),
+        )]),
+    ))
     .expect_err("known rank-three matrix is invalid");
     assert!(error.message().contains("vector or 2-D matrix"));
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
@@ -139,9 +148,11 @@ fn provider_failure_preserves_cause_and_borrowed_source() {
         .owner
         .allocate_zeroed(vec![4, 1], NumericElementType::F64, GpuTensorStorage::Real)
         .unwrap();
-    let error = block_on(qqplot_builtin(vec![Value::GpuTensor(
-        sample.handle.clone(),
-    )]))
+    let error = block_on(qqplot_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(
+            sample.handle.clone(),
+        )]),
+    ))
     .expect_err("provider rejects gather");
     assert_eq!(error.identifier(), QQPLOT_ERROR_INVALID_ARGUMENT.identifier);
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);

@@ -98,7 +98,7 @@ pub(super) fn spawn(
     stack.try_push(if explicit_pool {
         runmat_runtime::parallel::future::wrap_task(task)
     } else {
-        Value::Task(task)
+        Value::Task(task.into())
     })?;
     Ok(())
 }
@@ -315,14 +315,19 @@ pub(super) fn semantic_descriptor(
     function: runmat_hir::FunctionId,
     requested_outputs: usize,
     arguments: Vec<Value>,
+    binding: Option<runmat_value::BoundFunctionBinding>,
 ) -> runmat_runtime::call::descriptor::CallableDescriptor {
-    runmat_runtime::call::descriptor::CallableDescriptor::resolved(
+    let mut descriptor = runmat_runtime::call::descriptor::CallableDescriptor::resolved(
         runmat_hir::CallableIdentity::BoundFunction(function),
         arguments,
         requested_outputs,
         runmat_hir::CallableFallbackPolicy::None,
         runmat_runtime::call::descriptor::CallableCallKind::Direct,
-    )
+    );
+    if let Some(binding) = binding {
+        descriptor.target = runmat_runtime::call::descriptor::CallableTarget::Bound(binding);
+    }
+    descriptor
 }
 
 fn resolved_feval_descriptor(
@@ -435,11 +440,25 @@ async fn await_sequence(
                 );
                 let result = match &call.invocation {
                     runmat_runtime::execution::DeferredInvocation::Callable(descriptor) => {
-                        crate::call::execute_callable_descriptor(
-                            &context.runtime,
-                            descriptor.as_ref().clone(),
-                        )
-                        .await
+                        match context
+                            .runtime
+                            .clone()
+                            .with_invocation_environment(&call.environment)
+                        {
+                            Ok(invocation) => {
+                                invocation
+                                    .scope(crate::call::execute_callable_descriptor(
+                                        &invocation,
+                                        descriptor.as_ref().clone(),
+                                    ))
+                                    .await
+                            }
+                            Err(error) => Err(execution_error(
+                                runmat_runtime::execution::ExecutionServiceError::Failed(
+                                    error.to_string(),
+                                ),
+                            )),
+                        }
                     }
                     runmat_runtime::execution::DeferredInvocation::Program { .. } => {
                         if matches!(

@@ -11,7 +11,7 @@ use std::fmt;
 
 fn has_global_pool(layers: &[Value]) -> bool {
     layers.iter().any(|layer| {
-        matches!(layer, Value::Object(object) if ForwardLayerKind::from_identity(&object.class_name)
+        matches!(layer, Value::Object(object) if ForwardLayerKind::from_identity(object.class_name())
             == Some(ForwardLayerKind::GlobalAveragePooling1D))
     })
 }
@@ -46,8 +46,8 @@ fn classify_global_pool(
                 "network layers must be layer objects",
             ));
         };
-        let Some(kind) = ForwardLayerKind::from_identity(&object.class_name) else {
-            return Ok(Err(GpuCapabilityReason::Layer(object.class_name.clone())));
+        let Some(kind) = ForwardLayerKind::from_identity(object.class_name()) else {
+            return Ok(Err(GpuCapabilityReason::Layer(object.class_name().clone())));
         };
         kinds.push(kind);
     }
@@ -66,7 +66,7 @@ fn classify_global_pool(
         let unsupported = layers.iter().find_map(|layer| match layer {
             Value::Object(object)
                 if !matches!(
-                    ForwardLayerKind::from_identity(&object.class_name),
+                    ForwardLayerKind::from_identity(object.class_name()),
                     Some(
                         ForwardLayerKind::FeatureInput
                             | ForwardLayerKind::SequenceInput
@@ -74,7 +74,7 @@ fn classify_global_pool(
                     )
                 ) =>
             {
-                Some(object.class_name.clone())
+                Some(object.class_name().clone())
             }
             _ => None,
         });
@@ -321,7 +321,7 @@ fn classify_layers(
                 format!("{function}: network layers must be layer objects"),
             ));
         };
-        match ForwardLayerKind::from_identity(&layer.class_name) {
+        match ForwardLayerKind::from_identity(layer.class_name()) {
             Some(ForwardLayerKind::FeatureInput) if !saw_input => {
                 let expected = feature_input_width(layer, function)?;
                 if features != expected {
@@ -419,7 +419,7 @@ fn classify_layers(
                 // The host plan has already admitted the complete network.
                 // Its later geometry is not the channel count of this GPU
                 // subset once an unimplemented layer changes that geometry.
-                return Ok(Some(GpuCapabilityReason::Layer(layer.class_name.clone())));
+                return Ok(Some(GpuCapabilityReason::Layer(layer.class_name().clone())));
             }
         }
     }
@@ -524,8 +524,10 @@ mod tests {
             object_with_identity(
                 K::FeatureInput.class(),
                 vec![("InputSize", Value::Num(2.0))],
-            ),
-            object_with_identity(K::Relu.class(), Vec::<(&str, Value)>::new()),
+            )
+            .expect("fixture object"),
+            object_with_identity(K::Relu.class(), Vec::<(&str, Value)>::new())
+                .expect("fixture object"),
             object_with_identity(
                 K::FullyConnected.class(),
                 vec![
@@ -539,8 +541,10 @@ mod tests {
                         Value::Tensor(Tensor::new(vec![0.5], vec![1, 1]).unwrap()),
                     ),
                 ],
-            ),
-            object_with_identity(K::Softmax.class(), Vec::<(&str, Value)>::new()),
+            )
+            .expect("fixture object"),
+            object_with_identity(K::Softmax.class(), Vec::<(&str, Value)>::new())
+                .expect("fixture object"),
         ]
     }
 

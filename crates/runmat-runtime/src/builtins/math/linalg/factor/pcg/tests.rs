@@ -185,7 +185,12 @@ fn pcg_csc_real_and_hermitian_complex_converge_without_dense_coefficients() {
     // without first producing a sparse or converted coefficient owner.
     let dense = Value::Tensor(Tensor::new(vec![4.0, 1.0, 1.0, 3.0], vec![2, 2]).unwrap());
     let rhs = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap());
-    let request = super::request::parse(dense, rhs, Vec::new()).unwrap();
+    let request = super::request::parse(
+        dense,
+        rhs,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    )
+    .unwrap();
     let Value::Tensor(solution) =
         futures::executor::block_on(super::execution::execute(request, None, Some(1))).unwrap()
     else {
@@ -204,7 +209,12 @@ fn pcg_csc_real_and_hermitian_complex_converge_without_dense_coefficients() {
         );
     let dense = Value::Tensor(Tensor::new(vec![4.0, 1.0, 1.0, 3.0], vec![2, 2]).unwrap());
     let rhs = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap());
-    let request = super::request::parse(dense, rhs, Vec::new()).unwrap();
+    let request = super::request::parse(
+        dense,
+        rhs,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    )
+    .unwrap();
     let Value::OutputList(outputs) =
         futures::executor::block_on(super::execution::execute(request, Some(&context), Some(5)))
             .unwrap()
@@ -315,7 +325,12 @@ fn pcg_reuses_selected_callable_a_and_both_preconditioners_without_replaying_cal
     let request = super::request::parse(
         target(0),
         rhs,
-        vec![Value::Num(1e-12), Value::Num(2.0), target(1), target(2)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(1e-12),
+            Value::Num(2.0),
+            target(1),
+            target(2),
+        ]),
     )
     .unwrap();
     let Value::Tensor(solution) =

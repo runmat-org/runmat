@@ -366,21 +366,35 @@ impl RunMatSession {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    async fn retire_project_native_extensions(&self) -> std::result::Result<(), RuntimeError> {
-        self.local_tasks
-            .participate_foreground(async {
-                self.source_evaluator
-                    .retire_selected_foreign_hosts(&self.runtime_context, &self.local_tasks)
-                    .await?;
-                self.mex_runtime
-                    .clear_gracefully(
-                        &runmat_runtime::user_functions::DynamicFunctionClearRequest::NativeExtensions,
-                        self.runtime_context.clone(),
-                    )
-                    .await
-            })
-            .await??;
-        Ok(())
+    #[inline(never)]
+    fn retire_project_native_extensions(
+        &self,
+    ) -> impl std::future::Future<Output = std::result::Result<(), RuntimeError>> + '_ {
+        // This lifecycle body contains concrete foreign teardown futures. Do
+        // not embed their full state in every project-install caller. Admit F
+        // before construction and let the shared deferred poll owner construct
+        // and pin it only after the caller's construction frame has unwound.
+        let prepared = self
+            .runtime_context
+            .prepare_poll_scope()
+            .and_then(|scope| scope.prepare_future())
+            .map(|scope| {
+                scope.defer_result(move || async move {
+                    self.source_evaluator
+                        .retire_selected_foreign_hosts(&self.runtime_context, &self.local_tasks)
+                        .await?;
+                    self.mex_runtime
+                        .clear_gracefully(
+                            &runmat_runtime::user_functions::DynamicFunctionClearRequest::NativeExtensions,
+                            self.runtime_context.clone(),
+                        )
+                        .await
+                })
+            });
+        async move {
+            self.local_tasks.participate_foreground(prepared?).await??;
+            Ok(())
+        }
     }
 
     #[cfg(target_arch = "wasm32")]

@@ -11,7 +11,9 @@ pub(super) struct ParsedExportOption {
     pub(super) value: Value,
 }
 
-pub(super) fn parse_option_inputs(args: Vec<Value>) -> BuiltinResult<Vec<ParsedExportOption>> {
+pub(super) fn parse_option_inputs(
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Vec<ParsedExportOption>> {
     parse_name_values(args, EXPORT_ONNX).map(|values| {
         values
             .into_iter()
@@ -139,10 +141,10 @@ pub(in crate::builtins::deep_learning) fn integer_scalar(
 fn single_name(value: &Value, label: &str) -> BuiltinResult<String> {
     let values = match value {
         Value::String(_) | Value::CharArray(_) => vec![scalar_text(value, EXPORT_ONNX)?],
-        Value::StringArray(array) => array.data.clone(),
+        Value::StringArray(array) => array.data().iter().map(ToString::to_string).collect(),
         Value::Cell(cell) => {
-            let mut names = Vec::with_capacity(cell.data.len());
-            for item in &cell.data {
+            let mut names = Vec::with_capacity(cell.data().len());
+            for item in cell.data() {
                 names.push(scalar_text(item, EXPORT_ONNX)?);
             }
             names

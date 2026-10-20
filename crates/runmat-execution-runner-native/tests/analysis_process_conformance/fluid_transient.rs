@@ -229,9 +229,7 @@ pub(super) async fn run_block(
         .unwrap();
     for alter_bytes in [false, true] {
         let mut original = done.execution.clone();
-        let resources = crate::test_fixtures::attempt_resources_mut(&mut original.task.committed.as_mut().unwrap().result)
-            .as_mut()
-            .unwrap();
+        let resources = super::phase_execution_support::winning_accounting_mut(&mut original);
         if alter_bytes {
             resources.resources.artifact_bytes += 1;
         } else {

@@ -98,14 +98,14 @@ pub(super) fn forward(
         panic!("formatted forward output must be a dlarray")
     };
     assert_eq!(
-        output.properties.get("Format"),
+        output.properties().get("Format"),
         Some(&Value::String(output_format.into()))
     );
     assert_eq!(
-        output.properties.get("Labels"),
+        output.properties().get("Labels"),
         Some(&Value::String(output_format.into()))
     );
-    let Some(Value::GpuTensor(data)) = output.properties.get("Data") else {
+    let Some(Value::GpuTensor(data)) = output.properties().get("Data") else {
         panic!("supported resident route must not gather")
     };
     assert_eq!(provider.telemetry_snapshot().download_bytes, 0);

@@ -16,9 +16,9 @@ async fn original_request() -> ProgramExecutionRequest {
         .unwrap();
     let envelope = unit.portable_envelope().unwrap();
     let recipe = ProgramBuildRecipe {
-        foreign_policy: None,
         accelerators: Vec::new(),
         interop: runmat_types::InteropManifest::empty(),
+        foreign_policy: None,
         schema_version: PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
         program_revision: envelope.manifest.identity.program.clone(),
         entrypoint: envelope.manifest.identity.entrypoint.clone(),
@@ -38,7 +38,11 @@ async fn original_request() -> ProgramExecutionRequest {
         environment: runmat_execution::EnvironmentSnapshot::default(),
         schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         callable: runmat_execution::ProgramCallable::semantic(
-            envelope.manifest.identity.entrypoint_function.unwrap(),
+            envelope
+                .manifest
+                .identity
+                .entrypoint_function
+                .expect("compiled semantic entrypoint"),
             None,
         ),
         context: runmat_execution::ProgramInvocationContext::Direct,
@@ -72,10 +76,11 @@ async fn original_unit_consumes_exact_frozen_environment_and_live_cancellation()
         ));
         let response = execute_unit(&request, None, None, None).await;
         response.validate_against(&request).unwrap();
-        let ProgramExecutionResponse::Success { outputs } = response else {
+        let ProgramExecutionResponse::Success { mut outputs } = response else {
             panic!("original execution failed: {response:?}")
         };
-        let [output]: [_; 1] = outputs.try_into().unwrap();
+        assert_eq!(outputs.len(), 1, "one original semantic output");
+        let output = outputs.remove(0);
         assert_eq!(
             runmat_runtime::execution::value_codec::decode_inline_value(&output).unwrap(),
             Value::CharArray(CharArray::new_row(value))

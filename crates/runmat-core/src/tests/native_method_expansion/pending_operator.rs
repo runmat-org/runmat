@@ -46,7 +46,7 @@ type InputTurn = (
 fn invoke(function: &str) -> ProcedureInvocation {
     ProcedureInvocation {
         target: ProcedureTarget::Function(function.into()),
-        arguments: Vec::new(),
+        arguments: crate::ProcedureArguments::Source(Vec::new()),
         requested_outputs: 1,
     }
 }

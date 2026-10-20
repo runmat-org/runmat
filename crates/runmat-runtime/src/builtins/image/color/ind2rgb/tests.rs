@@ -8,9 +8,14 @@ async fn ind2rgb_builtin(
     map: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    super::ind2rgb_builtin(runtime, indexed, map, rest)
-        .await
-        .map(|owned| owned.with_owned(|value| value))
+    super::ind2rgb_builtin(
+        runtime,
+        indexed,
+        map,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    )
+    .await
+    .map(|owned| owned.with_owned(|value| value))
 }
 use crate::builtins::common::{gpu_helpers, test_support};
 use futures::executor::block_on;

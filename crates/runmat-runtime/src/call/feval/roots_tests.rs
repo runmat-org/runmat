@@ -5,6 +5,96 @@ use std::task::{Context, Poll};
 
 use runmat_value::{CellArray, Closure, HandleRef, LexicalEnvironment, Value};
 
+#[test]
+fn selected_callback_rebinds_old_segments_but_keeps_real_captures_and_activation() {
+    runmat_gc::gc_test_context(|| {
+        struct Resolver;
+        impl crate::call::descriptor::FunctionNameResolver for Resolver {
+            fn resolve_function(&self, _: &str) -> Option<runmat_types::FunctionId> {
+                None
+            }
+        }
+        let runtime = crate::context::RuntimeContext::new(Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ));
+        let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 33);
+        let activation = runmat_gc::gc_allocate_rooted(Value::Num(40.)).unwrap();
+        let captured = runmat_gc::gc_allocate_rooted(Value::Num(41.)).unwrap();
+        let activation_handle = activation.handle();
+        let captured_handle = captured.handle();
+        let target = crate::execution::RootedValue::in_context(
+            Value::Closure(Closure::from_data(runmat_value::ClosureData {
+                function_name: "nested_rebind".into(),
+                binding: Some(binding.clone()),
+                source_role: runmat_types::FunctionSourceRole::Nested,
+                source_file: None,
+                captures: vec![Value::HandleObject(HandleRef {
+                    class_name: "CallbackCapture".into(),
+                    target: captured_handle,
+                    valid: true,
+                })]
+                .into(),
+                lexical_environment: Some(LexicalEnvironment::new(activation_handle, None)),
+            })),
+            &runtime,
+        )
+        .unwrap();
+        let selected = crate::call::descriptor::RepeatableCallable::select_rooted(
+            Some(&runtime),
+            target,
+            &Resolver,
+        )
+        .unwrap();
+        match selected.selected_target() {
+            crate::call::descriptor::CallableTarget::BoundLexical {
+                binding: actual,
+                closure,
+            } => {
+                assert_eq!(actual, &binding);
+                assert!(closure.as_closure().lexical_environment.is_some());
+            }
+            _ => panic!("selected callback must retain its exact lexical binding"),
+        }
+        let old = crate::execution::RetainedValueReadLease::prepare_owned(
+            Value::Closure(Closure::new(
+                "old_caller".into(),
+                None,
+                runmat_types::FunctionSourceRole::Anonymous,
+                None,
+                vec![Value::Num(1.)],
+                None,
+            )),
+            &runtime,
+        )
+        .unwrap();
+        let arguments = crate::call::RootedFunctionArguments::captured(
+            old,
+            crate::execution::RootedValues::new(vec![Value::Num(2.)]).unwrap(),
+        )
+        .unwrap()
+        .prepend_routing(Value::Num(0.), Some(&runtime))
+        .unwrap();
+        let prepared = selected
+            .prepare_arguments(Some(&runtime), arguments.into())
+            .unwrap();
+        assert_eq!(prepared.capture_count(), 1);
+        assert_eq!(prepared.supplied_count(), 3);
+        assert_eq!(prepared.get(1), Some(&Value::Num(0.)));
+        assert_eq!(prepared.get(2), Some(&Value::Num(1.)));
+        assert_eq!(prepared.get(3), Some(&Value::Num(2.)));
+        activation.unroot().unwrap();
+        captured.unroot().unwrap();
+        drop(selected);
+        runmat_gc::gc_collect_major().unwrap();
+        assert!(runmat_gc::gc_with_value(&activation_handle, |_| ()).is_ok());
+        assert!(runmat_gc::gc_with_value(&captured_handle, |_| ()).is_ok());
+        drop(prepared);
+        runmat_gc::gc_collect_major().unwrap();
+        assert!(runmat_gc::gc_with_value(&activation_handle, |_| ()).is_err());
+        assert!(runmat_gc::gc_with_value(&captured_handle, |_| ()).is_err());
+    });
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn public_feval_future_roots_unpolled_and_pending_nested_inputs_until_drop() {
@@ -49,7 +139,7 @@ fn public_feval_future_roots_unpolled_and_pending_nested_inputs_until_drop() {
             binding: Some(binding),
             source_role: runmat_types::FunctionSourceRole::Nested,
             source_file: None,
-            captures: Vec::new(),
+            captures: Vec::new().into(),
             lexical_environment: Some(LexicalEnvironment::new(activation_handle, None)),
         }));
         let arguments = [Value::HandleObject(HandleRef {
@@ -139,7 +229,7 @@ fn mapped_nested_closure_uses_explicit_runtime_without_ambient_or_foreign_ambien
                     binding: Some(binding),
                     source_role: runmat_types::FunctionSourceRole::Nested,
                     source_file: None,
-                    captures: Vec::new(),
+                    captures: Vec::new().into(),
                     lexical_environment: Some(LexicalEnvironment::new(activation.handle(), None)),
                 },
             )),

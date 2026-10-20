@@ -279,8 +279,12 @@ pub async fn image_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let defaults =
         SurfaceStyleDefaults::new(ColorMap::Parula, ShadingMode::None, false, 1.0, true, false);
     let style = Arc::new(
-        parse_surface_style_args(BUILTIN_NAME, &rest, defaults)
-            .map_err(map_image_invalid_argument)?,
+        parse_surface_style_args(
+            BUILTIN_NAME,
+            crate::call::FunctionArgumentView::from_slice(&rest),
+            defaults,
+        )
+        .map_err(map_image_invalid_argument)?,
     );
     let color_limits = color_limits_snapshot();
 

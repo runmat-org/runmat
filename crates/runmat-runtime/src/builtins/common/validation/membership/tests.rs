@@ -88,10 +88,12 @@ fn admission_precedes_access_and_nested_membership_preserves_exact_borrowed_valu
         let resident = Value::GpuTensor(handle.clone());
         let nested = cell(vec![cell(vec![resident.clone()])]);
         let invalid = cell(vec![Value::Struct(StructValue::new())]);
-        let error = futures::executor::block_on(super::super::must_be_member::evaluate(vec![
-            resident.clone(),
-            invalid,
-        ]))
+        let error = futures::executor::block_on(super::super::must_be_member::evaluate(
+            crate::builtins::common::validation::tests::retained_arguments(vec![
+                resident.clone(),
+                invalid,
+            ]),
+        ))
         .unwrap_err();
         assert_eq!(
             error.identifier(),

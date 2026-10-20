@@ -5,7 +5,7 @@ use runmat_builtins::{BuiltinCatalogEntry, BuiltinErrorDescriptor, BuiltinParamA
 pub(super) fn inputs(
     entry: &'static BuiltinCatalogEntry,
     output_error: &'static BuiltinErrorDescriptor,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<()> {
     crate::output_count::validate_fixed_outputs(
         entry.descriptor,

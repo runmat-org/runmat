@@ -58,14 +58,14 @@ pub(crate) async fn parse_dims(
         }
         Value::Tensor(_) | Value::GpuTensor(_) => parse_vector_dims(value, operation).await,
         Value::Cell(ca) => {
-            if ca.data.is_empty() {
+            if ca.data().is_empty() {
                 return Err(indexing_error(
                     operation,
                     "Size vector must have at least one element.",
                 ));
             }
-            let mut dims = Vec::with_capacity(ca.data.len());
-            for cell in &ca.data {
+            let mut dims = Vec::with_capacity(ca.data().len());
+            for cell in ca.data() {
                 let coerced = match cell {
                     Value::Num(n) => coerce_positive_int(*n, operation)?,
                     Value::Int(i) => coerce_positive_integer(i, operation)?,
@@ -243,9 +243,9 @@ mod tests {
     #[test]
     fn parse_dims_rejects_non_numeric() {
         let values = [
-            Value::String("bad".to_string()),
+            Value::String("bad".to_string().into()),
             Value::Cell(
-                CellArray::new(vec![Value::String("bad".to_string())], 1, 1)
+                CellArray::new(vec![Value::String("bad".to_string().into())], 1, 1)
                     .expect("cell size vector"),
             ),
         ];

@@ -8,7 +8,14 @@ use runmat_value::{IntValue, IntegerStorage};
 
 fn output_values(order: usize, cutoff: Value, rest: Vec<Value>, outputs: usize) -> Vec<Value> {
     let _guard = crate::output_count::push_output_count(Some(outputs)).expect("output-count scope");
-    match block_on(butter_builtin(None, Value::Num(order as f64), cutoff, rest)).expect("butter") {
+    match block_on(butter_builtin(
+        None,
+        Value::Num(order as f64),
+        cutoff,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    ))
+    .expect("butter")
+    {
         Value::OutputList(values) => values
             .try_into_owned()
             .expect("unique output list")
@@ -39,7 +46,12 @@ fn call_values(
     outputs: usize,
 ) -> BuiltinResult<Value> {
     let _guard = crate::output_count::push_output_count(Some(outputs)).expect("output-count scope");
-    block_on(butter_builtin(None, order, cutoff, rest))
+    block_on(butter_builtin(
+        None,
+        order,
+        cutoff,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    ))
 }
 
 #[cfg(feature = "wgpu")]
@@ -92,7 +104,7 @@ fn numerical_design_observes_invocation_cancellation() {
     let error = block_on(evaluate_with_cooperation(
         Value::Num(100.0),
         Value::Num(0.25),
-        &[],
+        crate::call::FunctionArgumentView::from_slice(&[]),
         &mut cooperation,
     ))
     .expect_err("cooperative design must cancel before publishing outputs");
@@ -207,7 +219,7 @@ fn butter_second_order_coefficients_match_reference_values() {
     let high = output_values(
         2,
         Value::Num(0.25),
-        vec![Value::String("high".to_string())],
+        vec![Value::String("high".to_string().into())],
         2,
     );
     assert_slice_close(
@@ -225,7 +237,7 @@ fn butter_second_order_coefficients_match_reference_values() {
     let bandpass = output_values(
         2,
         wn.clone(),
-        vec![Value::String("bandpass".to_string())],
+        vec![Value::String("bandpass".to_string().into())],
         2,
     );
     assert_slice_close(
@@ -251,7 +263,7 @@ fn butter_second_order_coefficients_match_reference_values() {
         1e-12,
     );
 
-    let bandstop = output_values(2, wn, vec![Value::String("stop".to_string())], 2);
+    let bandstop = output_values(2, wn, vec![Value::String("stop".to_string().into())], 2);
     assert_slice_close(
         &tensor_data(&bandstop[0]),
         &[
@@ -292,7 +304,7 @@ fn butter_order_reads_typed_integer_storage_exactly() {
         None,
         Value::Tensor(order),
         Value::Num(0.5),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("butter")
     {
@@ -315,7 +327,7 @@ fn butter_cutoff_reads_typed_integer_storage_exactly() {
     let values = output_values(
         1,
         Value::Tensor(cutoff),
-        vec![Value::String("s".to_string())],
+        vec![Value::String("s".to_string().into())],
         2,
     );
     assert_slice_close(&tensor_data(&values[0]), &[0.0, 1.0], 1e-12);
@@ -357,7 +369,7 @@ fn butter_accepts_all_integer_order_and_cutoff_classes_only_in_runmat_mode() {
         let err = call_values(
             Value::Num(1.0),
             Value::Tensor(cutoff),
-            vec![Value::String("s".to_string())],
+            vec![Value::String("s".to_string().into())],
             2,
         )
         .expect_err("typed cutoff must be gated");
@@ -383,7 +395,7 @@ fn butter_accepts_all_integer_order_and_cutoff_classes_only_in_runmat_mode() {
         let Value::OutputList(outputs) = call_values(
             Value::Num(1.0),
             Value::Tensor(cutoff),
-            vec![Value::String("s".to_string())],
+            vec![Value::String("s".to_string().into())],
             2,
         )
         .expect("integer cutoff") else {
@@ -413,19 +425,19 @@ fn butter_nondouble_alias_and_large_order_extensions_are_independent() {
         (
             Value::Num(1.0),
             Value::Bool(true),
-            vec![Value::String("s".to_string())],
+            vec![Value::String("s".to_string().into())],
             "RunMat:compatibility:ButterLogicalCutoffExtension",
         ),
         (
             Value::Num(1.0),
             Value::Tensor(single_one()),
-            vec![Value::String("s".to_string())],
+            vec![Value::String("s".to_string().into())],
             "RunMat:compatibility:ButterSingleCutoffExtension",
         ),
         (
             Value::Num(1.0),
             Value::Num(0.5),
-            vec![Value::String("lowpass".to_string())],
+            vec![Value::String("lowpass".to_string().into())],
             "RunMat:compatibility:ButterOptionAliasExtension",
         ),
         (
@@ -498,7 +510,7 @@ fn butter_first_order_highpass_matches_closed_form() {
     let values = output_values(
         1,
         Value::Num(0.5),
-        vec![Value::String("high".to_string())],
+        vec![Value::String("high".to_string().into())],
         2,
     );
     assert_slice_close(&tensor_data(&values[0]), &[0.5, -0.5], 1e-12);
@@ -510,7 +522,7 @@ fn butter_fourth_order_lowpass_has_unity_dc_gain() {
     let values = output_values(
         4,
         Value::Tensor(Tensor::new(vec![0.25], vec![1, 1]).unwrap()),
-        vec![Value::String("low".to_string())],
+        vec![Value::String("low".to_string().into())],
         2,
     );
     let b = tensor_data(&values[0]);
@@ -527,7 +539,7 @@ fn butter_bandpass_and_bandstop_have_expected_edge_zeros() {
     let bandpass = output_values(
         3,
         wn.clone(),
-        vec![Value::String("bandpass".to_string())],
+        vec![Value::String("bandpass".to_string().into())],
         2,
     );
     let b_pass = tensor_data(&bandpass[0]);
@@ -537,7 +549,7 @@ fn butter_bandpass_and_bandstop_have_expected_edge_zeros() {
     assert!(dc_gain(&b_pass, &a_pass).abs() < 1e-9);
     assert!(nyquist_gain(&b_pass, &a_pass).abs() < 1e-9);
 
-    let bandstop = output_values(3, wn, vec![Value::String("stop".to_string())], 2);
+    let bandstop = output_values(3, wn, vec![Value::String("stop".to_string().into())], 2);
     let b_stop = tensor_data(&bandstop[0]);
     let a_stop = tensor_data(&bandstop[1]);
     assert_eq!(b_stop.len(), 7);
@@ -584,7 +596,12 @@ fn butter_state_space_outputs_canonical_dimensions() {
 
 #[test]
 fn butter_analog_lowpass_and_highpass_are_supported() {
-    let low = output_values(1, Value::Num(2.0), vec![Value::String("s".to_string())], 2);
+    let low = output_values(
+        1,
+        Value::Num(2.0),
+        vec![Value::String("s".to_string().into())],
+        2,
+    );
     assert_slice_close(&tensor_data(&low[0]), &[0.0, 2.0], 1e-12);
     assert_slice_close(&tensor_data(&low[1]), &[1.0, 2.0], 1e-12);
 
@@ -592,8 +609,8 @@ fn butter_analog_lowpass_and_highpass_are_supported() {
         1,
         Value::Num(2.0),
         vec![
-            Value::String("high".to_string()),
-            Value::String("s".to_string()),
+            Value::String("high".to_string().into()),
+            Value::String("s".to_string().into()),
         ],
         2,
     );
@@ -607,7 +624,7 @@ fn butter_rejects_invalid_frequency_and_outputs() {
         None,
         Value::Num(2.0),
         Value::Num(1.0),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect_err("digital Wn at Nyquist should be rejected");
     assert_eq!(
@@ -620,7 +637,7 @@ fn butter_rejects_invalid_frequency_and_outputs() {
         None,
         Value::Num(2.0),
         Value::Num(0.4),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect_err("too many outputs should be rejected");
     assert_eq!(

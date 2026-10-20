@@ -6,7 +6,7 @@ use std::{
 
 use runmat_gc::{Trace, Tracer};
 use runmat_runtime::user_functions;
-use runmat_types::ProgramFunctionId;
+use runmat_types::FunctionId;
 use runmat_value::{Value, ValueSequence};
 
 use crate::ExecutableUnit;
@@ -51,7 +51,8 @@ pub(crate) struct NativeInvocation<'a> {
         runmat_types::ProgramPointId,
     )>,
     pub preferred_function: Option<&'a str>,
-    pub arguments: Vec<Value>,
+    pub arguments: runmat_runtime::call::BuiltinArguments,
+    pub lexical_environment: Option<runmat_value::LexicalEnvironment>,
     pub requested_outputs: usize,
     pub runtime: runmat_runtime::context::RuntimeContext,
     pub dynamic_admission: Option<runmat_vm::DynamicEvalAdmissionPort>,
@@ -68,6 +69,7 @@ pub(crate) async fn invoke(
         osr,
         preferred_function,
         arguments,
+        lexical_environment,
         requested_outputs,
         runtime,
         dynamic_admission,
@@ -82,12 +84,11 @@ pub(crate) async fn invoke(
         .map(|name| {
             unit.native_function_id(name)
                 .ok_or_else(|| super::error::stage("NativeProcedure", name))
-                .and_then(program_function)
         })
         .transpose()?
         .unwrap_or(published.entrypoint);
-    let selected_function = runmat_hir::FunctionId(function.0 as usize);
-    let selected_body = runtime_functions.get_current(selected_function);
+    let selected_function = function;
+    let selected_body = runtime_functions.get_current(function);
     let runtime = if selected_body.is_some_and(|body| {
         body.class_method_owner.as_ref().is_some_and(|owner| {
             owner.role == runmat_types::ClassMethodRole::Constructor && !owner.is_static
@@ -112,46 +113,33 @@ pub(crate) async fn invoke(
             .and_then(|metadata| metadata.class_method_owner.as_ref()),
     )?;
     let registry = Rc::new(runtime_functions.clone());
-    let runtime = runtime.with_selected_graph_function_resolver({
-        let registry = Rc::clone(&registry);
-        Rc::new(move |function| registry.exact_bound_binding(function))
-    });
-    let native_functions = unit
-        .mir()
-        .bodies
-        .keys()
-        .map(|function| program_function(*function))
-        .collect::<Result<BTreeSet<_>, _>>()?;
-    let capture_bindings = unit
-        .mir()
-        .functions
-        .iter()
-        .map(|(function, metadata)| {
-            Ok((
-                program_function(*function)?,
-                metadata
-                    .captures
-                    .iter()
-                    .map(|capture| capture.binding)
-                    .collect::<Vec<_>>(),
-            ))
-        })
-        .collect::<Result<BTreeMap<_, _>, runmat_runtime::RuntimeError>>()?;
-
+    let runtime = if runtime.has_selected_graph_function_resolver() {
+        runtime
+    } else {
+        crate::session::bind_function_resolvers(
+            runtime,
+            unit,
+            Rc::clone(&registry),
+            unit.original_static_targets().to_vec(),
+        )
+        .map_err(|error| super::error::stage("NativeStaticImport", error))?
+    };
+    let native_functions = unit.mir().bodies.keys().copied().collect::<BTreeSet<_>>();
     let previous_invoker = user_functions::current_semantic_function_invoker();
     let nested_executor = Rc::clone(&published.executor);
     let nested_runtime = runtime.native_invocation_context().0;
-    let semantic_capture_bindings = Arc::new(capture_bindings.clone());
     let semantic_native_functions = native_functions.clone();
     let semantic_unit = unit.clone();
     let semantic_registry = Rc::clone(&registry);
     let semantic_dynamic_admission = dynamic_admission.clone();
     let invoker = user_functions::install_local_semantic_function_invoker(Rc::new(
         move |selected, function, arguments, requested_outputs| {
-            let arguments = arguments.to_vec();
-            let argument_roots =
-                runmat_runtime::execution::RootedValueLease::for_values(arguments.iter())
-                    .map_err(|error| error.into_runtime_error());
+            let lexical_environment = arguments.callable().and_then(|callable| {
+                let Value::Closure(closure) = callable.value() else {
+                    return None;
+                };
+                closure.lexical_environment.clone()
+            });
             let previous_invoker = previous_invoker.clone();
             let executor = Rc::clone(&nested_executor);
             let same_owner = selected
@@ -170,7 +158,6 @@ pub(crate) async fn invoke(
             } else {
                 nested_runtime.clone()
             };
-            let capture_bindings = Arc::clone(&semantic_capture_bindings);
             let unit = semantic_unit.clone();
             let registry = Rc::clone(&semantic_registry);
             let dynamic_admission = semantic_dynamic_admission.clone();
@@ -185,11 +172,8 @@ pub(crate) async fn invoke(
                         .and_then(|function| function.class_method_owner.clone())
                 });
             let runtime = runtime.with_constructor_receiver_for_method(method_owner.as_ref());
-            let is_native = u32::try_from(function)
-                .map(ProgramFunctionId)
-                .is_ok_and(|function| semantic_native_functions.contains(&function));
+            let is_native = semantic_native_functions.contains(&FunctionId(function));
             Box::pin(async move {
-                let _argument_roots = argument_roots?;
                 if !same_owner {
                     return Err(super::error::stage(
                         "NativeCallbackOwner",
@@ -206,38 +190,31 @@ pub(crate) async fn invoke(
                         runmat_hir::FunctionId(function),
                         &execution_sources,
                     )?;
-                    let function = program_function(runmat_hir::FunctionId(function))?;
-                    native_semantic::invoke(
+                    let function = runmat_hir::FunctionId(function);
+                    native_semantic::invoke_rooted(
                         &unit,
-                        super::deopt::DeoptimizationRequest {
-                            executor,
+                        executor,
+                        native_semantic::RootedInvocation {
                             function,
-                            captures: Vec::new(),
-                            lexical_environment: None,
                             arguments,
                             requested_outputs,
                             runtime,
+                            lexical_environment,
                             dynamic_admission,
-                            osr: None,
-                            workspace: None,
                         },
-                        capture_bindings
-                            .get(&function)
-                            .map(Vec::as_slice)
-                            .unwrap_or(&[]),
                     )
                     .await
                 } else if registry.get(runmat_hir::FunctionId(function)).is_some() {
                     // A retained session closure need not belong to this
                     // unit's native MIR. Its registry definition remains
                     // authoritative; arguments still include its captures.
-                    invoke_vm_with_admission(
+                    invoke_vm_with_rooted_admission(
                         function,
-                        &arguments,
+                        arguments,
                         requested_outputs,
                         &registry,
                         runtime,
-                        None,
+                        lexical_environment,
                         dynamic_admission,
                     )
                     .await
@@ -246,7 +223,7 @@ pub(crate) async fn invoke(
                         .scope(previous_invoker(
                             Some(runtime.clone()),
                             function,
-                            &arguments,
+                            arguments,
                             requested_outputs,
                         ))
                         .await
@@ -278,9 +255,7 @@ pub(crate) async fn invoke(
             let dynamic_admission = bound_dynamic_admission.clone();
             let executor = Rc::clone(&bound_executor);
             let unit = bound_unit.clone();
-            let is_native = u32::try_from(binding.function)
-                .map(ProgramFunctionId)
-                .is_ok_and(|function| bound_native_functions.contains(&function));
+            let is_native = bound_native_functions.contains(&FunctionId(binding.function));
             // Select the exact body before the sibling future can be queued.
             // A later same-name class publication must not replace its
             // invocation-owned class defaults or constructor role.
@@ -392,18 +367,17 @@ pub(crate) async fn invoke(
                 if current_definition {
                     let runtime = isolated_procedure_runtime(runtime);
                     if native_selected_body {
-                        let function = program_function(function)?;
                         let method_owner = unit
                             .mir()
                             .functions
-                            .get(&runmat_hir::FunctionId(function.0 as usize))
+                            .get(&function)
                             .and_then(|metadata| metadata.class_method_owner.as_ref());
                         let runtime = runtime.with_constructor_receiver_for_method(method_owner)?;
                         let execution_sources = registry.execution_source_resolver_in(&runtime);
                         let runtime = super::super_constructor::bind_selected(
                             runtime,
                             &registry,
-                            runmat_hir::FunctionId(function.0 as usize),
+                            function,
                             &execution_sources,
                         )?;
                         let selected = runtime.clone();
@@ -499,13 +473,10 @@ pub(crate) async fn invoke(
                     ));
                 }
                 let runtime = isolated_procedure_runtime(runtime);
-                if u32::try_from(call.function)
-                    .map(ProgramFunctionId)
-                    .is_ok_and(|id| unit.owns_callable(id))
-                {
-                    return invoke_vm_with_admission(
+                if unit.owns_callable(FunctionId(call.function)) {
+                    return invoke_vm_with_rooted_admission(
                         call.function,
-                        &call.arguments,
+                        call.arguments,
                         call.requested_outputs,
                         &registry,
                         runtime,
@@ -560,9 +531,7 @@ pub(crate) async fn invoke(
                 .get(&runmat_hir::FunctionId(call.function))
                 .and_then(|metadata| metadata.class_method_owner.as_ref());
             let runtime = runtime.with_constructor_receiver_for_method(method_owner);
-            let is_native = u32::try_from(call.function)
-                .map(ProgramFunctionId)
-                .is_ok_and(|function| lexical_native_functions.contains(&function));
+            let is_native = lexical_native_functions.contains(&FunctionId(call.function));
             Box::pin(async move {
                 let _call_roots = call_roots?;
                 if !same_owner {
@@ -582,15 +551,17 @@ pub(crate) async fn invoke(
                         format!("lexical function {} is unavailable", call.function),
                     ));
                 }
-                let function = program_function(runmat_hir::FunctionId(call.function))?;
+                let function = runmat_hir::FunctionId(call.function);
                 let execution = super::deopt::invoke(
                     &unit,
                     super::deopt::DeoptimizationRequest {
                         executor,
                         function,
-                        captures: call.captures,
                         lexical_environment: call.environment,
-                        arguments: call.arguments,
+                        inputs: super::deopt::Inputs::Source {
+                            captures: call.captures,
+                            arguments: call.arguments,
+                        },
                         requested_outputs: call.requested_outputs,
                         runtime,
                         dynamic_admission,
@@ -648,7 +619,7 @@ pub(crate) async fn invoke(
     source_functions.sort_by_key(|function| function.function);
     let catalog =
         user_functions::install_source_function_catalog(Some(Arc::new(source_functions)))?;
-    let active = user_functions::push_active_semantic_function(function.0 as usize)?;
+    let active = user_functions::push_active_semantic_function(function.0)?;
     // The compiler deliberately omits the synthetic script entrypoint from
     // the semantic FunctionRegistry. It cannot own a superclass constructor;
     // every real function still has to pass the exact retained-owner check.
@@ -680,9 +651,8 @@ pub(crate) async fn invoke(
         super::deopt::DeoptimizationRequest {
             executor: published.executor,
             function,
-            captures: Vec::new(),
-            lexical_environment: None,
-            arguments,
+            lexical_environment,
+            inputs: super::deopt::Inputs::Retained(arguments.into_function_arguments()),
             requested_outputs,
             runtime,
             dynamic_admission,
@@ -715,39 +685,6 @@ pub(crate) async fn invoke(
     )
 }
 
-async fn invoke_vm_with_admission(
-    function: usize,
-    arguments: &[Value],
-    requested_outputs: usize,
-    registry: &runmat_vm::FunctionRegistry,
-    runtime: runmat_runtime::context::RuntimeContext,
-    lexical_environment: Option<runmat_value::LexicalEnvironment>,
-    dynamic_admission: Option<runmat_vm::DynamicEvalAdmissionPort>,
-) -> Result<runmat_runtime::execution::RootedValueSequence, runmat_runtime::RuntimeError> {
-    if let Some(dynamic_admission) = dynamic_admission {
-        runmat_vm::invoke_semantic_function_value_with_dynamic_admission_in_context(
-            function,
-            arguments,
-            requested_outputs,
-            registry,
-            runtime,
-            lexical_environment,
-            dynamic_admission,
-        )
-        .await
-    } else {
-        runmat_vm::invoke_semantic_function_value_with_environment_in_context(
-            function,
-            arguments,
-            requested_outputs,
-            registry,
-            runtime,
-            lexical_environment,
-        )
-        .await
-    }
-}
-
 async fn invoke_vm_with_rooted_admission(
     function: usize,
     arguments: runmat_runtime::call::RootedFunctionArguments,
@@ -767,16 +704,6 @@ async fn invoke_vm_with_rooted_admission(
         dynamic_admission,
     )
     .await
-}
-
-fn program_function(
-    function: runmat_hir::FunctionId,
-) -> Result<ProgramFunctionId, runmat_runtime::RuntimeError> {
-    u32::try_from(function.0)
-        .map(ProgramFunctionId)
-        .map_err(|_| {
-            super::error::stage("NativeProcedure", "function identity exceeds native schema")
-        })
 }
 
 fn isolated_procedure_runtime(

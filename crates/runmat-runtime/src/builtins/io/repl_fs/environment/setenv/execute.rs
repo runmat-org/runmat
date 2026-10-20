@@ -9,7 +9,7 @@ use super::result::SetenvResult;
 
 const IDENTITY: &str = "setenv";
 
-pub(super) fn run(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub(super) fn run(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     let requested = crate::output_count::current_output_count();
     if requested.is_some_and(|count| count > 2) {
         return Err(error::builtin(IDENTITY, &SETENV_ERROR_TOO_MANY_OUTPUTS));
@@ -20,18 +20,27 @@ pub(super) fn run(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             IDENTITY,
         )?;
     }
-    Ok(evaluate(&args)?.render(requested))
+    Ok(evaluate_view(args.view())?.render(requested))
 }
 
+#[cfg(test)]
 pub(super) fn evaluate(args: &[Value]) -> crate::BuiltinResult<SetenvResult> {
-    let prepared = match args {
-        [Value::Object(object)] if object.is_class(runmat_types::standard::DICTIONARY) => {
-            dictionary_plan(object)?
-        }
-        [name] => names_plan(name, &EnvironmentValues::empty_scalar())?,
-        [name, value] => names_plan(
-            name,
-            &EnvironmentValues::decode(value).map_err(value_error)?,
+    evaluate_view(crate::call::FunctionArgumentView::from_slice(args))
+}
+
+fn evaluate_view(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<SetenvResult> {
+    let prepared = match args.len() {
+        1 => match &args[0] {
+            Value::Object(object) if object.is_class(runmat_types::standard::DICTIONARY) => {
+                dictionary_plan(object)?
+            }
+            name => names_plan(name, &EnvironmentValues::empty_scalar())?,
+        },
+        2 => names_plan(
+            &args[0],
+            &EnvironmentValues::decode(&args[1]).map_err(value_error)?,
         )?,
         _ => return Err(error::builtin(IDENTITY, &SETENV_ERROR_ARITY)),
     };

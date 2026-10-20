@@ -105,7 +105,10 @@ fn ifftn_provider_error(detail: impl AsRef<str>) -> RuntimeError {
     binding_variant = "default",
     builtin_path = "crate::builtins::math::fft::ifftn"
 )]
-async fn ifftn_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn ifftn_builtin_registered(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     crate::builtins::common::validation::reject_typed_complex_integer(&value, "ifftn")?;
     if is_wide_integer_value(&value) {
         crate::compatibility::ensure_builtin_extension_enabled(
@@ -120,7 +123,7 @@ async fn ifftn_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<V
             BUILTIN_NAME,
         )?;
     }
-    let (sizes, symmetric) = parse_ifftn_arguments(&rest)?;
+    let (sizes, symmetric) = parse_ifftn_arguments(rest.view())?;
     if let Some(ref sizes) = sizes {
         if sizes.len() < ifftn_input_rank(&value) {
             crate::compatibility::ensure_builtin_extension_enabled(
@@ -139,6 +142,12 @@ async fn ifftn_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<V
         Value::GpuTensor(handle) => ifftn_gpu(handle, sizes, symmetric).await,
         other => ifftn_host(other, sizes, symmetric),
     }
+}
+
+#[cfg(test)]
+async fn ifftn_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let rest = crate::call::BuiltinArguments::from_borrowed(&rest, None)?;
+    ifftn_builtin_registered(value, rest).await
 }
 
 fn ifftn_host(value: Value, sizes: Option<Vec<usize>>, symmetric: bool) -> BuiltinResult<Value> {
@@ -326,7 +335,9 @@ fn finalize_ifftn_output(tensor: ComplexTensor, symmetric: bool) -> BuiltinResul
     }
 }
 
-fn parse_ifftn_arguments(args: &[Value]) -> BuiltinResult<(Option<Vec<usize>>, bool)> {
+fn parse_ifftn_arguments(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<(Option<Vec<usize>>, bool)> {
     if args.is_empty() {
         return Ok((None, false));
     }
@@ -342,8 +353,13 @@ fn parse_ifftn_arguments(args: &[Value]) -> BuiltinResult<(Option<Vec<usize>>, b
     Ok((sizes, symmetric))
 }
 
-fn split_symflag(args: &[Value]) -> BuiltinResult<(Option<bool>, &[Value])> {
-    if let Some((last, rest)) = args.split_last() {
+fn split_symflag(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<(Option<bool>, crate::call::FunctionArgumentView<'_>)> {
+    if let Some(last) = args.last() {
+        let rest = args
+            .range(..args.len() - 1)
+            .expect("bounded ifftn control range");
         if let Some(flag) = parse_symflag(last, BUILTIN_NAME).map_err(|source| {
             ifftn_error_with_source(&IFFTN_ERROR_INVALID_SYMFLAG, "symflag parse failed", source)
         })? {
@@ -525,24 +541,29 @@ mod tests {
 
     #[test]
     fn ifftn_rejects_invalid_argument_count() {
-        let err = parse_ifftn_arguments(&[
+        let args = [
             Value::Num(2.0),
             Value::Num(2.0),
             Value::Num(2.0),
             Value::Num(2.0),
-        ])
-        .unwrap_err();
+        ];
+        let err = parse_ifftn_arguments(crate::call::FunctionArgumentView::from_slice(&args))
+            .unwrap_err();
         assert_eq!(error_identifier(&err), IFFTN_ERROR_ARG_COUNT.identifier);
         assert!(error_message(err).contains(IFFTN_ERROR_ARG_COUNT.message));
     }
 
     #[test]
     fn ifftn_accepts_documented_logical_size_and_rejects_complex_size() {
-        let (size, symmetric) = parse_ifftn_arguments(&[Value::Bool(true)]).unwrap();
+        let logical = [Value::Bool(true)];
+        let (size, symmetric) =
+            parse_ifftn_arguments(crate::call::FunctionArgumentView::from_slice(&logical)).unwrap();
         assert_eq!(size, Some(vec![1]));
         assert!(!symmetric);
 
-        let err = parse_ifftn_arguments(&[Value::Complex(1.0, 0.0)]).unwrap_err();
+        let complex = [Value::Complex(1.0, 0.0)];
+        let err = parse_ifftn_arguments(crate::call::FunctionArgumentView::from_slice(&complex))
+            .unwrap_err();
         assert_eq!(error_identifier(&err), IFFTN_ERROR_INVALID_SIZE.identifier);
         assert!(error_message(err).contains(IFFTN_ERROR_INVALID_SIZE.message));
     }

@@ -14,7 +14,8 @@ const WORKER_MAX_MESSAGE_BYTES: u32 = 64 * 1024 * 1024;
 
 enum WorkerExecutionOutcome {
     Completed {
-        response: WorkerResponse,
+        // Ordinary stdio transport control; Value backing keeps its own owners.
+        response: Box<WorkerResponse>,
         console: Option<runmat_execution::console::ConsoleReceipt>,
     },
     RetirementUnverified {
@@ -62,11 +63,13 @@ pub async fn run_worker_stdio() -> NativeExecutionResult<()> {
         };
         let service = collective::StdioCollectiveService::new(task, channel.clone());
         Ok(WorkerExecutionOutcome::Completed {
-            response: crate::test_workload::execute_host_program_request_with_collective(
-                request,
-                std::rc::Rc::new(service),
-            )
-            .await,
+            response: Box::new(
+                crate::test_workload::execute_host_program_request_with_collective(
+                    request,
+                    std::rc::Rc::new(service),
+                )
+                .await,
+            ),
             console: None,
         })
     } else {
@@ -75,7 +78,7 @@ pub async fn run_worker_stdio() -> NativeExecutionResult<()> {
     let payload = match response {
         Ok(WorkerExecutionOutcome::Completed { response, console }) => {
             serde_json::to_vec(&crate::protocol::WorkerProcessMessage::Completed {
-                response,
+                response: *response,
                 console,
             })
         }
@@ -110,7 +113,7 @@ async fn execute_launch(
     match request {
         WorkerLaunchRequest::Direct(direct) => match *direct {
             WorkerRequest::Direct(request) => Ok(WorkerExecutionOutcome::Completed {
-                response: execute(WorkerRequest::Direct(request)).await,
+                response: Box::new(execute(WorkerRequest::Direct(request)).await),
                 console: None,
             }),
             WorkerRequest::Graph(_) => Err(NativeExecutionError::Protocol(
@@ -119,7 +122,10 @@ async fn execute_launch(
         },
         WorkerLaunchRequest::Reserved(reserved) => {
             let (response, console) = console::execute_reserved(*reserved).await?;
-            Ok(WorkerExecutionOutcome::Completed { response, console })
+            Ok(WorkerExecutionOutcome::Completed {
+                response: Box::new(response),
+                console,
+            })
         }
         WorkerLaunchRequest::StagedGraph(staged) => {
             execute_staged_graph(staged.staged_graph_v10, channel).await
@@ -148,7 +154,7 @@ async fn execute_staged_graph(
         tokio::select! {
             response = &mut execution => return Ok(match response {
                 crate::test_workload::GraphHostExecution::Completed(response) => {
-                    WorkerExecutionOutcome::Completed { response, console: None }
+                    WorkerExecutionOutcome::Completed { response: Box::new(response), console: None }
                 }
                 crate::test_workload::GraphHostExecution::RetirementUnverified { message, owner } => {
                     WorkerExecutionOutcome::RetirementUnverified { message, owner }

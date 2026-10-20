@@ -87,7 +87,7 @@ pub(crate) fn structural_motions_from_value(
     value: &Value,
 ) -> BuiltinResult<Vec<TranslationDofMotion>> {
     let entries = match value {
-        Value::Cell(cell) => cell.data.iter().collect::<Vec<_>>(),
+        Value::Cell(cell) => cell.data().iter().collect::<Vec<_>>(),
         value => vec![value],
     };
     if entries.is_empty() {

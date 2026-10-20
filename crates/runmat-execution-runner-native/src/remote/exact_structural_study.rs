@@ -100,7 +100,7 @@ pub(super) async fn execute_for_composition(
     let (meshing, input_outcomes) = tokio::join!(meshing, inputs);
     let completed = match meshing? {
         RemoteExactMeshingComposition::Completed(completed) => completed,
-        RemoteExactMeshingComposition::Terminal(outcome) => return Ok(composition(outcome)),
+        RemoteExactMeshingComposition::Terminal(outcome) => return Ok(composition(*outcome)),
     };
     let mut input_outcomes = input_outcomes?;
     input_outcomes.extend(
@@ -345,9 +345,17 @@ mod allocation_tests {
             cpu_millicores: 1_000,
             memory_bytes: 1 << 20,
             scratch_bytes: 1 << 20,
-            accelerators: (0..accelerator_count)
-                .map(|_| crate::test_fixtures::accelerator_request("gpu.test", 1 << 18))
-                .collect(),
+            accelerators: if accelerator_count == 0 {
+                Vec::new()
+            } else {
+                vec![runmat_execution::resource::AcceleratorRequest {
+                    class: runmat_execution::resource::AcceleratorClass::new("gpu.test").unwrap(),
+                    count: u16::try_from(accelerator_count).unwrap(),
+                    minimum_allocation_bytes: 1 << 18,
+                    provider: None,
+                    required_features: Default::default(),
+                }]
+            },
             maximum_wall_millis: 10_000,
         }
     }
@@ -372,7 +380,7 @@ mod allocation_tests {
             .unwrap_err()
             .contains("immutable structural-study request"));
         let requested = runmat_execution::resource::AcceleratorRequest {
-            class: crate::test_fixtures::accelerator_class("gpu.test"),
+            class: runmat_execution::resource::AcceleratorClass::new("gpu.test").unwrap(),
             count: 1,
             minimum_allocation_bytes: 1 << 18,
             provider: None,

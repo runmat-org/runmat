@@ -2,6 +2,27 @@ use super::*;
 use futures::executor::block_on;
 use runmat_value::{IntValue, IntegerStorage, StringArray};
 
+fn admit_options(rest: Vec<Value>) -> crate::BuiltinResult<Vec<super::OptionInput>> {
+    super::admit_options(crate::builtins::common::test_support::builtin_arguments(
+        rest,
+    ))
+}
+
+async fn lassoglm_builtin(
+    x: Value,
+    y: Value,
+    distribution: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    super::lassoglm_builtin(
+        x,
+        y,
+        distribution,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    )
+    .await
+}
+
 fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
     Value::Tensor(Tensor::new(data, shape).unwrap())
 }
@@ -23,7 +44,7 @@ fn output_pair(value: Value) -> (Value, Value) {
     (values[0].clone(), values[1].clone())
 }
 
-fn row_field<'a>(info: &'a StructValue, name: &str) -> &'a Tensor {
+fn row_field<'a>(info: &'a runmat_value::StructValue, name: &str) -> &'a Tensor {
     let Some(Value::Tensor(tensor)) = info.fields.get(name) else {
         panic!("expected tensor field {name}");
     };
@@ -118,7 +139,7 @@ fn binomial_and_poisson_paths_return_fitinfo() {
     let out = block_on(lassoglm_builtin(
         tensor(vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0], vec![6, 1]),
         tensor(vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], vec![6, 1]),
-        Value::String("binomial".to_string()),
+        Value::String("binomial".to_string().into()),
         vec![
             Value::CharArray(CharArray::new_row("Lambda")),
             tensor(vec![0.0, 0.1], vec![1, 2]),
@@ -143,16 +164,16 @@ fn binomial_and_poisson_paths_return_fitinfo() {
     let out = block_on(lassoglm_builtin(
         tensor(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]),
         tensor(vec![1.0, 2.0, 4.0, 7.0], vec![4, 1]),
-        Value::String("poisson".to_string()),
+        Value::String("poisson".to_string().into()),
         vec![
             Value::CharArray(CharArray::new_row("Lambda")),
             tensor(vec![0.0], vec![1, 1]),
             Value::CharArray(CharArray::new_row("Options")),
             {
-                let mut st = StructValue::new();
+                let mut st = runmat_value::UnboundedStructValueBuilder::new();
                 st.insert("MaxIter", Value::Num(400.0));
                 st.insert("TolX", Value::Num(1.0e-6));
-                Value::Struct(st)
+                Value::Struct(st.finish())
             },
         ],
     ))
@@ -171,7 +192,7 @@ fn binomial_size_and_single_row_count_response_are_supported() {
     let out = block_on(lassoglm_builtin(
         tensor(vec![0.0, 1.0, 2.0], vec![3, 1]),
         tensor(vec![0.2, 0.5, 0.8], vec![3, 1]),
-        Value::String("binomial".to_string()),
+        Value::String("binomial".to_string().into()),
         vec![
             Value::CharArray(CharArray::new_row("Lambda")),
             tensor(vec![0.0, 0.2], vec![1, 2]),
@@ -202,7 +223,7 @@ fn binomial_size_and_single_row_count_response_are_supported() {
     let out = block_on(lassoglm_builtin(
         tensor(vec![1.0], vec![1, 1]),
         tensor(vec![8.0, 10.0], vec![1, 2]),
-        Value::String("binomial".to_string()),
+        Value::String("binomial".to_string().into()),
         vec![
             Value::CharArray(CharArray::new_row("Lambda")),
             tensor(vec![0.1], vec![1, 1]),
@@ -221,7 +242,7 @@ fn rejects_unsupported_link_and_excessive_resource_options() {
     let err = block_on(lassoglm_builtin(
         tensor(vec![0.0, 1.0, 2.0], vec![3, 1]),
         tensor(vec![0.0, 1.0, 1.0], vec![3, 1]),
-        Value::String("binomial".to_string()),
+        Value::String("binomial".to_string().into()),
         vec![
             Value::CharArray(CharArray::new_row("Link")),
             Value::CharArray(CharArray::new_row("probit")),
@@ -233,7 +254,7 @@ fn rejects_unsupported_link_and_excessive_resource_options() {
     let err = block_on(lassoglm_builtin(
         tensor(vec![0.0, 1.0, 2.0], vec![3, 1]),
         tensor(vec![0.0, 1.0, 1.0], vec![3, 1]),
-        Value::String("binomial".to_string()),
+        Value::String("binomial".to_string().into()),
         vec![
             Value::CharArray(CharArray::new_row("NumLambda")),
             Value::Num((MAX_NUM_LAMBDA + 1) as f64),
@@ -294,7 +315,7 @@ fn validates_binomial_counts_and_predictor_names() {
     let err = block_on(lassoglm_builtin(
         tensor(vec![0.0, 1.0], vec![2, 1]),
         tensor(vec![2.0, 1.0, 1.0, 1.0], vec![2, 2]),
-        Value::String("binomial".to_string()),
+        Value::String("binomial".to_string().into()),
         Vec::new(),
     ))
     .unwrap_err();
@@ -303,7 +324,7 @@ fn validates_binomial_counts_and_predictor_names() {
     let err = block_on(lassoglm_builtin(
         tensor(vec![0.0, 1.0, 2.0, 3.0], vec![2, 2]),
         tensor(vec![1.0, 2.0], vec![2, 1]),
-        Value::String("normal".to_string()),
+        Value::String("normal".to_string().into()),
         vec![
             Value::CharArray(CharArray::new_row("PredictorNames")),
             Value::StringArray(StringArray::new(vec!["x".into()], vec![1, 1]).unwrap()),
@@ -320,7 +341,7 @@ fn lassoglm_reads_typed_integer_storage_exactly() {
     let out = block_on(lassoglm_builtin(
         poisoned_int_tensor(IntegerStorage::I16(vec![0, 1, 2, 3, 4]), 5, 1),
         poisoned_int_tensor(IntegerStorage::I16(vec![1, 3, 5, 7, 9]), 5, 1),
-        Value::String("normal".to_string()),
+        Value::String("normal".to_string().into()),
         vec![
             Value::CharArray(CharArray::new_row("Lambda")),
             cleared_int_tensor(IntegerStorage::U8(vec![0]), 1, 1),
@@ -422,7 +443,7 @@ fn lassoglm_reads_typed_integer_binomial_counts_exactly() {
             6,
             2,
         ),
-        Value::String("binomial".to_string()),
+        Value::String("binomial".to_string().into()),
         vec![
             Value::CharArray(CharArray::new_row("Lambda")),
             poisoned_int_tensor(IntegerStorage::U8(vec![0]), 1, 1),
@@ -522,9 +543,9 @@ fn nested_options_integer_roles_are_gated_by_semantic_role() {
             "RunMat:compatibility:LassoglmIntegerBooleanExtension",
         ),
     ] {
-        let mut options = StructValue::new();
+        let mut options = runmat_value::UnboundedStructValueBuilder::new();
         options.insert(field, Value::Int(IntValue::U8(1)));
-        let rest = [Value::from("Options"), Value::Struct(options)];
+        let rest = [Value::from("Options"), Value::Struct(options.finish())];
         let rest = admit_options(rest.to_vec()).unwrap();
         let err = ensure_extensions(&host, &host, &distr, &rest)
             .expect_err("nested native integer option must be gated");

@@ -1,10 +1,12 @@
 use super::*;
 
 fn structure_array(child: Value) -> Value {
-    let mut element = StructValue::new();
+    let mut element = runmat_value::UnboundedStructValueBuilder::new();
     element.insert("Payload", child);
-    let mut other = StructValue::new();
+    let mut other = runmat_value::UnboundedStructValueBuilder::new();
     other.insert("Payload", Value::Num(0.0));
+    let other = other.finish();
+    let element = element.finish();
     Value::StructArray(StructArray::new(vec![element, other], vec![1, 2]).unwrap())
 }
 
@@ -35,10 +37,10 @@ fn aggregate_exactness_retains_wide_integer_distinctions() {
         assert!(value_contains_native_integer_class(&input));
         assert!(!value_contains_explicit_gpu(&input));
         assert_eq!(native_integer_value_is_exact_f64(&input), exact);
-        let mut object = runmat_value::ObjectInstance::new("ExactnessFixture".to_string());
-        object.properties.insert("Payload".into(), input);
+        let mut object = runmat_value::UnboundedObjectBuilder::new("ExactnessFixture");
+        object.insert("Payload".into(), input);
         assert_eq!(
-            native_integer_value_is_exact_f64(&Value::Object(object)),
+            native_integer_value_is_exact_f64(&Value::Object(object.finish())),
             exact
         );
     }

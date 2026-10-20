@@ -144,7 +144,7 @@ impl AccelProvider for OmitProvider {
 fn omit_first_axis(source: GpuTensorHandle) -> BuiltinResult<Value> {
     block_on(sum_with_nan_policy(
         Value::GpuTensor(source),
-        vec![Value::Num(1.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
         Some(ReductionNaN::Omit),
     ))
 }

@@ -5,8 +5,13 @@ use crate::BuiltinResult;
 
 use super::{arguments, columns::CombinationColumn, error, plan};
 
-pub(super) async fn apply(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let inputs = arguments::gather(first, rest).await?;
+pub(super) async fn apply(
+    runtime: Option<&crate::context::RuntimeContext>,
+    first: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let inputs = arguments::gather(runtime, first, rest).await?;
+    let _input_owner = inputs.fork();
     let columns = inputs
         .into_iter()
         .map(CombinationColumn::from_value)

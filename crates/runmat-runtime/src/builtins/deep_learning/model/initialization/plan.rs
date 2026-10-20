@@ -61,7 +61,7 @@ fn parse_initializer(
     function: &'static str,
 ) -> BuiltinResult<Initializer> {
     let property = initializer_property(role);
-    let Some(value) = layer.properties.get(property) else {
+    let Some(value) = layer.properties().get(property) else {
         return Ok(Initializer::Builtin(default_initializer(kind, role)));
     };
     if crate::builtins::deep_learning::layer_helpers::options::is_callable(value) {
@@ -302,7 +302,7 @@ pub(super) fn tasks(layers: &[Value], function: &'static str) -> BuiltinResult<V
         let Value::Object(layer) = &layers[row.key.layer_index] else {
             unreachable!("canonical parameter view admitted layer objects")
         };
-        let kind = DeepLearningLayerKind::from_identity(&layer.class_name)
+        let kind = DeepLearningLayerKind::from_identity(layer.class_name())
             .expect("canonical parameter view admitted known classes");
         let initializer = parse_initializer(layer, kind, row.key.role, function)?;
         if let Some(shape) = planned.get(&(row.key.layer_index, row.key.role)) {

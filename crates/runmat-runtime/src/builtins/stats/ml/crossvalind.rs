@@ -52,17 +52,21 @@ enum PartitionOutput {
 #[runtime_builtin(
     name = "crossvalind",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::stats::ml::crossvalind"
 )]
-async fn crossvalind_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let admitted = admit_host_controls(&args)?;
-    let args = gather_values(args).await?;
+async fn crossvalind_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let admitted = admit_host_controls(args.view())?;
+    let args = gather_values(args, runtime.as_ref()).await?;
     let mut turn = if matches!(admitted.method, Method::Resubstitution) {
         None
     } else {
-        Some(random::acquire_turn(None, NAME).await?)
+        Some(random::acquire_turn(runtime.as_ref(), NAME).await?)
     };
-    let output = crossvalind_compute(args, admitted, turn.as_mut())?;
+    let output = crossvalind_compute(args.view(), admitted, turn.as_mut())?;
     output_value(output)
 }
 
@@ -72,7 +76,9 @@ struct AdmittedControls {
     option_names: Vec<CrossvalIndOption>,
 }
 
-fn admit_host_controls(args: &[Value]) -> BuiltinResult<AdmittedControls> {
+fn admit_host_controls(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<AdmittedControls> {
     if args.len() < 2 {
         return Err(invalid_argument(
             "crossvalind: method and observation count are required",
@@ -179,16 +185,21 @@ fn admit_host_controls(args: &[Value]) -> BuiltinResult<AdmittedControls> {
     })
 }
 
-async fn gather_values(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(values.len());
-    for value in values {
-        out.push(gather_if_needed_async(&value).await?);
-    }
-    Ok(out)
+async fn gather_values(
+    values: crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    let gathered = values
+        .try_map_preserving_roots_async(values.len(), runtime, |index| {
+            gather_if_needed_async(&values[index])
+        })
+        .await?;
+    drop(values);
+    Ok(gathered)
 }
 
 fn crossvalind_compute(
-    args: Vec<Value>,
+    args: crate::call::FunctionArgumentView<'_>,
     admitted: AdmittedControls,
     turn: Option<&mut random::RandomTurn>,
 ) -> BuiltinResult<PartitionOutput> {
@@ -207,7 +218,7 @@ fn crossvalind_compute(
         }
     };
     debug_assert_eq!(option_start, admitted.option_start);
-    let options = parse_options(&args[option_start..], n, &admitted.option_names)?;
+    let options = parse_options(args.range(option_start..)?, n, &admitted.option_names)?;
     validate_n(n)?;
 
     match method {
@@ -287,7 +298,11 @@ fn output_value(output: PartitionOutput) -> BuiltinResult<Value> {
     }
 }
 
-fn parse_options(rest: &[Value], n: usize, names: &[CrossvalIndOption]) -> BuiltinResult<Options> {
+fn parse_options(
+    rest: crate::call::FunctionArgumentView<'_>,
+    n: usize,
+    names: &[CrossvalIndOption],
+) -> BuiltinResult<Options> {
     debug_assert_eq!(rest.len() / 2, names.len());
     let mut options = Options::default();
     let mut idx = 0usize;
@@ -531,9 +546,9 @@ fn logical_labels(array: &LogicalArray) -> BuiltinResult<Vec<Option<PartitionLab
 }
 
 fn string_array_labels(array: &StringArray) -> BuiltinResult<Vec<Option<PartitionLabel>>> {
-    ensure_vector(&array.shape, array.data.len(), "Classes")?;
+    ensure_vector(&array.shape, array.data().len(), "Classes")?;
     Ok(array
-        .data
+        .data()
         .iter()
         .map(|text| Some(PartitionLabel::Text(text.clone())))
         .collect())
@@ -544,9 +559,9 @@ fn char_row_labels(chars: &CharArray) -> Vec<Option<PartitionLabel>> {
     for row in 0..chars.rows {
         let mut label = String::with_capacity(chars.cols);
         for col in 0..chars.cols {
-            label.push(chars.data[row + col * chars.rows]);
+            label.push(chars.data()[row * chars.cols + col]);
         }
-        labels.push(Some(PartitionLabel::Text(label.trim_end().to_string())));
+        labels.push(Some(PartitionLabel::Text(label.trim_end().into())));
     }
     labels
 }
@@ -617,11 +632,13 @@ fn scalar_number(value: &Value, label: &str) -> BuiltinResult<f64> {
     }
 }
 
-fn scalar_text(value: &Value, label: &str) -> BuiltinResult<String> {
+fn scalar_text<'a>(value: &'a Value, label: &str) -> BuiltinResult<std::borrow::Cow<'a, str>> {
     match value {
-        Value::String(text) => Ok(text.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
-        Value::CharArray(chars) => Ok(chars.data.iter().collect()),
+        Value::String(text) => Ok(std::borrow::Cow::Borrowed(text.as_str())),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(std::borrow::Cow::Borrowed(array.data()[0].as_str()))
+        }
+        Value::CharArray(chars) => Ok(std::borrow::Cow::Owned(chars.data().iter().collect())),
         other => Err(invalid_argument(format!(
             "crossvalind: {label} must be a text scalar, got {other:?}"
         ))),

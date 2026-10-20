@@ -269,10 +269,12 @@ mod tests {
     #[test]
     fn addpoints_appends_2d_points_and_trims_oldest() {
         let _guard = setup();
-        let handle = block_on(animatedline_builtin(vec![
-            Value::String("MaximumNumPoints".into()),
-            Value::Num(3.0),
-        ]))
+        let handle = block_on(animatedline_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("MaximumNumPoints".into()),
+                Value::Num(3.0),
+            ]),
+        ))
         .unwrap();
         block_on(addpoints_builtin(vec![
             handle.clone(),
@@ -293,7 +295,10 @@ mod tests {
     #[test]
     fn addpoints_supports_3d_coordinates() {
         let _guard = setup();
-        let handle = block_on(animatedline_builtin(Vec::new())).unwrap();
+        let handle = block_on(animatedline_builtin(
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap();
         block_on(addpoints_builtin(vec![
             handle.clone(),
             vector(&[1.0, 2.0]),
@@ -308,7 +313,10 @@ mod tests {
     #[test]
     fn addpoints_bumps_figure_revision_for_renderer_flush() {
         let _guard = setup();
-        let handle = block_on(animatedline_builtin(Vec::new())).unwrap();
+        let handle = block_on(animatedline_builtin(
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap();
         let figure = current_figure_handle();
         let before = current_figure_revision(figure).unwrap();
         block_on(addpoints_builtin(vec![
@@ -337,10 +345,12 @@ mod tests {
     #[test]
     fn addpoints_rejects_3d_promotion_when_markers_would_be_lost() {
         let _guard = setup();
-        let handle = block_on(animatedline_builtin(vec![
-            Value::String("Marker".into()),
-            Value::String("o".into()),
-        ]))
+        let handle = block_on(animatedline_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("Marker".into()),
+                Value::String("o".into()),
+            ]),
+        ))
         .unwrap();
         let err = block_on(addpoints_builtin(vec![
             handle,
@@ -379,7 +389,10 @@ mod tests {
             IntegerStorage::U64(vec![1, 2]),
         ];
         for storage in coordinates {
-            let handle = block_on(animatedline_builtin(Vec::new())).unwrap();
+            let handle = block_on(animatedline_builtin(
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+            ))
+            .unwrap();
             block_on(addpoints_builtin(vec![
                 handle.clone(),
                 integer_value(storage.clone()),
@@ -409,7 +422,10 @@ mod tests {
     #[test]
     fn addpoints_rejects_undocumented_logical_coordinates() {
         let _guard = setup();
-        let handle = block_on(animatedline_builtin(Vec::new())).unwrap();
+        let handle = block_on(animatedline_builtin(
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap();
         let err = block_on(addpoints_builtin(vec![
             handle,
             Value::Bool(true),

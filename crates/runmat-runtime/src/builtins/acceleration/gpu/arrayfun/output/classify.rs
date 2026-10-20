@@ -64,7 +64,7 @@ pub(in crate::builtins::acceleration::gpu::arrayfun) fn classify_value(
             }
         }
         Value::CharArray(ca) if ca.rows * ca.cols == 1 => {
-            let ch = ca.data.first().copied().unwrap_or('\0');
+            let ch = ca.data().first().copied().unwrap_or('\0');
             Ok(ClassifiedValue::Char(ch))
         }
         other => Err(arrayfun_error_with_detail(

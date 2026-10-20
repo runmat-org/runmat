@@ -97,7 +97,7 @@ fn float32() -> Vec<u8> {
 fn invocation(name: &str, path: &str, requested_outputs: usize) -> ProcedureInvocation {
     ProcedureInvocation {
         target: ProcedureTarget::Function(name.into()),
-        arguments: vec![Value::String(path.into())],
+        arguments: crate::ProcedureArguments::Source(vec![Value::String(path.into())]),
         requested_outputs,
     }
 }
@@ -194,10 +194,10 @@ fn check_audio_forms(
         unit,
         ProcedureInvocation {
             target: ProcedureTarget::Function("engineBadRange".into()),
-            arguments: vec![
+            arguments: crate::ProcedureArguments::Source(vec![
                 Value::String("/engine/pcm.wav".into()),
                 Value::Tensor(runmat_value::Tensor::new(vec![3.0, 2.0], vec![1, 2]).unwrap()),
-            ],
+            ]),
             requested_outputs: 1,
         },
         control,
@@ -225,7 +225,7 @@ fn check_native_audio_suspension_has_no_effect_replay(
             unit,
             ProcedureInvocation {
                 target: ProcedureTarget::Function("engineResetCount".into()),
-                arguments: Vec::new(),
+                arguments: crate::ProcedureArguments::Source(Vec::new()),
                 requested_outputs: 0,
             },
             &control,

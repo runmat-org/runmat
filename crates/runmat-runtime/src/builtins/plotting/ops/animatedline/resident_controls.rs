@@ -13,19 +13,23 @@ fn animatedline_gathers_proven_numeric_style_and_parent_positions() {
         ] {
             let tensor = Tensor::new(values.clone(), vec![1, values.len()]).unwrap();
             let resident = gpu_helpers::upload_tensor(provider, &tensor).unwrap();
-            let host = block_on(animatedline_builtin(vec![
-                Value::from("Marker"),
-                Value::from("o"),
-                Value::from(name),
-                Value::Tensor(tensor),
-            ]))
+            let host = block_on(animatedline_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::from("Marker"),
+                    Value::from("o"),
+                    Value::from(name),
+                    Value::Tensor(tensor),
+                ]),
+            ))
             .unwrap();
-            let gpu = block_on(animatedline_builtin(vec![
-                Value::from("Marker"),
-                Value::from("o"),
-                Value::from(name),
-                Value::GpuTensor(resident.clone()),
-            ]))
+            let gpu = block_on(animatedline_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::from("Marker"),
+                    Value::from("o"),
+                    Value::from(name),
+                    Value::GpuTensor(resident.clone()),
+                ]),
+            ))
             .unwrap();
             assert_eq!(
                 get_builtin(vec![gpu, Value::from(name)]).unwrap(),
@@ -42,7 +46,10 @@ fn animatedline_gathers_proven_numeric_style_and_parent_positions() {
             vec![Value::GpuTensor(resident.clone())],
             vec![Value::from("Parent"), Value::GpuTensor(resident.clone())],
         ] {
-            let line = block_on(animatedline_builtin(args)).unwrap();
+            let line = block_on(animatedline_builtin(
+                crate::builtins::common::test_support::builtin_arguments(args),
+            ))
+            .unwrap();
             assert_eq!(
                 get_builtin(vec![line, Value::from("Parent")]).unwrap(),
                 Value::Num(axes)

@@ -95,7 +95,10 @@ mod tests {
         assert!(schedule.should_repair(Yielded, true));
         schedule.repaired(Unchanged, Some("no admissible move"));
         // Yield is not exhaustion: refinement gets its complete pass.
-        assert_eq!(schedule.next(Yielded, Some(Unchanged), false), Next::Continue);
+        assert_eq!(
+            schedule.next(Yielded, Some(Unchanged), false),
+            Next::Continue
+        );
         // The unchanged rejected state is not searched again.
         assert!(!schedule.should_repair(Accepted, true));
         schedule.refined(Accepted);
@@ -110,10 +113,16 @@ mod tests {
         let mut schedule = CoupledSchedule::default();
         schedule.refined(Yielded);
         schedule.repaired(Unchanged, Some("rejected"));
-        assert_eq!(schedule.next(Yielded, Some(Unchanged), false), Next::Continue);
+        assert_eq!(
+            schedule.next(Yielded, Some(Unchanged), false),
+            Next::Continue
+        );
         schedule.refined(Blocked);
         assert!(!schedule.should_repair(Blocked, true));
-        assert_eq!(schedule.next(Blocked, None, false), Next::Reject("rejected"));
+        assert_eq!(
+            schedule.next(Blocked, None, false),
+            Next::Reject("rejected")
+        );
     }
 
     #[test]
@@ -122,7 +131,10 @@ mod tests {
         schedule.refined(Idle);
         assert!(schedule.should_repair(Idle, true));
         schedule.repaired(Unchanged, Some("rejected"));
-        assert_eq!(schedule.next(Idle, Some(Unchanged), false), Next::Reject("rejected"));
+        assert_eq!(
+            schedule.next(Idle, Some(Unchanged), false),
+            Next::Reject("rejected")
+        );
     }
 
     #[test]
@@ -130,7 +142,10 @@ mod tests {
         let mut schedule = CoupledSchedule::<&str>::default();
         schedule.refined(Idle);
         schedule.repaired(Unchanged, None);
-        assert_eq!(schedule.next(Idle, Some(Unchanged), false), Next::NoProgress);
+        assert_eq!(
+            schedule.next(Idle, Some(Unchanged), false),
+            Next::NoProgress
+        );
     }
 
     #[test]
@@ -180,7 +195,10 @@ mod tests {
                     rejected_state = false;
                 }
                 let ran = schedule.should_repair(*refinement, true).then(|| {
-                    assert!(!rejected_state, "repair retried an unchanged rejected state");
+                    assert!(
+                        !rejected_state,
+                        "repair retried an unchanged rejected state"
+                    );
                     let rejection = (*repair == Unchanged && *rejects).then_some(iteration);
                     rejected_state = rejection.is_some();
                     schedule.repaired(*repair, rejection);

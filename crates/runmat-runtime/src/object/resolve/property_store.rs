@@ -12,8 +12,8 @@ enum Store {
 fn admit(obj: &ObjectInstance, field: &str, caller: Option<&str>) -> Result<Store, RuntimeError> {
     let selected = crate::class_registry::checked_receiver_projection(obj)?;
     let property = match &selected {
-        Some(projection) => projection.receiver_property(&obj.class_name, &field.into()),
-        None => crate::class_registry::lookup_property(&obj.class_name, &field.into()).map(
+        Some(projection) => projection.receiver_property(obj.class_name(), &field.into()),
+        None => crate::class_registry::lookup_property(obj.class_name(), &field.into()).map(
             |(property, owner)| {
                 (
                     crate::class_registry::receiver_property_declaration(property),
@@ -28,7 +28,7 @@ fn admit(obj: &ObjectInstance, field: &str, caller: Option<&str>) -> Result<Stor
                 "RunMat:PropertyStaticAccess",
                 &format!(
                     "Property '{field}' is static; use classref('{}').{field}",
-                    obj.class_name
+                    obj.class_name()
                 ),
             ));
         }
@@ -56,11 +56,11 @@ fn admit(obj: &ObjectInstance, field: &str, caller: Option<&str>) -> Result<Stor
             let setter = crate::object_property_setter_name(field);
             if selected.as_ref().map_or_else(
                 || {
-                    crate::class_registry::lookup_method(&obj.class_name, &setter.as_str().into())
+                    crate::class_registry::lookup_method(obj.class_name(), &setter.as_str().into())
                         .is_some()
                 },
                 |projection| {
-                    projection.receiver_declares_method(&obj.class_name, &setter.as_str().into())
+                    projection.receiver_declares_method(obj.class_name(), &setter.as_str().into())
                 },
             ) {
                 return Ok(Store::Dependent);
@@ -76,7 +76,7 @@ fn admit(obj: &ObjectInstance, field: &str, caller: Option<&str>) -> Result<Stor
     let dynamic_access = match &selected {
         Some(projection) => obj.dynamic_property(field).map(|definition| {
             projection.receiver_member_accessible(
-                &definition.defining_class,
+                definition.defining_class.as_identity(),
                 definition.set_access,
                 caller_class.as_ref(),
             )
@@ -92,10 +92,14 @@ fn admit(obj: &ObjectInstance, field: &str, caller: Option<&str>) -> Result<Stor
         }
         return Ok(Store::Stored);
     }
-    if selected.is_some() || crate::class_registry::get_class(&obj.class_name).is_some() {
-        Err(format!("Undefined property '{field}' for class {}", obj.class_name).into())
+    if selected.is_some() || crate::class_registry::get_class(obj.class_name()).is_some() {
+        Err(format!(
+            "Undefined property '{field}' for class {}",
+            obj.class_name()
+        )
+        .into())
     } else {
-        Err(format!("Unknown class {}", obj.class_name).into())
+        Err(format!("Unknown class {}", obj.class_name()).into())
     }
 }
 
@@ -128,11 +132,11 @@ pub(super) async fn store_value(
             require_single_rooted_sequence(outputs)
         }
         Store::Stored => {
-            if let Some(old) = obj.properties.get(&field) {
+            if let Some(old) = obj.property(&field) {
                 on_write(old, &rhs);
             }
-            obj.properties.insert(field, rhs);
-            RootedValue::new(Value::Object(obj)).map_err(|error| error.into_runtime_error())
+            replace_stored_property(context, &mut obj, &field, rhs)?;
+            RootedValue::in_optional_context(Value::Object(obj), context)
         }
     }
 }
@@ -151,13 +155,36 @@ fn target_object<'a>(
     match value {
         Value::Object(obj)
             if handle.valid
-                && obj.class_name == handle.class_name
+                && obj.class_name() == &handle.class_name
                 && crate::object_handle_flag_valid(obj) =>
         {
             Ok(obj)
         }
         _ => Err(invalid_handle()),
     }
+}
+
+fn replace_stored_property(
+    context: Option<&crate::context::RuntimeContext>,
+    object: &mut ObjectInstance,
+    field: &str,
+    rhs: Value,
+) -> Result<Option<Value>, RuntimeError> {
+    crate::execution::object::replacement::replace_property(
+        context,
+        object,
+        field,
+        rhs,
+        |message, source| {
+            crate::context::host_allocation::host_allocation_runtime_error(
+                context,
+                "RunMat:PropertyAssignment",
+                message,
+                source,
+            )
+        },
+        |message| mex("RunMat:PropertyAssignment", &message),
+    )
 }
 
 pub(super) async fn store_handle(
@@ -171,6 +198,8 @@ pub(super) async fn store_handle(
         .class_name
         .is(crate::builtins::introspection::dynamicprops::DYNAMIC_PROPERTY_CLASS)
     {
+        let receiver =
+            RootedValue::in_optional_context(Value::HandleObject(handle.clone()), context)?;
         // Metadata assignment also edits the owning object's dynamic-property
         // definition. Never hold a mutable GC borrow of the metadata handle
         // while that shared domain owner enters the target object.
@@ -179,6 +208,7 @@ pub(super) async fn store_handle(
         })
         .map_err(|_| invalid_handle())??;
         if !crate::builtins::introspection::dynamicprops::metadata_assignment(
+            context,
             &mut metadata,
             &field,
             rhs,
@@ -194,8 +224,7 @@ pub(super) async fn store_handle(
         .map_err(|_| invalid_handle())??;
         // Destruction can reenter GC and other owners.
         drop(old);
-        return RootedValue::new(Value::HandleObject(handle))
-            .map_err(|error| error.into_runtime_error());
+        return Ok(receiver);
     }
     let action = runmat_gc::gc_with_value(&handle.target, |target| {
         admit(target_object(&handle, target)?, &field, caller)
@@ -252,23 +281,31 @@ pub(super) async fn store_handle(
             return Ok(result);
         }
         Store::Stored => {
+            // Prepare outside the GC borrow. Allocation and retirement can
+            // reenter owners; publication checks the original generation.
+            let snapshot = runmat_gc::gc_with_value(&handle.target, |target| {
+                target_object(&handle, target).cloned()
+            })
+            .map_err(|_| invalid_handle())??;
+            let mut replacement = snapshot.clone();
+            replace_stored_property(context, &mut replacement, &field, rhs)?;
+            let replacement =
+                RootedValue::in_optional_context(Value::Object(replacement), context)?;
+            let prepared = replacement.into_value_and_lease();
+            let _replacement_roots = prepared.1;
+            let replacement = prepared.0;
             let old = runmat_gc::gc_with_value_mut(&handle.target, |target| {
-                let obj = target_object(&handle, target)?;
-                // Revalidate the live object, rather than publishing a snapshot.
-                match admit(obj, &field, caller)? {
-                    Store::Stored => {}
-                    Store::Dependent => {
-                        return Err(mex(
-                            "RunMat:PropertyChanged",
-                            "Property changed before assignment",
-                        ))
-                    }
+                let live = target_object(&handle, target)?;
+                if !live.shares_generation_with(&snapshot)
+                    || !matches!(admit(live, &field, caller)?, Store::Stored)
+                {
+                    return Err(mex(
+                        "RunMat:PropertyChanged",
+                        "Property changed before assignment",
+                    ));
                 }
-                runmat_gc::gc_record_handle_write(&handle.target, &rhs);
-                let Value::Object(obj) = target else {
-                    unreachable!("target validated above")
-                };
-                Ok::<_, RuntimeError>(obj.properties.insert(field, rhs))
+                runmat_gc::gc_record_handle_write(&handle.target, &replacement);
+                Ok::<_, RuntimeError>(std::mem::replace(target, replacement))
             })
             .map_err(|_| invalid_handle())??;
             // Resource destruction may reenter owners/GC; never run it while
@@ -276,5 +313,5 @@ pub(super) async fn store_handle(
             drop(old);
         }
     }
-    RootedValue::new(Value::HandleObject(handle)).map_err(|error| error.into_runtime_error())
+    RootedValue::in_optional_context(Value::HandleObject(handle), context)
 }

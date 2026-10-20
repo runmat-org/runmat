@@ -17,7 +17,7 @@ fn fatal_frontend_diagnostic(
 ) -> Option<&runmat_hir::HirDiagnostic> {
     diagnostics
         .iter()
-        .find(|diagnostic| diagnostic.severity == runmat_hir::HirDiagnosticSeverity::Error)
+        .find(|diagnostic| diagnostic.blocks_execution())
 }
 
 fn bind_frontend_diagnostic(
@@ -1178,7 +1178,7 @@ impl RunMatSession {
                     .build(),
             )
         })?;
-        unit.with_portable_selection(current, selected.imports)
+        unit.with_portable_selection(current, selected.imports, selected.targets)
             .map_err(|error| {
                 RunError::Runtime(
                     build_runtime_error(error)
@@ -1577,6 +1577,10 @@ impl RunMatSession {
                         .build(),
                 )
             })?;
+        // Full source/catalog/companion assembly is complete. The following
+        // session publication only renames compiler coordinates; retain this
+        // analysis's original revision-level function/point identities.
+        let analysis = runmat_mir::analysis::analyze_assembly(&mir);
         let (
             function_registry_after_success,
             next_semantic_function_id_after_success,
@@ -1609,7 +1613,15 @@ impl RunMatSession {
                 )?;
             }
         }
-        let analysis = runmat_mir::analysis::analyze_assembly(&mir);
+        let analysis = analysis
+            .rebind_eval_local_functions(&function_id_remap)
+            .map_err(|error| {
+                RunError::Runtime(
+                    build_runtime_error(error)
+                        .with_identifier("RunMat:ExecutableFunctionIdentity")
+                        .build(),
+                )
+            })?;
         Ok(PreparedExecution {
             ast,
             lowering,
@@ -1685,7 +1697,7 @@ impl RunMatSession {
         if current_registry.functions.is_empty() {
             bytecode.function_registry = execution_registry;
             bytecode.bound_functions = bytecode.function_registry.functions.clone();
-            let bindings = semantic_function_bindings(bytecode)?;
+            let bindings = semantic_function_bindings(bytecode, &HashSet::new())?;
             runmat_vm::remap_session_entrypoint(bytecode, &HashMap::new(), &bindings).map_err(
                 |error| {
                     RunError::Runtime(
@@ -1748,24 +1760,16 @@ impl RunMatSession {
                 continue;
             };
             let mut function = function;
-            let program_function = runmat_types::ProgramFunctionId(
-                u32::try_from(new_id.0).expect("session function identity exceeds portable schema"),
-            );
             let source = function.source_id.or(bytecode.source_id);
-            runmat_vm::remap_session_function(
-                &mut function,
-                new_id,
-                program_function,
-                source,
-                &remap,
-            )
-            .map_err(|error| {
-                RunError::Runtime(
-                    build_runtime_error(format!("session function remap: {error}"))
-                        .with_identifier("RunMat:SelectedFusionStageProjection")
-                        .build(),
-                )
-            })?;
+            runmat_vm::remap_session_function(&mut function, new_id, source, &remap).map_err(
+                |error| {
+                    RunError::Runtime(
+                        build_runtime_error(format!("session function remap: {error}"))
+                            .with_identifier("RunMat:SelectedFusionStageProjection")
+                            .build(),
+                    )
+                },
+            )?;
             let persist_function =
                 !private_companion_function_names.contains(&function.display_name);
             execution_registry.insert_replacing_name(function.clone());
@@ -1807,7 +1811,7 @@ impl RunMatSession {
 
         bytecode.function_registry = execution_registry;
         bytecode.bound_functions = bytecode.function_registry.functions.clone();
-        let bindings = semantic_function_bindings(bytecode)?;
+        let bindings = semantic_function_bindings(bytecode, &remap.values().copied().collect())?;
         runmat_vm::remap_session_entrypoint(bytecode, &remap, &bindings).map_err(|error| {
             RunError::Runtime(
                 build_runtime_error(format!("session entrypoint remap: {error}"))
@@ -1935,6 +1939,7 @@ impl RunMatSession {
 
 fn semantic_function_bindings(
     bytecode: &runmat_vm::Bytecode,
+    current: &HashSet<runmat_hir::FunctionId>,
 ) -> Result<Vec<runmat_vm::SessionCallableBinding>, RunError> {
     let registry = &bytecode.function_registry;
     let mut bindings = Vec::new();
@@ -1948,6 +1953,7 @@ fn semantic_function_bindings(
                         pc,
                         function,
                         name.clone(),
+                        session_reference_kind(function, current),
                     ));
                 }
                 continue;
@@ -1970,11 +1976,23 @@ fn semantic_function_bindings(
                     pc,
                     function,
                     name.clone(),
+                    session_reference_kind(function, current),
                 ));
             }
         }
     }
     Ok(bindings)
+}
+
+fn session_reference_kind(
+    function: runmat_hir::FunctionId,
+    current: &HashSet<runmat_hir::FunctionId>,
+) -> runmat_vm::FunctionReferenceKind {
+    if current.contains(&function) {
+        runmat_vm::FunctionReferenceKind::Local
+    } else {
+        runmat_vm::FunctionReferenceKind::External
+    }
 }
 #[cfg(test)]
 mod source_discovery_tests {
@@ -2018,12 +2036,12 @@ mod source_discovery_tests {
                 .values()
                 .find(|metadata| metadata.name.0 == "helper")
                 .unwrap();
-            assert_ne!(helper.source.0 as usize, primary.source_id);
+            assert_ne!(helper.source, primary.source_id);
             let helper_source = unit
                 .source_map()
                 .entries()
                 .iter()
-                .find(|entry| entry.source_id == helper.source.0 as usize)
+                .find(|entry| entry.source_id == helper.source)
                 .unwrap();
             assert!(helper_source.relative_path.ends_with("helper.m"));
             assert!(unit
@@ -2036,17 +2054,22 @@ mod source_discovery_tests {
                     assert_eq!(metadata.source, unit.mir().functions[&parent].source);
                 }
                 if metadata.name.0 == name {
-                    assert_eq!(metadata.source.0 as usize, primary.source_id);
+                    assert_eq!(metadata.source, primary.source_id);
                 }
                 if let Some(function) = unit.bytecode().function_registry.get(*id) {
-                    assert_eq!(function.source_id.unwrap().0, metadata.source.0 as usize);
+                    assert_eq!(function.source_id.unwrap().program(), Some(metadata.source));
                 }
             }
             for region in &unit.analysis().regions {
-                let function = runmat_hir::FunctionId(region.contract.id.function.0 as usize);
+                let facts = unit.function_analysis(region.contract.id.function).unwrap();
+                let Some(runmat_types::CallableIdentity::BoundFunction(function)) =
+                    facts.callable.identity.as_ref()
+                else {
+                    panic!("region owner self binding");
+                };
                 assert_eq!(
                     region.contract.source,
-                    unit.mir().functions[&function].source
+                    unit.mir().functions[function].source
                 );
             }
         }

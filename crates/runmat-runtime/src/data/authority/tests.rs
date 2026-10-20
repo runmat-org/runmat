@@ -9,24 +9,18 @@ fn fixture_root(name: &str) -> PathBuf {
 }
 
 fn object(role: HandleRole, path: &str, reference: ForeignRef) -> Value {
-    let mut object = ObjectInstance::new(role.class().owned()).with_dataset_authority(reference);
-    object
-        .properties
-        .insert("__data_path".into(), Value::String(path.into()));
+    let mut object = runmat_value::UnboundedObjectBuilder::new(role.class().owned());
+    object.insert("__data_path".into(), Value::String(path.into()));
     match role {
         HandleRole::Dataset => {}
         HandleRole::Array(name) => {
-            object
-                .properties
-                .insert("__array_name".into(), Value::String(name));
+            object.insert("__array_name".into(), Value::String(name.into()));
         }
         HandleRole::Transaction(tx_id) => {
-            object
-                .properties
-                .insert("__tx_id".into(), Value::String(tx_id));
+            object.insert("__tx_id".into(), Value::String(tx_id.into()));
         }
     }
-    Value::Object(object)
+    Value::Object(object.finish().with_dataset_authority(reference))
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

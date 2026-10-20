@@ -113,7 +113,7 @@ async fn conv2_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     a: Value,
     b: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     let mut extras = rest;
     let mode = extract_mode(&mut extras)?;
@@ -228,7 +228,12 @@ async fn conv2_builtin(
             };
             let restore_recorder = placement.as_ref().and_then(|selected| selected.recorder());
             let result = async move {
-                let signal = convert_matrix(extras.remove(0), "A", &mut cooperation).await?;
+                let signal = convert_matrix(
+                    extras.pop_front().expect("validated argument prefix"),
+                    "A",
+                    &mut cooperation,
+                )
+                .await?;
                 let column = convert_vector(a, "H column", &mut cooperation).await?;
                 let row = convert_vector(b, "H row", &mut cooperation).await?;
                 let result = separable::convolve_separable(
@@ -700,7 +705,7 @@ impl Matrix {
     }
 }
 
-fn extract_mode(extras: &mut Vec<Value>) -> BuiltinResult<Conv2Mode> {
+fn extract_mode(extras: &mut crate::call::BuiltinArguments) -> BuiltinResult<Conv2Mode> {
     if let Some(last) = extras.last() {
         if let Some(mode) = parse_mode_value(last)? {
             extras.pop();
@@ -1791,7 +1796,12 @@ pub(crate) mod tests {
     }
 
     fn conv2_builtin(a: Value, b: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::conv2_builtin(None, a, b, rest))
+        block_on(super::conv2_builtin(
+            None,
+            a,
+            b,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     #[test]
@@ -1806,7 +1816,7 @@ pub(crate) mod tests {
             Some(runtime),
             Value::Num(1.0),
             Value::Num(2.0),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect_err("cancelled invocation");
         assert_eq!(error.identifier(), Some("RunMat:Cancelled"));

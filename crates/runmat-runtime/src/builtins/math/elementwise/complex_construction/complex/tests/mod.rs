@@ -9,7 +9,12 @@ pub(super) use crate::builtins::common::{gpu_helpers, test_support};
 pub(super) use crate::BuiltinResult;
 
 pub(super) fn complex_call(real: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    block_on(super::complex_builtin(None, real, rest)).map(|owned| owned.value().clone())
+    block_on(super::complex_builtin(
+        None,
+        real,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    ))
+    .map(|owned| owned.value().clone())
 }
 
 mod host;

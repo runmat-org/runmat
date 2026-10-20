@@ -2,6 +2,8 @@
 //!
 //! Replicates arrays by tiling their contents across one or more dimensions.
 
+use crate::aggregate::structure::operations as struct_ops;
+
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
@@ -48,7 +50,10 @@ fn repmat_internal(message: impl Into<String>) -> RuntimeError {
     binding_variant = "default",
     builtin_path = "crate::builtins::array::shape::repmat"
 )]
-pub(super) async fn repmat_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub(super) async fn repmat_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     if !rest.is_empty()
         && !shape_transform_input_supported(
             &crate::value_fact::value_fact(&value),
@@ -81,7 +86,7 @@ pub(super) async fn repmat_builtin(value: Value, rest: Vec<Value>) -> crate::Bui
     if rest.is_empty() {
         return Err(repmat_missing_factors(REPMAT_ERROR_MISSING_FACTORS.message));
     }
-    let raw_reps = parse_replication_factors(&rest).await?;
+    let raw_reps = parse_replication_factors(rest.view()).await?;
     match value {
         Value::Tensor(t) => {
             let tiled = repmat_tensor(&t, &raw_reps)?;
@@ -119,7 +124,7 @@ pub(super) async fn repmat_builtin(value: Value, rest: Vec<Value>) -> crate::Bui
             Ok(Value::ComplexTensor(tiled))
         }
         Value::String(s) => {
-            let array = StringArray::new(vec![s], vec![1, 1])
+            let array = StringArray::from_texts_unbounded(vec![s], vec![1, 1])
                 .map_err(|e| repmat_internal(format!("repmat: {e}")))?;
             let tiled = repmat_string_array(&array, &raw_reps)?;
             Ok(Value::StringArray(tiled))
@@ -150,14 +155,13 @@ pub(super) async fn repmat_builtin(value: Value, rest: Vec<Value>) -> crate::Bui
                     })
                 })?
             };
-            let fields = structure.field_names().cloned().collect();
-            runmat_value::StructArray::normalize(fields, vec![structure; count], shape)
-                .map_err(repmat_internal)
+            debug_assert_eq!(count, shape.iter().product::<usize>());
+            struct_ops::replicate_scalar(&structure, &shape)
+                .map_err(|error| struct_ops::remap(error, |message| repmat_internal(message)))
         }
-        Value::StructArray(array) => array
-            .tile(&raw_reps)
+        Value::StructArray(array) => struct_ops::tile(&array, &raw_reps)
             .map(Value::StructArray)
-            .map_err(repmat_internal),
+            .map_err(|error| struct_ops::remap(error, |message| repmat_internal(message))),
         Value::GpuTensor(handle) => Ok(repmat_gpu_tensor(handle, &raw_reps).await?),
         other => Err(repmat_unsupported(format!(
             "repmat: unsupported input type {:?}",
@@ -166,7 +170,9 @@ pub(super) async fn repmat_builtin(value: Value, rest: Vec<Value>) -> crate::Bui
     }
 }
 
-async fn parse_replication_factors(args: &[Value]) -> crate::BuiltinResult<Vec<usize>> {
+async fn parse_replication_factors(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<Vec<usize>> {
     if args.is_empty() {
         return Err(repmat_missing_factors(REPMAT_ERROR_MISSING_FACTORS.message));
     }
@@ -402,14 +408,21 @@ fn repmat_numeric_storage(
 }
 
 fn repmat_string_array(sa: &StringArray, reps: &[usize]) -> crate::BuiltinResult<StringArray> {
-    let (data, shape) = repmat_column_major(&sa.data, &sa.shape, reps, "repmat")?;
-    StringArray::new(data, shape).map_err(|e| repmat_internal(format!("repmat: {e}")))
+    let (data, shape) = repmat_column_major(sa.data(), &sa.shape, reps, "repmat")?;
+    StringArray::from_texts_unbounded(data, shape)
+        .map_err(|e| repmat_internal(format!("repmat: {e}")))
 }
 
 fn repmat_char_array(ca: &CharArray, reps: &[usize]) -> crate::BuiltinResult<CharArray> {
     let (row_factor, col_factor) = compute_2d_reps(reps)?;
-    let (data, rows, cols) =
-        repmat_row_major(&ca.data, ca.rows, ca.cols, row_factor, col_factor, "repmat")?;
+    let (data, rows, cols) = repmat_row_major(
+        ca.data(),
+        ca.rows,
+        ca.cols,
+        row_factor,
+        col_factor,
+        "repmat",
+    )?;
     CharArray::new(data, rows, cols).map_err(|e| repmat_internal(format!("repmat: {e}")))
 }
 
@@ -432,7 +445,7 @@ fn repmat_cell_array(cell: &CellArray, reps: &[usize]) -> crate::BuiltinResult<C
             for _ in 0..col_factor {
                 for c in 0..cell.cols {
                     let idx = r * cell.cols + c;
-                    values.push(cell.data[idx].clone());
+                    values.push(cell.data()[idx].clone());
                 }
             }
         }
@@ -632,7 +645,10 @@ pub(crate) mod tests {
     use futures::executor::block_on;
 
     fn repmat_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-        block_on(super::repmat_builtin(value, rest))
+        block_on(super::repmat_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::{
@@ -712,7 +728,9 @@ pub(crate) mod tests {
             .unwrap();
         let future = super::repmat_builtin(
             Value::Num(1.0),
-            vec![Value::GpuTensor(allocation.handle.clone())],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(
+                allocation.handle.clone(),
+            )]),
         );
         drop(future);
         assert_eq!(allocation.probe.retirements(), 0);
@@ -860,7 +878,7 @@ pub(crate) mod tests {
             Value::CharArray(out) => {
                 assert_eq!(out.rows, 2);
                 assert_eq!(out.cols, 6);
-                let text: String = out.data.iter().collect();
+                let text: String = out.data().iter().collect();
                 assert_eq!(text, "hihihihihihi");
             }
             other => panic!("expected char array, got {other:?}"),
@@ -1223,7 +1241,7 @@ pub(crate) mod tests {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![2, 2]);
                 assert_eq!(
-                    sa.data,
+                    sa.data(),
                     vec![
                         "runmat".to_string(),
                         "runmat".to_string(),

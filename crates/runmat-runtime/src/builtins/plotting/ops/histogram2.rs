@@ -390,7 +390,7 @@ pub async fn histogram2_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
     let rest: Vec<Value> = args.collect();
     let options = parse_options(rest)?;
     crate::builtins::stats::hist::histcounts2::ensure_histcounts2_public_syntax(
-        &options.histcounts_args,
+        crate::call::FunctionArgumentView::from_slice(&options.histcounts_args),
     )?;
 
     let chart = build_chart(x.clone(), y.clone(), &options, normalization_denominator).await?;
@@ -485,9 +485,13 @@ async fn build_chart(
     normalization_denominator: f64,
 ) -> BuiltinResult<Histogram2Chart> {
     let raw_args = histcounts_count_args(&options.histcounts_args);
-    let raw_eval = crate::builtins::stats::hist::histcounts2::evaluate(x, y, &raw_args)
-        .await
-        .map_err(map_histcounts_error)?;
+    let raw_eval = crate::builtins::stats::hist::histcounts2::evaluate(
+        x,
+        y,
+        crate::call::FunctionArgumentView::from_slice(&raw_args),
+    )
+    .await
+    .map_err(map_histcounts_error)?;
     let (raw_counts_value, x_edges_value, y_edges_value) = raw_eval.into_triple();
     let raw_counts = Tensor::try_from(&raw_counts_value)
         .map_err(|err| invalid(format!("histogram2: cannot convert raw bin counts: {err}")))?;

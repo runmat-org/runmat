@@ -101,9 +101,8 @@ fn native_deopt_projection_releases_discarded_slots_on_success_and_output_error(
                 super::DeoptimizationInvocation {
                     executor: compiled.executor,
                     function: compiled.entrypoint,
-                    captures: Vec::new(),
                     lexical_environment: None,
-                    arguments: vec![Value::GpuTensor(input.clone())],
+                    inputs: super::Inputs::Source { captures: Vec::new(), arguments: vec![Value::GpuTensor(input.clone())] },
                     requested_outputs,
                     runtime,
                     policy: DeoptimizationPolicy {

@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 
 use runmat_hir::FunctionId;
-use runmat_types::{CallableIdentity, ProgramFunctionId};
+use runmat_types::CallableIdentity;
 
 use super::grammar::with_instruction_function_references;
+use super::reference_sites::FunctionReferenceKind;
 use crate::bytecode::{
     Bytecode, BytecodeSourceRef, BytecodeSubscriptStep, FunctionBytecode, Instr,
 };
@@ -32,7 +33,7 @@ fn remap_function_with_policy(
     let lexical_parent = project_lexical_parent(function, remap)?;
     let inherited_storage = project_inherited_storage(function, remap)?;
     if let Some(destination) = remap.get(&function.function).copied() {
-        function.rebind_identity(destination, function.portable_function);
+        function.rebind_identity(destination);
     }
     function.lexical_parent = lexical_parent;
     function.inherited_storage_slots = inherited_storage;
@@ -120,18 +121,10 @@ pub(crate) fn remap_eval_local_instruction(
 pub fn remap_session_function(
     function: &mut FunctionBytecode,
     destination: FunctionId,
-    program_function: ProgramFunctionId,
     source: Option<BytecodeSourceRef>,
     remap: &HashMap<FunctionId, FunctionId>,
 ) -> Result<(), String> {
-    remap_session_function_with_policy(
-        function,
-        destination,
-        program_function,
-        source,
-        remap,
-        RemapPolicy::EvalLocal,
-    )
+    remap_session_function_with_policy(function, destination, source, remap, RemapPolicy::EvalLocal)
 }
 
 /// Rebind a proved closed product body after fresh session IDs have been
@@ -140,14 +133,12 @@ pub fn remap_session_function(
 pub fn remap_closed_session_function(
     function: &mut FunctionBytecode,
     destination: FunctionId,
-    program_function: ProgramFunctionId,
     remap: &HashMap<FunctionId, FunctionId>,
 ) -> Result<(), String> {
     let source = function.source_id;
     remap_session_function_with_policy(
         function,
         destination,
-        program_function,
         source,
         remap,
         RemapPolicy::ClosedUnit,
@@ -157,7 +148,6 @@ pub fn remap_closed_session_function(
 fn remap_session_function_with_policy(
     function: &mut FunctionBytecode,
     destination: FunctionId,
-    program_function: ProgramFunctionId,
     source: Option<BytecodeSourceRef>,
     remap: &HashMap<FunctionId, FunctionId>,
     policy: RemapPolicy,
@@ -167,7 +157,7 @@ fn remap_session_function_with_policy(
     let mut next = function.clone();
     next.lexical_parent = project_lexical_parent(&next, remap)?;
     next.inherited_storage_slots = project_inherited_storage(&next, remap)?;
-    next.rebind_identity_unsealed(destination, program_function);
+    next.rebind_identity_unsealed(destination);
     next.source_id = source;
     let context = RemapContext { ids: remap, policy };
     for instruction in &mut next.instructions {
@@ -233,17 +223,21 @@ fn remap_session_entrypoint_with_policy(
     for instruction in &mut next.instructions {
         remap_instruction_with_policy(instruction, &context);
     }
-    let mut bound_pcs = HashMap::<usize, (FunctionId, &str, SessionCallableBindingKind)>::new();
+    let mut bound_pcs = HashMap::new();
     for binding in bindings {
-        if let Some((function, name, kind)) = bound_pcs.insert(
+        if let Some((function, name, kind, reference)) = bound_pcs.insert(
             binding.pc,
             (
                 binding.function,
                 binding.display_name.as_str(),
                 binding.kind,
+                binding.reference,
             ),
         ) {
-            if function == binding.function && name == binding.display_name && kind == binding.kind
+            if function == binding.function
+                && name == binding.display_name
+                && kind == binding.kind
+                && reference == binding.reference
             {
                 continue;
             }
@@ -283,8 +277,9 @@ fn remap_session_entrypoint_with_policy(
             .map_or(runmat_types::FunctionSourceRole::Unknown, |body| {
                 body.source_role
             });
-        let external = matches!(instruction, Instr::CreateExternalFunctionHandle(_));
-        *instruction = if external {
+        // Source spelling does not establish the definition's identity domain:
+        // an unqualified constructor can belong to a prior session product.
+        *instruction = if binding.reference == FunctionReferenceKind::External {
             Instr::CreateExternalBoundFunctionHandle(
                 binding.function,
                 binding.display_name.clone(),
@@ -316,6 +311,7 @@ pub struct SessionCallableBinding {
     pub function: FunctionId,
     pub display_name: String,
     kind: SessionCallableBindingKind,
+    reference: FunctionReferenceKind,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -325,21 +321,33 @@ enum SessionCallableBindingKind {
 }
 
 impl SessionCallableBinding {
-    pub fn named(pc: usize, function: FunctionId, display_name: String) -> Self {
+    pub fn named(
+        pc: usize,
+        function: FunctionId,
+        display_name: String,
+        reference: FunctionReferenceKind,
+    ) -> Self {
         Self {
             pc,
             function,
             display_name,
             kind: SessionCallableBindingKind::Named,
+            reference,
         }
     }
 
-    pub fn constructor(pc: usize, function: FunctionId, display_name: String) -> Self {
+    pub fn constructor(
+        pc: usize,
+        function: FunctionId,
+        display_name: String,
+        reference: FunctionReferenceKind,
+    ) -> Self {
         Self {
             pc,
             function,
             display_name,
             kind: SessionCallableBindingKind::Constructor,
+            reference,
         }
     }
 }

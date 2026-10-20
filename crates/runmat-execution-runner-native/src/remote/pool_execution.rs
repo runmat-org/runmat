@@ -83,8 +83,10 @@ pub(super) struct RemotePoolExecution<'a> {
 /// The admitted root program: Direct V7 runs against the installed bundle;
 /// a Graph V10 Program is staged to each worker from its signed transfer.
 enum RootProgram {
-    Direct(ProgramExecutionRequest),
-    Graph(GraphRoot),
+    // Retain only request control state, not the decoded admission bundle.
+    Direct(Box<ProgramExecutionRequest>),
+    // The stage has transferred to the pool; remaining graph fields are needed.
+    Graph(Box<super::driver::program::AdmittedGraphProgram>),
 }
 
 pub(super) struct GraphRoot {
@@ -158,36 +160,24 @@ pub(super) async fn execute(
                     authority.run_id.clone(),
                 )?,
             };
-            (pool, RootProgram::Direct(request))
+            // This ordinary transport-control Box moves the request without
+            // copying Value payloads or retaining redundant decoded objects.
+            (pool, RootProgram::Direct(Box::new(request)))
         }
-        AdmittedRemoteProgram::Graph(admitted) => {
+        AdmittedRemoteProgram::Graph(mut admitted) => {
             if recovered_pool.is_some() || !input_objects.is_empty() {
                 return Err(protocol(
                     "graph programs carry neither pool checkpoints nor Direct input objects",
                 ));
             }
-            let super::driver::program::AdmittedGraphProgram {
-                request,
-                encoded_bytes,
-                _staged,
-                transfer,
-                ..
-            } = *admitted;
             let pool = RemotePoolDriver::new_graph(
                 scope_id,
                 pool_spec,
                 authority.fencing_token,
                 authority.run_id.clone(),
             )?;
-            pool.retain_graph_stage(_staged);
-            (
-                pool,
-                RootProgram::Graph(GraphRoot {
-                    request,
-                    encoded_bytes,
-                    transfer,
-                }),
-            )
+            pool.retain_graph_stage(admitted._staged.take());
+            (pool, RootProgram::Graph(admitted))
         }
     };
     for object in input_objects {
@@ -421,7 +411,7 @@ async fn execute_with_allocated_workers(
 
     let run_id = authority.run_id.clone();
     let request = match root {
-        RootProgram::Direct(request) => request,
+        RootProgram::Direct(request) => *request,
         RootProgram::Graph(graph) => {
             // V10 work proceeds as soon as workers register. Newer graph
             // requests wait for an encrypted, binary-issued capability proof.
@@ -453,7 +443,11 @@ async fn execute_with_allocated_workers(
                 &pool,
                 super::pool_tasks::execute_graph_root(
                     Arc::clone(&pool),
-                    graph,
+                    GraphRoot {
+                        request: graph.request,
+                        encoded_bytes: graph.encoded_bytes,
+                        transfer: graph.transfer,
+                    },
                     required,
                     run_id,
                     resources.clone(),

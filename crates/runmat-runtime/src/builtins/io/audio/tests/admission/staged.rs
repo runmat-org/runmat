@@ -335,7 +335,7 @@ fn native_source_scans_then_selects_once_and_retains_exact_output_reservation() 
     let value = block_on(audioread_builtin(
         Some(runtime.clone()),
         Value::from(path.to_string_lossy().as_ref()),
-        vec![],
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
     ))
     .expect("staged native decode");
     assert_eq!(resources.stage_calls.get(), 3);
@@ -366,7 +366,7 @@ fn native_source_scans_then_selects_once_and_retains_exact_output_reservation() 
         block_on(audioread_builtin(
             Some(runtime.clone()),
             Value::from(path.to_string_lossy().as_ref()),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .expect("selected effect-only decode without output quota")
     };

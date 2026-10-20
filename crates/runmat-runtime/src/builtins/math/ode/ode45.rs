@@ -100,7 +100,7 @@ async fn ode45_builtin_registered(
     function: Value,
     tspan: Value,
     y0: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     ode45_in_runtime(runtime.as_ref(), function, tspan, y0, rest).await
 }
@@ -110,7 +110,7 @@ async fn ode45_builtin(
     function: Value,
     tspan: Value,
     y0: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     ode45_in_runtime(None, function, tspan, y0, rest).await
 }
@@ -120,7 +120,7 @@ async fn ode45_in_runtime(
     function: Value,
     tspan: Value,
     y0: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     check_cancellation(NAME, runtime)?;
     if rest.len() > 1 {
@@ -171,7 +171,7 @@ mod tests {
             Value::FunctionHandle("unused".into()),
             Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap()),
             Value::Num(1.0),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect_err("cancelled invocation cannot reach derivative");
         assert!(error
@@ -209,7 +209,7 @@ mod tests {
             Value::FunctionHandle("decay".into()),
             Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap()),
             Value::Num(1.0),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         )))
         .unwrap();
 
@@ -232,7 +232,7 @@ mod tests {
             Value::FunctionHandle("unused".into()),
             Value::Tensor(tspan),
             Value::Num(1.0),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect_err("integer tspan is a RunMat-only extension");
 
@@ -250,7 +250,7 @@ mod tests {
             Value::FunctionHandle("unused".into()),
             Value::Tensor(tspan),
             Value::Num(1.0),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect_err("wide integer tspan cannot cross exactly");
 
@@ -284,7 +284,7 @@ mod tests {
             Value::FunctionHandle("integer_rhs".into()),
             Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap()),
             Value::Num(1.0),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         )))
         .expect_err("integer derivative is a RunMat-only extension");
 
@@ -327,7 +327,7 @@ mod tests {
                 crate::user_functions::test_support::exact_local_value("constant_rhs", binding),
                 Value::GpuTensor(automatic),
                 Value::Num(1.0),
-                Vec::new(),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
             ))
             .expect("automatic resident tspan gathers");
             assert!(matches!(result, Value::Tensor(_)));
@@ -346,7 +346,7 @@ mod tests {
                 Value::FunctionHandle("unused".into()),
                 Value::GpuTensor(explicit),
                 Value::Num(1.0),
-                Vec::new(),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
             ))
             .expect_err("explicit resident tspan is gated before fallback");
             assert_eq!(
@@ -382,7 +382,7 @@ mod tests {
             Value::FunctionHandle("nan_rhs".into()),
             Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap()),
             Value::Num(1.0),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         )))
         .expect_err("ode45 should reject NaN derivative values");
 
@@ -419,7 +419,7 @@ mod tests {
             Value::ExternalFunctionHandle("pkg.decay".into()),
             Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap()),
             Value::Num(1.0),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         )))
         .unwrap();
 
@@ -441,7 +441,10 @@ mod tests {
             Value::FunctionHandle("decay".into()),
             Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap()),
             Value::Num(1.0),
-            vec![Value::Num(1.0), Value::Num(2.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(1.0),
+                Value::Num(2.0),
+            ]),
         ))
         .expect_err("expected too many inputs error");
         assert_eq!(err.identifier(), ODE45_ERROR_INVALID_ARGUMENT.identifier);

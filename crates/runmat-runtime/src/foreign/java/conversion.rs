@@ -10,7 +10,7 @@ use crate::RuntimeError;
 pub(super) fn value_to_java(value: Value) -> Result<JavaValue, RuntimeError> {
     match value {
         Value::Bool(value) => Ok(JavaValue::Boolean(value)),
-        Value::String(value) => Ok(JavaValue::String(value)),
+        Value::String(value) => Ok(JavaValue::String(value.into_string_unbounded())),
         Value::Num(value) => Ok(JavaValue::Double(value)),
         Value::Int(value) => match value {
             IntValue::I8(value) => Ok(JavaValue::Byte(value)),
@@ -35,7 +35,11 @@ pub(super) fn value_to_java(value: Value) -> Result<JavaValue, RuntimeError> {
         }),
         Value::StringArray(value) => Ok(JavaValue::Array {
             component: JavaParameterType::String,
-            elements: value.data.into_iter().map(JavaValue::String).collect(),
+            elements: value
+                .data()
+                .iter()
+                .map(|value| JavaValue::String(value.as_str().to_owned()))
+                .collect(),
         }),
         Value::CharArray(value) => value
             .row_string()
@@ -44,9 +48,9 @@ pub(super) fn value_to_java(value: Value) -> Result<JavaValue, RuntimeError> {
         Value::Cell(value) => Ok(JavaValue::Array {
             component: JavaParameterType::Object("java.lang.Object".into()),
             elements: value
-                .data
-                .into_iter()
-                .map(value_to_java)
+                .data()
+                .iter()
+                .map(value_ref_to_java)
                 .collect::<Result<_, _>>()?,
         }),
         Value::StructArray(_) => Err(invalid_conversion(
@@ -57,6 +61,94 @@ pub(super) fn value_to_java(value: Value) -> Result<JavaValue, RuntimeError> {
             value_kind(&other)
         ))),
     }
+}
+
+/// Marshal an immutable retained argument without manufacturing another
+/// RunMat Value owner. JavaValue necessarily owns its wire/native payload.
+pub(super) fn value_ref_to_java(value: &Value) -> Result<JavaValue, RuntimeError> {
+    match value {
+        Value::Bool(value) => Ok(JavaValue::Boolean(*value)),
+        Value::String(value) => Ok(JavaValue::String(value.as_str().to_owned())),
+        Value::Num(value) => Ok(JavaValue::Double(*value)),
+        Value::Int(value) => value_to_java(Value::Int(value.clone())),
+        Value::Tensor(value) => tensor_ref_to_java(value),
+        Value::LogicalArray(value) => Ok(JavaValue::Array {
+            component: JavaParameterType::Boolean,
+            elements: value
+                .data
+                .iter()
+                .map(|value| JavaValue::Boolean(*value != 0))
+                .collect(),
+        }),
+        Value::StringArray(value) => Ok(JavaValue::Array {
+            component: JavaParameterType::String,
+            elements: value
+                .data()
+                .iter()
+                .map(|value| JavaValue::String(value.as_str().to_owned()))
+                .collect(),
+        }),
+        Value::CharArray(value) => value
+            .row_string()
+            .map(JavaValue::String)
+            .ok_or_else(|| invalid_conversion("Java string conversion requires a character row")),
+        Value::Cell(value) => Ok(JavaValue::Array {
+            component: JavaParameterType::Object("java.lang.Object".into()),
+            elements: value
+                .data()
+                .iter()
+                .map(value_ref_to_java)
+                .collect::<Result<_, _>>()?,
+        }),
+        Value::StructArray(_) => Err(invalid_conversion(
+            "structure arrays require an explicit Java conversion",
+        )),
+        other => Err(invalid_conversion(format!(
+            "RunMat value {} is not yet convertible to Java",
+            value_kind(other)
+        ))),
+    }
+}
+
+fn tensor_ref_to_java(value: &Tensor) -> Result<JavaValue, RuntimeError> {
+    if value
+        .shape()
+        .iter()
+        .filter(|dimension| **dimension > 1)
+        .count()
+        > 1
+    {
+        return Err(invalid_conversion(
+            "multidimensional numeric values require an explicit Java array",
+        ));
+    }
+    let (component, elements) = match value.numeric_dtype() {
+        runmat_value::NumericDType::F64 => (
+            JavaParameterType::Double,
+            value
+                .as_f64_slice()
+                .expect("double storage")
+                .iter()
+                .copied()
+                .map(JavaValue::Double)
+                .collect(),
+        ),
+        runmat_value::NumericDType::F32 => (
+            JavaParameterType::Float,
+            value
+                .as_f32_slice()
+                .expect("single storage")
+                .iter()
+                .copied()
+                .map(JavaValue::Float)
+                .collect(),
+        ),
+        _ => return value_to_java(Value::Tensor(value.clone())),
+    };
+    Ok(JavaValue::Array {
+        component,
+        elements,
+    })
 }
 
 fn tensor_to_java(value: Tensor) -> Result<JavaValue, RuntimeError> {
@@ -271,7 +363,7 @@ pub(super) fn scalar_from_java(value: JavaValue) -> Result<Value, RuntimeError> 
         JavaValue::Char(value) => char::from_u32(u32::from(value))
             .map(|value| Value::CharArray(CharArray::new_row(&value.to_string())))
             .ok_or_else(|| invalid_conversion("Java char is not a valid Unicode scalar")),
-        JavaValue::String(value) => Ok(Value::String(value)),
+        JavaValue::String(value) => Ok(Value::String(value.into())),
         JavaValue::Array { .. } | JavaValue::Object { .. } | JavaValue::Callback(_) => Err(
             invalid_conversion("Java compound value requires session-owned conversion"),
         ),

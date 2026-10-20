@@ -13,6 +13,6 @@ use runmat_value::Value;
     binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::temporary_path::tempname"
 )]
-async fn tempname_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn tempname_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     execute::run(args).await
 }

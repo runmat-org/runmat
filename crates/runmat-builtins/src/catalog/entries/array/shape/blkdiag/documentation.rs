@@ -1,0 +1,61 @@
+use crate::*;
+
+pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
+    authority: BuiltinDocumentationAuthority::Catalog,
+    title: Some("blkdiag"), slug: Some("blkdiag"), related: &[],
+    summary: "Construct block diagonal matrices from scalar, vector, matrix, sparse, complex, logical, character, or gpuArray blocks.",
+    description: "`B = blkdiag(A1, A2, ...)` places each input block down the diagonal of a new matrix. Rows and columns are accumulated from the input blocks, and all off-block entries are filled with zeros or spaces for character arrays.",
+    keywords: &["blkdiag", "block diagonal", "matrix assembly", "sparse", "gpu"],
+    sections: &[
+        BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
+            "`blkdiag()` returns the canonical empty `0 x 0` double matrix.",
+            "Numeric scalars are treated as `1 x 1` blocks, vectors and matrices keep their two-dimensional shape, and inputs with only singleton trailing dimensions are accepted.",
+            "All-logical inputs return a logical array. If any dense real block is integer, the first integer block determines output class; unlike integer, single, double, and logical blocks convert into that class with ordinary rounding and saturation.",
+            "If any input is sparse and no input is character, the output is sparse when complex inputs are real-valued; dense numeric, logical, and real-valued complex blocks contribute only their nonzero entries.",
+            "If any input is complex and no input is character, the output is complex and real, logical, and sparse inputs are promoted into the real part when needed.",
+            "Public sparse numeric storage is single, double, or logical. Same-class sparse integer assembly is an explicitly gated RunMat extension and remains host-resident.",
+            "Sparse inputs mixed with non-real complex blocks currently return a dense complex result because RunMat does not yet have a complex sparse matrix representation.",
+            "Same-class paired complex-integer assembly is an explicitly gated RunMat extension; MATLAB-compatible mode rejects it because the public integer domain does not support complex-integer operations.",
+            "Single-precision dense blocks preserve single dtype when all dense numeric blocks share that dtype.",
+            "Character blocks are supported when every input is a character array; off-block entries are spaces.",
+            "String arrays, cell arrays, and non-matrix higher-dimensional inputs raise errors.",
+            "gpuArray inputs can be mixed with host numeric, logical, or complex blocks. Dense numeric, logical, and complex results remain gpu-resident; sparse results remain host sparse matrices.",
+        ] },
+        BuiltinDocumentationSection { heading: "Execution and residency", paragraphs: &[
+            "RunMat gathers gpuArray inputs once, assembles the block diagonal result on the host, and uploads dense floating, exact integer, logical, or complex results back to the owning provider. Sparse results remain host sparse matrices because RunMat does not yet have a sparse gpuArray representation.",
+            "This structural operation is a fusion boundary, not an elementwise or reduction kernel.",
+        ] },
+    ],
+    examples: &[
+        BuiltinExample { id: "example-1", title: "Combining dense matrix blocks", program: "A = [1 2; 3 4];\nB = [5 6];\nC = blkdiag(A, B)", display_output: Some("C =\n     1     2     0     0\n     3     4     0     0\n     0     0     5     6"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(C,[1 2 0 0;3 4 0 0;0 0 5 6]));" } },
+        BuiltinExample { id: "example-2", title: "Using scalar and vector blocks", program: "D = blkdiag(1, [2 3 4], 5)", display_output: Some("D =\n     1     0     0     0     0\n     0     2     3     4     0\n     0     0     0     0     5"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(D,[1 0 0 0 0;0 2 3 4 0;0 0 0 0 5]));" } },
+        BuiltinExample { id: "example-3", title: "Preserving sparse output", program: "S = sparse([1 2], [1 2], [10 20], 2, 2);\nT = blkdiag(S, [0; 30])", display_output: Some("T = sparse([1 2 4], [1 2 3], [10 20 30], 4, 3)"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(issparse(T)); assert(isequal(full(T),[10 0 0;0 20 0;0 0 0;0 0 30]));" } },
+        BuiltinExample { id: "example-4", title: "Building a complex block diagonal matrix", program: "Z = blkdiag(1 + 2i, [3; 4])", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(real(Z),[1 0;0 3;0 4])); assert(isequal(imag(Z),[2 0;0 0;0 0]));" } },
+        BuiltinExample { id: "example-5", title: "Keeping all-gpuArray inputs on the GPU", program: "G1 = gpuArray([1; 2]);\nG2 = gpuArray([3 4]);\nG = blkdiag(G1, G2);\nresult = gather(G)", display_output: Some("result =\n     1     0     0\n     2     0     0\n     0     3     4"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Wgpu, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isgpuarray(G)); assert(isequal(result,[1 0 0;2 0 0;0 3 4]));" } },
+    ],
+    example_exemption: None,
+    faqs: &[
+        BuiltinDocumentationFaq { question: "What class does `blkdiag` return?", answer: "All-logical inputs return logical. For dense real blocks, the first integer input class dominates unlike integer, floating, and logical blocks; otherwise single/double promotion applies. Sparse inputs return sparse unless character input is present or a non-real complex block requires complex output." },
+        BuiltinDocumentationFaq { question: "Does `blkdiag` preserve sparse matrices?", answer: "Yes for public single, double, and logical sparse outputs. Same-class sparse integer CSC preservation is a RunMat-only extension. Non-real complex entries currently promote the result to dense complex because RunMat does not yet provide complex sparse storage." },
+        BuiltinDocumentationFaq { question: "Can I mix host arrays and gpuArray values?", answer: "Yes, for dense numeric, logical, and complex blocks. RunMat gathers gpuArray inputs, assembles the result, and uploads dense results back to the provider. Sparse results remain host sparse matrices." },
+        BuiltinDocumentationFaq { question: "Are character arrays supported?", answer: "Yes, when every input is a character array. The original character blocks are placed on the diagonal and spaces fill off-block positions." },
+        BuiltinDocumentationFaq { question: "Does `blkdiag` accept 3-D arrays?", answer: "Only inputs whose trailing dimensions are singleton are accepted. Non-matrix higher-dimensional inputs raise an error." },
+    ],
+    links: &[
+        BuiltinDocumentationLink { label: "diag", target: BuiltinDocumentationLinkTarget::Builtin("diag") },
+        BuiltinDocumentationLink { label: "cat", target: BuiltinDocumentationLinkTarget::Builtin("cat") },
+        BuiltinDocumentationLink { label: "horzcat", target: BuiltinDocumentationLinkTarget::Builtin("horzcat") },
+        BuiltinDocumentationLink { label: "vertcat", target: BuiltinDocumentationLinkTarget::Builtin("vertcat") },
+        BuiltinDocumentationLink { label: "sparse", target: BuiltinDocumentationLinkTarget::Builtin("sparse") },
+        BuiltinDocumentationLink { label: "gpuArray", target: BuiltinDocumentationLinkTarget::Builtin("gpuarray") },
+        BuiltinDocumentationLink { label: "gather", target: BuiltinDocumentationLinkTarget::Builtin("gather") },
+    ],
+    media: &[],
+    evidence: BuiltinDocumentationEvidence {
+        implementation: &[BuiltinDocumentationLink { label: "blkdiag runtime", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/shape/blkdiag.rs") }],
+        verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Retained blkdiag verification", location: "builtins::array::shape::blkdiag::tests::gpu_numeric_inputs_roundtrip_to_gpu" }, BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Retained blkdiag verification", location: "builtins::array::shape::blkdiag::tests" }, BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "blkdiag semantic and provider tests", location: "crates/runmat-runtime/src/builtins/array/shape/blkdiag.rs" }],
+        notes: &[],
+    },
+    introduced: None,
+    status: Some(BuiltinDocumentationStatus::Partial),
+};

@@ -71,7 +71,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::strings::core::int2str"
 )]
-async fn int2str_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn int2str_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &INT2STR_DESCRIPTOR,
         &INT2STR_ERROR_TOO_MANY_OUTPUTS,
@@ -407,7 +410,10 @@ pub(crate) mod tests {
     use runmat_value::{IntValue, LogicalArray};
 
     fn int2str_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(super::int2str_builtin(value, rest))
+        futures::executor::block_on(super::int2str_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -431,7 +437,7 @@ pub(crate) mod tests {
     fn char_rows(value: Value) -> Vec<String> {
         match value {
             Value::CharArray(ca) => ca
-                .data
+                .data()
                 .chunks(ca.cols)
                 .map(|chunk| chunk.iter().collect())
                 .collect(),
@@ -519,7 +525,7 @@ pub(crate) mod tests {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 0);
                 assert_eq!(ca.cols, 0);
-                assert!(ca.data.is_empty());
+                assert!(ca.data().is_empty());
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -530,7 +536,7 @@ pub(crate) mod tests {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 0);
                 assert_eq!(ca.cols, 0);
-                assert!(ca.data.is_empty());
+                assert!(ca.data().is_empty());
             }
             other => panic!("expected char array, got {other:?}"),
         }

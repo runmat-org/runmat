@@ -126,7 +126,7 @@ fn complex_string_formats_and_logical_conversion_rejects_complex_values() {
     let a = Value::Complex(0.0, -2.5);
     let s = runmat_runtime::call_builtin("string", std::slice::from_ref(&a)).unwrap();
     if let Value::StringArray(sa) = s.value() {
-        assert_eq!(sa.data[0], "-2.5i");
+        assert_eq!(sa.data()[0], "-2.5i");
     } else {
         panic!();
     }

@@ -629,7 +629,7 @@ fn compiled_gain_bias_clamp_keeps_every_out_publication_in_source_order() {
                     .find(|step| step.node == call.node)
                     .expect("selected mean call remains in the source transcript");
                 if mean.inputs.get(2) == Some(id) {
-                    return runmat_value::Value::String("native".to_owned());
+                    return runmat_value::Value::String("native".into());
                 }
             }
             for (control, value) in [

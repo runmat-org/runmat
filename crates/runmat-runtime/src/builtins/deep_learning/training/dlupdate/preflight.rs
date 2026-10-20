@@ -77,10 +77,10 @@ fn matching_node(values: &[&Value], depth: usize) -> BuiltinResult<()> {
                 }
                 peers.push(other);
             }
-            for index in 0..cell.data.len() {
+            for index in 0..cell.data().len() {
                 let children = peers
                     .iter()
-                    .map(|peer| &peer.data[index])
+                    .map(|peer| &peer.data()[index])
                     .collect::<Vec<_>>();
                 matching_node(&children, depth + 1)?;
             }
@@ -129,7 +129,7 @@ fn matching_node(values: &[&Value], depth: usize) -> BuiltinResult<()> {
                     return Err(structure_mismatch());
                 };
                 if !model::is_deep_learning_network_object(other)
-                    || other.class_name != network.class_name
+                    || other.class_name() != network.class_name()
                 {
                     return Err(structure_mismatch());
                 }
@@ -156,7 +156,7 @@ fn matching_tables(
         .map(|vars| vars.fields.keys().collect::<Vec<_>>())
         .unwrap_or_default();
     for field in ["Layer", "Parameter", "Value"] {
-        if !names.iter().any(|name| name.as_str() == field) {
+        if !names.contains(&field) {
             return Err(deep_learning_error(
                 "dlupdate",
                 "dlupdate: learnables tables must contain Layer, Parameter, and Value variables",
@@ -175,7 +175,7 @@ fn matching_tables(
             return Err(structure_mismatch());
         };
         if !crate::builtins::table::is_tabular_object(other)
-            || other.class_name != reference.class_name
+            || other.class_name() != reference.class_name()
         {
             return Err(structure_mismatch());
         }
@@ -249,11 +249,13 @@ mod tests {
             [network.clone(), Value::Num(1.0)],
             [Value::Num(1.0), network.clone()],
         ] {
-            let error = block_on(dlupdate_builtin(vec![
-                missing_callback(),
-                trees[0].clone(),
-                trees[1].clone(),
-            ]))
+            let error = block_on(dlupdate_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    missing_callback(),
+                    trees[0].clone(),
+                    trees[1].clone(),
+                ]),
+            ))
             .expect_err("network/leaf mismatch must precede callback invocation");
             assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
             assert!(error.to_string().contains("matching container structure"));
@@ -263,23 +265,25 @@ mod tests {
 
     #[test]
     fn later_nested_shape_mismatch_precedes_an_earlier_leaf_callback() {
-        let mut left = StructValue::new();
+        let mut left = runmat_value::UnboundedStructValueBuilder::new();
         left.insert("First", Value::Num(1.0));
         left.insert(
             "Later",
             Value::Cell(CellArray::new(vec![Value::Num(2.0)], 1, 1).unwrap()),
         );
-        let mut right = StructValue::new();
+        let mut right = runmat_value::UnboundedStructValueBuilder::new();
         right.insert("First", Value::Num(3.0));
         right.insert(
             "Later",
             Value::Cell(CellArray::new(vec![Value::Num(4.0), Value::Num(5.0)], 1, 2).unwrap()),
         );
-        let error = block_on(dlupdate_builtin(vec![
-            missing_callback(),
-            Value::Struct(left),
-            Value::Struct(right),
-        ]))
+        let error = block_on(dlupdate_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                missing_callback(),
+                Value::Struct(left.finish()),
+                Value::Struct(right.finish()),
+            ]),
+        ))
         .expect_err("later mismatch must be admitted before first callback");
         assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
         assert!(error.to_string().contains("same shape"));

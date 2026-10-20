@@ -11,7 +11,7 @@ pub(super) fn into_tensor(value: Value) -> BuiltinResult<Tensor> {
     match value {
         Value::CharArray(characters) => {
             let data = characters
-                .data
+                .data()
                 .iter()
                 .map(|&character| character as u32 as f64)
                 .collect();
@@ -61,7 +61,7 @@ pub(in super::super) fn scalar(value: &Value) -> Option<f64> {
             Some(if logical.data[0] != 0 { 1.0 } else { 0.0 })
         }
         Value::CharArray(characters) if characters.rows * characters.cols == 1 => characters
-            .data
+            .data()
             .first()
             .map(|&character| character as u32 as f64)
             .or(Some(0.0)),

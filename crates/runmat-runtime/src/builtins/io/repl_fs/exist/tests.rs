@@ -68,7 +68,10 @@ fn unique_class_name(prefix: &str) -> String {
 }
 
 fn exist_builtin(name: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    futures::executor::block_on(super::exist_builtin(name, rest))
+    futures::executor::block_on(super::exist_builtin(
+        name,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    ))
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

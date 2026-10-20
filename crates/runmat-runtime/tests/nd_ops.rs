@@ -198,7 +198,7 @@ fn repelem_cell_array_nd() {
     if let Value::Cell(out) = v.value() {
         assert_eq!(out.shape, vec![1, 1, 4]);
         let values: Vec<f64> = out
-            .data
+            .data()
             .iter()
             .map(|ptr| match ptr {
                 Value::Num(n) => *n,

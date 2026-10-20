@@ -93,7 +93,7 @@ enum BandSelector {
 async fn bandwidth_builtin(
     runtime: Option<RuntimeContext>,
     matrix: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     if matches!(&matrix, Value::Object(object) if object.is_class(TF_CLASS)) {
         if rest.len() > 1 || crate::output_count::current_output_count().is_some_and(|n| n > 1) {
@@ -110,7 +110,7 @@ async fn bandwidth_builtin(
         };
     }
     ensure_input_extensions(&matrix)?;
-    let selector = parse_selector(&rest)?;
+    let selector = parse_selector(rest.view())?;
     let data = MatrixData::from_value(matrix)?;
     let (lower, upper) = data.bandwidth().await?;
     match selector {
@@ -177,7 +177,7 @@ fn one_bandwidth_output(value: usize) -> BuiltinResult<Value> {
     }
 }
 
-fn parse_selector(args: &[Value]) -> BuiltinResult<BandSelector> {
+fn parse_selector(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<BandSelector> {
     match args.len() {
         0 => Ok(BandSelector::Both),
         1 => {
@@ -941,6 +941,10 @@ pub(crate) mod tests {
     }
 
     fn bandwidth_builtin(matrix: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::bandwidth_builtin(None, matrix, rest))
+        block_on(super::bandwidth_builtin(
+            None,
+            matrix,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 }

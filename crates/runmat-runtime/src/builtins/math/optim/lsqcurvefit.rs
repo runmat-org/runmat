@@ -68,7 +68,7 @@ async fn lsqcurvefit_builtin_registered(
     x0: Value,
     xdata: Value,
     ydata: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     lsqcurvefit_in_runtime(runtime.as_ref(), function, x0, xdata, ydata, rest).await
 }
@@ -81,7 +81,9 @@ async fn lsqcurvefit_builtin(
     ydata: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    lsqcurvefit_in_runtime(None, function, x0, xdata, ydata, rest).await
+    let rest =
+        crate::execution::RootedValues::new(rest).map_err(|error| error.into_runtime_error())?;
+    lsqcurvefit_in_runtime(None, function, x0, xdata, ydata, rest.into()).await
 }
 
 async fn lsqcurvefit_in_runtime(
@@ -90,7 +92,7 @@ async fn lsqcurvefit_in_runtime(
     x0: Value,
     xdata: Value,
     ydata: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     validate_requested_outputs()?;
     let mut cooperation = crate::builtins::math::optim::common::ScalarCooperation::new(
@@ -98,14 +100,21 @@ async fn lsqcurvefit_in_runtime(
         runtime,
     );
     cooperation.completed(0).await?;
-    ensure_input_extensions(&x0, &xdata, &ydata, &rest)?;
-    let parsed = ParsedArgs::parse(rest)
+    ensure_input_extensions(&x0, &xdata, &ydata, rest.view())?;
+    let _option_sources = rest.fork();
+    let mut parsed = ParsedArgs::parse(rest)
         .await
         .map_err(|err| map_error(err, &LSQCURVEFIT_ERROR_INVALID_ARGUMENT))?;
-    let parsed = parsed
-        .prepare_options(&mut cooperation)
-        .await
-        .map_err(|err| map_error(err, &LSQCURVEFIT_ERROR_INVALID_ARGUMENT))?;
+    let prepared_options = crate::builtins::math::optim::common::prepare_solver_options(
+        runmat_builtins::OptimSolver::Lsqcurvefit,
+        parsed.options.take(),
+        Some(&LSQCURVEFIT_INTEGER_OPTION_EXTENSION),
+        Some(&LSQCURVEFIT_RESIDENT_INPUT_EXTENSION),
+        runtime,
+        &mut cooperation,
+    )
+    .await
+    .map_err(|err| map_error(err, &LSQCURVEFIT_ERROR_INVALID_ARGUMENT))?;
     crate::builtins::math::optim::common::preflight_real_array(NAME, &x0, "initial point", false)?;
     let x0 = prepare_floating_input(
         "initial point",
@@ -119,8 +128,9 @@ async fn lsqcurvefit_in_runtime(
         .await
         .map_err(|err| map_error(err, &LSQCURVEFIT_ERROR_INVALID_INPUT))?;
     let n = guess.values.len();
-    let options = LsqOptions::from_struct(parsed.options.as_ref())
-        .map_err(|err| map_error(err, &LSQCURVEFIT_ERROR_INVALID_ARGUMENT))?;
+    let options =
+        LsqOptions::from_struct(prepared_options.as_ref().map(|options| options.structure()))
+            .map_err(|err| map_error(err, &LSQCURVEFIT_ERROR_INVALID_ARGUMENT))?;
     let bounds = parsed
         .bounds(n, &mut cooperation)
         .await
@@ -167,7 +177,7 @@ fn ensure_input_extensions(
     x0: &Value,
     xdata: &Value,
     ydata: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<()> {
     use crate::builtins::common::validation::{
         value_contains_explicit_gpu, value_contains_native_integer_class,
@@ -272,7 +282,7 @@ struct ParsedArgs {
 }
 
 impl ParsedArgs {
-    async fn parse(rest: Vec<Value>) -> BuiltinResult<Self> {
+    async fn parse(rest: crate::call::BuiltinArguments) -> BuiltinResult<Self> {
         match rest.len() {
             0 => Ok(Self {
                 lb: None,
@@ -336,21 +346,6 @@ impl ParsedArgs {
         }
         bounds.validate(NAME, n)?;
         Ok(bounds)
-    }
-
-    async fn prepare_options(
-        mut self,
-        cooperation: &mut crate::builtins::math::optim::common::ScalarCooperation,
-    ) -> BuiltinResult<Self> {
-        self.options = crate::builtins::math::optim::common::prepare_solver_options(
-            runmat_builtins::OptimSolver::Lsqcurvefit,
-            self.options,
-            Some(&LSQCURVEFIT_INTEGER_OPTION_EXTENSION),
-            Some(&LSQCURVEFIT_RESIDENT_INPUT_EXTENSION),
-            cooperation,
-        )
-        .await?;
-        Ok(self)
     }
 }
 
@@ -726,13 +721,13 @@ fn tensor_value(values: Vec<f64>, shape: Vec<usize>) -> BuiltinResult<Value> {
 }
 
 fn output_struct(result: &LeastSquaresResult, algorithm: &str) -> StructValue {
-    let mut fields = StructValue::new();
+    let mut fields = runmat_value::UnboundedStructValueBuilder::new();
     fields.insert("iterations", Value::Num(result.iterations as f64));
     fields.insert("funcCount", Value::Num(result.func_count as f64));
     fields.insert("firstorderopt", Value::Num(result.first_order_optimality));
     fields.insert("algorithm", Value::from(algorithm));
     fields.insert("message", Value::from(result.message.clone()));
-    fields
+    fields.finish()
 }
 
 async fn lambda_struct(
@@ -758,10 +753,10 @@ async fn lambda_struct(
             upper[i] = (-gradient[i]).max(0.0);
         }
     }
-    let mut fields = StructValue::new();
+    let mut fields = runmat_value::UnboundedStructValueBuilder::new();
     fields.insert("lower", multiplier_value(lower, x_shape, x_scalar)?);
     fields.insert("upper", multiplier_value(upper, x_shape, x_scalar)?);
-    Ok(fields)
+    Ok(fields.finish())
 }
 
 fn multiplier_value(values: Vec<f64>, x_shape: &[usize], x_scalar: bool) -> BuiltinResult<Value> {

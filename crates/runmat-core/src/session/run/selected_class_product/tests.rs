@@ -1,6 +1,6 @@
 use runmat_value::Value;
 
-use crate::{execute_text_request_for_testing, RunMatSession};
+use crate::RunMatSession;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::{ExecutableSource, InvocationControl, ProcedureInvocation, ProcedureTarget};
 #[cfg(not(target_arch = "wasm32"))]
@@ -10,22 +10,22 @@ use futures::executor::block_on;
 fn current_constructor_handle_keeps_its_class_defaults_after_republication() {
     runmat_gc::gc_test_context(|| {
         let mut session = RunMatSession::with_options(false, false).expect("session");
-        let original = execute_text_request_for_testing(
+        let original = execute_source(
             &mut session,
             "classdef LocalRevision < handle\n properties\n seed = 11\n bodyTag\n end\n methods\n function obj = LocalRevision()\n obj.bodyTag = 101;\n end\n end\nend",
         )
         .expect("first class publication");
-        assert!(original.error.is_none(), "{original:?}");
-        let retained = execute_text_request_for_testing(&mut session, "old_ctor = @LocalRevision;")
+        assert!(original.diagnostics.is_empty(), "{original:?}");
+        let retained = execute_source(&mut session, "old_ctor = @LocalRevision;")
             .expect("retain the first constructor");
-        assert!(retained.error.is_none(), "{retained:?}");
+        assert!(retained.diagnostics.is_empty(), "{retained:?}");
 
-        let replacement = execute_text_request_for_testing(
+        let replacement = execute_source(
             &mut session,
             "classdef LocalRevision < handle\n properties\n seed = 31\n bodyTag\n end\n methods\n function obj = LocalRevision()\n obj.bodyTag = 303;\n end\n end\nend",
         )
         .expect("replacement class publication");
-        assert!(replacement.error.is_none(), "{replacement:?}");
+        assert!(replacement.diagnostics.is_empty(), "{replacement:?}");
         #[cfg(not(target_arch = "wasm32"))]
         {
             for source in [
@@ -33,9 +33,9 @@ fn current_constructor_handle_keeps_its_class_defaults_after_republication() {
                 "old_fn = @retainedOrdinary;",
                 "function y = retainedOrdinary(x)\n y = x + 100;\nend",
             ] {
-                let published = execute_text_request_for_testing(&mut session, source)
-                    .expect("ordinary function publication");
-                assert!(published.error.is_none(), "{source}: {published:?}");
+                let published =
+                    execute_source(&mut session, source).expect("ordinary function publication");
+                assert!(published.diagnostics.is_empty(), "{source}: {published:?}");
             }
             let unrelated = "function [out, obj, oldResult] = unrelatedNative(v, ctor, callback)\n out = v + 1;\n obj = ctor();\n oldResult = callback(v);\nend";
             let unit = block_on(session.compile_executable_unit(
@@ -71,7 +71,11 @@ fn current_constructor_handle_keeps_its_class_defaults_after_republication() {
                 &unit,
                 ProcedureInvocation {
                     target: ProcedureTarget::Function("unrelatedNative".into()),
-                    arguments: vec![Value::Num(4.0), old_ctor, old_fn],
+                    arguments: crate::ProcedureArguments::Source(vec![
+                        Value::Num(4.0),
+                        old_ctor,
+                        old_fn,
+                    ]),
                     requested_outputs: 3,
                 },
                 &InvocationControl::default().force_generic_native(),
@@ -90,24 +94,24 @@ fn current_constructor_handle_keeps_its_class_defaults_after_republication() {
                 panic!("native-retained constructor must return a live object")
             };
             assert_eq!(
-                properties.properties.get("seed"),
+                properties.properties().get("seed"),
                 Some(&Value::Num(11.0)),
                 "native registry owns old constructor: {}; selected product: {}; returned bodyTag: {:?}",
                 native_selected_body.is_some(),
                 native_has_old_product,
-                properties.properties.get("bodyTag")
+                properties.properties().get("bodyTag")
             );
             assert_eq!(
-                properties.properties.get("bodyTag"),
+                properties.properties().get("bodyTag"),
                 Some(&Value::Num(101.0))
             );
         }
-        let observed = execute_text_request_for_testing(
+        let observed = execute_source(
             &mut session,
             "new_ctor = @LocalRevision; old_obj = old_ctor(); new_obj = new_ctor(); old_seed = old_obj.seed; new_seed = new_obj.seed; old_tag = old_obj.bodyTag; new_tag = new_obj.bodyTag;",
         )
         .expect("invoke both selected constructor products");
-        assert!(observed.error.is_none(), "{observed:?}");
+        assert!(observed.diagnostics.is_empty(), "{observed:?}");
         let workspace = session.get_variables().expect("workspace");
         assert_eq!(workspace.get("old_seed"), Some(&Value::Num(11.0)));
         assert_eq!(workspace.get("new_seed"), Some(&Value::Num(31.0)));
@@ -121,5 +125,43 @@ fn current_constructor_handle_keeps_its_class_defaults_after_republication() {
             workspace.get("new_obj"),
             Some(Value::HandleObject(_))
         ));
+    });
+}
+
+fn execute_source(
+    session: &mut RunMatSession,
+    source: &str,
+) -> Result<runmat_runtime::execution::RootedResult<crate::abi::ExecutionOutcome>, crate::RunError>
+{
+    let request = crate::abi::ExecutionRequest::for_source(
+        crate::abi::SourceInput::Text {
+            name: "<test>".into(),
+            text: source.into(),
+        },
+        session.compat_mode(),
+        crate::abi::HostExecutionPolicy::default(),
+        session.workspace_handle(),
+    );
+    futures::executor::block_on(session.execute_request(request)).result
+}
+
+#[test]
+fn constructorless_interactive_class_keeps_metadata_and_method_products() {
+    runmat_gc::gc_test_context(|| {
+        let mut session = RunMatSession::with_options(false, false).expect("session");
+        let declaration = execute_source(
+            &mut session,
+            "classdef InteractiveMetadataValue\n properties\n seed = 13\n end\n methods\n function value = marker(obj)\n value = obj.seed + 1;\n end\n end\n methods (Static)\n function value = fixed()\n value = 29;\n end\n end\nend",
+        ).expect("publish a constructorless class from anonymous text");
+        assert!(declaration.diagnostics.is_empty(), "{declaration:?}");
+        let observed = execute_source(
+            &mut session,
+            "value = InteractiveMetadataValue(); observed_seed = value.seed; observed_method = value.marker(); observed_static = InteractiveMetadataValue.fixed();",
+        ).expect("construct the published class and invoke both method roles");
+        assert!(observed.diagnostics.is_empty(), "{observed:?}");
+        let workspace = session.get_variables().expect("workspace");
+        assert_eq!(workspace.get("observed_seed"), Some(&Value::Num(13.0)));
+        assert_eq!(workspace.get("observed_method"), Some(&Value::Num(14.0)));
+        assert_eq!(workspace.get("observed_static"), Some(&Value::Num(29.0)));
     });
 }

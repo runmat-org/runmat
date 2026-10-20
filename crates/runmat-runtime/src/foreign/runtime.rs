@@ -371,7 +371,9 @@ mod tests {
             ForeignCall {
                 adapter: "process-stack-test".into(),
                 symbol: "invoke".into(),
-                arguments: Vec::new(),
+                arguments: crate::call::RootedFunctionArguments::ordinary(
+                    crate::execution::RootedValues::new(Vec::new()).unwrap(),
+                ),
                 requested_outputs: 1,
             },
         ))
@@ -432,7 +434,9 @@ mod tests {
             ForeignCall {
                 adapter: "recording-test".into(),
                 symbol: "invoke".into(),
-                arguments: vec![nested],
+                arguments: crate::call::RootedFunctionArguments::ordinary(
+                    crate::execution::RootedValues::new(vec![nested]).unwrap(),
+                ),
                 requested_outputs: 0,
             },
         ))

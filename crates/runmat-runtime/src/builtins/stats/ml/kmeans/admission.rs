@@ -47,7 +47,9 @@ pub(super) enum StatsetInput {
     TolFun(Value),
 }
 
-pub(super) fn parse_option_headers(args: Vec<Value>) -> BuiltinResult<Vec<OptionHeader>> {
+pub(super) fn parse_option_headers(
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Vec<OptionHeader>> {
     if !args.len().is_multiple_of(2) {
         return Err(invalid("kmeans: options must be name-value pairs"));
     }
@@ -65,11 +67,11 @@ pub(super) fn parse_option_headers(args: Vec<Value>) -> BuiltinResult<Vec<Option
             (KmeansOption::Options, Value::Struct(value)) => OptionHeader::Statset(
                 value
                     .fields
-                    .into_iter()
+                    .iter()
                     .filter(|(_, value)| !is_empty_option_value(value))
                     .map(|(name, value)| StatsetHeader {
-                        kind: KmeansStatsetField::from_keyword(&name),
-                        value,
+                        kind: KmeansStatsetField::from_keyword(name),
+                        value: value.clone(),
                     })
                     .collect(),
             ),
@@ -313,9 +315,9 @@ pub(super) fn is_empty_option_value(value: &Value) -> bool {
     match value {
         Value::Tensor(tensor) => tensor::tensor_element_len(tensor) == 0,
         Value::LogicalArray(array) => array.data.is_empty(),
-        Value::Cell(cell) => cell.data.is_empty(),
-        Value::StringArray(array) => array.data.is_empty(),
-        Value::CharArray(array) => array.data.is_empty(),
+        Value::Cell(cell) => cell.data().is_empty(),
+        Value::StringArray(array) => array.data().is_empty(),
+        Value::CharArray(array) => array.data().is_empty(),
         Value::GpuTensor(handle) => {
             handle.shape().contains(&0) && handle.physical().storage() == GpuTensorStorage::Real
         }
@@ -372,7 +374,7 @@ fn collect_resident_handles(value: &Value, into: &mut Vec<GpuTensorHandle>) -> B
             into.push(handle.clone());
         }
         Value::Cell(cell) => {
-            for value in &cell.data {
+            for value in cell.data() {
                 collect_resident_handles(value, into)?;
             }
         }
@@ -391,7 +393,7 @@ fn collect_resident_handles(value: &Value, into: &mut Vec<GpuTensorHandle>) -> B
             result?;
         }
         Value::Object(value) => {
-            for value in value.properties.values() {
+            for value in value.properties().values() {
                 collect_resident_handles(value, into)?;
             }
         }

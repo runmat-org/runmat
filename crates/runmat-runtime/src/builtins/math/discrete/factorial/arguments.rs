@@ -12,23 +12,35 @@ pub(super) enum OutputTemplate {
     Like(Value),
 }
 
-pub(super) fn parse_output_template(args: &[Value]) -> BuiltinResult<OutputTemplate> {
-    match args {
-        [] => Ok(OutputTemplate::Default),
-        [keyword, prototype] if matches!(keyword_of(keyword).as_deref(), Some("like")) => {
+pub(super) fn parse_output_template(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<OutputTemplate> {
+    match args.len() {
+        0 => Ok(OutputTemplate::Default),
+        2 if matches!(
+            keyword_of(args.get(0).expect("keyword")).as_deref(),
+            Some("like")
+        ) =>
+        {
             crate::compatibility::ensure_builtin_extension_enabled(
                 &FACTORIAL_LIKE_EXTENSION,
                 BUILTIN_NAME,
             )?;
-            Ok(OutputTemplate::Like(prototype.clone()))
+            Ok(OutputTemplate::Like(
+                args.get(1).expect("prototype").clone(),
+            ))
         }
-        [keyword] if matches!(keyword_of(keyword).as_deref(), Some("like")) => {
+        1 if matches!(
+            keyword_of(args.get(0).expect("keyword")).as_deref(),
+            Some("like")
+        ) =>
+        {
             Err(factorial_error(
                 FactorialError::InvalidArgument,
                 "expected prototype after 'like'",
             ))
         }
-        [.., _, _] if args.len() > 2 => Err(factorial_error(
+        count if count > 2 => Err(factorial_error(
             FactorialError::InvalidArgument,
             "too many input arguments",
         )),

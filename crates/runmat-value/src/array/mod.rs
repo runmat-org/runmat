@@ -41,7 +41,8 @@ pub use exact_host_numeric::{
     ExactHostAllocationClaim, ExactHostAllocationPermit, ExactHostAllocationReservation,
     ExactHostComplexTensorAllocation, ExactHostIntegerComplexTensorAllocation,
     ExactHostLogicalTensorAllocation, ExactHostNumericAllocation, ExactHostNumericAllocationError,
-    ExactHostTensor2dAllocation, ExactHostTensorAllocation,
+    ExactHostSparseClass, ExactHostSparseTensorAllocation, ExactHostTensor2dAllocation,
+    ExactHostTensorAllocation, PreparedExactSparseTensor,
 };
 pub use exact_vec::{exact_capacity_vec, exact_capacity_vec_from_slice, exact_capacity_vec_with};
 pub(crate) use format::{format_integer_complex_value, should_expand_nd_display, write_nd_pages};
@@ -51,7 +52,7 @@ pub use host_index_buffer::HostIndexBuffer;
 pub use host_logical_buffer::HostLogicalBuffer;
 pub use host_numeric_buffer::HostNumericBuffer;
 pub use logical::LogicalArray;
-pub use shared_shape::{HostShapeInput, SharedShape, SharedShapeIntoIter};
+pub use shared_shape::{HostShapeInput, SharedShape, SharedShapeBuilder, SharedShapeIntoIter};
 pub use sparse::{SparseCscValidation, SparseTensor, ValidatedSparseCscParts};
 pub use string::StringArray;
 pub use symbolic::SymbolicArray;

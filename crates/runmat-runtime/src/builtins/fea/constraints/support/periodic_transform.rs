@@ -30,37 +30,50 @@ const ROTATION_FIELDS: &[&str] = &["origin", "axis", "angle"];
 #[runtime_builtin(
     name = "fea.PeriodicTransform.identity",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::fea::constraints::support::periodic_transform"
 )]
-pub async fn periodic_transform_identity_builtin() -> BuiltinResult<Value> {
+pub async fn periodic_transform_identity_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+) -> BuiltinResult<Value> {
     crate::builtins::fea::constraints::fixed_outputs(
         &runmat_builtins::FEA_PERIODIC_TRANSFORM_IDENTITY_DESCRIPTOR,
         "fea.PeriodicTransform.identity",
     )?;
     ensure_periodic_transform_classes_registered();
-    Ok(Value::Object(ObjectInstance::new(IDENTITY_TRANSFORM_CLASS)))
+    transform_object(runtime.as_ref(), IDENTITY_TRANSFORM_CLASS, [])
 }
 
 #[runtime_builtin(
     name = "fea.PeriodicTransform.translation",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::fea::constraints::support::periodic_transform"
 )]
-pub async fn periodic_transform_translation_builtin(translation: Value) -> BuiltinResult<Value> {
+pub async fn periodic_transform_translation_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    translation: Value,
+) -> BuiltinResult<Value> {
     crate::builtins::fea::constraints::fixed_outputs(
         &runmat_builtins::FEA_PERIODIC_TRANSFORM_TRANSLATION_DESCRIPTOR,
         "fea.PeriodicTransform.translation",
     )?;
     translation_meters("fea.PeriodicTransform.translation", &translation)?;
-    transform_object(TRANSLATION_TRANSFORM_CLASS, [("translation", translation)])
+    transform_object(
+        runtime.as_ref(),
+        TRANSLATION_TRANSFORM_CLASS,
+        [("translation", translation)],
+    )
 }
 
 #[runtime_builtin(
     name = "fea.PeriodicTransform.rotation",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::fea::constraints::support::periodic_transform"
 )]
 pub async fn periodic_transform_rotation_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     origin: Value,
     axis: Value,
     angle: Value,
@@ -78,6 +91,7 @@ pub async fn periodic_transform_rotation_builtin(
         "radians",
     )?;
     transform_object(
+        runtime.as_ref(),
         ROTATION_TRANSFORM_CLASS,
         [("origin", origin), ("axis", axis), ("angle", angle)],
     )
@@ -95,15 +109,15 @@ pub(crate) fn periodic_transform_from_value(
         ));
     };
     let property = |name: &str| {
-        object.properties.get(name).ok_or_else(|| {
+        object.properties().get(name).ok_or_else(|| {
             builtin_error(
                 builtin,
                 &ERROR_INPUT,
-                format!("{}.{} is required", object.class_name, name),
+                format!("{}.{} is required", object.class_name(), name),
             )
         })
     };
-    match object.class_name.display_name() {
+    match object.class_name().display_name() {
         IDENTITY_TRANSFORM_CLASS => Ok(PeriodicTransform::Identity),
         TRANSLATION_TRANSFORM_CLASS => Ok(PeriodicTransform::Translation(Translation::new(
             translation_meters(builtin, property("translation")?)?,
@@ -130,15 +144,17 @@ pub(crate) fn periodic_transform_from_value(
 }
 
 fn transform_object<const N: usize>(
+    runtime: Option<&crate::context::RuntimeContext>,
     class_name: &str,
     properties: [(&str, Value); N],
 ) -> BuiltinResult<Value> {
     ensure_periodic_transform_classes_registered();
-    let mut object = ObjectInstance::new(class_name);
-    for (name, value) in properties {
-        object.properties.insert(name.into(), value);
-    }
-    Ok(Value::Object(object))
+    let object = crate::execution::object::construct_object_from_borrowed_fields(
+        runtime,
+        class_name,
+        properties.iter().map(|(name, value)| (*name, value)),
+    )?;
+    Ok(object.into_value_and_lease().0)
 }
 
 pub(super) fn ensure_periodic_transform_classes_registered() {
@@ -231,12 +247,13 @@ fn validate_nested_classes(
 ) -> Result<(), String> {
     for (field, class_name) in expected {
         if !matches!(
-            object.properties.get(*field),
-            Some(Value::Object(value)) if value.class_name.display_name() == *class_name
+            object.properties().get(field),
+            Some(Value::Object(value)) if value.class_name().display_name() == *class_name
         ) {
             return Err(format!(
                 "{}.{} must be a typed {class_name}",
-                object.class_name, field
+                object.class_name(),
+                field
             ));
         }
     }

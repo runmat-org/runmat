@@ -11,15 +11,30 @@ fn operators_preserve_typed_storage_and_broadcast() {
 
     for (result, expected) in [
         (
-            block_on(bitand_builtin(vec![input.clone(), mask.clone()])),
+            block_on(bitand_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    input.clone(),
+                    mask.clone(),
+                ]),
+            )),
             vec![1, 3, 3],
         ),
         (
-            block_on(bitor_builtin(vec![input.clone(), mask.clone()])),
+            block_on(bitor_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    input.clone(),
+                    mask.clone(),
+                ]),
+            )),
             vec![3, 3, 7],
         ),
         (
-            block_on(bitxor_builtin(vec![input.clone(), mask.clone()])),
+            block_on(bitxor_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    input.clone(),
+                    mask.clone(),
+                ]),
+            )),
             vec![2, 0, 4],
         ),
     ] {
@@ -36,17 +51,24 @@ fn operators_preserve_typed_storage_and_broadcast() {
 
 #[test]
 fn logical_inputs_produce_logical_outputs() {
-    let result =
-        block_on(bitxor_builtin(vec![Value::Bool(true), Value::Bool(false)])).expect("logical xor");
+    let result = block_on(bitxor_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Bool(true),
+            Value::Bool(false),
+        ]),
+    ))
+    .expect("logical xor");
     assert_eq!(result, Value::Bool(true));
 }
 
 #[test]
 fn incompatible_integer_classes_are_rejected() {
-    let error = block_on(bitand_builtin(vec![
-        Value::Int(runmat_value::IntValue::U16(1)),
-        Value::Int(runmat_value::IntValue::U32(1)),
-    ]))
+    let error = block_on(bitand_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Int(runmat_value::IntValue::U16(1)),
+            Value::Int(runmat_value::IntValue::U32(1)),
+        ]),
+    ))
     .expect_err("mixed classes must fail");
     assert_eq!(error.identifier(), Some("RunMat:bitwise:InvalidInput"));
 }

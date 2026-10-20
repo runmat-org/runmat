@@ -4,7 +4,9 @@ use runmat_value::IntegerStorage;
 
 fn call(args: Vec<Value>, outputs: Option<usize>) -> BuiltinResult<Value> {
     let _guard = crate::output_count::push_output_count(outputs).expect("output-count scope");
-    block_on(crossvalind_builtin(args))
+    let args =
+        crate::execution::RootedValues::new(args).map_err(|error| error.into_runtime_error())?;
+    block_on(crossvalind_builtin(None, args.into()))
 }
 
 fn logical_data(value: Value) -> Vec<u8> {
@@ -204,6 +206,16 @@ fn classes_keep_adjacent_wide_integer_labels_distinct() {
     assert_eq!(labels[1], labels[3]);
     assert_ne!(labels[0], labels[1]);
     assert_eq!(grouped_indices(&labels).len(), 2);
+
+    let character_classes =
+        Value::CharArray(CharArray::new(vec!['a', '1', 'b', '2'], 2, 2).unwrap());
+    assert_eq!(
+        classes_from_value(&character_classes, 2).unwrap(),
+        vec![
+            Some(PartitionLabel::Text("a1".into())),
+            Some(PartitionLabel::Text("b2".into())),
+        ],
+    );
 }
 
 #[test]
@@ -285,10 +297,16 @@ fn typed_integer_partition_counts_are_exact_and_lossy_f64_is_rejected() {
         typed_tensor_six,
         int_tensor(IntegerStorage::U8(vec![3]), 1, 1),
     ];
-    let admitted = admit_host_controls(&fold_args).unwrap();
+    let admitted =
+        admit_host_controls(crate::call::FunctionArgumentView::from_slice(&fold_args)).unwrap();
     let folds = {
         let mut turn = random::try_acquire_turn(None, "crossvalind").unwrap();
-        crossvalind_compute(fold_args, admitted, Some(&mut turn)).unwrap()
+        crossvalind_compute(
+            crate::call::FunctionArgumentView::from_slice(&fold_args),
+            admitted,
+            Some(&mut turn),
+        )
+        .unwrap()
     };
     let PartitionOutput::Folds(Value::Tensor(folds)) = folds else {
         panic!("expected fold tensor");

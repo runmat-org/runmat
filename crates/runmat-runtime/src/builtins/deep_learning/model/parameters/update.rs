@@ -1,5 +1,6 @@
 //! Whole-table validation and atomic replacement of canonical layer parameters.
 use super::*;
+use crate::builtins::deep_learning::arguments::DeepLearningObjectEdit as _;
 use runmat_value::NumericDType;
 use std::collections::HashMap;
 
@@ -10,27 +11,39 @@ pub(in crate::builtins::deep_learning) struct ParameterUpdate {
     pub value: Tensor,
 }
 
-fn install(network: &mut ObjectInstance, replacements: Vec<(ParameterKey, Option<Value>)>) {
+fn install(
+    network: &mut ObjectInstance,
+    replacements: Vec<(ParameterKey, Option<Value>)>,
+    _function: &'static str,
+) -> BuiltinResult<()> {
     let Value::Cell(layers) = network
-        .properties
-        .get_mut("Layers")
+        .property("Layers")
         .expect("parameter view admitted Layers")
     else {
         unreachable!("parameter view admitted Layers cell")
     };
+    let context = crate::context::legacy::active();
+    let prepared_layers = crate::execution::structure::replacement::cell(layers, context.as_ref())?;
+    let _roots = prepared_layers.1;
+    let mut layers = prepared_layers.0;
+    let layer_values = layers
+        .try_data_mut_unique()
+        .expect("private Layers destination");
     for (key, value) in replacements {
-        let Value::Object(layer) = &mut layers.data[key.layer_index] else {
+        let Value::Object(layer) = &mut layer_values[key.layer_index] else {
             unreachable!("parameter view admitted layer object")
         };
         match value {
             Some(value) => {
-                layer.properties.insert(key.role.name().into(), value);
+                layer.replace_dl_property(key.role.name(), value)?;
             }
             None => {
-                layer.properties.remove(key.role.name());
+                layer.remove_dl_property(key.role.name())?;
             }
         }
     }
+    network.replace_dl_property("Layers", Value::Cell(layers))?;
+    Ok(())
 }
 
 /// Atomic selected-role publication for the native trainer. Full topology,
@@ -92,18 +105,23 @@ pub(in crate::builtins::deep_learning) fn apply_updates(
             }
             let replacement = match original {
                 Value::Object(original_wrapper)
-                    if original_wrapper.class_name.is(super::DLARRAY_CLASS) =>
+                    if original_wrapper.class_name().is(super::DLARRAY_CLASS) =>
                 {
-                    let mut wrapper = ObjectInstance::new(super::DLARRAY_CLASS.owned());
-                    wrapper
-                        .properties
-                        .insert("Data".into(), Value::Tensor(value));
-                    for property in ["Format", "Labels"] {
-                        if let Some(metadata) = original_wrapper.properties.get(property) {
-                            wrapper.properties.insert(property.into(), metadata.clone());
-                        }
-                    }
-                    Value::Object(wrapper)
+                    let data = Value::Tensor(value);
+                    let fields = std::iter::once(("Data", &data)).chain(
+                        ["Format", "Labels"].into_iter().filter_map(|property| {
+                            original_wrapper
+                                .property(property)
+                                .map(|value| (property, value))
+                        }),
+                    );
+                    let context = crate::context::legacy::active();
+                    crate::execution::object::construct_object_from_borrowed_fields(
+                        context.as_ref(),
+                        super::DLARRAY_CLASS.display_name(),
+                        fields,
+                    )?
+                    .with_owned(|value| value)
                 }
                 _ => Value::Tensor(value),
             };
@@ -123,10 +141,8 @@ pub(in crate::builtins::deep_learning) fn apply_updates(
             format!("{function}: parameter update key differs from network Layers"),
         ));
     }
-    install(&mut network, replacements);
-    network
-        .properties
-        .insert("Initialized".into(), Value::Bool(initialized));
+    install(&mut network, replacements, function)?;
+    network.replace_dl_property("Initialized", Value::Bool(initialized))?;
     Ok(Value::Object(network))
 }
 
@@ -151,7 +167,7 @@ pub(in crate::builtins) fn apply(
     let parameters = view(&network, function)?;
     if layer_names.len() != parameters.len()
         || parameter_names.len() != parameters.len()
-        || values.data.len() != parameters.len()
+        || values.data().len() != parameters.len()
     {
         return Err(deep_learning_error(
             function,
@@ -186,12 +202,12 @@ pub(in crate::builtins) fn apply(
                 )
             })?;
         validate_parameter(
-            &values.data[row],
+            &values.data()[row],
             &parameter.expected_shape,
             parameter.key.role,
             function,
         )?;
-        initialized &= !empty_parameter(parameter_data(&values.data[row], function)?);
+        initialized &= !empty_parameter(parameter_data(&values.data()[row], function)?);
         rows.push(row);
     }
     initialized &= super::super::state::all_filled(&network, function)?;
@@ -199,16 +215,14 @@ pub(in crate::builtins) fn apply(
         .into_iter()
         .zip(rows)
         .map(|(parameter, row)| {
-            let value = &values.data[row];
+            let value = &values.data()[row];
             let replacement =
                 (!empty_parameter(parameter_data(value, function)?)).then(|| value.clone());
             Ok((parameter.key, replacement))
         })
         .collect::<BuiltinResult<Vec<_>>>()?;
-    install(&mut network, replacements);
-    network
-        .properties
-        .insert("Initialized".into(), Value::Bool(initialized));
+    install(&mut network, replacements, function)?;
+    network.replace_dl_property("Initialized", Value::Bool(initialized))?;
     Ok(Value::Object(network))
 }
 

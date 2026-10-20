@@ -15,8 +15,8 @@ pub(super) fn mir_local_fact_count_for_entrypoint(
     assembly: &runmat_hir::HirAssembly,
 ) -> usize {
     let function = entrypoint_target_function(assembly)
-        .and_then(|function| u32::try_from(function.0).ok())
-        .map(runmat_types::ProgramFunctionId);
+        .and_then(|function| analysis.function_for_local(function))
+        .map(|facts| facts.function);
     analysis.local_value_count(function)
 }
 

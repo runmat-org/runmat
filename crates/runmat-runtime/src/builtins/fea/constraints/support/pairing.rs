@@ -22,23 +22,35 @@ const GEOMETRIC_FIELDS: &[&str] = &["tolerance"];
 #[runtime_builtin(
     name = "fea.PeriodicPairing.matching",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::fea::constraints::support::pairing"
 )]
-pub async fn periodic_pairing_matching_builtin() -> BuiltinResult<Value> {
+pub async fn periodic_pairing_matching_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+) -> BuiltinResult<Value> {
     crate::builtins::fea::constraints::fixed_outputs(
         &runmat_builtins::FEA_PERIODIC_PAIRING_MATCHING_DESCRIPTOR,
         "fea.PeriodicPairing.matching",
     )?;
     ensure_pairing_classes_registered();
-    Ok(Value::Object(ObjectInstance::new(MATCHING_PAIRING_CLASS)))
+    let object = crate::execution::object::construct_object_from_borrowed_fields(
+        runtime.as_ref(),
+        MATCHING_PAIRING_CLASS,
+        std::iter::empty::<(&str, &Value)>(),
+    )?;
+    Ok(object.into_value_and_lease().0)
 }
 
 #[runtime_builtin(
     name = "fea.PeriodicPairing.geometric",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::fea::constraints::support::pairing"
 )]
-pub async fn periodic_pairing_geometric_builtin(tolerance: Value) -> BuiltinResult<Value> {
+pub async fn periodic_pairing_geometric_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    tolerance: Value,
+) -> BuiltinResult<Value> {
     crate::builtins::fea::constraints::fixed_outputs(
         &runmat_builtins::FEA_PERIODIC_PAIRING_GEOMETRIC_DESCRIPTOR,
         "fea.PeriodicPairing.geometric",
@@ -57,9 +69,13 @@ pub async fn periodic_pairing_geometric_builtin(tolerance: Value) -> BuiltinResu
         ));
     }
     ensure_pairing_classes_registered();
-    let mut object = ObjectInstance::new(GEOMETRIC_PAIRING_CLASS);
-    object.properties.insert("tolerance".into(), tolerance);
-    Ok(Value::Object(object))
+    let fields = [("tolerance", tolerance)];
+    let object = crate::execution::object::construct_object_from_borrowed_fields(
+        runtime.as_ref(),
+        GEOMETRIC_PAIRING_CLASS,
+        fields.iter().map(|(name, value)| (*name, value)),
+    )?;
+    Ok(object.into_value_and_lease().0)
 }
 
 pub(crate) fn pairing_policy_from_value(
@@ -73,10 +89,10 @@ pub(crate) fn pairing_policy_from_value(
             "expected a typed fea.PeriodicPairing value",
         ));
     };
-    match object.class_name.display_name() {
+    match object.class_name().display_name() {
         MATCHING_PAIRING_CLASS => Ok(PairingPolicy::Matching),
         GEOMETRIC_PAIRING_CLASS => {
-            let tolerance = object.properties.get("tolerance").ok_or_else(|| {
+            let tolerance = object.properties().get("tolerance").ok_or_else(|| {
                 builtin_error(
                     builtin,
                     &ERROR_INPUT,
@@ -152,8 +168,8 @@ fn validate_matching(_: &ObjectInstance) -> Result<(), String> {
 
 fn validate_geometric(object: &ObjectInstance) -> Result<(), String> {
     if !matches!(
-        object.properties.get("tolerance"),
-        Some(Value::Object(value)) if value.class_name.display_name() == LENGTH_CLASS
+        object.properties().get("tolerance"),
+        Some(Value::Object(value)) if value.class_name().display_name() == LENGTH_CLASS
     ) {
         return Err("geometric pairing requires a typed fea.Length tolerance".into());
     }

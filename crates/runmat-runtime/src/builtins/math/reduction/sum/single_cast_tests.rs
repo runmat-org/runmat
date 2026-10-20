@@ -153,7 +153,9 @@ impl AccelProvider for StageProvider {
 fn sum_first_axis(source: GpuTensorHandle) -> BuiltinResult<Value> {
     block_on(sum_with_nan_policy(
         Value::GpuTensor(source),
-        vec![Value::Int(IntValue::I32(1))],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(IntValue::I32(
+            1,
+        ))]),
         None,
     ))
 }
@@ -225,7 +227,9 @@ fn abandoned_actual_sum_futures_retire_cast_and_multistage_intermediates() {
         let source = cast_provider.source(vec![2, 2]);
         let mut future = Box::pin(sum_with_nan_policy(
             Value::GpuTensor(source.handle.clone()),
-            vec![Value::Int(IntValue::I32(1))],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(
+                IntValue::I32(1),
+            )]),
             None,
         ));
         let waker = futures::task::noop_waker();
@@ -248,7 +252,7 @@ fn abandoned_actual_sum_futures_retire_cast_and_multistage_intermediates() {
     let dims = Tensor::new(vec![1.0, 3.0], vec![1, 2]).unwrap();
     let mut future = Box::pin(sum_with_nan_policy(
         Value::GpuTensor(source.handle.clone()),
-        vec![Value::Tensor(dims)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(dims)]),
         None,
     ));
     let waker = futures::task::noop_waker();

@@ -23,11 +23,18 @@ fn host_and_gpu_admission_share_low_rank_operand_geometry() {
             let host = ArrayData::from_value(input.clone()).unwrap();
             assert_eq!(host.shape_vec(), expected);
             assert_eq!(
-                shape(std::slice::from_ref(&input)).unwrap(),
+                shape(crate::call::FunctionArgumentView::from_slice(
+                    std::slice::from_ref(&input)
+                ))
+                .unwrap(),
                 Some(expected.clone())
             );
             assert_eq!(
-                shape(&[input, Value::Num(1.0)]).unwrap(),
+                shape(crate::call::FunctionArgumentView::from_slice(&[
+                    input,
+                    Value::Num(1.0)
+                ]))
+                .unwrap(),
                 Some(expanded.clone())
             );
         }
@@ -55,22 +62,22 @@ fn varying_double_integer_pair_is_not_whole_array_equivalent() {
         assert!(!equivalent(
             operation,
             "mapped",
-            &[integer.clone(), double.clone()]
+            crate::call::FunctionArgumentView::from_slice(&[integer.clone(), double.clone()])
         ));
         assert!(!equivalent(
             operation,
             "mapped",
-            &[double.clone(), integer.clone()]
+            crate::call::FunctionArgumentView::from_slice(&[double.clone(), integer.clone()])
         ));
         assert!(equivalent(
             operation,
             "mapped",
-            &[integer.clone(), Value::Num(2.0)]
+            crate::call::FunctionArgumentView::from_slice(&[integer.clone(), Value::Num(2.0)])
         ));
         assert!(equivalent(
             operation,
             "mapped",
-            &[integer.clone(), integer.clone()]
+            crate::call::FunctionArgumentView::from_slice(&[integer.clone(), integer.clone()])
         ));
     }
 }
@@ -82,7 +89,13 @@ fn mixed_float_and_broadcast_shapes_remain_admitted() {
     assert!(equivalent(
         ArrayfunGpuCallback::Binary(ArrayfunGpuBinary::Add),
         "plus",
-        &[single.clone(), double.clone()]
+        crate::call::FunctionArgumentView::from_slice(&[single.clone(), double.clone()])
     ));
-    assert_eq!(shape(&[single, double]).unwrap(), Some(vec![2, 3]));
+    assert_eq!(
+        shape(crate::call::FunctionArgumentView::from_slice(&[
+            single, double
+        ]))
+        .unwrap(),
+        Some(vec![2, 3])
+    );
 }

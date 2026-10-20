@@ -147,7 +147,7 @@ fn full_read_codec_cancellation_restores_unpublished_bytes_once() {
     let mut call = Box::pin(read_builtin(
         Some(runtime),
         receiver(),
-        vec![Value::Num(8192.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(8192.0)]),
     ));
     let waker = futures::task::noop_waker();
     assert!(matches!(

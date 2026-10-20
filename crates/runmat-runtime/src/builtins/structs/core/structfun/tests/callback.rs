@@ -132,11 +132,11 @@ fn error_handler_receives_the_original_callback_identity() {
         },
     )))
     .expect("call-port scope");
-    let mut structure = StructValue::new();
+    let mut structure = runmat_value::UnboundedStructValueBuilder::new();
     structure.insert("a", Value::Num(1.0));
     let result = call(
         crate::user_functions::test_support::exact_local_value("fails", failing),
-        structure,
+        structure.finish(),
         vec![
             Value::String("ErrorHandler".into()),
             crate::user_functions::test_support::exact_local_value("recovers", recovery),

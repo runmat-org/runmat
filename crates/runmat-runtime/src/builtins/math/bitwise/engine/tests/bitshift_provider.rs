@@ -25,8 +25,10 @@ fn bitshift_single_and_logical_inputs_are_independently_gated() {
             "RunMat:compatibility:BitshiftLogicalCountInputExtension",
         ),
     ] {
-        let error =
-            block_on(bitshift_builtin(args)).expect_err("MATLAB mode rejects undocumented input");
+        let error = block_on(bitshift_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect_err("MATLAB mode rejects undocumented input");
         assert_eq!(error.identifier(), Some(identifier));
     }
 }
@@ -35,8 +37,10 @@ fn bitshift_single_and_logical_inputs_are_independently_gated() {
 fn bitshift_malformed_arity_precedes_compatibility_gates() {
     let single = Tensor::from_f32(vec![1.0], vec![1, 1]).expect("single input");
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-    let error = block_on(bitshift_builtin(vec![Value::Tensor(single)]))
-        .expect_err("malformed arity must retain the ordinary invalid-input path");
+    let error = block_on(bitshift_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(single)]),
+    ))
+    .expect_err("malformed arity must retain the ordinary invalid-input path");
     assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
 }
 
@@ -53,10 +57,12 @@ fn bitshift_rejects_unsupported_resident_forms_before_provider_access() {
         .unwrap();
     assert!(gpu_helpers::exact_provider_for_handle(&signed_value_allocation.handle).is_none());
     let signed_value = signed_value_allocation.handle.clone();
-    let error = block_on(bitshift_builtin(vec![
-        Value::GpuTensor(signed_value),
-        Value::Num(1.0),
-    ]))
+    let error = block_on(bitshift_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::GpuTensor(signed_value),
+            Value::Num(1.0),
+        ]),
+    ))
     .expect_err("MATLAB mode rejects signed A before gather");
     assert_eq!(
         error.identifier(),
@@ -72,10 +78,12 @@ fn bitshift_rejects_unsupported_resident_forms_before_provider_access() {
         .unwrap();
     assert!(gpu_helpers::exact_provider_for_handle(&unsigned_value_allocation.handle).is_none());
     let unsigned_value = unsigned_value_allocation.handle.clone();
-    let error = block_on(bitshift_builtin(vec![
-        Value::GpuTensor(unsigned_value.clone()),
-        Value::Int(IntValue::U64(1)),
-    ]))
+    let error = block_on(bitshift_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::GpuTensor(unsigned_value.clone()),
+            Value::Int(IntValue::U64(1)),
+        ]),
+    ))
     .expect_err("MATLAB mode rejects 64-bit k before gather");
     assert_eq!(
         error.identifier(),
@@ -91,21 +99,25 @@ fn bitshift_rejects_unsupported_resident_forms_before_provider_access() {
         .unwrap();
     assert!(gpu_helpers::exact_provider_for_handle(&double_value_allocation.handle).is_none());
     let double_value = double_value_allocation.handle.clone();
-    let error = block_on(bitshift_builtin(vec![
-        Value::GpuTensor(double_value),
-        Value::Num(1.0),
-    ]))
+    let error = block_on(bitshift_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::GpuTensor(double_value),
+            Value::Num(1.0),
+        ]),
+    ))
     .expect_err("MATLAB mode requires at least one integer-array input before gather");
     assert_eq!(
         error.identifier(),
         Some("RunMat:compatibility:BitshiftGpuUndocumentedInputExtension")
     );
 
-    let error = block_on(bitshift_builtin(vec![
-        Value::GpuTensor(unsigned_value),
-        Value::Num(1.0),
-        Value::from("uint8"),
-    ]))
+    let error = block_on(bitshift_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::GpuTensor(unsigned_value),
+            Value::Num(1.0),
+            Value::from("uint8"),
+        ]),
+    ))
     .expect_err("MATLAB mode rejects resident assumedtype before gather");
     assert_eq!(
         error.identifier(),
@@ -148,10 +160,12 @@ fn bitshift_documented_gpu_domain_restores_exact_resident_output() {
                 .expect("documented counts");
             let values = gpu_helpers::upload_tensor(provider, &values).expect("upload values");
             let counts = gpu_helpers::upload_tensor(provider, &counts).expect("upload counts");
-            let result = block_on(bitshift_builtin(vec![
-                Value::GpuTensor(values),
-                Value::GpuTensor(counts),
-            ]))
+            let result = block_on(bitshift_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::GpuTensor(values),
+                    Value::GpuTensor(counts),
+                ]),
+            ))
             .expect("documented GPU bitshift");
             let Value::GpuTensor(handle) = &result else {
                 panic!("documented GPU bitshift must preserve residency");
@@ -168,10 +182,12 @@ fn bitshift_documented_gpu_domain_restores_exact_resident_output() {
             .expect("resident integer counts");
         let counts = gpu_helpers::upload_tensor(provider, &counts).expect("upload counts");
         let values = Tensor::new(vec![3.0, 8.0], vec![1, 2]).expect("host double values");
-        let result = block_on(bitshift_builtin(vec![
-            Value::Tensor(values),
-            Value::GpuTensor(counts),
-        ]))
+        let result = block_on(bitshift_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Tensor(values),
+                Value::GpuTensor(counts),
+            ]),
+        ))
         .expect("documented double A and integer GPU k");
         assert!(matches!(result, Value::GpuTensor(_)));
         let gathered = test_support::gather(result).expect("gather double result");
@@ -210,10 +226,12 @@ fn bitshift_documented_gpu_domain_round_trips_through_wgpu() {
             .expect("documented counts");
         let values = gpu_helpers::upload_tensor(provider, &values).expect("upload values");
         let counts = gpu_helpers::upload_tensor(provider, &counts).expect("upload counts");
-        let result = block_on(bitshift_builtin(vec![
-            Value::GpuTensor(values),
-            Value::GpuTensor(counts),
-        ]))
+        let result = block_on(bitshift_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::GpuTensor(values),
+                Value::GpuTensor(counts),
+            ]),
+        ))
         .expect("WGPU bitshift");
         assert!(matches!(result, Value::GpuTensor(_)));
         let gathered = test_support::gather(result).expect("gather WGPU result");
@@ -234,10 +252,12 @@ fn bitshift_accepts_every_integer_count_class_without_changing_a_class() {
         IntValue::U64(1),
     ] {
         assert_eq!(
-            block_on(bitshift_builtin(vec![
-                Value::Int(IntValue::U16(3)),
-                Value::Int(count),
-            ]))
+            block_on(bitshift_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Int(IntValue::U16(3)),
+                    Value::Int(count),
+                ])
+            ))
             .expect("documented integer count"),
             Value::Int(IntValue::U16(6))
         );

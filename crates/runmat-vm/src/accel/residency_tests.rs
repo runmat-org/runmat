@@ -4,7 +4,7 @@ use runmat_accelerate_api::{
     test_support::{TestAllocation, TestAllocationOwner},
     GpuTensorHandle, GpuTensorStorage, NumericElementType,
 };
-use runmat_value::{CellArray, Closure, HandleRef, StructValue, Value};
+use runmat_value::{CellArray, Closure, HandleRef, Value};
 
 fn allocation(owner: &TestAllocationOwner) -> TestAllocation {
     owner
@@ -65,11 +65,9 @@ fn managed_target_retains_nested_allocation_until_collection() {
     runmat_gc::gc_test_context(|| {
         let owner = TestAllocationOwner::new();
         let owned = allocation(&owner);
-        let mut payload = StructValue::new();
-        payload
-            .fields
-            .insert("nested".into(), Value::GpuTensor(owned.handle));
-        let target = runmat_gc::gc_allocate_rooted(Value::Struct(payload)).unwrap();
+        let mut payload = runmat_value::UnboundedStructValueBuilder::with_capacity(1);
+        payload.insert("nested", Value::GpuTensor(owned.handle));
+        let target = runmat_gc::gc_allocate_rooted(Value::Struct(payload.finish())).unwrap();
         runmat_gc::gc_collect_major().unwrap();
         assert_eq!(owned.probe.retirements(), 0);
         target.unroot().unwrap();
@@ -84,11 +82,9 @@ fn completed_projection_preserves_alias_in_a_managed_output_target() {
         let owner = TestAllocationOwner::new();
         let shared = allocation(&owner);
         let old = allocation(&owner);
-        let mut payload = StructValue::new();
-        payload
-            .fields
-            .insert("nested".into(), Value::GpuTensor(shared.handle.clone()));
-        let target = runmat_gc::gc_allocate_rooted(Value::Struct(payload)).unwrap();
+        let mut payload = runmat_value::UnboundedStructValueBuilder::with_capacity(1);
+        payload.insert("nested", Value::GpuTensor(shared.handle.clone()));
+        let target = runmat_gc::gc_allocate_rooted(Value::Struct(payload.finish())).unwrap();
         let output = Value::HandleObject(HandleRef {
             class_name: "Payload".into(),
             target: target.handle(),

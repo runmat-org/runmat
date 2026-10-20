@@ -29,18 +29,21 @@ fn public_conv_default_has_valid_geometry_and_explicit_same_remains_distinct() {
             Value::String("same".into()),
         ),
     ] {
-        let input_layer = block_on(sequence_input_layer_builtin(Value::Num(2.0), vec![]))
-            .expect("sequence input layer");
+        let input_layer = block_on(sequence_input_layer_builtin(
+            Value::Num(2.0),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .expect("sequence input layer");
         let convolution = block_on(convolution_1d_layer_builtin(
             Value::Num(3.0),
             Value::Num(2.0),
-            options,
+            crate::builtins::common::test_support::builtin_arguments(options),
         ))
         .expect("convolution layer");
         let Value::Object(layer) = &convolution else {
             panic!("convolution object expected")
         };
-        assert_eq!(layer.properties.get("Padding"), Some(&expected_padding));
+        assert_eq!(layer.properties().get("Padding"), Some(&expected_padding));
         let network_owner = network(vec![input_layer, convolution]);
         let Value::Object(network) = network_owner.value() else {
             panic!("network object expected")
@@ -84,15 +87,20 @@ fn public_recurrent_defaults_preserve_time_axis_for_both_directions() {
                 "last",
             ),
         ] {
-            let input_layer = block_on(sequence_input_layer_builtin(Value::Num(3.0), vec![]))
-                .expect("sequence input layer");
+            let input_layer = block_on(sequence_input_layer_builtin(
+                Value::Num(3.0),
+                crate::builtins::common::test_support::builtin_arguments(vec![]),
+            ))
+            .expect("sequence input layer");
             let recurrent = match kind {
-                DeepLearningLayerKind::Lstm => {
-                    block_on(lstm_layer_builtin(Value::Num(2.0), options))
-                }
-                DeepLearningLayerKind::Bilstm => {
-                    block_on(bilstm_layer_builtin(Value::Num(2.0), options))
-                }
+                DeepLearningLayerKind::Lstm => block_on(lstm_layer_builtin(
+                    Value::Num(2.0),
+                    crate::builtins::common::test_support::builtin_arguments(options),
+                )),
+                DeepLearningLayerKind::Bilstm => block_on(bilstm_layer_builtin(
+                    Value::Num(2.0),
+                    crate::builtins::common::test_support::builtin_arguments(options),
+                )),
                 _ => unreachable!("fixture uses recurrent layer kind"),
             }
             .expect("recurrent layer");
@@ -100,7 +108,7 @@ fn public_recurrent_defaults_preserve_time_axis_for_both_directions() {
                 panic!("recurrent object expected")
             };
             assert_eq!(
-                layer.properties.get("OutputMode"),
+                layer.properties().get("OutputMode"),
                 Some(&Value::String(expected_mode.into()))
             );
             let network_owner = network(vec![input_layer, recurrent]);

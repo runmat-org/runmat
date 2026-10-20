@@ -61,7 +61,7 @@ fn rgb2gray_map_error(
 async fn rgb2gray_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     rgb: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<crate::execution::RootedValue> {
     if !rest.is_empty() {
         return Err(rgb2gray_error(&RGB2GRAY_ERROR_TOO_MANY_INPUTS));
@@ -237,9 +237,13 @@ mod tests {
         rgb: Value,
         rest: Vec<Value>,
     ) -> BuiltinResult<Value> {
-        super::rgb2gray_builtin(runtime, rgb, rest)
-            .await
-            .map(|owned| owned.with_owned(|value| value))
+        super::rgb2gray_builtin(
+            runtime,
+            rgb,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        )
+        .await
+        .map(|owned| owned.with_owned(|value| value))
     }
     use crate::builtins::common::{gpu_helpers, test_support};
     use futures::executor::block_on;

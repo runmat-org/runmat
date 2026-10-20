@@ -11,6 +11,6 @@ use runmat_value::Value;
     binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::installation_path::matlabroot"
 )]
-async fn matlabroot_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn matlabroot_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     execute::run(args)
 }

@@ -39,6 +39,7 @@ mod call_bound_method;
 mod memoized_subsref;
 mod object_serialization;
 mod overidx_fixture;
+mod input_parser;
 
 pub use self::arity_check::*;
 pub use self::builtin::*;
@@ -53,6 +54,7 @@ pub use self::function_dispatch::*;
 pub use self::functions::*;
 pub use self::get_p::*;
 pub use self::identifiers::*;
+pub use self::input_parser::*;
 pub use self::inputname::*;
 pub use self::is_underlying_type::*;
 pub use self::isa::*;
@@ -114,4 +116,5 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(memoized_subsref::ENTRIES.iter().copied());
     values.extend(object_serialization::ENTRIES.iter().copied());
     values.extend(overidx_fixture::ENTRIES.iter().copied());
+    values.extend(input_parser::ENTRIES.iter().copied());
 }

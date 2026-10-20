@@ -47,7 +47,7 @@ const BUILTIN_NAME: &str = "imwrite";
 )]
 async fn imwrite_builtin(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     if let Some(n) = crate::output_count::current_output_count() {
         if n > 0 {
@@ -80,9 +80,9 @@ async fn imwrite_builtin(
             "filename must not be empty",
         ));
     }
-    preflight::preflight_resident_argument_roles(&args)?;
+    preflight::preflight_resident_argument_roles(args.view())?;
     let format = preflight::preflight_option_text(
-        &args,
+        args.view(),
         filename_index + 1,
         &filename,
         filename_index == 2,
@@ -96,7 +96,7 @@ async fn imwrite_builtin(
         )?;
     }
     let mut cooperation = ImageCooperation::new(runtime.as_ref(), BUILTIN_NAME);
-    preflight::preflight_known_host_pixels(&args, &mut cooperation).await?;
+    preflight::preflight_known_host_pixels(args.view(), &mut cooperation).await?;
     cooperation.completed(0).await?;
     let mut host_args = Vec::with_capacity(args.len());
     for arg in &args {

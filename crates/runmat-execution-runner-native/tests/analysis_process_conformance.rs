@@ -16,10 +16,7 @@ mod phase_execution_support;
 mod static_recovery;
 use std::collections::BTreeSet;
 use std::net::{Ipv4Addr, SocketAddr};
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
+use std::sync::Arc;
 use std::time::Duration;
 
 use rcgen::{generate_simple_self_signed, CertifiedKey};
@@ -549,11 +546,9 @@ async fn parent() {
     user_cancelled_config.worker_arguments = vec!["--child".into()];
     user_cancelled_config.max_workers = 2;
     user_cancelled_config.store_root = directory.path().join("user-cancelled-analysis-sequence");
-    let interrupt = Arc::new(AtomicBool::new(true));
-    let interrupt_guard =
-        runmat_runtime::interrupt::replace_interrupt(Some(
-            runmat_execution::CancellationToken::from_shared(Arc::clone(&interrupt)),
-        ));
+    let interrupt = runmat_execution::cancellation::CancellationSource::new();
+    interrupt.cancel(runmat_execution::CancellationReason::User);
+    let interrupt_guard = runmat_runtime::interrupt::replace_interrupt(Some(interrupt.token()));
     let cancellation = execute_structural_sequence_locally(
         user_cancelled_config,
         sequence_preparation(revision(), "user-cancelled-analysis-sequence"),
@@ -561,7 +556,6 @@ async fn parent() {
     )
     .await;
     assert!(matches!(cancellation, Err(NativeExecutionError::Cancelled)));
-    interrupt.store(false, Ordering::Relaxed);
     drop(interrupt_guard);
 
     remote_conformance(
@@ -888,13 +882,13 @@ async fn remote_conformance(
     let scope_id = runmat_execution::ExecutionScopeId::derive(&[b"remote-analysis-scope"]);
     let pool_id = runmat_execution::PoolId::derive(&[b"remote-analysis-pool"]);
     let first_worker = WorkerSpec {
-        host: crate::test_fixtures::host_inventory(),
+        host: phase_execution_support::worker_host_inventory(),
         id: runmat_execution::identity::WorkerId::derive(&[b"remote-analysis-worker-a"]),
         pool_id,
         resources: inventory(),
     };
     let second_worker = WorkerSpec {
-        host: crate::test_fixtures::host_inventory(),
+        host: phase_execution_support::worker_host_inventory(),
         id: runmat_execution::identity::WorkerId::derive(&[b"remote-analysis-worker-b"]),
         pool_id,
         resources: inventory(),
@@ -2181,11 +2175,14 @@ fn analysis_submission(
         .iter()
         .map(|value| match value {
             ValuePayload::Object(root) => (**root).clone(),
-            other => panic!("analysis inputs must remain externalized: {other:?}"),
+            ValuePayload::Inline(_) => panic!("analysis inputs must remain externalized"),
+            ValuePayload::Distributed(_) | ValuePayload::Composite(_) => {
+                panic!("analysis inputs require external object roots, not service handles")
+            }
         })
         .collect();
     let context = AnalysisExecutionContext {
-        host: crate::test_fixtures::host_requirement(),
+        host: phase_execution_support::host_requirement(request),
         scope_id,
         pool_id,
         program_artifact_id: ArtifactId::derive(&[request.artifact.id.0.bytes()]),

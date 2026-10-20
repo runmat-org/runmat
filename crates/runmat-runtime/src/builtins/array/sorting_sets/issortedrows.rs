@@ -467,21 +467,28 @@ impl Args {
 }
 
 fn parse_direction_list(value: &Value) -> crate::BuiltinResult<Option<Vec<Direction>>> {
+    use std::borrow::Cow;
     let strings = match value {
-        Value::StringArray(array) => Some(array.data.clone()),
+        Value::StringArray(array) => Some(
+            array
+                .data()
+                .iter()
+                .map(|text| Cow::Borrowed(text.as_str()))
+                .collect::<Vec<_>>(),
+        ),
         Value::Cell(cell) => {
-            let mut strings = Vec::with_capacity(cell.data.len());
-            for value in &cell.data {
+            let mut strings = Vec::with_capacity(cell.data().len());
+            for value in cell.data() {
                 let Some(value) = tensor::value_to_string(value) else {
                     return Err(invalid_argument(
                         "issortedrows: direction cell arrays must contain character vectors or strings",
                     ));
                 };
-                strings.push(value);
+                strings.push(Cow::Owned(value));
             }
             Some(strings)
         }
-        _ => tensor::value_to_string(value).map(|value| vec![value]),
+        _ => tensor::value_to_string(value).map(|value| vec![Cow::Owned(value)]),
     };
     let Some(strings) = strings else {
         return Ok(None);
@@ -675,8 +682,8 @@ fn check_complex_values<T: SetFloat, S: ComplexSequence<T> + ?Sized>(
 
 fn check_char(array: &CharArray, rows: usize, cols: usize, args: &Args) -> bool {
     check_adjacent(rows, args, |row, column, direction| {
-        let left = array.data[row * cols + column];
-        let right = array.data[(row + 1) * cols + column];
+        let left = array.data()[row * cols + column];
+        let right = array.data()[(row + 1) * cols + column];
         apply_direction(left.cmp(&right), direction)
     })
 }
@@ -860,7 +867,7 @@ fn value_shape(value: &Value) -> Vec<usize> {
         Value::Tensor(tensor) => tensor.shape().to_vec(),
         Value::LogicalArray(array) => array.shape.to_vec(),
         Value::ComplexTensor(tensor) => tensor.shape().to_vec(),
-        Value::CharArray(array) => array.shape.clone(),
+        Value::CharArray(array) => array.shape().to_vec(),
         _ => vec![1, 1],
     }
 }

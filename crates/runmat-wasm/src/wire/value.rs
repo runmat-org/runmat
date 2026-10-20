@@ -319,9 +319,9 @@ pub(crate) fn value_to_json(value: &Value, depth: usize) -> JsonValue {
         }),
         Value::MException(ex) => json!({
             "kind": "exception",
-            "identifier": ex.identifier,
-            "message": ex.message,
-            "stack": ex.stack,
+            "identifier": ex.identifier.as_str(),
+            "message": ex.message.as_str(),
+            "stack": JsonValue::Array(ex.stack.iter().map(|frame| json!(frame.as_str())).collect()),
         }),
         Value::Future(handle) => json!({
             "kind": "future",
@@ -522,7 +522,7 @@ mod tests {
     }
     use runmat_value::{
         ComplexTensor, IntegerComplexStorage, IntegerStorage, ObjectArray, ObjectInstance,
-        SparseTensor, StructArray, StructValue, Tensor,
+        SparseTensor, StructArray, Tensor,
     };
     use wasm_bindgen_test::wasm_bindgen_test;
 
@@ -551,8 +551,9 @@ mod tests {
 
     #[test]
     fn structure_array_uses_the_v1_display_fallback() {
-        let mut element = StructValue::new();
+        let mut element = runmat_value::UnboundedStructValueBuilder::with_capacity(1);
         element.insert("name", Value::from("entry"));
+        let element = element.finish();
         let array = StructArray::new(vec![element.clone(), element], vec![1, 2]).unwrap();
         let json = value_to_json(&Value::StructArray(array), 0);
 

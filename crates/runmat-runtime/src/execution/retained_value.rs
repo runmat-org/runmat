@@ -5,7 +5,10 @@
 //! read lease owns the separate GC roots, and drops those roots before the
 //! final shared generation owner can retire.
 
-use runmat_value::{SharedValueGeneration, Value};
+use runmat_value::{
+    CallableGenerationInput, CallableGenerationPrepareError, ExactArrayClaimPromotionError,
+    SharedValueGeneration, Value,
+};
 
 use crate::context::host_allocation::{
     host_allocation_runtime_error, HostAllocationError, HostAllocationPlan, HostAllocationReceipt,
@@ -15,6 +18,8 @@ use crate::runtime_error::semantic_error_with_source;
 use crate::RuntimeError;
 
 use super::{RootedValueAdmissionError, RootedValueHandles, RootedValueLease};
+#[path = "retained_value/callable_rooted.rs"]
+mod callable_rooted;
 
 #[derive(Clone, Debug)]
 pub struct RetainedValueReadLease {
@@ -102,6 +107,35 @@ impl RetainedValueReadLease {
 
     pub fn shares_generation_with(&self, other: &Self) -> bool {
         self.generation.ptr_eq(&other.generation)
+    }
+}
+
+fn callable_prepare_error(
+    context: &RuntimeContext,
+    source: CallableGenerationPrepareError,
+) -> RuntimeError {
+    match source {
+        CallableGenerationPrepareError::Allocation(source)
+        | CallableGenerationPrepareError::CapturePromotion(
+            ExactArrayClaimPromotionError::Allocation(source),
+        ) => host_error(context, HostAllocationError::Numeric(source)),
+        CallableGenerationPrepareError::CapturePromotion(
+            source @ ExactArrayClaimPromotionError::UnsharedBacking,
+        ) => semantic_error_with_source(
+            "RunMat:Callable:RepeatableSelection",
+            "repeatable callable capture backing is not shared",
+            source,
+        ),
+        CallableGenerationPrepareError::NotCallable => crate::runtime_error::semantic_error(
+            "RunMat:Callable:RepeatableSelection",
+            "repeatable target is not a callable Value",
+        ),
+        CallableGenerationPrepareError::AlreadyConsumedOrReserved => {
+            crate::runtime_error::semantic_error(
+                "RunMat:Callable:RepeatableSelection",
+                "repeatable callable preparation state was already consumed",
+            )
+        }
     }
 }
 

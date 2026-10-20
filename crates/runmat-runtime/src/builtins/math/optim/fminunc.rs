@@ -65,21 +65,23 @@ async fn fminunc_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
     function: Value,
     x0: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     fminunc_in_runtime(runtime.as_ref(), function, x0, rest).await
 }
 
 #[cfg(test)]
 async fn fminunc_builtin(function: Value, x0: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    fminunc_in_runtime(None, function, x0, rest).await
+    let rest =
+        crate::execution::RootedValues::new(rest).map_err(|error| error.into_runtime_error())?;
+    fminunc_in_runtime(None, function, x0, rest.into()).await
 }
 
 async fn fminunc_in_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
     function: Value,
     x0: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     crate::output_count::validate_bounded_outputs(
         &FMINUNC_DESCRIPTOR,
@@ -104,6 +106,7 @@ async fn fminunc_in_runtime(
         options_struct,
         Some(&FMINUNC_OPTION_EXTENSION),
         Some(&FMINUNC_RESIDENT_EXTENSION),
+        runtime,
         &mut cooperation,
     )
     .await
@@ -117,8 +120,11 @@ async fn fminunc_in_runtime(
     )
     .await
     .map_err(|err| fminunc_map_error(err, &FMINUNC_ERROR_INVALID_INPUT))?;
-    let options = FminuncOptions::from_struct(options_struct.as_ref(), guess.values.len())
-        .map_err(|err| fminunc_map_error(err, &FMINUNC_ERROR_INVALID_ARGUMENT))?;
+    let options = FminuncOptions::from_struct(
+        options_struct.as_ref().map(|options| options.structure()),
+        guess.values.len(),
+    )
+    .map_err(|err| fminunc_map_error(err, &FMINUNC_ERROR_INVALID_ARGUMENT))?;
     let outcome = minimize(
         &function,
         guess.values,
@@ -318,9 +324,9 @@ fn bool_value(field: &str, value: &Value) -> BuiltinResult<bool> {
             bool_from_number(field, tensor::tensor_value_f64(tensor, 0))
         }
         Value::String(s) => bool_from_text(field, s),
-        Value::StringArray(sa) if sa.data.len() == 1 => bool_from_text(field, &sa.data[0]),
+        Value::StringArray(sa) if sa.data().len() == 1 => bool_from_text(field, &sa.data()[0]),
         Value::CharArray(chars) if chars.rows == 1 => {
-            let text: String = chars.data.iter().collect();
+            let text: String = chars.data().iter().collect();
             bool_from_text(field, &text)
         }
         other => Err(fminunc_error_with_detail(

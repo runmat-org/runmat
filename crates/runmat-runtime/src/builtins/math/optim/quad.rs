@@ -129,7 +129,7 @@ async fn quad_builtin_registered(
     function: Value,
     a: Value,
     b: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     quad_in_runtime(runtime.as_ref(), function, a, b, rest).await
 }
@@ -139,7 +139,7 @@ pub(super) async fn quad_builtin(
     function: Value,
     a: Value,
     b: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     quad_in_runtime(None, function, a, b, rest).await
 }
@@ -149,15 +149,15 @@ async fn quad_in_runtime(
     function: Value,
     a: Value,
     b: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let mut cooperation = QuadratureCooperation::new(QuadratureIdentity::Quad, runtime);
     cooperation.completed(0).await?;
     validate_requested_outputs()?;
-    ensure_quad_extensions(&a, &b, &rest)?;
-    preflight_quad_inputs(&a, &b, &rest)?;
+    ensure_quad_extensions(&a, &b, rest.view())?;
+    preflight_quad_inputs(&a, &b, rest.view())?;
     crate::call::admission::admit_feval_target(&function)?;
-    authenticate_quad_residents(&a, &b, &rest)?;
+    authenticate_quad_residents(&a, &b, rest.view())?;
     let options = QuadOptions::parse(rest, &mut cooperation)
         .await
         .map_err(|err| quad_map_error(err, &QUAD_ERROR_INVALID_ARGUMENT))?;
@@ -195,7 +195,11 @@ async fn quad_in_runtime(
     finalize(result)
 }
 
-fn preflight_quad_inputs(a: &Value, b: &Value, rest: &[Value]) -> BuiltinResult<()> {
+fn preflight_quad_inputs(
+    a: &Value,
+    b: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     preflight_quad_scalar(QuadScalarRole::LowerBound, a)?;
     preflight_quad_scalar(QuadScalarRole::UpperBound, b)?;
     if let Some(tol) = rest.first() {
@@ -207,7 +211,11 @@ fn preflight_quad_inputs(a: &Value, b: &Value, rest: &[Value]) -> BuiltinResult<
     Ok(())
 }
 
-fn authenticate_quad_residents(a: &Value, b: &Value, rest: &[Value]) -> BuiltinResult<()> {
+fn authenticate_quad_residents(
+    a: &Value,
+    b: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     for (role, value) in [
         (QuadScalarRole::LowerBound, Some(a)),
         (QuadScalarRole::UpperBound, Some(b)),
@@ -344,7 +352,11 @@ fn preflight_quad_scalar(role: QuadScalarRole, value: &Value) -> BuiltinResult<(
     Ok(())
 }
 
-fn ensure_quad_extensions(a: &Value, b: &Value, rest: &[Value]) -> BuiltinResult<()> {
+fn ensure_quad_extensions(
+    a: &Value,
+    b: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     for bound in [a, b] {
         if crate::builtins::common::validation::value_contains_native_integer_class(bound) {
             crate::compatibility::ensure_builtin_extension_enabled(&INTEGER_BOUND_EXTENSION, NAME)?;
@@ -448,7 +460,7 @@ struct QuadOptions {
 
 impl QuadOptions {
     async fn parse(
-        rest: Vec<Value>,
+        rest: crate::call::BuiltinArguments,
         cooperation: &mut QuadratureCooperation,
     ) -> BuiltinResult<Self> {
         let mut values = rest.into_iter();
@@ -790,7 +802,7 @@ mod tests {
             Value::FunctionHandle("sin".into()),
             Value::Num(0.0),
             Value::Num(std::f64::consts::PI),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect("quad");
         match result {
@@ -824,7 +836,7 @@ mod tests {
             integrand,
             Value::Num(0.0),
             Value::Num(1.0),
-            vec![Value::Num(1.0e-10)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0e-10)]),
         )))
         .expect("quad");
         match result {
@@ -840,7 +852,7 @@ mod tests {
             Value::FunctionHandle("sin".into()),
             Value::Num(0.0),
             Value::Num(std::f64::consts::PI),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect("quad");
         match result {
@@ -860,7 +872,10 @@ mod tests {
             Value::FunctionHandle("sin".into()),
             Value::Num(0.0),
             Value::Num(std::f64::consts::PI),
-            vec![Value::Num(1.0e-6), Value::Num(1.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(1.0e-6),
+                Value::Num(1.0),
+            ]),
         ))
         .expect("quad");
         assert!(matches!(result, Value::Num(_)));
@@ -898,7 +913,10 @@ mod tests {
             Value::FunctionHandle("sin".into()),
             Value::Num(0.0),
             Value::Num(1.0),
-            vec![Value::Tensor(tol), Value::Tensor(trace)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Tensor(tol),
+                Value::Tensor(trace),
+            ]),
         ))
         .expect("quad");
         assert!(matches!(result, Value::Num(_)));
@@ -917,7 +935,9 @@ mod tests {
             Value::FunctionHandle("sin".into()),
             Value::Num(0.0),
             Value::Num(1.0),
-            vec![Value::Tensor(tolerance)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(
+                tolerance,
+            )]),
         ))
         .expect_err("integer tolerance is a RunMat-only extension");
 
@@ -937,7 +957,7 @@ mod tests {
             Value::FunctionHandle("sin".into()),
             Value::Num(0.0),
             Value::Tensor(bound),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect_err("wide integer bound cannot cross exactly");
 
@@ -954,10 +974,10 @@ mod tests {
             Value::FunctionHandle("sin".into()),
             Value::Num(0.0),
             Value::Num(1.0),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::Tensor(Tensor::zeros(vec![0, 0])),
                 Value::Tensor(trace),
-            ],
+            ]),
         ))
         .expect("documented integer trace selector");
 
@@ -997,11 +1017,11 @@ mod tests {
             integrand,
             Value::Num(0.0),
             Value::Num(1.0),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::Tensor(Tensor::zeros(vec![0, 0])),
                 Value::Num(0.0),
                 Value::Tensor(parameter),
-            ],
+            ]),
         )))
         .expect("exact callback parameter");
 
@@ -1026,7 +1046,7 @@ mod tests {
                 Value::FunctionHandle("sin".into()),
                 Value::Num(0.0),
                 Value::GpuTensor(automatic),
-                Vec::new(),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
             ))
             .expect("automatic resident bound gathers");
             assert!(matches!(result, Value::Num(_)));
@@ -1045,7 +1065,7 @@ mod tests {
                 Value::FunctionHandle("sin".into()),
                 Value::Num(0.0),
                 Value::GpuTensor(explicit),
-                Vec::new(),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
             ))
             .expect_err("explicit resident bound is gated before fallback");
             assert_eq!(
@@ -1085,11 +1105,11 @@ mod tests {
             integrand,
             Value::Num(0.0),
             Value::Num(2.0),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::Tensor(Tensor::zeros(vec![0, 0])),
                 Value::Tensor(Tensor::zeros(vec![0, 0])),
                 Value::Num(3.0),
-            ],
+            ]),
         )))
         .expect("quad");
         match result {
@@ -1104,7 +1124,7 @@ mod tests {
             Value::FunctionHandle("sin".into()),
             Value::Num(0.0),
             Value::Num(2.0 * std::f64::consts::PI),
-            vec![Value::Num(1.0e-8)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0e-8)]),
         ))
         .expect("quad");
         match result {
@@ -1137,7 +1157,7 @@ mod tests {
             integrand,
             Value::Num(0.0),
             Value::Num(1.0),
-            vec![Value::Num(1.0e-7)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0e-7)]),
         )))
         .expect("quad");
         match result {
@@ -1152,7 +1172,7 @@ mod tests {
             Value::FunctionHandle("sin".into()),
             Value::Num(std::f64::consts::PI),
             Value::Num(0.0),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect("quad");
         match result {
@@ -1168,7 +1188,7 @@ mod tests {
             Value::FunctionHandle("sin".into()),
             Value::Num(0.0),
             Value::Num(1.0),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect_err("too many outputs should fail");
         assert_eq!(err.identifier(), Some("RunMat:quad:TooManyOutputs"));
@@ -1212,7 +1232,7 @@ mod tests {
             Value::FunctionHandle("sin".into()),
             Value::Num(0.0),
             Value::Num(1.0),
-            vec![Value::Num(-1.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(-1.0)]),
         ))
         .expect_err("negative tolerance");
         assert_eq!(error.identifier(), QUAD_ERROR_INVALID_ARGUMENT.identifier);
@@ -1224,7 +1244,7 @@ mod tests {
             Value::Num(7.0),
             Value::Num(0.0),
             Value::Num(1.0),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect_err("invalid callback");
         assert_eq!(
@@ -1250,7 +1270,7 @@ mod tests {
             Value::FunctionHandle("sin".into()),
             Value::Num(0.0),
             Value::Num(1.0),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect_err("cancelled invocation");
         assert_eq!(error.identifier(), Some("RunMat:Cancelled"));

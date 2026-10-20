@@ -11,8 +11,8 @@ const INTEGER_CONSTRUCTORS: [&str; 8] = [
 fn contains_text(values: &[Value], expected: &str) -> bool {
     values.iter().any(|value| match value {
         Value::String(text) => text == expected,
-        Value::StringArray(strings) => strings.data.iter().any(|text| text == expected),
-        Value::CharArray(chars) => chars.data.iter().collect::<String>() == expected,
+        Value::StringArray(strings) => strings.data().iter().any(|text| text == expected),
+        Value::CharArray(chars) => chars.data().iter().collect::<String>() == expected,
         _ => false,
     })
 }

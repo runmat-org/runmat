@@ -8,7 +8,7 @@ use super::super::{error, mutation, names::*};
 
 const IDENTITY: &str = "unsetenv";
 
-pub(super) fn run(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub(super) fn run(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     let requested = crate::output_count::current_output_count();
     if requested.is_some_and(|count| count > 1) {
         return Err(error::builtin(IDENTITY, &UNSETENV_ERROR_TOO_MANY_OUTPUTS));
@@ -19,9 +19,10 @@ pub(super) fn run(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             IDENTITY,
         )?;
     }
-    let [value] = args.as_slice() else {
+    if args.len() != 1 {
         return Err(error::builtin(IDENTITY, &UNSETENV_ERROR_ARITY));
-    };
+    }
+    let value = args.first().expect("validated one argument");
     let names = EnvironmentNames::decode(value)
         .map_err(|_| error::builtin(IDENTITY, &UNSETENV_ERROR_NAME))?;
     if names.features().next().is_some() {

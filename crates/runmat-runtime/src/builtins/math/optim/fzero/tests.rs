@@ -21,7 +21,7 @@ fn registered_fzero_preserves_invocation_cancellation_before_solver_effects() {
         Some(runtime),
         Value::FunctionHandle("sin".into()),
         Value::Num(0.0),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect_err("cancelled invocation must not call callback");
     assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
@@ -71,7 +71,7 @@ fn dropping_a_pending_callback_abandons_the_solver_without_publication() {
     let mut call = Box::pin(fzero_builtin(
         crate::user_functions::test_support::exact_local_value("pending_callback", binding),
         Value::Num(0.0),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ));
     let mut context = Context::from_waker(futures::task::noop_waker_ref());
     assert!(matches!(call.as_mut().poll(&mut context), Poll::Pending));
@@ -87,7 +87,7 @@ fn fzero_bracketed_builtin_handle() {
     let root = block_on(fzero_builtin(
         Value::FunctionHandle("sin".into()),
         Value::Tensor(bracket),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap();
     match root {
@@ -103,7 +103,7 @@ fn fzero_accepts_admitted_logical_interval_without_widening_its_control_class() 
     let root = block_on(fzero_builtin(
         Value::FunctionHandle("sin".into()),
         Value::LogicalArray(interval),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap();
     assert!(matches!(root, Value::Num(value) if value == 0.0));
@@ -118,7 +118,7 @@ fn fzero_single_interval_returns_single_numerical_outputs() {
     let result = block_on(fzero_builtin(
         Value::FunctionHandle("sin".into()),
         Value::Tensor(bracket),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap();
     let Value::OutputList(outputs) = result else {
@@ -167,7 +167,7 @@ fn fzero_single_precision_is_explicitly_threaded_through_all_callback_calls() {
     let root = block_on(fzero_builtin(
         crate::user_functions::test_support::exact_local_value("single_root", binding),
         Value::Tensor(bracket),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap();
     assert!(
@@ -227,7 +227,7 @@ fn fzero_bracket_reads_typed_integer_storage_exactly() {
     let root = block_on(fzero_builtin(
         Value::FunctionHandle("sin".into()),
         Value::Tensor(bracket),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap();
     match root {
@@ -241,7 +241,7 @@ fn fzero_scalar_initial_guess_expands_bracket() {
     let root = block_on(fzero_builtin(
         Value::FunctionHandle("cos".into()),
         Value::Num(1.0),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap();
     match root {
@@ -258,7 +258,7 @@ fn fzero_initial_guess_reads_typed_integer_storage_exactly() {
     let root = block_on(fzero_builtin(
         Value::FunctionHandle("cos".into()),
         Value::Tensor(guess),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap();
     match root {
@@ -272,7 +272,7 @@ fn fzero_scalar_initial_guess_uses_center_sign_for_bracket() {
     let root = block_on(fzero_builtin(
         Value::FunctionHandle("sin".into()),
         Value::Num(std::f64::consts::FRAC_PI_2),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap();
     match root {
@@ -393,7 +393,7 @@ fn fzero_accepts_semantic_function_handle_callback() {
     let root = block_on(fzero_builtin(
         crate::user_functions::test_support::exact_local_value("root_function", binding),
         Value::Num(0.0),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap();
     match root {
@@ -409,7 +409,7 @@ fn fzero_multi_output_two_returns_root_and_fval() {
     let result = block_on(fzero_builtin(
         Value::FunctionHandle("sin".into()),
         Value::Tensor(bracket),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("fzero");
     match result {
@@ -434,7 +434,7 @@ fn fzero_multi_output_four_includes_output_struct() {
     let result = block_on(fzero_builtin(
         Value::FunctionHandle("sin".into()),
         Value::Tensor(bracket),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("fzero");
     match result {
@@ -469,7 +469,7 @@ fn fzero_multi_output_four_includes_output_struct() {
 
 #[test]
 fn fzero_reports_zero_exitflag_when_iteration_budget_exhausted() {
-    let mut opts = StructValue::new();
+    let mut opts = runmat_value::UnboundedStructValueBuilder::new();
     opts.insert("MaxIter", Value::Num(1.0));
     opts.insert("MaxFunEvals", Value::Num(2.0));
     opts.insert("Display", Value::from("off"));
@@ -478,7 +478,9 @@ fn fzero_reports_zero_exitflag_when_iteration_budget_exhausted() {
     let result = block_on(fzero_builtin(
         Value::FunctionHandle("sin".into()),
         Value::Tensor(bracket),
-        vec![Value::Struct(opts)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Struct(
+            opts.finish(),
+        )]),
     ))
     .expect("fzero");
     match result {
@@ -492,7 +494,7 @@ fn fzero_reports_zero_exitflag_when_iteration_budget_exhausted() {
 
 #[test]
 fn fzero_reports_convergence_when_final_step_hits_root() {
-    let mut opts = StructValue::new();
+    let mut opts = runmat_value::UnboundedStructValueBuilder::new();
     opts.insert("MaxIter", Value::Num(1.0));
     opts.insert("Display", Value::from("off"));
     let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
@@ -500,7 +502,9 @@ fn fzero_reports_convergence_when_final_step_hits_root() {
     let result = block_on(fzero_builtin(
         Value::FunctionHandle("sin".into()),
         Value::Tensor(bracket),
-        vec![Value::Struct(opts)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Struct(
+            opts.finish(),
+        )]),
     ))
     .expect("fzero");
     match result {
@@ -520,7 +524,7 @@ fn fzero_rejects_more_than_four_outputs() {
     let err = block_on(fzero_builtin(
         Value::FunctionHandle("sin".into()),
         Value::Tensor(bracket),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect_err("too many outputs should fail");
     assert_eq!(err.identifier(), Some("RunMat:fzero:TooManyOutputs"));
@@ -530,13 +534,15 @@ fn fzero_rejects_more_than_four_outputs() {
 #[test]
 fn fzero_iter_display_records_iteration_rows() {
     crate::console::reset_thread_buffer();
-    let mut opts = StructValue::new();
+    let mut opts = runmat_value::UnboundedStructValueBuilder::new();
     opts.insert("Display", Value::from("iter"));
     let bracket = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
     let result = block_on(fzero_builtin(
         Value::FunctionHandle("sin".into()),
         Value::Tensor(bracket),
-        vec![Value::Struct(opts)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Struct(
+            opts.finish(),
+        )]),
     ))
     .expect("fzero");
     assert!(matches!(result, Value::Num(_)));
@@ -606,10 +612,10 @@ fn fzero_too_many_args_uses_stable_identifier() {
     let err = block_on(fzero_builtin(
         Value::FunctionHandle("sin".into()),
         Value::Num(0.0),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::Struct(StructValue::new()),
             Value::Struct(StructValue::new()),
-        ],
+        ]),
     ))
     .unwrap_err();
     assert_eq!(err.identifier(), Some("RunMat:fzero:InvalidArgument"));

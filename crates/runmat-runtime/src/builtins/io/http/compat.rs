@@ -48,23 +48,26 @@ fn compat_error_with_source(
         .build()
 }
 
-async fn gather_args(name: &str, args: &[Value]) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(args.len());
-    for value in args {
-        out.push(
-            gather_if_needed_async(value)
-                .await
-                .map_err(|err| compat_error(name, format!("{name}: {}", err.message())))?,
-        );
-    }
-    Ok(out)
+async fn gather_args(
+    name: &str,
+    args: &crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    args.try_map_preserving_roots_async(args.len(), runtime, |index| async move {
+        gather_if_needed_async(&args[index])
+            .await
+            .map_err(|err| compat_error(name, format!("{name}: {}", err.message())))
+    })
+    .await
 }
 
 fn scalar_text(value: &Value, name: &str, arg: &str) -> BuiltinResult<String> {
     match value {
-        Value::String(text) => Ok(text.clone()),
-        Value::CharArray(array) if array.rows == 1 => Ok(array.data.iter().collect()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::String(text) => Ok(text.as_str().to_owned()),
+        Value::CharArray(array) if array.rows == 1 => Ok(array.data().iter().collect()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(array.data()[0].as_str().to_owned())
+        }
         _ => Err(compat_error(
             name,
             format!("{name}: {arg} must be a string scalar or character vector"),
@@ -81,7 +84,7 @@ fn char_value(text: &str) -> Value {
     binding_variant = "default",
     builtin_path = "crate::builtins::io::http::compat"
 )]
-async fn urlencode_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn urlencode_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &URLENCODE_DESCRIPTOR,
         &URLENCODE_ERROR_TOO_MANY_OUTPUTS,
@@ -98,13 +101,15 @@ async fn urlencode_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 
 fn url_text_input(value: &Value) -> Option<String> {
     match value {
-        Value::String(text) => Some(text.clone()),
+        Value::String(text) => Some(text.as_str().to_owned()),
         Value::CharArray(array)
             if array.rows == 1 && array.shape.iter().skip(2).all(|extent| *extent == 1) =>
         {
-            Some(array.data.iter().collect())
+            Some(array.data().iter().collect())
         }
-        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Some(array.data()[0].as_str().to_owned())
+        }
         _ => None,
     }
 }
@@ -134,7 +139,7 @@ fn percent_encode(text: &str) -> String {
     binding_variant = "default",
     builtin_path = "crate::builtins::io::http::compat"
 )]
-async fn urldecode_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn urldecode_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &URLDECODE_DESCRIPTOR,
         &URLDECODE_ERROR_TOO_MANY_OUTPUTS,
@@ -189,7 +194,7 @@ fn percent_decode(text: &str) -> BuiltinResult<String> {
 )]
 async fn websave_builtin(
     context: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &WEBSAVE_DESCRIPTOR,
@@ -219,8 +224,9 @@ async fn websave_builtin(
         Some(Value::Struct(source)) => Some(super::api_key::PreparedApiKey::parse(source)),
         _ => None,
     };
-    preflight_websave_rest(&args[2..], prepared_api_key.as_ref())?;
-    let rest = gather_args("websave", &args[2..]).await?;
+    preflight_websave_rest(args.view().range(2..)?, prepared_api_key.as_ref())?;
+    let tail = args.range(2..)?;
+    let rest = gather_args("websave", &tail, context.as_ref()).await?;
     let mut headers = Vec::new();
     let mut timeout = DEFAULT_TIMEOUT;
     let mut user_agent = USER_AGENT.to_string();
@@ -229,7 +235,7 @@ async fn websave_builtin(
         &mut headers,
         &mut timeout,
         &mut user_agent,
-        &rest,
+        rest.view(),
         prepared_api_key.as_ref(),
     )?;
     let response = transport::send_request(
@@ -264,7 +270,7 @@ async fn websave_builtin(
 )]
 async fn sendmail_builtin(
     context: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &SENDMAIL_DESCRIPTOR,
@@ -280,7 +286,7 @@ async fn sendmail_builtin(
             "sendmail: mail arguments must be text, not numeric or resident values",
         ));
     }
-    let (recipients, subject, body) = parse_sendmail_args(&args)?;
+    let (recipients, subject, body) = parse_sendmail_args(args.view())?;
     let message = format_mail_message(&recipients, &subject, &body);
 
     let outbox = std::env::var("RUNMAT_SENDMAIL_OUTBOX").ok();

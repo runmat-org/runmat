@@ -18,7 +18,7 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericDType,
-    NumericScalar, NumericStorage, StringArray, Tensor, Value,
+    NumericScalar, NumericStorage, StringArray, Tensor, Utf8Text, Value,
 };
 
 use super::{
@@ -318,7 +318,7 @@ enum ComplexRowKey {
 struct RowCharKey(Vec<u32>);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct RowStringKey(Vec<String>);
+struct RowStringKey<'a>(Vec<&'a Utf8Text>);
 
 fn setxor_error_with(
     error: &'static BuiltinErrorDescriptor,
@@ -553,14 +553,14 @@ fn setxor_host(a: Value, b: Value, opts: &SetxorOptions) -> crate::BuiltinResult
             setxor_string(astring, bstring, opts)
         }
         (Value::String(a), right) if value_is_string_compatible(&right) => {
-            let astring = StringArray::new(vec![a], vec![1, 1])
+            let astring = StringArray::from_texts_unbounded(vec![a], vec![1, 1])
                 .map_err(|e| setxor_internal_error(format!("setxor: {e}")))?;
             let bstring = value_into_string_array(right)?;
             setxor_string(astring, bstring, opts)
         }
         (left, Value::String(b)) if value_is_string_compatible(&left) => {
             let astring = value_into_string_array(left)?;
-            let bstring = StringArray::new(vec![b], vec![1, 1])
+            let bstring = StringArray::from_texts_unbounded(vec![b], vec![1, 1])
                 .map_err(|e| setxor_internal_error(format!("setxor: {e}")))?;
             setxor_string(astring, bstring, opts)
         }
@@ -568,19 +568,19 @@ fn setxor_host(a: Value, b: Value, opts: &SetxorOptions) -> crate::BuiltinResult
             setxor_string(astring, bstring, opts)
         }
         (Value::StringArray(astring), Value::String(b)) => {
-            let bstring = StringArray::new(vec![b], vec![1, 1])
+            let bstring = StringArray::from_texts_unbounded(vec![b], vec![1, 1])
                 .map_err(|e| setxor_internal_error(format!("setxor: {e}")))?;
             setxor_string(astring, bstring, opts)
         }
         (Value::String(a), Value::StringArray(bstring)) => {
-            let astring = StringArray::new(vec![a], vec![1, 1])
+            let astring = StringArray::from_texts_unbounded(vec![a], vec![1, 1])
                 .map_err(|e| setxor_internal_error(format!("setxor: {e}")))?;
             setxor_string(astring, bstring, opts)
         }
         (Value::String(a), Value::String(b)) => {
-            let astring = StringArray::new(vec![a], vec![1, 1])
+            let astring = StringArray::from_texts_unbounded(vec![a], vec![1, 1])
                 .map_err(|e| setxor_internal_error(format!("setxor: {e}")))?;
-            let bstring = StringArray::new(vec![b], vec![1, 1])
+            let bstring = StringArray::from_texts_unbounded(vec![b], vec![1, 1])
                 .map_err(|e| setxor_internal_error(format!("setxor: {e}")))?;
             setxor_string(astring, bstring, opts)
         }
@@ -637,7 +637,7 @@ fn value_is_string_compatible(value: &Value) -> bool {
 fn value_into_string_array(value: Value) -> crate::BuiltinResult<StringArray> {
     match value {
         Value::StringArray(array) => Ok(array),
-        Value::String(value) => StringArray::new(vec![value], vec![1, 1])
+        Value::String(value) => StringArray::from_texts_unbounded(vec![value], vec![1, 1])
             .map_err(|e| setxor_internal_error(format!("setxor: {e}"))),
         Value::CharArray(chars) => char_array_to_string_array(chars),
         other => Err(setxor_error_with(
@@ -650,7 +650,7 @@ fn value_into_string_array(value: Value) -> crate::BuiltinResult<StringArray> {
 fn char_array_to_string_array(chars: CharArray) -> crate::BuiltinResult<StringArray> {
     let values = (0..chars.rows)
         .map(|row| {
-            chars.data[row * chars.cols..row * chars.cols + chars.cols]
+            chars.data()[row * chars.cols..row * chars.cols + chars.cols]
                 .iter()
                 .collect()
         })
@@ -1158,7 +1158,7 @@ fn setxor_char(
             for row in 0..a.rows {
                 let linear_idx = row + col * a.rows;
                 let data_idx = row * a.cols + col;
-                let ch = a.data[data_idx];
+                let ch = a.data()[data_idx];
                 add_sym_entry(
                     &mut entries,
                     &mut map,
@@ -1174,7 +1174,7 @@ fn setxor_char(
             for row in 0..b.rows {
                 let linear_idx = row + col * b.rows;
                 let data_idx = row * b.cols + col;
-                let ch = b.data[data_idx];
+                let ch = b.data()[data_idx];
                 add_sym_entry(
                     &mut entries,
                     &mut map,
@@ -1237,26 +1237,26 @@ fn setxor_string(
         setxor_string_rows(a, b, opts)
     } else {
         let row_output = element_row_output(&a.shape, &b.shape);
-        let mut entries = Vec::<SymEntry<String>>::new();
-        let mut map: HashMap<String, usize> = HashMap::new();
+        let mut entries = Vec::<SymEntry<&Utf8Text>>::new();
+        let mut map: HashMap<&str, usize> = HashMap::new();
         let mut order_counter = 0usize;
-        for (idx, value) in a.data.iter().enumerate() {
+        for (idx, value) in a.data().iter().enumerate() {
             add_sym_entry(
                 &mut entries,
                 &mut map,
-                value.clone(),
-                value.clone(),
+                value.as_str(),
+                value,
                 Origin::A,
                 idx,
                 &mut order_counter,
             );
         }
-        for (idx, value) in b.data.iter().enumerate() {
+        for (idx, value) in b.data().iter().enumerate() {
             add_sym_entry(
                 &mut entries,
                 &mut map,
-                value.clone(),
-                value.clone(),
+                value.as_str(),
+                value,
                 Origin::B,
                 idx,
                 &mut order_counter,
@@ -1282,7 +1282,7 @@ fn setxor_string_rows(
     let rows_a = a.shape[0];
     let rows_b = b.shape[0];
     let cols = a.shape[1];
-    let mut entries = Vec::<SymEntry<Vec<String>>>::new();
+    let mut entries = Vec::<SymEntry<Vec<&Utf8Text>>>::new();
     let mut map: HashMap<RowStringKey, usize> = HashMap::new();
     let mut order_counter = 0usize;
     for row in 0..rows_a {
@@ -1650,18 +1650,19 @@ fn assemble_char_rows(
 }
 
 fn assemble_string(
-    entries: Vec<SymEntry<String>>,
+    entries: Vec<SymEntry<&Utf8Text>>,
     opts: &SetxorOptions,
     row_output: bool,
 ) -> crate::BuiltinResult<SetxorEvaluation> {
     let order = symmetric_order(&entries, opts, |lhs, rhs| lhs.cmp(rhs));
     let values = order
         .iter()
-        .map(|&idx| entries[idx].value.clone())
+        .map(|&idx| (*entries[idx].value).clone())
         .collect::<Vec<_>>();
     let (ia, ib) = collect_indices(&entries, &order);
-    let value_array = StringArray::new(values, element_shape(row_output, order.len()))
-        .map_err(|e| setxor_internal_error(format!("setxor: {e}")))?;
+    let value_array =
+        StringArray::from_texts_unbounded(values, element_shape(row_output, order.len()))
+            .map_err(|e| setxor_internal_error(format!("setxor: {e}")))?;
     let (ia_tensor, ib_tensor) = index_tensors(ia, ib)?;
     Ok(SetxorEvaluation::new(
         Value::StringArray(value_array),
@@ -1671,20 +1672,20 @@ fn assemble_string(
 }
 
 fn assemble_string_rows(
-    entries: Vec<SymEntry<Vec<String>>>,
+    entries: Vec<SymEntry<Vec<&Utf8Text>>>,
     opts: &SetxorOptions,
     cols: usize,
 ) -> crate::BuiltinResult<SetxorEvaluation> {
     let order = symmetric_order(&entries, opts, |lhs, rhs| compare_string_rows(lhs, rhs));
     let rows = order.len();
-    let mut values = vec![String::new(); rows * cols];
+    let mut values = vec![Utf8Text::default(); rows * cols];
     for (row_pos, &entry_idx) in order.iter().enumerate() {
         for col in 0..cols {
             values[row_pos + col * rows] = entries[entry_idx].value[col].clone();
         }
     }
     let (ia, ib) = collect_indices(&entries, &order);
-    let value_array = StringArray::new(values, vec![rows, cols])
+    let value_array = StringArray::from_texts_unbounded(values, vec![rows, cols])
         .map_err(|e| setxor_internal_error(format!("setxor: {e}")))?;
     let (ia_tensor, ib_tensor) = index_tensors(ia, ib)?;
     Ok(SetxorEvaluation::new(
@@ -1784,13 +1785,13 @@ fn complex_row<T: Copy, S: ComplexSequence<T> + ?Sized>(
 
 fn char_row(array: &CharArray, row: usize) -> Vec<char> {
     (0..array.cols)
-        .map(|col| array.data[row * array.cols + col])
+        .map(|col| array.data()[row * array.cols + col])
         .collect()
 }
 
-fn string_row(array: &StringArray, row: usize, cols: usize) -> Vec<String> {
+fn string_row(array: &StringArray, row: usize, cols: usize) -> Vec<&Utf8Text> {
     (0..cols)
-        .map(|col| array.data[row + col * array.shape[0]].clone())
+        .map(|col| &array.data()[row + col * array.shape[0]])
         .collect()
 }
 
@@ -1861,7 +1862,7 @@ fn compare_char_rows(a: &[char], b: &[char]) -> Ordering {
     Ordering::Equal
 }
 
-fn compare_string_rows(a: &[String], b: &[String]) -> Ordering {
+fn compare_string_rows(a: &[&Utf8Text], b: &[&Utf8Text]) -> Ordering {
     for (lhs, rhs) in a.iter().zip(b.iter()) {
         let ord = lhs.cmp(rhs);
         if ord != Ordering::Equal {
@@ -1904,7 +1905,7 @@ mod tests {
         let Value::CharArray(empty_projection) = result else {
             panic!("expected character result");
         };
-        assert_eq!(empty_projection.data, vec!['a']);
+        assert_eq!(empty_projection.data(), vec!['a']);
 
         let rank_one = Tensor::new(vec![f64::from('b' as u32), f64::from('c' as u32)], vec![2])
             .expect("rank one");
@@ -1918,7 +1919,7 @@ mod tests {
             panic!("expected character result");
         };
         assert_eq!((row_projection.rows, row_projection.cols), (1, 3));
-        assert_eq!(row_projection.data, vec!['a', 'b', 'c']);
+        assert_eq!(row_projection.data(), vec!['a', 'b', 'c']);
     }
 
     #[test]
@@ -2363,7 +2364,7 @@ mod tests {
         let Value::CharArray(values) = eval.values_value() else {
             panic!("expected char array");
         };
-        assert_eq!(values.data, vec!['i', 'o']);
+        assert_eq!(values.data(), vec!['i', 'o']);
         assert_eq!((values.rows, values.cols), (1, 2));
         let ia = tensor::value_into_tensor_for("setxor", eval.ia_value()).unwrap();
         assert_double(&ia, &[2.0]);
@@ -2379,7 +2380,7 @@ mod tests {
         let Value::CharArray(values) = eval.values_value() else {
             panic!("expected char array");
         };
-        assert_eq!(values.data, vec!['a', 'c', 'd']);
+        assert_eq!(values.data(), vec!['a', 'c', 'd']);
         assert_eq!((values.rows, values.cols), (1, 3));
         let ia = tensor::value_into_tensor_for("setxor", eval.ia_value()).unwrap();
         assert_double(&ia, &[1.0, 3.0]);
@@ -2396,7 +2397,7 @@ mod tests {
         let Value::StringArray(values) = eval.values_value() else {
             panic!("expected string array");
         };
-        assert_eq!(values.data, vec!["alpha".to_string()]);
+        assert_eq!(values.data(), vec!["alpha".to_string()]);
         assert_eq!(values.shape, vec![1, 1]);
     }
 
@@ -2433,7 +2434,7 @@ mod tests {
         };
         assert_eq!(values.shape, vec![2, 2]);
         assert_eq!(
-            values.data,
+            values.data(),
             vec![
                 "alpha".to_string(),
                 "delta".to_string(),

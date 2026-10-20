@@ -71,7 +71,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::math::poly::polyint"
 )]
-async fn polyint_builtin(coeffs: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn polyint_builtin(
+    coeffs: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(polyint_argument_error("polyint: too many input arguments"));
     }
@@ -907,6 +910,9 @@ pub(crate) mod tests {
     }
 
     fn polyint_builtin(coeffs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::polyint_builtin(coeffs, rest))
+        block_on(super::polyint_builtin(
+            coeffs,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 }

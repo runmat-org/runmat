@@ -1,7 +1,9 @@
 use runmat_value::{CellArray, CharArray, StringArray, Value};
 
 fn run(value: Value) -> crate::BuiltinResult<Value> {
-    super::execute::run(vec![value])
+    super::execute::run(crate::builtins::common::test_support::builtin_arguments(
+        vec![value],
+    ))
 }
 
 #[test]

@@ -93,7 +93,7 @@ async fn validate_known_group(
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::String(_) => Some(1),
         Value::Tensor(tensor) => Some(tensor.len()),
         Value::LogicalArray(array) => Some(array.len()),
-        Value::StringArray(array) => Some(array.data.len()),
+        Value::StringArray(array) => Some(array.data().len()),
         Value::CharArray(array) => Some(array.rows),
         Value::GpuTensor(handle) => {
             if handle.physical().storage() != GpuTensorStorage::Real {
@@ -145,9 +145,9 @@ async fn could_match_group_length(
         cooperation.completed(1).await?;
         match value {
             Value::Cell(cell) => {
-                let mut scalar_labels = cell.data.len() == expected;
+                let mut scalar_labels = cell.data().len() == expected;
                 if scalar_labels {
-                    for item in &cell.data {
+                    for item in cell.data() {
                         scalar_labels &= could_be_scalar_label(item);
                         cooperation.completed(1).await?;
                         if !scalar_labels {
@@ -162,7 +162,7 @@ async fn could_match_group_length(
                             error,
                         )
                     })?;
-                    pending.push(cell.data.iter());
+                    pending.push(cell.data().iter());
                 }
             }
             Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::String(_) => {
@@ -172,7 +172,7 @@ async fn could_match_group_length(
             }
             Value::Tensor(tensor) if tensor.len() == expected => {}
             Value::LogicalArray(array) if array.len() == expected => {}
-            Value::StringArray(array) if array.data.len() == expected => {}
+            Value::StringArray(array) if array.data().len() == expected => {}
             Value::CharArray(array) if array.rows == expected => {}
             Value::GpuTensor(handle)
                 if handle
@@ -210,7 +210,7 @@ fn could_be_scalar_label(value: &Value) -> bool {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::String(_) => true,
         Value::Tensor(tensor) => tensor.len() == 1,
         Value::LogicalArray(array) => array.len() == 1,
-        Value::StringArray(array) => array.data.len() == 1,
+        Value::StringArray(array) => array.data().len() == 1,
         Value::CharArray(array) => array.rows == 1,
         Value::GpuTensor(handle) => {
             handle
@@ -239,7 +239,7 @@ async fn validate_group_leaf_classes(
                 pending.try_reserve(1).map_err(|error| {
                     allocation_failure("boxplot: grouping metadata exceeds available memory", error)
                 })?;
-                pending.push(cell.data.iter());
+                pending.push(cell.data().iter());
             }
             Value::GpuTensor(handle) if handle.physical().storage() != GpuTensorStorage::Real => {
                 return Err(invalid(

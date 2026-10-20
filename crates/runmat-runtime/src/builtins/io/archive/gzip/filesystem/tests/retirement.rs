@@ -68,7 +68,10 @@ fn public_pending_write_is_dropped_on_cancellation_or_abandonment_without_public
             Value::String("source.bin".into()),
             Value::String("out".into()),
         ];
-        let mut call = Box::pin(super::super::super::gzip_builtin(Some(runtime), args));
+        let mut call = Box::pin(super::super::super::gzip_builtin(
+            Some(runtime),
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ));
         assert!(poll_once(call.as_mut()).is_pending());
         assert_eq!(selected.writes.load(Ordering::SeqCst), 1);
 

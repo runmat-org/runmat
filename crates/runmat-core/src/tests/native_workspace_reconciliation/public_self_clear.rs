@@ -25,7 +25,7 @@ fn first_public_function_invocation_self_clear_does_not_resurrect_persistent() {
                 .expect("compile first-session function");
             let invocation = crate::ProcedureInvocation {
                 target: crate::ProcedureTarget::Function("selfClearFirst".into()),
-                arguments: Vec::new(),
+                arguments: crate::ProcedureArguments::Source(Vec::new()),
                 requested_outputs: 1,
             };
             let control = match mode {

@@ -27,7 +27,7 @@ fn asymmetric_cell_pages_are_linearized_in_column_major_order() {
         .into_iter()
         .flat_map(|value| vec![Value::Int(runmat_value::IntValue::U64(value)); 2])
         .collect::<Vec<_>>();
-    assert_eq!(column.data, expected);
+    assert_eq!(column.data(), expected);
     assert_eq!(column.shape, vec![24, 1]);
 }
 
@@ -51,7 +51,7 @@ fn cartesian_product_uses_rightmost_fastest_order() {
     let Value::StringArray(second) = &variables.fields["Var2"] else {
         panic!("expected string column")
     };
-    assert_eq!(second.data, vec!["x", "y", "z", "x", "y", "z"]);
+    assert_eq!(second.data(), vec!["x", "y", "z", "x", "y", "z"]);
 }
 
 #[test]
@@ -61,7 +61,7 @@ fn logical_character_and_cell_inputs_keep_their_container_contracts() {
     let Value::StringArray(column) = &variables.fields["Var1"] else {
         panic!("expected string column")
     };
-    assert_eq!(column.data, vec!["a", "b"]);
+    assert_eq!(column.data(), vec!["a", "b"]);
 
     let logical = table(
         call(
@@ -90,7 +90,7 @@ fn logical_character_and_cell_inputs_keep_their_container_contracts() {
         panic!("expected cell column")
     };
     assert_eq!(
-        column.data,
+        column.data(),
         vec![Value::Num(1.0), Value::String("x".into())]
     );
 }
@@ -136,7 +136,7 @@ fn unsupported_sequence_representations_are_retained_as_single_cell_values() {
     let Value::Cell(column) = &variables.fields["Var1"] else {
         panic!("expected cell column")
     };
-    assert_eq!(column.data, vec![complex]);
+    assert_eq!(column.data(), vec![complex]);
 
     let characters = Value::CharArray(CharArray::new(vec!['a', 'b'], 2, 1).unwrap());
     let output = table(call(characters.clone(), Vec::new()).unwrap());
@@ -144,6 +144,6 @@ fn unsupported_sequence_representations_are_retained_as_single_cell_values() {
     let variables = table_variables(&output).unwrap();
     assert!(matches!(
         &variables.fields["Var1"],
-        Value::Cell(column) if column.data == [characters]
+        Value::Cell(column) if column.data() == [characters]
     ));
 }

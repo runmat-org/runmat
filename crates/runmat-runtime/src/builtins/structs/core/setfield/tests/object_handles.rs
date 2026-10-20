@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn setfield_object_extension_rejects_before_handle_mutation() {
     let mut object = ObjectInstance::new("StrictHandle");
-    object.properties.insert("value".into(), Value::Num(1.0));
+    object.replace_property_unbounded("value".into(), Value::Num(1.0));
     let target = gc_allocate(Value::Object(object)).expect("handle target");
     let handle = HandleRef {
         class_name: "StrictHandle".into(),
@@ -25,7 +25,7 @@ fn setfield_object_extension_rejects_before_handle_mutation() {
     else {
         panic!("expected object target");
     };
-    assert_eq!(object.properties.get("value"), Some(&Value::Num(1.0)));
+    assert_eq!(object.properties().get("value"), Some(&Value::Num(1.0)));
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -33,7 +33,7 @@ fn setfield_object_extension_rejects_before_handle_mutation() {
 fn setfield_updates_handle_target() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     let mut inner = ObjectInstance::new("PointHandle".to_string());
-    inner.properties.insert("x".to_string(), Value::Num(0.0));
+    inner.replace_property_unbounded("x".to_string(), Value::Num(0.0));
     let gc_ptr = gc_allocate(Value::Object(inner)).expect("gc allocation");
     let handle_ptr = gc_ptr;
     let handle = HandleRef {
@@ -56,7 +56,7 @@ fn setfield_updates_handle_target() {
     let pointee = runmat_gc::gc_clone_value(&gc_ptr).expect("valid handle target");
     match pointee {
         Value::Object(obj) => {
-            assert_eq!(obj.properties.get("x"), Some(&Value::Num(7.0)));
+            assert_eq!(obj.properties().get("x"), Some(&Value::Num(7.0)));
         }
         other => panic!("expected object pointee, got {other:?}"),
     }

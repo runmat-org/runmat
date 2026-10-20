@@ -19,7 +19,7 @@ fn skips_special_folders_and_their_descendants() {
     }
     let result = segments(
         call(vec![Value::String(
-            directory.path().to_string_lossy().into(),
+            directory.path().to_string_lossy().into_owned().into(),
         )])
         .expect("genpath"),
     );
@@ -41,7 +41,7 @@ fn resolves_relative_exclusions_from_the_root() {
     let _compatibility = crate::compatibility::push_runmat_extensions_enabled(true);
     let result = segments(
         call(vec![
-            Value::String(directory.path().to_string_lossy().into()),
+            Value::String(directory.path().to_string_lossy().into_owned().into()),
             Value::String("skip".into()),
         ])
         .expect("genpath"),
@@ -63,8 +63,8 @@ fn excluding_a_parent_omits_its_entire_subtree() {
     let _compatibility = crate::compatibility::push_runmat_extensions_enabled(true);
     let result = segments(
         call(vec![
-            Value::String(directory.path().to_string_lossy().into()),
-            Value::String(canonical(&directory.path().join("alpha"))),
+            Value::String(directory.path().to_string_lossy().into_owned().into()),
+            Value::String(canonical(&directory.path().join("alpha")).into()),
         ])
         .expect("genpath"),
     );

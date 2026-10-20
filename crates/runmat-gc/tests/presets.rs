@@ -288,7 +288,7 @@ fn test_concurrent_collection_config() {
         assert!(result.is_ok());
 
         // Should still work with concurrent collection enabled
-        let value = Value::String("test".to_string());
+        let value = Value::String("test".to_string().into());
         let ptr = gc_allocate(value);
         assert!(ptr.is_ok());
     });

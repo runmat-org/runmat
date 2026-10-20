@@ -27,8 +27,8 @@ mod project_replacement;
 mod project_retirement;
 use callback_admission::CallbackAdmission;
 #[cfg(test)]
-use environment::environment_metadata;
-use environment::{issued_python_status_value, validate_environment};
+use environment::{environment_metadata, validate_environment};
+use environment::{issued_python_status_value, validate_rooted_environment};
 use isolated::{IsolatedCallGuard, NestedCallLease};
 use prepared::{prepare_python_call, PreparedPythonCall};
 pub use project_replacement::{
@@ -55,7 +55,7 @@ struct ReleaseQueue(Mutex<Vec<u64>>);
 
 #[derive(Clone)]
 struct PythonCallbackRegistration {
-    callback: RetainedValueReadLease,
+    callback: crate::call::RetainedCallableTarget,
     context: RuntimeContext,
     foreign: std::rc::Weak<dyn crate::context::RuntimeForeignService>,
 }
@@ -575,17 +575,18 @@ impl PythonAdapter {
 
     fn invoke_control_now(
         &self,
+        runtime: Option<&RuntimeContext>,
         call: ForeignCall,
     ) -> Result<runmat_value::ValueSequence, RuntimeError> {
         match call.symbol.as_str() {
             "status" => self
-                .status_value()
+                .status_value(runtime)
                 .and_then(super::super::single_output_sequence),
             "configure" => self
-                .configure_value(call.arguments)
+                .configure_value(runtime, call.arguments)
                 .and_then(super::super::single_output_sequence),
             "terminate" => self
-                .terminate_value(call.arguments)
+                .terminate_value(runtime, call.arguments)
                 .and_then(super::super::single_output_sequence),
             _ => Err(invalid_call(
                 "unsupported synchronous Python control operation",
@@ -700,9 +701,9 @@ impl PythonAdapter {
     fn argument_to_python(
         &self,
         context: &RuntimeContext,
-        value: Value,
+        value: crate::call::RootedArgumentValue,
     ) -> Result<PythonValue, RuntimeError> {
-        if super::super::is_callable(&value) {
+        if super::super::is_callable(value.value()) {
             let foreign = context
                 .service_ports()
                 .foreign()
@@ -714,7 +715,16 @@ impl PythonAdapter {
                     .checked_add(1)
                     .ok_or_else(|| invalid_call("Python callback identity space is exhausted"))?,
             );
-            let callback_value = RetainedValueReadLease::prepare_owned(value, context)?;
+            let callback_value = match value {
+                crate::call::RootedArgumentValue::Owned(value) => {
+                    crate::call::RetainedCallableTarget::Direct(
+                        RetainedValueReadLease::prepare_owned(value, context)?,
+                    )
+                }
+                crate::call::RootedArgumentValue::Captured(value) => {
+                    crate::call::RetainedCallableTarget::Captured(value)
+                }
+            };
             self.callbacks.borrow_mut().insert(
                 callback,
                 PythonCallbackRegistration {
@@ -727,11 +737,14 @@ impl PythonAdapter {
             );
             return Ok(PythonValue::Callback(callback));
         }
-        match value {
-            Value::Foreign(reference) if reference.type_identity.family == PYTHON_ADAPTER_ID => {
-                self.python_handle(&reference).map(PythonValue::Object)
+        if let Value::Foreign(reference) = value.value() {
+            if reference.type_identity.family == PYTHON_ADAPTER_ID {
+                return self.python_handle(reference).map(PythonValue::Object);
             }
-            value => value_to_python(value),
+        }
+        match value.into_owned() {
+            Ok(value) => value_to_python(value),
+            Err(value) => super::conversion::value_ref_to_python(value.value()),
         }
     }
 
@@ -841,12 +854,12 @@ impl PythonAdapter {
             let value = crate::sequence::into_first_output(values)
                 .map_err(|error| PythonError::host("PythonCallbackError", error.to_string()))?
                 .expect("one Python callback output was selected");
-            self.argument_to_python(context, value)
+            self.argument_to_python(context, value.into())
                 .map_err(|error| PythonError::host("PythonCallbackError", error.to_string()))
         })
     }
 
-    fn status_value(&self) -> Result<Value, RuntimeError> {
+    fn status_value(&self, runtime: Option<&RuntimeContext>) -> Result<Value, RuntimeError> {
         let configuration = self.configuration.borrow().clone();
         let running = self.is_running();
         let process_id = self
@@ -856,6 +869,7 @@ impl PythonAdapter {
             .and_then(IsolatedPythonClient::process_id)
             .or_else(|| running.then(std::process::id));
         issued_python_status_value(
+            runtime,
             &self.handles,
             &self.host_identity,
             &configuration,
@@ -865,7 +879,11 @@ impl PythonAdapter {
         )
     }
 
-    fn configure_value(&self, arguments: Vec<Value>) -> Result<Value, RuntimeError> {
+    fn configure_value(
+        &self,
+        runtime: Option<&RuntimeContext>,
+        arguments: crate::call::RootedFunctionArguments,
+    ) -> Result<Value, RuntimeError> {
         if self.is_running() || self.isolated_call_active.get() {
             return Err(invalid_call(
                 "pyenv cannot change Python configuration after startup",
@@ -875,10 +893,17 @@ impl PythonAdapter {
             return Err(invalid_call("pyenv requires name-value pairs"));
         }
         let mut configuration = self.configuration.borrow().clone();
-        let mut arguments = arguments.into_iter();
+        let mut arguments = arguments.try_into_values()?;
         while let Some(name) = arguments.next() {
-            let name = string_argument(Some(name), "pyenv option")?.to_ascii_lowercase();
-            let value = string_argument(arguments.next(), "pyenv option value")?;
+            let name =
+                string_argument_ref(Some(name.value()), "pyenv option")?.to_ascii_lowercase();
+            let value = string_argument_ref(
+                arguments
+                    .next()
+                    .as_ref()
+                    .map(crate::call::RootedArgumentValue::value),
+                "pyenv option value",
+            )?;
             match name.as_str() {
                 "version" => {
                     let path = std::path::PathBuf::from(&value);
@@ -910,11 +935,15 @@ impl PythonAdapter {
         }
         discover_python(&discovery_request(&configuration)).map_err(python_runtime_error)?;
         self.configure(configuration)?;
-        self.status_value()
+        self.status_value(runtime)
     }
 
-    fn terminate_value(&self, arguments: Vec<Value>) -> Result<Value, RuntimeError> {
-        validate_environment(&self.handles, &self.host_identity, &arguments)?;
+    fn terminate_value(
+        &self,
+        runtime: Option<&RuntimeContext>,
+        arguments: crate::call::RootedFunctionArguments,
+    ) -> Result<Value, RuntimeError> {
+        validate_rooted_environment(&self.handles, &self.host_identity, &arguments)?;
         if self.configuration.borrow().execution_mode != PythonExecutionMode::OutOfProcess {
             return Err(invalid_call(
                 "terminate is available only for an OutOfProcess Python environment",
@@ -928,7 +957,7 @@ impl PythonAdapter {
             released.clear();
         }
         self.terminated.set(true);
-        self.status_value()
+        self.status_value(runtime)
     }
 
     fn isolated_state(&self) -> IsolatedPythonState {
@@ -1058,12 +1087,13 @@ fn isolated_outputs(
 
 async fn terminate_isolated(
     state: IsolatedPythonState,
-    arguments: Vec<Value>,
+    context: Option<RuntimeContext>,
+    arguments: crate::call::RootedFunctionArguments,
 ) -> Result<Value, RuntimeError> {
     if state.retirement_requested.get() || state.project_retirement.is_pending() {
         return Err(invalid_call("Python selected adapter is retiring"));
     }
-    validate_environment(&state.handles, &state.host_identity, &arguments)?;
+    validate_rooted_environment(&state.handles, &state.host_identity, &arguments)?;
     if state.configuration.borrow().execution_mode != PythonExecutionMode::OutOfProcess {
         return Err(invalid_call(
             "terminate is available only for an OutOfProcess Python environment",
@@ -1113,6 +1143,7 @@ async fn terminate_isolated(
     crate::runtime_error::complete_with_cleanup(shutdown, restart)?;
     let configuration = state.configuration.borrow().clone();
     issued_python_status_value(
+        context.as_ref(),
         &state.handles,
         &state.host_identity,
         &configuration,
@@ -1187,8 +1218,11 @@ impl ForeignAdapter for PythonAdapter {
         if matches!(call.symbol.as_str(), "status" | "configure")
             || (mode == PythonExecutionMode::InProcess && call.symbol == "terminate")
         {
-            let result =
-                crate::foreign::runtime::root_adapter_result(self.invoke_control_now(call));
+            let result = self
+                .invoke_control_now(Some(&context), call)
+                .and_then(|sequence| {
+                    crate::execution::RootedValueSequence::in_context(sequence, &context)
+                });
             return Box::pin(async move { ForeignCallCompletion::invoked(result) });
         }
         if mode == PythonExecutionMode::InProcess {
@@ -1204,10 +1238,12 @@ impl ForeignAdapter for PythonAdapter {
             let state = self.isolated_state();
             let arguments = call.arguments;
             return Box::pin(async move {
-                let result = terminate_isolated(state, arguments)
+                let result = terminate_isolated(state, Some(context.clone()), arguments)
                     .await
                     .and_then(super::super::single_output_sequence);
-                ForeignCallCompletion::invoked(crate::foreign::runtime::root_adapter_result(result))
+                ForeignCallCompletion::invoked(result.and_then(|sequence| {
+                    crate::execution::RootedValueSequence::in_context(sequence, &context)
+                }))
             });
         }
         let state = self.isolated_state();
@@ -1290,15 +1326,7 @@ fn pin_configuration_to_bundle_environment(
     configuration.required_platform_tag = Some(environment.platform_tag.clone());
 }
 
-fn foreign_argument(value: Option<Value>) -> Result<ForeignRef, RuntimeError> {
-    match value {
-        Some(Value::Foreign(reference)) if reference.type_identity.family == PYTHON_ADAPTER_ID => {
-            Ok(reference)
-        }
-        _ => Err(invalid_call("Python receiver must be a Python object")),
-    }
-}
-
+#[cfg(test)]
 fn string_argument(value: Option<Value>, label: &str) -> Result<String, RuntimeError> {
     match value {
         Some(value) => value_text_scalar_string(&value)
@@ -1308,16 +1336,27 @@ fn string_argument(value: Option<Value>, label: &str) -> Result<String, RuntimeE
     }
 }
 
+fn string_argument_ref(value: Option<&Value>, label: &str) -> Result<String, RuntimeError> {
+    value
+        .and_then(value_text_scalar_string)
+        .ok_or_else(|| invalid_call(format!("{label} must be text")))
+}
+
+#[cfg(test)]
 fn output_names(value: Option<Value>) -> Result<Vec<String>, RuntimeError> {
     match value {
         None => Ok(Vec::new()),
-        Some(Value::String(value)) => Ok(vec![value]),
+        Some(Value::String(value)) => Ok(vec![value.into_string_unbounded()]),
         Some(Value::CharArray(value)) => value_text_scalar_string(&Value::CharArray(value))
             .map(|value| vec![value])
             .ok_or_else(|| invalid_call("Python outputs must be text")),
-        Some(Value::StringArray(value)) => Ok(value.data),
+        Some(Value::StringArray(value)) => Ok(value
+            .data()
+            .iter()
+            .map(|value| value.as_str().to_owned())
+            .collect()),
         Some(Value::Cell(value)) => value
-            .data
+            .data()
             .iter()
             .map(|value| {
                 value_text_scalar_string(value)
@@ -1328,6 +1367,31 @@ fn output_names(value: Option<Value>) -> Result<Vec<String>, RuntimeError> {
     }
 }
 
+pub(super) fn output_names_ref(value: Option<&Value>) -> Result<Vec<String>, RuntimeError> {
+    match value {
+        None => Ok(Vec::new()),
+        Some(Value::String(value)) => Ok(vec![value.as_str().to_owned()]),
+        Some(Value::CharArray(value)) => value_text_scalar_string(&Value::CharArray(value.clone()))
+            .map(|value| vec![value])
+            .ok_or_else(|| invalid_call("Python outputs must be text")),
+        Some(Value::StringArray(value)) => Ok(value
+            .data()
+            .iter()
+            .map(|value| value.as_str().to_owned())
+            .collect()),
+        Some(Value::Cell(value)) => value
+            .data()
+            .iter()
+            .map(|value| {
+                value_text_scalar_string(value)
+                    .ok_or_else(|| invalid_call("Python output names must be text"))
+            })
+            .collect(),
+        Some(_) => Err(invalid_call("Python outputs must be text")),
+    }
+}
+
+#[cfg(test)]
 fn split_file_inputs(arguments: Vec<Value>) -> Result<(Vec<String>, Vec<Value>), RuntimeError> {
     if arguments.len() >= 2 {
         if let Some(position) = arguments.iter().position(|value| {
@@ -1340,7 +1404,7 @@ fn split_file_inputs(arguments: Vec<Value>) -> Result<(Vec<String>, Vec<Value>),
                 ));
             };
             let script_arguments = values
-                .data
+                .data()
                 .iter()
                 .map(|value| {
                     value_text_scalar_string(value)
@@ -1355,6 +1419,7 @@ fn split_file_inputs(arguments: Vec<Value>) -> Result<(Vec<String>, Vec<Value>),
     Ok((Vec::new(), arguments))
 }
 
+#[cfg(test)]
 fn python_index(value: Option<Value>) -> Result<PythonValue, RuntimeError> {
     let value = value.ok_or_else(|| invalid_call("Python index is required"))?;
     let one_based = match value {
@@ -1382,6 +1447,34 @@ fn python_index(value: Option<Value>) -> Result<PythonValue, RuntimeError> {
     Ok(PythonValue::Unsigned(one_based as u64 - 1))
 }
 
+pub(super) fn python_index_ref(value: Option<&Value>) -> Result<PythonValue, RuntimeError> {
+    let value = value.ok_or_else(|| invalid_call("Python index is required"))?;
+    let one_based = match value {
+        Value::Int(value) => {
+            let index = value
+                .try_to_u64()
+                .and_then(|value| value.checked_sub(1))
+                .ok_or_else(|| {
+                    invalid_call("Python positional indices must be positive integers")
+                })?;
+            return Ok(PythonValue::Unsigned(index));
+        }
+        Value::Num(value) => *value,
+        _ => return super::conversion::value_ref_to_python(value),
+    };
+    if !one_based.is_finite()
+        || one_based.fract() != 0.0
+        || one_based < 1.0
+        || one_based >= u64::MAX as f64
+    {
+        return Err(invalid_call(
+            "Python positional indices must be positive integers",
+        ));
+    }
+    Ok(PythonValue::Unsigned(one_based as u64 - 1))
+}
+
+#[cfg(test)]
 fn python_indices(values: Vec<Value>) -> Result<PythonValue, RuntimeError> {
     if values.is_empty() {
         return Err(invalid_call("Python indexing requires at least one index"));
@@ -1397,6 +1490,7 @@ fn python_indices(values: Vec<Value>) -> Result<PythonValue, RuntimeError> {
     }
 }
 
+#[cfg(test)]
 fn split_item_assignment_arguments(
     mut arguments: Vec<Value>,
 ) -> Result<(Vec<Value>, Value), RuntimeError> {
@@ -1462,6 +1556,12 @@ mod text_tests;
 mod tests {
     use runmat_value::{HandleRef, ObjectInstance};
 
+    fn rooted(arguments: Vec<Value>) -> crate::call::RootedFunctionArguments {
+        crate::call::RootedFunctionArguments::ordinary(
+            crate::execution::RootedValues::new(arguments).unwrap(),
+        )
+    }
+
     impl super::PythonAdapter {
         fn retained_values(&self) -> Option<Vec<runmat_value::Value>> {
             let mut values = Vec::new();
@@ -1483,7 +1583,9 @@ mod tests {
                 call: crate::context::ForeignCall {
                     adapter: "python".into(),
                     symbol: "pending".into(),
-                    arguments: vec![runmat_value::Value::String("retained-argument".into())],
+                    arguments: rooted(vec![runmat_value::Value::String(
+                        "retained-argument".into(),
+                    )]),
                     requested_outputs: 1,
                 },
                 reply,
@@ -1503,13 +1605,15 @@ mod tests {
         adapter.callbacks.borrow_mut().insert(
             1,
             super::PythonCallbackRegistration {
-                callback: crate::execution::RetainedValueReadLease::prepare_owned(
-                    runmat_value::Value::String("nested-capture".into()),
-                    &crate::context::RuntimeContext::new(std::rc::Rc::new(
-                        crate::execution::RuntimeExecutionService::new(),
-                    )),
-                )
-                .expect("root callback test value"),
+                callback: crate::call::RetainedCallableTarget::Direct(
+                    crate::execution::RetainedValueReadLease::prepare_owned(
+                        runmat_value::Value::String("nested-capture".into()),
+                        &crate::context::RuntimeContext::new(std::rc::Rc::new(
+                            crate::execution::RuntimeExecutionService::new(),
+                        )),
+                    )
+                    .expect("root callback test value"),
+                ),
                 context: crate::context::RuntimeContext::new(std::rc::Rc::new(
                     crate::execution::RuntimeExecutionService::new(),
                 )),
@@ -1541,14 +1645,15 @@ mod tests {
                         class_name: "CallbackCapture".into(),
                         target: handle,
                         valid: true,
-                    })],
+                    })]
+                    .into(),
                 },
             ));
             let foreign = Rc::new(ForeignRuntime::new(ForeignPlatform::Native));
             let adapter = PythonAdapter::new(foreign.handles().clone()).expect("create adapter");
             let context = context(foreign);
             let PythonValue::Callback(id) = adapter
-                .argument_to_python(&context, callback)
+                .argument_to_python(&context, callback.into())
                 .expect("register callback")
             else {
                 panic!("callable argument must publish a callback token");
@@ -1606,7 +1711,8 @@ mod tests {
                             class_name: "CallbackCapture".into(),
                             target: handle,
                             valid: true,
-                        })],
+                        })]
+                        .into(),
                     },
                 ))
             };
@@ -1720,7 +1826,7 @@ mod tests {
                 ForeignCall {
                     adapter: PYTHON_ADAPTER_ID.into(),
                     symbol: "invoke_qualified".into(),
-                    arguments: vec![Value::String("py.types.SimpleNamespace".into())],
+                    arguments: rooted(vec![Value::String("py.types.SimpleNamespace".into())]),
                     requested_outputs: 1,
                 },
             ))
@@ -1735,11 +1841,11 @@ mod tests {
             ForeignCall {
                 adapter: PYTHON_ADAPTER_ID.into(),
                 symbol: "set_member".into(),
-                arguments: vec![
+                arguments: rooted(vec![
                     Value::Foreign(reference.clone()),
                     Value::String("answer".into()),
                     Value::Int(runmat_value::IntValue::I32(42)),
-                ],
+                ]),
                 requested_outputs: 0,
             },
         ))
@@ -1751,7 +1857,10 @@ mod tests {
                 ForeignCall {
                     adapter: PYTHON_ADAPTER_ID.into(),
                     symbol: "get_member".into(),
-                    arguments: vec![Value::Foreign(reference), Value::String("answer".into())],
+                    arguments: rooted(vec![
+                        Value::Foreign(reference),
+                        Value::String("answer".into()),
+                    ]),
                     requested_outputs: 1,
                 },
             ))
@@ -1766,18 +1875,22 @@ mod tests {
         let Some((_foreign, adapter)) = adapter() else {
             return;
         };
-        let Value::Object(environment) = adapter.status_value().expect("read status") else {
+        let Value::Object(environment) = adapter.status_value(None).expect("read status") else {
             panic!("expected PythonEnvironment");
         };
         assert_eq!(
-            environment.class_name.display_name(),
+            environment.class_name().display_name(),
             "py.PythonEnvironment"
         );
         assert_eq!(
-            environment.properties.get("Status"),
+            environment.property("Status"),
             Some(&Value::String("NotLoaded".into()))
         );
-        let later = adapter.status_value().expect("read status again");
+        let context =
+            RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()));
+        let later = adapter
+            .status_value(Some(&context))
+            .expect("read status in supplied context");
         validate_environment(
             &adapter.handles,
             &adapter.host_identity,
@@ -1791,13 +1904,17 @@ mod tests {
     #[test]
     fn environment_control_rejects_synthetic_cross_registry_and_stale_values() {
         let adapter = PythonAdapter::new(ForeignHandleRegistry::default()).unwrap();
-        let original = adapter.status_value().unwrap();
+        let original = adapter.status_value(None).unwrap();
         let Value::Object(original_object) = &original else {
             panic!("expected PythonEnvironment");
         };
         assert!(original_object.foreign_host_control().is_some());
-        let mut synthetic = ObjectInstance::new(runmat_builtins::PYTHON_ENVIRONMENT_CLASS.owned());
-        synthetic.properties = original_object.properties.clone();
+        let mut synthetic =
+            runmat_value::UnboundedObjectBuilder::new(runmat_builtins::PYTHON_ENVIRONMENT_CLASS);
+        for entry in original_object.properties().entries() {
+            synthetic.insert_text(entry.key().clone(), entry.value().clone());
+        }
+        let synthetic = synthetic.finish();
         assert_eq!(
             validate_environment(
                 &adapter.handles,
@@ -1809,7 +1926,7 @@ mod tests {
             Some("RunMat:Foreign:InvalidCall")
         );
         let other = PythonAdapter::new(ForeignHandleRegistry::default()).unwrap();
-        let other_status = other.status_value().unwrap();
+        let other_status = other.status_value(None).unwrap();
         assert_eq!(
             validate_environment(
                 &other.handles,
@@ -1831,14 +1948,14 @@ mod tests {
                 .identifier(),
             Some("RunMat:Foreign:StaleHandle")
         );
-        let fresh = adapter.status_value().unwrap();
+        let fresh = adapter.status_value(None).unwrap();
         validate_environment(
             &adapter.handles,
             &adapter.host_identity,
             std::slice::from_ref(&fresh),
         )
         .unwrap();
-        adapter.terminate_value(vec![fresh]).unwrap();
+        adapter.terminate_value(None, rooted(vec![fresh])).unwrap();
         assert!(adapter.terminated.get());
     }
 
@@ -1848,13 +1965,13 @@ mod tests {
         let mut configuration = adapter.configuration.borrow().clone();
         configuration.execution_mode = PythonExecutionMode::OutOfProcess;
         adapter.configure(configuration).unwrap();
-        let valid = adapter.status_value().unwrap();
+        let valid = adapter.status_value(None).unwrap();
         let synthetic = Value::Object(ObjectInstance::new(
             runmat_builtins::PYTHON_ENVIRONMENT_CLASS.owned(),
         ));
         assert_eq!(
             adapter
-                .terminate_value(vec![synthetic])
+                .terminate_value(None, rooted(vec![synthetic]))
                 .unwrap_err()
                 .identifier(),
             Some("RunMat:Foreign:InvalidCall")
@@ -1866,7 +1983,9 @@ mod tests {
             std::slice::from_ref(&valid),
         )
         .unwrap();
-        let terminated = adapter.terminate_value(vec![valid.clone()]).unwrap();
+        let terminated = adapter
+            .terminate_value(None, rooted(vec![valid.clone()]))
+            .unwrap();
         assert_eq!(
             validate_environment(&adapter.handles, &adapter.host_identity, &[valid])
                 .unwrap_err()
@@ -1880,7 +1999,7 @@ mod tests {
     fn failed_reconfiguration_preserves_ticket_and_real_python_resources_block_policy_change() {
         let adapter = PythonAdapter::new(ForeignHandleRegistry::default()).unwrap();
         let prior_snapshot = adapter.configuration().clone();
-        let environment = adapter.status_value().unwrap();
+        let environment = adapter.status_value(None).unwrap();
         let object = adapter
             .handles
             .register_resource(&adapter.host_identity, environment_metadata())
@@ -1918,7 +2037,7 @@ mod tests {
     #[test]
     fn failed_portable_artifact_install_keeps_previous_configuration_and_ticket() {
         let adapter = PythonAdapter::new(ForeignHandleRegistry::default()).unwrap();
-        let original = adapter.status_value().unwrap();
+        let original = adapter.status_value(None).unwrap();
         let previous = adapter.configuration.borrow().clone();
         let mut bundle = PythonArtifactBundle::empty();
         bundle.schema_version = 0;
@@ -1947,15 +2066,19 @@ mod tests {
         let mut configuration = adapter.configuration.borrow().clone();
         configuration.execution_mode = PythonExecutionMode::OutOfProcess;
         adapter.configure(configuration).unwrap();
-        let valid = adapter.status_value().unwrap();
+        let valid = adapter.status_value(None).unwrap();
         let state = adapter.isolated_state();
         let invalid = Value::Object(ObjectInstance::new(
             runmat_builtins::PYTHON_ENVIRONMENT_CLASS.owned(),
         ));
         assert_eq!(
-            pollster::block_on(terminate_isolated(state.clone(), vec![invalid]))
-                .unwrap_err()
-                .identifier(),
+            pollster::block_on(terminate_isolated(
+                state.clone(),
+                None,
+                rooted(vec![invalid])
+            ))
+            .unwrap_err()
+            .identifier(),
             Some("RunMat:Foreign:InvalidCall")
         );
         assert!(!state.call_active.get());
@@ -1966,7 +2089,14 @@ mod tests {
             std::slice::from_ref(&valid),
         )
         .unwrap();
-        let result = pollster::block_on(terminate_isolated(state, vec![valid.clone()])).unwrap();
+        let context =
+            RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()));
+        let result = pollster::block_on(terminate_isolated(
+            state,
+            Some(context),
+            rooted(vec![valid.clone()]),
+        ))
+        .unwrap();
         assert!(matches!(result, Value::Object(_)));
         assert_eq!(
             validate_environment(&adapter.handles, &adapter.host_identity, &[valid])
@@ -1982,7 +2112,7 @@ mod tests {
         let mut configuration = adapter.configuration.borrow().clone();
         configuration.execution_mode = PythonExecutionMode::OutOfProcess;
         adapter.configure(configuration).unwrap();
-        let environment = adapter.status_value().unwrap();
+        let environment = adapter.status_value(None).unwrap();
         let object = adapter
             .handles
             .register_resource(&adapter.host_identity, environment_metadata())
@@ -1995,7 +2125,7 @@ mod tests {
             call: ForeignCall {
                 adapter: PYTHON_ADAPTER_ID.into(),
                 symbol: "pending".into(),
-                arguments: vec![Value::String("retained".into())],
+                arguments: rooted(vec![Value::String("retained".into())]),
                 requested_outputs: 1,
             },
             reply,
@@ -2020,7 +2150,7 @@ mod tests {
             Some("RunMat:Foreign:StaleHandle")
         );
         assert!(state.released.0.lock().unwrap().is_empty());
-        let fresh = adapter.status_value().unwrap();
+        let fresh = adapter.status_value(None).unwrap();
         validate_environment(&state.handles, &state.host_identity, &[fresh]).unwrap();
         drop(object);
         assert!(state.released.0.lock().unwrap().is_empty());
@@ -2032,8 +2162,9 @@ mod tests {
         let mut configuration = adapter.configuration.borrow().clone();
         configuration.execution_mode = PythonExecutionMode::OutOfProcess;
         adapter.configure(configuration).unwrap();
-        let status = adapter.status_value().unwrap();
-        let future = terminate_isolated(adapter.isolated_state(), vec![status.clone()]);
+        let status = adapter.status_value(None).unwrap();
+        let future =
+            terminate_isolated(adapter.isolated_state(), None, rooted(vec![status.clone()]));
         drop(future);
         assert!(!adapter.isolated_call_active.get());
         assert!(!adapter.terminated.get());
@@ -2044,7 +2175,7 @@ mod tests {
     async fn abandoned_project_retirement_restores_old_configuration_admission() {
         let adapter = PythonAdapter::new(ForeignHandleRegistry::default()).unwrap();
         let old = adapter.configuration.borrow().clone();
-        let status = adapter.status_value().unwrap();
+        let status = adapter.status_value(None).unwrap();
         let identity = adapter.project_retirement.snapshot();
         let ticket = adapter.retire_project_session(&identity).await.unwrap();
         assert!(adapter.retire_project_session(&identity).await.is_err());
@@ -2069,7 +2200,7 @@ mod tests {
     #[tokio::test]
     async fn dropped_queued_nested_request_cannot_dispatch_or_retain_arguments() {
         let adapter = PythonAdapter::new(ForeignHandleRegistry::default()).unwrap();
-        let status = adapter.status_value().unwrap();
+        let status = adapter.status_value(None).unwrap();
         // A callback's outer client owns the active slot; the nested future
         // only owns its queued request, not the session or its controls.
         adapter.isolated_call_active.set(true);
@@ -2080,7 +2211,7 @@ mod tests {
             ForeignCall {
                 adapter: PYTHON_ADAPTER_ID.into(),
                 symbol: "status".into(),
-                arguments: vec![Value::String("must-not-dispatch".into())],
+                arguments: rooted(vec![Value::String("must-not-dispatch".into())]),
                 requested_outputs: 1,
             },
         ));
@@ -2102,7 +2233,7 @@ mod tests {
         let mut configuration = adapter.configuration.borrow().clone();
         configuration.execution_mode = PythonExecutionMode::OutOfProcess;
         adapter.configure(configuration).unwrap();
-        let status = adapter.status_value().unwrap();
+        let status = adapter.status_value(None).unwrap();
         let object = adapter
             .handles
             .register_resource(&adapter.host_identity, environment_metadata())
@@ -2137,7 +2268,7 @@ mod tests {
                 .identifier(),
             Some("RunMat:Foreign:StaleHandle")
         );
-        let fresh = adapter.status_value().unwrap();
+        let fresh = adapter.status_value(None).unwrap();
         validate_environment(&adapter.handles, &adapter.host_identity, &[fresh]).unwrap();
         drop(old_object);
         assert!(adapter.released.0.lock().unwrap().is_empty());
@@ -2165,7 +2296,7 @@ mod tests {
         let call = ForeignCall {
             adapter: PYTHON_ADAPTER_ID.into(),
             symbol: "status".into(),
-            arguments: Vec::new(),
+            arguments: rooted(Vec::new()),
             requested_outputs: 1,
         };
         let mut pending = Box::pin(invoke_isolated(adapter.isolated_state(), context, call));
@@ -2184,7 +2315,8 @@ mod tests {
         let (adapter, status, object, pid) = pending_isolated_adapter().await;
         let mut pending = Box::pin(terminate_isolated(
             adapter.isolated_state(),
-            vec![status.clone()],
+            None,
+            rooted(vec![status.clone()]),
         ));
         tokio::select! {
             result = &mut pending => panic!("sleeping child unexpectedly replied: {result:?}"),

@@ -2,7 +2,10 @@ use super::*;
 use crate::builtins::common::fs::expand_user_path;
 use std::path::PathBuf;
 
-pub(super) fn preflight_extensions(data: &Value, rest: &[Value]) -> BuiltinResult<()> {
+pub(super) fn preflight_extensions(
+    data: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     let requested_outputs = crate::output_count::current_output_count();
     if requested_outputs.is_some_and(|count| count > 1) {
         return Err(writematrix_error_with(
@@ -26,7 +29,7 @@ pub(super) fn preflight_extensions(data: &Value, rest: &[Value]) -> BuiltinResul
             BUILTIN_NAME,
         )?;
     }
-    for pair in rest.get(1..).unwrap_or_default().chunks_exact(2) {
+    for pair in rest.range(rest.len().min(1)..)?.chunks_exact(2) {
         let Ok(name) = option_name_from_value(&pair[0]) else {
             continue;
         };

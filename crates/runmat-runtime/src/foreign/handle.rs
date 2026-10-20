@@ -624,8 +624,15 @@ mod tests {
         let releases = Arc::new(ReleaseCounter::default());
         let registry = registry(releases);
         let reference = registry.register_resource("host-a", metadata()).unwrap();
-        let mut forged = reference.clone();
-        forged.type_identity.name = "test.Other".into();
+        let mut forged_type = reference.type_identity.clone();
+        forged_type.name = "test.Other".into();
+        let forged = runmat_value::ForeignRef::detached(
+            reference.resource_key(),
+            forged_type,
+            reference.ownership,
+            reference.affinity,
+            reference.lifetime,
+        );
         assert_eq!(
             registry
                 .resolve(&forged, ForeignCapability::Invoke)

@@ -8,11 +8,17 @@ use runmat_value::{CellArray, ComplexTensor, IntegerStorage, NumericDType, Tenso
 
 use super::*;
 use crate::builtins::deep_learning::model::execution::{NetworkCaller, NetworkOutputLayout};
+use crate::builtins::deep_learning::tests::fully_connected_layer_builtin;
 use crate::builtins::deep_learning::{layers::*, model::dlnetwork_builtin, object};
 
 fn network() -> crate::execution::RootedValue {
-    let input = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
+    let input = block_on(feature_input_layer_builtin(
+        Value::Num(2.0),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap();
     let dense = block_on(fully_connected_layer_builtin(
+        None,
         Value::Num(1.0),
         vec![
             Value::String("Weights".into()),
@@ -51,7 +57,8 @@ fn admitted_host_projection_retains_actual_input_class_and_canonical_resources()
             ("Format", Value::String("CB".into())),
             ("Labels", Value::String("CB".into())),
         ],
-    );
+    )
+    .expect("fixture object");
     let plan = HostNetworkPlan::admit(network, &input, "predict").unwrap();
     let target = AxisPlan::new(
         runmat_builtins::DeepLearningAxisLayout::from_axes(&[
@@ -163,7 +170,8 @@ fn provider_projection_preserves_explicit_intent_owner_and_physical_allocation()
                 ("Format", Value::String("CB".into())),
                 ("Labels", Value::String("CB".into())),
             ],
-        );
+        )
+        .expect("fixture object");
         let network_owner = network();
         let network = network_object(&network_owner);
         let plan = HostNetworkPlan::admit(network, &input, "forward").unwrap();

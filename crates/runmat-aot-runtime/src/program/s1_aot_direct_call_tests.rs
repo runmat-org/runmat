@@ -175,11 +175,14 @@ fn closed_world_native_callback_reuses_local_strcmp_feedback() {
     let mut sites = function.expected_sites.clone();
     sites.sort_by_key(|site| (site.point, site.phase, site.ordinal));
     assert!(!sites.is_empty());
+    assert!(sites
+        .iter()
+        .all(|site| site.point.function == function.portable_id));
     LINKED_SITES.with(|slot| {
         *slot.borrow_mut() = sites
             .iter()
             .map(|site| NativeSiteRequest {
-                function: function.id.0,
+                function: function.portable_id.0,
                 block: site.point.block,
                 position: site.point.position,
                 phase: site_phase(site.phase),

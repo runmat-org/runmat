@@ -21,11 +21,14 @@ pub(in crate::execution::value_codec::decode::machine) struct SparseTask<'a> {
     values: Option<DenseOutput>,
     validation: Option<SparseCscValidation>,
     phase: Phase,
-    path: String,
+    path: ControlPath<'a>,
 }
 
 impl<'a> SparseTask<'a> {
-    pub(super) fn new(source: &'a SparseValue, path: String) -> Result<Self, ValueCodecError> {
+    pub(super) fn new(
+        source: &'a SparseValue,
+        path: ControlPath<'a>,
+    ) -> Result<Self, ValueCodecError> {
         let rows = usize::try_from(source.rows)
             .map_err(|_| ValueCodecError::invalid(&path, "row count exceeds platform limits"))?;
         let columns = usize::try_from(source.columns)
@@ -146,7 +149,7 @@ impl<'a> SparseTask<'a> {
         }
     }
 
-    pub(super) fn path(&self) -> &str {
+    pub(super) fn path(&self) -> &ControlPath<'a> {
         &self.path
     }
 }

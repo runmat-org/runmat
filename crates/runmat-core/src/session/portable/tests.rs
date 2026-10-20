@@ -21,12 +21,16 @@ fn request(text: &str, selected: Option<&str>, outputs: u16) -> ProgramExecution
     let recipe = ProgramBuildRecipe {
         schema_version: PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
         program_revision: envelope.manifest.identity.program.clone(),
-        entrypoint: envelope.manifest.identity.entrypoint_function.0.to_string(),
+        entrypoint: envelope.manifest.identity.entrypoint.clone(),
         outputs: OutputContract {
             requested_outputs: outputs,
+            owned_work: None,
         },
         execution_mode: "interpreter".into(),
         target: ProgramTarget::portable("session-portable-test"),
+        interop: envelope.manifest.interop.clone(),
+        accelerators: Vec::new(),
+        foreign_policy: None,
         features: Default::default(),
         compile_options: Default::default(),
         source_objects: Vec::new(),
@@ -35,8 +39,14 @@ fn request(text: &str, selected: Option<&str>, outputs: u16) -> ProgramExecution
     ProgramExecutionRequest {
         console: None,
         environment: runmat_execution::EnvironmentSnapshot::default(),
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
-        function: envelope.manifest.identity.entrypoint_function.0 as usize,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
+        callable: runmat_execution::ProgramCallable::semantic(
+            envelope.manifest.identity.entrypoint_function.unwrap(),
+            None,
+        ),
+        context: runmat_execution::ProgramInvocationContext::Direct,
+        assignment: None,
+        job_id: None,
         artifact: ProgramArtifact::materialize(
             &recipe,
             ExecutableForm::ExecutableUnitV4,
@@ -75,8 +85,8 @@ fn invoke_session(
             usize::from(request.requested_outputs),
             control,
         ))?;
-        runmat_runtime::execution::value_codec::encode_inline_outputs(
-            &value,
+        runmat_runtime::execution::value_codec::encode_inline_sequence(
+            value.value(),
             usize::from(request.requested_outputs),
         )
         .map_err(|error| error.to_string())
@@ -94,7 +104,7 @@ fn invoke(request: &ProgramExecutionRequest) -> ProgramExecutionResponse {
 
 fn values(response: ProgramExecutionResponse) -> Vec<Value> {
     let outputs = match response {
-        ProgramExecutionResponse::Success { value } => vec![value],
+        ProgramExecutionResponse::Success { outputs } => outputs,
         ProgramExecutionResponse::ExternalizedSuccess {
             outputs,
             result_objects,
@@ -122,7 +132,7 @@ fn exact_nonprimary_procedure_preserves_captures_and_output_ordinals() {
         Some("selected"),
         2,
     );
-    assert_ne!(request.function, 0);
+    assert_ne!(request.callable.semantic_function().unwrap().0, 0);
     request.arguments =
         vec![
             runmat_runtime::execution::value_codec::encode_inline_value(&Value::Num(10.0)).unwrap(),
@@ -170,7 +180,9 @@ fn original_environment_and_cancellation_are_enforced_before_execution() {
         invoke_session(
             &mut session,
             &request,
-            &InvocationControl::default().with_cancellation(cancellation)
+            &InvocationControl::default().with_cancellation(
+                runmat_execution::CancellationToken::from_shared(cancellation)
+            )
         ),
         ProgramExecutionResponse::Failure { .. }
     ));

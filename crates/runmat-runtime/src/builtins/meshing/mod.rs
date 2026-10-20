@@ -39,7 +39,8 @@ const MESH_METHOD_NAME: &str = "__runmat_meshing_mesh";
     binding_variant = "default",
     builtin_path = "crate::builtins::meshing"
 )]
-pub async fn generate_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn generate_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     let (asset_value, options) = args
         .split_first()
         .ok_or_else(|| error(GENERATE_NAME, "expected a geometry.Asset"))?;
@@ -70,7 +71,8 @@ pub async fn generate_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::meshing"
 )]
-pub async fn load_binding(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn load_binding(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     let [mesh_path, evidence_path] = args.as_slice() else {
         return Err(error(
             LOAD_NAME,
@@ -114,7 +116,8 @@ pub async fn load_builtin(mesh_path: String, evidence_path: String) -> BuiltinRe
     binding_variant = "default",
     builtin_path = "crate::builtins::meshing"
 )]
-pub async fn save_builtin(args: Vec<Value>) -> BuiltinResult<bool> {
+pub async fn save_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<bool> {
+    let args: Vec<Value> = args.into_iter().collect();
     let [mesh, mesh_path, evidence_path, options @ ..] = args.as_slice() else {
         return Err(error(
             SAVE_NAME,
@@ -170,7 +173,8 @@ fn single_mesh(builtin: &'static str, args: Vec<Value>) -> BuiltinResult<Value> 
     binding_variant = "default",
     builtin_path = "crate::builtins::meshing"
 )]
-pub async fn nodes_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn nodes_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     let mesh = single_mesh(NODES_NAME, args)?;
     inspection::nodes(mesh)
 }
@@ -180,7 +184,8 @@ pub async fn nodes_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::meshing"
 )]
-pub async fn elements_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn elements_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     let mesh = single_mesh(ELEMENTS_NAME, args)?;
     inspection::elements(mesh)
 }
@@ -190,7 +195,8 @@ pub async fn elements_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::meshing"
 )]
-pub async fn boundary_faces_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn boundary_faces_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     let mesh = single_mesh(BOUNDARY_FACES_NAME, args)?;
     inspection::boundary_faces(mesh)
 }
@@ -200,7 +206,8 @@ pub async fn boundary_faces_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::meshing"
 )]
-pub async fn regions_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn regions_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     let mesh = single_mesh(REGIONS_NAME, args)?;
     inspection::regions(mesh)
 }
@@ -210,7 +217,8 @@ pub async fn regions_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::meshing"
 )]
-pub async fn quality_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn quality_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     let mesh = single_mesh(QUALITY_NAME, args)?;
     inspection::quality(mesh)
 }
@@ -220,7 +228,8 @@ pub async fn quality_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::meshing"
 )]
-pub async fn evidence_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn evidence_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     let mesh = single_mesh(EVIDENCE_NAME, args)?;
     evidence_object(payload_from_value(EVIDENCE_NAME, &mesh)?.evidence)
 }
@@ -230,7 +239,8 @@ pub async fn evidence_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::meshing"
 )]
-pub async fn mesh_method_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn mesh_method_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let args: Vec<Value> = args.into_iter().collect();
     #[cfg(feature = "plot-core")]
     {
         let (mesh, options) = args
@@ -299,7 +309,7 @@ mod tests {
     }
 
     fn text_value(path: &std::path::Path) -> Value {
-        Value::String(path.to_string_lossy().to_string())
+        Value::String(path.to_string_lossy().to_string().into())
     }
 
     #[test]
@@ -308,11 +318,13 @@ mod tests {
         let mesh_path = directory.path().join("part.solver-mesh.cbor");
         let evidence_path = directory.path().join("part.meshing-evidence.cbor");
         let (mesh, aliases) = aliased_mesh_value();
-        assert!(futures::executor::block_on(save_builtin(vec![
-            mesh,
-            text_value(&mesh_path),
-            text_value(&evidence_path),
-        ]))
+        assert!(futures::executor::block_on(save_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                mesh,
+                text_value(&mesh_path),
+                text_value(&evidence_path),
+            ])
+        ))
         .expect("save"));
         let sidecar = directory.path().join("part.solver-mesh.cbor.regions.json");
         assert!(sidecar.exists());
@@ -343,18 +355,22 @@ mod tests {
         let mesh_path = directory.path().join("part.solver-mesh.cbor");
         let evidence_path = directory.path().join("part.meshing-evidence.cbor");
         let (mesh, _) = aliased_mesh_value();
-        futures::executor::block_on(save_builtin(vec![
-            mesh.clone(),
-            text_value(&mesh_path),
-            text_value(&evidence_path),
-        ]))
+        futures::executor::block_on(save_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                mesh.clone(),
+                text_value(&mesh_path),
+                text_value(&evidence_path),
+            ]),
+        ))
         .expect("save");
         // Existing destinations, including the sidecar, are protected without Force.
-        let error = futures::executor::block_on(save_builtin(vec![
-            mesh.clone(),
-            text_value(&mesh_path),
-            text_value(&evidence_path),
-        ]))
+        let error = futures::executor::block_on(save_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                mesh.clone(),
+                text_value(&mesh_path),
+                text_value(&evidence_path),
+            ]),
+        ))
         .expect_err("protected");
         assert_eq!(error.identifier(), Some("RunMat:meshing:InvalidInput"));
         let sidecar = directory.path().join("part.solver-mesh.cbor.regions.json");
@@ -374,13 +390,23 @@ mod tests {
     #[test]
     fn bindings_report_arity_with_the_meshing_identifier() {
         for result in [
-            futures::executor::block_on(nodes_builtin(Vec::new())),
-            futures::executor::block_on(quality_builtin(vec![
-                tetrahedron_mesh_value(),
-                tetrahedron_mesh_value(),
-            ])),
-            futures::executor::block_on(load_binding(vec![Value::String("a".into())])),
-            futures::executor::block_on(generate_builtin(vec![Value::Num(1.0)])),
+            futures::executor::block_on(nodes_builtin(
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+            )),
+            futures::executor::block_on(quality_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    tetrahedron_mesh_value(),
+                    tetrahedron_mesh_value(),
+                ]),
+            )),
+            futures::executor::block_on(load_binding(
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                    "a".into(),
+                )]),
+            )),
+            futures::executor::block_on(generate_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
+            )),
         ] {
             assert_eq!(
                 result.expect_err("arity").identifier(),
@@ -413,10 +439,12 @@ mod tests {
 
     #[test]
     fn boundary_faces_preserve_topology_roles_adjacency_and_full_identity() {
-        let Value::Struct(faces) =
-            futures::executor::block_on(boundary_faces_builtin(vec![tetrahedron_mesh_value()]))
-                .expect("boundary faces")
-        else {
+        let Value::Struct(faces) = futures::executor::block_on(boundary_faces_builtin(
+            crate::builtins::common::test_support::builtin_arguments(
+                vec![tetrahedron_mesh_value()],
+            ),
+        ))
+        .expect("boundary faces") else {
             panic!("expected boundary face struct");
         };
 
@@ -425,16 +453,16 @@ mod tests {
         };
         assert_eq!(roles.shape, [4, 1]);
         assert!(roles
-            .data
+            .data()
             .iter()
-            .all(|role| role == &Value::String("exterior".to_string())));
+            .all(|role| role == &Value::String("exterior".to_string().into())));
 
         let Value::Cell(adjacency) = faces.fields.get("adjacent_element_ids").expect("adjacency")
         else {
             panic!("expected adjacency cell");
         };
         assert_eq!(adjacency.shape, [4, 1]);
-        assert!(adjacency.data.iter().all(|ids| {
+        assert!(adjacency.data().iter().all(|ids| {
             matches!(
                 ids,
                 Value::Tensor(tensor)
@@ -449,10 +477,10 @@ mod tests {
             panic!("expected provenance cell");
         };
         assert_eq!(provenance.shape, [4, 1]);
-        let Value::Cell(first_face) = &provenance.data[0] else {
+        let Value::Cell(first_face) = &provenance.data()[0] else {
             panic!("expected per-face provenance cell");
         };
-        let Value::Struct(identity) = &first_face.data[0] else {
+        let Value::Struct(identity) = &first_face.data()[0] else {
             panic!("expected persistent identity struct");
         };
         assert_eq!(
@@ -468,14 +496,16 @@ mod tests {
 
     #[test]
     fn regions_preserve_persistent_identity_components() {
-        let Value::Cell(regions) =
-            futures::executor::block_on(regions_builtin(vec![tetrahedron_mesh_value()]))
-                .expect("regions")
-        else {
+        let Value::Cell(regions) = futures::executor::block_on(regions_builtin(
+            crate::builtins::common::test_support::builtin_arguments(
+                vec![tetrahedron_mesh_value()],
+            ),
+        ))
+        .expect("regions") else {
             panic!("expected region cell");
         };
         assert_eq!(regions.shape, [1, 1]);
-        let Value::Struct(region) = &regions.data[0] else {
+        let Value::Struct(region) = &regions.data()[0] else {
             panic!("expected region struct");
         };
         assert_eq!(
@@ -518,6 +548,6 @@ mod tests {
             &[tetrahedron_mesh_value()],
         ))
         .expect("standard mesh should dispatch meshing.Mesh");
-        assert!(matches!(*handle, Value::Num(value) if value > 0.0));
+        assert!(matches!(handle.value(), Value::Num(value) if *value > 0.0));
     }
 }

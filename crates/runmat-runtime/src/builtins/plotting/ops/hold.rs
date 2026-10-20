@@ -1,5 +1,5 @@
 //! Per-axes hold policy through the shared graphics state.
-use super::op_common::axes_target::{apply_axes_target, split_leading_axes_handle};
+use super::op_common::axes_target::{apply_axes_target, split_leading_axes_arguments};
 use super::op_common::cmd_parsing::parse_hold_mode;
 use super::state::{set_hold, HoldMode};
 use runmat_builtins::{HOLD_DESCRIPTOR, HOLD_ERROR_TOO_MANY_OUTPUTS};
@@ -9,7 +9,7 @@ use runmat_value::Value;
     binding_variant = "default",
     builtin_path = "crate::builtins::plotting::hold"
 )]
-pub fn hold_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub fn hold_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &HOLD_DESCRIPTOR,
         &HOLD_ERROR_TOO_MANY_OUTPUTS,
@@ -24,11 +24,11 @@ pub fn hold_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     })
 }
 
-fn hold_state(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let (axes_target, rest) = split_leading_axes_handle(args, "hold")?;
-    let mode = match rest.as_slice() {
-        [] => HoldMode::Toggle,
-        [value] => parse_hold_mode(value)?,
+fn hold_state(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
+    let (axes_target, rest) = split_leading_axes_arguments(args, "hold")?;
+    let mode = match rest.len() {
+        0 => HoldMode::Toggle,
+        1 => parse_hold_mode(&rest[0])?,
         _ => {
             return Err(crate::builtins::plotting::plotting_error(
                 "hold",
@@ -39,6 +39,11 @@ fn hold_state(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     apply_axes_target(axes_target, "hold")?;
     set_hold(mode);
     Ok(Value::output_list(Vec::new()))
+}
+
+#[cfg(test)]
+pub(crate) fn hold_builtin_source(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    hold_builtin(crate::call::BuiltinArguments::from_borrowed(&args, None)?)
 }
 
 #[cfg(test)]
@@ -63,24 +68,24 @@ mod tests {
     #[test]
     fn hold_toggle_and_explicit_modes_work() {
         let _lock = crate::builtins::plotting::tests::lock_plot_registry();
-        let _ = hold_builtin(Vec::new()).unwrap();
+        let _ = hold_builtin_source(Vec::new()).unwrap();
         assert_eq!(
-            hold_builtin(vec![Value::String("on".into())]).unwrap(),
+            hold_builtin_source(vec![Value::String("on".into())]).unwrap(),
             Value::output_list(Vec::new())
         );
         assert_eq!(
-            hold_builtin(vec![Value::String("off".into())]).unwrap(),
+            hold_builtin_source(vec![Value::String("off".into())]).unwrap(),
             Value::output_list(Vec::new())
         );
-        assert!(hold_builtin(vec![Value::from("on"), Value::from("off")]).is_err());
+        assert!(hold_builtin_source(vec![Value::from("on"), Value::from("off")]).is_err());
     }
 
     #[test]
     fn hold_typed_integer_state_is_exact_in_compatibility_mode() {
         let _lock = crate::builtins::plotting::tests::lock_plot_registry();
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        assert!(hold_builtin(vec![Value::Int(runmat_value::IntValue::U8(1))]).is_ok());
-        assert!(hold_builtin(vec![Value::Int(runmat_value::IntValue::I64(0))]).is_ok());
+        assert!(hold_builtin_source(vec![Value::Int(runmat_value::IntValue::U8(1))]).is_ok());
+        assert!(hold_builtin_source(vec![Value::Int(runmat_value::IntValue::I64(0))]).is_ok());
     }
 
     #[test]
@@ -92,13 +97,13 @@ mod tests {
             let _outputs =
                 crate::output_count::push_output_count(Some(1)).expect("output-count scope");
             assert_eq!(
-                hold_builtin(vec![]).unwrap_err().identifier(),
+                hold_builtin_source(vec![]).unwrap_err().identifier(),
                 Some("RunMat:hold:TooManyOutputs")
             );
             assert!(state::current_figure_handle_if_exists().is_none());
         }
         let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
-        hold_builtin(vec![Value::from("on")]).unwrap();
+        hold_builtin_source(vec![Value::from("on")]).unwrap();
         assert!(state::current_hold_enabled());
         for value in [
             Value::from("toggle"),
@@ -106,14 +111,14 @@ mod tests {
             Value::Int(runmat_value::IntValue::U64(u64::MAX)),
         ] {
             assert_eq!(
-                hold_builtin(vec![value]).unwrap_err().identifier(),
+                hold_builtin_source(vec![value]).unwrap_err().identifier(),
                 Some("RunMat:hold:InvalidArgument")
             );
             assert!(state::current_hold_enabled());
         }
-        hold_builtin(vec![Value::from("")]).unwrap();
+        hold_builtin_source(vec![Value::from("")]).unwrap();
         assert!(!state::current_hold_enabled());
-        hold_builtin(vec![]).unwrap();
+        hold_builtin_source(vec![]).unwrap();
         assert!(state::current_hold_enabled());
     }
 
@@ -124,7 +129,7 @@ mod tests {
         state::reset_plot_state();
         let first = state::current_axes_state();
         let (_, second) = state::create_axes_for_figure(Some(first.handle)).unwrap();
-        hold_builtin(vec![
+        hold_builtin_source(vec![
             Value::Num(state::encode_axes_handle(first.handle, first.active_index)),
             Value::from("all"),
         ])
@@ -132,7 +137,7 @@ mod tests {
         assert!(state::current_hold_enabled());
         state::select_axes_for_figure(first.handle, second).unwrap();
         assert!(!state::current_hold_enabled());
-        hold_builtin(vec![Value::Bool(true)]).unwrap();
+        hold_builtin_source(vec![Value::Bool(true)]).unwrap();
         state::select_axes_for_figure(first.handle, first.active_index).unwrap();
         assert!(state::current_hold_enabled());
     }

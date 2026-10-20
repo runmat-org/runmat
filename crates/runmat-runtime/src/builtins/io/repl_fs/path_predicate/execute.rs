@@ -7,7 +7,7 @@ use crate::{build_runtime_error, BuiltinResult};
 use super::input::{self, PathInputs};
 
 pub(super) async fn evaluate(
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     builtin: &'static str,
     arity_error: &'static BuiltinErrorDescriptor,
     path_error: &'static BuiltinErrorDescriptor,

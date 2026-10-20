@@ -5,9 +5,9 @@ pub(crate) struct ExpectedScalarFieldName;
 
 pub(crate) fn decode(value: &Value) -> Result<String, ExpectedScalarFieldName> {
     match value {
-        Value::String(name) => Ok(name.clone()),
-        Value::CharArray(array) if array.rows == 1 => Ok(array.data.iter().collect()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::String(name) => Ok(name.to_string()),
+        Value::CharArray(array) if array.rows == 1 => Ok(array.data().iter().collect()),
+        Value::StringArray(array) if array.data().len() == 1 => Ok(array.data()[0].to_string()),
         _ => Err(ExpectedScalarFieldName),
     }
 }

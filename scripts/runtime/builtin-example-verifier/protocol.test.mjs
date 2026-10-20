@@ -30,6 +30,22 @@ test("inventory identities are order-independent and retain documentation-only e
     assert.equal(first.counts.documentationOnly, 1);
     assert.equal(first.examples.find((entry) => entry.exampleId === "notes")?.admission.kind, "documentation-only");
     assert.deepEqual(first.examples.find((entry) => entry.exampleId === "portable")?.requiredLanes, ["native-host", "browser-host"]);
+    const proseOnly = exportFixture();
+    proseOnly.builtins.push({
+        key: "prose", authority: "legacy_sidecar", category: "general",
+        examples: [{ description: "An explanation without executable source." }]
+    });
+    const retained = buildInventory(proseOnly, inventoryOptions());
+    assert.equal(validateInventory(retained), retained);
+    const prose = retained.examples.find((entry) => entry.builtinKey === "prose");
+    assert.deepEqual(prose.admission, { kind: "documentation-only", reason: "missing executable source" });
+    assert.equal(prose.program, "");
+    assert.deepEqual(prose.requiredLanes, []);
+    const malformed = structuredClone(retained);
+    const emptyExecution = malformed.examples.find((entry) => entry.builtinKey === "prose");
+    emptyExecution.admission = { kind: "executable" };
+    malformed.inventoryDigest = digestObject(malformed, ["inventoryDigest"]);
+    assert.throws(() => validateInventory(malformed), /Executable example has no source/);
 });
 
 test("catalog examples cannot silently become documentation-only", () => {

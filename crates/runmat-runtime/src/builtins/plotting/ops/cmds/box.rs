@@ -5,7 +5,6 @@ use runmat_builtins::{
     BOX_DESCRIPTOR, BOX_ERROR_INVALID_ARGUMENT, BOX_ERROR_OUTPUTS, BOX_STATE_OUTPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::Value;
 #[cfg(test)]
 #[path = "box/tests.rs"]
 mod tests;
@@ -14,7 +13,7 @@ mod tests;
     binding_variant = "default",
     builtin_path = "crate::builtins::plotting::cmds::r#box"
 )]
-pub fn box_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
+pub fn box_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<bool> {
     crate::output_count::validate_fixed_outputs(&BOX_DESCRIPTOR, &BOX_ERROR_OUTPUTS, "box")?;
     if crate::output_count::current_output_count() == Some(1) {
         crate::compatibility::ensure_builtin_extension_enabled(&BOX_STATE_OUTPUT_EXTENSION, "box")?;

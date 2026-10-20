@@ -15,8 +15,8 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_types::IntegerClass;
 use runmat_value::{
-    CharArray, IntValue, IntegerStorage, LogicalArray, ObjectInstance, StringArray, StructValue,
-    Tensor, Value,
+    CharArray, IntValue, IntegerStorage, LogicalArray, ObjectInstance, StringArray, Tensor,
+    Utf8Text, Value,
 };
 
 use crate::builtins::common::tensor;
@@ -164,7 +164,7 @@ impl ScoreTransform {
 enum ClassLabel {
     Numeric(f64),
     Integer(IntValue),
-    Text(String),
+    Text(Utf8Text),
     Logical(bool),
 }
 
@@ -259,19 +259,26 @@ struct FitResult {
 
 #[runtime_builtin(
     name = "fitclinear",
+    context = true,
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::ml::classification_linear"
 )]
-pub(crate) async fn fitclinear_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let inspection = HeaderInspection::inspect(&first, &rest);
-    ensure_fitclinear_extensions(&first, &rest, &inspection)?;
+pub(crate) async fn fitclinear_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    first: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let inspection = HeaderInspection::inspect(&first, rest.view());
+    ensure_fitclinear_extensions(&first, rest.view(), &inspection)?;
     preflight_matrix_rank(&first)?;
-    let arguments = inspection.validate(rest.len())?.preflight_values(&rest)?;
-    preflight_response_shape(&first, &rest, &arguments)?;
+    let arguments = inspection
+        .validate(rest.len())?
+        .preflight_values(rest.view())?;
+    preflight_response_shape(&first, rest.view(), &arguments)?;
     let first = gather(first).await?;
-    let rest = gather_all(rest, &arguments).await?;
-    let spec = build_fit_spec(first, rest, arguments)?;
-    let result = fit_models(&spec)?;
+    let rest = gather_all(rest, &arguments, runtime.as_ref()).await?;
+    let spec = build_fit_spec(first, rest.view(), arguments)?;
+    let result = fit_models(runtime.as_ref(), &spec)?;
     match crate::output_count::current_output_count() {
         Some(0) => Ok(Value::output_list(Vec::new())),
         Some(1) => Ok(Value::output_list(vec![Value::Object(result.object)])),
@@ -296,7 +303,7 @@ fn typed_integer_value(value: &Value) -> bool {
 
 fn ensure_fitclinear_extensions(
     first: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     inspection: &HeaderInspection,
 ) -> BuiltinResult<()> {
     if crate::dispatcher::value_contains_gpu(first)
@@ -321,7 +328,7 @@ fn ensure_fitclinear_extensions(
 
 fn ensure_table_integer_extensions(
     first: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     inspection: &HeaderInspection,
 ) -> BuiltinResult<()> {
     let Value::Object(object) = first else {
@@ -400,24 +407,28 @@ async fn gather(value: Value) -> BuiltinResult<Value> {
 }
 
 async fn gather_all(
-    values: Vec<Value>,
+    values: crate::call::BuiltinArguments,
     arguments: &FitclinearArguments,
-) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(values.len());
-    for (index, value) in values.into_iter().enumerate() {
-        let is_option_name =
-            index >= arguments.option_start && (index - arguments.option_start).is_multiple_of(2);
-        let is_ignored_value = arguments
-            .options
-            .iter()
-            .any(|option| option.name.index + 1 == index && option.name.identity.ignored());
-        if is_option_name || is_ignored_value {
-            out.push(value);
-        } else {
-            out.push(gather(value).await?);
-        }
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    if !values.iter().any(crate::dispatcher::value_contains_gpu) {
+        return Ok(values);
     }
-    Ok(out)
+    values
+        .try_map_preserving_roots_async(values.len(), runtime, async |index| {
+            let is_option_name = index >= arguments.option_start
+                && (index - arguments.option_start).is_multiple_of(2);
+            let is_ignored_value = arguments
+                .options
+                .iter()
+                .any(|option| option.name.index + 1 == index && option.name.identity.ignored());
+            if is_option_name || is_ignored_value {
+                Ok(values[index].clone())
+            } else {
+                gather(values[index].clone()).await
+            }
+        })
+        .await
 }
 
 fn numeric_matrix_for_fit(value: Value) -> BuiltinResult<Tensor> {

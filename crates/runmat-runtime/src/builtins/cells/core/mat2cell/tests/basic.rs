@@ -14,7 +14,7 @@ fn rank_one_single_input_uses_the_existing_row_partition_geometry() {
         panic!("partition cells expected")
     };
     assert_eq!(cells.shape, vec![1, 2]);
-    for (cell, expected) in cells.data.iter().zip([1.0_f32, 2.]) {
+    for (cell, expected) in cells.data().iter().zip([1.0_f32, 2.]) {
         let Value::Tensor(value) = cell else {
             panic!("single block expected")
         };
@@ -39,7 +39,7 @@ fn partition_matrix_into_quadrants() {
     };
     assert_eq!(cell.shape, vec![2, 2]);
 
-    let bottom_right = cell.data[3].clone();
+    let bottom_right = cell.data()[3].clone();
     let gathered = test_support::gather(bottom_right).expect("gather");
     assert_eq!(gathered.shape(), &[2, 3]);
     assert_eq!(
@@ -62,12 +62,12 @@ fn native_single_data_and_partition_vectors_remain_typed() {
     };
     assert_eq!(cells.shape, vec![1, 2]);
     let expected = [vec![1.0_f32, 2.0], vec![3.0_f32, 4.0]];
-    for (value, expected) in cells.data.into_iter().zip(expected) {
+    for (value, expected) in cells.data().iter().zip(expected) {
         let Value::Tensor(tensor) = value else {
             panic!("expected single tensor block");
         };
         assert_eq!(
-            tensor.into_numeric_storage().unwrap(),
+            tensor.clone().into_numeric_storage().unwrap(),
             NumericStorage::F32(expected)
         );
     }
@@ -87,8 +87,8 @@ fn row_vector_with_single_partition_vector() {
         other => panic!("expected cell array, got {other:?}"),
     };
     assert_eq!(cell.shape, vec![1, 3]);
-    assert_eq!(cell.data.len(), 3);
-    let third = cell.data[2].clone();
+    assert_eq!(cell.data().len(), 3);
+    let third = cell.data()[2].clone();
     let gathered = test_support::gather(third).expect("gather");
     assert_eq!(gathered.materialize_f64(), vec![4.0, 5.0, 6.0]);
     assert_eq!(gathered.shape(), &[1, 3]);
@@ -104,7 +104,7 @@ fn column_vector_with_implicit_column_partition() {
         other => panic!("expected cell array, got {other:?}"),
     };
     assert_eq!(cell.shape, vec![2, 1]);
-    let second = cell.data[1].clone();
+    let second = cell.data()[1].clone();
     let gathered = test_support::gather(second).expect("gather");
     assert_eq!(gathered.shape(), &[2, 1]);
     assert_eq!(gathered.materialize_f64(), vec![3.0, 4.0]);
@@ -123,7 +123,7 @@ fn complex_scalar_partition_yields_complex_value() {
         other => panic!("expected cell array, got {other:?}"),
     };
     assert_eq!(cell.shape, vec![1, 1]);
-    let value = cell.data[0].clone();
+    let value = cell.data()[0].clone();
     match value {
         Value::Complex(re, im) => {
             assert!((re - 1.25).abs() < 1e-12);

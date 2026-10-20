@@ -115,13 +115,16 @@ enum NormParse {
     binding_variant = "default",
     builtin_path = "crate::builtins::math::reduction::std"
 )]
-pub(crate) async fn std_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub(crate) async fn std_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     std_with_nan_policy(value, rest, None).await
 }
 
 pub(crate) async fn std_with_nan_policy(
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
     imposed_nan_mode: Option<ReductionNaN>,
 ) -> crate::BuiltinResult<Value> {
     reject_integer_data_input(&value)?;
@@ -131,7 +134,7 @@ pub(crate) async fn std_with_nan_policy(
             NAME,
         )?;
     }
-    let mut parsed = parse_arguments(&rest).await?;
+    let mut parsed = parse_arguments(rest.view()).await?;
     if let Some(mode) = imposed_nan_mode {
         parsed.nan_mode = mode;
     }
@@ -169,7 +172,9 @@ fn reject_integer_data_input(value: &Value) -> BuiltinResult<()> {
     Ok(())
 }
 
-async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
+async fn parse_arguments(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<ParsedArguments> {
     let mut axes = StdAxes::Default;
     let mut axes_set = false;
     let mut normalization = StdNormalization::Sample;
@@ -376,9 +381,9 @@ fn tensor_len(tensor: &Tensor) -> usize {
 
 fn value_as_str(value: &Value) -> Option<String> {
     match value {
-        Value::String(s) => Some(s.clone()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
+        Value::String(s) => Some(s.as_str().to_owned()),
+        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].as_str().to_owned()),
+        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data().iter().collect()),
         _ => None,
     }
 }
@@ -830,7 +835,10 @@ pub(crate) mod tests {
 
     fn std_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        block_on(super::std_builtin(value, rest))
+        block_on(super::std_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     fn values(tensor: &Tensor) -> Vec<f64> {
@@ -894,7 +902,7 @@ pub(crate) mod tests {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
             let error = block_on(super::std_builtin(
                 Value::Tensor(tensor.clone()),
-                args.clone(),
+                crate::builtins::common::test_support::builtin_arguments(args.clone()),
             ))
             .expect_err("MATLAB-compatible mode");
             assert_eq!(
@@ -904,8 +912,11 @@ pub(crate) mod tests {
         }
         {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-            block_on(super::std_builtin(Value::Tensor(tensor), args))
-                .expect("RunMat extension mode");
+            block_on(super::std_builtin(
+                Value::Tensor(tensor),
+                crate::builtins::common::test_support::builtin_arguments(args),
+            ))
+            .expect("RunMat extension mode");
         }
     }
 
@@ -1218,13 +1229,17 @@ pub(crate) mod tests {
 
     #[test]
     fn std_typed_text_controls_preserve_axis_and_whitespace_admission() {
-        let parsed = block_on(parse_arguments(&[Value::from(" all ")]))
-            .expect("std has historically admitted spaces around all");
+        let parsed = block_on(parse_arguments(
+            crate::call::FunctionArgumentView::from_slice(&[Value::from(" all ")]),
+        ))
+        .expect("std has historically admitted spaces around all");
         assert!(matches!(parsed.axes, StdAxes::All));
 
-        let conflict = block_on(parse_arguments(&[Value::Num(2.0), Value::from("all")]))
-            .err()
-            .expect("all after an axis must conflict");
+        let conflict = block_on(parse_arguments(
+            crate::call::FunctionArgumentView::from_slice(&[Value::Num(2.0), Value::from("all")]),
+        ))
+        .err()
+        .expect("all after an axis must conflict");
         assert_eq!(conflict.identifier(), STD_ERROR_INVALID_ARGUMENT.identifier);
         assert!(conflict.message().contains("'all' cannot be combined"));
     }
@@ -1274,7 +1289,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn std_invalid_input_identifier_is_stable() {
-        let err = std_builtin(Value::String("abc".to_string()), Vec::new()).unwrap_err();
+        let err = std_builtin(Value::String("abc".to_string().into()), Vec::new()).unwrap_err();
         assert_eq!(err.identifier(), STD_ERROR_INVALID_INPUT.identifier);
     }
 

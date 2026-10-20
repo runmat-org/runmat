@@ -1,7 +1,7 @@
-use super::{deletion, mex, zero_based_indices};
+use super::{deletion, mex};
 use crate::indexing::plan::IndexPlan;
 use crate::RuntimeError;
-use runmat_value::{StructArray, StructValue, Tensor, Value};
+use runmat_value::{StructArray, StructValue, Value};
 
 enum Replacement {
     Scalar(StructValue),
@@ -26,8 +26,8 @@ pub fn assign_with_plan(
     if plan.indices.is_empty() {
         return Ok(base);
     }
-    let schema = structure_schema(&base)?;
-    let replacements = assignment_values(&schema, rhs, plan.indices.len())?;
+    structure_schema(&base)?;
+    let replacements = assignment_values(&base, rhs, plan.indices.len())?;
     let target_len = checked_len(&plan.base_shape)?;
     if target_len == 1 {
         if plan.indices.as_slice() != [0] {
@@ -41,48 +41,58 @@ pub fn assign_with_plan(
             )),
         };
     }
-    let fill = empty_structure(&schema);
-    let array = match base {
-        Value::Struct(structure) => {
-            StructArray::grow_scalar(structure, plan.base_shape.clone(), &fill)
-        }
-        Value::StructArray(array) if array.shape() == plan.base_shape => Ok(array),
-        Value::StructArray(array) => array.grow(plan.base_shape.clone(), &fill),
-        _ => unreachable!("structure_schema admitted only structure values"),
-    }
-    .map_err(|error| mex("StructAssignment", error))?;
-    let indices = zero_based_indices(plan);
-    let array = match replacements {
-        Replacement::Scalar(value) => array.replace_linear_scalar(&indices, value),
-        Replacement::Array(values) => array.replace_linear_array(&indices, values),
-    }
-    .map_err(|error| mex("StructAssignment", error))?;
-    Ok(Value::StructArray(array))
+    let rhs = match replacements {
+        Replacement::Scalar(value) => Value::Struct(value),
+        Replacement::Array(value) => Value::StructArray(value),
+    };
+    crate::aggregate::structure::operations::assign(&base, &rhs, plan).map_err(|error| {
+        crate::aggregate::structure::operations::remap(error, |message| {
+            mex("StructAssignment", message)
+        })
+    })
 }
 
-fn structure_schema(value: &Value) -> Result<Vec<String>, RuntimeError> {
+fn structure_schema(value: &Value) -> Result<(), RuntimeError> {
     match value {
-        Value::Struct(structure) => Ok(structure.field_names().cloned().collect()),
-        Value::StructArray(array) => Ok(array.field_names().cloned().collect()),
+        Value::Struct(_) | Value::StructArray(_) => Ok(()),
         _ => Err(mex(
             "StructAssignmentTypeMismatch",
             "Structure-array assignment requires a structure target",
         )),
     }
 }
-
 fn assignment_values(
-    schema: &[String],
+    schema: &Value,
     rhs: Value,
     count: usize,
 ) -> Result<Replacement, RuntimeError> {
+    let valid = match (schema, &rhs) {
+        (Value::Struct(left), Value::Struct(right)) => left.field_names().eq(right.field_names()),
+        (Value::Struct(left), Value::StructArray(right)) => {
+            left.field_names().eq(right.field_names())
+        }
+        (Value::StructArray(left), Value::Struct(right)) => {
+            left.field_names().eq(right.field_names())
+        }
+        (Value::StructArray(left), Value::StructArray(right)) => {
+            left.field_names().eq(right.field_names())
+        }
+        _ => {
+            return Err(mex(
+                "StructAssignmentTypeMismatch",
+                "Structure-array assignment requires a structure value",
+            ))
+        }
+    };
     match rhs {
         Value::Struct(value) => {
-            validate_schema(schema, &value)?;
+            if !valid {
+                return Err(dissimilar_structure_error());
+            }
             Ok(Replacement::Scalar(value))
         }
         Value::StructArray(value) if value.len() == count => {
-            if !value.field_names().eq(schema.iter()) {
+            if !valid {
                 return Err(dissimilar_structure_error());
             }
             Ok(Replacement::Array(value))
@@ -91,18 +101,7 @@ fn assignment_values(
             "StructAssignmentSizeMismatch",
             "Structure-array assignment requires one structure per selected element",
         )),
-        _ => Err(mex(
-            "StructAssignmentTypeMismatch",
-            "Structure-array assignment requires a structure value",
-        )),
-    }
-}
-
-fn validate_schema(schema: &[String], value: &StructValue) -> Result<(), RuntimeError> {
-    if value.field_names().eq(schema.iter()) {
-        Ok(())
-    } else {
-        Err(dissimilar_structure_error())
+        _ => unreachable!("validated structure RHS"),
     }
 }
 
@@ -111,19 +110,6 @@ fn dissimilar_structure_error() -> RuntimeError {
         "DissimilarStructureAssignment",
         "Subscripted assignment between dissimilar structures",
     )
-}
-
-fn empty_structure(schema: &[String]) -> StructValue {
-    let mut structure = StructValue::new();
-    for name in schema {
-        structure.insert(
-            name.clone(),
-            Value::Tensor(
-                Tensor::new(Vec::new(), vec![0, 0]).expect("empty tensor shape is valid"),
-            ),
-        );
-    }
-    structure
 }
 
 fn is_empty_delete_rhs(value: &Value) -> bool {

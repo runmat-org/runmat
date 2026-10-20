@@ -3,6 +3,7 @@
 
 mod analytics;
 mod conversion;
+mod descriptor_objects;
 mod indexing;
 mod predicates;
 mod selectors;
@@ -11,6 +12,7 @@ mod timetable;
 
 pub use self::analytics::*;
 pub use self::conversion::*;
+pub use self::descriptor_objects::*;
 pub use self::indexing::*;
 pub use self::predicates::*;
 pub use self::selectors::*;
@@ -20,6 +22,7 @@ pub use self::timetable::*;
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(analytics::ENTRIES.iter().copied());
     values.extend(conversion::ENTRIES.iter().copied());
+    values.extend(descriptor_objects::ENTRIES.iter().copied());
     values.extend(indexing::ENTRIES.iter().copied());
     values.extend(predicates::ENTRIES.iter().copied());
     values.extend(selectors::ENTRIES.iter().copied());

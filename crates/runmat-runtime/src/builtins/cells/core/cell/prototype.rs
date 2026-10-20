@@ -14,7 +14,7 @@ pub(super) fn empty_value(prototype: Option<&Value>) -> crate::BuiltinResult<Val
                 .map(Value::ComplexTensor)
                 .map_err(error::internal)
         }
-        Some(Value::String(_)) => Ok(Value::String(String::new())),
+        Some(Value::String(_)) => Ok(Value::string(String::new())),
         Some(Value::StringArray(_)) => StringArray::new(Vec::new(), vec![0, 0])
             .map(Value::StringArray)
             .map_err(error::internal),

@@ -14,7 +14,6 @@ use options::*;
 use preflight::*;
 
 use runmat_value::NumericScalar;
-use std::collections::VecDeque;
 use std::time::Duration;
 
 use base64::engine::general_purpose::STANDARD as BASE64_ENGINE;
@@ -109,7 +108,7 @@ fn webwrite_flow_with_context(err: RuntimeError) -> RuntimeError {
 async fn webwrite_builtin(
     context: Option<crate::context::RuntimeContext>,
     url: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &WEBWRITE_DESCRIPTOR,
@@ -146,7 +145,8 @@ async fn webwrite_builtin(
         Some(Value::Struct(source)) => Some(super::api_key::PreparedApiKey::parse(source)),
         _ => None,
     };
-    let prepared_names = preflight_host_arguments(&rest[1..], prepared_api_key.as_ref())?;
+    let prepared_names =
+        preflight_host_arguments(rest.view().range(1..)?, prepared_api_key.as_ref())?;
     let parsed_url = parse_http_url(&url_text).map_err(|err| {
         webwrite_error_with_source(
             &WEBWRITE_ERROR_INVALID_URL,
@@ -155,15 +155,14 @@ async fn webwrite_builtin(
         )
     })?;
 
-    let mut gathered = Vec::with_capacity(rest.len());
-    for value in rest {
-        gathered.push(
-            gather_if_needed_async(&value)
+    let source = &rest;
+    let mut queue = rest
+        .try_map_preserving_roots_async(rest.len(), context.as_ref(), |index| async move {
+            gather_if_needed_async(&source[index])
                 .await
-                .map_err(webwrite_flow_with_context)?,
-        );
-    }
-    let mut queue: VecDeque<Value> = VecDeque::from(gathered);
+                .map_err(webwrite_flow_with_context)
+        })
+        .await?;
     let data_value = queue.pop_front().ok_or_else(|| {
         webwrite_error_with(
             &WEBWRITE_ERROR_MISSING_DATA,
@@ -172,20 +171,20 @@ async fn webwrite_builtin(
     })?;
 
     let (options, query_params) =
-        parse_arguments(queue, prepared_api_key.as_ref(), &prepared_names)?;
+        parse_arguments(&mut queue, prepared_api_key.as_ref(), &prepared_names)?;
     let body = prepare_request_body(data_value, &options).await?;
     execute_request(parsed_url, options, &query_params, body, context.as_ref()).await
 }
 
 fn parse_arguments(
-    mut queue: VecDeque<Value>,
+    queue: &mut crate::call::BuiltinArguments,
     prepared_api_key: Option<&super::api_key::PreparedApiKey>,
     prepared_names: &PreparedRequestNames,
 ) -> BuiltinResult<(WebWriteOptions, Vec<(String, String)>)> {
     let mut options = WebWriteOptions::default();
     let mut query_params = Vec::new();
 
-    if matches!(queue.front(), Some(Value::Struct(_))) {
+    if matches!(queue.first(), Some(Value::Struct(_))) {
         if let Some(Value::Struct(struct_value)) = queue.pop_front() {
             process_struct_fields(
                 &struct_value,
@@ -195,7 +194,7 @@ fn parse_arguments(
                 &mut query_params,
             )?;
         }
-    } else if matches!(queue.front(), Some(Value::Cell(_))) {
+    } else if matches!(queue.first(), Some(Value::Cell(_))) {
         if let Some(Value::Cell(cell)) = queue.pop_front() {
             append_query_from_cell(&cell, &mut query_params)?;
         }
@@ -451,7 +450,7 @@ fn append_query_from_value(
         Value::Struct(struct_value) => {
             for (key, val) in &struct_value.fields {
                 let text = value_to_query_string(val, key)?;
-                query_params.push((key.clone(), text));
+                query_params.push((key.to_owned(), text));
             }
             Ok(())
         }

@@ -131,9 +131,20 @@ pub(crate) fn dispatch_inputname(args: Vec<Value>) -> crate::BuiltinResult<Value
     dispatch_inputname_in_context(None, args)
 }
 
+#[cfg(test)]
 pub(crate) fn dispatch_inputname_in_context(
     runtime: Option<&crate::context::RuntimeContext>,
     args: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    dispatch_inputname_arguments(
+        runtime,
+        crate::call::FunctionArgumentView::from_slice(&args),
+    )
+}
+
+fn dispatch_inputname_arguments(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> crate::BuiltinResult<Value> {
     match args.len() {
         0 => return Err(descriptor_error(&INPUTNAME_ERROR_NOT_ENOUGH_INPUTS)),
@@ -176,9 +187,9 @@ pub(crate) fn dispatch_inputname_in_context(
 )]
 pub fn inputname_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
-    dispatch_inputname_in_context(runtime.as_ref(), args)
+    dispatch_inputname_arguments(runtime.as_ref(), args.view())
 }
 
 #[cfg(test)]

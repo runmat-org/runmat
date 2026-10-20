@@ -120,9 +120,9 @@ async fn imfilter_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     image: Value,
     kernel: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
-    let options = parse_imfilter_options(&rest)?;
+    let options = parse_imfilter_options(rest.view())?;
     preflight_imfilter_geometry(&image, &kernel, options.shape)?;
     match (image, kernel) {
         (Value::GpuTensor(image_handle), Value::GpuTensor(filter_handle)) => {
@@ -380,7 +380,9 @@ fn imfilter_host_value(
     Ok(result)
 }
 
-fn parse_imfilter_options(args: &[Value]) -> BuiltinResult<ImfilterOptions> {
+fn parse_imfilter_options(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<ImfilterOptions> {
     let mut options = ImfilterOptions::default();
     let mut idx = 0usize;
     while idx < args.len() {

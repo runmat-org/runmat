@@ -514,8 +514,10 @@ impl MeteredProgramResponse {
 }
 
 pub(super) fn success_response(success: &AttemptSuccess) -> ProgramExecutionResponse {
-    let (outputs, result_objects) = success.values().expect("value attempt result");
-    ProgramExecutionResponse::from_success_outputs(outputs.to_vec(), result_objects.to_vec())
+    ProgramExecutionResponse::from_success_outputs(
+        success.values().expect("analysis value result").0.to_vec(),
+        success.result_objects().to_vec(),
+    )
 }
 
 pub(super) fn metered_response(
@@ -526,7 +528,6 @@ pub(super) fn metered_response(
     success.validate_accounting().unwrap();
     let resources = success
         .resources()
-        .as_deref()
         .expect("analysis task must retain resource accounting")
         .clone();
     let response = success_response(&success);
@@ -790,9 +791,11 @@ impl CacheImport for MemoryStore {
         maximum_bytes: u64,
     ) -> runmat_execution_artifact::ArtifactResult<Option<Vec<u8>>> {
         match self.0.get(&digest) {
-            Some(bytes) if bytes.len() as u64 > maximum_bytes => Err(
-                runmat_execution_artifact::ArtifactError::Limit("object exceeds its read bound".into()),
-            ),
+            Some(bytes) if bytes.len() as u64 > maximum_bytes => {
+                Err(runmat_execution_artifact::ArtifactError::Limit(
+                    "object exceeds its read bound".into(),
+                ))
+            }
             bytes => Ok(bytes.cloned()),
         }
     }

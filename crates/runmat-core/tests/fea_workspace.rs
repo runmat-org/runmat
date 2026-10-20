@@ -247,7 +247,7 @@ fn checked_candidate_retains_exact_source_for_preview_and_never_reads_live_fallb
     let missing = source.source_root.join("not-captured.m");
     assert!(futures::executor::block_on(source.read_source(&missing)).is_err());
     assert_eq!(source.check_result(), *report);
-    session.clear_project_handoff();
+    futures::executor::block_on(session.clear_project_handoff()).expect("retire project handoff");
     assert!(session.checked_fea_source(report.revision).is_err());
 }
 

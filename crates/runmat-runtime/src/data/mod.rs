@@ -1845,7 +1845,7 @@ pub fn parse_schema(schema: &Value) -> BuiltinResult<DataSchema> {
         let data_path = format!("arrays/{name}/data.f64.json");
         let chunk_index_path = format!("arrays/{name}/chunks/index.json");
         arrays.insert(
-            name.clone(),
+            name.to_owned(),
             DataArrayMeta {
                 dtype,
                 shape,
@@ -1940,20 +1940,25 @@ fn tensor_to_usize_vector(t: &Tensor) -> BuiltinResult<Vec<usize>> {
     Ok(out)
 }
 
-pub fn dataset_object(path: &str, manifest: &DataManifest, authority: ForeignRef) -> Value {
-    let mut obj = ObjectInstance::new(runmat_builtins::DATASET_CLASS.owned())
-        .with_dataset_authority(authority);
-    obj.properties
-        .insert("__data_path".to_string(), Value::String(path.to_string()));
-    obj.properties.insert(
-        "__data_id".to_string(),
-        Value::String(manifest.dataset_id.clone()),
-    );
-    obj.properties.insert(
-        "__data_version".to_string(),
-        Value::String(manifest_version_token(manifest)),
-    );
-    Value::Object(obj)
+pub fn dataset_object(
+    runtime: Option<&crate::context::RuntimeContext>,
+    path: &str,
+    manifest: &DataManifest,
+    authority: ForeignRef,
+) -> BuiltinResult<crate::execution::RootedValue> {
+    data_object(
+        runtime,
+        runmat_builtins::DATASET_CLASS.display_name(),
+        [
+            ("__data_path", Value::string(path)),
+            ("__data_id", Value::string(manifest.dataset_id.clone())),
+            (
+                "__data_version",
+                Value::string(manifest_version_token(manifest)),
+            ),
+        ],
+        authority,
+    )
 }
 
 pub fn manifest_version_token(manifest: &DataManifest) -> String {
@@ -1976,34 +1981,56 @@ pub fn ensure_manifest_sequence(expected: u64, manifest: &DataManifest) -> Built
     Ok(())
 }
 
-pub fn array_object(dataset_path: &str, array_name: &str, authority: ForeignRef) -> Value {
-    let mut obj = ObjectInstance::new(runmat_builtins::DATA_ARRAY_CLASS.owned())
-        .with_dataset_authority(authority);
-    obj.properties.insert(
-        "__data_path".to_string(),
-        Value::String(dataset_path.to_string()),
-    );
-    obj.properties.insert(
-        "__array_name".to_string(),
-        Value::String(array_name.to_string()),
-    );
-    Value::Object(obj)
+pub fn array_object(
+    runtime: Option<&crate::context::RuntimeContext>,
+    dataset_path: &str,
+    array_name: &str,
+    authority: ForeignRef,
+) -> BuiltinResult<crate::execution::RootedValue> {
+    data_object(
+        runtime,
+        runmat_builtins::DATA_ARRAY_CLASS.display_name(),
+        [
+            ("__data_path", Value::string(dataset_path)),
+            ("__array_name", Value::string(array_name)),
+        ],
+        authority,
+    )
 }
 
-pub fn transaction_object(dataset_path: &str, tx_id: &str, authority: ForeignRef) -> Value {
-    let mut obj = ObjectInstance::new(runmat_builtins::DATA_TRANSACTION_CLASS.owned())
-        .with_dataset_authority(authority);
-    obj.properties.insert(
-        "__data_path".to_string(),
-        Value::String(dataset_path.to_string()),
-    );
-    obj.properties
-        .insert("__tx_id".to_string(), Value::String(tx_id.to_string()));
-    Value::Object(obj)
+pub fn transaction_object(
+    runtime: Option<&crate::context::RuntimeContext>,
+    dataset_path: &str,
+    tx_id: &str,
+    authority: ForeignRef,
+) -> BuiltinResult<crate::execution::RootedValue> {
+    data_object(
+        runtime,
+        runmat_builtins::DATA_TRANSACTION_CLASS.display_name(),
+        [
+            ("__data_path", Value::string(dataset_path)),
+            ("__tx_id", Value::string(tx_id)),
+        ],
+        authority,
+    )
+}
+
+fn data_object<const N: usize>(
+    runtime: Option<&crate::context::RuntimeContext>,
+    class: &str,
+    fields: [(&str, Value); N],
+    authority: ForeignRef,
+) -> BuiltinResult<crate::execution::RootedValue> {
+    crate::execution::object::construct_object_from_fields_with_native(
+        runtime,
+        class,
+        fields.iter().map(|(name, value)| (*name, value)),
+        Some(crate::execution::object::ObjectNativeInitialization::DatasetAuthority(authority)),
+    )
 }
 
 pub fn get_object_prop<'a>(obj: &'a ObjectInstance, key: &str) -> BuiltinResult<&'a Value> {
-    obj.properties
+    obj.properties()
         .get(key)
         .ok_or_else(|| data_error(format!("object missing internal property '{key}'")))
 }

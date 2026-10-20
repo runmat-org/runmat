@@ -18,14 +18,14 @@ fn test_handle() -> (*mut u8, runmat_gc_api::GcHandle) {
 fn value_tracing_reaches_deep_container_handle_without_recursive_calls() {
     let (raw, handle) = test_handle();
     let mut value = Value::HandleObject(HandleRef {
-        class_name: ClassIdentity::from("DeepTrace"),
+        class_name: ClassIdentity::from("DeepTrace").into(),
         target: handle,
         valid: true,
     });
     for _ in 0..1024 {
-        let mut structure = StructValue::new();
+        let mut structure = crate::UnboundedStructValueBuilder::new();
         structure.insert("next", value);
-        value = Value::Struct(structure);
+        value = Value::Struct(structure.finish());
     }
     let mut tracer = RecordingTracer(Vec::new());
     value.trace(&mut tracer);
@@ -45,7 +45,7 @@ fn value_tracing_reaches_deep_container_handle_without_recursive_calls() {
     assert_eq!(live.load(Ordering::SeqCst), 0);
     loop {
         value = match value {
-            Value::Struct(structure) => structure.fields.into_iter().next().unwrap().1,
+            Value::Struct(structure) => structure.into_fields_unbounded().next().unwrap().1,
             other => {
                 assert!(matches!(other, Value::HandleObject(_)));
                 break;
@@ -99,14 +99,14 @@ impl ExactHostAllocationPermit for TracePermit {
 fn admitted_value_trace_growth_failure_is_terminal_and_workspace_can_retrace() {
     let (raw, handle) = test_handle();
     let mut nested = Value::HandleObject(HandleRef {
-        class_name: ClassIdentity::from("DeniedTrace"),
+        class_name: ClassIdentity::from("DeniedTrace").into(),
         target: handle,
         valid: true,
     });
     for _ in 0..12 {
-        let mut structure = StructValue::new();
+        let mut structure = crate::UnboundedStructValueBuilder::new();
         structure.insert("next", nested);
-        nested = Value::Struct(structure);
+        nested = Value::Struct(structure.finish());
     }
     let live = Arc::new(AtomicUsize::new(0));
     let permit = TracePermit {
@@ -138,7 +138,7 @@ fn value_tracing_includes_object_native_property_and_metadata_edges() {
     let (metadata_raw, metadata) = test_handle();
     let handle_value = |target| {
         Value::HandleObject(HandleRef {
-            class_name: ClassIdentity::from("TraceEdge"),
+            class_name: ClassIdentity::from("TraceEdge").into(),
             target,
             valid: true,
         })
@@ -153,13 +153,12 @@ fn value_tracing_includes_object_native_property_and_metadata_edges() {
         key_value: Value::String("key".into()),
         value: handle_value(native),
     });
-    let mut object = ObjectInstance::new("TraceObject").with_containers_map_payload(storage);
-    object
-        .properties
-        .insert("property".into(), handle_value(property));
-    let mut definition = DynamicPropertyDef::new("metadata".into(), "TraceObject".into());
+    let mut object = UnboundedObjectBuilder::new("TraceObject");
+    object.insert("property".into(), handle_value(property));
+    let mut definition = DynamicPropertyDef::new("metadata".into(), "TraceObject");
     definition.metadata_handle = Some(metadata);
-    object.insert_dynamic_property("metadata".into(), definition);
+    object.insert_dynamic("metadata".into(), definition);
+    let object = object.finish().with_containers_map_payload(storage);
     let mut tracer = RecordingTracer(Vec::new());
     Value::Object(object).trace(&mut tracer);
     assert_eq!(tracer.0, vec![native, property, metadata]);
@@ -179,18 +178,23 @@ fn value_tracing_covers_all_nested_container_edges() {
         .collect::<Vec<_>>();
     let child = |target| {
         Value::HandleObject(HandleRef {
-            class_name: ClassIdentity::from("TraceEdge"),
+            class_name: ClassIdentity::from("TraceEdge").into(),
             target,
             valid: true,
         })
     };
     let cell = Value::Cell(CellArray::new_with_shape(vec![child(handles[0])], vec![1, 1]).unwrap());
-    let mut first = StructValue::new();
+    let mut first = crate::UnboundedStructValueBuilder::new();
     first.insert("item", child(handles[1]));
-    let mut second = StructValue::new();
+    let mut second = crate::UnboundedStructValueBuilder::new();
     second.insert("item", child(handles[2]));
     let structures = Value::StructArray(
-        StructArray::with_fields(vec!["item".into()], vec![first, second], vec![1, 2]).unwrap(),
+        StructArray::with_fields(
+            vec!["item".into()],
+            vec![first.finish(), second.finish()],
+            vec![1, 2],
+        )
+        .unwrap(),
     );
     let objects = Value::ObjectArray(
         ObjectArray::new(
@@ -206,7 +210,7 @@ fn value_tracing_covers_all_nested_container_edges() {
         binding: None,
         source_role: runmat_types::FunctionSourceRole::Unknown,
         source_file: None,
-        captures: vec![Value::Listener(Listener {
+        captures: crate::OutputListStorage::shared_unbounded(vec![Value::Listener(Listener {
             id: 1,
             target: handles[5],
             target_class_name: "TraceEdge".into(),
@@ -214,7 +218,7 @@ fn value_tracing_covers_all_nested_container_edges() {
             callback: handles[6],
             enabled: true,
             valid: true,
-        })],
+        })]),
     }));
     let value = Value::output_list(vec![cell, structures, objects, closure]);
     let mut tracer = RecordingTracer(Vec::new());
@@ -243,7 +247,7 @@ fn nested_closure_traces_each_live_ancestor_activation() {
         binding: None,
         source_role: runmat_types::FunctionSourceRole::Nested,
         source_file: None,
-        captures: Vec::new(),
+        captures: crate::OutputListStorage::empty(),
     }));
     let mut tracer = RecordingTracer(Vec::new());
     closure.trace(&mut tracer);
@@ -279,7 +283,7 @@ fn sequence_traces_handles_reachable_from_every_output() {
     };
     let make_handle = |target| {
         Value::HandleObject(HandleRef {
-            class_name: ClassIdentity::from("SequenceTestHandle"),
+            class_name: ClassIdentity::from("SequenceTestHandle").into(),
             target,
             valid: true,
         })

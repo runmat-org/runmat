@@ -3291,7 +3291,8 @@ fn spectral_range_shader_mode(range: ProviderSpectralRange) -> SpectralRangeShad
 #[cfg(test)]
 mod tests {
     use crate::backend::wgpu::provider::{
-        register_test_wgpu_provider, WgpuProvider, WgpuProviderOptions,
+        register_retained_test_wgpu_provider, register_test_wgpu_provider, WgpuProvider,
+        WgpuProviderOptions,
     };
     use num_complex::Complex;
     use runmat_accelerate_api::{
@@ -3322,8 +3323,19 @@ mod tests {
             .unwrap_or_default()
     }
 
+    fn with_retained_wgpu_provider<F, R>(f: F) -> Option<R>
+    where
+        F: FnOnce(&'static dyn AccelProvider) -> R,
+    {
+        let Ok(session) = register_retained_test_wgpu_provider(WgpuProviderOptions::default())
+        else {
+            return None;
+        };
+        Some(f(session.provider()))
+    }
+
     fn run_envelope_on(
-        provider: &'static dyn AccelProvider,
+        provider: &dyn AccelProvider,
         method: ProviderEnvelopeMethod,
         values: &[f64],
         shape: &[usize],
@@ -3968,7 +3980,7 @@ mod tests {
 
     #[test]
     fn iir_filter_nonleading_axis_uses_order_first_state_geometry() {
-        let Some(()) = with_wgpu_provider(|provider| {
+        let Some(()) = with_retained_wgpu_provider(|provider| {
             let x = provider
                 .upload(&HostTensorView {
                     data: &[
@@ -4029,7 +4041,7 @@ mod tests {
 
     #[test]
     fn iir_filter_third_axis_uses_order_first_state_geometry() {
-        let Some(()) = with_wgpu_provider(|provider| {
+        let Some(()) = with_retained_wgpu_provider(|provider| {
             let x = provider
                 .upload(&HostTensorView {
                     data: &[
@@ -4249,8 +4261,9 @@ mod tests {
     #[test]
     #[ignore = "run explicitly on actual WGPU hardware"]
     fn prepared_iir_coefficients_are_uploaded_once_and_reused_without_download() {
-        let provider = register_wgpu_provider(WgpuProviderOptions::default())
+        let session = register_retained_test_wgpu_provider(WgpuProviderOptions::default())
             .expect("actual WGPU provider required");
+        let provider = session.provider();
         let prepared = ProviderPreparedIirCoefficients::upload(
             provider,
             &[0.5, 0.5],

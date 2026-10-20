@@ -10,19 +10,22 @@ use super::*;
 )]
 pub async fn timer_builtin(
     runtime: Option<RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let runtime = timer_runtime(runtime)?;
     ensure_timer_class_registered();
-    let args = prepare_timer_property_pairs(Some(&runtime), &args, false).await?;
+    let args = prepare_timer_property_pairs(Some(&runtime), args.view(), false).await?;
     let name = runtime
         .timer_session()
         .borrow_mut()
         .next_name()
         .ok_or_else(|| timer_error(&TIMER_ERROR_INVALID_INPUT, "timer: name identity exhausted"))?;
-    let mut object = default_timer_object(name);
-    apply_name_value_pairs(&mut object, &args, true)?;
-    let Some(Value::String(visibility_text)) = object.properties.get("ObjectVisibility") else {
+    let object = prepare_default_timer_object(&runtime, name, &args)?;
+    let (object, object_roots) = object.into_value_and_lease();
+    let Value::Object(object) = object else {
+        unreachable!("timer constructor publishes an object")
+    };
+    let Some(Value::String(visibility_text)) = object.properties().get("ObjectVisibility") else {
         return Err(timer_error(
             &TIMER_ERROR_INVALID_PROPERTY,
             "timer: invalid ObjectVisibility value",
@@ -47,6 +50,7 @@ pub async fn timer_builtin(
         .timer_session()
         .borrow_mut()
         .register(handle.clone(), root, visibility);
+    drop(object_roots);
     Ok(Value::HandleObject(handle))
 }
 
@@ -58,12 +62,12 @@ pub async fn timer_builtin(
 )]
 pub async fn timerfind_builtin(
     runtime: Option<RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let runtime = timer_runtime(runtime)?;
     find_timers(
         &runtime,
-        prepare_timer_property_pairs(Some(&runtime), &args, true).await?,
+        prepare_timer_property_pairs(Some(&runtime), args.view(), true).await?,
         false,
     )
 }
@@ -76,12 +80,12 @@ pub async fn timerfind_builtin(
 )]
 pub async fn timerfindall_builtin(
     runtime: Option<RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let runtime = timer_runtime(runtime)?;
     find_timers(
         &runtime,
-        prepare_timer_property_pairs(Some(&runtime), &args, true).await?,
+        prepare_timer_property_pairs(Some(&runtime), args.view(), true).await?,
         true,
     )
 }
@@ -115,7 +119,7 @@ pub async fn timer_startat_builtin(
     runtime: Option<RuntimeContext>,
     requested_outputs: Option<usize>,
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let runtime = timer_runtime(runtime)?;
     admit_timer_method_outputs(&runtime, requested_outputs, "startat")?;
@@ -125,7 +129,7 @@ pub async fn timer_startat_builtin(
             "startat: expected one firing time or Y/M/D[/H/MI/S] components",
         ));
     }
-    if !rest.is_empty() && !is_legacy_relative_scalar(&rest) {
+    if !rest.is_empty() && !is_legacy_relative_scalar(rest.view()) {
         start_at_absolute(&runtime, &value, rest).await?;
         return Ok(Value::Num(0.0));
     }
@@ -136,9 +140,10 @@ pub async fn timer_startat_builtin(
     )?;
     let prepared = match rest.first() {
         Some(delay) => {
+            let delay_argument = [Value::string("StartDelay".to_string()), delay.clone()];
             prepare_timer_property_pairs(
                 Some(&runtime),
-                &[Value::String("StartDelay".to_string()), delay.clone()],
+                crate::call::FunctionArgumentView::from_slice(&delay_argument),
                 false,
             )
             .await?

@@ -38,7 +38,7 @@ fn error(index: usize, detail: impl AsRef<str>) -> RuntimeError {
     binding_variant = "default",
     builtin_path = "crate::builtins::plotting::cylinder"
 )]
-async fn cylinder_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn cylinder_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     let requested = crate::output_count::current_output_count();
     if requested.is_some_and(|count| count > 3) {
         return Err(error(0, "requested more than [X,Y,Z]"));
@@ -60,7 +60,7 @@ async fn cylinder_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         Some(
             parse_surface_style_args(
                 NAME,
-                &options,
+                options.view(),
                 SurfaceStyleDefaults::new(
                     ColorMap::Parula,
                     ShadingMode::Flat,
@@ -136,10 +136,10 @@ struct AxesTarget {
 
 struct CylinderCall {
     target: Option<AxesTarget>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 }
 
-fn split_axes(mut args: Vec<Value>, plot: bool) -> BuiltinResult<CylinderCall> {
+fn split_axes(mut args: crate::call::BuiltinArguments, plot: bool) -> BuiltinResult<CylinderCall> {
     let Some(first) = args.first() else {
         return Ok(CylinderCall { target: None, args });
     };
@@ -147,7 +147,7 @@ fn split_axes(mut args: Vec<Value>, plot: bool) -> BuiltinResult<CylinderCall> {
         if !plot {
             return Err(error(1, "axes handles require statement-form plotting"));
         }
-        args.remove(0);
+        args.pop_front().expect("validated argument prefix");
         return Ok(CylinderCall {
             target: Some(AxesTarget { figure, axes }),
             args,
@@ -182,21 +182,21 @@ impl RadiusProfile {
 }
 
 async fn parse_arguments(
-    mut args: Vec<Value>,
-) -> BuiltinResult<(RadiusProfile, usize, Vec<Value>)> {
+    mut args: crate::call::BuiltinArguments,
+) -> BuiltinResult<(RadiusProfile, usize, crate::call::BuiltinArguments)> {
     let mut radius = RadiusProfile::Constant(1.0);
     if args
         .first()
         .is_some_and(|value| value_as_string(value).is_none())
     {
-        radius = parse_radius(args.remove(0))?;
+        radius = parse_radius(args.pop_front().expect("radius argument"))?;
     }
     let mut n = DEFAULT_N;
     if args
         .first()
         .is_some_and(|value| value_as_string(value).is_none())
     {
-        n = parse_resolution(&args.remove(0)).await?;
+        n = parse_resolution(&args.pop_front().expect("resolution argument")).await?;
     }
     if !args.is_empty() && !args.len().is_multiple_of(2) {
         return Err(error(1, "plot property names and values must be paired"));
@@ -270,6 +270,10 @@ fn valid_resolution(value: f64) -> bool {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+
+    async fn cylinder_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+        super::cylinder_builtin(crate::call::BuiltinArguments::from_borrowed(&args, None)?).await
+    }
 
     #[test]
     fn default_and_profile_coordinates_have_height_and_closed_seam() {

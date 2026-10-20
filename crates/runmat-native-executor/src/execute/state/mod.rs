@@ -41,9 +41,68 @@ pub(super) struct HostStateInput {
     pub workspace: Option<super::workspace::NativeWorkspaceInput>,
 }
 
-pub(super) enum NativeFunctionInputs {
+// Keep the rooted prepared owner inline: boxing it would introduce a new
+// allocation at retained entry. The source control preserves legacy validation
+// and preparation order without copying either input forest.
+pub(super) struct NativeFunctionInputs {
+    source: NativeInputSource,
+    prepared: Option<runmat_runtime::call::function_abi::PreparedFunctionInputs>,
+}
+
+enum NativeInputSource {
     Legacy(Vec<runmat_value::Value>),
-    Prepared(runmat_runtime::call::function_abi::PreparedFunctionInputs),
+    Prepared,
+}
+
+impl NativeFunctionInputs {
+    pub(super) fn legacy(arguments: Vec<runmat_value::Value>) -> Self {
+        Self {
+            source: NativeInputSource::Legacy(arguments),
+            prepared: None,
+        }
+    }
+
+    pub(super) fn prepared(
+        prepared: runmat_runtime::call::function_abi::PreparedFunctionInputs,
+    ) -> Self {
+        Self {
+            source: NativeInputSource::Prepared,
+            prepared: Some(prepared),
+        }
+    }
+
+    pub(super) fn legacy_arguments(&self) -> Option<&[runmat_value::Value]> {
+        match &self.source {
+            NativeInputSource::Legacy(arguments) => Some(arguments),
+            NativeInputSource::Prepared => None,
+        }
+    }
+
+    pub(super) fn input_count(&self) -> usize {
+        match &self.source {
+            NativeInputSource::Legacy(arguments) => arguments.len(),
+            NativeInputSource::Prepared => {
+                self.prepared
+                    .as_ref()
+                    .expect("prepared input source owns its prepared inputs")
+                    .nargin
+            }
+        }
+    }
+
+    /// Extract prepared inputs, returning the original source arguments when
+    /// this entry still requires legacy preparation.
+    pub(super) fn try_into_prepared(
+        self,
+    ) -> Result<runmat_runtime::call::function_abi::PreparedFunctionInputs, Vec<runmat_value::Value>>
+    {
+        match self.source {
+            NativeInputSource::Legacy(arguments) => Err(arguments),
+            NativeInputSource::Prepared => Ok(self
+                .prepared
+                .expect("prepared input source owns its prepared inputs")),
+        }
+    }
 }
 
 pub(super) enum NativeCaptureInput {
@@ -63,7 +122,7 @@ pub(super) struct HostState {
     pub locals: Vec<NativeValueRef>,
     pub values: BTreeMap<NativeValueId, NativeValueRef>,
     pub roots: Vec<NativeRoot>,
-    pub last_error: Option<Arc<RuntimeError>>,
+    pub last_error: Option<runmat_runtime::runtime_error::RuntimeErrorOwner>,
     pub host_failure: Option<NativeExecutorError>,
     pub current_source: runmat_runtime::native::NativeSourceLocation,
     pub pending_place_mutation: Option<runmat_mir::MirPlaceMutation>,

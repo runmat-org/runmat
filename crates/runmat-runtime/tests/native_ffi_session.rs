@@ -122,15 +122,22 @@ fn invoke_outputs(
         .require_foreign(symbol)
         .unwrap()
         .clone();
-    futures::executor::block_on(context.scope(service.invoke(
-        context.clone(),
-        ForeignCall {
-            adapter: NATIVE_FFI_ADAPTER_ID.into(),
-            symbol: symbol.into(),
-            arguments,
-            requested_outputs,
-        },
-    )))
+    futures::executor::block_on(
+        context.scope(
+            service.invoke(
+                context.clone(),
+                ForeignCall {
+                    adapter: NATIVE_FFI_ADAPTER_ID.into(),
+                    symbol: symbol.into(),
+                    arguments: runmat_runtime::call::RootedFunctionArguments::ordinary(
+                        runmat_runtime::execution::RootedValues::in_context(arguments, context)
+                            .map_err(Box::new)?,
+                    ),
+                    requested_outputs,
+                },
+            ),
+        ),
+    )
     .into_invoked_result()
     .map_err(Box::new)?
     .with_owned_sequence(|sequence| {
@@ -163,8 +170,8 @@ fn library_and_pointer_state_are_owned_by_one_runtime_session() {
         &context,
         "load",
         vec![
-            Value::String(library_path.display().to_string()),
-            Value::String(header_path.display().to_string()),
+            Value::String(library_path.display().to_string().into()),
+            Value::String(header_path.display().to_string().into()),
             Value::String("session_fixture".into()),
         ],
         1,
@@ -185,7 +192,7 @@ fn library_and_pointer_state_are_owned_by_one_runtime_session() {
         panic!("full function metadata must be returned as a cell array");
     };
     assert!(signatures
-        .data
+        .data()
         .iter()
         .any(|value| { value == &Value::String("int32 fixture_add(int32, int32)".into()) }));
 
@@ -199,8 +206,8 @@ fn library_and_pointer_state_are_owned_by_one_runtime_session() {
         &context,
         "load_report",
         vec![
-            Value::String(library_path.display().to_string()),
-            Value::String(census_header.display().to_string()),
+            Value::String(library_path.display().to_string().into()),
+            Value::String(census_header.display().to_string().into()),
             Value::String("census_fixture".into()),
         ],
         2,
@@ -210,7 +217,10 @@ fn library_and_pointer_state_are_owned_by_one_runtime_session() {
     let Value::Cell(notfound) = &report[0] else {
         panic!("missing functions must be reported as a cell array");
     };
-    assert_eq!(notfound.data, vec![Value::String("fixture_absent".into())]);
+    assert_eq!(
+        notfound.data(),
+        vec![Value::String("fixture_absent".into())]
+    );
     assert!(matches!(&report[1], Value::String(_)));
     invoke(
         &context,
@@ -224,9 +234,9 @@ fn library_and_pointer_state_are_owned_by_one_runtime_session() {
         &context,
         "build_interface",
         vec![
-            Value::String(header_path.display().to_string()),
+            Value::String(header_path.display().to_string().into()),
             Value::String("Libraries".into()),
-            Value::String(library_path.display().to_string()),
+            Value::String(library_path.display().to_string().into()),
             Value::String("InterfaceName".into()),
             Value::String("prepared_fixture".into()),
         ],
@@ -244,8 +254,8 @@ fn library_and_pointer_state_are_owned_by_one_runtime_session() {
         &context,
         "load_prepared",
         vec![
-            Value::String(missing_library.display().to_string()),
-            Value::String(manifest_path.display().to_string()),
+            Value::String(missing_library.display().to_string().into()),
+            Value::String(manifest_path.display().to_string().into()),
             Value::String("missing_fixture".into()),
         ],
         1,
@@ -270,8 +280,8 @@ fn library_and_pointer_state_are_owned_by_one_runtime_session() {
             &context,
             "load_prepared",
             vec![
-                Value::String(library_path.display().to_string()),
-                Value::String(manifest_path.display().to_string()),
+                Value::String(library_path.display().to_string().into()),
+                Value::String(manifest_path.display().to_string().into()),
                 Value::String("restored_fixture".into()),
             ],
             1,
@@ -669,20 +679,28 @@ async fn isolated_add(context: &RuntimeContext) -> Value {
         .expect("native service")
         .clone();
     context
-        .scope(service.invoke(
-            context.clone(),
-            ForeignCall {
-                adapter: NATIVE_FFI_ADAPTER_ID.into(),
-                symbol: "call".into(),
-                arguments: vec![
-                    Value::String("prepared_fixture".into()),
-                    Value::String("fixture_add".into()),
-                    Value::Int(IntValue::I32(20)),
-                    Value::Int(IntValue::I32(22)),
-                ],
-                requested_outputs: 1,
-            },
-        ))
+        .scope(
+            service.invoke(
+                context.clone(),
+                ForeignCall {
+                    adapter: NATIVE_FFI_ADAPTER_ID.into(),
+                    symbol: "call".into(),
+                    arguments: runmat_runtime::call::RootedFunctionArguments::ordinary(
+                        runmat_runtime::execution::RootedValues::in_context(
+                            vec![
+                                Value::String("prepared_fixture".into()),
+                                Value::String("fixture_add".into()),
+                                Value::Int(IntValue::I32(20)),
+                                Value::Int(IntValue::I32(22)),
+                            ],
+                            context,
+                        )
+                        .expect("root isolated native fixture arguments"),
+                    ),
+                    requested_outputs: 1,
+                },
+            ),
+        )
         .await
         .into_invoked_result()
         .expect("isolated native fixture call")

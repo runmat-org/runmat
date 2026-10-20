@@ -59,13 +59,22 @@ pub(crate) fn resolved_builtin_catalog_identity(
     runmat_builtins::builtin_catalog_entry_by_name(&name).map(|entry| entry.identity)
 }
 
-fn callable_name(callable: &Value) -> Option<String> {
+fn callable_name(callable: &Value) -> Option<std::borrow::Cow<'_, str>> {
+    use std::borrow::Cow;
     let text = match callable {
-        Value::FunctionHandle(name) | Value::ExternalFunctionHandle(name) => name.name().to_owned(),
-        Value::Closure(closure) if closure.binding.is_none() => closure.function_name.clone(),
-        Value::String(text) => text.clone(),
-        Value::StringArray(array) if array.data.len() == 1 => array.data.first()?.clone(),
-        Value::CharArray(array) if array.rows == 1 => array.data.iter().collect(),
+        Value::FunctionHandle(name) | Value::ExternalFunctionHandle(name) => {
+            Cow::Borrowed(name.name())
+        }
+        Value::Closure(closure) if closure.binding.is_none() => {
+            Cow::Borrowed(closure.function_name.as_str())
+        }
+        Value::String(text) => Cow::Borrowed(text.as_str()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Cow::Borrowed(array.data().first()?.as_str())
+        }
+        Value::CharArray(array) if array.rows == 1 => {
+            Cow::Owned(array.data().iter().collect::<String>())
+        }
         Value::MethodFunctionHandle(_) | Value::BoundFunctionHandle(_) | Value::Closure(_) => {
             return None
         }
@@ -73,7 +82,19 @@ fn callable_name(callable: &Value) -> Option<String> {
     };
     let trimmed = text.trim();
     let name = trimmed.strip_prefix('@').unwrap_or(trimmed).trim();
-    (!name.is_empty()).then(|| name.to_string())
+    if name.is_empty() {
+        return None;
+    }
+    let start = name.as_ptr() as usize - text.as_ptr() as usize;
+    let len = name.len();
+    Some(match text {
+        Cow::Borrowed(text) => Cow::Borrowed(&text[start..start + len]),
+        Cow::Owned(mut text) => {
+            text.truncate(start + len);
+            text.drain(..start);
+            Cow::Owned(text)
+        }
+    })
 }
 
 pub(crate) fn scalarized_fact(value: &Value) -> ValueFact {

@@ -1,5 +1,6 @@
 //! Two-sample test execution, statistics, output geometry, and typed boundaries.
 use super::*;
+use std::borrow::Cow;
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Options {
@@ -89,7 +90,10 @@ pub(super) fn ensure_ttest2_sample_extension(x: &Value, y: &Value) -> BuiltinRes
 #[cfg(test)]
 pub(super) fn ensure_ttest2_extensions(x: &Value, y: &Value, rest: &[Value]) -> BuiltinResult<()> {
     ensure_ttest2_sample_extension(x, y)?;
-    Ttest2OptionPlan::admit(rest.to_vec()).map(|_| ())
+    Ttest2OptionPlan::admit(crate::builtins::common::test_support::builtin_arguments(
+        rest.to_vec(),
+    ))
+    .map(|_| ())
 }
 
 pub(super) fn ensure_exact_ttest2_integer_tensor(tensor: &Tensor, role: &str) -> BuiltinResult<()> {
@@ -123,12 +127,14 @@ pub(super) fn ensure_exact_ttest2_integer_scalar(value: &Value, role: &str) -> B
     }
 }
 
-pub(super) fn scalar_text(value: &Value, context: &str) -> BuiltinResult<String> {
+pub(super) fn scalar_text<'a>(value: &'a Value, context: &str) -> BuiltinResult<Cow<'a, str>> {
     match value {
-        Value::String(text) => Ok(text.clone()),
-        Value::CharArray(array) if array.rows == 1 => Ok(array.data.iter().collect()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
-        Value::Cell(cell) if cell.data.len() == 1 => scalar_text(&cell.data[0], context),
+        Value::String(text) => Ok(Cow::Borrowed(text.as_str())),
+        Value::CharArray(array) if array.rows == 1 => Ok(Cow::Owned(array.data().iter().collect())),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(Cow::Borrowed(array.data()[0].as_str()))
+        }
+        Value::Cell(cell) if cell.data().len() == 1 => scalar_text(&cell.data()[0], context),
         other => Err(invalid_argument(format!(
             "ttest2: {context} must be a string scalar, got {other:?}"
         ))),
@@ -230,7 +236,7 @@ pub(super) fn evaluate(x: &Tensor, y: &Tensor, options: Options) -> BuiltinResul
     let p = numeric_output(p_data, out_shape.clone())?;
     let ci_shape = interval_shape(&out_shape, dim);
     let ci = Value::Tensor(Tensor::new(ci_data, ci_shape).map_err(internal_error)?);
-    let mut stats = StructValue::new();
+    let mut stats = runmat_value::UnboundedStructValueBuilder::new();
     stats.insert("tstat", numeric_output(tstat_data, out_shape.clone())?);
     stats.insert("df", numeric_output(df_data, out_shape.clone())?);
     if options.vartype == VarType::Equal {
@@ -251,7 +257,7 @@ pub(super) fn evaluate(x: &Tensor, y: &Tensor, options: Options) -> BuiltinResul
         h,
         p,
         ci,
-        stats: Value::Struct(stats),
+        stats: Value::Struct(stats.finish()),
     })
 }
 

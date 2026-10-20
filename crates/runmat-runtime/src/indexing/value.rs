@@ -21,10 +21,10 @@ pub fn shape(value: &Value) -> Option<Vec<usize>> {
         Value::ComplexTensor(value) => Some(value.shape().to_vec()),
         Value::SparseTensor(value) => Some(value.shape()),
         Value::GpuTensor(value) => Some(value.shape().to_vec()),
-        Value::StringArray(value) => Some(value.shape.clone()),
+        Value::StringArray(value) => Some(value.shape().to_vec()),
         Value::LogicalArray(value) => Some(value.shape.to_vec()),
         Value::CharArray(value) => Some(value.shape().to_vec()),
-        Value::Cell(value) => Some(value.shape.clone()),
+        Value::Cell(value) => Some(value.shape().to_vec()),
         Value::StructArray(value) => Some(value.shape().to_vec()),
         Value::ObjectArray(value) => Some(value.shape().to_vec()),
         Value::Struct(_) | Value::Object(_) | Value::HandleObject(_) => Some(vec![1, 1]),
@@ -68,7 +68,9 @@ pub fn read_with_plan(value: Value, plan: &IndexPlan) -> Result<Value, RuntimeEr
             plan,
         ),
         Value::String(value) => read_with_plan(
-            Value::StringArray(StringArray::new(vec![value], vec![1, 1]).map_err(shape_error)?),
+            Value::StringArray(
+                StringArray::from_texts_unbounded(vec![value], vec![1, 1]).map_err(shape_error)?,
+            ),
             plan,
         ),
         _ => Err(invalid_base()),
@@ -118,7 +120,8 @@ pub async fn assign_with_plan(
             &rhs,
         ),
         Value::String(value) => {
-            let mut value = StringArray::new(vec![value], vec![1, 1]).map_err(shape_error)?;
+            let mut value =
+                StringArray::from_texts_unbounded(vec![value], vec![1, 1]).map_err(shape_error)?;
             grow_string_array(&mut value, &plan.base_shape)?;
             let rhs = super::write_slice::build_string_rhs_view(&rhs, &plan.selection_lengths)?;
             super::write_slice::scatter_string_with_plan(&mut value, plan, &rhs)?;

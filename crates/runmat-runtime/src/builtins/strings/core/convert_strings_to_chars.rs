@@ -13,7 +13,7 @@ use crate::BuiltinResult;
 )]
 pub(crate) async fn convert_strings_to_chars_builtin(
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     convert_variadic(value, rest, |value| {
         string_to_chars(value, "convertStringsToChars")

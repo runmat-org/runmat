@@ -5,9 +5,9 @@ use runmat_value::ComplexTensor;
 #[test]
 fn ismissing_preserves_typed_struct_array_shape_and_schema() {
     let element = |value| {
-        let mut structure = StructValue::new();
+        let mut structure = runmat_value::UnboundedStructValueBuilder::new();
         structure.insert("payload", value);
-        structure
+        structure.finish()
     };
     let array = StructArray::new(
         vec![
@@ -25,10 +25,7 @@ fn ismissing_preserves_typed_struct_array_shape_and_schema() {
         panic!("expected typed structure array");
     };
     assert_eq!(output.shape(), &[2, 1]);
-    assert_eq!(
-        output.field_names().map(String::as_str).collect::<Vec<_>>(),
-        ["payload"]
-    );
+    assert_eq!(output.field_names().collect::<Vec<_>>(), ["payload"]);
     let values = output.field_values("payload").unwrap();
     assert!(matches!(
         &values[0],
@@ -40,19 +37,33 @@ fn ismissing_preserves_typed_struct_array_shape_and_schema() {
 #[test]
 fn missing_constructs_scalar_and_arrays() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-    let scalar = block_on(missing_builtin(Vec::new())).unwrap();
-    assert!(matches!(scalar, Value::StringArray(sa) if sa.data == vec![MISSING_TEXT]));
-    let shaped = block_on(missing_builtin(vec![Value::Num(2.0), Value::Num(3.0)])).unwrap();
+    let scalar = block_on(missing_builtin(
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap();
+    assert!(matches!(scalar, Value::StringArray(sa) if sa.data() == vec![MISSING_TEXT]));
+    let shaped = block_on(missing_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(2.0),
+            Value::Num(3.0),
+        ]),
+    ))
+    .unwrap();
     assert!(
-        matches!(shaped, Value::StringArray(sa) if sa.shape == vec![2, 3] && sa.data.len() == 6)
+        matches!(shaped, Value::StringArray(sa) if sa.shape == vec![2, 3] && sa.data().len() == 6)
     );
 }
 
 #[test]
 fn missing_rejects_dangling_like_control() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-    let error = block_on(missing_builtin(vec![Value::Num(2.0), Value::from("like")]))
-        .expect_err("a like keyword needs a prototype");
+    let error = block_on(missing_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(2.0),
+            Value::from("like"),
+        ]),
+    ))
+    .expect_err("a like keyword needs a prototype");
     assert_eq!(error.identifier(), Some("RunMat:missing:InvalidArgument"));
 }
 
@@ -70,10 +81,12 @@ fn missing_runmat_shape_extension_reads_every_integer_class_exactly() {
         IntValue::U64(2),
     ];
     for size in cases {
-        let result =
-            block_on(missing_builtin(vec![Value::Int(size)])).expect("RunMat shaped missing");
+        let result = block_on(missing_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(size)]),
+        ))
+        .expect("RunMat shaped missing");
         assert!(
-            matches!(result, Value::StringArray(array) if array.shape == vec![2, 2] && array.data.len() == 4)
+            matches!(result, Value::StringArray(array) if array.shape == vec![2, 2] && array.data().len() == 4)
         );
     }
 }
@@ -90,8 +103,10 @@ fn missing_shaped_extension_gates_before_provider_access() {
         .unwrap();
     assert!(gpu_helpers::exact_provider_for_handle(&allocation.handle).is_none());
     let value = Value::GpuTensor(allocation.handle.clone());
-    let error = block_on(missing_builtin(vec![value]))
-        .expect_err("MATLAB-compatible mode must reject shaped missing");
+    let error = block_on(missing_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![value]),
+    ))
+    .expect_err("MATLAB-compatible mode must reject shaped missing");
     assert_eq!(
         error.identifier(),
         Some("RunMat:compatibility:MissingShapedArrayExtension")
@@ -107,12 +122,15 @@ fn missing_preserves_typed_integer_size_vectors_exactly() {
     let large = 9_007_199_254_740_993_u64;
     let dims = Tensor::new_integer(IntegerStorage::U64(vec![large, 0]), vec![1, 2]).unwrap();
 
-    let result = block_on(missing_builtin(vec![Value::Tensor(dims)])).unwrap();
+    let result = block_on(missing_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(dims)]),
+    ))
+    .unwrap();
 
     match result {
         Value::StringArray(array) => {
             assert_eq!(array.shape, vec![large as usize, 0]);
-            assert!(array.data.is_empty());
+            assert!(array.data().is_empty());
         }
         other => panic!("expected string array, got {other:?}"),
     }

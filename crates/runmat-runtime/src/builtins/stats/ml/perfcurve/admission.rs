@@ -246,7 +246,7 @@ pub(super) fn preflight(
     labels: Value,
     scores: Value,
     posclass: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
     names: Vec<OptionName>,
 ) -> BuiltinResult<AdmittedCall> {
     let label_count = labels_shape(&labels, "labels")?;

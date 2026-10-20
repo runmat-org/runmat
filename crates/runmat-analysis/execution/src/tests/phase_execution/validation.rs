@@ -113,6 +113,6 @@ fn phase_rejects_foreign_host_and_original_callable_tampering() {
         .is_err());
     let mut original = valid.task_evidence().clone();
     original.task.submission.request.callable.program =
-        runmat_execution::ProgramCallable::semantic(runmat_execution::ProgramFunctionId(9_999), None);
+        runmat_execution::ProgramCallable::builtin("__foreign").unwrap();
     assert!(AnalysisPhaseExecutionEvidence::new(original, 1).is_err());
 }

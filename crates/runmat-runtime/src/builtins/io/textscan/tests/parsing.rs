@@ -81,10 +81,10 @@ fn textscan_huge_header_lines_stop_at_eof() {
         None,
         Value::from("x"),
         Value::from("%s"),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("HeaderLines"),
             Value::Int(IntValue::U64(usize::MAX as u64)),
-        ],
+        ]),
     ))
     .expect("textscan");
     assert!(text_column(&out, 0).is_empty());
@@ -97,7 +97,7 @@ fn textscan_reads_mixed_columns_from_text() {
         None,
         Value::from("1 alpha\n2 beta\n"),
         Value::from("%f %s"),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("textscan");
     assert_eq!(numeric_column(&out, 0), vec![1.0, 2.0]);
@@ -113,7 +113,7 @@ fn textscan_integer_conversions_preserve_native_classes_and_wide_values() {
         None,
         Value::from("-999 18446744073709551615 1.25\n127 9223372036854775808 -2.5\n"),
         Value::from("%d8 %u64 %f32"),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("textscan");
     let Value::Tensor(signed) = output_value(&out, 0) else {
@@ -143,7 +143,7 @@ fn textscan_hex_binary_and_overflow_conversions_preserve_integer_contracts() {
         None,
         Value::from("0xFFFFFFFFFFFFFFFF -0x81 0b1111111111111111 999999999999999999999999999999999999999 -7\n"),
         Value::from("%x %xs8 %bu16 %d64 %u8"),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("textscan");
 
@@ -191,7 +191,7 @@ fn textscan_documented_integer_formats_remain_enabled_in_matlab_mode() {
         None,
         Value::from("9007199254740993 0xFFFFFFFFFFFFFFFF\n"),
         Value::from("%u64 %x"),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("documented integer textscan formats");
     let Value::Tensor(decimal) = output_value(&out, 0) else {
@@ -217,7 +217,7 @@ fn textscan_compatibility_gates_typed_controls_before_scanning() {
         None,
         Value::from("1\n"),
         Value::from("%d"),
-        vec![Value::Int(IntValue::U8(1))],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(IntValue::U8(1))]),
     ))
     .expect_err("typed repeat count must be gated");
     assert_eq!(
@@ -232,7 +232,10 @@ fn textscan_collect_output_groups_only_adjacent_same_class_columns() {
         None,
         Value::from("1 2 3\n4 5 6\n"),
         Value::from("%d16 %d16 %u16"),
-        vec![Value::from("CollectOutput"), Value::Bool(true)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("CollectOutput"),
+            Value::Bool(true),
+        ]),
     ))
     .expect("textscan");
     assert_eq!(output_cell(&out).cols, 2);
@@ -261,7 +264,7 @@ fn textscan_honors_delimiter_header_comments_and_treat_empty() {
         None,
         Value::from(text),
         Value::from("%s %f"),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("Delimiter"),
             Value::from(","),
             Value::from("HeaderLines"),
@@ -270,7 +273,7 @@ fn textscan_honors_delimiter_header_comments_and_treat_empty() {
             Value::from("%"),
             Value::from("TreatAsEmpty"),
             Value::from("NA"),
-        ],
+        ]),
     ))
     .expect("textscan");
     assert_eq!(
@@ -290,13 +293,13 @@ fn textscan_supports_repeat_skip_collect_and_quotes() {
         None,
         Value::from("1,drop,2,\"hello, world\"\n3,drop,4,\"tail\"\n"),
         Value::from("%f %*s %f %q"),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::Num(1.0),
             Value::from("Delimiter"),
             Value::from(","),
             Value::from("CollectOutput"),
             Value::Bool(true),
-        ],
+        ]),
     ))
     .expect("textscan");
     let Value::Tensor(group) = output_value(&out, 0) else {
@@ -314,7 +317,10 @@ fn textscan_return_on_error_false_reports_parse_failure() {
         None,
         Value::from("1\nbad\n"),
         Value::from("%f"),
-        vec![Value::from("ReturnOnError"), Value::Bool(false)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("ReturnOnError"),
+            Value::Bool(false),
+        ]),
     ))
     .expect_err("parse failure");
     assert!(err.message().contains("cannot parse"));
@@ -327,7 +333,7 @@ fn textscan_honors_literals_in_format_spec() {
         None,
         Value::from("1,2\n3,4\n"),
         Value::from("%f,%f"),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("textscan");
     assert_eq!(numeric_column(&out, 0), vec![1.0, 3.0]);
@@ -341,7 +347,7 @@ fn textscan_width_and_char_conversions_leave_remainder() {
         None,
         Value::from("abcdef"),
         Value::from("%2s%s"),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("textscan strings");
     assert_eq!(text_column(&strings, 0), vec!["ab".to_string()]);
@@ -351,7 +357,7 @@ fn textscan_width_and_char_conversions_leave_remainder() {
         None,
         Value::from("abc"),
         Value::from("%c%c%c"),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("textscan chars");
     assert_eq!(text_column(&chars, 0), vec!["a".to_string()]);
@@ -366,7 +372,10 @@ fn textscan_collect_output_preserves_column_major_numeric_group() {
         None,
         Value::from("1 2\n3 4\n"),
         Value::from("%f %f"),
-        vec![Value::from("CollectOutput"), Value::Bool(true)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("CollectOutput"),
+            Value::Bool(true),
+        ]),
     ))
     .expect("textscan");
     let Value::Tensor(group) = output_value(&out, 0) else {

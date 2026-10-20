@@ -118,9 +118,9 @@ async fn cheb2ord_builtin(
     ws: Value,
     rp: Value,
     rs: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    evaluate_in_context(wp, ws, rp, rs, &rest, runtime.as_ref()).await
+    evaluate_in_context(wp, ws, rp, rs, rest.view(), runtime.as_ref()).await
 }
 
 pub async fn evaluate(
@@ -130,7 +130,15 @@ pub async fn evaluate(
     rs: Value,
     rest: &[Value],
 ) -> BuiltinResult<Value> {
-    evaluate_in_context(wp, ws, rp, rs, rest, None).await
+    evaluate_in_context(
+        wp,
+        ws,
+        rp,
+        rs,
+        crate::call::FunctionArgumentView::from_slice(rest),
+        None,
+    )
+    .await
 }
 
 async fn evaluate_in_context(
@@ -138,7 +146,7 @@ async fn evaluate_in_context(
     ws: Value,
     rp: Value,
     rs: Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     runtime: Option<&crate::context::RuntimeContext>,
 ) -> BuiltinResult<Value> {
     let mut cooperation = SignalCooperation::new(runtime, BUILTIN_NAME);

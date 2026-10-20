@@ -12,7 +12,11 @@ pub(super) struct PcgRequest {
     pub(super) initial: Option<Value>,
 }
 
-pub(super) fn parse(coefficient: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<PcgRequest> {
+pub(super) fn parse(
+    coefficient: Value,
+    rhs: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<PcgRequest> {
     if rest.len() > 5 {
         return Err(invalid("pcg accepts at most seven inputs"));
     }

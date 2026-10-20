@@ -80,9 +80,12 @@ fn categorical_classes_preserve_unused_categories() {
     assert_eq!(dummy.shape(), &[2, 3]);
     assert_eq!(dummy.materialize_f64(), vec![0.0, 1.0, 0.0, 0.0, 1.0, 0.0]);
 
-    let Value::Tensor(encoded) =
-        block_on(onehotencode_builtin(group, Value::Num(2.0), Vec::new())).unwrap()
-    else {
+    let Value::Tensor(encoded) = block_on(onehotencode_builtin(
+        group,
+        Value::Num(2.0),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap() else {
         panic!("encoded tensor");
     };
     assert_eq!(encoded.shape(), &[2, 3]);
@@ -124,12 +127,12 @@ fn onehot_output_type_name_value_aliases_are_mode_gated() {
     let encode_error = block_on(onehotencode_builtin(
         int_tensor(IntegerStorage::U8(vec![1, 2]), vec![2, 1]),
         Value::Num(2.0),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("ClassNames"),
             int_tensor(IntegerStorage::U8(vec![1, 2]), vec![1, 2]),
             Value::from("OutputType"),
             Value::from("uint8"),
-        ],
+        ]),
     ))
     .expect_err("onehotencode alias gate");
     assert_eq!(
@@ -141,7 +144,10 @@ fn onehot_output_type_name_value_aliases_are_mode_gated() {
         tensor(vec![1.0, 0.0], vec![2, 1]),
         int_tensor(IntegerStorage::U8(vec![1, 2]), vec![1, 2]),
         Value::Num(1.0),
-        vec![Value::from("OutputType"), Value::from("uint8")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("OutputType"),
+            Value::from("uint8"),
+        ]),
     ))
     .expect_err("onehotdecode alias gate");
     assert_eq!(
@@ -156,10 +162,10 @@ fn rejects_bad_dimensions_and_unknown_labels() {
     let err = block_on(onehotencode_builtin(
         tensor(vec![1.0, 2.0], vec![2, 1]),
         Value::Num(1.0),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("ClassNames"),
             tensor(vec![1.0, 2.0], vec![1, 2]),
-        ],
+        ]),
     ))
     .unwrap_err();
     assert!(err.message.contains("singleton"));
@@ -167,10 +173,10 @@ fn rejects_bad_dimensions_and_unknown_labels() {
     let err = block_on(onehotencode_builtin(
         tensor(vec![1.0], vec![1, 1]),
         Value::Num(2.0),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("ClassNames"),
             tensor(vec![1.0, f64::NAN], vec![1, 2]),
-        ],
+        ]),
     ))
     .unwrap_err();
     assert!(err.message.contains("cannot contain missing"));
@@ -179,7 +185,7 @@ fn rejects_bad_dimensions_and_unknown_labels() {
         tensor(vec![1.2, 0.0], vec![1, 2]),
         tensor(vec![1.0, 2.0], vec![1, 2]),
         Value::Num(2.0),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap_err();
     assert!(err.message.contains("between 0 and 1"));

@@ -1,7 +1,7 @@
 use super::*;
 use futures::executor::block_on;
-use runmat_value::StringArray;
 use runmat_value::{IntValue, IntegerStorage};
+use runmat_value::{StringArray, StructValue};
 
 fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
     Value::Tensor(Tensor::new(data, shape).unwrap())
@@ -73,12 +73,12 @@ fn explicit_lambda_recovers_sparse_coefficients_with_intercept() {
     let out = block_on(lasso_builtin(
         x,
         y,
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::CharArray(CharArray::new_row("Lambda")),
             tensor(vec![0.0], vec![1, 1]),
             Value::CharArray(CharArray::new_row("Standardize")),
             Value::Bool(false),
-        ],
+        ]),
     ))
     .unwrap();
     let Value::Tensor(coeffs) = out else {
@@ -94,10 +94,10 @@ fn malformed_use_covariance_does_not_silently_become_false() {
     let result = block_on(lasso_builtin(
         tensor(vec![0.0, 1.0, 2.0], vec![3, 1]),
         tensor(vec![1.0, 3.0, 5.0], vec![3, 1]),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::String("UseCovariance".into()),
             Value::String("not-a-boolean".into()),
-        ],
+        ]),
     ));
     let error = result.expect_err("unknown boolean spelling must reject");
     assert_eq!(error.identifier(), Some("RunMat:lasso:InvalidArgument"));
@@ -108,7 +108,7 @@ fn predictor_geometry_rejects_nonsingleton_tail_and_keeps_singleton_tail() {
     let rejected = block_on(lasso_builtin(
         tensor(vec![1.0; 8], vec![2, 2, 2]),
         tensor(vec![1.0, 2.0], vec![2, 1]),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ));
     assert_eq!(
         rejected
@@ -119,7 +119,10 @@ fn predictor_geometry_rejects_nonsingleton_tail_and_keeps_singleton_tail() {
     let accepted = block_on(lasso_builtin(
         tensor(vec![0.0, 1.0, 2.0, 3.0, 1.0, 0.0, 1.0, 0.0], vec![4, 2, 1]),
         tensor(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]),
-        vec![Value::from("Lambda"), Value::Num(0.1)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("Lambda"),
+            Value::Num(0.1),
+        ]),
     ));
     assert!(
         accepted.is_ok(),
@@ -140,7 +143,10 @@ fn invalid_host_option_precedes_unregistered_predictor_download() {
     let error = block_on(lasso_builtin(
         Value::GpuTensor(resident),
         tensor(vec![1.0, 2.0], vec![2, 1]),
-        vec![Value::from("Alpha"), Value::Num(2.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("Alpha"),
+            Value::Num(2.0),
+        ]),
     ))
     .expect_err("host option must reject before provider access");
     assert_eq!(error.identifier(), Some("RunMat:lasso:InvalidArgument"));
@@ -160,7 +166,7 @@ fn alpha_weights_and_fitinfo_output_are_supported() {
     let out = block_on(lasso_builtin(
         x,
         y,
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::CharArray(CharArray::new_row("Lambda")),
             tensor(vec![0.0, 0.2], vec![1, 2]),
             Value::CharArray(CharArray::new_row("Alpha")),
@@ -169,7 +175,7 @@ fn alpha_weights_and_fitinfo_output_are_supported() {
             tensor(vec![1.0, 2.0, 1.0, 2.0], vec![4, 1]),
             Value::CharArray(CharArray::new_row("PredictorNames")),
             Value::StringArray(StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap()),
-        ],
+        ]),
     ))
     .unwrap();
     let (b, fit_info) = output_pair(out);
@@ -195,7 +201,7 @@ fn lasso_reads_typed_integer_storage_exactly() {
     let out = block_on(lasso_builtin(
         x,
         y,
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::CharArray(CharArray::new_row("Lambda")),
             cleared_int_tensor(IntegerStorage::U8(vec![0]), vec![1, 1]),
             Value::CharArray(CharArray::new_row("Alpha")),
@@ -206,7 +212,7 @@ fn lasso_reads_typed_integer_storage_exactly() {
             cleared_int_tensor(IntegerStorage::U16(vec![50]), vec![1, 1]),
             Value::CharArray(CharArray::new_row("Standardize")),
             Value::Bool(false),
-        ],
+        ]),
     ))
     .unwrap();
     let Value::Tensor(coeffs) = out else {
@@ -229,7 +235,10 @@ fn lasso_gates_integer_roles_before_gather_and_rejects_lossy_data() {
     let err = ensure_extensions(
         &tensor(vec![1.0, 2.0], vec![2, 1]),
         &tensor(vec![1.0, 2.0], vec![2, 1]),
-        &admit_options(vec![Value::from("MaxIter"), Value::Int(IntValue::U16(20))]).unwrap(),
+        &admit_options(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::from("MaxIter"), Value::Int(IntValue::U16(20))],
+        ))
+        .unwrap(),
     )
     .expect_err("strict mode must reject integer controls before gather");
     assert_eq!(
@@ -296,12 +305,12 @@ fn cross_validation_adds_minimum_error_fields() {
     let out = block_on(lasso_builtin(
         x,
         y,
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::CharArray(CharArray::new_row("Lambda")),
             tensor(vec![0.0, 0.1, 0.3], vec![1, 3]),
             Value::CharArray(CharArray::new_row("CV")),
             Value::Num(3.0),
-        ],
+        ]),
     ))
     .unwrap();
     let (_, fit_info) = output_pair(out);
@@ -329,14 +338,14 @@ fn dfmax_filters_cv_fields_consistently() {
     let out = block_on(lasso_builtin(
         x,
         y,
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::CharArray(CharArray::new_row("Lambda")),
             tensor(vec![0.0, 10.0], vec![1, 2]),
             Value::CharArray(CharArray::new_row("DFmax")),
             Value::Num(1.0),
             Value::CharArray(CharArray::new_row("CV")),
             Value::Num(3.0),
-        ],
+        ]),
     ))
     .unwrap();
     let (b, fit_info) = output_pair(out);
@@ -376,12 +385,12 @@ fn omitted_predictor_names_and_use_covariance_report_actual_state() {
     let out = block_on(lasso_builtin(
         x,
         y,
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::CharArray(CharArray::new_row("Lambda")),
             tensor(vec![0.1], vec![1, 1]),
             Value::CharArray(CharArray::new_row("UseCovariance")),
             Value::Bool(true),
-        ],
+        ]),
     ))
     .unwrap();
     let (_, fit_info) = output_pair(out);
@@ -391,7 +400,7 @@ fn omitted_predictor_names_and_use_covariance_report_actual_state() {
     let Some(Value::Cell(names)) = info.fields.get("PredictorNames") else {
         panic!("expected PredictorNames cell");
     };
-    assert_eq!(names.data.len(), 0);
+    assert_eq!(names.data().len(), 0);
     assert_eq!(names.shape, vec![1, 0]);
     let Some(Value::LogicalArray(use_covariance)) = info.fields.get("UseCovariance") else {
         panic!("expected UseCovariance logical");
@@ -406,10 +415,10 @@ fn matrix_shaped_lambda_and_weights_are_rejected() {
     let err = block_on(lasso_builtin(
         x.clone(),
         y.clone(),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::CharArray(CharArray::new_row("Lambda")),
             tensor(vec![0.0, 0.1, 0.2, 0.3], vec![2, 2]),
-        ],
+        ]),
     ))
     .unwrap_err();
     assert_eq!(err.identifier(), Some("RunMat:lasso:InvalidArgument"));
@@ -417,10 +426,10 @@ fn matrix_shaped_lambda_and_weights_are_rejected() {
     let err = block_on(lasso_builtin(
         x,
         y,
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::CharArray(CharArray::new_row("Weights")),
             tensor(vec![1.0, 1.0, 1.0, 1.0], vec![2, 2]),
-        ],
+        ]),
     ))
     .unwrap_err();
     assert_eq!(err.identifier(), Some("RunMat:lasso:InvalidArgument"));
@@ -438,7 +447,7 @@ fn invalid_dimensions_error() {
     let err = block_on(lasso_builtin(
         tensor(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]),
         tensor(vec![1.0, 2.0, 3.0], vec![3, 1]),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap_err();
     assert_eq!(err.identifier(), Some("RunMat:lasso:InvalidArgument"));

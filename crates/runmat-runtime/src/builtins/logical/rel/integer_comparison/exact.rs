@@ -307,7 +307,7 @@ impl RealOperand<'_> {
                 let row = in_page % array.rows;
                 let column = in_page / array.rows;
                 RealValue::Float(f64::from(
-                    array.data[page_offset + row * array.cols + column] as u32,
+                    array.data()[page_offset + row * array.cols + column] as u32,
                 ))
             }
         }
@@ -573,7 +573,7 @@ fn real_operand(value: &Value) -> Option<RealOperand<'_>> {
         }),
         Value::CharArray(array) => Some(RealOperand {
             source: RealSource::Char(array),
-            shape: array.shape.clone(),
+            shape: array.shape().to_vec(),
         }),
         _ => None,
     }

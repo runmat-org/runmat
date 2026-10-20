@@ -40,8 +40,12 @@ fn push_path_state(path: &Path) -> PathStateGuard {
 
 #[test]
 fn run_requires_explicit_execution_context() {
-    let err = block_on(run_builtin_registered(None, None, Vec::new()))
-        .expect_err("run execution requires an explicit context");
+    let err = block_on(run_builtin_registered(
+        None,
+        None,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect_err("run execution requires an explicit context");
     assert_eq!(err.identifier(), Some("RunMat:run:RequiresVm"));
 }
 
