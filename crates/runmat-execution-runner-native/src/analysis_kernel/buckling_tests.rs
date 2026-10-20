@@ -22,7 +22,7 @@ use runmat_analysis_fea::{
     results::observation::ObservationExecutionPolicy,
     ComputeBackend, LinearStaticSolveOptions,
 };
-use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
+use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::{object::ObjectInventoryLimits, ArtifactAccess, ObjectNamespace};
 use runmat_meshing_core::{ElementOrder, PersistentEntityId, PersistentEntityKind, StableDigest};
 
@@ -36,14 +36,7 @@ fn revision() -> ProgramRevision {
     ProgramRevision::new(
         digest("buckling-graph"),
         digest("buckling-source"),
-        ProgramEnvironment::new(
-            1,
-            1,
-            digest("buckling-runtime"),
-            digest("buckling-catalog"),
-            "matlab",
-        )
-        .unwrap(),
+        runmat_core::program_environment(runmat_core::CompatMode::Matlab),
     )
     .unwrap()
 }

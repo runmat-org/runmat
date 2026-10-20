@@ -8,6 +8,8 @@ mod fluid_mass_flow;
 mod fluid_study_fixture;
 #[path = "support/fluid.rs"]
 mod fluid_support;
+// Only the OCCT-backed authored replays use it.
+#[cfg(feature = "occt-native")]
 #[path = "support/phase_execution.rs"]
 mod phase_execution_support;
 #[path = "analysis_process_conformance/static_recovery.rs"]
@@ -50,7 +52,7 @@ use runmat_execution::identity::ArtifactId;
 use runmat_execution::resource::{Capability, ResourceInventory, ResourceRequest};
 use runmat_execution::task::RetryPolicy;
 use runmat_execution::value::ValuePayload;
-use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
+use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::cache::CacheImport;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::{
@@ -2224,7 +2226,7 @@ fn revision() -> ProgramRevision {
     ProgramRevision::new(
         digest("graph"),
         digest("source"),
-        ProgramEnvironment::new(1, 1, digest("runtime"), digest("catalog"), "matlab").unwrap(),
+        runmat_core::program_environment(runmat_core::CompatMode::Matlab),
     )
     .unwrap()
 }

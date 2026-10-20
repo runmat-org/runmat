@@ -2,7 +2,7 @@
 use super::*;
 use crate::excitation::{ProjectionSample, SpatialIntegrationRule};
 use runmat_analysis_core::{IndependentDomain, PhysicalQuantityKind, SignalSampleApproach};
-use runmat_canonical_codec::{profile_serialized, CanonicalLimits};
+use runmat_canonical_codec::{profile_serialized, profile_serialized_shape, CanonicalLimits};
 use serde::{ser::SerializeSeq, Serialize, Serializer};
 
 const LIMITS: CanonicalLimits = CanonicalLimits::new(usize::MAX, usize::MAX, usize::MAX, 64);
@@ -78,7 +78,8 @@ pub(super) fn derive(
                 ))
             }
         };
-        let actual = profile_serialized(
+        // Stand-in records bound every future value, so integers reserve their full range.
+        let actual = profile_serialized_shape(
             &History {
                 model,
                 step,

@@ -781,6 +781,19 @@ impl CacheImport for MemoryStore {
     ) -> runmat_execution_artifact::ArtifactResult<Option<Vec<u8>>> {
         Ok(self.0.get(&digest).cloned())
     }
+
+    fn read_verified_bounded(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+    ) -> runmat_execution_artifact::ArtifactResult<Option<Vec<u8>>> {
+        match self.0.get(&digest) {
+            Some(bytes) if bytes.len() as u64 > maximum_bytes => Err(
+                runmat_execution_artifact::ArtifactError::Limit("object exceeds its read bound".into()),
+            ),
+            bytes => Ok(bytes.cloned()),
+        }
+    }
 }
 
 pub(super) struct RemoteDriver {

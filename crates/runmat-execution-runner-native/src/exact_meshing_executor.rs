@@ -6,7 +6,6 @@ mod completion;
 use std::collections::BTreeSet;
 use std::time::Duration;
 
-use runmat_execution::identity::ArtifactId;
 use runmat_execution::ProgramRevision;
 use runmat_execution_artifact::cache::{CacheExport, CacheImport};
 use runmat_execution_artifact::{ArtifactResult, LogicalObject};
@@ -114,17 +113,14 @@ impl NativeExactMeshingExecutor<'_> {
             };
         let submission = build_task_submission(
             stage.host(),
-            &program.arguments,
+            &program,
             BTreeSet::new(),
             &MeshingExecutionContext {
                 scope_id: self.session.scope_id(),
                 pool_id: self.session.pool_id(),
-                program_artifact_id: ArtifactId::derive(&[program.artifact.id.0.bytes()]),
-                host: crate::program_host::program_host(
-                    &program,
-                    crate::program_host::local_trust(),
-                )
-                .map_err(stage_error)?,
+                permitted_trust_tiers: BTreeSet::from([
+                    runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
+                ]),
                 artifact_access: stage.host().artifact_access.clone(),
                 cpu_millicores: if stage.host().workload.stage
                     == runmat_meshing_core::MeshingStageKind::Tetrahedralization

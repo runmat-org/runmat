@@ -35,7 +35,7 @@ use runmat_analysis_fea::{
     solve::dynamics::DirectHarmonicPolicy,
     ComputeBackend, LinearStaticSolveOptions, ModalSolveOptions, ModalTruncationPolicy,
 };
-use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
+use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::cache::CacheImport;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::{ArtifactAccess, ObjectNamespace};
@@ -88,14 +88,7 @@ fn revision() -> ProgramRevision {
     ProgramRevision::new(
         digest("structural-frequency-graph"),
         digest("structural-frequency-source"),
-        ProgramEnvironment::new(
-            1,
-            1,
-            digest("structural-frequency-runtime"),
-            digest("structural-frequency-catalog"),
-            "matlab",
-        )
-        .unwrap(),
+        runmat_core::program_environment(runmat_core::CompatMode::Matlab),
     )
     .unwrap()
 }

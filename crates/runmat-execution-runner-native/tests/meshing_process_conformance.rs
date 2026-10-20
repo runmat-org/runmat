@@ -8,10 +8,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use rcgen::{generate_simple_self_signed, CertifiedKey};
-use runmat_execution::identity::ArtifactId;
 use runmat_execution::resource::{Capability, ResourceInventory};
 use runmat_execution::value::ValuePayload;
-use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
+use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::archive::{write_bundle, ArchiveLimits};
 use runmat_execution_artifact::cache::{CacheExport, CacheImport};
 use runmat_execution_artifact::{
@@ -996,21 +995,14 @@ fn submission_for(
 ) -> runmat_execution_runner::TaskSubmission {
     build_task_submission(
         host,
-        &request.arguments,
+        &request,
         BTreeSet::new(),
         &MeshingExecutionContext {
             scope_id,
             pool_id,
-            program_artifact_id: ArtifactId::derive(&[request.artifact.id.0.bytes()]),
-            host: request
-                .artifact
-                .execution_host_requirement(
-                    &request.recipe,
-                    BTreeSet::from([
-                        runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
-                    ]),
-                )
-                .unwrap(),
+            permitted_trust_tiers: BTreeSet::from([
+                runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
+            ]),
             artifact_access: host.artifact_access.clone(),
             cpu_millicores: 1000,
             maximum_egress_bytes: 0,
@@ -1184,14 +1176,8 @@ fn revision() -> ProgramRevision {
     ProgramRevision::new(
         Digest::sha256(b"native-meshing-graph"),
         Digest::sha256(b"native-meshing-source"),
-        ProgramEnvironment::new(
-            1,
-            1,
-            Digest::sha256(b"native-meshing-runtime"),
-            Digest::sha256(b"native-meshing-catalog"),
-            "matlab",
-        )
-        .unwrap(),
+        // Native workers advertise this runtime; the program must require the same.
+        runmat_core::program_environment(runmat_core::CompatMode::Matlab),
     )
     .unwrap()
 }

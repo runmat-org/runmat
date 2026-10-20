@@ -35,7 +35,7 @@ use runmat_analysis_fea::{
 };
 use runmat_execution::identity::{AttemptId, WorkerId};
 use runmat_execution::resource::ResourceAccounting;
-use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
+use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::{object::ObjectInventoryLimits, ArtifactAccess};
 use runmat_execution_runner::AttemptResourceAccounting;
 use runmat_meshing_core::{ElementOrder, PersistentEntityId, PersistentEntityKind, StableDigest};
@@ -589,14 +589,7 @@ fn revision() -> ProgramRevision {
     ProgramRevision::new(
         digest("response-spectrum-graph"),
         digest("response-spectrum-source"),
-        ProgramEnvironment::new(
-            1,
-            1,
-            digest("response-spectrum-runtime"),
-            digest("response-spectrum-catalog"),
-            "matlab",
-        )
-        .unwrap(),
+        runmat_core::program_environment(runmat_core::CompatMode::Matlab),
     )
     .unwrap()
 }

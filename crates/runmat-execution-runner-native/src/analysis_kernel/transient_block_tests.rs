@@ -34,7 +34,7 @@ use runmat_analysis_fea::{
     ComputeBackend, ModalSolveOptions, ModalTruncationPolicy,
 };
 use runmat_execution::value::ValueRefKind;
-use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
+use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::{
     ArtifactAccess, LogicalObject, ObjectNamespace, ProgramExecutionObject,
@@ -58,14 +58,7 @@ fn revision() -> ProgramRevision {
     ProgramRevision::new(
         digest("transient-block-graph"),
         digest("transient-block-source"),
-        ProgramEnvironment::new(
-            1,
-            1,
-            digest("transient-block-runtime"),
-            digest("transient-block-catalog"),
-            "matlab",
-        )
-        .unwrap(),
+        runmat_core::program_environment(runmat_core::CompatMode::Matlab),
     )
     .unwrap()
 }

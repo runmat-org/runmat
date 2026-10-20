@@ -16,7 +16,7 @@ use runmat_analysis_fea::{
     results::field::RecoveredFieldPartition,
     ComputeBackend, ThermalProcedureControl,
 };
-use runmat_execution::{ProgramEnvironment, ProgramRevision};
+use runmat_execution::ProgramRevision;
 use runmat_execution_artifact::{object::ObjectInventoryLimits, ArtifactAccess};
 use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
 
@@ -29,7 +29,7 @@ fn revision() -> ProgramRevision {
     ProgramRevision::new(
         digest,
         digest,
-        ProgramEnvironment::new(1, 1, digest, digest, "matlab").unwrap(),
+        runmat_core::program_environment(runmat_core::CompatMode::Matlab),
     )
     .unwrap()
 }

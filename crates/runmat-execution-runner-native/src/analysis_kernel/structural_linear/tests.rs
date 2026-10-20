@@ -11,7 +11,7 @@ use runmat_analysis_fea::{
     solve::{backend::kind::LinearAlgebraBackendKind, preconditioner::SpdPreconditionerKind},
     ComputeBackend, ThermalProcedureControl, ThermalSolveOptions,
 };
-use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
+use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::{object::ObjectInventoryLimits, ArtifactAccess, ObjectNamespace};
 use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
 const REFERENCE: f64 = 293.15;
@@ -129,7 +129,7 @@ fn revision() -> ProgramRevision {
     ProgramRevision::new(
         digest,
         digest,
-        ProgramEnvironment::new(1, 1, digest, digest, "matlab").unwrap(),
+        runmat_core::program_environment(runmat_core::CompatMode::Matlab),
     )
     .unwrap()
 }

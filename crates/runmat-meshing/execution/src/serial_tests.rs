@@ -9,7 +9,7 @@ use crate::{
     ArtifactAccess, MeshingExecutionContext, MeshingHostResponse, MeshingHostWorkload,
     MeshingTaskEffectPolicy,
 };
-use runmat_execution::identity::{ArtifactId, AttemptId, WorkerId};
+use runmat_execution::identity::{AttemptId, WorkerId};
 use runmat_execution::value::{ValuePayload, ValueRef};
 use runmat_execution::{Digest, ExecutionScopeId, PoolId, ProgramEnvironment, ProgramRevision};
 use runmat_execution_artifact::cache::{CacheExport, CacheImport};
@@ -757,13 +757,14 @@ fn ordinary_serial_backend_carries_the_complete_fenced_stage_publication() {
     let pool_id = PoolId::derive(&[b"serial-stage-pool"]);
     let submission = build_task_submission(
         &fixture.host,
-        &fixture.program.arguments,
+        &fixture.program,
         BTreeSet::new(),
         &MeshingExecutionContext {
             scope_id,
             pool_id,
-            program_artifact_id: ArtifactId::derive(&[fixture.program.artifact.id.0.bytes()]),
-            host: crate::task_tests::host_requirement(),
+            permitted_trust_tiers: BTreeSet::from([
+                runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
+            ]),
             artifact_access: fixture.host.artifact_access.clone(),
             cpu_millicores: 1000,
             maximum_egress_bytes: 0,
@@ -1646,7 +1647,7 @@ pub(crate) fn request() -> MeshingRequest {
     }
 }
 
-fn revision() -> ProgramRevision {
+pub(crate) fn revision() -> ProgramRevision {
     ProgramRevision::new(
         Digest::sha256(b"serial-meshing-graph"),
         Digest::sha256(b"serial-meshing-source"),

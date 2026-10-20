@@ -36,8 +36,9 @@ const MAX_REVIEWED_ATTEMPTS: u16 = 16;
 pub struct MeshingExecutionContext {
     pub scope_id: ExecutionScopeId,
     pub pool_id: PoolId,
-    pub program_artifact_id: ArtifactId,
-    pub host: runmat_execution::host::ExecutionHostRequirement,
+    /// Trust tiers this placement admits. The executable, callable, inputs and host
+    /// requirement all come from the program request itself.
+    pub permitted_trust_tiers: BTreeSet<runmat_execution::security::ExecutionTrustTier>,
     pub artifact_access: ArtifactAccess,
     pub cpu_millicores: u32,
     pub maximum_egress_bytes: u64,
@@ -57,7 +58,7 @@ pub enum MeshingTaskEffectPolicy {
 
 pub fn build_task_submission(
     host: &MeshingHostWorkload,
-    program_inputs: &[ValuePayload],
+    program: &runmat_execution_artifact::ProgramExecutionRequest,
     dependencies: BTreeSet<TaskId>,
     context: &MeshingExecutionContext,
     effect: MeshingTaskEffectPolicy,
@@ -71,6 +72,7 @@ pub fn build_task_submission(
     resolved_request.validate()?;
     context.artifact_access.validate()?;
     validate_identity_binding(workload, stage_identity, resolved_request)?;
+    let program_inputs = program.arguments.as_slice();
     let (invocation, semantic_inputs) = program_inputs.split_first().ok_or_else(|| {
         MeshingExecutionError::Invalid("meshing task is missing its invocation descriptor".into())
     })?;
@@ -131,30 +133,27 @@ pub fn build_task_submission(
         required_capabilities: capabilities,
     };
     resources.validate()?;
-    let qualified_name = stage_callable(workload.stage).to_string();
+    let host_requirement = program
+        .artifact
+        .execution_host_requirement(&program.recipe, context.permitted_trust_tiers.clone())
+        .map_err(|error| MeshingExecutionError::Invalid(error.to_string()))?;
     Ok(TaskSubmission {
         request: TaskRequest {
-            console: None,
-            environment: runmat_execution::EnvironmentSnapshot::default(),
+            console: program.console,
+            environment: program.environment.clone(),
             id: task_id,
             scope_id: context.scope_id,
             pool_id: context.pool_id,
             schema_version: runmat_execution::task::TASK_REQUEST_SCHEMA_VERSION,
             executable: runmat_execution::TaskExecutableIdentity::ProgramArtifact(
-                context.program_artifact_id,
+                ArtifactId::derive(&[program.artifact.id.0.bytes()]),
             ),
-            callable: Callable::for_program(
-                MESHING_EXECUTION_CALLABLE_OWNER,
-                &runmat_execution::ProgramCallable::semantic(
-                    runmat_execution::ProgramFunctionId(0),
-                    Some(qualified_name.clone()),
-                ),
-            ),
-            host: context.host.clone(),
-            invocation_context: runmat_execution::ProgramInvocationContext::Direct,
+            callable: Callable::for_program(MESHING_EXECUTION_CALLABLE_OWNER, &program.callable),
+            host: host_requirement,
+            invocation_context: program.context.clone(),
             inputs: program_inputs.to_vec(),
             outputs: OutputContract {
-                requested_outputs: 1,
+                requested_outputs: program.requested_outputs,
                 owned_work: None,
             },
             resources,
@@ -450,21 +449,3 @@ const fn order_name(order: ElementOrder) -> &'static str {
     }
 }
 
-const fn stage_callable(stage: MeshingStageKind) -> &'static str {
-    match stage {
-        MeshingStageKind::GeometryAdmission => "geometry-admission",
-        MeshingStageKind::Healing => "healing",
-        MeshingStageKind::Sizing => "sizing",
-        MeshingStageKind::CurveMesh => "curve-mesh",
-        MeshingStageKind::SurfaceMesh => "surface-mesh",
-        MeshingStageKind::ProtectedBoundaryComplex => "protected-boundary-complex",
-        MeshingStageKind::Tetrahedralization => "tetrahedralization",
-        MeshingStageKind::ConstraintRecovery => "constraint-recovery",
-        MeshingStageKind::Refinement => "refinement",
-        MeshingStageKind::Optimization => "optimization",
-        MeshingStageKind::OrderElevation => "order-elevation",
-        MeshingStageKind::Validation => "validation",
-        MeshingStageKind::Serialization => "serialization",
-        MeshingStageKind::Publication => "publication",
-    }
-}

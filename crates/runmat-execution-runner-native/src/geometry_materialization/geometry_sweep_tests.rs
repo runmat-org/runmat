@@ -338,14 +338,7 @@ fn revision() -> ProgramRevision {
     ProgramRevision::new(
         Digest::sha256(b"geometry-sweep-graph"),
         Digest::sha256(b"geometry-sweep-source"),
-        ProgramEnvironment::new(
-            1,
-            1,
-            Digest::sha256(b"runtime"),
-            Digest::sha256(b"catalog"),
-            "matlab",
-        )
-        .unwrap(),
+        runmat_core::program_environment(runmat_core::CompatMode::Matlab),
     )
     .unwrap()
 }

@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use runmat_execution::identity::{ArtifactId, WorkerId};
+use runmat_execution::identity::WorkerId;
 use runmat_execution::resource::{Capability, ResourceInventory};
 use runmat_execution::state::PoolState;
 use runmat_execution::task::RetryPolicy;
@@ -27,23 +27,16 @@ use crate::{
     MeshingTaskEffectPolicy, MESHING_STAGE_MANIFEST_MEDIA_TYPE,
 };
 
+/// The host the meshing program actually requires, derived as production derives it.
 pub(crate) fn host_requirement() -> runmat_execution::host::ExecutionHostRequirement {
-    runmat_execution::host::ExecutionHostRequirement::portable(
-        runmat_execution::ProgramEnvironment::new(
-            1,
-            1,
-            Digest::sha256(b"meshing-test-runtime"),
-            Digest::sha256(b"meshing-test-catalog"),
-            "runmat",
+    let crate::MeshingHostProgram { recipe, artifact } =
+        crate::prepare_meshing_host_program(crate::serial_tests::revision()).unwrap();
+    artifact
+        .execution_host_requirement(
+            &recipe,
+            BTreeSet::from([runmat_execution::security::ExecutionTrustTier::CustomerTrusted]),
         )
-        .unwrap(),
-        runmat_types::CapabilitySet(BTreeSet::from([
-            runmat_types::CapabilityRequirement::HostRuntime,
-        ])),
-        runmat_types::InteropManifest::empty(),
-        BTreeSet::from([runmat_execution::security::ExecutionTrustTier::CustomerTrusted]),
-    )
-    .unwrap()
+        .unwrap()
 }
 
 pub(crate) fn host_inventory() -> runmat_execution::host::ExecutionHostInventory {
@@ -147,7 +140,7 @@ fn logical_partition_task_is_placement_independent_within_a_scope() {
     other.cpu_millicores = 4_000;
     let second = build_task_submission(
         &fixture.host(),
-        &fixture.program_inputs(),
+        &fixture.program(fixture.program_inputs()),
         BTreeSet::new(),
         &other,
         MeshingTaskEffectPolicy::UnknownEffect,
@@ -169,7 +162,7 @@ fn mismatched_request_input_or_authority_fails_closed() {
     wrong_request.resources.maximum_memory_bytes += 1;
     assert!(build_task_submission(
         &fixture.host_with_request(wrong_request),
-        &fixture.program_inputs(),
+        &fixture.program(fixture.program_inputs()),
         BTreeSet::new(),
         &fixture.context,
         MeshingTaskEffectPolicy::UnknownEffect,
@@ -180,7 +173,7 @@ fn mismatched_request_input_or_authority_fails_closed() {
     wrong_input.authorization_scope = "another-run".into();
     assert!(build_task_submission(
         &fixture.host(),
-        &fixture.program_inputs_with(wrong_input),
+        &fixture.program(fixture.program_inputs_with(wrong_input)),
         BTreeSet::new(),
         &fixture.context,
         MeshingTaskEffectPolicy::UnknownEffect,
@@ -195,7 +188,7 @@ fn task_rejects_an_invocation_for_another_stage() {
 
     assert!(build_task_submission(
         &expected.host(),
-        &other.program_inputs(),
+        &other.program(other.program_inputs()),
         BTreeSet::new(),
         &expected.context,
         MeshingTaskEffectPolicy::UnknownEffect,
@@ -230,7 +223,7 @@ fn exact_geometry_inputs_use_the_authoritative_geometry_object_shape() {
     fixture.input.kind = ValueRefKind::WorkerObject;
     assert!(build_task_submission(
         &fixture.host(),
-        &fixture.program_inputs(),
+        &fixture.program(fixture.program_inputs()),
         BTreeSet::new(),
         &fixture.context,
         MeshingTaskEffectPolicy::UnknownEffect,
@@ -259,7 +252,7 @@ fn faceted_geometry_inputs_use_the_authoritative_geometry_object_shape() {
     fixture.input.media_type = runmat_geometry_core::EXACT_BREP_MEDIA_TYPE.into();
     assert!(build_task_submission(
         &fixture.host(),
-        &fixture.program_inputs(),
+        &fixture.program(fixture.program_inputs()),
         BTreeSet::new(),
         &fixture.context,
         MeshingTaskEffectPolicy::UnknownEffect,
@@ -284,7 +277,7 @@ fn evidence_inputs_use_the_authoritative_driver_object_shape() {
     fixture.input.kind = ValueRefKind::ResultObject;
     assert!(build_task_submission(
         &fixture.host(),
-        &fixture.program_inputs(),
+        &fixture.program(fixture.program_inputs()),
         BTreeSet::new(),
         &fixture.context,
         MeshingTaskEffectPolicy::UnknownEffect,
@@ -299,7 +292,7 @@ fn incomplete_or_inconsistent_capability_declarations_are_rejected() {
     missing_host.required_capabilities.remove(0);
     assert!(build_task_submission(
         &fixture.host_with_workload(missing_host),
-        &fixture.program_inputs(),
+        &fixture.program(fixture.program_inputs()),
         BTreeSet::new(),
         &fixture.context,
         MeshingTaskEffectPolicy::UnknownEffect,
@@ -312,7 +305,7 @@ fn incomplete_or_inconsistent_capability_declarations_are_rejected() {
     };
     assert!(build_task_submission(
         &fixture.host_with_workload(wrong_order),
-        &fixture.program_inputs(),
+        &fixture.program(fixture.program_inputs()),
         BTreeSet::new(),
         &fixture.context,
         MeshingTaskEffectPolicy::UnknownEffect,
@@ -334,7 +327,7 @@ fn final_publication_and_unknown_effects_never_retry() {
     let final_stage = Fixture::new(MeshingStageKind::Publication);
     assert!(build_task_submission(
         &final_stage.host(),
-        &final_stage.program_inputs(),
+        &final_stage.program(final_stage.program_inputs()),
         BTreeSet::new(),
         &final_stage.context,
         MeshingTaskEffectPolicy::ContentAddressedPure {
@@ -505,8 +498,9 @@ impl Fixture {
         let context = MeshingExecutionContext {
             scope_id: ExecutionScopeId::derive(&[b"scope"]),
             pool_id: PoolId::derive(&[b"pool"]),
-            program_artifact_id: ArtifactId::derive(&[b"meshing-host-v2"]),
-            host: host_requirement(),
+            permitted_trust_tiers: BTreeSet::from([
+                runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
+            ]),
             artifact_access: access,
             cpu_millicores: 2_000,
             maximum_egress_bytes: 4_000_000,
@@ -527,7 +521,7 @@ impl Fixture {
     fn submit(&self, effect: MeshingTaskEffectPolicy) -> runmat_execution_runner::TaskSubmission {
         build_task_submission(
             &self.host(),
-            &self.program_inputs(),
+            &self.program(self.program_inputs()),
             BTreeSet::new(),
             &self.context,
             effect,
@@ -557,6 +551,31 @@ impl Fixture {
         crate::MeshingHostWorkload {
             workload,
             ..self.host()
+        }
+    }
+
+    /// The meshing host program request carrying `arguments`, built as the library builds it.
+    fn program(
+        &self,
+        arguments: Vec<ValuePayload>,
+    ) -> runmat_execution_artifact::ProgramExecutionRequest {
+        let crate::MeshingHostProgram { recipe, artifact } =
+            crate::prepare_meshing_host_program(crate::serial_tests::revision()).unwrap();
+        runmat_execution_artifact::ProgramExecutionRequest {
+            schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
+            recipe,
+            artifact,
+            callable: runmat_execution::ProgramCallable::semantic(
+                runmat_execution::ProgramFunctionId(0),
+                None,
+            ),
+            context: runmat_execution::ProgramInvocationContext::Direct,
+            assignment: None,
+            job_id: None,
+            arguments,
+            requested_outputs: 1,
+            environment: runmat_execution::EnvironmentSnapshot::default(),
+            console: None,
         }
     }
 

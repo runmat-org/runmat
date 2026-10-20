@@ -4,7 +4,7 @@ use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
 use runmat_analysis_fea::ComputeBackend;
-use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
+use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::ArtifactAccess;
 use runmat_geometry_io::ExactCadImportOptions;
 use runmat_meshing_core::{
@@ -15,14 +15,7 @@ pub(crate) fn revision() -> ProgramRevision {
     ProgramRevision::new(
         Digest::sha256(b"graph"),
         Digest::sha256(b"source"),
-        ProgramEnvironment::new(
-            1,
-            1,
-            Digest::sha256(b"runtime"),
-            Digest::sha256(b"catalog"),
-            "matlab",
-        )
-        .unwrap(),
+        runmat_core::program_environment(runmat_core::CompatMode::Matlab),
     )
     .unwrap()
 }

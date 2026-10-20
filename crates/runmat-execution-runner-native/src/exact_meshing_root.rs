@@ -665,7 +665,7 @@ fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {
 
 #[cfg(test)]
 mod tests {
-    use runmat_execution::{ProgramEnvironment, ProgramRevision};
+    use runmat_execution::ProgramRevision;
     use runmat_execution_artifact::cache::FilesystemObjectStore;
     use runmat_geometry_core::GeometryTolerancePolicy;
     use runmat_meshing_core::{resolve_meshing_request, MeshingRequestSettings};
@@ -684,14 +684,7 @@ mod tests {
         ProgramRevision::new(
             Digest::sha256(b"exact-root-graph"),
             Digest::sha256(b"exact-root-source"),
-            ProgramEnvironment::new(
-                1,
-                1,
-                Digest::sha256(b"exact-root-runtime"),
-                Digest::sha256(b"exact-root-catalog"),
-                "matlab",
-            )
-            .unwrap(),
+            runmat_core::program_environment(runmat_core::CompatMode::Matlab),
         )
         .unwrap()
     }
