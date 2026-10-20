@@ -23,7 +23,7 @@ impl NativeExecutor {
         if let Some(Value::Closure(closure)) = arguments.callable().map(|owner| owner.value()) {
             if closure
                 .bound_function()
-                .is_some_and(|bound| bound != function.0 as usize)
+                .is_some_and(|bound| bound != function.0)
             {
                 return Err(NativeExecutorError::Host(
                     "selected native body differs from retained closure identity".into(),

@@ -109,7 +109,7 @@ fn evaluate_inner(
                             })?;
                     let runtime = state.runtime.clone();
                     let lexical_call = runmat_runtime::call::lexical::LexicalCall {
-                        function: function.0 as usize,
+                        function: function.0,
                         captures,
                         environment: state.lexical_environment.clone(),
                         arguments,

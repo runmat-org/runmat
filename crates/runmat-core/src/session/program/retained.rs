@@ -65,7 +65,7 @@ impl SessionProgramService {
         {
             return Ok(caller);
         }
-        let mut selected = None;
+        let mut selected: Option<&ExecutableUnit> = None;
         for owner in caller.original_dependencies().values() {
             if owner
                 .local_function_for_origin(origin)

@@ -43,13 +43,9 @@ fn suspended_descendant_argument_defers_to_exact_child_without_replay() {
     .expect("call-port scope");
     drop(activation);
     let executor = compile_executor(fixtures::nested_argument_fixture()).unwrap();
-    let result = futures::executor::block_on(executor.invoke_async(
-        ProgramFunctionId(0),
-        vec![],
-        1,
-        runtime,
-    ))
-    .unwrap();
+    let result =
+        futures::executor::block_on(executor.invoke_async(FunctionId(0), vec![], 1, runtime))
+            .unwrap();
     assert_eq!(result.outputs, vec![Value::Bool(true)]);
     assert_eq!(*calls.lock().unwrap(), vec![8, 9, 11, 10]);
     drop(invoker);
@@ -185,13 +181,9 @@ fn captured_empty_and_multi_cells_resume_without_effect_or_branch_replay() {
         .expect("call-port scope");
         drop(activation);
         let executor = compile_executor(capture_fixture(true, count)).unwrap();
-        let result = futures::executor::block_on(executor.invoke_async(
-            ProgramFunctionId(0),
-            vec![],
-            1,
-            runtime,
-        ))
-        .unwrap();
+        let result =
+            futures::executor::block_on(executor.invoke_async(FunctionId(0), vec![], 1, runtime))
+                .unwrap();
         assert_eq!(result.outputs, vec![Value::Bool(true)]);
         assert_eq!(*calls.lock().unwrap(), vec![8, 9, 10]);
         drop(invoker);
@@ -214,14 +206,9 @@ fn skipped_rhs_never_captures_or_invokes_calls() {
     drop(activation);
     let executor = compile_executor(capture_fixture(false, 3)).unwrap();
     assert_eq!(
-        futures::executor::block_on(executor.invoke_async(
-            ProgramFunctionId(0),
-            vec![],
-            1,
-            runtime,
-        ))
-        .unwrap()
-        .outputs,
+        futures::executor::block_on(executor.invoke_async(FunctionId(0), vec![], 1, runtime,))
+            .unwrap()
+            .outputs,
         vec![Value::Bool(false)]
     );
     assert_eq!(calls.load(Ordering::SeqCst), 0);
@@ -267,13 +254,9 @@ fn caught_failure_clears_unconsumed_capture_before_next_short_circuit() {
     .expect("call-port scope");
     drop(activation);
     let executor = compile_executor(fixtures::caught_capture_fixture()).unwrap();
-    let result = futures::executor::block_on(executor.invoke_async(
-        ProgramFunctionId(0),
-        vec![],
-        1,
-        runtime,
-    ))
-    .unwrap();
+    let result =
+        futures::executor::block_on(executor.invoke_async(FunctionId(0), vec![], 1, runtime))
+            .unwrap();
     assert_eq!(result.outputs, vec![Value::Bool(true)]);
     assert_eq!(*calls.lock().unwrap(), vec![9, 10]);
     drop(invoker);

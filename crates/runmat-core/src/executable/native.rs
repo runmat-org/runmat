@@ -193,23 +193,23 @@ impl NativeCompilationInput {
         self.manifest
             .parallel
             .distributed_values
-            .retain(|value| retained.contains(&value.id.function));
+            .retain(|value| retained_portable.contains(&value.id.function));
         self.manifest
             .parallel
             .collectives
-            .retain(|collective| retained.contains(&collective.id.region.0.function));
+            .retain(|collective| retained_portable.contains(&collective.id.region.0.function));
         let mut registry: runmat_vm::FunctionRegistry =
             runmat_vm::decode_interpreter_program_v2(&self.program_capture).map_err(|error| {
                 native_product_error(format!("failed to decode native program capture: {error}"))
             })?;
         registry
             .functions
-            .retain(|function, _| retained_local.contains(function));
+            .retain(|function, _| retained.contains(function));
         registry
             .names
-            .retain(|_, function| retained_local.contains(function));
+            .retain(|_, function| retained.contains(function));
         registry.source_functions.retain(|_, functions| {
-            functions.retain(|function| retained_local.contains(function));
+            functions.retain(|function| retained.contains(function));
             !functions.is_empty()
         });
         self.program_capture =
@@ -761,26 +761,35 @@ end
 
         assert_eq!(input.mir.bodies.len(), 2);
         assert_eq!(input.mir.functions.len(), 2);
+        let retained_portable = retained
+            .iter()
+            .map(|function| {
+                unit.analysis()
+                    .function_for_local(*function)
+                    .unwrap()
+                    .function
+            })
+            .collect::<BTreeSet<_>>();
         assert!(input
             .analysis
             .functions
             .iter()
-            .all(|function| retained.contains(&function.function)));
+            .all(|function| retained_portable.contains(&function.function)));
         assert!(input
             .analysis
             .program_points
             .iter()
-            .all(|point| retained.contains(&point.point.function)));
+            .all(|point| retained_portable.contains(&point.point.function)));
         assert!(input
             .analysis
             .regions
             .iter()
-            .all(|region| retained.contains(&region.contract.id.function)));
+            .all(|region| retained_portable.contains(&region.contract.id.function)));
         assert!(input
             .manifest
             .regions
             .iter()
-            .all(|region| retained.contains(&region.id.function)));
+            .all(|region| retained_portable.contains(&region.id.function)));
         let registry: runmat_vm::FunctionRegistry =
             runmat_vm::decode_interpreter_program_v2(&input.program_capture)
                 .expect("decode retained registry");
@@ -795,7 +804,7 @@ end
             .requirements
             .regions
             .iter()
-            .all(|region| retained.contains(&region.id.function)));
+            .all(|region| retained_portable.contains(&region.id.function)));
         let object_data = input
             .aot_object_data(
                 &assembly,

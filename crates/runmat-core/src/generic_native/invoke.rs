@@ -82,11 +82,10 @@ pub(crate) async fn invoke(
         .map(|name| {
             unit.native_function_id(name)
                 .ok_or_else(|| super::error::stage("NativeProcedure", name))
-                .and_then(program_function)
         })
         .transpose()?
         .unwrap_or(published.entrypoint);
-    let selected_function = runmat_hir::FunctionId(function.0 as usize);
+    let selected_function = function;
     let selected_body = runtime_functions.get_current(selected_function);
     let runtime = if selected_body.is_some_and(|body| {
         body.class_method_owner.as_ref().is_some_and(|owner| {
@@ -120,8 +119,8 @@ pub(crate) async fn invoke(
         .mir()
         .bodies
         .keys()
-        .map(|function| program_function(*function))
-        .collect::<Result<BTreeSet<_>, _>>()?;
+        .copied()
+        .collect::<BTreeSet<_>>();
     let previous_invoker = user_functions::current_semantic_function_invoker();
     let nested_executor = Rc::clone(&published.executor);
     let nested_runtime = runtime.native_invocation_context().0;
@@ -187,7 +186,7 @@ pub(crate) async fn invoke(
                         runmat_hir::FunctionId(function),
                         &execution_sources,
                     )?;
-                    let function = program_function(runmat_hir::FunctionId(function))?;
+                    let function = runmat_hir::FunctionId(function);
                     native_semantic::invoke_rooted(
                         &unit,
                         executor,
@@ -364,18 +363,17 @@ pub(crate) async fn invoke(
                 if current_definition {
                     let runtime = isolated_procedure_runtime(runtime);
                     if native_selected_body {
-                        let function = program_function(function)?;
                         let method_owner = unit
                             .mir()
                             .functions
-                            .get(&runmat_hir::FunctionId(function.0 as usize))
+                            .get(&function)
                             .and_then(|metadata| metadata.class_method_owner.as_ref());
                         let runtime = runtime.with_constructor_receiver_for_method(method_owner)?;
                         let execution_sources = registry.execution_source_resolver_in(&runtime);
                         let runtime = super::super_constructor::bind_selected(
                             runtime,
                             &registry,
-                            runmat_hir::FunctionId(function.0 as usize),
+                            function,
                             &execution_sources,
                         )?;
                         let selected = runtime.clone();
@@ -550,7 +548,7 @@ pub(crate) async fn invoke(
                         format!("lexical function {} is unavailable", call.function),
                     ));
                 }
-                let function = program_function(runmat_hir::FunctionId(call.function))?;
+                let function = runmat_hir::FunctionId(call.function);
                 let execution = super::deopt::invoke(
                     &unit,
                     super::deopt::DeoptimizationRequest {
@@ -616,7 +614,7 @@ pub(crate) async fn invoke(
     source_functions.sort_by_key(|function| function.function);
     let catalog =
         user_functions::install_source_function_catalog(Some(Arc::new(source_functions)))?;
-    let active = user_functions::push_active_semantic_function(function.0 as usize)?;
+    let active = user_functions::push_active_semantic_function(function.0)?;
     // The compiler deliberately omits the synthetic script entrypoint from
     // the semantic FunctionRegistry. It cannot own a superclass constructor;
     // every real function still has to pass the exact retained-owner check.
@@ -735,12 +733,6 @@ async fn invoke_vm_with_rooted_admission(
         dynamic_admission,
     )
     .await
-}
-
-fn program_function(
-    function: runmat_hir::FunctionId,
-) -> Result<FunctionId, runmat_runtime::RuntimeError> {
-    Ok(function)
 }
 
 fn isolated_procedure_runtime(

@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, rc::Rc};
 
 use runmat_execution::Digest;
-use runmat_types::ProgramFunctionId;
+use runmat_types::FunctionId;
 
 use crate::{invalidation::DependencySnapshot, tiering::TierAvailability};
 use runmat_native_executor::NativeExecutor;
@@ -40,7 +40,7 @@ impl EntryRegistry {
         &mut self,
         key: EntryKey,
         executor: Rc<NativeExecutor>,
-        entrypoint: ProgramFunctionId,
+        entrypoint: FunctionId,
         dependencies: DependencySnapshot,
         compilation: NativeCompilationEvidence,
     ) -> Result<PublishedEntry, &'static str> {
@@ -62,7 +62,7 @@ impl EntryRegistry {
         key: EntryKey,
         profile: Digest,
         executor: Rc<NativeExecutor>,
-        entrypoint: ProgramFunctionId,
+        entrypoint: FunctionId,
         dependencies: DependencySnapshot,
         compilation: NativeCompilationEvidence,
     ) -> Result<PublishedEntry, &'static str> {

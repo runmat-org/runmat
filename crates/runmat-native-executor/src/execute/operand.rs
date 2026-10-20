@@ -501,12 +501,12 @@ pub(super) fn evaluate_operand(
                     {
                         Value::bound_function_handle(
                             name,
-                            function.0 as usize,
+                            function.0,
                             runmat_runtime::user_functions::bound_function_authority_for(
-                                function.0 as usize,
+                                function.0,
                             ),
                             source_role,
-                            runmat_runtime::user_functions::source_file_for(function.0 as usize),
+                            runmat_runtime::user_functions::source_file_for(function.0),
                         )
                     } else {
                         runmat_runtime::call::closures::semantic_closure_value(

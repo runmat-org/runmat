@@ -628,9 +628,7 @@ mod tests {
                 .expect("bind selected nested source");
             let owned_bindings = unit
                 .mir()
-                .lexical_environment_projection(runmat_hir::FunctionId(
-                    compiled.entrypoint.0 as usize,
-                ))
+                .lexical_environment_projection(compiled.entrypoint)
                 .expect("canonical nested ownership projection")
                 .owned;
             assert_eq!(owned_bindings.len(), 1, "only shared is an owned cell");
@@ -675,7 +673,14 @@ mod tests {
                                 target,
                                 runmat_runtime::native::NativeResumeKind::INTERPRETER
                             );
-                            assert_eq!(frame.site.point.function, compiled.entrypoint);
+                            assert_eq!(frame.function, compiled.entrypoint);
+                            assert_eq!(
+                                frame.site.point.function,
+                                unit.analysis()
+                                    .function_for_local(compiled.entrypoint)
+                                    .expect("compiled entry portable identity")
+                                    .function
+                            );
                             assert!(frame.site.bytecode_pc.is_some());
                             assert_eq!(frame.site.source, selected_source.source);
                             assert_eq!(frame.site.span, selected_source.span);
