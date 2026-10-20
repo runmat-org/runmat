@@ -1128,11 +1128,7 @@ fn midpoint(endpoints: [[f64; 2]; 2]) -> [f64; 2] {
 }
 
 fn entity(kind: PersistentEntityKind, source_topology_id: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: source_topology_id.to_owned(),
-        assembly_path: Vec::new(),
-    }
+    PersistentEntityId::new(kind, source_topology_id.to_owned(), Vec::new())
 }
 
 struct Control;

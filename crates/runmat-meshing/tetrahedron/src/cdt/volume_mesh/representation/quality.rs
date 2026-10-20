@@ -236,7 +236,6 @@ impl DecodedQuality {
                 .region_id
                 .as_ref()
                 .ok_or_else(|| invalid("quality cell has no region"))?;
-            parts.expansion.charge(entity_heap(region))?;
             let context = contexts
                 .get(context as usize)
                 .ok_or_else(|| invalid("unknown quality context index"))?;

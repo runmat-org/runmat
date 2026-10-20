@@ -2027,11 +2027,11 @@ mod tests {
     fn solver_mesh_and_beam_share_attached_translation_rows() {
         let mut mesh = tetrahedron4_mesh();
         let attached_coordinates = mesh.topology.nodes[0].coordinates_m;
-        mesh.topology.nodes[0].provenance = vec![PersistentEntityId {
-            kind: PersistentEntityKind::Vertex,
-            source_topology_id: "beam_root".into(),
-            assembly_path: vec!["root".into()],
-        }];
+        mesh.topology.nodes[0].provenance = vec![PersistentEntityId::new(
+            PersistentEntityKind::Vertex,
+            "beam_root".into(),
+            vec!["root".into()],
+        )];
         set_boundary_regions(&mut mesh, 0, &["root"]);
         set_boundary_regions(&mut mesh, 1, &["solid_load"]);
         reseal(&mut mesh);
@@ -2219,11 +2219,11 @@ mod tests {
     fn whole_model_body_force_spans_solid_and_explicit_formulations_once() {
         let mut mesh = tetrahedron4_mesh();
         let attached_coordinates = mesh.topology.nodes[0].coordinates_m;
-        mesh.topology.nodes[0].provenance = vec![PersistentEntityId {
-            kind: PersistentEntityKind::Vertex,
-            source_topology_id: "beam_root".into(),
-            assembly_path: vec!["root".into()],
-        }];
+        mesh.topology.nodes[0].provenance = vec![PersistentEntityId::new(
+            PersistentEntityKind::Vertex,
+            "beam_root".into(),
+            vec!["root".into()],
+        )];
         set_boundary_regions(&mut mesh, 0, &["root"]);
         reseal(&mut mesh);
         let mut model = mixed_solid_beam_model(attached_coordinates);
@@ -2268,11 +2268,11 @@ mod tests {
     fn mixed_affine_rows_anchor_rigid_modes_without_connector_support() {
         let mut mesh = tetrahedron4_mesh();
         let attached_coordinates = mesh.topology.nodes[0].coordinates_m;
-        mesh.topology.nodes[0].provenance = vec![PersistentEntityId {
-            kind: PersistentEntityKind::Vertex,
-            source_topology_id: "beam_root".into(),
-            assembly_path: vec!["root".into()],
-        }];
+        mesh.topology.nodes[0].provenance = vec![PersistentEntityId::new(
+            PersistentEntityKind::Vertex,
+            "beam_root".into(),
+            vec!["root".into()],
+        )];
         set_boundary_regions(&mut mesh, 0, &["root"]);
         set_boundary_regions(&mut mesh, 1, &["solid_load"]);
         reseal(&mut mesh);
@@ -4344,20 +4344,20 @@ mod tests {
 
     fn clear_boundary_regions(mesh: &mut SolverMeshArtifact) {
         for (index, face) in mesh.topology.boundary_faces.iter_mut().enumerate() {
-            face.provenance = vec![PersistentEntityId {
-                kind: PersistentEntityKind::Face,
-                source_topology_id: format!("unselected:{index}"),
-                assembly_path: vec!["root".to_owned()],
-            }];
+            face.provenance = vec![PersistentEntityId::new(
+                PersistentEntityKind::Face,
+                format!("unselected:{index}"),
+                vec!["root".to_owned()],
+            )];
         }
     }
 
     fn set_solver_mesh_region(mesh: &mut SolverMeshArtifact, region_id: &str) {
-        let region = PersistentEntityId {
-            kind: PersistentEntityKind::Region,
-            source_topology_id: region_id.to_owned(),
-            assembly_path: vec!["root".to_owned()],
-        };
+        let region = PersistentEntityId::new(
+            PersistentEntityKind::Region,
+            region_id.to_owned(),
+            vec!["root".to_owned()],
+        );
         mesh.topology.volume_elements[0].region_id = region.clone();
         mesh.topology.regions[0].region_id = region;
         reseal(mesh);

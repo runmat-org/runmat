@@ -209,11 +209,11 @@ impl GeometryFeatureProvider for EdgeInventoryProvider {
 }
 
 fn edge(name: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind: runmat_geometry_core::PersistentEntityKind::Edge,
-        source_topology_id: name.into(),
-        assembly_path: vec!["root".into()],
-    }
+    PersistentEntityId::new(
+        runmat_geometry_core::PersistentEntityKind::Edge,
+        name.into(),
+        vec!["root".into()],
+    )
 }
 
 #[test]

@@ -5,11 +5,11 @@ use runmat_meshing_core::{
 #[test]
 fn selection_counts_raw_candidates_but_retains_unique_metadata_and_nodes() {
     let mut mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet10);
-    let entity = PersistentEntityId {
-        kind: PersistentEntityKind::Face,
-        source_topology_id: "shared".into(),
-        assembly_path: vec!["instance".repeat(512)],
-    };
+    let entity = PersistentEntityId::new(
+        PersistentEntityKind::Face,
+        "shared".into(),
+        vec!["instance".repeat(512)],
+    );
     for face in &mut mesh.topology.boundary_faces {
         face.provenance.push(entity.clone());
     }

@@ -405,14 +405,15 @@ fn workload_rejects_identity_and_access_tampering() {
 #[test]
 fn worker_capability_inventory_uses_generic_execution_capabilities() {
     let formulation = digest("formulation");
-    let capabilities =
-        analysis_worker_capabilities(
-            [formulation],
-            [crate::test_fixtures::accelerator_class("gpu.compute")],
-            true,
-        );
+    let capabilities = analysis_worker_capabilities(
+        [formulation],
+        [crate::test_fixtures::accelerator_class("gpu.compute")],
+        true,
+    );
     assert!(
-        capabilities.contains(&runmat_execution::resource::Capability::Accelerator(crate::test_fixtures::accelerator_class("gpu.compute")))
+        capabilities.contains(&runmat_execution::resource::Capability::Accelerator(
+            crate::test_fixtures::accelerator_class("gpu.compute")
+        ))
     );
     assert!(
         capabilities.contains(&runmat_execution::resource::Capability::Custom(format!(
@@ -1584,22 +1585,22 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     let mut mesh =
         runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     for (index, face) in mesh.topology.boundary_faces.iter_mut().enumerate() {
-        face.provenance.push(PersistentEntityId {
-            kind: PersistentEntityKind::Face,
-            source_topology_id: if index == 0 { "root" } else { "tip" }.into(),
-            assembly_path: vec!["root".into()],
-        });
+        face.provenance.push(PersistentEntityId::new(
+            PersistentEntityKind::Face,
+            if index == 0 { "root" } else { "tip" }.into(),
+            vec!["root".into()],
+        ));
         face.provenance.sort();
     }
     let assignment = solve.model.material_assignments.first().unwrap();
-    let region = PersistentEntityId {
-        kind: PersistentEntityKind::Region,
-        source_topology_id: assignment
+    let region = PersistentEntityId::new(
+        PersistentEntityKind::Region,
+        assignment
             .selected_region_id()
             .expect("fixture uses selected material region")
             .to_owned(),
-        assembly_path: vec!["root".into()],
-    };
+        vec!["root".into()],
+    );
     mesh.topology.volume_elements[0].region_id = region.clone();
     mesh.topology.regions[0].region_id = region;
     mesh.canonical_digest = StableDigest::ZERO;
@@ -3210,22 +3211,22 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
     let mut mesh =
         runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     for (index, face) in mesh.topology.boundary_faces.iter_mut().enumerate() {
-        face.provenance.push(PersistentEntityId {
-            kind: PersistentEntityKind::Face,
-            source_topology_id: if index == 0 { "root" } else { "tip" }.into(),
-            assembly_path: vec!["root".into()],
-        });
+        face.provenance.push(PersistentEntityId::new(
+            PersistentEntityKind::Face,
+            if index == 0 { "root" } else { "tip" }.into(),
+            vec!["root".into()],
+        ));
         face.provenance.sort();
     }
     let assignment = workload.model.material_assignments.first().unwrap();
-    let region = PersistentEntityId {
-        kind: PersistentEntityKind::Region,
-        source_topology_id: assignment
+    let region = PersistentEntityId::new(
+        PersistentEntityKind::Region,
+        assignment
             .selected_region_id()
             .expect("fixture uses selected material region")
             .to_owned(),
-        assembly_path: vec!["root".into()],
-    };
+        vec!["root".into()],
+    );
     mesh.topology.volume_elements[0].region_id = region.clone();
     mesh.topology.regions[0].region_id = region;
     mesh.canonical_digest = StableDigest::ZERO;
@@ -3329,8 +3330,8 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
                 class: crate::test_fixtures::accelerator_class("substituted-gpu"),
                 count: 1,
                 minimum_allocation_bytes: 1024,
-            provider: None,
-            required_features: Default::default(),
+                provider: None,
+                required_features: Default::default(),
             }],
             local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         })

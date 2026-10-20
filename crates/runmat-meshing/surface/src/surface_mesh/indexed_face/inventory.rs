@@ -90,6 +90,10 @@ pub(super) fn requested_surface_bytes(
         .ok_or_else(overflow)
 }
 
+const SHARED_IDENTITY_ALLOCATION_BYTES: u64 = (std::mem::size_of::<
+    runmat_geometry_core::PersistentEntityIdData,
+>() + 2 * std::mem::size_of::<usize>()) as u64;
+
 struct Inventory<'a, 'c> {
     decoder: minicbor::Decoder<'a>,
     control: &'c dyn CanonicalCodecControl,
@@ -166,7 +170,9 @@ impl Inventory<'_, '_> {
             Err(invalid("indexed row width differs"))
         }
     }
+    /// One shared identity allocation per decoded entity; handles live in their slots.
     fn entity(&mut self) -> Result<(), CanonicalCodecError> {
+        self.add(SHARED_IDENTITY_ALLOCATION_BYTES)?;
         self.fields(|p, key| match key {
             "kind" => p.skip(),
             "source_topology_id" => {
@@ -263,21 +269,12 @@ impl Inventory<'_, '_> {
         self.skip()
     }
     fn face(&mut self) -> Result<(), CanonicalCodecError> {
-        let mut identity_heap = 0;
-        let mut identity_clones = 1u64;
         self.fields(|p, key| match key {
             "schema_version"
             | "source_face"
             | "maximum_chordal_deviation_m"
             | "maximum_normal_deviation_rad" => p.skip(),
-            "entities" => p
-                .vector::<PersistentEntityId>(|p| {
-                    let before = p.bytes;
-                    p.entity()?;
-                    identity_heap = identity_heap.max(p.bytes - before);
-                    Ok(())
-                })
-                .map(|_| ()),
+            "entities" => p.vector::<PersistentEntityId>(Self::entity).map(|_| ()),
             "charts" => p.vector::<DigestWords>(Self::skip).map(|_| ()),
             "quality" => p.quality(),
             "nodes" => {
@@ -291,10 +288,6 @@ impl Inventory<'_, '_> {
                             p.skip()?;
                         }
                         let edges = p.vector::<EdgeRow>(Self::skip)?;
-                        identity_clones = identity_clones
-                            .checked_add(1)
-                            .and_then(|n| edges.checked_mul(2).and_then(|e| n.checked_add(e)))
-                            .ok_or_else(overflow)?;
                         p.expand_slots::<ExactFaceMeshEdgeParameter>(edges)
                     })?;
                     p.expand_slots::<ExactFaceMeshNodeUse>(uses)
@@ -303,24 +296,15 @@ impl Inventory<'_, '_> {
             }
             "triangles" => {
                 let count = p.vector::<TriangleRow>(Self::triangle_row)?;
-                identity_clones = identity_clones.checked_add(count).ok_or_else(overflow)?;
                 p.expand_slots::<ExactFaceMeshTriangle>(count)
             }
             "boundary_segments" => {
                 let count = p.vector::<BoundaryRow>(Self::boundary_row)?;
-                identity_clones = identity_clones
-                    .checked_add(count.checked_mul(2).ok_or_else(overflow)?)
-                    .ok_or_else(overflow)?;
                 p.expand_slots::<ExactFaceMeshBoundarySegment>(count)
             }
             "joined_chart_cuts" => p.vector::<ExactFaceMeshJoinedCut>(Self::skip).map(|_| ()),
             _ => Err(invalid("unknown indexed face field")),
-        })?;
-        self.expand(
-            identity_heap
-                .checked_mul(identity_clones)
-                .ok_or_else(overflow)?,
-        )
+        })
     }
 }
 fn invalid(reason: impl std::fmt::Display) -> CanonicalCodecError {

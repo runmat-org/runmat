@@ -16,11 +16,7 @@ fn fixture() -> DelaunayVolumeTopology {
         DelaunayVolumeNode::explicit(StableDigest::from_bytes([(index + 1) as u8; 32]), point)
     })
     .collect();
-    let region = PersistentEntityId {
-        kind: PersistentEntityKind::Region,
-        source_topology_id: "solid".into(),
-        assembly_path: vec![],
-    };
+    let region = PersistentEntityId::new(PersistentEntityKind::Region, "solid".into(), vec![]);
     build_delaunay_volume_topology_with_regions(
         nodes,
         vec![([0, 1, 2, 3], Some(region)), ([1, 4, 2, 3], None)],

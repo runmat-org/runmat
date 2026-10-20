@@ -18,11 +18,11 @@ fn thousands_of_noncommuting_sources_do_not_multiply_density_or_refine_the_commo
         for index in 0..count {
             let a = std::f64::consts::TAU * index as f64 / count as f64;
             let [x, y] = [a.cos(), a.sin()];
-            let id = PersistentEntityId {
-                kind: PersistentEntityKind::Edge,
-                source_topology_id: format!("source-{index:05}"),
-                assembly_path: vec![],
-            };
+            let id = PersistentEntityId::new(
+                PersistentEntityKind::Edge,
+                format!("source-{index:05}"),
+                vec![],
+            );
             incident.insert(id.clone());
             contributions.push(MetricContribution {
                 source: MetricSourceKind::Curve,

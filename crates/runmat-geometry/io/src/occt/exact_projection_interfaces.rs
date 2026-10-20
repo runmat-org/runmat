@@ -119,11 +119,11 @@ fn region_id(solid_id: &PersistentEntityId) -> PersistentEntityId {
         digest.update((segment.len() as u64).to_be_bytes());
         digest.update(segment.as_bytes());
     }
-    PersistentEntityId {
-        kind: PersistentEntityKind::Region,
-        source_topology_id: format!("solid-region:{:x}", digest.finalize()),
-        assembly_path: solid_id.assembly_path.clone(),
-    }
+    PersistentEntityId::new(
+        PersistentEntityKind::Region,
+        format!("solid-region:{:x}", digest.finalize()),
+        solid_id.assembly_path.clone(),
+    )
 }
 
 fn invalid(reason: &str) -> GeometryImportError {
@@ -231,10 +231,6 @@ mod tests {
     }
 
     fn id(kind: PersistentEntityKind, name: &str) -> PersistentEntityId {
-        PersistentEntityId {
-            kind,
-            source_topology_id: name.into(),
-            assembly_path: vec!["part".into()],
-        }
+        PersistentEntityId::new(kind, name.into(), vec!["part".into()])
     }
 }

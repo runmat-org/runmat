@@ -465,11 +465,11 @@ fn exact_interface_and_contact_classification_preserve_typed_sides() {
     let face_a = topology.faces[0].id.clone();
     let face_b = topology.faces[1].id.clone();
     let region_a = topology.regions[0].id.clone();
-    let region_b = PersistentEntityId {
-        kind: PersistentEntityKind::Region,
-        source_topology_id: "region:b".into(),
-        assembly_path: vec!["root".into()],
-    };
+    let region_b = PersistentEntityId::new(
+        PersistentEntityKind::Region,
+        "region:b".into(),
+        vec!["root".into()],
+    );
     topology.interfaces = vec![ExactSharedInterface {
         face_id: face_a.clone(),
         side_a_region_id: region_a.clone(),
@@ -491,11 +491,11 @@ fn exact_interface_and_contact_classification_preserve_typed_sides() {
 
     drop(index);
     topology.interfaces.clear();
-    let contact_id = PersistentEntityId {
-        kind: PersistentEntityKind::Contact,
-        source_topology_id: "contact".into(),
-        assembly_path: vec!["root".into()],
-    };
+    let contact_id = PersistentEntityId::new(
+        PersistentEntityKind::Contact,
+        "contact".into(),
+        vec!["root".into()],
+    );
     topology.contacts = vec![ExactContactPair {
         id: contact_id.clone(),
         side_a_face_ids: vec![face_a.clone()],

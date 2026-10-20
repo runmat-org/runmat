@@ -15,11 +15,11 @@ pub(super) enum RecoveryMesh {
 
 fn add_face_region(mesh: &mut SolverMeshArtifact, face: usize, region: &str) {
     let provenance = &mut mesh.topology.boundary_faces[face].provenance;
-    let entity = PersistentEntityId {
-        kind: PersistentEntityKind::Face,
-        source_topology_id: region.to_owned(),
-        assembly_path: vec!["root".to_owned()],
-    };
+    let entity = PersistentEntityId::new(
+        PersistentEntityKind::Face,
+        region.to_owned(),
+        vec!["root".to_owned()],
+    );
     if !provenance.contains(&entity) {
         provenance.push(entity);
         provenance.sort();
@@ -36,11 +36,11 @@ pub(super) fn physical_fixture_mesh(
         RecoveryMesh::ConnectedTet4 => connected_tetrahedron_solver_mesh(),
     };
     if let Some(assignment) = model.material_assignments.first() {
-        let region = PersistentEntityId {
-            kind: PersistentEntityKind::Region,
-            source_topology_id: assignment.selected_region_id().unwrap().to_owned(),
-            assembly_path: vec!["root".to_owned()],
-        };
+        let region = PersistentEntityId::new(
+            PersistentEntityKind::Region,
+            assignment.selected_region_id().unwrap().to_owned(),
+            vec!["root".to_owned()],
+        );
         for element in &mut mesh.topology.volume_elements {
             element.region_id = region.clone();
         }

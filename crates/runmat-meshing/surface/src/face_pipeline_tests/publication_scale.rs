@@ -7,11 +7,11 @@ use runmat_meshing_core::{NeverCancelled, StableDigest};
 use sha2::{Digest, Sha256};
 
 fn representative_face(cells: usize) -> ExactFaceMesh {
-    let face = PersistentEntityId {
-        kind: PersistentEntityKind::Face,
-        source_topology_id: format!("occt:{}", "1".repeat(64)),
-        assembly_path: vec!["root".into(), "0:1:1:1".into()],
-    };
+    let face = PersistentEntityId::new(
+        PersistentEntityKind::Face,
+        format!("occt:{}", "1".repeat(64)),
+        vec!["root".into(), "0:1:1:1".into()],
+    );
     let chart = StableDigest::from_bytes(Sha256::digest(b"surface-resource-grid/chart").into());
     let stride = cells + 1;
     let mut nodes = Vec::with_capacity(stride * stride);

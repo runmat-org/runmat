@@ -249,11 +249,11 @@ mod tests {
 
     #[test]
     fn solid_observation_uses_original_cad_provenance_and_rejects_partial_coverage() {
-        let solid = PersistentEntityId {
-            kind: PersistentEntityKind::Solid,
-            source_topology_id: "cad-body".into(),
-            assembly_path: vec!["part".into()],
-        };
+        let solid = PersistentEntityId::new(
+            PersistentEntityKind::Solid,
+            "cad-body".into(),
+            vec!["part".into()],
+        );
         let mut mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
         let region = mesh.topology.volume_elements[0].region_id.clone();
         assert_ne!(region, solid);
@@ -286,9 +286,13 @@ mod tests {
             .collect::<Vec<_>>(),
             (0..projection.elements.len()).collect::<Vec<_>>()
         );
-        let missing = PersistentEntityId {
-            source_topology_id: "absent-body".into(),
-            ..solid.clone()
+        let missing = {
+            let __base = &(solid.clone());
+            PersistentEntityId::new(
+                __base.kind,
+                "absent-body".into(),
+                __base.assembly_path.clone(),
+            )
         };
         target.bind_resolved_entities(vec![solid, missing]).unwrap();
         assert!(matches!(

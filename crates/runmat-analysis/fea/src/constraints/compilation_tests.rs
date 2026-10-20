@@ -18,11 +18,7 @@ use runmat_meshing_core::{
 };
 
 fn provenance(kind: PersistentEntityKind, name: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: name.into(),
-        assembly_path: vec!["root".into()],
-    }
+    PersistentEntityId::new(kind, name.into(), vec!["root".into()])
 }
 
 pub(super) fn mesh(order: ElementOrder) -> SolverMeshArtifact {

@@ -248,11 +248,7 @@ fn digest(domain: &str, ordinal: u64) -> StableDigest {
 }
 
 pub(super) fn entity(kind: PersistentEntityKind, source: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: source.into(),
-        assembly_path: vec!["root".into()],
-    }
+    PersistentEntityId::new(kind, source.into(), vec!["root".into()])
 }
 
 fn field(

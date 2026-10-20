@@ -6,16 +6,16 @@ use std::collections::BTreeSet;
 
 #[test]
 fn borrowed_parameter_images_preserve_ordered_reference_signed_zero_and_periodicity() {
-    let edge = PersistentEntityId {
-        kind: PersistentEntityKind::Edge,
-        source_topology_id: "edge".into(),
-        assembly_path: vec!["body".into()],
-    };
-    let face = PersistentEntityId {
-        kind: PersistentEntityKind::Face,
-        source_topology_id: "face".into(),
-        assembly_path: vec!["body".into()],
-    };
+    let edge = PersistentEntityId::new(
+        PersistentEntityKind::Edge,
+        "edge".into(),
+        vec!["body".into()],
+    );
+    let face = PersistentEntityId::new(
+        PersistentEntityKind::Face,
+        "face".into(),
+        vec!["body".into()],
+    );
     let chart = StableDigest::from_bytes([7; 32]);
     let observations = [
         Row {

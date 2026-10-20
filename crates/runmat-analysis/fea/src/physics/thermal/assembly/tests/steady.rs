@@ -21,11 +21,11 @@ fn disconnected_bodies_have_independent_exact_steady_equilibria_and_require_each
                     .iter_mut()
                     .find(|face| face.face_id == 10 + 100 * component as u64)
                     .unwrap();
-                face.provenance.push(PersistentEntityId {
-                    kind: PersistentEntityKind::Face,
-                    source_topology_id: name.clone(),
-                    assembly_path: vec!["root".into()],
-                });
+                face.provenance.push(PersistentEntityId::new(
+                    PersistentEntityKind::Face,
+                    name.clone(),
+                    vec!["root".into()],
+                ));
                 face.provenance.sort();
                 let target = RegionTarget::boundary(name.clone());
                 if mixed_anchors && component > 0 {

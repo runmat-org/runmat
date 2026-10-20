@@ -875,11 +875,13 @@ fn mixed_beam_shell_model_solves_and_recovers_each_formulation() {
 fn mixed_solid_beam_pipeline_is_deterministic_and_recovers_both_formulations() {
     let mut mesh = single_tetrahedron_solver_mesh();
     let attached_coordinates = mesh.topology.nodes[0].coordinates_m;
-    mesh.topology.nodes[0].provenance.push(PersistentEntityId {
-        kind: PersistentEntityKind::Vertex,
-        source_topology_id: "beam_root".into(),
-        assembly_path: vec!["root".into()],
-    });
+    mesh.topology.nodes[0]
+        .provenance
+        .push(PersistentEntityId::new(
+            PersistentEntityKind::Vertex,
+            "beam_root".into(),
+            vec!["root".into()],
+        ));
     mesh.topology.nodes[0].provenance.sort();
     add_face_region(&mut mesh, 1, "solid_load");
     reseal_solver_mesh(&mut mesh);
@@ -920,11 +922,13 @@ fn mixed_solid_beam_pipeline_is_deterministic_and_recovers_both_formulations() {
 fn conformal_solid_beam_shell_pipeline_recovers_every_formulation() {
     let mut mesh = single_tetrahedron_solver_mesh();
     let attached_coordinates = mesh.topology.nodes[0].coordinates_m;
-    mesh.topology.nodes[0].provenance.push(PersistentEntityId {
-        kind: PersistentEntityKind::Vertex,
-        source_topology_id: "beam_root".into(),
-        assembly_path: vec!["root".into()],
-    });
+    mesh.topology.nodes[0]
+        .provenance
+        .push(PersistentEntityId::new(
+            PersistentEntityKind::Vertex,
+            "beam_root".into(),
+            vec!["root".into()],
+        ));
     mesh.topology.nodes[0].provenance.sort();
     add_face_region(&mut mesh, 1, "solid_load");
     reseal_solver_mesh(&mut mesh);
@@ -1828,14 +1832,14 @@ fn single_tetrahedron_solver_mesh_with_order_for_model(
     add_face_region(&mut mesh, 0, "root");
     add_face_region(&mut mesh, 1, "tip");
     if let Some(assignment) = model.material_assignments.first() {
-        let region = PersistentEntityId {
-            kind: PersistentEntityKind::Region,
-            source_topology_id: assignment
+        let region = PersistentEntityId::new(
+            PersistentEntityKind::Region,
+            assignment
                 .selected_region_id()
                 .expect("fixture uses selected material region")
                 .to_owned(),
-            assembly_path: vec!["root".to_owned()],
-        };
+            vec!["root".to_owned()],
+        );
         mesh.topology.volume_elements[0].region_id = region.clone();
         mesh.topology.regions[0].region_id = region;
     }
@@ -2684,11 +2688,11 @@ pub(crate) fn multi_region_tetrahedron_solver_mesh() -> SolverMeshArtifact {
 
 fn add_face_region(mesh: &mut SolverMeshArtifact, face_index: usize, region_id: &str) {
     let provenance = &mut mesh.topology.boundary_faces[face_index].provenance;
-    let entity = PersistentEntityId {
-        kind: PersistentEntityKind::Face,
-        source_topology_id: region_id.to_owned(),
-        assembly_path: vec!["root".to_owned()],
-    };
+    let entity = PersistentEntityId::new(
+        PersistentEntityKind::Face,
+        region_id.to_owned(),
+        vec!["root".to_owned()],
+    );
     if !provenance.contains(&entity) {
         provenance.push(entity);
         provenance.sort();

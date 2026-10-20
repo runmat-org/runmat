@@ -9,11 +9,11 @@ use runmat_meshing_size::metric::{
 };
 
 fn region() -> PersistentEntityId {
-    PersistentEntityId {
-        kind: PersistentEntityKind::Region,
-        source_topology_id: "octahedron".into(),
-        assembly_path: Vec::new(),
-    }
+    PersistentEntityId::new(
+        PersistentEntityKind::Region,
+        "octahedron".into(),
+        Vec::new(),
+    )
 }
 pub(in crate::cdt) fn fixture(
     permuted: bool,
@@ -72,11 +72,11 @@ pub(in crate::cdt) fn fixture_scaled(
             ));
         }
         cells.push([offset, offset + 1, offset + 2, offset + 3]);
-        regions.push(PersistentEntityId {
-            kind: PersistentEntityKind::Region,
-            source_topology_id: format!("background-{index}"),
-            assembly_path: Vec::new(),
-        });
+        regions.push(PersistentEntityId::new(
+            PersistentEntityKind::Region,
+            format!("background-{index}"),
+            Vec::new(),
+        ));
     }
     let topology = build_delaunay_volume_topology(
         nodes,
@@ -105,11 +105,11 @@ pub(in crate::cdt) fn fixture_scaled(
                 .vertex_indices
                 .map(|i| topology.nodes[i as usize].coordinates_m.map(f64::to_bits));
             points.sort_unstable();
-            let entity = PersistentEntityId {
-                kind: PersistentEntityKind::Face,
-                source_topology_id: format!("outer-{points:?}"),
-                assembly_path: Vec::new(),
-            };
+            let entity = PersistentEntityId::new(
+                PersistentEntityKind::Face,
+                format!("outer-{points:?}"),
+                Vec::new(),
+            );
             let region = topology.tetrahedra[face.tetrahedron_index as usize]
                 .region_id
                 .clone()

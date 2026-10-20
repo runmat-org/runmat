@@ -4,11 +4,11 @@ use runmat_meshing_core::StableDigest;
 use super::*;
 
 fn edge() -> PersistentEntityId {
-    PersistentEntityId {
-        kind: PersistentEntityKind::Edge,
-        source_topology_id: "edge:closed".to_owned(),
-        assembly_path: Vec::new(),
-    }
+    PersistentEntityId::new(
+        PersistentEntityKind::Edge,
+        "edge:closed".to_owned(),
+        Vec::new(),
+    )
 }
 
 fn node(parameters: &[f64], edge: &PersistentEntityId) -> SolverMeshNode {
@@ -65,11 +65,11 @@ fn closed_curve_midpoint_uses_the_nearest_parameter_images() {
 
 #[test]
 fn periodic_surface_midpoint_uses_the_nearest_chart_images() {
-    let face = PersistentEntityId {
-        kind: PersistentEntityKind::Face,
-        source_topology_id: "face:periodic".to_owned(),
-        assembly_path: Vec::new(),
-    };
+    let face = PersistentEntityId::new(
+        PersistentEntityKind::Face,
+        "face:periodic".to_owned(),
+        Vec::new(),
+    );
     let chart = StableDigest::from_bytes([2; 32]);
     let surface_use = SurfaceUse {
         source_face_id: &face,

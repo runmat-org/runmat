@@ -6,11 +6,7 @@ use crate::cdt::{
 use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
 use runmat_meshing_core::{NeverCancelled, StableDigest};
 pub(in crate::cdt) fn region(name: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind: PersistentEntityKind::Region,
-        source_topology_id: name.into(),
-        assembly_path: Vec::new(),
-    }
+    PersistentEntityId::new(PersistentEntityKind::Region, name.into(), Vec::new())
 }
 pub(in crate::cdt) fn identity(value: u64) -> StableDigest {
     let mut bytes = [101; 32];

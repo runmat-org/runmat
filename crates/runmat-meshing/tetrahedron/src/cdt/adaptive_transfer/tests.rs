@@ -22,11 +22,7 @@ use crate::cdt::{
 };
 
 fn region() -> PersistentEntityId {
-    PersistentEntityId {
-        kind: PersistentEntityKind::Region,
-        source_topology_id: "solid".into(),
-        assembly_path: Vec::new(),
-    }
+    PersistentEntityId::new(PersistentEntityKind::Region, "solid".into(), Vec::new())
 }
 
 fn topology() -> DelaunayVolumeTopology {

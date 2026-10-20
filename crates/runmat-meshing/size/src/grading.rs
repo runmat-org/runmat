@@ -254,10 +254,10 @@ mod tests {
     }
 
     fn entity(seed: u8) -> PersistentEntityId {
-        PersistentEntityId {
-            kind: PersistentEntityKind::Edge,
-            source_topology_id: format!("edge-{seed}"),
-            assembly_path: Vec::new(),
-        }
+        PersistentEntityId::new(
+            PersistentEntityKind::Edge,
+            format!("edge-{seed}"),
+            Vec::new(),
+        )
     }
 }

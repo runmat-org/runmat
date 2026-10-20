@@ -16,11 +16,11 @@ fn fixture() -> (
 ) {
     let mut mesh = fixtures::slab_mesh(2);
     for element in &mut mesh.topology.volume_elements {
-        element.region_id = PersistentEntityId {
-            kind: PersistentEntityKind::Region,
-            source_topology_id: format!("cell-region-{}", element.element_id),
-            assembly_path: vec!["original".into()],
-        };
+        element.region_id = PersistentEntityId::new(
+            PersistentEntityKind::Region,
+            format!("cell-region-{}", element.element_id),
+            vec!["original".into()],
+        );
         element.provenance = vec![element.region_id.clone()];
     }
     // Every exact native Cell region is declared in the canonical mesh inventory,
@@ -39,11 +39,11 @@ fn fixture() -> (
         .regions
         .sort_by(|a, b| a.region_id.cmp(&b.region_id));
     for face in &mut mesh.topology.boundary_faces {
-        face.provenance = vec![PersistentEntityId {
-            kind: PersistentEntityKind::Face,
-            source_topology_id: format!("face-{}", face.face_id),
-            assembly_path: vec!["original".into()],
-        }];
+        face.provenance = vec![PersistentEntityId::new(
+            PersistentEntityKind::Face,
+            format!("face-{}", face.face_id),
+            vec!["original".into()],
+        )];
     }
     mesh.seal_canonical_digest().unwrap();
     let projection = AnalysisProjection::derive(&mesh).unwrap();

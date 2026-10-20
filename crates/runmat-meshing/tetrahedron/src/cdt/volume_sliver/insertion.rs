@@ -244,11 +244,8 @@ mod tests {
             node(4, [-0.5, 0.866_025_403_784, 0.0]),
             node(5, [-0.5, -0.866_025_403_784, 0.0]),
         ];
-        let region = PersistentEntityId {
-            kind: PersistentEntityKind::Region,
-            source_topology_id: "solid".to_owned(),
-            assembly_path: Vec::new(),
-        };
+        let region =
+            PersistentEntityId::new(PersistentEntityKind::Region, "solid".to_owned(), Vec::new());
         let topology = build_delaunay_volume_topology_with_regions(
             nodes,
             vec![

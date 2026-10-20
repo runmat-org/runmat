@@ -295,11 +295,11 @@ fn write_model_solver_mesh(model: &AnalysisModel) -> (tempfile::TempDir, PathBuf
     }) {
         mesh.topology.boundary_faces[0]
             .provenance
-            .push(PersistentEntityId {
-                kind: PersistentEntityKind::Face,
-                source_topology_id: boundary_region_id.to_string(),
-                assembly_path: vec!["root".to_owned()],
-            });
+            .push(PersistentEntityId::new(
+                PersistentEntityKind::Face,
+                boundary_region_id.to_string(),
+                vec!["root".to_owned()],
+            ));
         mesh.topology.boundary_faces[0].provenance.sort();
     }
     mesh.canonical_digest = StableDigest::ZERO;
@@ -2749,7 +2749,9 @@ impl runmat_accelerate_api::AccelProvider for AdmissionProbeProvider {
     ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
         let _ = host;
         self.uploads.fetch_add(1, Ordering::Relaxed);
-        Err(anyhow::anyhow!("admission probe never allocates device memory"))
+        Err(anyhow::anyhow!(
+            "admission probe never allocates device memory"
+        ))
     }
 
     fn download<'a>(

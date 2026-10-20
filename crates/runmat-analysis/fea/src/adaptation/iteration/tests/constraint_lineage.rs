@@ -18,11 +18,11 @@ fn persistent_clamp_rebuilds_new_midside_constraints_without_numeric_node_aliase
     for mesh in [&mut source, &mut target] {
         mesh.topology.boundary_faces[0]
             .provenance
-            .push(PersistentEntityId {
-                kind: PersistentEntityKind::Face,
-                source_topology_id: "adaptive_clamp".into(),
-                assembly_path: vec![],
-            });
+            .push(PersistentEntityId::new(
+                PersistentEntityKind::Face,
+                "adaptive_clamp".into(),
+                vec![],
+            ));
         mesh.topology.boundary_faces[0].provenance.sort();
         mesh.seal_canonical_digest().unwrap();
     }

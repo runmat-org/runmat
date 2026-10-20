@@ -234,11 +234,11 @@ fn consuming_freeze_releases_search_indexes_before_independent_admission() {
 fn borrowed_snapshot_preserves_regions_disconnected_cells_and_rejected_transaction() {
     use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
     let region = |name: &str| {
-        Some(PersistentEntityId {
-            kind: PersistentEntityKind::Region,
-            source_topology_id: name.into(),
-            assembly_path: vec!["assembly".into()],
-        })
+        Some(PersistentEntityId::new(
+            PersistentEntityKind::Region,
+            name.into(),
+            vec!["assembly".into()],
+        ))
     };
     let nodes = vec![
         node(10, [0.0, 0.0, 0.0]),

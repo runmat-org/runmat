@@ -7,11 +7,7 @@ fn digest(byte: u8) -> StableDigest {
 }
 
 fn entity(kind: PersistentEntityKind, id: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: id.into(),
-        assembly_path: vec!["root".into()],
-    }
+    PersistentEntityId::new(kind, id.into(), vec!["root".into()])
 }
 
 pub(super) fn request() -> MeshingRequest {

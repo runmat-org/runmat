@@ -77,11 +77,13 @@ fn mixed_solid_beam_ground_spring_recovers_from_the_shared_tip_dof() {
 
     let mut mesh = single_tetrahedron_solver_mesh();
     let attached_coordinates = mesh.topology.nodes[0].coordinates_m;
-    mesh.topology.nodes[0].provenance.push(PersistentEntityId {
-        kind: PersistentEntityKind::Vertex,
-        source_topology_id: "beam_root".into(),
-        assembly_path: vec!["root".into()],
-    });
+    mesh.topology.nodes[0]
+        .provenance
+        .push(PersistentEntityId::new(
+            PersistentEntityKind::Vertex,
+            "beam_root".into(),
+            vec!["root".into()],
+        ));
     mesh.topology.nodes[0].provenance.sort();
     add_face_region(&mut mesh, 1, "solid_load");
     reseal_solver_mesh(&mut mesh);

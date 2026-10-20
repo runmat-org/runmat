@@ -44,11 +44,11 @@ fn model_and_mesh() -> (AnalysisModel, SolverMeshArtifact) {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     let mut mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     for face in &mut mesh.topology.boundary_faces {
-        face.provenance.push(PersistentEntityId {
-            kind: runmat_meshing_core::PersistentEntityKind::Face,
-            source_topology_id: "root".into(),
-            assembly_path: vec!["root".into()],
-        });
+        face.provenance.push(PersistentEntityId::new(
+            runmat_meshing_core::PersistentEntityKind::Face,
+            "root".into(),
+            vec!["root".into()],
+        ));
         face.provenance.sort();
     }
     mesh.canonical_digest = StableDigest::ZERO;
