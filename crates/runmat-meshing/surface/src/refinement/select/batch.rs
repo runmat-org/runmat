@@ -83,8 +83,28 @@ pub(crate) fn independent_candidate_batch(
     let mut selected = Vec::<ExactFaceRefinementCandidate>::new();
     for (candidate_index, candidate) in candidates.iter().enumerate() {
         checkpoint(control, &geometry.source_face_id)?;
-        let metric = geometry.triangles[candidate.triangle_index as usize].deviation_samples[3]
-            .sizing_metric;
+        // Sizing may grade within one triangle; separate in the metric at the corner nearest
+        // the candidate, not at a centroid that can lie far from a fine boundary feature.
+        let metric = candidate
+            .triangle
+            .vertex_indices
+            .iter()
+            .map(|vertex| geometry.vertices.get(*vertex as usize))
+            .collect::<Option<Vec<_>>>()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|vertex| &vertex.evaluation)
+            .min_by(|left, right| {
+                let distance = |uv: [f64; 2]| {
+                    (uv[0] - candidate.uv[0]).powi(2) + (uv[1] - candidate.uv[1]).powi(2)
+                };
+                distance(left.uv).total_cmp(&distance(right.uv))
+            })
+            .map(|evaluation| evaluation.sizing_metric)
+            .unwrap_or(
+                geometry.triangles[candidate.triangle_index as usize].deviation_samples[3]
+                    .sizing_metric,
+            );
         let query = spatial::metric_bounds(
             candidate.uv,
             metric,
