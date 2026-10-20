@@ -98,7 +98,7 @@ async fn cold_worker_receives_only_exact_task_input_closure_and_inventory_is_imm
     for ordinal in 0..102_u32 {
         let bytes = ordinal.to_le_bytes().to_vec();
         let reference = ValueRef {
-            schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1,
+            schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION,
             id: runmat_execution::identity::ValueId::derive(&[b"scoped-input", &bytes]),
             logical_digest: Digest::sha256(&bytes),
             encoded_length: bytes.len() as u64,

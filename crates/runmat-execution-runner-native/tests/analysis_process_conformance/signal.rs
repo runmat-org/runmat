@@ -98,7 +98,7 @@ impl SignalFixture {
         let anonymous_name = anonymous.name.0.clone();
         let executable = unit.portable_envelope_for(Some(&anonymous_name)).unwrap();
         let function = unit
-            .function_analysis(executable.manifest.identity.entrypoint_function)
+            .function_analysis(executable.manifest.identity.entrypoint_function.unwrap())
             .cloned()
             .unwrap();
         let callable = runmat_analysis_core::GeneratorCallable::BoundFunction {
@@ -127,14 +127,25 @@ impl SignalFixture {
                     .collect(),
             },
         )));
-        let function_id = function.function.0;
+        let owner = runmat_execution::value::CallableOwner::Bound(
+            runmat_execution::FunctionBindingOrigin::from_revision(&revision, function.function)
+                .unwrap(),
+        );
+        let form = runmat_execution::value::CallableForm::Closure;
+        let source_role = runmat_types::FunctionSourceRole::Anonymous;
         let frozen_callable = CallableValue {
-            owner_identity: format!("bound:{function_id}"),
-            qualified_name: "loads.pulse".into(),
             callable_digest: CallableValue::identity_digest(
-                &format!("bound:{function_id}"),
+                owner.clone(),
                 "loads.pulse",
+                form,
+                source_role,
+                None,
             ),
+            owner,
+            qualified_name: "loads.pulse".into(),
+            form,
+            source_role,
+            source_file: None,
             captures: vec![capture],
         };
         let admitted = admit_callable_signal_generator(
@@ -209,10 +220,10 @@ impl SignalFixture {
                 .unwrap();
             let success = super::wait_for_native_task(&task).await;
             assert!(success.result_objects().is_empty());
-            assert_eq!(success.outputs.len(), 1);
+            assert_eq!(success.values().unwrap().0.len(), 1);
             outputs.push(GeneratorChunkOutput {
                 chunk_identity: chunk.plan.identity,
-                value: success.outputs[0].clone(),
+                value: success.values().unwrap().0[0].clone(),
             });
         }
         self.canonicalize(outputs)
@@ -395,10 +406,10 @@ impl SignalFixture {
                     .expect("remote signal completion timeout")
                     .unwrap();
                 assert!(success.result_objects().is_empty());
-                assert_eq!(success.outputs.len(), 1);
+                assert_eq!(success.values().unwrap().0.len(), 1);
                 outputs.push(GeneratorChunkOutput {
                     chunk_identity: chunk.plan.identity,
-                    value: success.outputs[0].clone(),
+                    value: success.values().unwrap().0[0].clone(),
                 });
             }
             channel.drain().await.unwrap();
@@ -444,6 +455,7 @@ fn signal_submission(
         GeneratorExecutionContext {
             scope_id,
             pool_id,
+            host: crate::test_fixtures::host_requirement(),
             resources: ResourceRequest {
                 cpu_millicores: 1_000,
                 memory_bytes: 512 * 1024 * 1024,
@@ -464,9 +476,10 @@ fn signal_submission(
 }
 
 fn response_output(identity: Digest, response: ProgramExecutionResponse) -> GeneratorChunkOutput {
-    let ProgramExecutionResponse::Success { value } = response else {
+    let ProgramExecutionResponse::Success { outputs } = response else {
         panic!("signal generator did not return an inline value: {response:?}")
     };
+    let [value]: [_; 1] = outputs.try_into().unwrap();
     GeneratorChunkOutput {
         chunk_identity: identity,
         value,

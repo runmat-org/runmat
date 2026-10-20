@@ -129,3 +129,13 @@ pub(crate) fn accelerator_devices(requests: &[AcceleratorRequest]) -> Vec<Accele
         })
         .collect()
 }
+
+/// The accounting slot of a value-producing attempt result.
+pub(crate) fn attempt_resources_mut(
+    success: &mut runmat_execution_runner::AttemptSuccess,
+) -> &mut Option<Box<runmat_execution_runner::AttemptResourceAccounting>> {
+    match success {
+        runmat_execution_runner::AttemptSuccess::Values { resources, .. } => resources,
+        other => panic!("test attempt is not a value result: {other:?}"),
+    }
+}

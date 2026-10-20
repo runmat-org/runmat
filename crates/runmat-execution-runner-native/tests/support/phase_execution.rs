@@ -4,12 +4,7 @@ use runmat_execution::resource::ResourceAccounting;
 
 pub fn assert_foreign_allocation_cannot_be_sealed(execution: &AnalysisPhaseExecutionEvidence) {
     let mut original = execution.task_evidence().clone();
-    let accounting = original
-        .task
-        .committed
-        .as_mut()
-        .unwrap()
-        .resources
+    let accounting = crate::test_fixtures::attempt_resources_mut(&mut original.task.committed.as_mut().unwrap().result)
         .as_mut()
         .unwrap();
     let mut allocation = accounting.resources.allocation.clone();

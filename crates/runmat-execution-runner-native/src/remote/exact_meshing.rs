@@ -490,7 +490,7 @@ fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {
 #[cfg(test)]
 mod tests {
     use runmat_execution::identity::ValueId;
-    use runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1;
+    use runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION;
     use runmat_execution::value::ValueRef;
     use runmat_geometry_core::PersistentEntityKind;
 
@@ -498,7 +498,7 @@ mod tests {
 
     fn reference(identity: &[u8]) -> ValueRef {
         ValueRef {
-            schema_version: VALUE_PAYLOAD_SCHEMA_V1,
+            schema_version: VALUE_PAYLOAD_SCHEMA_VERSION,
             id: ValueId::derive(&[b"admission-reference", identity]),
             logical_digest: runmat_execution::Digest::sha256(identity),
             encoded_length: identity.len() as u64,

@@ -235,12 +235,7 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
         // Corrupt original accounting cannot even construct the sealed phase carrier.
         for alter_bytes in [false, true] {
             let mut original = original_execution.task_evidence().clone();
-            let resources = original
-                .task
-                .committed
-                .as_mut()
-                .unwrap()
-                .resources
+            let resources = crate::test_fixtures::attempt_resources_mut(&mut original.task.committed.as_mut().unwrap().result)
                 .as_mut()
                 .unwrap();
             if alter_bytes {

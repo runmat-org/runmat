@@ -151,6 +151,7 @@ async fn fault_parent() {
             assert!(result
                 .as_ref()
                 .unwrap_err()
+                .to_string()
                 .contains("checkpoint was not published"));
         } else {
             assert_eq!(
@@ -166,7 +167,7 @@ async fn fault_parent() {
             );
             let success = result.unwrap();
             assert_eq!(
-                history[1].terminal.as_ref().unwrap().resources,
+                history[1].terminal.as_ref().unwrap().resources.as_deref(),
                 success.resources()
             );
             assert_eq!(
@@ -226,7 +227,7 @@ pub(super) async fn run() {
         })
         .await
         .unwrap();
-        assert!(matches!(result, Err(message) if message.contains("cancelled")));
+        assert!(matches!(result, Err(message) if message.to_string().contains("cancelled")));
         let history = task.try_attempt_history().unwrap();
         assert_eq!(history.len(), 1);
         let original = &history[0];

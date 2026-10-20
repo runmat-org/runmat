@@ -7,7 +7,7 @@ use runmat_analysis_fea::execution::{
 use runmat_analysis_fea::planning::resource::{
     ByteCount, PreparedInputResourceFacts, PreparedOutputResourceFacts,
 };
-use runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1;
+use runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION;
 use runmat_execution::value::{ValueRef, ValueRefKind};
 use runmat_execution::Digest;
 use runmat_execution_artifact::cache::CacheImport;
@@ -314,7 +314,7 @@ pub fn analysis_object_references(
     references.push(root.clone());
     for chunk in &manifest.chunks {
         references.push(ValueRef {
-            schema_version: VALUE_PAYLOAD_SCHEMA_V1,
+            schema_version: VALUE_PAYLOAD_SCHEMA_VERSION,
             id: access.value_id(chunk.digest),
             logical_digest: chunk.digest,
             encoded_length: chunk.encoded_length,

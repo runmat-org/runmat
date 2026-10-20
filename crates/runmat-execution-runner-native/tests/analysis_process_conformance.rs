@@ -549,7 +549,9 @@ async fn parent() {
     user_cancelled_config.store_root = directory.path().join("user-cancelled-analysis-sequence");
     let interrupt = Arc::new(AtomicBool::new(true));
     let interrupt_guard =
-        runmat_runtime::interrupt::replace_interrupt(Some(Arc::clone(&interrupt)));
+        runmat_runtime::interrupt::replace_interrupt(Some(
+            runmat_execution::CancellationToken::from_shared(Arc::clone(&interrupt)),
+        ));
     let cancellation = execute_structural_sequence_locally(
         user_cancelled_config,
         sequence_preparation(revision(), "user-cancelled-analysis-sequence"),
@@ -1058,9 +1060,9 @@ async fn remote_conformance(
         for reference in success
             .result_objects()
             .iter()
-            .chain(&second_success.result_objects())
-            .chain(&mixed_success.result_objects())
-            .chain(&explicit_success.result_objects())
+            .chain(second_success.result_objects())
+            .chain(mixed_success.result_objects())
+            .chain(explicit_success.result_objects())
         {
             result_store.0.insert(
                 reference.logical_digest,
@@ -2177,7 +2179,7 @@ fn analysis_submission(
         .iter()
         .map(|value| match value {
             ValuePayload::Object(root) => (**root).clone(),
-            ValuePayload::Inline(_) => panic!("analysis inputs must remain externalized"),
+            other => panic!("analysis inputs must remain externalized: {other:?}"),
         })
         .collect();
     let context = AnalysisExecutionContext {

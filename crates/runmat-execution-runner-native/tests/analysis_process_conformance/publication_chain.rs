@@ -512,10 +512,8 @@ impl MeteredProgramResponse {
 }
 
 pub(super) fn success_response(success: &AttemptSuccess) -> ProgramExecutionResponse {
-    ProgramExecutionResponse::from_success_outputs(
-        success.outputs.clone(),
-        success.result_objects().clone(),
-    )
+    let (outputs, result_objects) = success.values().expect("value attempt result");
+    ProgramExecutionResponse::from_success_outputs(outputs.to_vec(), result_objects.to_vec())
 }
 
 pub(super) fn metered_response(
@@ -858,7 +856,7 @@ impl PublicationChainDriver for RemoteDriver {
                         remote_timeout_summary(&self.pool)
                     ),
                 };
-            for reference in &success.result_objects() {
+            for reference in success.result_objects() {
                 self.store.0.insert(
                     reference.logical_digest,
                     self.pool
@@ -937,7 +935,7 @@ impl PublicationChainDriver for RemoteDriver {
                             remote_timeout_summary(&self.pool)
                         ),
                     };
-                for reference in &success.result_objects() {
+                for reference in success.result_objects() {
                     self.store.0.insert(
                         reference.logical_digest,
                         self.pool

@@ -35,7 +35,7 @@ fn reference(bytes: &[u8], media: &str, schema: &str) -> runmat_execution::value
     let encryption_context = Digest::sha256("frequency contract encryption");
     let authorization_scope = "analysis:frequency-contract".to_string();
     runmat_execution::value::ValueRef {
-        schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1,
+        schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION,
         id: artifact_object_value_id(logical_digest, encryption_context, &authorization_scope),
         logical_digest,
         encoded_length: bytes.len() as u64,
