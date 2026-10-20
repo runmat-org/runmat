@@ -64,6 +64,7 @@ impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactSolverProject
             .checkpoint(MeshingStageCheckpoint::default())?;
         let control = invocation.control.geometry_evaluation_control();
         let (surface, surface_storage) = sources.surface(&invocation, &control)?;
+        log_phase(&control, "exact surface decoded");
         phase_checkpoint(
             invocation.control,
             "exact surface artifact decoding and validation",
@@ -84,12 +85,14 @@ impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactSolverProject
                 &invocation.host.resolved_request,
             )
             .map_err(crate::curve_kernel::map_curve_error)?;
+        log_phase(&control, "geometry metric prepared");
         let retained = runmat_geometry_core::GeometryAllocationScope::new(&control);
         let codec = crate::codec_control::CodecControl::new(&retained);
         let reconstruction = runmat_geometry_core::GeometryAllocationScope::new(&codec);
         let volume_bytes = sources
             .volume_record(&codec, &reconstruction)
             .map_err(|failure| error::map_record_error(failure, &codec))?;
+        log_phase(&control, "volume record admitted");
         let topology = decode_delaunay_solver_topology(
             volume_bytes,
             DelaunaySolverProjectionInput {
@@ -129,6 +132,7 @@ impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactSolverProject
         drop(evaluator);
         drop(surface);
         drop(surface_storage);
+        log_phase(&control, "solver topology constructed");
         phase_checkpoint(
             invocation.control,
             "solver topology construction and validation",
@@ -142,6 +146,7 @@ impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactSolverProject
                 )
             })?;
         let projection = storage::admit(projection, &retained, &codec)?;
+        log_phase(&control, "projection retained");
         drop(codec);
         drop(retained);
         let codec = crate::codec_control::CodecControl::new(&control);
@@ -157,6 +162,7 @@ impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactSolverProject
             encoding_profile.resident_workspace_bytes_estimate,
         )
         .map_err(|error| failure(crate::geometry_failure::category(error.kind), &error.reason))?;
+        log_phase(&control, "encoding workspace reserved");
         let encoded = projection.encode(&codec).map_err(|error| {
             if let Some(original) = codec.take_failure() {
                 failure(
@@ -230,6 +236,18 @@ impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactSolverProject
             final_checkpoint: checkpoint,
         })
     }
+}
+
+/// Live and peak admitted geometry storage at each order-elevation phase.
+fn log_phase(control: &crate::MeshingGeometryEvaluationControl<'_>, phase: &'static str) {
+    let usage = control.usage();
+    tracing::info!(
+        event_code = "meshing.order_elevation.phase",
+        phase,
+        live_bytes = usage.live_allocation_bytes,
+        peak_bytes = usage.allocation_bytes,
+        "order elevation phase"
+    );
 }
 
 fn phase_checkpoint(
