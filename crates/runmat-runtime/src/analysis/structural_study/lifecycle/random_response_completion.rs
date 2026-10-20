@@ -355,7 +355,6 @@ pub(in crate::analysis) fn complete_random_response_study(
         production_publication_reasons: reasons,
         provenance: persisted.provenance,
         numerical_result: crate::analysis::StructuralRandomResponseResultsData {
-            result: numerical.response_result,
             numerical_receipt: numerical.response_numerical_receipt,
             accuracy,
             resource_usage: numerical.response_resource_usage,

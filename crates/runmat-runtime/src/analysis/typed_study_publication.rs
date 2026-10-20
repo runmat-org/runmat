@@ -291,8 +291,8 @@ enum StructuralStudyNumericalEvidence {
             runmat_analysis_fea::execution::StructuralLinearNumericalReceiptArtifact,
         prestress_state: PersistedStateEvidence,
         modal_reduction: Option<StructuralModalReductionEvidence>,
-        frequency_publication:
-            Box<runmat_analysis_fea::execution::StructuralFrequencyPublicationManifest>,
+        /// The publication itself is persisted once with the frequency run record.
+        frequency_publication_digest: Digest,
     },
     StructuralTransient {
         frozen_project_digest: Option<Digest>,
@@ -302,7 +302,8 @@ enum StructuralStudyNumericalEvidence {
     StructuralFrequency {
         frozen_project_digest: Option<Digest>,
         step_id: ProcedureStepId,
-        publication: runmat_analysis_fea::execution::StructuralFrequencyPublicationManifest,
+        /// The publication itself is persisted once with the frequency run record.
+        publication_digest: Digest,
     },
 }
 
@@ -448,7 +449,9 @@ impl StructuralStudyNumericalEvidence {
                     preload_numerical_receipt: result.preload_numerical_receipt.clone(),
                     prestress_state: PersistedStateEvidence::persist(&result.prestress_state, study_digest, staging)?,
                     modal_reduction,
-                    frequency_publication: Box::new(result.frequency.publication.clone()),
+                    frequency_publication_digest: frequency_publication_digest(
+                        &result.frequency.publication,
+                    )?,
                 }
             }
             super::StructuralStudyNumericalResult::StructuralTransient(result) => {
@@ -462,11 +465,20 @@ impl StructuralStudyNumericalEvidence {
                 Self::StructuralFrequency {
                     frozen_project_digest: result.frozen_project_digest,
                     step_id: result.step_id.clone(),
-                    publication: result.publication.clone(),
+                    publication_digest: frequency_publication_digest(&result.publication)?,
                 }
             }
         })
     }
+}
+
+fn frequency_publication_digest(
+    publication: &runmat_analysis_fea::execution::StructuralFrequencyPublicationManifest,
+) -> Result<Digest, crate::analysis::storage::AnalysisPublicationError> {
+    let bytes = publication
+        .canonical_bytes()
+        .map_err(|error| error.to_string())?;
+    Ok(Digest::sha256(bytes))
 }
 
 fn typed_publication_error(

@@ -343,9 +343,7 @@ pub(in crate::analysis) fn complete_response_spectrum_study(
         production_publication_reasons,
         provenance: persisted.provenance,
         numerical_result: crate::analysis::StructuralResponseSpectrumResultsData {
-            result: numerical.response_result,
             numerical_receipt: numerical.response_numerical_receipt,
-            field_recovery,
             accuracy,
             resource_usage: numerical.response_resource_usage,
             publication: numerical.response_publication,

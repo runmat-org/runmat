@@ -2201,22 +2201,24 @@ pub enum AnalysisStudyStepNumericalResultData {
     StructuralRandomResponse(Box<StructuralRandomResponseResultsData>),
 }
 
+/// Published response-spectrum run record. Recovered response values are persisted once as
+/// the run's original fields and the envelope state; this record names their solver result
+/// through its receipt and carries scalar evidence only.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StructuralResponseSpectrumResultsData {
-    pub result: runmat_analysis_fea::execution::StructuralModalResponseSpectrumSolverResult,
     pub numerical_receipt:
         runmat_analysis_fea::execution::StructuralModalResponseSpectrumNumericalReceipt,
-    pub field_recovery: runmat_analysis_fea::solve::dynamics::ResponseSpectrumFieldRecovery,
     pub accuracy: runmat_analysis_fea::results::accuracy::AccuracyArtifact,
     pub resource_usage: runmat_analysis_fea::planning::resource::ResourceUsageEvidence,
     pub publication: runmat_analysis_fea::results::publication::PublishedAnalysisResult,
 }
 
+/// Published random-response run record. Variance and RMS values are persisted once as the
+/// run's original fields and the statistics state; this record carries scalar evidence only.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StructuralRandomResponseResultsData {
-    pub result: runmat_analysis_fea::execution::StructuralRandomResponseSolverResult,
     pub numerical_receipt: runmat_analysis_fea::execution::StructuralRandomResponseNumericalReceipt,
     pub accuracy: runmat_analysis_fea::results::accuracy::AccuracyArtifact,
     pub resource_usage: runmat_analysis_fea::planning::resource::ResourceUsageEvidence,

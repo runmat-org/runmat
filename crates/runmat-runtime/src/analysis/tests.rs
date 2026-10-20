@@ -76,6 +76,7 @@ use runmat_meshing_core::{
 use super::*;
 
 mod nonlinear_physical;
+mod persisted_record_shape;
 mod static_admission;
 mod structural_study_intent;
 mod structural_study_storage;
