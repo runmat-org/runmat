@@ -350,13 +350,9 @@ impl AnalysisPublicationBuilder {
             .admission
             .lock()
             .map_err(|_| "staging admission lock poisoned")?;
-        self.admit(
-            resident(value, self.maximum_bytes)?
-                .checked_mul(2)
-                .ok_or_else(|| AnalysisPublicationError::ResourceLimit {
-                    message: "staging byte overflow".into(),
-                })?,
-        )?;
+        // One JSON tree is built from the borrowed value.
+        self.admit(json_projection(value, self.maximum_bytes)?)
+            .map_err(|error| error.context("manifest JSON projection"))?;
         *guard = true;
         serde_json::to_value(value).map_err(AnalysisPublicationError::from)
     }
@@ -372,18 +368,33 @@ impl AnalysisPublicationBuilder {
             .admission
             .lock()
             .map_err(|_| "staging admission lock poisoned")?;
-        self.admit(
-            resident(&(manifest as &serde_json::Value, run), self.maximum_bytes)?
-                .checked_mul(2)
-                .ok_or_else(|| AnalysisPublicationError::ResourceLimit {
-                    message: "staging byte overflow".into(),
-                })?,
-        )?;
+        // The retained manifest is already charged; only the run's JSON tree is new.
+        self.admit(json_projection(run, self.maximum_bytes)?)
+            .map_err(|error| error.context("manifest public-run JSON projection"))?;
         *guard = true;
         manifest["public_run"] =
             serde_json::to_value(run).map_err(AnalysisPublicationError::from)?;
         Ok(())
     }
+}
+
+/// Requested workspace for projecting a borrowed value into one JSON tree.
+fn json_projection(value: &impl Serialize, maximum: u64) -> Result<u64, AnalysisPublicationError> {
+    runmat_canonical_codec::profile_serialized(
+        value,
+        CanonicalLimits::new(
+            usize::try_from(maximum).map_err(|_| AnalysisPublicationError::ResourceLimit {
+                message: "publication budget exceeds address space".into(),
+            })?,
+            100_000_000,
+            65_536,
+            64,
+        ),
+    )?
+    .json_projection_resident_bytes_estimate()
+    .ok_or_else(|| AnalysisPublicationError::ResourceLimit {
+        message: "invalid JSON projection workspace".into(),
+    })
 }
 
 pub(super) fn source_workspace(
