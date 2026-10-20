@@ -22,7 +22,7 @@ pub(in crate::execution) use fields::{
 };
 mod publication;
 mod result;
-pub use result::AcousticHarmonicSolverResult;
+pub use result::{AcousticHarmonicResultSummary, AcousticHarmonicSolverResult};
 mod receipt;
 pub use receipt::{
     AcousticNumericalReceipt, AcousticNumericalReceiptArtifact, ACOUSTIC_RECEIPT_MAX_ENCODED_BYTES,

@@ -18,7 +18,9 @@ use serde_json::Value as JsonValue;
 mod electrical_run_options;
 pub use electrical_run_options::AnalysisElectricalRunOptions;
 mod frequency_results;
-pub use frequency_results::{AcousticFrequencyResultsData, StructuralFrequencyResultsData};
+pub use frequency_results::{
+    AcousticFrequencyEntryEvidence, AcousticFrequencyResultsData, StructuralFrequencyResultsData,
+};
 mod nonlinear_run_options;
 pub use nonlinear_run_options::AnalysisNonlinearRunOptions;
 mod field_units;

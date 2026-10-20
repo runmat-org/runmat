@@ -14,7 +14,7 @@ use crate::analysis::{
 use super::{validate_run_id_token, AnalysisFieldPageLookup};
 
 pub(super) const ACOUSTIC_FREQUENCY_ARTIFACT_SCHEMA_VERSION: &str =
-    "analysis_acoustic_frequency_artifact/2026-09-001";
+    "analysis_acoustic_frequency_artifact/2026-10-001";
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -73,11 +73,19 @@ pub(super) fn validate_artifact(
     else {
         return Err("acoustic frequency artifact contains another numerical result kind".into());
     };
-    let authority = result
-        .result
-        .publication_authority()
+    // The manifest's authority was proven against the complete numerical result at admission.
+    let authority = result.publication.authority();
+    let workload_identity = result
+        .workload
+        .identity()
         .map_err(|error| error.to_string())?;
-    if result.result.workload() != &result.workload
+    let runmat_analysis_fea::execution::FieldTopologyIdentity::VolumeMesh { mesh_digest } =
+        authority.topology()
+    else {
+        return Err("acoustic frequency authority has a non-volume topology".into());
+    };
+    if authority.workload() != workload_identity
+        || authority.plan() != result.workload.plan()
         || authority.entries().len() != result.entries.len()
     {
         return Err(
@@ -91,22 +99,16 @@ pub(super) fn validate_artifact(
     let mut solver_convergence = QualityGate::Pass;
     let mut result_quality = QualityGate::Pass;
     let mut quality_reasons = Vec::new();
-    for ((numerical, completed), original) in authority
-        .entries()
-        .iter()
-        .zip(&result.entries)
-        .zip(result.result.results())
-    {
+    for (numerical, completed) in authority.entries().iter().zip(&result.entries) {
         let expected = result
             .workload
             .entry(numerical.entry)
             .map_err(|error| error.to_string())?;
+        let summary = &completed.result;
         let request = runmat_analysis_fea::execution::AccuracyEvaluationRequest::new(
-            original.producer(),
+            summary.producer,
             runmat_analysis_fea::execution::AccuracySourceKind::AcousticHarmonic,
-            original
-                .source_result_identity()
-                .map_err(|error| error.to_string())?,
+            summary.source_result,
             None,
             expected.formulation_requirement,
             expected
@@ -171,22 +173,27 @@ pub(super) fn validate_artifact(
         result_quality = worst_gate(result_quality, accuracy.result_quality);
         quality_reasons.extend(accuracy.quality_reasons);
         let receipt = completed.numerical_receipt.receipt();
-        let source_result = original
-            .source_result_identity()
-            .map_err(|error| error.to_string())?;
+        let expected_workload = expected.identity().map_err(|error| error.to_string())?;
         if completed.entry != numerical.entry
-            || completed.workload != expected
-            || &completed.result != original
-            || original.formulation() != &artifact.step.identity
+            || numerical.workload != expected_workload
+            || numerical.source
+                != runmat_analysis_fea::execution::FieldRecoverySource::SolverResult(
+                    summary.source_result,
+                )
+            || summary.source_workload != expected_workload
+            || summary.producer != authority.producer()
+            || summary.mesh_digest != mesh_digest
+            || summary.frequency != expected.frequency
+            || &summary.formulation != &artifact.step.identity
             || completed.numerical_receipt.source_workload() != numerical.workload
-            || completed.numerical_receipt.source_result() != source_result
-            || completed.accuracy.source_result != source_result
-            || completed.accuracy.producer != original.producer()
-            || receipt.producer != original.producer()
-            || receipt.topology_digest != Digest::from_bytes(*original.mesh_digest().bytes())
+            || completed.numerical_receipt.source_result() != summary.source_result
+            || completed.accuracy.source_result != summary.source_result
+            || completed.accuracy.producer != summary.producer
+            || receipt.producer != summary.producer
+            || receipt.topology_digest != Digest::from_bytes(*summary.mesh_digest.bytes())
             || receipt.frequency_hz != expected.frequency.hertz
-            || receipt.relative_residual != original.relative_residual()
-            || receipt.power_relative_error != original.power_relative_error()
+            || receipt.relative_residual != summary.relative_residual
+            || receipt.power_relative_error != summary.power_relative_error
             || receipt.solver_relative_tolerance != expected.solver.relative_tolerance
             || receipt.power_balance_relative_tolerance != expected.power_balance_relative_tolerance
         {
@@ -195,21 +202,17 @@ pub(super) fn validate_artifact(
                     .into(),
             );
         }
-        let state_requests = original
-            .state_publication_requests()
+        let state_requests = expected
+            .state_publication_requests(
+                Digest::from_bytes(*summary.mesh_digest.bytes()),
+                summary.source_result,
+            )
             .map_err(|error| error.to_string())?;
         if state_requests.len() != completed.states.len() {
             return Err("acoustic frequency state inventory differs from original result".into());
         }
         for (request, state) in state_requests.iter().zip(&completed.states) {
-            state.validate().map_err(|error| error.to_string())?;
-            let payload = state
-                .payload
-                .acoustic()
-                .ok_or("acoustic frequency state has another payload kind")?;
-            let [pressure, velocity] = payload.fields.fields() else {
-                return Err("acoustic frequency state omits its native field inventory".into());
-            };
+            state.verify_identity()?;
             if state.producer != request.producer
                 || state.source_result != request.source_result
                 || state.topology_digest != request.topology_digest
@@ -217,26 +220,6 @@ pub(super) fn validate_artifact(
                 || state.kind != request.declaration.kind
                 || state.completeness != request.declaration.completeness
                 || state.persistence != request.declaration.persistence
-                || payload.frequency.hertz != numerical.entry.frequency_hz()
-                || payload.ordered_node_ids != original.ordered_node_ids()
-                || payload.ordered_element_ids != original.ordered_element_ids()
-                || payload.recovery_request
-                    != original
-                        .native_field_request_from_result()
-                        .map_err(|error| error.to_string())?
-                || !native_values_match(
-                    pressure.storage(),
-                    original
-                        .pressure_pa()
-                        .iter()
-                        .flat_map(|pressure| [pressure.real, pressure.imaginary]),
-                )
-                || !native_values_match(
-                    velocity.storage(),
-                    original.velocity_m_per_s().iter().flat_map(|velocity| {
-                        (0..3).flat_map(move |axis| [velocity.real[axis], velocity.imaginary[axis]])
-                    }),
-                )
             {
                 return Err("acoustic frequency state differs from its exact entry source".into());
             }
@@ -252,7 +235,7 @@ pub(super) fn validate_artifact(
         .artifact_roots
         .validate(&crate::analysis::FrequencySamplePublicationAccess {
             publication: &result.publication,
-            authority: &authority,
+            authority,
             object_catalog: &artifact.object_catalog,
         })?;
     let operation = run_operation_for_identity(&artifact.step.identity)
@@ -294,7 +277,7 @@ fn worst_gate(left: QualityGate, right: QualityGate) -> QualityGate {
 }
 
 /// Compare original accepted arrays in canonical component order without recovery or allocation.
-fn native_values_match(
+pub(in crate::analysis) fn native_values_match(
     field: &runmat_analysis_core::AnalysisField,
     expected: impl Iterator<Item = f64>,
 ) -> bool {
@@ -337,14 +320,11 @@ pub(super) fn validate_closure(
     else {
         return Err("acoustic frequency artifact contains another result kind".into());
     };
-    let authority = result
-        .result
-        .publication_authority()
-        .map_err(|error| error.to_string())?;
+    let authority = result.publication.authority();
     artifact.artifact_roots.admit(
         crate::analysis::FrequencySamplePublicationAccess {
             publication: &result.publication,
-            authority: &authority,
+            authority,
             object_catalog: &artifact.object_catalog,
         },
         |digest| Ok(read(digest)),
@@ -376,15 +356,12 @@ pub(super) fn field_page(
     else {
         return Err("acoustic frequency artifact contains another result kind".into());
     };
-    let authority = result
-        .result
-        .publication_authority()
-        .map_err(|error| error.to_string())?;
+    let authority = result.publication.authority();
     let mut read = read;
     let admitted = artifact.artifact_roots.admit(
         crate::analysis::FrequencySamplePublicationAccess {
             publication: &result.publication,
-            authority: &authority,
+            authority,
             object_catalog: &artifact.object_catalog,
         },
         &mut read,

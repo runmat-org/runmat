@@ -330,7 +330,8 @@ fn install_fea_solver_context() -> runmat_analysis_fea::FeaProgressContextGuard 
 
 pub use contracts::{
     analysis_authoring_workflow, analysis_language_reference_paths, analysis_output_operation_ids,
-    analysis_procedure_ids, AcousticFrequencyResultsData, AnalysisAcousticRunOptions,
+    analysis_procedure_ids, AcousticFrequencyEntryEvidence, AcousticFrequencyResultsData,
+    AnalysisAcousticRunOptions,
     AnalysisBucklingRunOptions, AnalysisCfdRunOptions, AnalysisChtRunOptions,
     AnalysisDiagnosticsArtifactPayload, AnalysisDocumentCheckResult, AnalysisDocumentKind,
     AnalysisDocumentRunResult, AnalysisExecutionCapability, AnalysisExecutionPlan,

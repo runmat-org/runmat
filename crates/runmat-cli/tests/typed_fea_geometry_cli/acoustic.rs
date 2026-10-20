@@ -187,7 +187,15 @@ fn authored_acoustic_orders_publish_cold_native_fields_and_exact_state_catalog()
             .iter()
             .map(|entry| {
                 assert_eq!(entry.states.len(), 1);
-                let state = entry.states[0].clone();
+                // The run record keeps a reference; the state is persisted once as binary.
+                let reference = &entry.states[0];
+                reference.verify_identity().unwrap();
+                let state =
+                    runmat_analysis_fea::execution::CanonicalSemanticState::from_canonical_bytes(
+                        &fs::read(&reference.artifact_path).unwrap(),
+                    )
+                    .unwrap();
+                assert_eq!(state.identity, reference.identity);
                 assert_eq!(state.kind, runmat_analysis_core::StateKind::AcousticComplex);
                 assert_eq!(
                     state.payload.acoustic().unwrap().frequency.hertz,

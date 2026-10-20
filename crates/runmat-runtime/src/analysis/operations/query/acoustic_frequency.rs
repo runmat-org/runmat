@@ -85,12 +85,12 @@ pub(super) fn results_op(
         max_frequency_solver_residual: result
             .entries
             .iter()
-            .map(|entry| entry.result.relative_residual())
+            .map(|entry| entry.result.relative_residual)
             .reduce(f64::max),
         max_frequency_balance_error: result
             .entries
             .iter()
-            .map(|entry| entry.result.power_relative_error())
+            .map(|entry| entry.result.power_relative_error)
             .reduce(f64::max),
         ..AnalysisResultsSummary::default()
     };

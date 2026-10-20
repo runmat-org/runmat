@@ -57,7 +57,42 @@ impl TryFrom<ResultData> for AcousticHarmonicSolverResult {
         Ok(result)
     }
 }
+/// Scalar closure and identity of one acoustic harmonic result. Per-node values are published
+/// as field partitions and the native state; this summary is what run records retain.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AcousticHarmonicResultSummary {
+    pub source_workload: AnalysisWorkloadIdentity,
+    pub producer: super::super::StepIdentity,
+    pub source_result: SolverResultIdentity,
+    pub formulation: AnalysisRunIdentity,
+    pub mesh_digest: StableDigest,
+    pub frequency: Frequency,
+    pub iterations: u32,
+    pub relative_residual: f64,
+    pub mean_input_power_w: f64,
+    pub mean_impedance_loss_w: f64,
+    pub power_relative_error: f64,
+}
+
 impl AcousticHarmonicSolverResult {
+    pub fn summary(&self) -> AnalysisExecutionResult<AcousticHarmonicResultSummary> {
+        let d = &self.data;
+        Ok(AcousticHarmonicResultSummary {
+            source_workload: d.source_workload,
+            producer: d.producer,
+            source_result: self.source_result_identity()?,
+            formulation: d.formulation.clone(),
+            mesh_digest: d.mesh_digest,
+            frequency: d.frequency,
+            iterations: d.iterations,
+            relative_residual: d.relative_residual,
+            mean_input_power_w: d.mean_input_power_w,
+            mean_impedance_loss_w: d.mean_impedance_loss_w,
+            power_relative_error: d.power_relative_error,
+        })
+    }
+
     pub(super) fn new(
         workload: &AcousticHarmonicWorkload,
         mesh: &SolverMeshArtifact,

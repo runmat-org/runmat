@@ -50,6 +50,7 @@ pub use observations::{
 
 use frequency::PersistedStructuralFrequencyArtifact;
 use frequency_sample::PersistedAcousticFrequencyArtifact;
+pub(in crate::analysis) use frequency_sample::native_values_match;
 
 pub(super) const ARTIFACT_SCHEMA_VERSION: &str = "analysis_run_artifact/2026-09-002";
 const FIELD_IDENTITY_PREFIX: &[u8] = b"runmat-analysis-field/v1\0";

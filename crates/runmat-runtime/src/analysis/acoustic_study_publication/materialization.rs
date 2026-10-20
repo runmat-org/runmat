@@ -25,8 +25,62 @@ pub(in crate::analysis) struct CompletedAcousticFrequencyStep {
     pub quality_reasons: Vec<QualityReason>,
     pub production_publication_reasons: Vec<ProductionPublicationReason>,
     pub provenance: RunProvenance,
-    pub numerical_result: AnalysisStudyStepNumericalResultData,
+    pub completion: Box<AcousticFrequencyCompletionResults>,
     pub persistence: AcousticFrequencyPersistence,
+}
+
+/// Complete in-memory acoustic sweep, admitted and validated before publication. Only its
+/// slim projection (`AcousticFrequencyResultsData`) is persisted.
+pub(in crate::analysis) struct AcousticFrequencyCompletionResults {
+    pub workload: runmat_analysis_fea::execution::AcousticFrequencyWorkload,
+    pub result: runmat_analysis_fea::execution::AcousticFrequencyResult,
+    pub publication: runmat_analysis_fea::execution::FrequencySamplePublicationManifest,
+    pub entries: Vec<AcousticStudyEntryCompletion>,
+    pub resource_usage: runmat_analysis_fea::planning::resource::ResourceUsageEvidence,
+}
+
+impl AcousticFrequencyCompletionResults {
+    /// Persist entry states once as canonical binary and keep scalar entry summaries.
+    pub(in crate::analysis) fn publish(
+        &self,
+        study_fingerprint: &str,
+        staging: &crate::analysis::storage::AnalysisPublicationBuilder,
+    ) -> Result<AcousticFrequencyResultsData, crate::analysis::storage::AnalysisPublicationError>
+    {
+        let entries = self
+            .entries
+            .iter()
+            .map(|entry| {
+                Ok(AcousticFrequencyEntryEvidence {
+                    entry: entry.entry,
+                    host_workload_digest: entry.host_workload_digest,
+                    result: entry.result.summary().map_err(|error| error.to_string())?,
+                    numerical_receipt: entry.numerical_receipt.clone(),
+                    accuracy: entry.accuracy.clone(),
+                    states: entry
+                        .states
+                        .iter()
+                        .map(|state| {
+                            crate::analysis::study_result_manifest::PersistedStateEvidence::persist_in(
+                                study_fingerprint,
+                                state,
+                                staging,
+                            )
+                        })
+                        .collect::<Result<_, _>>()?,
+                    baseline_usage: entry.baseline_usage.clone(),
+                    terminal_usage: entry.terminal_usage.clone(),
+                    publication: entry.publication.clone(),
+                })
+            })
+            .collect::<Result<Vec<_>, crate::analysis::storage::AnalysisPublicationError>>()?;
+        Ok(AcousticFrequencyResultsData {
+            workload: self.workload.clone(),
+            publication: self.publication.clone(),
+            entries,
+            resource_usage: self.resource_usage.clone(),
+        })
+    }
 }
 
 pub(super) fn admit(
@@ -93,15 +147,13 @@ pub(super) fn admit(
             quality_policy: contracts::format_quality_policy(options.quality_policy),
             fallback_events: Vec::new(),
         },
-        numerical_result: AnalysisStudyStepNumericalResultData::AcousticFrequency(Box::new(
-            AcousticFrequencyResultsData {
-                workload: completed.workload.clone(),
-                result: completed.result.clone(),
-                publication: completed.publication.clone(),
-                entries: completed.entries.clone(),
-                resource_usage: completed.resource_usage.clone(),
-            },
-        )),
+        completion: Box::new(AcousticFrequencyCompletionResults {
+            workload: completed.workload.clone(),
+            result: completed.result.clone(),
+            publication: completed.publication.clone(),
+            entries: completed.entries.clone(),
+            resource_usage: completed.resource_usage.clone(),
+        }),
         persistence: AcousticFrequencyPersistence {
             publication_catalog: completed.publication_catalog.clone(),
             publication_roots: completed.publication_roots.clone(),

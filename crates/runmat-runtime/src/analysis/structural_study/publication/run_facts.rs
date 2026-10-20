@@ -20,7 +20,9 @@ pub(super) fn completed_run_facts(run: CompletedStudyStepRun) -> CompletedRunFac
                 quality_reasons: data.quality_reasons.clone(),
                 production_publication_reasons: data.production_publication_reasons.clone(),
                 provenance: data.provenance.clone(),
-                numerical_result: crate::analysis::AnalysisStudyStepNumericalResultData::Standard,
+                numerical_result: CompletedNumericalResult::Published(
+                    crate::analysis::AnalysisStudyStepNumericalResultData::Standard,
+                ),
                 standard_persistence: Some(data),
                 frequency_persistence: None,
                 acoustic_frequency_persistence: None,
@@ -43,7 +45,7 @@ pub(super) fn completed_run_facts(run: CompletedStudyStepRun) -> CompletedRunFac
                 quality_reasons: run.quality_reasons,
                 production_publication_reasons: run.production_publication_reasons,
                 provenance: run.provenance,
-                numerical_result: run.numerical_result,
+                numerical_result: CompletedNumericalResult::AcousticFrequency(run.completion),
                 standard_persistence: None,
                 frequency_persistence: None,
                 acoustic_frequency_persistence: Some(run.persistence),
@@ -66,7 +68,7 @@ pub(super) fn completed_run_facts(run: CompletedStudyStepRun) -> CompletedRunFac
                 quality_reasons: run.quality_reasons,
                 production_publication_reasons: run.production_publication_reasons,
                 provenance: run.provenance,
-                numerical_result: run.numerical_result,
+                numerical_result: CompletedNumericalResult::Published(run.numerical_result),
                 standard_persistence: None,
                 frequency_persistence: Some(run.persistence),
                 acoustic_frequency_persistence: None,
@@ -89,10 +91,11 @@ pub(super) fn completed_run_facts(run: CompletedStudyStepRun) -> CompletedRunFac
                 quality_reasons: run.quality_reasons,
                 production_publication_reasons: run.production_publication_reasons,
                 provenance: run.provenance,
-                numerical_result:
-                    crate::analysis::AnalysisStudyStepNumericalResultData::StructuralResponseSpectrum(
-                        Box::new(run.numerical_result),
-                    ),
+                numerical_result: CompletedNumericalResult::Published(
+                    crate::analysis::AnalysisStudyStepNumericalResultData::StructuralResponseSpectrum(Box::new(
+                        run.numerical_result,
+                    )),
+                ),
                 standard_persistence: Some(run.persistence),
                 frequency_persistence: None,
                 acoustic_frequency_persistence: None,
@@ -115,10 +118,11 @@ pub(super) fn completed_run_facts(run: CompletedStudyStepRun) -> CompletedRunFac
                 quality_reasons: run.quality_reasons,
                 production_publication_reasons: run.production_publication_reasons,
                 provenance: run.provenance,
-                numerical_result:
-                    crate::analysis::AnalysisStudyStepNumericalResultData::StructuralRandomResponse(
-                        Box::new(run.numerical_result),
-                    ),
+                numerical_result: CompletedNumericalResult::Published(
+                    crate::analysis::AnalysisStudyStepNumericalResultData::StructuralRandomResponse(Box::new(
+                        run.numerical_result,
+                    )),
+                ),
                 standard_persistence: Some(run.persistence),
                 frequency_persistence: None,
                 acoustic_frequency_persistence: None,

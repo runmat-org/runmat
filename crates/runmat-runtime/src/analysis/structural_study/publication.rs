@@ -63,6 +63,13 @@ pub(in crate::analysis) struct CompletedStructuralRandomResponseStep {
     pub persistence: AnalysisRunResult,
 }
 
+/// A step's numerical result before publication. Acoustic sweeps keep their complete
+/// in-memory data until entry states are validated and persisted.
+enum CompletedNumericalResult {
+    Published(crate::analysis::AnalysisStudyStepNumericalResultData),
+    AcousticFrequency(Box<crate::analysis::study_publication::AcousticFrequencyCompletionResults>),
+}
+
 struct CompletedRunFacts {
     identity: runmat_analysis_fea::AnalysisRunIdentity,
     operation: String,
@@ -76,7 +83,7 @@ struct CompletedRunFacts {
     quality_reasons: Vec<crate::analysis::QualityReason>,
     production_publication_reasons: Vec<crate::analysis::ProductionPublicationReason>,
     provenance: crate::analysis::RunProvenance,
-    numerical_result: crate::analysis::AnalysisStudyStepNumericalResultData,
+    numerical_result: CompletedNumericalResult,
     standard_persistence: Option<AnalysisRunResult>,
     frequency_persistence:
         Option<crate::analysis::frequency_result::StructuralFrequencyPersistence>,
@@ -196,12 +203,29 @@ pub(in crate::analysis) fn complete_study_run_prepared(
             )?;
             original_sources.insert(run.run_id.clone(), source);
         }
-        if let crate::analysis::AnalysisStudyStepNumericalResultData::AcousticFrequency(result) =
-            &run.numerical_result
-        {
-            validate_entry_scoped_acoustic_states(&context, &authored.procedure_step, result)?;
-            entry_scoped_state_steps.insert(authored.procedure_step.step_id.clone());
-        }
+        let numerical_result = match run.numerical_result {
+            CompletedNumericalResult::Published(result) => result,
+            CompletedNumericalResult::AcousticFrequency(completion) => {
+                validate_entry_scoped_acoustic_states(
+                    &context,
+                    &authored.procedure_step,
+                    &completion,
+                )?;
+                entry_scoped_state_steps.insert(authored.procedure_step.step_id.clone());
+                let published = completion
+                    .publish(&study_fingerprint, &staging)
+                    .map_err(|error| {
+                        completion_storage_error(
+                            &context,
+                            "RM.FEA.RUN_STUDY.STATE_ARTIFACT_STORE_FAILED",
+                            error,
+                        )
+                    })?;
+                crate::analysis::AnalysisStudyStepNumericalResultData::AcousticFrequency(Box::new(
+                    published,
+                ))
+            }
+        };
         if let Some(standard) = run.standard_persistence.clone() {
             runs_to_persist.push(standard);
         }
@@ -262,7 +286,7 @@ pub(in crate::analysis) fn complete_study_run_prepared(
                     "quality_reasons": run.quality_reasons,
                     "production_publication_reasons": run.production_publication_reasons,
                     "provenance": run.provenance,
-                    "numerical_result": run.numerical_result,
+                    "numerical_result": numerical_result,
                 }),
             )
             .map_err(|error| {
@@ -288,7 +312,7 @@ pub(in crate::analysis) fn complete_study_run_prepared(
             quality_reasons: run.quality_reasons,
             production_publication_reasons: run.production_publication_reasons,
             provenance: run.provenance,
-            numerical_result: run.numerical_result,
+            numerical_result,
             evidence_artifact_path,
         };
         if let Some(persistence) = run.frequency_persistence {

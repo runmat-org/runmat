@@ -350,23 +350,43 @@ impl CanonicalSemanticState {
     }
 
     fn derive_identity(&self) -> AnalysisExecutionResult<StateIdentity> {
-        let declaration_digest = Digest::sha256(encode_contract(
-            STATE_PREFIX,
-            "semantic-state-declaration",
-            &(
-                &self.state_id,
-                self.kind,
-                self.completeness,
-                self.persistence,
-            ),
-            STATE_LIMITS,
-        )?);
-        StateIdentity::new(
+        Self::identity_for(
             self.producer,
-            declaration_digest,
+            &self.state_id,
+            self.kind,
+            self.completeness,
+            self.persistence,
             self.topology_digest,
             self.source_result,
             self.content_digest,
+        )
+    }
+
+    /// The identity a state with this header and content digest has. Lets a persisted
+    /// reference prove its header without loading the state payload.
+    #[allow(clippy::too_many_arguments)]
+    pub fn identity_for(
+        producer: StepIdentity,
+        state_id: &StateId,
+        kind: StateKind,
+        completeness: StateCompleteness,
+        persistence: StatePersistence,
+        topology_digest: Digest,
+        source_result: SolverResultIdentity,
+        content_digest: Digest,
+    ) -> AnalysisExecutionResult<StateIdentity> {
+        let declaration_digest = Digest::sha256(encode_contract(
+            STATE_PREFIX,
+            "semantic-state-declaration",
+            &(state_id, kind, completeness, persistence),
+            STATE_LIMITS,
+        )?);
+        StateIdentity::new(
+            producer,
+            declaration_digest,
+            topology_digest,
+            source_result,
+            content_digest,
         )
     }
 }

@@ -123,16 +123,21 @@ pub fn read_saved_study_publication(
         .map_err(|error| format!("{error:?}"))
 }
 
-/// A solver state held by a study manifest by reference. The state itself is persisted once as
-/// canonical binary in the run's state store; the manifest names it by identity and digest.
+/// A solver state held by reference. The state itself is persisted once as canonical binary in
+/// the run's state store; the record keeps its header, whose identity it can re-derive.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct PersistedStateEvidence {
-    state_id: runmat_analysis_core::StateId,
-    identity: runmat_analysis_fea::execution::StateIdentity,
-    content_digest: Digest,
-    topology_digest: Digest,
-    artifact_path: String,
+pub struct PersistedStateEvidence {
+    pub producer: runmat_analysis_fea::execution::StepIdentity,
+    pub state_id: runmat_analysis_core::StateId,
+    pub kind: runmat_analysis_core::StateKind,
+    pub completeness: runmat_analysis_core::StateCompleteness,
+    pub persistence: runmat_analysis_core::StatePersistence,
+    pub identity: runmat_analysis_fea::execution::StateIdentity,
+    pub content_digest: Digest,
+    pub topology_digest: Digest,
+    pub source_result: runmat_analysis_fea::execution::SolverResultIdentity,
+    pub artifact_path: String,
 }
 
 impl PersistedStateEvidence {
@@ -141,12 +146,44 @@ impl PersistedStateEvidence {
         study_digest: Digest,
         staging: &super::storage::AnalysisPublicationBuilder,
     ) -> Result<Self, super::storage::AnalysisPublicationError> {
+        Self::persist_in(&study_digest.to_string(), state, staging)
+    }
+
+    pub(super) fn persist_in(
+        study_fingerprint: &str,
+        state: &runmat_analysis_fea::execution::CanonicalSemanticState,
+        staging: &super::storage::AnalysisPublicationBuilder,
+    ) -> Result<Self, super::storage::AnalysisPublicationError> {
         Ok(Self {
-            artifact_path: staging.persist_state(&study_digest.to_string(), state)?,
+            artifact_path: staging.persist_state(study_fingerprint, state)?,
+            producer: state.producer,
             state_id: state.state_id.clone(),
+            kind: state.kind,
+            completeness: state.completeness,
+            persistence: state.persistence,
             identity: state.identity,
             content_digest: state.content_digest,
             topology_digest: state.topology_digest,
+            source_result: state.source_result,
         })
+    }
+
+    /// Re-derive the identity from the recorded header and content digest.
+    pub fn verify_identity(&self) -> Result<(), String> {
+        let derived = runmat_analysis_fea::execution::CanonicalSemanticState::identity_for(
+            self.producer,
+            &self.state_id,
+            self.kind,
+            self.completeness,
+            self.persistence,
+            self.topology_digest,
+            self.source_result,
+            self.content_digest,
+        )
+        .map_err(|error| error.to_string())?;
+        if derived != self.identity || self.artifact_path.trim().is_empty() {
+            return Err("persisted state reference differs from its header".into());
+        }
+        Ok(())
     }
 }

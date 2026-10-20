@@ -9,7 +9,7 @@ mod accuracy;
 mod acoustic;
 pub use acoustic::{
     assemble_acoustic_frequency_result, AcousticFrequencyAssemblyOutput, AcousticFrequencyResult,
-    AcousticFrequencyWorkload, AcousticHarmonicSolverResult, AcousticHarmonicWorkload,
+    AcousticFrequencyWorkload, AcousticHarmonicResultSummary, AcousticHarmonicSolverResult, AcousticHarmonicWorkload,
     AcousticNumericalReceipt, AcousticNumericalReceiptArtifact, ACOUSTIC_RECEIPT_MAX_ENCODED_BYTES,
 };
 mod accuracy_source;

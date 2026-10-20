@@ -4,7 +4,7 @@ use super::*;
 pub(super) fn validate_entry_scoped_acoustic_states(
     context: &OperationContext,
     authored: &runmat_analysis_core::ProcedureStep,
-    result: &crate::analysis::AcousticFrequencyResultsData,
+    result: &crate::analysis::study_publication::AcousticFrequencyCompletionResults,
 ) -> Result<(), OperationErrorEnvelope> {
     let invalid = |message: &str| {
         completion_error(
@@ -25,6 +25,19 @@ pub(super) fn validate_entry_scoped_acoustic_states(
             "acoustic state inventory does not cover every exact frequency entry",
         ));
     }
+    // The published record keeps only the manifest's authority; it must be the one the complete
+    // numerical result implies.
+    if result.result.workload() != &result.workload
+        || result.publication.authority()
+            != &result
+                .result
+                .publication_authority()
+                .map_err(|e| invalid(&e.to_string()))?
+    {
+        return Err(invalid(
+            "acoustic frequency publication authority differs from its numerical result",
+        ));
+    }
     let mut seen = BTreeSet::new();
     for ((planned, entry), numerical) in entries
         .iter()
@@ -33,6 +46,11 @@ pub(super) fn validate_entry_scoped_acoustic_states(
     {
         if planned != &entry.entry
             || numerical != &entry.result
+            || entry.workload
+                != result
+                    .workload
+                    .entry(*planned)
+                    .map_err(|e| invalid(&e.to_string()))?
             || entry.workload.step_id != authored.step_id
             || entry.workload.model.sequence.steps.as_slice() != [authored.clone()]
             || entry.states.len() != authored.state_outputs.len()
@@ -41,12 +59,61 @@ pub(super) fn validate_entry_scoped_acoustic_states(
                 "acoustic entry-scoped state inventory differs from its authored declaration",
             ));
         }
-        for (state, declaration) in entry.states.iter().zip(&authored.state_outputs) {
+        let requests = numerical
+            .state_publication_requests()
+            .map_err(|e| invalid(&e.to_string()))?;
+        if requests.len() != entry.states.len() {
+            return Err(invalid(
+                "acoustic frequency state inventory differs from original result",
+            ));
+        }
+        for ((state, declaration), request) in entry
+            .states
+            .iter()
+            .zip(&authored.state_outputs)
+            .zip(&requests)
+        {
             state.validate().map_err(|e| invalid(&e.to_string()))?;
             let payload = state
                 .payload
                 .acoustic()
                 .ok_or_else(|| invalid("acoustic entry has a different state payload"))?;
+            let [pressure, velocity] = payload.fields.fields() else {
+                return Err(invalid(
+                    "acoustic frequency state omits its native field inventory",
+                ));
+            };
+            if state.producer != request.producer
+                || state.source_result != request.source_result
+                || state.topology_digest != request.topology_digest
+                || state.state_id != request.declaration.state_id
+                || state.kind != request.declaration.kind
+                || state.completeness != request.declaration.completeness
+                || state.persistence != request.declaration.persistence
+                || payload.ordered_node_ids != numerical.ordered_node_ids()
+                || payload.ordered_element_ids != numerical.ordered_element_ids()
+                || payload.recovery_request
+                    != numerical
+                        .native_field_request_from_result()
+                        .map_err(|e| invalid(&e.to_string()))?
+                || !storage::native_values_match(
+                    pressure.storage(),
+                    numerical
+                        .pressure_pa()
+                        .iter()
+                        .flat_map(|pressure| [pressure.real, pressure.imaginary]),
+                )
+                || !storage::native_values_match(
+                    velocity.storage(),
+                    numerical.velocity_m_per_s().iter().flat_map(|velocity| {
+                        (0..3).flat_map(move |axis| [velocity.real[axis], velocity.imaginary[axis]])
+                    }),
+                )
+            {
+                return Err(invalid(
+                    "acoustic frequency state differs from its exact entry source",
+                ));
+            }
             if state.producer != numerical.producer()
                 || state.source_result
                     != numerical

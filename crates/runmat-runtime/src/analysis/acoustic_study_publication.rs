@@ -12,7 +12,7 @@ mod admission;
 #[path = "acoustic_study_publication/materialization.rs"]
 mod materialization;
 pub(in crate::analysis) use materialization::{
-    AcousticFrequencyPersistence, CompletedAcousticFrequencyStep,
+    AcousticFrequencyCompletionResults, AcousticFrequencyPersistence, CompletedAcousticFrequencyStep,
 };
 
 pub fn publish_acoustic_study_result(
