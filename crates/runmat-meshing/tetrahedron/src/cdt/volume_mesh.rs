@@ -72,8 +72,37 @@ pub struct DelaunayVolumeMesh {
     pub provenance: DelaunayVolumeProvenance,
     pub quality: DelaunayVolumeQuality,
     pub facet_recovery_insertions: Vec<DelaunayFacetSteinerInsertion>,
-    pub refinement_insertions: Vec<DelaunayVolumeNode>,
-    pub sliver_mutations: Vec<DelaunayVolumeSliverMutation>,
+    /// Refinement insertions and optimization mutations in the order they were applied.
+    /// Coupled convergence interleaves them, and identity replay depends on that order.
+    pub quality_mutations: Vec<DelaunayVolumeQualityMutation>,
+}
+
+/// One applied step of volume quality convergence.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    content = "mutation",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+pub enum DelaunayVolumeQualityMutation {
+    Refined(DelaunayVolumeNode),
+    Optimized(DelaunayVolumeSliverMutation),
+}
+
+impl DelaunayVolumeMesh {
+    pub fn refinement_insertions(&self) -> impl Iterator<Item = &DelaunayVolumeNode> {
+        self.quality_mutations.iter().filter_map(|mutation| match mutation {
+            DelaunayVolumeQualityMutation::Refined(node) => Some(node),
+            DelaunayVolumeQualityMutation::Optimized(_) => None,
+        })
+    }
+    pub fn optimization_mutations(&self) -> impl Iterator<Item = &DelaunayVolumeSliverMutation> {
+        self.quality_mutations.iter().filter_map(|mutation| match mutation {
+            DelaunayVolumeQualityMutation::Refined(_) => None,
+            DelaunayVolumeQualityMutation::Optimized(mutation) => Some(mutation),
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -309,8 +338,7 @@ fn construct_component_mesh(
         provenance: optimized.provenance,
         quality: optimized.quality,
         facet_recovery_insertions,
-        refinement_insertions: optimized.refinement_insertions,
-        sliver_mutations: optimized.optimization_mutations,
+        quality_mutations: optimized.quality_mutations,
     })
 }
 

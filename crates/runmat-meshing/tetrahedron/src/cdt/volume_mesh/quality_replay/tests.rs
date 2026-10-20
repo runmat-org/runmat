@@ -100,7 +100,10 @@ fn diagnostic_replay_revalidates_the_original_coupled_state_without_cad() {
         .unwrap();
         assert!(result.quality.worst_refinement_tetrahedron.is_none());
         assert!(result.quality.worst_optimization_tetrahedron.is_none());
-        assert!(!result.sliver_mutations.is_empty());
+        assert!(result
+            .quality_mutations
+            .iter()
+            .any(|step| matches!(step, super::super::DelaunayVolumeQualityMutation::Optimized(_))));
         crate::cdt::validate_delaunay_volume_quality(
             &result.topology,
             &metric,

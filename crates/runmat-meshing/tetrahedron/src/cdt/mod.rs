@@ -90,6 +90,7 @@ pub use volume_mesh::{
     volume_quality_snapshot_preparation_storage_bytes, DelaunayVolumeMesh,
     DelaunayVolumeMeshCodecError, DelaunayVolumeMeshCodecErrorKind, DelaunayVolumeMeshError,
     DelaunayVolumeMeshErrorKind, DelaunayVolumeMeshOptions, DelaunayVolumeMeshStage,
+    DelaunayVolumeQualityMutation,
     PreparedVolumeQualitySnapshot, ValidatedDelaunayVolumeMesh, VolumeMeshEncoding,
     VolumeQualityBinding, VolumeQualityObserver, VolumeQualityReplayResult, VolumeQualitySnapshot,
     DELAUNAY_VOLUME_MESH_SCHEMA_VERSION,

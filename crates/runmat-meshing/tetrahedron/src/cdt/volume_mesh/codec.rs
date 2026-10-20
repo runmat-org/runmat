@@ -11,7 +11,7 @@ pub(in crate::cdt) mod admission;
 pub(super) mod control;
 mod indexed;
 pub use indexed::VolumeMeshEncoding;
-pub const DELAUNAY_VOLUME_MESH_SCHEMA_VERSION: u16 = 4;
+pub const DELAUNAY_VOLUME_MESH_SCHEMA_VERSION: u16 = 5;
 
 const CODEC_PREFIX: &[u8] = b"runmat-meshing-delaunay-volume-canonical-cbor/v4\0";
 const CONTRACT_DOMAIN: &str = "delaunay-volume-mesh/v4";

@@ -12,8 +12,8 @@ use crate::cdt::{
         working::{WorkingRefinement, WorkingRefinementProgress},
     },
     volume_state::{SearchState, WorkingState},
-    DelaunayVolumeNode, DelaunayVolumeProvenance, DelaunayVolumeQuality,
-    DelaunayVolumeSliverMutation, DelaunayVolumeTopology,
+    DelaunayVolumeProvenance, DelaunayVolumeQuality, DelaunayVolumeSliverMutation,
+    DelaunayVolumeTopology,
 };
 use runmat_meshing_core::MeshingCancellationSignal;
 use runmat_meshing_size::metric::MetricFieldRequest;
@@ -26,8 +26,7 @@ pub(super) struct ConvergedVolumeQuality {
     pub(super) topology: DelaunayVolumeTopology,
     pub(super) quality: DelaunayVolumeQuality,
     pub(super) provenance: DelaunayVolumeProvenance,
-    pub(super) refinement_insertions: Vec<DelaunayVolumeNode>,
-    pub(super) optimization_mutations: Vec<DelaunayVolumeSliverMutation>,
+    pub(super) quality_mutations: Vec<super::DelaunayVolumeQualityMutation>,
     #[cfg(test)]
     pub(super) lifecycle_counts: (u64, u64),
 }
@@ -66,8 +65,7 @@ pub(super) fn converge_volume_quality(
             topology,
             quality,
             provenance,
-            refinement_insertions: Vec::new(),
-            optimization_mutations: Vec::new(),
+            quality_mutations: Vec::new(),
             #[cfg(test)]
             lifecycle_counts: (0, 0),
         });
@@ -100,8 +98,7 @@ pub(super) fn converge_volume_quality(
     )
     .map_err(|failure| sliver_error(failure.into()))?;
     let mut search = WorkingRefinement::coupled();
-    let mut refinement_insertions = Vec::new();
-    let mut optimization_mutations = Vec::new();
+    let mut quality_mutations = Vec::new();
     let mut remaining_refinement = options.refinement.maximum_insertions;
     let mut remaining_optimization = options.sliver.maximum_passes;
     let repair = repair::RepairExecution {
@@ -130,7 +127,11 @@ pub(super) fn converge_volume_quality(
                 WorkingRefinementProgress::Accepted(inserted) => {
                     remaining_refinement =
                         remaining_refinement.saturating_sub(inserted.len() as u64);
-                    refinement_insertions.extend(inserted);
+                    quality_mutations.extend(
+                        inserted
+                            .into_iter()
+                            .map(super::DelaunayVolumeQualityMutation::Refined),
+                    );
                     RefinementStep::Accepted
                 }
                 WorkingRefinementProgress::Yielded => RefinementStep::Yielded,
@@ -152,7 +153,12 @@ pub(super) fn converge_volume_quality(
                 search.repaired();
                 RepairStep::Changed
             };
-            optimization_mutations.extend(repaired.mutations);
+            quality_mutations.extend(
+                repaired
+                    .mutations
+                    .into_iter()
+                    .map(super::DelaunayVolumeQualityMutation::Optimized),
+            );
             state = repaired.state;
             schedule.repaired(step, repaired.blocked);
             repair_step = Some(step);
@@ -175,8 +181,7 @@ pub(super) fn converge_volume_quality(
                     topology,
                     quality,
                     provenance,
-                    refinement_insertions,
-                    optimization_mutations,
+                    quality_mutations,
                     #[cfg(test)]
                     lifecycle_counts,
                 });

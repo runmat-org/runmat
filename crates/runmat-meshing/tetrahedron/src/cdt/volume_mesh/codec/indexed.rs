@@ -76,8 +76,7 @@ impl Serialize for VolumeMeshEncoding<'_> {
             volume: &'a VolumeRepresentation<'b>,
             quality: QualityRepresentation<'a, 'b>,
             facet_recovery_insertions: &'b [crate::cdt::DelaunayFacetSteinerInsertion],
-            refinement_insertions: &'b [crate::cdt::DelaunayVolumeNode],
-            sliver_mutations: &'b [crate::cdt::DelaunayVolumeSliverMutation],
+            quality_mutations: &'b [crate::cdt::DelaunayVolumeQualityMutation],
         }
         #[derive(Serialize)]
         struct Envelope<'a, 'b> {
@@ -93,8 +92,7 @@ impl Serialize for VolumeMeshEncoding<'_> {
                     tables: &self.quality,
                 },
                 facet_recovery_insertions: &self.mesh.facet_recovery_insertions,
-                refinement_insertions: &self.mesh.refinement_insertions,
-                sliver_mutations: &self.mesh.sliver_mutations,
+                quality_mutations: &self.mesh.quality_mutations,
             },
         }
         .serialize(serializer)
@@ -115,9 +113,7 @@ pub(super) struct DecodedMesh {
     #[serde(deserialize_with = "runmat_canonical_codec::deserialize_exact_vec")]
     facet_recovery_insertions: Vec<crate::cdt::DelaunayFacetSteinerInsertion>,
     #[serde(deserialize_with = "runmat_canonical_codec::deserialize_exact_vec")]
-    refinement_insertions: Vec<crate::cdt::DelaunayVolumeNode>,
-    #[serde(deserialize_with = "runmat_canonical_codec::deserialize_exact_vec")]
-    sliver_mutations: Vec<crate::cdt::DelaunayVolumeSliverMutation>,
+    quality_mutations: Vec<crate::cdt::DelaunayVolumeQualityMutation>,
 }
 impl DecodedMesh {
     pub fn into_mesh(
@@ -131,8 +127,7 @@ impl DecodedMesh {
             volume,
             quality,
             facet_recovery_insertions,
-            refinement_insertions,
-            sliver_mutations,
+            quality_mutations,
         } = self;
         let mut parts = volume.into_parts(options, cancellation, admitted_bytes, allocations)?;
         let quality = quality.into_quality(&mut parts, options, cancellation)?;
@@ -141,8 +136,7 @@ impl DecodedMesh {
             provenance: parts.provenance,
             quality,
             facet_recovery_insertions,
-            refinement_insertions,
-            sliver_mutations,
+            quality_mutations,
         })
     }
 }

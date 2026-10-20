@@ -187,8 +187,7 @@ fn representative_grid_preserves_complete_topology_and_quality_through_working_t
             quality,
             provenance,
             facet_recovery_insertions: Vec::new(),
-            refinement_insertions: Vec::new(),
-            sliver_mutations: Vec::new(),
+            quality_mutations: Vec::new(),
         }],
         &request,
         crate::cdt::DelaunayVolumeMeshOptions {

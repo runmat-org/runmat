@@ -57,8 +57,7 @@ fn publication_case(side: u32, thin: bool) {
         provenance,
         quality,
         facet_recovery_insertions: Vec::new(),
-        refinement_insertions: Vec::new(),
-        sliver_mutations: Vec::new(),
+        quality_mutations: Vec::new(),
     };
     let preparation = VolumeMeshEncoding::preparation_bytes(&mesh).unwrap();
     let prepared = VolumeMeshEncoding::new(&mesh, &Control).unwrap();

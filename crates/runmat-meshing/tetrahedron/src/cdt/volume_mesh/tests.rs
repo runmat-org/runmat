@@ -38,8 +38,7 @@ fn exact_surface_constructs_one_seeded_validated_general_volume_mesh() {
     assert_eq!(result.provenance.segments.len(), 6);
     assert_eq!(result.provenance.facets.len(), 4);
     assert!(result.facet_recovery_insertions.is_empty());
-    assert!(result.refinement_insertions.is_empty());
-    assert!(result.sliver_mutations.is_empty());
+    assert!(result.quality_mutations.is_empty());
     validate_delaunay_volume_mesh(
         &topology,
         &surface,

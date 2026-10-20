@@ -288,8 +288,7 @@ pub(super) fn refined(levels: usize) -> (ExactBRepTopology, ExactSurfaceMesh, De
             provenance,
             quality,
             facet_recovery_insertions: vec![],
-            refinement_insertions: vec![],
-            sliver_mutations: vec![],
+            quality_mutations: vec![],
         },
     )
 }

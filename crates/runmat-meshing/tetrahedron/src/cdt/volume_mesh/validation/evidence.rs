@@ -6,7 +6,10 @@ use super::super::{
     error, DelaunayVolumeMesh, DelaunayVolumeMeshError, DelaunayVolumeMeshErrorKind,
     DelaunayVolumeMeshOptions, DelaunayVolumeMeshStage,
 };
-use crate::cdt::{DelaunayConstraints, DelaunayVolumeNode, DelaunayVolumeSliverMutation};
+use crate::cdt::{
+    DelaunayConstraints, DelaunayVolumeNode, DelaunayVolumeQualityMutation,
+    DelaunayVolumeSliverMutation,
+};
 
 pub(super) fn validate_facet_insertions(
     constraints: &DelaunayConstraints,
@@ -74,8 +77,8 @@ pub(super) fn validate_mutations(
     mesh: &DelaunayVolumeMesh,
     options: DelaunayVolumeMeshOptions,
 ) -> Result<(), DelaunayVolumeMeshError> {
-    let insertion_count = mesh.refinement_insertions.len() as u64;
-    let treatment_count = mesh.sliver_mutations.len() as u64;
+    let insertion_count = mesh.refinement_insertions().count() as u64;
+    let treatment_count = mesh.optimization_mutations().count() as u64;
     let maximum_treatments = insertion_count
         .saturating_add(1)
         .saturating_mul(options.sliver.maximum_passes);
@@ -85,16 +88,26 @@ pub(super) fn validate_mutations(
         return Err(invalid_mutations());
     }
 
-    // Replay identities backwards from the published topology. This verifies that every ordered
-    // insertion, relocation, and deletion has an exact predecessor without reconstructing CAD or
-    // rerunning tetrahedralization.
+    // Replay identities backwards from the published topology in the original interleaved order.
+    // This verifies that every insertion, relocation, and deletion has an exact predecessor
+    // without reconstructing CAD or rerunning tetrahedralization.
     let mut identities = mesh
         .topology
         .nodes
         .iter()
         .map(|node| node.identity)
         .collect::<BTreeSet<_>>();
-    for mutation in mesh.sliver_mutations.iter().rev() {
+    for step in mesh.quality_mutations.iter().rev() {
+        let mutation = match step {
+            DelaunayVolumeQualityMutation::Refined(node) => {
+                validate_node(*node)?;
+                if !identities.remove(&node.identity) {
+                    return Err(invalid_mutations());
+                }
+                continue;
+            }
+            DelaunayVolumeQualityMutation::Optimized(mutation) => mutation,
+        };
         match mutation {
             DelaunayVolumeSliverMutation::Relocated(relocation) => {
                 validate_source_tetrahedron(
@@ -154,12 +167,6 @@ pub(super) fn validate_mutations(
                     return Err(invalid_mutations());
                 }
             }
-        }
-    }
-    for node in mesh.refinement_insertions.iter().rev() {
-        validate_node(*node)?;
-        if !identities.remove(&node.identity) {
-            return Err(invalid_mutations());
         }
     }
     if constraints
@@ -283,8 +290,8 @@ fn lineage_identities(mesh: &DelaunayVolumeMesh) -> BTreeSet<StableDigest> {
         .iter()
         .map(|node| node.identity)
         .collect::<BTreeSet<_>>();
-    identities.extend(mesh.refinement_insertions.iter().map(|node| node.identity));
-    for mutation in &mesh.sliver_mutations {
+    identities.extend(mesh.refinement_insertions().map(|node| node.identity));
+    for mutation in mesh.optimization_mutations() {
         match mutation {
             DelaunayVolumeSliverMutation::Relocated(relocation) => {
                 identities.insert(relocation.source_node_identity);

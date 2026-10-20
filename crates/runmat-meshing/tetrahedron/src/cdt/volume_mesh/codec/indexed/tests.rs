@@ -31,14 +31,16 @@ fn mesh(permuted: bool, background: usize, scoped: bool) -> DelaunayVolumeMesh {
             ),
         )
         .unwrap();
-        assert!(!result.optimization_mutations.is_empty());
+        assert!(result
+            .quality_mutations
+            .iter()
+            .any(|step| matches!(step, crate::cdt::DelaunayVolumeQualityMutation::Optimized(_))));
         DelaunayVolumeMesh {
             topology: result.topology,
             provenance: result.provenance,
             quality: result.quality,
             facet_recovery_insertions: Vec::new(),
-            refinement_insertions: result.refinement_insertions,
-            sliver_mutations: result.optimization_mutations,
+            quality_mutations: result.quality_mutations,
         }
     } else {
         DelaunayVolumeMesh {
@@ -46,8 +48,7 @@ fn mesh(permuted: bool, background: usize, scoped: bool) -> DelaunayVolumeMesh {
             provenance,
             quality,
             facet_recovery_insertions: Vec::new(),
-            refinement_insertions: Vec::new(),
-            sliver_mutations: Vec::new(),
+            quality_mutations: Vec::new(),
         }
     }
 }

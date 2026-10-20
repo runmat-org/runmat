@@ -227,10 +227,7 @@ impl ExactVolumeKernel {
             "volume_boundary_facets".into(),
             mesh.provenance.facets.len() as u64,
         );
-        let mutation_count = mesh
-            .refinement_insertions
-            .len()
-            .saturating_add(mesh.sliver_mutations.len()) as u64;
+        let mutation_count = mesh.quality_mutations.len() as u64;
         entity_counts.insert("volume_mutations".into(), mutation_count);
         entity_counts.insert("encoded_surface_bytes".into(), surface_encoded_bytes);
         entity_counts.insert("encoded_volume_bytes".into(), encoded.len() as u64);

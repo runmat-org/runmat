@@ -40,8 +40,7 @@ fn reference(meshes: &[DelaunayVolumeMesh]) -> DelaunayVolumeMesh {
         provenance,
         quality,
         facet_recovery_insertions: super::reference::assemble_insertions(meshes),
-        refinement_insertions: super::reference::assemble_refinement_insertions(meshes),
-        sliver_mutations: super::reference::assemble_sliver_mutations(meshes),
+        quality_mutations: super::reference::assemble_quality_mutations(meshes),
     }
 }
 

@@ -69,8 +69,8 @@ pub struct VolumeQualityReplayResult {
     pub topology: DelaunayVolumeTopology,
     pub provenance: DelaunayVolumeProvenance,
     pub quality: DelaunayVolumeQuality,
-    pub refinement_insertions: Vec<DelaunayVolumeNode>,
-    pub sliver_mutations: Vec<DelaunayVolumeSliverMutation>,
+    /// Applied refinement and optimization steps in their original order.
+    pub quality_mutations: Vec<super::DelaunayVolumeQualityMutation>,
 }
 
 /// Profiles borrowed inputs before any diagnostic wire allocation. The caller
@@ -226,8 +226,7 @@ pub fn replay_volume_quality_observed(
         topology: result.topology,
         provenance: result.provenance,
         quality: result.quality,
-        refinement_insertions: result.refinement_insertions,
-        sliver_mutations: result.optimization_mutations,
+        quality_mutations: result.quality_mutations,
     })
 }
 
