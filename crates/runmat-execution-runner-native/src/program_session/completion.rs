@@ -49,11 +49,12 @@ impl NativeProgramCompletion {
             return Err(failure.error());
         }
         if let Ok(result) = &self.result {
-            if evidence.task.committed.as_ref().is_none_or(|commit| {
-                commit.outputs != result.outputs
-                    || commit.result_objects != result.result_objects
-                    || commit.resources != result.resources
-            }) {
+            if evidence
+                .task
+                .committed
+                .as_ref()
+                .is_none_or(|commit| commit.result != *result)
+            {
                 return Err(crate::NativeExecutionError::Protocol(
                     "native delivery differs from its original commit".into(),
                 ));

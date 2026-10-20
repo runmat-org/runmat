@@ -28,6 +28,12 @@ impl CacheImport for RemoteAnalysisTaskPool {
 
 #[async_trait]
 impl AnalysisTaskPool for RemoteAnalysisTaskPool {
+    fn permitted_trust_tiers(
+        &self,
+    ) -> std::collections::BTreeSet<runmat_execution::security::ExecutionTrustTier> {
+        crate::remote::pool_tasks::admitted_trust()
+    }
+
     fn scope_id(&self) -> ExecutionScopeId {
         self.pool.scope_id()
     }
@@ -93,7 +99,14 @@ impl AnalysisTaskPool for RemoteAnalysisTaskPool {
             .zip(task_ids)
             .enumerate()
             .map(|(index, (completion, task_id))| async move {
-                (index, task_id, completion.wait().await)
+                (
+                    index,
+                    task_id,
+                    completion
+                        .wait()
+                        .await
+                        .map_err(|failure| failure.to_string()),
+                )
             })
             .collect::<FuturesUnordered<_>>();
         let mut responses = (0..waiting.len()).map(|_| None).collect::<Vec<_>>();

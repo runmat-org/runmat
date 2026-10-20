@@ -1,5 +1,5 @@
 use super::{NativeProcessProvider, ProcessControl, TransportMeters};
-use crate::protocol::{WorkerProcessMessage, WorkerRequest, WorkerResponse};
+use crate::protocol::{WorkerLaunchRequest, WorkerProcessMessage, WorkerResponse};
 use runmat_process_host::{
     ipc::{read_payload, write_payload, FrameLimits, MeteredIo},
     ChildProcess,
@@ -11,7 +11,7 @@ use tokio::io::BufReader;
 pub(super) async fn exchange(
     provider: &NativeProcessProvider<'_>,
     child: &mut ChildProcess,
-    request: &WorkerRequest,
+    request: &WorkerLaunchRequest,
     control: &dyn ProcessControl,
     meters: &TransportMeters,
     console: &mut Option<runmat_execution::console::ConsoleTranscript>,
@@ -28,8 +28,11 @@ pub(super) async fn exchange(
     write_payload(&mut writer, &payload, limits)
         .await
         .map_err(|error| error.to_string())?;
-    let mut receiver = request
-        .request()
+    let WorkerLaunchRequest::Reserved(reserved) = request else {
+        return Err("durable program provider launches reserved direct programs only".into());
+    };
+    let program = reserved.request();
+    let mut receiver = program
         .console
         .map(runmat_execution::console::ConsoleReceiver::new)
         .transpose()
@@ -38,7 +41,7 @@ pub(super) async fn exchange(
     let response = read_response(
         &mut reader,
         limits,
-        request.request(),
+        program,
         control,
         &mut receiver,
         &mut receipt,
@@ -53,7 +56,7 @@ pub(super) async fn exchange(
     // then is parent death to domain workers, and would cancel healthy execution.
     drop(writer);
     response
-        .validate_against(request.request())
+        .validate_against(program)
         .map_err(|error| error.to_string())?;
     Ok(response)
 }
@@ -110,6 +113,11 @@ async fn read_response(
                 *receipt = console;
                 return Ok(response);
             }
+            WorkerProcessMessage::CollectiveRequest { .. } => {
+                return Err("durable program attempts do not serve worker collectives".into());
+            }
+            WorkerProcessMessage::InfrastructureFailure { message }
+            | WorkerProcessMessage::RetirementUnverified { message } => return Err(message),
         }
     }
 }

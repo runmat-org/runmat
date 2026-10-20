@@ -23,7 +23,7 @@ use runmat_execution_artifact::{
     ArtifactAccess, ExecutableForm, LogicalObject, ObjectNamespace, ProgramArtifact,
     ProgramBuildRecipe, ProgramExecutionDescriptor, ProgramExecutionObject,
     ProgramExecutionRequest, ProgramTarget, PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
-    PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
 };
 use runmat_meshing_core::MeshingRequest;
 use runmat_meshing_execution::MeshingHostProgram;
@@ -236,10 +236,10 @@ fn descriptor(request: &ProgramExecutionRequest) -> ProgramExecutionDescriptor {
     ProgramExecutionDescriptor {
         console: request.console,
         environment: request.environment.clone(),
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         recipe: request.recipe.clone(),
         artifact: request.artifact.clone(),
-        function: request.function,
+        callable: request.callable.clone(),
         requested_outputs: request.requested_outputs,
     }
 }
@@ -253,7 +253,7 @@ fn object_references(
             ValuePayload::Object(reference) => {
                 Ok((reference.logical_digest, reference.as_ref().clone()))
             }
-            ValuePayload::Inline(_) => Err(protocol("study root inputs must be externalized")),
+            _ => Err(protocol("study root inputs must be externalized")),
         })
         .collect()
 }

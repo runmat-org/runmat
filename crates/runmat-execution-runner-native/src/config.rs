@@ -2,10 +2,7 @@ use std::collections::BTreeSet;
 use std::io;
 use std::path::PathBuf;
 
-use runmat_execution::{
-    resource::Capability,
-    ExecutionScopeId,
-};
+use runmat_execution::{resource::Capability, ExecutionScopeId};
 
 use crate::{NativeExecutionError, NativeExecutionResult};
 

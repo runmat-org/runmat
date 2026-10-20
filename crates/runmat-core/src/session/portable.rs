@@ -13,7 +13,7 @@ impl RunMatSession {
         arguments: Vec<runmat_value::Value>,
         requested_outputs: usize,
         control: &InvocationControl,
-    ) -> Result<runmat_value::Value, String> {
+    ) -> Result<runmat_runtime::execution::RootedValueSequence, String> {
         let unit = ExecutableUnit::from_portable_envelope(envelope)?;
         if unit.revision().program_revision.environment()
             != crate::program_environment(self.compat_mode())
@@ -32,9 +32,16 @@ impl RunMatSession {
         }
         let target = match envelope.manifest.identity.entrypoint_kind {
             ExecutableEntrypointKind::Script => ProcedureTarget::Entrypoint,
-            ExecutableEntrypointKind::Function => {
-                ProcedureTarget::SemanticFunction(envelope.manifest.identity.entrypoint_function)
+            ExecutableEntrypointKind::DeclarationOnly => {
+                return Err("declaration-only product has no invocable entrypoint".into())
             }
+            ExecutableEntrypointKind::Function => ProcedureTarget::SemanticFunction(
+                envelope
+                    .manifest
+                    .identity
+                    .entrypoint_function
+                    .ok_or("portable function product has no entrypoint function")?,
+            ),
         };
         let result = self
             .invoke_executable(

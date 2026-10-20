@@ -44,9 +44,11 @@ pub(crate) async fn check_source(
         "create FEA source-check session",
     )?;
     if let Some(project) = project.as_ref() {
-        session.install_project_handoff(runmat_package::FrozenProjectHandoff::new(
-            project.resolved.frozen.clone(),
-        ))?;
+        session
+            .install_project_handoff(runmat_package::FrozenProjectHandoff::new(
+                project.resolved.frozen.clone(),
+            ))
+            .await?;
     }
     let session_source = session
         .load_and_check_fea_source_path(&physical_path)

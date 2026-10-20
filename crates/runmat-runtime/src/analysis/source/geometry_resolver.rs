@@ -43,11 +43,37 @@ pub(super) fn inspect_geometry_bytes(
             SourceAvailability::Available,
         ));
     }
+    // A check runs on every edit and every agent check; the CAD import and
+    // exact closure dominate it. Identical bytes, units and path inspect
+    // identically, so reuse the result until the file changes.
+    let key = (
+        logical_path.to_string(),
+        content_digest,
+        format!("{:?}", request.source_units),
+    );
+    if let Some(cached) = inspection_cache::get(&key) {
+        return Ok(cached);
+    }
+    let inspection = inspect_uncached(bytes, request, logical_path, content_digest)?;
+    inspection_cache::insert(key, inspection.clone());
+    Ok(inspection)
+}
+
+fn inspect_uncached(
+    bytes: &[u8],
+    request: &GeometryInspectionRequest,
+    logical_path: &str,
+    content_digest: SourceDigest,
+) -> Result<GeometryInspection, SourceDiagnostic> {
+    let units = match request.source_units {
+        runmat_geometry_core::UnitSystem::Unspecified => declared_units(bytes, logical_path)?,
+        authored => authored,
+    };
     let imported = import_geometry(
         logical_path,
         bytes,
         GeometryImportOptions {
-            units: request.source_units,
+            units,
             ..GeometryImportOptions::default()
         },
     )
@@ -70,7 +96,7 @@ pub(super) fn inspect_geometry_bytes(
             bytes,
             format,
             &ExactCadImportOptions {
-                source_units: request.source_units,
+                source_units: units,
                 ..ExactCadImportOptions::default()
             },
             &GeometryImportContext::new(),
@@ -111,6 +137,27 @@ pub(super) fn inspect_geometry_bytes(
         topology_digest,
         capabilities: capabilities(&imported.asset, exchange.as_ref(), exact_topology),
         exchange,
+        resolved_units: Some(units),
+    })
+}
+
+/// An imported geometry without authored `units` uses the single length unit
+/// its STEP file declares; other files must state their unit.
+fn declared_units(
+    bytes: &[u8],
+    logical_path: &str,
+) -> Result<runmat_geometry_core::UnitSystem, SourceDiagnostic> {
+    let declared = matches!(detect_geometry_format(logical_path, bytes), GeometryFormat::Step)
+        .then(|| runmat_geometry_io::ap242::declared_length_unit(&String::from_utf8_lossy(bytes)))
+        .flatten();
+    declared.ok_or_else(|| {
+        diagnostic(
+            "fea.host.geometry_units_undeclared",
+            format!(
+                "geometry `{logical_path}` does not declare a single length unit; add `units = mm`, `m`, or `in`"
+            ),
+            SourceAvailability::Available,
+        )
     })
 }
 
@@ -183,4 +230,37 @@ fn supported(exchange: &Ap242ExchangeInventory, capability: Ap242Capability) -> 
             | Ap242CapabilityDisposition::ReadWrite
             | Ap242CapabilityDisposition::Regenerable
     )
+}
+
+mod inspection_cache {
+    use std::collections::VecDeque;
+    use std::sync::{Mutex, OnceLock};
+
+    use runmat_analysis_language::{GeometryInspection, SourceDigest};
+
+    pub(super) type Key = (String, SourceDigest, String);
+    const CAPACITY: usize = 32;
+
+    fn entries() -> &'static Mutex<VecDeque<(Key, GeometryInspection)>> {
+        static ENTRIES: OnceLock<Mutex<VecDeque<(Key, GeometryInspection)>>> = OnceLock::new();
+        ENTRIES.get_or_init(|| Mutex::new(VecDeque::new()))
+    }
+
+    pub(super) fn get(key: &Key) -> Option<GeometryInspection> {
+        let mut entries = entries().lock().unwrap_or_else(|error| error.into_inner());
+        let index = entries.iter().position(|(candidate, _)| candidate == key)?;
+        let entry = entries.remove(index)?;
+        let inspection = entry.1.clone();
+        entries.push_back(entry);
+        Some(inspection)
+    }
+
+    pub(super) fn insert(key: Key, inspection: GeometryInspection) {
+        let mut entries = entries().lock().unwrap_or_else(|error| error.into_inner());
+        entries.retain(|(candidate, _)| candidate != &key);
+        if entries.len() == CAPACITY {
+            entries.pop_front();
+        }
+        entries.push_back((key, inspection));
+    }
 }

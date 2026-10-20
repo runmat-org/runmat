@@ -82,6 +82,7 @@ pub(super) async fn compile_imported_function(
     session.set_compat_mode(source.compatibility_mode());
     session
         .install_project_handoff(runmat_package::FrozenProjectHandoff::new(frozen.clone()))
+        .await
         .map_err(|error| error.to_string())?;
     let entrypoint = definition
         .qualified_name
@@ -117,7 +118,13 @@ pub(super) async fn compile_imported_function(
         .portable_envelope_for(Some(entrypoint))
         .map_err(|error| error.to_string())?;
     let function = unit
-        .function_analysis(executable.manifest.identity.entrypoint_function)
+        .function_analysis(
+            executable
+                .manifest
+                .identity
+                .entrypoint_function
+                .ok_or("FEA function product has no entrypoint function")?,
+        )
         .cloned()
         .ok_or_else(|| "FEA function has no static function facts".to_string())?;
     Ok(CompiledImportedFunction {

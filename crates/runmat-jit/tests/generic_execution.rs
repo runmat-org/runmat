@@ -74,7 +74,7 @@ fn rooted_sequence(
 fn compile_executor(
     assembly: runmat_native_codegen::NativeAssembly,
 ) -> Result<NativeExecutor, JitError> {
-    GenericCompiler::compile_executor_with_resume_points(assembly, BTreeMap::new())
+    GenericCompiler::compile_executor_with_resume_points(assembly, None, BTreeMap::new())
 }
 
 fn advance_after_suspended_work(
@@ -639,6 +639,7 @@ fn interpreter_target_is_selected_only_for_verified_empty_stack_resume_points() 
     let region = fixture_region(ValueFact::scalar(ValueKindFact::String));
     let executor = GenericCompiler::compile_executor_with_resume_points(
         fixture_with_regions(vec![region]),
+        None,
         BTreeMap::from([(point, 7)]),
     )
     .unwrap();
@@ -1300,6 +1301,7 @@ fn generic_for_transfers_once_to_an_exact_retained_optimized_entry() {
     let optimized = Rc::new(
         GenericCompiler::compile_specialized_executor_with_resume_points(
             assembly,
+            None,
             BTreeMap::new(),
             profile,
         )

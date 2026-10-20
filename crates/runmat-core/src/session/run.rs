@@ -39,7 +39,7 @@ fn discover_source_catalog(
     let Ok(cwd) = runmat_filesystem::current_dir() else {
         let source_name = source_name?;
         let source_path = PathBuf::from(source_name);
-        if source_path.is_absolute() {
+        if crate::diagnostic_path::host_path_is_absolute(&source_path) {
             let source_cwd = source_path
                 .parent()
                 .map(Path::to_path_buf)
@@ -195,9 +195,7 @@ impl RunMatSession {
         self.runtime_context = self.runtime_context.clone().with_fresh_plot_receipts();
         self.configure_runtime_context();
         let runtime = self.runtime_context.clone();
-        runtime
-            .scope(self.run_in_context(input))
-            .await
+        runtime.scope(self.run_in_context(input)).await
     }
 
     async fn run_in_context(
@@ -306,6 +304,7 @@ impl RunMatSession {
             {
                 Ok(response) => response,
                 Err(error) => crate::abi::ExecutionResponse {
+                    dependency_lock: None,
                     source_context: unresolved_source_context(
                         &request
                             .as_ref()
@@ -411,6 +410,7 @@ impl RunMatSession {
         let source_input = request.source.clone();
         if let Err(error) = self.ensure_user_path_hydrated().await {
             return crate::abi::ExecutionResponse {
+                dependency_lock: None,
                 source_context: unresolved_source_context(&source_input),
                 result: Err(error),
             };
@@ -448,6 +448,7 @@ impl RunMatSession {
                     Ok(source) => source,
                     Err(error) => {
                         return crate::abi::ExecutionResponse {
+                            dependency_lock: None,
                             source_context: crate::abi::ExecutionSourceContext {
                                 name: source_name,
                                 text: Some(source_text),
@@ -707,10 +708,7 @@ impl RunMatSession {
                 .and_then(|source| source.resolve_in(&product.runtime)),
         );
         let preparation::workspace::PreparedInteractiveWorkspace {
-            #[cfg(not(target_arch = "wasm32"))]
-                unit: interactive_unit,
-            #[cfg(target_arch = "wasm32")]
-                unit: _interactive_unit,
+            unit: interactive_unit,
             runtime: execution_runtime,
             bytecode,
             publication: source_registry_publication,
@@ -1241,7 +1239,6 @@ impl RunMatSession {
             self.generic_native_cache
                 .publish_session_registry(&self.function_registry, &function_registry_after_success)
                 .map_err(RunError::Runtime)?;
-            #[cfg(not(target_arch = "wasm32"))]
             self.program_service
                 .publish(&interactive_unit, &function_registry_after_success);
             self.function_registry = function_registry_after_success;

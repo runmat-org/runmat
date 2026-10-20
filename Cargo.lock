@@ -7266,6 +7266,7 @@ dependencies = [
  "once_cell",
  "reqwest 0.12.28",
  "runmat-canonical-codec",
+ "runmat-time",
  "runmat-workspace-contracts",
  "serde",
  "serde_json",

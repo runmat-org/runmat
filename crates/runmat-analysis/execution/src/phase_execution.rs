@@ -64,8 +64,8 @@ impl AnalysisPhaseExecutionEvidence {
             .committed
             .as_ref()
             .expect("sealed successful task has its original commit")
-            .resources
-            .as_deref()
+            .result
+            .resources()
             .expect("sealed commit has original accounting")
     }
 
@@ -97,11 +97,13 @@ impl AnalysisPhaseExecutionEvidence {
         else {
             return Err(invalid("phase execution requires externalized completion"));
         };
+        let Some((committed_outputs, committed_objects)) = commit.result.values() else {
+            return Err(invalid("phase commit is not a value result"));
+        };
         if request.callable.owner_identity != crate::task::ANALYSIS_EXECUTION_CALLABLE_OWNER
-            || request.callable.qualified_name != crate::host::ANALYSIS_HOST_ENTRYPOINT
-            || request.callable.entrypoint_digest != host.workload.identity.digest()
-            || outputs != &commit.outputs
-            || result_objects != &commit.result_objects
+            || request.callable.program != crate::host::analysis_host_callable()
+            || outputs.as_slice() != committed_outputs
+            || result_objects.as_slice() != committed_objects
         {
             return Err(AnalysisBridgeError::Identity(
                 "phase response or callable differs from its original task",
@@ -112,7 +114,7 @@ impl AnalysisPhaseExecutionEvidence {
             .iter()
             .map(|input| match input {
                 ValuePayload::Object(root) => Ok(root.as_ref().clone()),
-                ValuePayload::Inline(_) => Err(invalid("phase task has inline numerical input")),
+                _ => Err(invalid("phase task has a non-object numerical input")),
             })
             .collect::<AnalysisBridgeResult<Vec<_>>>()?;
         let Some((invocation, inputs)) = roots.split_first() else {

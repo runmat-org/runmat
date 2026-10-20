@@ -401,6 +401,8 @@ impl RuntimeExecutionServices for NativeExecutionService {
                 },
                 retry: runmat_execution::RetryPolicy::Never,
                 program_revision: call.program_revision.clone(),
+                environment: runmat_execution::EnvironmentSnapshot::default(),
+                console: None,
                 capabilities: call.capabilities.clone(),
                 program: runmat_runtime::execution::DeferredProgram::RegionSourcesV1(
                     call.program.clone().into(),
@@ -1425,17 +1427,13 @@ fn materialize_call(
 > {
     runmat_vm::materialize_deferred_call(
         call,
-        outputs.clone(),
+        outputs,
         runmat_execution_artifact::ProgramTarget::portable(format!(
             "{}-{}-interpreter-bytecode-v2",
             std::env::consts::ARCH,
             std::env::consts::OS,
         )),
-    )?;
-    request
-        .validate_for_portable_host()
-        .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
-    Ok(request)
+    )
 }
 
 #[cfg(test)]

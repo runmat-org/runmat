@@ -143,10 +143,10 @@ pub(crate) fn value_to_json(value: &Value, depth: usize) -> JsonValue {
                         .map(|index| {
                             json!({
                                 "real": integer_json_value(
-                                    storage.real().value_at(index).expect("integer storage index is valid"),
+                                    &storage.real().value_at(index).expect("integer storage index is valid"),
                                 ),
                                 "imag": integer_json_value(
-                                    storage.imag().value_at(index).expect("integer storage index is valid"),
+                                    &storage.imag().value_at(index).expect("integer storage index is valid"),
                                 ),
                             })
                         })

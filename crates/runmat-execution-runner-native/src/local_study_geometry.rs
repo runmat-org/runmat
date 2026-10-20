@@ -200,7 +200,10 @@ fn materialization_output_root(
             )),
         },
         ProgramExecutionResponse::Failure { message } => Err(protocol(message)),
-        ProgramExecutionResponse::Success { .. } => Err(protocol(
+        ProgramExecutionResponse::RuntimeFailure { failure } => Err(protocol(failure.message)),
+        ProgramExecutionResponse::Success { .. }
+        | ProgramExecutionResponse::GraphSuccess { .. }
+        | ProgramExecutionResponse::SpmdSuccess { .. } => Err(protocol(
             "geometry materialization returned an inline output",
         )),
     }

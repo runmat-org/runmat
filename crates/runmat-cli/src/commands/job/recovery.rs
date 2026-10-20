@@ -10,7 +10,7 @@ use runmat_execution_artifact::encryption::{
     decode_run_key_envelope, EncryptionPurpose, ExecutionHpkeSuite, ExecutionRecipientKey,
     PortableExecutionEncryption, PortableExecutionPrivateKey,
 };
-use runmat_execution_artifact::{ProgramExecutionOutputs, ProgramExecutionResponse};
+use runmat_execution_artifact::ProgramExecutionOutputs;
 use runmat_server_client::auth::resolve_public_project_id;
 use runmat_server_client::execution::public_error;
 use runmat_server_client::public_api::types;

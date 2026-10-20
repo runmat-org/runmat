@@ -357,7 +357,10 @@ pub(super) fn spawn(
     guard.armed = false;
     if !committed {
         completion.cancel();
-        match service.driver.cancel_task(task_id, CancellationReason::User) {
+        match service
+            .driver
+            .cancel_task(task_id, CancellationReason::User)
+        {
             Ok(true) => return Err(ExecutionServiceError::Cancelled),
             Ok(false) => {
                 return Err(ExecutionServiceError::Infrastructure(

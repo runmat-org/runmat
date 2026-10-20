@@ -20,11 +20,17 @@ const MAX_OUTPUTS: usize = 4096;
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum AnalysisCapabilityRequirement {
-    Host { abi: String },
+    Host {
+        abi: String,
+    },
     ProcessIsolation,
     DistributedRuntime,
-    Accelerator { class: String },
-    Formulation { identity: Digest },
+    Accelerator {
+        class: runmat_execution::resource::AcceleratorClass,
+    },
+    Formulation {
+        identity: Digest,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -170,7 +176,7 @@ impl AnalysisWorkloadRequest {
 
 pub fn analysis_worker_capabilities(
     formulation_identities: impl IntoIterator<Item = Digest>,
-    accelerator_classes: impl IntoIterator<Item = String>,
+    accelerator_classes: impl IntoIterator<Item = runmat_execution::resource::AcceleratorClass>,
     distributed: bool,
 ) -> BTreeSet<Capability> {
     let mut capabilities = BTreeSet::from([Capability::Custom(format!(
@@ -212,8 +218,8 @@ fn work_contract_digest(
 
 fn validate_capability(requirement: &AnalysisCapabilityRequirement) -> AnalysisBridgeResult<()> {
     let text = match requirement {
-        AnalysisCapabilityRequirement::Host { abi }
-        | AnalysisCapabilityRequirement::Accelerator { class: abi } => Some(abi),
+        // Accelerator classes are validated tokens by construction.
+        AnalysisCapabilityRequirement::Host { abi } => Some(abi),
         _ => None,
     };
     if text.is_some_and(|value| {

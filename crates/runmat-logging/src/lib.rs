@@ -72,13 +72,40 @@ static LOG_HOOK: OnceCell<LogHook> = OnceCell::new();
 static TRACE_HOOK: OnceCell<TraceHook> = OnceCell::new();
 static FALLBACK_TRACE_ID: OnceCell<String> = OnceCell::new();
 static EVENT_ID_COUNTER: AtomicUsize = AtomicUsize::new(1);
+type LogFilterReloader = Box<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
+
+/// Reloads the filter of the subscriber that is actually installed process-wide.
 #[cfg(not(target_arch = "wasm32"))]
-static LOG_FILTER_HANDLE: OnceCell<
-    reload::Handle<EnvFilter, tracing_subscriber::registry::Registry>,
-> = OnceCell::new();
+static LOG_FILTER_RELOADER: OnceCell<LogFilterReloader> = OnceCell::new();
 
 pub struct LoggingGuard {
     _guard: Option<DefaultGuard>,
+}
+
+impl LoggingGuard {
+    /// A guard for hosts that installed their own global subscriber.
+    pub fn host_managed() -> Self {
+        Self { _guard: None }
+    }
+}
+
+/// Lets a host that owns the global subscriber serve `update_log_filter`.
+/// The first registration wins.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn set_log_filter_reloader<F>(reloader: F)
+where
+    F: Fn(&str) -> Result<(), String> + Send + Sync + 'static,
+{
+    let _ = LOG_FILTER_RELOADER.set(Box::new(reloader));
+}
+
+/// The layer that forwards events to the runtime log and trace hooks, for hosts
+/// that build their own subscriber instead of calling [`init_logging`].
+pub fn runtime_bridge_layer<S>(enable_traces: bool, pid: i64) -> impl Layer<S>
+where
+    S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
+{
+    LogBridgeLayer.and_then(enable_traces.then_some(TraceBridgeLayer { pid }))
 }
 
 #[derive(Clone, Default)]
@@ -125,25 +152,24 @@ pub fn init_logging(opts: LoggingOptions) -> LoggingGuard {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let (filter_layer, filter_handle) = reload::Layer::new(env_filter.clone());
-            if LOG_FILTER_HANDLE.get().is_none() {
-                let _ = LOG_FILTER_HANDLE.set(filter_handle.clone());
-            }
-            tracing_subscriber::registry()
+            let subscriber = tracing_subscriber::registry()
                 .with(filter_layer)
                 .with(bridge_layer)
-                .with(trace_layer.clone())
+                .with(trace_layer.clone());
+            (subscriber, Some(filter_handle))
         }
 
         #[cfg(target_arch = "wasm32")]
         {
-            tracing_subscriber::registry()
+            let subscriber = tracing_subscriber::registry()
                 .with(env_filter.clone())
                 .with(bridge_layer)
-                .with(trace_layer.clone())
+                .with(trace_layer.clone());
+            (subscriber, None::<()>)
         }
     };
 
-    let subscriber = build_subscriber();
+    let (subscriber, filter_handle) = build_subscriber();
 
     #[cfg(feature = "otlp")]
     let subscriber = {
@@ -152,8 +178,21 @@ pub fn init_logging(opts: LoggingOptions) -> LoggingGuard {
     };
 
     let guard = match tracing::subscriber::set_global_default(subscriber) {
-        Ok(()) => None,
-        Err(_) => Some(tracing::subscriber::set_default(build_subscriber())),
+        Ok(()) => {
+            // Only the installed subscriber's handle is live; a dropped one reports
+            // "subscriber no longer exists" on every reload.
+            #[cfg(not(target_arch = "wasm32"))]
+            if let Some(handle) = filter_handle {
+                set_log_filter_reloader(move |spec| {
+                    let filter = EnvFilter::try_new(spec).map_err(|err| err.to_string())?;
+                    handle.reload(filter).map_err(|err| err.to_string())
+                });
+            }
+            #[cfg(target_arch = "wasm32")]
+            let _ = filter_handle;
+            None
+        }
+        Err(_) => Some(tracing::subscriber::set_default(build_subscriber().0)),
     };
 
     LoggingGuard { _guard: guard }
@@ -173,11 +212,10 @@ pub fn shutdown_otel() {}
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn update_log_filter(spec: &str) -> Result<(), String> {
-    let handle = LOG_FILTER_HANDLE
+    let reload = LOG_FILTER_RELOADER
         .get()
         .ok_or_else(|| "log filter handle not initialised".to_string())?;
-    let filter = EnvFilter::try_new(spec).map_err(|err| err.to_string())?;
-    handle.reload(filter).map_err(|err| err.to_string())
+    reload(spec)
 }
 
 #[cfg(target_arch = "wasm32")]

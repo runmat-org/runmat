@@ -110,7 +110,9 @@ pub struct PreparedObservationPartition {
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum ObservationExecutionTarget {
     Host,
-    GovernedAccelerator { class: String },
+    GovernedAccelerator {
+        class: runmat_execution::resource::AcceleratorClass,
+    },
 }
 
 pub struct PreparedObservationFanout {
@@ -385,13 +387,13 @@ pub fn import_observation_partition_contribution(
 }
 
 fn validate_acceleration_binding(
-    prepared_class: &str,
+    prepared_class: &runmat_execution::resource::AcceleratorClass,
     prepared_plan: runmat_analysis_fea::planning::resource::FeaResourcePlanIdentity,
     prepared_allocation: &AcceleratorRequest,
     evidence_plan: runmat_analysis_fea::planning::resource::FeaResourcePlanIdentity,
     evidence_allocation: &AcceleratorRequest,
 ) -> AnalysisBridgeResult<()> {
-    if prepared_allocation.class != prepared_class
+    if &prepared_allocation.class != prepared_class
         || prepared_plan != evidence_plan
         || prepared_allocation != evidence_allocation
     {

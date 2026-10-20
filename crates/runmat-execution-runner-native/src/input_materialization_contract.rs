@@ -154,10 +154,14 @@ fn prepared_program(
                 request: ProgramExecutionRequest {
                     console: descriptor.console,
                     environment: descriptor.environment.clone(),
-                    schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+                    schema_version:
+                        runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
                     recipe: descriptor.recipe.clone(),
                     artifact: descriptor.artifact.clone(),
-                    function: descriptor.function,
+                    callable: descriptor.callable.clone(),
+                    context: runmat_execution::ProgramInvocationContext::Direct,
+                    assignment: None,
+                    job_id: None,
                     arguments: plan.arguments.clone(),
                     requested_outputs: descriptor.requested_outputs,
                 },

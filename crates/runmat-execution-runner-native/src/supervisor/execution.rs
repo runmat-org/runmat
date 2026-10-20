@@ -28,11 +28,21 @@ impl LocalSupervisor {
         let mut store = self.store.lock().await;
         let mut scheduler = self.scheduler.lock().await;
         scheduler.validate_context(&submission.task)?;
-        let stored = crate::protocol::StoredProgram {
-            function: submission.function,
-            recipe: &submission.recipe,
-            artifact: &submission.artifact,
-        };
+        let artifact_id = submission
+            .task
+            .request
+            .program_artifact_id()
+            .ok_or_else(|| {
+                crate::NativeExecutionError::Protocol(
+                    "durable program submission has no program artifact".into(),
+                )
+            })?;
+        let stored = crate::protocol::StoredProgram::Direct(Box::new(
+            crate::protocol::StoredDirectProgram {
+                recipe: submission.recipe.clone(),
+                artifact: submission.artifact.clone(),
+            },
+        ));
         // Reject an unreadable worker artifact before publishing a job or admitting
         // scheduler work. The provider uses this same configured read ceiling.
         let encoded = runmat_canonical_codec::encode_json_bounded(
@@ -46,7 +56,7 @@ impl LocalSupervisor {
         }
         let artifacts =
             crate::local_store::ArtifactStore::new(self.config.paths.root.join("artifacts"))?;
-        artifacts.put(submission.task.request.program_artifact_id, &encoded)?;
+        artifacts.put(artifact_id, &encoded)?;
         let mut actions = scheduler.tick()?;
         actions.extend(scheduler.admit(record.handle.id, &submission.task)?);
         self.dispatch_program_actions(&mut store, &mut scheduler, actions)

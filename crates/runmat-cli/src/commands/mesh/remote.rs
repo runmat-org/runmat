@@ -9,7 +9,7 @@ use runmat_execution_artifact::cache::CacheImport;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::{
     ArtifactAccess, ExecutionBundleBuilder, ProgramExecutionDescriptor, ProgramExecutionInputs,
-    ProgramExecutionObject, ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+    ProgramExecutionObject, ProgramExecutionResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
 };
 use runmat_execution_runner_native::{
     prepare_exact_meshing_root, resolve_native_meshing_request, ExactMeshingRootPreparation,
@@ -232,7 +232,9 @@ fn prepare_remote_root(
             ValuePayload::Object(reference) => {
                 Some((reference.logical_digest, reference.as_ref().clone()))
             }
-            ValuePayload::Inline(_) => None,
+            ValuePayload::Inline(_)
+            | ValuePayload::Distributed(_)
+            | ValuePayload::Composite(_) => None,
         })
         .collect::<BTreeMap<_, _>>();
     let objects = prepared
@@ -257,14 +259,15 @@ fn prepare_remote_root(
     let descriptor = serde_json::to_vec(&ProgramExecutionDescriptor {
         console: None,
         environment: runmat_execution::EnvironmentSnapshot::default(),
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         recipe: request.recipe,
         artifact: request.artifact,
-        function: request.function,
+        callable: request.callable.clone(),
         requested_outputs: request.requested_outputs,
     })?;
     let inputs = ProgramExecutionInputs {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
+        context: request.context,
         arguments: request.arguments,
         objects: Vec::new(),
     };

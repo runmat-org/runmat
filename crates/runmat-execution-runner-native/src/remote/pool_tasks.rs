@@ -94,13 +94,11 @@ pub(super) async fn execute_graph_root(
     };
     let completion = pool.submit_graph_program(submission, request, encoded_bytes, transfer)?;
     match completion.wait().await {
-        Ok(runmat_execution_runner::AttemptSuccess::Graph { graph }) => {
-            Ok(RemotePoolExecutionOutcome::Completed(
-                RemotePoolExecutionResult::without_objects(
-                    ProgramExecutionResponse::GraphSuccess { graph },
-                ),
-            ))
-        }
+        Ok(runmat_execution_runner::AttemptSuccess::Graph { graph }) => Ok(
+            RemotePoolExecutionOutcome::Completed(RemotePoolExecutionResult::without_objects(
+                ProgramExecutionResponse::GraphSuccess { graph },
+            )),
+        ),
         Ok(_) => Ok(RemotePoolExecutionOutcome::Indeterminate(
             "remote Graph root returned a non-Graph result".into(),
         )),
@@ -108,7 +106,7 @@ pub(super) async fn execute_graph_root(
     }
 }
 
-fn admitted_trust() -> BTreeSet<runmat_execution::security::ExecutionTrustTier> {
+pub(crate) fn admitted_trust() -> BTreeSet<runmat_execution::security::ExecutionTrustTier> {
     [
         runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
         runmat_execution::security::ExecutionTrustTier::HostedOrdinary,
@@ -205,7 +203,9 @@ pub(super) fn task_failure_outcome(
 ) -> NativeExecutionResult<RemotePoolExecutionOutcome> {
     let state = pool.snapshot().tasks.get(&task_id).map(|task| task.state);
     if state == Some(TaskState::Indeterminate) {
-        return Ok(RemotePoolExecutionOutcome::Indeterminate(failure.to_string()));
+        return Ok(RemotePoolExecutionOutcome::Indeterminate(
+            failure.to_string(),
+        ));
     }
     let response = match failure {
         crate::NativeProgramFailure::Execution(message)

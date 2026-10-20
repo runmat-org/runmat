@@ -294,14 +294,8 @@ impl ExecutableUnit {
             .entries()
             .iter()
             .filter(|entry| entry.relative_path == self.source.relative_path)
-            .map(|entry| {
-                u32::try_from(entry.source_id)
-                    .map(runmat_types::ProgramSourceId)
-                    .map_err(|_| {
-                        "primary source identity exceeds the portable analysis schema".to_string()
-                    })
-            })
-            .collect::<Result<Vec<_>, String>>()?;
+            .map(|entry| entry.source_id)
+            .collect::<Vec<_>>();
         let matches = self
             .mir
             .functions

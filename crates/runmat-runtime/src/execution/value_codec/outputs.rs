@@ -3,6 +3,20 @@ use super::{decode_inline_value, encode_inline_value, ValueCodecError};
 use runmat_execution::value::ValuePayload;
 use runmat_value::Value;
 
+/// Encode one ordinal output per requested output from a typed sequence.
+pub fn encode_inline_sequence(
+    outputs: &runmat_value::ValueSequence,
+    requested: usize,
+) -> Result<Vec<ValuePayload>, ValueCodecError> {
+    if outputs.len() != requested {
+        return Err(ValueCodecError::invalid(
+            "$",
+            "output count differs from the original contract",
+        ));
+    }
+    outputs.iter().map(encode_inline_value).collect()
+}
+
 pub fn encode_inline_outputs(
     value: &Value,
     requested: usize,

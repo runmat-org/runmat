@@ -62,10 +62,7 @@ impl AnalysisTaskCompletion {
                     .committed
                     .as_ref()
                     .ok_or_else(|| protocol("delivered success lacks a scheduler commit"))?;
-                if success.outputs != commit.outputs
-                    || success.result_objects != commit.result_objects
-                    || success.resources != commit.resources
-                {
+                if success != commit.result {
                     return Err(protocol(
                         "delivered success differs from the original scheduler commit",
                     ));

@@ -298,7 +298,9 @@ fn source_identity(
     if let Some(project) = project {
         let source_root = project.workspace_root.clone();
         let physical_path =
-            if requested_path.is_absolute() || requested_path.starts_with(&source_root) {
+            if crate::diagnostic_path::host_path_is_absolute(requested_path)
+                || requested_path.starts_with(&source_root)
+            {
                 requested_path.to_path_buf()
             } else {
                 source_root.join(requested_path)
@@ -316,8 +318,8 @@ fn source_identity(
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."))
         .to_path_buf();
-    let logical_path = LogicalSourcePath::new(file_name.to_owned())
-        .map_err(|error| error.to_string())?;
+    let logical_path =
+        LogicalSourcePath::new(file_name.to_owned()).map_err(|error| error.to_string())?;
     Ok((source_root, requested_path.to_path_buf(), logical_path))
 }
 

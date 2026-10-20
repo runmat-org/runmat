@@ -8,8 +8,6 @@ use std::sync::atomic::AtomicBool;
 pub const NATIVE_OBJECT_STORE_ROOT_ENV: &str = "RUNMAT_EXECUTION_OBJECT_STORE_ROOT";
 pub(crate) const NATIVE_MESHING_SUBTASK_CACHE_ROOT_ENV: &str =
     "RUNMAT_EXECUTION_MESHING_SUBTASK_CACHE_ROOT";
-pub const NATIVE_ACCELERATOR_REQUIRED_ENV: &str = "RUNMAT_EXECUTION_ACCELERATOR_REQUIRED";
-pub const NATIVE_ACCELERATOR_REQUESTS_ENV: &str = "RUNMAT_EXECUTION_ACCELERATOR_REQUESTS";
 pub(crate) type TransferResult = Result<AttemptSuccess, String>;
 
 pub(crate) trait ProcessControl: Send + Sync {
@@ -39,7 +37,7 @@ pub(crate) struct NativeProcessProvider<'a> {
     pub objects: &'a FilesystemObjectStore,
 }
 use crate::protocol::{
-    StoredProgram, WorkerRequest, WorkerResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+    StoredProgram, WorkerLaunchRequest, WorkerResponse, PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
 };
 use runmat_execution_runner::{
     AttemptExecutionObservation, AttemptExecutionTermination, AttemptFailureKind, AttemptReport,
@@ -130,6 +128,7 @@ impl ObservedAttempt {
         (self.result, report)
     }
 
+    #[cfg(test)]
     pub(crate) fn not_started(request: &AttemptRequest, started: Instant, message: String) -> Self {
         observe(
             request,
@@ -161,14 +160,18 @@ fn observe(
     };
     let original_response = response.as_ref().ok().cloned();
     let mut result = response.and_then(|response| match response {
-        WorkerResponse::Success { value } => {
-            AttemptSuccess::new(request, vec![value], Vec::new(), wall_millis, 0, 0)
+        WorkerResponse::Success { outputs } => {
+            AttemptSuccess::new(request, outputs, Vec::new(), wall_millis, 0, 0)
         }
         WorkerResponse::ExternalizedSuccess {
             outputs,
             result_objects,
         } => AttemptSuccess::new(request, outputs, result_objects, wall_millis, 0, 0),
         WorkerResponse::Failure { message } => Err(message),
+        WorkerResponse::RuntimeFailure { failure } => Err(failure.message),
+        WorkerResponse::GraphSuccess { .. } | WorkerResponse::SpmdSuccess { .. } => {
+            Err("durable direct program returned a graph or SPMD response".into())
+        }
     });
     // Preflight only reads the admitted program. No process or result producer has
     // been invoked, so output/egress/relay consumption is known zero. Once launch
@@ -200,7 +203,7 @@ fn observe(
 fn prepare_program(
     provider: &NativeProcessProvider<'_>,
     request: &AttemptRequest,
-) -> Result<WorkerRequest, String> {
+) -> Result<WorkerLaunchRequest, String> {
     request
         .task
         .validate_invocation_reservation()
@@ -210,22 +213,38 @@ fn prepare_program(
             .validate_transport(u64::from(provider.config.max_message_bytes))
             .map_err(|error| error.to_string())?;
     }
+    let artifact_id = request
+        .task
+        .program_artifact_id()
+        .ok_or("durable program attempt has no program artifact")?;
     let stored = provider
         .artifacts
-        .get(
-            request.task.program_artifact_id,
-            u64::from(provider.config.max_message_bytes),
-        )
+        .get(artifact_id, u64::from(provider.config.max_message_bytes))
         .map_err(|error| error.to_string())?;
     let stored: StoredProgram =
         serde_json::from_slice(&stored).map_err(|error| error.to_string())?;
+    let StoredProgram::Direct(stored) = stored else {
+        return Err("durable program attempts execute direct programs only".into());
+    };
+    let assignment = runmat_execution::ProgramExecutionAssignment {
+        scope_id: request.scope_id,
+        pool_id: request.task.pool_id,
+        task_id: request.task_id,
+        attempt_id: request.id,
+        worker_id: request.worker_id,
+        backend: runmat_execution::PoolBackend::LocalProcesses,
+        resources: request.resource_assignment.clone(),
+    };
     let worker_request = runmat_execution_artifact::ProgramExecutionRequest {
         console: request.task.console,
         environment: request.task.environment.clone(),
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         recipe: stored.recipe,
         artifact: stored.artifact,
-        function: stored.function,
+        callable: request.task.callable.program.clone(),
+        context: request.task.invocation_context.clone(),
+        assignment: Some(assignment),
+        job_id: None,
         arguments: request.task.inputs.clone(),
         requested_outputs: request.task.outputs.requested_outputs,
     };
@@ -234,7 +253,7 @@ fn prepare_program(
         .validate_for_portable_host()
         .map_err(|error| error.to_string())?;
     if runmat_execution::identity::ArtifactId::derive(&[worker_request.artifact.id.0.bytes()])
-        != request.task.program_artifact_id
+        != artifact_id
     {
         return Err("native stored program differs from original admitted artifact".into());
     }
@@ -249,13 +268,18 @@ fn prepare_program(
     if minimum > request.task.resources.memory_bytes {
         return Err("native invocation and parent monitor exceed task memory reservation".into());
     }
-    WorkerRequest::new(worker_request, request.task.resources.clone())
-        .map_err(|error| error.to_string())
+    Ok(WorkerLaunchRequest::Reserved(Box::new(
+        runmat_execution_artifact::ReservedProgramExecutionRequest::new(
+            worker_request,
+            request.task.resources.clone(),
+        )
+        .map_err(|error| error.to_string())?,
+    )))
 }
 
 async fn run_process(
     provider: &NativeProcessProvider<'_>,
-    request: WorkerRequest,
+    request: WorkerLaunchRequest,
     control: &dyn ProcessControl,
     meters: &TransportMeters,
     termination: &mut AttemptExecutionTermination,
@@ -281,16 +305,6 @@ async fn run_process(
             .to_string_lossy()
             .into_owned(),
     );
-    if !provider.config.worker_accelerators.is_empty() {
-        command
-            .environment
-            .insert(NATIVE_ACCELERATOR_REQUIRED_ENV.into(), "1".into());
-        command.environment.insert(
-            NATIVE_ACCELERATOR_REQUESTS_ENV.into(),
-            serde_json::to_string(&provider.config.worker_accelerators)
-                .map_err(|error| error.to_string())?,
-        );
-    }
     command.max_stderr_bytes = provider.config.max_stderr_bytes;
     // Spawn can fail after creating a child (for example during containment).
     // Until root exit is observed, even an error leaves launch unconfirmed.

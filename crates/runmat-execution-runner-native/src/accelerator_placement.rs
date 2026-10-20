@@ -1,28 +1,29 @@
-use runmat_execution::resource::AcceleratorRequest;
+use runmat_execution::resource::{AcceleratorDevice, AcceleratorFeature, AcceleratorRequest};
 
 use crate::{NativeExecutionError, NativeExecutionResult};
 
+/// One whole-device request for the active provider, in the same class,
+/// provider and capacity terms the scheduler inventory reports for it.
 pub fn active_provider_resource() -> NativeExecutionResult<AcceleratorRequest> {
-    let capability = active_hardware_capability()?;
-    let class = capability.device.backend.ok_or_else(|| {
-        configuration(
-            "the active acceleration provider does not declare a scheduler resource class",
-        )
-    })?;
-    let memory_bytes_each = capability.max_allocation_bytes.ok_or_else(|| {
-        configuration("the active acceleration provider does not declare a bounded allocation size")
-    })?;
-    if memory_bytes_each == 0 {
-        return Err(configuration(
-            "the active acceleration provider declares zero allocatable memory",
-        ));
-    }
+    let device = active_execution_device()?;
+    let required_features = device
+        .features
+        .contains(&AcceleratorFeature::Compute)
+        .then(|| std::collections::BTreeSet::from([AcceleratorFeature::Compute]))
+        .unwrap_or_default();
     let request = AcceleratorRequest {
-        class,
+        class: device.class.clone(),
         count: 1,
-        memory_bytes_each,
+        minimum_allocation_bytes: device.max_allocation_bytes,
+        provider: Some(device.provider.clone()),
+        required_features,
     };
     request.validate().map_err(configuration)?;
+    if !request.matches(&device) {
+        return Err(configuration(
+            "the active acceleration provider cannot satisfy its own resource request",
+        ));
+    }
     Ok(request)
 }
 
@@ -39,28 +40,6 @@ pub(crate) fn validate_active_provider_for(
     Ok(())
 }
 
-pub(crate) fn validate_local_provider_for(
-    requests: &[AcceleratorRequest],
-) -> NativeExecutionResult<()> {
-    let [request] = requests else {
-        return Err(configuration(
-            "local accelerated execution requires exactly one accelerator request",
-        ));
-    };
-    request.validate().map_err(configuration)?;
-    let capability = active_hardware_capability()?;
-    if capability.device.backend.as_deref() != Some(request.class.as_str())
-        || capability
-            .max_allocation_bytes
-            .is_none_or(|bytes| bytes < request.memory_bytes_each)
-    {
-        return Err(configuration(
-            "the local acceleration provider differs from its admitted resource request",
-        ));
-    }
-    Ok(())
-}
-
 fn active_hardware_capability(
 ) -> NativeExecutionResult<runmat_accelerate_api::ProviderCapabilitySnapshot> {
     let provider = runmat_accelerate_api::provider().ok_or_else(|| {
@@ -73,6 +52,19 @@ fn active_hardware_capability(
         ));
     }
     Ok(capability)
+}
+
+fn active_execution_device() -> NativeExecutionResult<AcceleratorDevice> {
+    active_hardware_capability()?;
+    let provider = runmat_accelerate_api::provider().ok_or_else(|| {
+        configuration("accelerated execution requires an initialized acceleration provider")
+    })?;
+    provider
+        .execution_accelerator_device(1)
+        .map_err(configuration)?
+        .ok_or_else(|| {
+            configuration("the active acceleration provider does not expose an execution device")
+        })
 }
 
 fn configuration(error: impl std::fmt::Display) -> NativeExecutionError {

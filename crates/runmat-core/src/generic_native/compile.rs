@@ -81,6 +81,7 @@ pub(super) fn compile_prepared(
     prepared: PreparedGenericUnit,
 ) -> Result<BackgroundCompiledGenericUnit, runmat_runtime::RuntimeError> {
     let started = std::time::Instant::now();
+    let program_capture = prepared.native.program_capture().to_vec();
     let interpreter_resume_points = prepared.native.interpreter_resume_points().clone();
     let point_coverage = prepared.native.coverage_sites().clone();
     let assembly = prepared
@@ -151,12 +152,14 @@ pub(super) fn compile_prepared(
     let executor = match prepared.specialization {
         Some(profile) => runmat_jit::GenericCompiler::compile_specialized_executor_with_metadata(
             assembly,
+            Some(program_capture),
             interpreter_resume_points,
             coverage_sites,
             profile,
         ),
         None => runmat_jit::GenericCompiler::compile_executor_with_metadata(
             assembly,
+            Some(program_capture),
             interpreter_resume_points,
             coverage_sites,
         ),

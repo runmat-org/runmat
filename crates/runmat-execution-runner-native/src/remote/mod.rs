@@ -20,7 +20,7 @@ mod pool_objects;
 mod pool_progress;
 mod pool_reconcile;
 mod pool_resources;
-mod pool_tasks;
+pub(crate) mod pool_tasks;
 mod pool_values;
 mod pool_wait;
 mod program_staging;

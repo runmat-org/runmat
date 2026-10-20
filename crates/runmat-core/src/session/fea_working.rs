@@ -93,9 +93,8 @@ impl RunMatSession {
                 if budget > MAX_SOURCE_BYTES {
                     return Err("working-source capture exceeds 32 MiB".into());
                 }
-                let logical =
-                    LogicalSourcePath::new(relative.to_string_lossy().into_owned())
-                        .map_err(|error| error.to_string())?;
+                let logical = LogicalSourcePath::new(relative.to_string_lossy().into_owned())
+                    .map_err(|error| error.to_string())?;
                 files.insert(logical.clone(), captured(logical, bytes));
             }
         }
@@ -134,7 +133,9 @@ impl RunMatSession {
         .map_err(|error| error.to_string())?;
         let mut geometry_paths = std::collections::BTreeSet::new();
         {
-            let prepared = candidate.prepare(&request.root).map_err(|error| error.to_string())?;
+            let prepared = candidate
+                .prepare(&request.root)
+                .map_err(|error| error.to_string())?;
             for geometry in prepared.requests(Vec::new(), Vec::new())?.geometry {
                 geometry_paths.insert(geometry.logical_path);
             }
@@ -197,13 +198,16 @@ impl RunMatSession {
             }
         }
         let result = self
-            .check_fea_workspace_roots(FeaWorkspaceCheckRequest {
-                snapshot: FeaWorkspaceCapture {
-                    files: files.into_values().collect(),
+            .check_fea_workspace_roots(
+                FeaWorkspaceCheckRequest {
+                    snapshot: FeaWorkspaceCapture {
+                        files: files.into_values().collect(),
+                    },
+                    edits: vec![],
+                    dependencies,
                 },
-                edits: vec![],
-                dependencies,
-            }, Some(&request.root))
+                Some(&request.root),
+            )
             .await?;
         result
             .roots

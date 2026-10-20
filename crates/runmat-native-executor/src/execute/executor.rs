@@ -18,6 +18,7 @@ pub struct NativeExecutor {
     class_declarations: Arc<[runmat_native_codegen::NativeClassDeclaration]>,
     program_revision: runmat_execution::ProgramRevision,
     compiled: NativeExecutable,
+    program_capture: Option<Vec<u8>>,
     interpreter_resume_points: BTreeMap<runmat_types::ProgramPointId, u64>,
     coverage_sites: BTreeMap<runmat_native_codegen::NativeMirSite, Vec<u64>>,
     pub(super) regions: Vec<runmat_types::RegionContract>,
@@ -36,6 +37,7 @@ struct EntryRepresentationProfile {
 
 #[derive(Default)]
 pub struct NativeExecutorOptions {
+    pub program_capture: Option<Vec<u8>>,
     pub interpreter_resume_points: BTreeMap<runmat_types::ProgramPointId, u64>,
     pub coverage_sites: BTreeMap<runmat_native_codegen::NativeMirSite, Vec<u64>>,
     pub entry_profile: Option<crate::RepresentationProfile>,
@@ -251,6 +253,7 @@ impl NativeExecutor {
             class_declarations: Arc::from(assembly.class_declarations),
             program_revision: assembly.program,
             compiled: executable,
+            program_capture: options.program_capture,
             interpreter_resume_points: options.interpreter_resume_points,
             coverage_sites: options.coverage_sites,
             regions,
@@ -628,6 +631,7 @@ impl NativeExecutor {
             inputs,
             requested_outputs: requested_outputs as usize,
             runtime,
+            program_capture: self.program_capture.clone(),
             functions: Arc::clone(&self.functions),
             captures,
             lexical_environment,

@@ -90,7 +90,6 @@ mod profiling_tests;
 mod project;
 mod retirement;
 mod run;
-mod script;
 #[cfg(test)]
 mod s1_compiled_call_tests;
 pub(crate) mod semantic_definition;

@@ -10,7 +10,7 @@ use runmat_execution_artifact::cache::{CacheExport, CacheImport};
 use runmat_execution_artifact::{
     ArtifactAccess, ExecutableForm, LogicalObject, ObjectNamespace, ProgramArtifact,
     ProgramBuildRecipe, ProgramExecutionDescriptor, ProgramExecutionRequest, ProgramTarget,
-    PROGRAM_BUILD_RECIPE_SCHEMA_VERSION, PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+    PROGRAM_BUILD_RECIPE_SCHEMA_VERSION, PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
 };
 use runmat_meshing_core::MeshingRequest;
 use runmat_meshing_execution::prepare_meshing_host_program;
@@ -203,12 +203,16 @@ pub fn prepare_geometry_meshing_root(
         entrypoint: "meshing_workload".into(),
         outputs: OutputContract {
             requested_outputs: 1,
+            owned_work: None,
         },
         execution_mode: GEOMETRY_MESHING_ROOT_EXECUTION_MODE.into(),
         target: ProgramTarget::portable(GEOMETRY_MESHING_ROOT_TARGET_PROFILE),
+        interop: runmat_types::InteropManifest::empty(),
+        accelerators: Vec::new(),
         features: Default::default(),
         compile_options: Default::default(),
         source_objects: Vec::new(),
+        foreign_policy: None,
         expected_artifact_id: None,
     };
     let artifact = ProgramArtifact::materialize(
@@ -240,10 +244,16 @@ pub fn prepare_geometry_meshing_root(
     let request = ProgramExecutionRequest {
         console: None,
         environment: runmat_execution::EnvironmentSnapshot::default(),
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         recipe,
         artifact,
-        function: 0,
+        callable: runmat_execution::ProgramCallable::semantic(
+            runmat_execution::ProgramFunctionId(0),
+            None,
+        ),
+        context: runmat_execution::ProgramInvocationContext::Direct,
+        assignment: None,
+        job_id: None,
         arguments,
         requested_outputs: 1,
     };
@@ -319,10 +329,13 @@ pub fn decode_geometry_meshing_root(
     let geometry = ProgramExecutionRequest {
         console: request.geometry.console,
         environment: request.geometry.environment.clone(),
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         recipe: request.geometry.recipe.clone(),
         artifact: request.geometry.artifact.clone(),
-        function: request.geometry.function,
+        callable: request.geometry.callable.clone(),
+        context: runmat_execution::ProgramInvocationContext::Direct,
+        assignment: None,
+        job_id: None,
         arguments: geometry_arguments,
         requested_outputs: request.geometry.requested_outputs,
     };
@@ -342,7 +355,7 @@ fn descriptor_from_request(request: &ProgramExecutionRequest) -> ProgramExecutio
         schema_version: request.schema_version,
         recipe: request.recipe.clone(),
         artifact: request.artifact.clone(),
-        function: request.function,
+        callable: request.callable.clone(),
         requested_outputs: request.requested_outputs,
     }
 }

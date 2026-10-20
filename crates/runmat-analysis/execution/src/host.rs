@@ -5,7 +5,7 @@ use runmat_execution_artifact::cache::{CacheExport, CacheImport};
 use runmat_execution_artifact::{
     ArtifactAccess, ExecutableForm, LogicalObject, ObjectNamespace, ProgramArtifact,
     ProgramBuildRecipe, ProgramExecutionRequest, ProgramTarget,
-    PROGRAM_BUILD_RECIPE_SCHEMA_VERSION, PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+    PROGRAM_BUILD_RECIPE_SCHEMA_VERSION, PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
 };
 use serde::{Deserialize, Serialize};
 
@@ -51,6 +51,14 @@ pub struct PreparedAnalysisHostInvocation {
     descriptor: LogicalObject,
 }
 
+/// The single program callable of the analysis host workload.
+pub(crate) fn analysis_host_callable() -> runmat_execution::ProgramCallable {
+    runmat_execution::ProgramCallable::semantic(
+        runmat_execution::ProgramFunctionId(0),
+        Some(ANALYSIS_HOST_ENTRYPOINT.into()),
+    )
+}
+
 pub fn prepare_analysis_host_program(
     program_revision: ProgramRevision,
 ) -> AnalysisBridgeResult<AnalysisHostProgramArtifact> {
@@ -60,12 +68,16 @@ pub fn prepare_analysis_host_program(
         entrypoint: ANALYSIS_HOST_ENTRYPOINT.into(),
         outputs: OutputContract {
             requested_outputs: 1,
+            owned_work: None,
         },
         execution_mode: ANALYSIS_HOST_EXECUTION_MODE.into(),
         target: ProgramTarget::portable(ANALYSIS_HOST_TARGET_PROFILE),
+        interop: runmat_types::InteropManifest::empty(),
+        accelerators: Vec::new(),
         features: Default::default(),
         compile_options: Default::default(),
         source_objects: Vec::new(),
+        foreign_policy: None,
         expected_artifact_id: None,
     };
     let artifact = ProgramArtifact::materialize(
@@ -191,10 +203,13 @@ impl AnalysisHostWorkload {
         let request = ProgramExecutionRequest {
             console: None,
             environment: runmat_execution::EnvironmentSnapshot::default(),
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
             recipe,
             artifact,
-            function: 0,
+            callable: analysis_host_callable(),
+            context: runmat_execution::ProgramInvocationContext::Direct,
+            assignment: None,
+            job_id: None,
             arguments,
             requested_outputs: 1,
         };
@@ -282,7 +297,7 @@ impl AnalysisHostWorkload {
             .iter()
             .map(|value| match value {
                 ValuePayload::Object(reference) => Ok((**reference).clone()),
-                ValuePayload::Inline(_) => Err(AnalysisBridgeError::Invalid(
+                _ => Err(AnalysisBridgeError::Invalid(
                     "analysis host inputs must be externalized manifest roots".into(),
                 )),
             })
@@ -305,7 +320,7 @@ impl AnalysisHostWorkload {
             .iter()
             .map(|value| match value {
                 ValuePayload::Object(root) => Ok((**root).clone()),
-                ValuePayload::Inline(_) => Err(AnalysisBridgeError::Invalid(
+                _ => Err(AnalysisBridgeError::Invalid(
                     "analysis host inputs must be externalized root manifests".into(),
                 )),
             })

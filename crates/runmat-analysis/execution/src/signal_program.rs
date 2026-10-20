@@ -1,11 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_execution::identity::ArtifactId;
-use runmat_execution::task::{Callable, TaskRequest};
+use runmat_execution::task::TaskRequest;
 use runmat_execution::{Digest, ExecutableUnitEnvelope, OutputContract, TaskId};
 use runmat_execution_artifact::{
     ExecutableForm, ProgramExecutionDescriptor, ProgramExecutionInputs, ProgramExecutionObject,
-    ProgramExecutionObjectLocation, ProgramExecutionRequest, PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+    ProgramExecutionObjectLocation, ProgramExecutionRequest,
+    PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
 };
 use runmat_execution_runner::TaskSubmission;
 
@@ -292,8 +293,7 @@ pub(crate) fn validate_prepared_generator_program(
 ) -> AnalysisBridgeResult<()> {
     let admission = admitted.invocation_admission();
     if &program.descriptor.recipe.program_revision != admission.program_revision
-        || program.descriptor.function
-            != usize::try_from(admission.function.0).unwrap_or(usize::MAX)
+        || program.descriptor.callable.semantic_function() != Some(admission.function)
         || program.descriptor.requested_outputs != 1
         || program.descriptor.recipe.execution_mode != GENERATOR_EXECUTION_MODE
         || program.descriptor.artifact.form != ExecutableForm::ExecutableUnitV4
@@ -305,14 +305,16 @@ pub(crate) fn validate_prepared_generator_program(
     for chunk in &program.chunks {
         chunk.request.validate_for_portable_host()?;
         ProgramExecutionInputs {
-            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+            schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
+            context: runmat_execution::ProgramInvocationContext::Direct,
             arguments: chunk.request.arguments.clone(),
             objects: input_locations(&program.input_references),
         }
         .validate()?;
         if chunk.request.recipe != program.descriptor.recipe
             || chunk.request.artifact != program.descriptor.artifact
-            || chunk.request.function != program.descriptor.function
+            || chunk.request.callable != program.descriptor.callable
+            || chunk.request.context != runmat_execution::ProgramInvocationContext::Direct
             || chunk.request.requested_outputs != program.descriptor.requested_outputs
             || chunk.request.arguments != chunk.plan.arguments
         {
@@ -450,7 +452,8 @@ pub fn prepare_generator_program(
         .into_iter()
         .map(|plan| {
             let inputs = ProgramExecutionInputs {
-                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+                schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
+                context: runmat_execution::ProgramInvocationContext::Direct,
                 arguments: plan.arguments.clone(),
                 objects: input_locations(&input_references),
             };
@@ -534,9 +537,11 @@ fn collect_value_reference_ids(
         runmat_execution::value::ValuePayload::Object(reference) => {
             references.insert(reference.id);
         }
+        // Pool-resident partitions are addressed by their pool handle.
+        runmat_execution::value::ValuePayload::Distributed(_)
+        | runmat_execution::value::ValuePayload::Composite(_) => {}
         runmat_execution::value::ValuePayload::Inline(inline) => match inline.as_ref() {
-            runmat_execution::value::InlineValue::Cell { values, .. }
-            | runmat_execution::value::InlineValue::OutputList(values) => {
+            runmat_execution::value::InlineValue::Cell { values, .. } => {
                 for value in values {
                     collect_value_reference_ids(value, references);
                 }
@@ -575,9 +580,14 @@ fn rebind_value(
             )?;
             **reference = replacement.reference.clone();
         }
+        runmat_execution::value::ValuePayload::Distributed(_)
+        | runmat_execution::value::ValuePayload::Composite(_) => {
+            return Err(AnalysisBridgeError::Invalid(
+                "signal generator arguments cannot carry pool-resident values".into(),
+            ));
+        }
         runmat_execution::value::ValuePayload::Inline(inline) => match inline.as_mut() {
-            runmat_execution::value::InlineValue::Cell { values, .. }
-            | runmat_execution::value::InlineValue::OutputList(values) => {
+            runmat_execution::value::InlineValue::Cell { values, .. } => {
                 for value in values {
                     rebind_value(value, replacements)?;
                 }
@@ -615,7 +625,7 @@ pub fn build_generator_task_submission(
     context.resources.validate()?;
     let expected_artifact = ArtifactId::derive(&[chunk.request.artifact.id.0.bytes()]);
     if &chunk.request.recipe.program_revision != admission.program_revision
-        || chunk.request.function != usize::try_from(admission.function.0).unwrap_or(usize::MAX)
+        || chunk.request.callable.semantic_function() != Some(admission.function)
         || !context
             .resources
             .required_capabilities
@@ -625,6 +635,7 @@ pub fn build_generator_task_submission(
             "signal task context differs from its admitted portable program".into(),
         ));
     }
+    crate::named_callable::validate_program_host(&chunk.request, &context.host)?;
     let task_id = TaskId::derive(&[
         admitted.materialization_digest().bytes(),
         chunk.plan.identity.bytes(),
@@ -634,23 +645,22 @@ pub fn build_generator_task_submission(
             console: None,
             environment: runmat_execution::EnvironmentSnapshot::default(),
             id: task_id,
+            schema_version: runmat_execution::task::TASK_REQUEST_SCHEMA_VERSION,
             scope_id: context.scope_id,
             pool_id: context.pool_id,
-            program_artifact_id: expected_artifact,
-            callable: Callable {
-                owner_identity: admission.callable.owner_identity.clone(),
-                qualified_name: admission.callable.qualified_name.clone(),
-                entrypoint_digest: Digest::sha256(
-                    [
-                        admission.generator_identity.digest().bytes().as_slice(),
-                        chunk.plan.identity.bytes().as_slice(),
-                    ]
-                    .concat(),
-                ),
-            },
+            executable: runmat_execution::TaskExecutableIdentity::ProgramArtifact(
+                expected_artifact,
+            ),
+            callable: crate::named_callable::program_task_callable(
+                &admission.callable.owner_identity,
+                &chunk.request,
+            ),
+            host: context.host,
+            invocation_context: chunk.request.context.clone(),
             inputs: chunk.request.arguments.clone(),
             outputs: OutputContract {
                 requested_outputs: 1,
+                owned_work: None,
             },
             resources: context.resources,
             retry: context.retry,

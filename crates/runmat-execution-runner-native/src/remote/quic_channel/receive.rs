@@ -55,7 +55,10 @@ pub(super) async fn run(
             {
                 return Err(protocol("remote worker readiness differs from its route"));
             }
-            let mut state = ready.capabilities.lock().expect("worker readiness poisoned");
+            let mut state = ready
+                .capabilities
+                .lock()
+                .expect("worker readiness poisoned");
             if state.is_some() {
                 return Err(protocol("remote worker issued readiness twice"));
             }

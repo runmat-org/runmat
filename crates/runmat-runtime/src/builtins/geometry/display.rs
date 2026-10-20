@@ -12,7 +12,7 @@ pub(super) const GEOMETRY_MESH_METHOD_NAME: &str = "__runmat_geometry_mesh";
 #[runtime_builtin(
     name = "__runmat_geometry_mesh",
     binding_variant = "default",
-    builtin_path = "crate::builtins::geometry"
+    builtin_path = "crate::builtins::geometry::display"
 )]
 pub async fn geometry_mesh_method_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     #[cfg(feature = "plot-core")]

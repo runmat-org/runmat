@@ -69,11 +69,14 @@ impl RemotePoolDriver {
                     artifact: program.artifact.clone(),
                     callable: callable.clone(),
                     requested_outputs: program.requested_outputs,
+                    environment: runmat_execution::EnvironmentSnapshot::default(),
+                    console: None,
                 },
                 ProgramExecutionInputs {
                     schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
                     context: context.clone(),
                     arguments: program.captures.clone(),
+                    objects: Vec::new(),
                 },
             )
             .map_err(protocol)?;
@@ -108,6 +111,8 @@ impl RemotePoolDriver {
                     callable: Callable::for_program("remote-spmd", &callable),
                     host,
                     invocation_context: context,
+                    environment: runmat_execution::EnvironmentSnapshot::default(),
+                    console: None,
                     inputs: program.captures.clone(),
                     outputs: OutputContract {
                         requested_outputs: program.requested_outputs,

@@ -471,7 +471,8 @@ fn named_response_spectrum_generator_materializes_before_the_solve() {
         "function y = design_input(frequency, scale)\narguments\n    frequency (:,1) double\n    scale (1,1) double\nend\ny = scale .* (1 + 0 .* frequency);\nend\n",
     )
     .unwrap();
-    let source = repository.join("docs/simulation/examples/modal-response-spectrum-experimental.fea");
+    let source =
+        repository.join("docs/simulation/examples/modal-response-spectrum-experimental.fea");
     fs::create_dir_all(temp.path().join("geometry")).unwrap();
     fs::copy(
         repository.join("crates/runmat-geometry/io/tests/fixtures/box.brep"),

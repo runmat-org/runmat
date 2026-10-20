@@ -171,6 +171,7 @@ pub struct AnalysisExecutionContext {
     pub scope_id: ExecutionScopeId,
     pub pool_id: PoolId,
     pub program_artifact_id: ArtifactId,
+    pub host: runmat_execution::host::ExecutionHostRequirement,
     pub resources: ResourceRequest,
     pub retry: RetryPolicy,
     pub deadline_unix_millis: Option<u64>,
@@ -255,20 +256,25 @@ pub fn build_analysis_task_submission(
         console: None,
         environment: runmat_execution::EnvironmentSnapshot::default(),
         id: task_id,
+        schema_version: runmat_execution::task::TASK_REQUEST_SCHEMA_VERSION,
         scope_id: context.scope_id,
         pool_id: context.pool_id,
-        program_artifact_id: context.program_artifact_id,
-        callable: Callable {
-            owner_identity: ANALYSIS_EXECUTION_CALLABLE_OWNER.into(),
-            qualified_name: crate::host::ANALYSIS_HOST_ENTRYPOINT.into(),
-            entrypoint_digest: workload.identity.digest(),
-        },
+        executable: runmat_execution::TaskExecutableIdentity::ProgramArtifact(
+            context.program_artifact_id,
+        ),
+        callable: Callable::for_program(
+            ANALYSIS_EXECUTION_CALLABLE_OWNER,
+            &crate::host::analysis_host_callable(),
+        ),
+        host: context.host,
+        invocation_context: runmat_execution::ProgramInvocationContext::Direct,
         inputs: program_roots
             .into_iter()
             .map(|root| runmat_execution::value::ValuePayload::Object(Box::new(root)))
             .collect(),
         outputs: OutputContract {
             requested_outputs: 1,
+            owned_work: None,
         },
         resources: context.resources,
         retry: context.retry,

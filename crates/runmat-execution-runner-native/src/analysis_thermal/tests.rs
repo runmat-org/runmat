@@ -170,6 +170,7 @@ fn execute(
             retry: RetryPolicy::IdempotentInfrastructure,
             deadline_unix_millis: None,
             priority: 0,
+            permitted_trust_tiers: crate::program_host::local_trust(),
         },
     )
     .unwrap();

@@ -21,6 +21,7 @@ fn native_prepared_closure_binds_inputs_and_preserves_legacy_none_submission() {
                 retry: RetryPolicy::IdempotentInfrastructure,
                 deadline_unix_millis: None,
                 priority: 0,
+                permitted_trust_tiers: crate::program_host::local_trust(),
             },
         )
     };

@@ -233,11 +233,11 @@ async fn run_owned_attempt(
     loop {
         if let Some(result) = completion.try_value() {
             return Ok(match result {
-                Ok(AttemptSuccess::Graph { graph }) => {
-                    RemotePoolExecutionOutcome::Completed(RemotePoolExecutionResult::without_objects(
+                Ok(AttemptSuccess::Graph { graph }) => RemotePoolExecutionOutcome::Completed(
+                    RemotePoolExecutionResult::without_objects(
                         ProgramExecutionResponse::GraphSuccess { graph },
-                    ))
-                }
+                    ),
+                ),
                 Ok(_) => RemotePoolExecutionOutcome::Indeterminate(
                     "isolated Graph attempt returned a non-Graph result".into(),
                 ),
@@ -253,9 +253,11 @@ async fn run_owned_attempt(
                 ),
                 Err(TransferFailure::Execution(message))
                 | Err(TransferFailure::Infrastructure(message)) => {
-                    RemotePoolExecutionOutcome::Completed(RemotePoolExecutionResult::without_objects(
-                        ProgramExecutionResponse::Failure { message },
-                    ))
+                    RemotePoolExecutionOutcome::Completed(
+                        RemotePoolExecutionResult::without_objects(
+                            ProgramExecutionResponse::Failure { message },
+                        ),
+                    )
                 }
             });
         }

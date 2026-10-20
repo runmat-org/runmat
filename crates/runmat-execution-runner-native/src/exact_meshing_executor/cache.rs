@@ -159,7 +159,7 @@ impl NativeMeshingStageCache {
             return Ok(());
         };
         let reserve = success
-            .result_objects
+            .result_objects()
             .iter()
             .try_fold(RECEIPT_BYTES, |total, reference| {
                 total.checked_add(reference.encoded_length)
@@ -176,7 +176,7 @@ impl NativeMeshingStageCache {
             &self.index,
             self.objects.0.root(),
             reserve,
-            success.result_objects.len(),
+            success.result_objects().len(),
             &|| control.check(),
         )?
         else {
@@ -226,14 +226,15 @@ impl NativeMeshingStageCache {
                     limits(stage),
                 )
                 .map_err(error)?;
-            if accepted.outputs != success.outputs
+            if accepted.values().map(|(outputs, _)| outputs)
+                != success.values().map(|(outputs, _)| outputs)
                 || accepted
-                    .result_objects
+                    .result_objects()
                     .iter()
                     .filter(|r| r.media_type != runmat_meshing_execution::STAGE_EVIDENCE_MEDIA_TYPE)
                     .collect::<Vec<_>>()
                     != success
-                        .result_objects
+                        .result_objects()
                         .iter()
                         .filter(|r| {
                             r.media_type != runmat_meshing_execution::STAGE_EVIDENCE_MEDIA_TYPE

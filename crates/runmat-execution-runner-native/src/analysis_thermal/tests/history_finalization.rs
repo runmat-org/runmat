@@ -368,6 +368,7 @@ fn check_history_chain(order: ElementOrder, partial_access: PartialAccessPolicy)
                 retry: runmat_execution::task::RetryPolicy::IdempotentInfrastructure,
                 deadline_unix_millis: None,
                 priority: 0,
+                permitted_trust_tiers: crate::program_host::local_trust(),
             },
         )
         .is_err());

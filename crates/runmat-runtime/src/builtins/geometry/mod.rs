@@ -3,7 +3,7 @@
 
 mod class_registration;
 mod conversion;
-mod display;
+pub(crate) mod display;
 mod entrypoints;
 mod errors;
 mod metadata;

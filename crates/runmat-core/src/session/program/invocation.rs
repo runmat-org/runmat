@@ -12,7 +12,7 @@ impl SessionProgramService {
         let owners = unit.original_dependencies().clone();
         let current = Rc::new(unit.clone());
         let previous = user_functions::current_external_function_invoker();
-        user_functions::install_local_external_function_invoker(Rc::new(move |call| {
+        user_functions::install_local_external_function_invoker(Rc::new(move |caller, call| {
             let owner = u32::try_from(call.function).ok().and_then(|id| {
                 let id = ProgramFunctionId(id);
                 owners
@@ -22,11 +22,16 @@ impl SessionProgramService {
             });
             let service = Rc::clone(&service);
             let previous = previous.clone();
-            let runtime = runtime.clone().inherit_same_session_environment();
+            // The caller's context carries its live services; the installer's
+            // context is only the fallback for unscoped dispatch.
+            let runtime = caller
+                .clone()
+                .unwrap_or_else(|| runtime.clone())
+                .inherit_same_session_environment();
             Box::pin(async move {
                 let Some(owner) = owner else {
                     return match previous {
-                        Some(previous) => previous(call).await,
+                        Some(previous) => previous(caller, call).await,
                         None => Err(program_error(
                             "external function has no original compiler owner",
                         )),
@@ -45,6 +50,10 @@ impl SessionProgramService {
                 let runtime = runtime
                     .with_service_ports(ports)
                     .with_program_revision(Some(owner.revision().program_revision.clone()));
+                // Issue session-local source leases for the original owner's program.
+                let runtime = runtime
+                    .with_program_sources(owner.source_map().runtime_records())
+                    .map_err(|error| program_error(error.to_string()))?;
                 let nested_runtime = runtime.clone();
                 runtime
                     .scope(async move {
@@ -56,24 +65,11 @@ impl SessionProgramService {
                                 Some(&owner.source().relative_path),
                                 Some(&owner.source().text),
                             );
-                        let _catalog =
-                            runmat_runtime::source_context::replace_source_catalog_with_fullpaths(
-                                owner
-                                    .source_map()
-                                    .entries()
-                                    .iter()
-                                    .map(|entry| {
-                                        (
-                                            runmat_hir::SourceId(entry.source_id),
-                                            entry.display_name.clone(),
-                                            entry.full_path.clone(),
-                                            entry.text.clone(),
-                                        )
-                                    })
-                                    .collect(),
-                            );
                         let _source_id = runmat_runtime::source_context::replace_current_source_id(
-                            owner.bytecode().source_id,
+                            owner
+                                .bytecode()
+                                .source_id
+                                .and_then(|source| source.resolve_in(&nested_runtime)),
                         );
                         runmat_vm::invoke_semantic_function_value_in_context(
                             call.function,

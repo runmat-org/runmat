@@ -149,13 +149,28 @@ impl PreparedAssessmentProgram {
         use runmat_execution_artifact::ProgramExecutionResponse;
         response.validate_against(&self.request)?;
         let (evaluation, diagnostic) = match response {
-            ProgramExecutionResponse::Success { value } => match decode_assessment_outcome(value) {
-                Ok(outcome) => (AssessmentFunctionEvaluation::Completed(outcome), None),
-                Err(error) => (AssessmentFunctionEvaluation::Failed, Some(error.to_string())),
+            ProgramExecutionResponse::Success { outputs } => match outputs.as_slice() {
+                [value] => match decode_assessment_outcome(value) {
+                    Ok(outcome) => (AssessmentFunctionEvaluation::Completed(outcome), None),
+                    Err(error) => (AssessmentFunctionEvaluation::Failed, Some(error.to_string())),
+                },
+                _ => (
+                    AssessmentFunctionEvaluation::Failed,
+                    Some("assessment must return exactly one logical record".into()),
+                ),
             },
             ProgramExecutionResponse::Failure { message } => {
                 (AssessmentFunctionEvaluation::Failed, Some(message.clone()))
             }
+            ProgramExecutionResponse::RuntimeFailure { failure } => (
+                AssessmentFunctionEvaluation::Failed,
+                Some(failure.message.clone()),
+            ),
+            ProgramExecutionResponse::GraphSuccess { .. }
+            | ProgramExecutionResponse::SpmdSuccess { .. } => (
+                AssessmentFunctionEvaluation::Failed,
+                Some("assessment returned a graph or SPMD result instead of one logical record".into()),
+            ),
             ProgramExecutionResponse::ExternalizedSuccess { .. } => (
                 AssessmentFunctionEvaluation::Failed,
                 Some("assessment returned an object-backed value instead of its bounded logical record".into()),
@@ -180,11 +195,12 @@ pub fn prepare_assessment_program(
     executable: ExecutableUnitEnvelope,
 ) -> AnalysisBridgeResult<PreparedAssessmentProgram> {
     use runmat_execution_artifact::{
-        ProgramExecutionInputs, ProgramExecutionRequest, PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+        ProgramExecutionInputs, ProgramExecutionRequest, PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
     };
     let descriptor = prepare_assessment_descriptor(assessment, revision, callable, executable)?;
     let inputs = ProgramExecutionInputs {
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
+        context: runmat_execution::ProgramInvocationContext::Direct,
         arguments: assessment_inputs(assessment, measured_si)?,
         objects: Vec::new(),
     };
@@ -222,10 +238,11 @@ pub fn build_assessment_task_submission(
     dependencies: BTreeSet<runmat_execution::TaskId>,
     context: crate::named_callable::NamedCallableExecutionContext,
 ) -> AnalysisBridgeResult<runmat_execution_runner::TaskSubmission> {
-    use runmat_execution::task::{Callable, TaskRequest};
+    use runmat_execution::task::TaskRequest;
     use runmat_execution::{OutputContract, TaskId};
     context.resources.validate()?;
     prepared.request.validate_for_portable_host()?;
+    crate::named_callable::validate_program_host(&prepared.request, &context.host)?;
     if !context
         .resources
         .required_capabilities
@@ -240,22 +257,27 @@ pub fn build_assessment_task_submission(
             console: None,
             environment: runmat_execution::EnvironmentSnapshot::default(),
             id: TaskId::derive(&[prepared.identity.bytes()]),
+            schema_version: runmat_execution::task::TASK_REQUEST_SCHEMA_VERSION,
             scope_id: context.scope_id,
             pool_id: context.pool_id,
-            program_artifact_id: runmat_execution::identity::ArtifactId::derive(&[prepared
-                .request
-                .artifact
-                .id
-                .0
-                .bytes()]),
-            callable: Callable {
-                owner_identity: prepared.callable.owner_identity.clone(),
-                qualified_name: prepared.callable.qualified_name.clone(),
-                entrypoint_digest: prepared.identity,
-            },
+            executable: runmat_execution::TaskExecutableIdentity::ProgramArtifact(
+                runmat_execution::identity::ArtifactId::derive(&[prepared
+                    .request
+                    .artifact
+                    .id
+                    .0
+                    .bytes()]),
+            ),
+            callable: crate::named_callable::program_task_callable(
+                &prepared.callable.owner_identity,
+                &prepared.request,
+            ),
+            host: context.host,
+            invocation_context: prepared.request.context.clone(),
             inputs: prepared.request.arguments.clone(),
             outputs: OutputContract {
                 requested_outputs: 1,
+                owned_work: None,
             },
             resources: context.resources,
             retry: context.retry,

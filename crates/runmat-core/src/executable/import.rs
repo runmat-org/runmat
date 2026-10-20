@@ -19,10 +19,17 @@ impl ExecutableUnit {
         let unit = Self::decode_local_product(envelope)?;
         let unit = dependencies::restore(unit, &envelope.dependency_products)?;
         let restored = match envelope.manifest.identity.entrypoint_kind {
-            ExecutableEntrypointKind::Function => {
-                unit.portable_envelope_for_function(envelope.manifest.identity.entrypoint_function)?
-            }
+            ExecutableEntrypointKind::Function => unit.portable_envelope_for_function(
+                envelope
+                    .manifest
+                    .identity
+                    .entrypoint_function
+                    .ok_or("portable function product has no entrypoint function")?,
+            )?,
             ExecutableEntrypointKind::Script => unit.portable_envelope_for_selection(None)?,
+            ExecutableEntrypointKind::DeclarationOnly => {
+                return Err("declaration-only products are not imported for invocation".into())
+            }
         };
         if restored != *envelope {
             return Err("portable dependency closure differs from original inventory".into());
@@ -77,9 +84,19 @@ impl ExecutableUnit {
         let selected = match envelope.manifest.identity.entrypoint_kind {
             ExecutableEntrypointKind::Function => Some((
                 envelope.manifest.identity.entrypoint.clone(),
-                runmat_hir::FunctionId(envelope.manifest.identity.entrypoint_function.0 as usize),
+                runmat_hir::FunctionId(
+                    envelope
+                        .manifest
+                        .identity
+                        .entrypoint_function
+                        .ok_or("portable function product has no entrypoint function")?
+                        .0 as usize,
+                ),
             )),
             ExecutableEntrypointKind::Script => None,
+            ExecutableEntrypointKind::DeclarationOnly => {
+                return Err("declaration-only products are not imported for invocation".into())
+            }
         };
         let restored = unit.portable_local_envelope_for_selection(selected)?;
         let mut local_manifest = envelope.manifest.clone();
