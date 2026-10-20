@@ -10,12 +10,11 @@ use crate::{
 use runmat_geometry_core::GeometryAllocationScope;
 
 use super::{
-    derive_exact_face_feature_collars, independent_candidate_batch,
-    insert_validated_face_refinement_candidates, select_exact_face_refinement_candidates,
-    separate_refinement_candidate, ExactFaceRefinedMesh, ExactFaceRefinedTopology,
-    ExactFaceRefinementCandidate, ExactFaceRefinementContext, ExactFaceRefinementError,
-    ExactFaceRefinementErrorKind, ExactFaceRefinementOutcome, ExactFaceRefinementPolicy,
-    ExactFaceRefinementReason,
+    derive_exact_face_feature_collars, insert_validated_face_refinement_candidates,
+    select_exact_face_refinement_candidates, separate_refinement_candidate, ExactFaceRefinedMesh,
+    ExactFaceRefinedTopology, ExactFaceRefinementCandidate, ExactFaceRefinementContext,
+    ExactFaceRefinementError, ExactFaceRefinementErrorKind, ExactFaceRefinementOutcome,
+    ExactFaceRefinementPolicy, ExactFaceRefinementReason,
 };
 
 #[derive(Clone, Copy)]
@@ -331,12 +330,31 @@ pub(crate) fn refine_exact_face_domain_until_blocked(
                 ));
             }
             let remaining = policy.refinement.maximum_interior_insertions - insertion_count;
-            let mut candidates = independent_candidate_batch(
+            let metric_at = |candidate: &ExactFaceRefinementCandidate| {
+                field
+                    .evaluate_parameterized(
+                        &candidate.source_face_id,
+                        candidate.uv,
+                        domain.parameterization(),
+                        context.evaluator,
+                        context.geometry_control,
+                    )
+                    .map(|evaluation| evaluation.sizing_metric)
+                    .map_err(|error| {
+                        ExactFaceRefinementError::new(
+                            ExactFaceRefinementErrorKind::Metric(error.kind),
+                            &candidate.source_face_id,
+                            error.reason,
+                        )
+                    })
+            };
+            let mut candidates = super::select::independent_candidate_batch_in_metric(
                 classifications.insertions,
                 &geometry,
                 &current.pslg,
                 policy.quality.minimum_metric_edge_length,
                 Some(context.geometry_control),
+                &metric_at,
             )?;
             candidates.truncate(remaining as usize);
             if candidates.is_empty() && !pending_splits.is_empty() {

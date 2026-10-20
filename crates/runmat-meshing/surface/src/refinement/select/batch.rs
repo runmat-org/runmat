@@ -12,12 +12,41 @@ use runmat_meshing_core::quality::spatial_index::SpatialEntry;
 /// Selects a deterministic maximal set of refinement cavities that cannot touch through a
 /// triangle vertex. Inserting circumcenters from adjacent triangles against one stale topology
 /// can manufacture arbitrarily short edges even when every individual candidate is valid.
+#[cfg(test)]
 pub(crate) fn independent_candidate_batch(
     candidates: Vec<ExactFaceRefinementCandidate>,
     geometry: &ExactFaceGeometry,
     pslg: &ExactFacePslg,
     minimum_candidate_separation: f64,
     control: Option<&dyn GeometryEvaluationControl>,
+) -> Result<Vec<ExactFaceRefinementCandidate>, ExactFaceRefinementError> {
+    independent_candidate_batch_in_metric(
+        candidates,
+        geometry,
+        pslg,
+        minimum_candidate_separation,
+        control,
+        &|candidate| {
+            Ok(
+                geometry.triangles[candidate.triangle_index as usize].deviation_samples[3]
+                    .sizing_metric,
+            )
+        },
+    )
+}
+
+/// As `independent_candidate_batch`, measuring separation in the sizing metric that
+/// `metric_at` reports for each candidate. Refinement evaluates the face field at the
+/// candidate itself: sizing graded from edges can vary within one triangle.
+pub(crate) fn independent_candidate_batch_in_metric(
+    candidates: Vec<ExactFaceRefinementCandidate>,
+    geometry: &ExactFaceGeometry,
+    pslg: &ExactFacePslg,
+    minimum_candidate_separation: f64,
+    control: Option<&dyn GeometryEvaluationControl>,
+    metric_at: &dyn Fn(
+        &ExactFaceRefinementCandidate,
+    ) -> Result<crate::ParametricMetricTensor, ExactFaceRefinementError>,
 ) -> Result<Vec<ExactFaceRefinementCandidate>, ExactFaceRefinementError> {
     checkpoint(control, &geometry.source_face_id)?;
     let storage = control.map(GeometryAllocationScope::new);
@@ -83,28 +112,7 @@ pub(crate) fn independent_candidate_batch(
     let mut selected = Vec::<ExactFaceRefinementCandidate>::new();
     for (candidate_index, candidate) in candidates.iter().enumerate() {
         checkpoint(control, &geometry.source_face_id)?;
-        // Sizing may grade within one triangle; separate in the metric at the corner nearest
-        // the candidate, not at a centroid that can lie far from a fine boundary feature.
-        let metric = candidate
-            .triangle
-            .vertex_indices
-            .iter()
-            .map(|vertex| geometry.vertices.get(*vertex as usize))
-            .collect::<Option<Vec<_>>>()
-            .unwrap_or_default()
-            .into_iter()
-            .map(|vertex| &vertex.evaluation)
-            .min_by(|left, right| {
-                let distance = |uv: [f64; 2]| {
-                    (uv[0] - candidate.uv[0]).powi(2) + (uv[1] - candidate.uv[1]).powi(2)
-                };
-                distance(left.uv).total_cmp(&distance(right.uv))
-            })
-            .map(|evaluation| evaluation.sizing_metric)
-            .unwrap_or(
-                geometry.triangles[candidate.triangle_index as usize].deviation_samples[3]
-                    .sizing_metric,
-            );
+        let metric = metric_at(candidate)?;
         let query = spatial::metric_bounds(
             candidate.uv,
             metric,
