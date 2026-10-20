@@ -76,53 +76,65 @@ struct PartitionSpec {
 #[runtime_builtin(
     name = "cvpartition",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::stats::ml::cvpartition"
 )]
 async fn cvpartition_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     first: Value,
     second: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    let admitted = admit_cvpartition(&first, &second, &rest)?;
+    let admitted = admit_cvpartition(&first, &second, rest.view())?;
     let first = gather_value(first).await?;
     let second = gather_value(second).await?;
-    let rest = gather_values(rest).await?;
+    let rest = gather_values(rest, runtime.as_ref()).await?;
     let mut turn = if matches!(admitted.kind, PartitionKind::KFold | PartitionKind::Holdout) {
-        Some(random::acquire_turn(None, CVPARTITION_NAME).await?)
+        Some(random::acquire_turn(runtime.as_ref(), CVPARTITION_NAME).await?)
     } else {
         None
     };
-    let spec = cvpartition_compute(first, second, rest, admitted, turn.as_mut())?;
+    let spec = cvpartition_compute(first, second, rest.view(), admitted, turn.as_mut())?;
     partition_object(spec).map(Value::Object)
 }
 
 #[runtime_builtin(
     name = "training",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::stats::ml::cvpartition"
 )]
-async fn training_builtin(c: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    ensure_mask_extensions(&rest, true)?;
-    let admitted = admit_mask(&c, &rest)?;
-    let output_source = mask_output_source(&rest, "training")?;
+async fn training_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    c: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    ensure_mask_extensions(rest.view(), true)?;
+    let admitted = admit_mask(&c, rest.view())?;
+    let output_source = mask_output_source(rest.view(), "training")?;
     let c = gather_value(c).await?;
-    let rest = gather_values(rest).await?;
-    let output = mask_from_partition(c, rest, admitted, true)?;
+    let rest = gather_values(rest, runtime.as_ref()).await?;
+    let output = mask_from_partition(c, rest.view(), admitted, true)?;
     restore_mask_output(output, output_source.as_ref(), "training")
 }
 
 #[runtime_builtin(
     name = "test",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::stats::ml::cvpartition"
 )]
-async fn test_builtin(c: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    ensure_mask_extensions(&rest, false)?;
-    let admitted = admit_mask(&c, &rest)?;
-    let output_source = mask_output_source(&rest, "test")?;
+async fn test_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    c: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    ensure_mask_extensions(rest.view(), false)?;
+    let admitted = admit_mask(&c, rest.view())?;
+    let output_source = mask_output_source(rest.view(), "test")?;
     let c = gather_value(c).await?;
-    let rest = gather_values(rest).await?;
-    let output = mask_from_partition(c, rest, admitted, false)?;
+    let rest = gather_values(rest, runtime.as_ref()).await?;
+    let output = mask_from_partition(c, rest.view(), admitted, false)?;
     restore_mask_output(output, output_source.as_ref(), "test")
 }
 
@@ -130,12 +142,11 @@ async fn gather_value(value: Value) -> BuiltinResult<Value> {
     gather_if_needed_async(&value).await
 }
 
-async fn gather_values(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(values.len());
-    for value in values {
-        out.push(gather_value(value).await?);
-    }
-    Ok(out)
+async fn gather_values(
+    values: crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    crate::dispatcher::gather_builtin_arguments_async(values, runtime).await
 }
 
 #[cfg(test)]

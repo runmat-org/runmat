@@ -132,7 +132,7 @@ pub(super) fn cdfplot_stats(data: &[f64]) -> BuiltinResult<StructValue> {
             / (n - 1) as f64;
         var.sqrt()
     };
-    let mut stats = StructValue::new();
+    let mut stats = runmat_value::UnboundedStructValueBuilder::new();
     stats
         .fields
         .insert("min".to_string(), Value::Num(values[0]));
@@ -144,5 +144,5 @@ pub(super) fn cdfplot_stats(data: &[f64]) -> BuiltinResult<StructValue> {
         .fields
         .insert("median".to_string(), Value::Num(median));
     stats.fields.insert("std".to_string(), Value::Num(std));
-    Ok(stats)
+    Ok(stats.finish())
 }

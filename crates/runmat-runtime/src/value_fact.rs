@@ -74,7 +74,7 @@ pub fn value_fact(value: &Value) -> ValueFact {
             value
                 .fields
                 .iter()
-                .map(|(name, value)| (name.clone(), value_fact(value)))
+                .map(|(name, value)| (name.to_owned(), value_fact(value)))
                 .collect(),
             true,
         ))),
@@ -89,7 +89,7 @@ pub fn value_fact(value: &Value) -> ValueFact {
                         .map(value_fact)
                         .reduce(|left, right| runmat_types::FactJoin::join(&left, &right))
                         .unwrap_or_else(|| ValueFact::unknown(DynamicReason::RuntimeValue));
-                    (name.clone(), joined)
+                    (name.to_owned(), joined)
                 })
                 .collect();
             dense(
@@ -102,7 +102,7 @@ pub fn value_fact(value: &Value) -> ValueFact {
                             element
                                 .fields
                                 .iter()
-                                .map(|(name, value)| (name.clone(), value_fact(value)))
+                                .map(|(name, value)| (name.to_owned(), value_fact(value)))
                                 .collect()
                         })
                         .collect(),
@@ -134,11 +134,11 @@ pub fn value_fact(value: &Value) -> ValueFact {
             }
         }
         Value::Object(value) => object(
-            value.class_name.clone(),
+            value.class_name().clone(),
             value
-                .properties
+                .properties()
                 .iter()
-                .map(|(name, value)| (name.clone(), value_fact(value)))
+                .map(|(name, value)| (name.to_owned(), value_fact(value)))
                 .collect(),
             true,
             false,
@@ -155,14 +155,14 @@ pub fn value_fact(value: &Value) -> ValueFact {
             shape(value.shape()),
         ),
         Value::HandleObject(value) => object(
-            value.class_name.clone(),
+            value.class_name.as_identity().clone(),
             BTreeMap::new(),
             false,
             true,
             ShapeFact::Scalar,
         ),
         Value::Listener(value) => object(
-            value.target_class_name.clone(),
+            value.target_class_name.as_identity().clone(),
             BTreeMap::new(),
             false,
             true,
@@ -186,7 +186,7 @@ pub fn value_fact(value: &Value) -> ValueFact {
         )),
         Value::Closure(value) => {
             let mut fact = callable_kind(CallableIdentity::DynamicName(SymbolName(
-                value.function_name.clone(),
+                value.function_name.to_string(),
             )));
             fact.captures = value.captures.iter().map(value_fact).collect();
             scalar(ValueKindFact::Callable(fact))
@@ -194,11 +194,11 @@ pub fn value_fact(value: &Value) -> ValueFact {
         Value::ClassRef(name) => scalar(ValueKindFact::ClassReference(
             runmat_types::ClassReferenceFact {
                 class: None,
-                runtime_class: Some(name.clone()),
+                runtime_class: Some(name.as_identity().clone()),
             },
         )),
         Value::MException(value) => scalar(ValueKindFact::Exception(ExceptionFact {
-            identifier: Some(value.identifier.clone()),
+            identifier: Some(value.identifier.to_string()),
         })),
         Value::Future(_) => execution(ExecutionFact::Future {
             output: runmat_types::ValueSequenceFact::single(ValueFact::unknown(

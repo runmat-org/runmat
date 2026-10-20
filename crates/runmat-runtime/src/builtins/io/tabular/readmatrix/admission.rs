@@ -235,7 +235,7 @@ mod tests {
         let error = futures::executor::block_on(super::super::readmatrix_builtin(
             Some(runtime),
             runmat_value::Value::from(absent),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .expect_err("missing stage evidence must deny before source open");
         assert_eq!(

@@ -4,11 +4,11 @@ use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, ObjectInstance, StringArray, Value};
 
 use crate::builtins::strings::common::{scalar_text_input, text_input_admission};
-use crate::builtins::strings::text_analytics::details::add_sentence_details_builtin;
+use crate::builtins::strings::text_analytics::details::add_sentence_details_to_object;
 use crate::builtins::strings::text_analytics::documents::{
     document_token_type_with_options, documents_from_object, options_from_document_object,
-    replace_tokenized_document_documents, text_analytics_error, tokenized_document_language,
-    DocumentTokenType, TOKENIZED_DOCUMENT_CLASS,
+    remove_document_properties, replace_document_properties, replace_tokenized_document_documents,
+    text_analytics_error, tokenized_document_language, DocumentTokenType, TOKENIZED_DOCUMENT_CLASS,
 };
 use crate::{gather_if_needed_async, BuiltinResult};
 
@@ -23,11 +23,32 @@ pub(in crate::builtins::strings::text_analytics) const POS_DETAILS_PROPERTY: &st
 )]
 pub(in crate::builtins::strings::text_analytics) async fn add_part_of_speech_details_builtin(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    let gathered = gather_args(args).await?;
-    let (documents, options) = parse_args(runtime.as_ref(), gathered)?;
-    let mut object = tokenized_document_object(documents)?;
+    let gathered = gather_args(&args, runtime.as_ref()).await?;
+    let (documents, options) = parse_args(runtime.as_ref(), gathered.view())?;
+    let object = tokenized_document_object(documents)?;
+    apply_pos_details(runtime.as_ref(), object, &options)
+        .await
+        .map(Value::Object)
+}
+
+pub(in crate::builtins::strings::text_analytics) async fn add_pos_details_without_retokenizing(
+    runtime: Option<&crate::context::RuntimeContext>,
+    object: ObjectInstance,
+) -> BuiltinResult<ObjectInstance> {
+    let options = AddPosOptions {
+        retokenize_method: RetokenizeMethod::None,
+        ..AddPosOptions::default()
+    };
+    apply_pos_details(runtime, object, &options).await
+}
+
+async fn apply_pos_details(
+    runtime: Option<&crate::context::RuntimeContext>,
+    mut object: ObjectInstance,
+    options: &AddPosOptions,
+) -> BuiltinResult<ObjectInstance> {
     let language = PosLanguage::from_document(&tokenized_document_language(&object))?;
 
     if options.retokenize_method == RetokenizeMethod::PartOfSpeech {
@@ -38,16 +59,17 @@ pub(in crate::builtins::strings::text_analytics) async fn add_part_of_speech_det
             .collect::<Vec<_>>();
         if retokenized != documents {
             replace_tokenized_document_documents(
+                runtime,
                 &mut object,
                 retokenized,
                 "addPartOfSpeechDetails",
             )?;
-            clear_token_aligned_details(&mut object);
+            clear_token_aligned_details(runtime, &mut object)?;
         }
     }
 
-    if !object.properties.contains_key("SentenceNumbers") {
-        object = add_sentence_details_for_pos(runtime.as_ref(), object, &options).await?;
+    if !object.properties().contains_key("SentenceNumbers") {
+        object = add_sentence_details_for_pos(runtime, object, options)?;
     }
 
     let documents = documents_from_object(&object, "addPartOfSpeechDetails")?;
@@ -67,23 +89,29 @@ pub(in crate::builtins::strings::text_analytics) async fn add_part_of_speech_det
             &document_options,
         )?
     };
-    object
-        .properties
-        .insert(POS_DETAILS_PROPERTY.to_string(), pos);
-    Ok(Value::Object(object))
+    let updates = [(POS_DETAILS_PROPERTY, pos)];
+    replace_document_properties(
+        runtime,
+        &mut object,
+        updates.iter().map(|(name, value)| (*name, value)),
+        "addPartOfSpeechDetails",
+    )?;
+    Ok(object)
 }
 
-async fn gather_args(args: Vec<Value>) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(args.len());
-    for arg in args {
-        out.push(gather_if_needed_async(&arg).await.map_err(|err| {
+async fn gather_args(
+    args: &crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    args.try_map_preserving_roots_async(args.len(), runtime, async |index| {
+        gather_if_needed_async(&args[index]).await.map_err(|err| {
             text_analytics_error(
                 "addPartOfSpeechDetails",
                 format!("addPartOfSpeechDetails: failed to gather input: {err}"),
             )
-        })?);
-    }
-    Ok(out)
+        })
+    })
+    .await
 }
 
 #[derive(Clone, Debug)]
@@ -159,7 +187,7 @@ impl PosLanguage {
 
 fn parse_args(
     runtime: Option<&crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<(Value, AddPosOptions)> {
     if args.is_empty() {
         return Err(text_analytics_error(
@@ -221,7 +249,7 @@ fn tokenized_document_object(value: Value) -> BuiltinResult<ObjectInstance> {
             "addPartOfSpeechDetails",
             format!(
                 "addPartOfSpeechDetails: expected tokenizedDocument object, got {}",
-                object.class_name
+                object.class_name()
             ),
         )),
         other => Err(text_analytics_error(
@@ -231,37 +259,32 @@ fn tokenized_document_object(value: Value) -> BuiltinResult<ObjectInstance> {
     }
 }
 
-fn clear_token_aligned_details(object: &mut ObjectInstance) {
-    for property in [
-        "TypeDetails",
-        "SentenceNumbers",
-        "LemmaDetails",
-        POS_DETAILS_PROPERTY,
-        "EntityDetails",
-        "HeadDetails",
-        "DependencyDetails",
-    ] {
-        object.properties.remove(property);
-    }
+fn clear_token_aligned_details(
+    runtime: Option<&crate::context::RuntimeContext>,
+    object: &mut ObjectInstance,
+) -> BuiltinResult<()> {
+    remove_document_properties(
+        runtime,
+        object,
+        [
+            "TypeDetails",
+            "SentenceNumbers",
+            "LemmaDetails",
+            POS_DETAILS_PROPERTY,
+            "EntityDetails",
+            "HeadDetails",
+            "DependencyDetails",
+        ],
+        "addPartOfSpeechDetails",
+    )
 }
 
-async fn add_sentence_details_for_pos(
+fn add_sentence_details_for_pos(
     runtime: Option<&crate::context::RuntimeContext>,
     object: ObjectInstance,
     options: &AddPosOptions,
 ) -> BuiltinResult<ObjectInstance> {
-    let mut args = vec![Value::Object(object)];
-    if let Some(abbreviations) = &options.abbreviations {
-        args.push(Value::string("Abbreviations".to_string()));
-        args.push(abbreviations.clone());
-    }
-    let Value::Object(object) = add_sentence_details_builtin(runtime.cloned(), args).await? else {
-        return Err(text_analytics_error(
-            "addPartOfSpeechDetails",
-            "addPartOfSpeechDetails: addSentenceDetails did not return tokenizedDocument",
-        ));
-    };
-    Ok(object)
+    add_sentence_details_to_object(runtime, object, options.abbreviations.as_ref())
 }
 
 fn part_of_speech_details_cell(
@@ -757,7 +780,7 @@ pub(in crate::builtins::strings::text_analytics) fn part_of_speech_details_from_
     object: &ObjectInstance,
     fn_name: &str,
 ) -> BuiltinResult<Option<Vec<Vec<String>>>> {
-    let Some(value) = object.properties.get(POS_DETAILS_PROPERTY) else {
+    let Some(value) = object.properties().get(POS_DETAILS_PROPERTY) else {
         return Ok(None);
     };
     let Value::Cell(cell) = value else {
@@ -772,8 +795,8 @@ pub(in crate::builtins::strings::text_analytics) fn part_of_speech_details_from_
             format!("{fn_name}: tokenizedDocument object has invalid PartOfSpeechDetails shape"),
         ));
     }
-    let mut out = Vec::with_capacity(cell.data.len());
-    for item in &cell.data {
+    let mut out = Vec::with_capacity(cell.data().len());
+    for item in cell.data() {
         let Value::StringArray(array) = item else {
             return Err(text_analytics_error(
                 fn_name,
@@ -792,7 +815,7 @@ pub(in crate::builtins::strings::text_analytics) fn part_of_speech_details_from_
         }
         out.push(
             array
-                .data
+                .data()
                 .iter()
                 .map(|text| text.as_str().to_owned())
                 .collect(),
@@ -827,7 +850,10 @@ mod tests {
     }
 
     fn run_add_pos(args: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(add_part_of_speech_details_builtin(None, args))
+        futures::executor::block_on(add_part_of_speech_details_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
 
     fn run_token_details(value: Value) -> BuiltinResult<Value> {
@@ -852,7 +878,7 @@ mod tests {
 
     fn string_column(table: &ObjectInstance, name: &str) -> Vec<String> {
         match table_column(table, name) {
-            Value::StringArray(array) => array.data,
+            Value::StringArray(array) => array.data().iter().map(ToString::to_string).collect(),
             other => panic!("expected string column {name}, got {other:?}"),
         }
     }
@@ -947,7 +973,7 @@ mod tests {
             .expect("tokenized"),
         );
         let mut stale = docs.clone();
-        stale.properties.insert(
+        stale.replace_property_unbounded(
             "SentenceNumbers".to_string(),
             Value::Cell(
                 CellArray::new(
@@ -960,7 +986,7 @@ mod tests {
                 .unwrap(),
             ),
         );
-        stale.properties.insert(
+        stale.replace_property_unbounded(
             POS_DETAILS_PROPERTY.to_string(),
             Value::Cell(
                 CellArray::new(
@@ -1019,9 +1045,7 @@ mod tests {
         assert!(err.to_string().contains("unsupported RetokenizeMethod"));
 
         let mut unsupported = object(docs);
-        unsupported
-            .properties
-            .insert("Language".into(), Value::String("fr".into()));
+        unsupported.replace_property_unbounded("Language".into(), Value::String("fr".into()));
         let err = run_add_pos(vec![Value::Object(unsupported)]).expect_err("expected bad language");
         assert!(err.to_string().contains("unsupported document language"));
     }
@@ -1034,9 +1058,7 @@ mod tests {
 
         let docs = object(run_tokenized(vec![Value::String("Guten Morgen.".into())]).unwrap());
         let mut german = docs;
-        german
-            .properties
-            .insert("Language".into(), Value::String("de".into()));
+        german.replace_property_unbounded("Language".into(), Value::String("de".into()));
         let updated = run_add_pos(vec![Value::Object(german)]).expect("german pos");
         let table = object(run_token_details(updated).expect("details"));
         assert_eq!(
@@ -1051,7 +1073,7 @@ mod tests {
         let docs =
             object(run_tokenized(vec![Value::String("dogs run".into())]).expect("tokenized"));
         let mut malformed = docs.clone();
-        malformed.properties.insert(
+        malformed.replace_property_unbounded(
             POS_DETAILS_PROPERTY.to_string(),
             Value::String("bad".into()),
         );
@@ -1072,7 +1094,7 @@ mod tests {
         let docs =
             object(run_tokenized(vec![Value::String("dogs run".into())]).expect("tokenized"));
         let mut malformed = docs.clone();
-        malformed.properties.insert(
+        malformed.replace_property_unbounded(
             POS_DETAILS_PROPERTY.to_string(),
             Value::Cell(
                 CellArray::new(

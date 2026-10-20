@@ -5,13 +5,13 @@ use runmat_value::Value;
 async fn handle_identity_and_delete_impl() {
     let h1 = runmat_runtime::call_builtin_async(
         "new_handle_object",
-        &[Value::String("Point".to_string())],
+        &[Value::String("Point".to_string().into())],
     )
     .await
     .unwrap();
     let h2 = runmat_runtime::call_builtin_async(
         "new_handle_object",
-        &[Value::String("Point".to_string())],
+        &[Value::String("Point".to_string().into())],
     )
     .await
     .unwrap();
@@ -60,20 +60,27 @@ async fn events_addlistener_notify_impl() {
     // Add a simple listener and ensure notify calls do not error
     let obj = runmat_runtime::call_builtin_async(
         "new_handle_object",
-        &[Value::String("Point".to_string())],
+        &[Value::String("Point".to_string().into())],
     )
     .await
     .unwrap();
-    let cb = Value::String("@isvalid".to_string()); // simple callable that accepts the handle
+    let cb = Value::String("@isvalid".to_string().into()); // simple callable that accepts the handle
     let _l = runmat_runtime::call_builtin_async(
         "addlistener",
-        &[obj.value().clone(), Value::String("moved".to_string()), cb],
+        &[
+            obj.value().clone(),
+            Value::String("moved".to_string().into()),
+            cb,
+        ],
     )
     .await
     .unwrap();
     let _ = runmat_runtime::call_builtin_async(
         "notify",
-        &[obj.value().clone(), Value::String("moved".to_string())],
+        &[
+            obj.value().clone(),
+            Value::String("moved".to_string().into()),
+        ],
     )
     .await
     .unwrap();

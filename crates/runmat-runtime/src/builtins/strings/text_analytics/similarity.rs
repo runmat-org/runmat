@@ -627,22 +627,20 @@ fn idf_from_counts(counts: &[f64], rows: usize, cols: usize) -> Vec<f64> {
 
 fn text_model_input(value: &Value) -> BuiltinResult<TextModel> {
     match value {
-        Value::Object(object) if object.class_name == TOKENIZED_DOCUMENT_CLASS => {
+        Value::Object(object) if object.is_class(TOKENIZED_DOCUMENT_CLASS) => {
             let documents = documents_from_object(object, NAME)?;
             text_model_from_documents(&documents)
         }
-        Value::Object(object) if object.class_name == BAG_OF_WORDS_CLASS => TextModel::from_counts(
+        Value::Object(object) if object.is_class(BAG_OF_WORDS_CLASS) => TextModel::from_counts(
             Terms::Words(vocabulary_from_bag(object, NAME)?),
             counts_from_bag(object, NAME)?,
             NAME,
         ),
-        Value::Object(object) if object.class_name == BAG_OF_NGRAMS_CLASS => {
-            TextModel::from_counts(
-                Terms::Ngrams(ngrams_from_bag(object)?),
-                counts_from_ngram_bag(object)?,
-                NAME,
-            )
-        }
+        Value::Object(object) if object.is_class(BAG_OF_NGRAMS_CLASS) => TextModel::from_counts(
+            Terms::Ngrams(ngrams_from_bag(object)?),
+            counts_from_ngram_bag(object)?,
+            NAME,
+        ),
         other => {
             let words = row_word_vector(other)?;
             text_model_from_documents(&[words])
@@ -675,12 +673,12 @@ fn text_model_from_documents(documents: &[Vec<String>]) -> BuiltinResult<TextMod
 
 fn query_documents(value: &Value) -> BuiltinResult<Vec<Vec<String>>> {
     match value {
-        Value::Object(object) if object.class_name == TOKENIZED_DOCUMENT_CLASS => {
+        Value::Object(object) if object.is_class(TOKENIZED_DOCUMENT_CLASS) => {
             documents_from_object(object, NAME)
         }
         Value::Object(object) => Err(similarity_error(format!(
             "cosineSimilarity: query input must be tokenizedDocument or a row word vector, got {}",
-            object.class_name
+            object.class_name()
         ))),
         other => Ok(vec![row_word_vector(other)?]),
     }
@@ -770,7 +768,7 @@ fn counts_for_ngram_queries(
 }
 
 fn counts_from_ngram_bag(object: &ObjectInstance) -> BuiltinResult<Tensor> {
-    match object.properties.get("Counts") {
+    match object.properties().get("Counts") {
         Some(Value::Tensor(tensor)) => Ok(tensor.clone()),
         _ => Err(similarity_error(
             "cosineSimilarity: bagOfNgrams object missing Counts property",
@@ -779,7 +777,7 @@ fn counts_from_ngram_bag(object: &ObjectInstance) -> BuiltinResult<Tensor> {
 }
 
 fn ngrams_from_bag(object: &ObjectInstance) -> BuiltinResult<Vec<Vec<String>>> {
-    let value = object.properties.get("Ngrams").ok_or_else(|| {
+    let value = object.properties().get("Ngrams").ok_or_else(|| {
         similarity_error("cosineSimilarity: bagOfNgrams object missing Ngrams property")
     })?;
     let Value::StringArray(array) = value else {
@@ -791,7 +789,7 @@ fn ngrams_from_bag(object: &ObjectInstance) -> BuiltinResult<Vec<Vec<String>>> {
     for row in 0..array.rows {
         let mut ngram = Vec::new();
         for col in 0..array.cols {
-            let word = array.data[row + col * array.rows].as_str().to_owned();
+            let word = array.data()[row + col * array.rows].as_str().to_owned();
             if !word.is_empty() && !is_missing_string(&word) {
                 ngram.push(word);
             }
@@ -1176,7 +1174,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let mut object = ObjectInstance::new(TOKENIZED_DOCUMENT_CLASS.to_string());
-        object.properties.insert(
+        object.replace_property_unbounded(
             "Documents".to_string(),
             Value::Cell(CellArray::new(values, rows, 1).expect("cell")),
         );
@@ -1251,12 +1249,8 @@ mod tests {
             .expect("words");
         let counts = Tensor::new(vec![2.0, 0.0, 0.0, 1.0], vec![2, 2]).expect("counts");
         let mut object = ObjectInstance::new(BAG_OF_WORDS_CLASS.to_string());
-        object
-            .properties
-            .insert("Vocabulary".to_string(), Value::StringArray(words));
-        object
-            .properties
-            .insert("Counts".to_string(), Value::Tensor(counts));
+        object.replace_property_unbounded("Vocabulary".to_string(), Value::StringArray(words));
+        object.replace_property_unbounded("Counts".to_string(), Value::Tensor(counts));
         let bag = Value::Object(object);
         let query = Value::StringArray(
             StringArray::new(vec!["alpha".to_string()], vec![1, 1]).expect("query"),
@@ -1275,12 +1269,8 @@ mod tests {
         let words = StringArray::new(vec!["alpha".to_string()], vec![1, 1]).expect("words");
         let counts = Tensor::new(vec![1.0], vec![1, 1]).expect("counts");
         let mut object = ObjectInstance::new(BAG_OF_WORDS_CLASS.to_string());
-        object
-            .properties
-            .insert("Vocabulary".to_string(), Value::StringArray(words));
-        object
-            .properties
-            .insert("Counts".to_string(), Value::Tensor(counts));
+        object.replace_property_unbounded("Vocabulary".to_string(), Value::StringArray(words));
+        object.replace_property_unbounded("Counts".to_string(), Value::Tensor(counts));
         let bag = Value::Object(object);
         let err = cosine_similarity_builtin(vec![bag.clone(), bag])
             .await
@@ -1443,7 +1433,7 @@ mod tests {
     fn char_row_to_string_helper_is_not_dead_code() {
         let array = runmat_value::CharArray::new_row("alpha beta");
         assert_eq!(
-            crate::builtins::strings::common::char_row_to_string_slice(&array.data, array.cols, 0),
+            crate::builtins::strings::common::char_row_to_string_slice(array.data(), array.cols, 0),
             "alpha beta"
         );
     }

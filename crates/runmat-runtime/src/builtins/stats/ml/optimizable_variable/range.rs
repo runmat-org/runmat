@@ -187,13 +187,13 @@ fn validate_integer_transform(lower: f64, transform: Transform) -> BuiltinResult
 fn text_categories_from_string_array(
     array: &StringArray,
 ) -> BuiltinResult<Vec<runmat_value::Utf8Text>> {
-    check_categories(array.data.as_slice())?;
-    Ok(array.data.iter().cloned().collect())
+    check_categories(array.data_owner().as_slice())?;
+    Ok(array.data().to_vec())
 }
 
 fn text_categories_from_cell(cell: &CellArray) -> BuiltinResult<Vec<runmat_value::Utf8Text>> {
-    let mut categories = Vec::with_capacity(cell.data.len());
-    for value in &cell.data {
+    let mut categories = Vec::with_capacity(cell.data().len());
+    for value in cell.data() {
         categories.push(parse_text_scalar(value, "Range", &ERROR_INVALID_RANGE)?);
     }
     check_categories(&categories)?;

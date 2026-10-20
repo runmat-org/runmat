@@ -16,7 +16,7 @@ pub(super) use object::{graph_data, infer_node_count_from_nodes};
 pub(super) fn construct_graph(
     name: &'static str,
     directed: bool,
-    args: Vec<Value>,
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<Value> {
     if args.is_empty() {
         return graph_object(GraphData {
@@ -26,14 +26,14 @@ pub(super) fn construct_graph(
             node_count: 0,
         });
     }
-    if is_adjacency_form(&args) && args.len() > 2 {
+    if is_adjacency_form(args) && args.len() > 2 {
         return Err(graph_error(
             name,
             format!("{name}: adjacency construction accepts at most one option or name list"),
         ));
     }
-    if args.len() == 1 || is_adjacency_form(&args) {
-        return graph_from_adjacency(name, directed, &args);
+    if args.len() == 1 || is_adjacency_form(args) {
+        return graph_from_adjacency(name, directed, args);
     }
-    graph_from_edges(name, directed, &args)
+    graph_from_edges(name, directed, args)
 }

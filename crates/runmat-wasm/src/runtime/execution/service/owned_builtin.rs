@@ -356,20 +356,14 @@ impl BrowserExecutionService {
         let (result, report) = match admitted {
             Ok(ProgramExecutionResponse::Success { outputs }) => {
                 let decoded = decode_owned_outputs(&outputs);
-                let report = match AttemptSuccess::new(
-                    &attempt,
-                    outputs,
-                    Vec::new(),
-                    wall_millis,
-                    0,
-                    0,
-                ) {
-                    Ok(result) => AttemptReport::Succeeded { result },
-                    Err(message) => AttemptReport::Failed {
-                        kind: AttemptFailureKind::Rejected,
-                        message,
-                    },
-                };
+                let report =
+                    match AttemptSuccess::new(&attempt, outputs, Vec::new(), wall_millis, 0, 0) {
+                        Ok(result) => AttemptReport::Succeeded { result },
+                        Err(message) => AttemptReport::Failed {
+                            kind: AttemptFailureKind::Rejected,
+                            message,
+                        },
+                    };
                 (decoded, report)
             }
             Ok(ProgramExecutionResponse::RuntimeFailure { failure }) => {

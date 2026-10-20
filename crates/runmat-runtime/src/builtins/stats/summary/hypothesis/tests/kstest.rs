@@ -3,7 +3,13 @@ use super::*;
 fn kstest_default_normal_accepts_centered_sample() {
     let sample = Value::Tensor(Tensor::new(vec![-1.0, -0.25, 0.0, 0.25, 1.0], vec![5, 1]).unwrap());
     let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
-    let outputs = output_list(block_on(kstest_builtin(sample, Vec::new())).unwrap());
+    let outputs = output_list(
+        block_on(kstest_builtin(
+            sample,
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap(),
+    );
     assert_eq!(outputs[0], Value::Bool(false));
     match outputs[1] {
         Value::Num(p) => assert_close(p, 0.973_180_532_073_205, 1.0e-12),
@@ -26,12 +32,12 @@ fn kstest_rejects_shifted_sample_and_supports_tail() {
     let outputs = output_list(
         block_on(kstest_builtin(
             sample,
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::from("Alpha"),
                 Value::Num(0.05),
                 Value::from("Tail"),
                 Value::from("smaller"),
-            ],
+            ]),
         ))
         .unwrap(),
     );
@@ -46,7 +52,10 @@ fn kstest_rejects_shifted_sample_and_supports_tail() {
     let outputs = output_list(
         block_on(kstest_builtin(
             sample,
-            vec![Value::from("Tail"), Value::from("larger")],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("Tail"),
+                Value::from("larger"),
+            ]),
         ))
         .unwrap(),
     );
@@ -62,8 +71,13 @@ fn kstest_accepts_two_column_cdf_table() {
     let sample = Value::Tensor(Tensor::new(vec![0.2, 0.4, 0.6, 0.8], vec![4, 1]).unwrap());
     let cdf = Value::Tensor(Tensor::new(vec![0.0, 0.5, 1.0, 0.0, 0.5, 1.0], vec![3, 2]).unwrap());
     let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
-    let outputs =
-        output_list(block_on(kstest_builtin(sample, vec![Value::from("CDF"), cdf])).unwrap());
+    let outputs = output_list(
+        block_on(kstest_builtin(
+            sample,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from("CDF"), cdf]),
+        ))
+        .unwrap(),
+    );
     assert_eq!(outputs[0], Value::Bool(false));
     match outputs[2] {
         Value::Num(stat) => assert_close(stat, 0.2, 1.0e-12),
@@ -78,7 +92,10 @@ fn kstest_accepts_two_column_cdf_table() {
     let outputs = output_list(
         block_on(kstest_builtin(
             sample,
-            vec![Value::from("CDF"), unsorted_cdf],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("CDF"),
+                unsorted_cdf,
+            ]),
         ))
         .unwrap(),
     );
@@ -90,7 +107,11 @@ fn kstest_accepts_two_column_cdf_table() {
 
     let sample = Value::Tensor(Tensor::new(vec![-0.1, 0.2, 0.4], vec![3, 1]).unwrap());
     let cdf = Value::Tensor(Tensor::new(vec![0.0, 0.5, 1.0, 0.0, 0.5, 1.0], vec![3, 2]).unwrap());
-    let err = block_on(kstest_builtin(sample, vec![Value::from("CDF"), cdf])).unwrap_err();
+    let err = block_on(kstest_builtin(
+        sample,
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("CDF"), cdf]),
+    ))
+    .unwrap_err();
     assert!(err.message.contains("CDF table range"));
 }
 
@@ -104,7 +125,10 @@ fn kstest_rejects_rank_zero_and_rank_one_cdf_tables() {
     ] {
         let error = block_on(kstest_builtin(
             sample(),
-            vec![Value::from("CDF"), Value::Tensor(cdf)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("CDF"),
+                Value::Tensor(cdf),
+            ]),
         ))
         .expect_err("CDF tables must be rank-two");
         assert!(error.message.contains("n-by-2"));
@@ -120,8 +144,11 @@ fn kstest_accepts_rank_zero_and_rank_one_sample_vectors() {
     ] {
         let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         let outputs = output_list(
-            block_on(kstest_builtin(Value::Tensor(sample), Vec::new()))
-                .expect("low-rank sample remains a vector"),
+            block_on(kstest_builtin(
+                Value::Tensor(sample),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+            ))
+            .expect("low-rank sample remains a vector"),
         );
         assert!(matches!(outputs.as_slice(), [Value::Bool(_)]));
     }
@@ -135,8 +162,13 @@ fn kstest_reads_typed_integer_sample_and_cdf_table_exactly() {
     let cdf =
         Value::Cell(runmat_value::CellArray::new(vec![cdf], 1, 1).expect("singleton CDF cell"));
     let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
-    let outputs =
-        output_list(block_on(kstest_builtin(sample, vec![Value::from("CDF"), cdf])).unwrap());
+    let outputs = output_list(
+        block_on(kstest_builtin(
+            sample,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from("CDF"), cdf]),
+        ))
+        .unwrap(),
+    );
     assert_eq!(outputs[0], Value::Bool(false));
     match outputs[2] {
         Value::Num(stat) => assert!(stat.is_finite()),
@@ -262,7 +294,7 @@ fn kstest_rejects_malformed_or_text_only_roles_before_resident_access() {
 
     let err = block_on(kstest_builtin(
         Value::GpuTensor(poison.clone()),
-        vec![Value::from("CDF")],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("CDF")]),
     ))
     .expect_err("arity must reject before resident sample access");
     assert_eq!(err.identifier(), Some("RunMat:kstest:InvalidArgument"));
@@ -271,7 +303,10 @@ fn kstest_rejects_malformed_or_text_only_roles_before_resident_access() {
     let sample = Value::Tensor(Tensor::new(vec![0.0], vec![1, 1]).unwrap());
     let err = block_on(kstest_builtin(
         sample,
-        vec![Value::from("Tail"), Value::GpuTensor(poison.clone())],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("Tail"),
+            Value::GpuTensor(poison.clone()),
+        ]),
     ))
     .expect_err("text-only Tail must reject before resident access");
     drop(poison);
@@ -284,7 +319,10 @@ fn kstest_rejects_bad_options_cdf_and_outputs() {
     let sample = Value::Tensor(Tensor::new(vec![0.0, 1.0, 2.0], vec![3, 1]).unwrap());
     let err = block_on(kstest_builtin(
         sample.clone(),
-        vec![Value::from("Tail"), Value::from("sideways")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("Tail"),
+            Value::from("sideways"),
+        ]),
     ))
     .unwrap_err();
     assert!(err.message.contains("Tail"));
@@ -292,28 +330,43 @@ fn kstest_rejects_bad_options_cdf_and_outputs() {
     let cdf = Value::Tensor(Tensor::new(vec![0.0, 1.0, 0.8, 0.2], vec![2, 2]).unwrap());
     let err = block_on(kstest_builtin(
         sample.clone(),
-        vec![Value::from("CDF"), cdf],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("CDF"), cdf]),
     ))
     .unwrap_err();
     assert!(err.message.contains("nondecreasing"));
 
     let matrix = Value::Tensor(Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![2, 2]).unwrap());
-    let err = block_on(kstest_builtin(matrix, Vec::new())).unwrap_err();
+    let err = block_on(kstest_builtin(
+        matrix,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap_err();
     assert!(err.message.contains("vector"));
 
     let empty = Value::Tensor(Tensor::new(vec![], vec![0, 1]).unwrap());
-    let err = block_on(kstest_builtin(empty, Vec::new())).unwrap_err();
+    let err = block_on(kstest_builtin(
+        empty,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap_err();
     assert!(err.message.contains("non-NaN"));
 
     let all_nan = Value::Tensor(Tensor::new(vec![f64::NAN, f64::NAN], vec![2, 1]).unwrap());
-    let err = block_on(kstest_builtin(all_nan, Vec::new())).unwrap_err();
+    let err = block_on(kstest_builtin(
+        all_nan,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap_err();
     assert!(err.message.contains("non-NaN"));
 
     let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
     let outputs = output_list(
         block_on(kstest_builtin(
             sample.clone(),
-            vec![Value::from("Alpha"), Value::Num(0.5)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("Alpha"),
+                Value::Num(0.5),
+            ]),
         ))
         .unwrap(),
     );
@@ -327,12 +380,12 @@ fn kstest_rejects_bad_options_cdf_and_outputs() {
     let outputs = output_list(
         block_on(kstest_builtin(
             sample.clone(),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::from("Alpha"),
                 Value::Num(0.005),
                 Value::from("Tail"),
                 Value::from("smaller"),
-            ],
+            ]),
         ))
         .unwrap(),
     );
@@ -346,12 +399,12 @@ fn kstest_rejects_bad_options_cdf_and_outputs() {
     let outputs = output_list(
         block_on(kstest_builtin(
             sample.clone(),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::from("Alpha"),
                 Value::Num(0.15),
                 Value::from("Tail"),
                 Value::from("smaller"),
-            ],
+            ]),
         ))
         .unwrap(),
     );
@@ -362,7 +415,11 @@ fn kstest_rejects_bad_options_cdf_and_outputs() {
     drop(_guard);
 
     let _guard = crate::output_count::push_output_count(Some(5)).expect("output-count scope");
-    let err = block_on(kstest_builtin(sample, Vec::new())).unwrap_err();
+    let err = block_on(kstest_builtin(
+        sample,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap_err();
     assert!(err.message.contains("too many output arguments"));
 }
 
@@ -371,10 +428,10 @@ fn kstest_integer_alpha_follows_the_ordinary_open_interval_rule() {
     let sample = Value::Tensor(Tensor::new(vec![0.0, 1.0, 2.0], vec![3, 1]).unwrap());
     let err = block_on(kstest_builtin(
         sample,
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("Alpha"),
             poisoned_integer_scalar(IntegerStorage::U64(vec![1])),
-        ],
+        ]),
     ))
     .unwrap_err();
     assert!(err.message.contains("open interval"));

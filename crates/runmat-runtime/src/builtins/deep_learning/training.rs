@@ -26,7 +26,7 @@ pub(super) use dlupdate::dlupdate_builtin;
 )]
 pub(super) async fn training_options_builtin(
     solver: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     super::errors::admit_single_output(
         "trainingOptions",
@@ -78,7 +78,7 @@ pub(super) async fn training_options_builtin(
         }
         properties.push((runmat_builtins::canonical_training_option_name(&key), value));
     }
-    Ok(object_with_identity(solver.class_identity(), properties))
+    object_with_identity(solver.class_identity(), properties)
 }
 
 #[runtime_builtin(
@@ -86,7 +86,10 @@ pub(super) async fn training_options_builtin(
     binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::training"
 )]
-pub(super) async fn dlarray_builtin(data: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn dlarray_builtin(
+    data: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     super::errors::admit_single_output("dlarray", &runmat_builtins::DLARRAY_INVALID_INPUT)?;
     validate_dlarray_data(&data)?;
     if rest.len() > 1 {
@@ -106,7 +109,7 @@ pub(super) async fn dlarray_builtin(data: Value, rest: Vec<Value>) -> BuiltinRes
             ("Format", Value::string(format.clone())),
             ("Labels", Value::string(format)),
         ],
-    ))
+    )?)
 }
 
 fn validate_dlarray_data(data: &Value) -> BuiltinResult<()> {
@@ -138,7 +141,7 @@ fn validate_dlarray_data(data: &Value) -> BuiltinResult<()> {
 async fn dlfeval_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<crate::execution::RootedValue> {
     dlfeval_in_runtime(runtime.as_ref(), requested_outputs, args).await
 }
@@ -147,13 +150,18 @@ async fn dlfeval_builtin_registered(
 pub(super) async fn dlfeval_builtin(
     args: Vec<Value>,
 ) -> BuiltinResult<crate::execution::RootedValue> {
-    dlfeval_in_runtime(None, crate::output_count::current_output_count(), args).await
+    dlfeval_in_runtime(
+        None,
+        crate::output_count::current_output_count(),
+        crate::builtins::common::test_support::builtin_arguments(args),
+    )
+    .await
 }
 
 async fn dlfeval_in_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
-    mut args: Vec<Value>,
+    mut args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<crate::execution::RootedValue> {
     let Some(function) = args.first() else {
         return Err(super::errors::descriptor_error(
@@ -179,6 +187,6 @@ async fn dlfeval_in_runtime(
     let requested_outputs = requested_outputs.unwrap_or(1);
     // Admission is complete. Move the call arguments into the tape future
     // without an additional whole-tree clone at this boundary.
-    let function = args.remove(0);
+    let function = args.pop_front().expect("validated argument prefix");
     autodiff::with_tape_context(runtime, function, args, requested_outputs).await
 }

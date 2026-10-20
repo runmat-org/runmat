@@ -54,16 +54,24 @@ fn restored_success_rejects_missing_or_substituted_commit_accounting() {
             .as_mut()
             .unwrap();
         match corruption {
-            0 => commit.resources = None,
-            1 => commit.resources.as_mut().unwrap().worker_id = WorkerId::derive(&[b"foreign"]),
-            2 => {
-                commit
-                    .resources
-                    .as_mut()
-                    .unwrap()
-                    .resources
-                    .allocation
-                    .memory_bytes += 1
+            0..=2 => {
+                let runmat_execution_runner::task::AttemptSuccess::Values { resources, .. } =
+                    &mut commit.result
+                else {
+                    panic!("fixture commits a metered value result");
+                };
+                match corruption {
+                    0 => *resources = None,
+                    1 => resources.as_mut().unwrap().worker_id = WorkerId::derive(&[b"foreign"]),
+                    _ => {
+                        resources
+                            .as_mut()
+                            .unwrap()
+                            .resources
+                            .allocation
+                            .memory_bytes += 1
+                    }
+                }
             }
             3 => commit.id = ResultCommitId::derive(&[b"foreign"]),
             4 => commit.driver_fence += 1,
@@ -116,7 +124,12 @@ fn restored_attempt_and_dependencies_must_match_admission() {
         let mut invalid = snapshot.clone();
         let request = &mut invalid.attempts.get_mut(&attempt).unwrap().request;
         match corruption {
-            0 => request.task.callable.qualified_name = "substituted".into(),
+            0 => {
+                request.task.callable.program = runmat_execution::ProgramCallable::semantic(
+                    runmat_execution::ProgramFunctionId(1),
+                    Some("substituted".into()),
+                );
+            }
             1 => request.ordinal += 1,
             2 => request.driver_fence = 0,
             _ => request.scope_id = runmat_execution::ExecutionScopeId::derive(&[b"foreign"]),

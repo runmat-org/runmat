@@ -5,7 +5,7 @@ use runmat_value::{ObjectArray, ObjectInstance, Tensor, Value};
 
 fn object(id: usize) -> Value {
     let mut value = ObjectInstance::new("AssignmentFixture");
-    value.properties.insert("Id".into(), Value::Num(id as f64));
+    value.replace_property_unbounded("Id".into(), Value::Num(id as f64));
     Value::Object(value)
 }
 
@@ -21,7 +21,7 @@ fn ids(value: Value, expected_shape: &[usize]) -> Vec<f64> {
             let Value::Object(value) = value else {
                 panic!("expected value object")
             };
-            let Value::Num(id) = value.properties["Id"] else {
+            let Value::Num(id) = value.properties()["Id"] else {
                 panic!("expected identifier")
             };
             id

@@ -174,12 +174,14 @@ fn public_forward_and_predict_keep_pooling_resident_with_correct_axes() {
     let sequence = block_on(
         crate::builtins::deep_learning::layers::sequence_input_layer_builtin(
             Value::Num(2.0),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ),
     )
     .unwrap();
     let pool = block_on(
-        crate::builtins::deep_learning::layers::global_average_pooling_1d_layer_builtin(vec![]),
+        crate::builtins::deep_learning::layers::global_average_pooling_1d_layer_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ),
     )
     .unwrap();
     let network = block_on(super::super::dlnetwork_builtin(vec![Value::Cell(
@@ -202,22 +204,23 @@ fn public_forward_and_predict_keep_pooling_resident_with_correct_axes() {
             ("Format", Value::String("CBT".into())),
             ("Labels", Value::String("CBT".into())),
         ],
-    );
+    )
+    .expect("fixture object");
     provider.reset_telemetry();
     let Value::Object(forward) = block_on(super::super::forward_builtin(
         network.value().clone(),
         formatted,
-        vec![],
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
     ))
     .unwrap() else {
         panic!("formatted forward output expected")
     };
-    let Some(Value::GpuTensor(forward_data)) = forward.properties.get("Data") else {
+    let Some(Value::GpuTensor(forward_data)) = forward.properties().get("Data") else {
         panic!("resident forward data expected")
     };
     assert_eq!(forward_data.shape(), &[2, 3]);
     assert_eq!(
-        forward.properties.get("Format"),
+        forward.properties().get("Format"),
         Some(&Value::String("CB".into()))
     );
     assert_eq!(forward_data.device_id(), input.device_id());

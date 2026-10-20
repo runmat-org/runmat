@@ -7,25 +7,25 @@ use runmat_value::{NumericDType, Value};
 use crate::BuiltinResult;
 
 pub(super) fn execute(
-    arguments: Vec<Value>,
+    arguments: crate::call::BuiltinArguments,
     kind: FloatingLimitKind,
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
-    match arguments.as_slice() {
-        [] => host::value(
+    match (arguments.len(), arguments.get(0), arguments.get(1)) {
+        (0, _, _) => host::value(
             runmat_types::NumericClass::Double,
             false,
             false,
             kind,
             builtin,
         ),
-        [class] if super::syntax::text(class).is_some() => {
+        (1, Some(class), _) if super::syntax::text(class).is_some() => {
             let text = super::syntax::text(class).expect("guarded text value");
             let class = parse_class(&text, builtin)?;
             host::value(class, false, false, kind, builtin)
         }
-        [_value] if kind == FloatingLimitKind::SpacingAtOne => Err(super::eps::invalid_value()),
-        [keyword, prototype]
+        (1, _, _) if kind == FloatingLimitKind::SpacingAtOne => Err(super::eps::invalid_value()),
+        (2, Some(keyword), Some(prototype))
             if super::syntax::text(keyword)
                 .is_some_and(|text| text.eq_ignore_ascii_case("like")) =>
         {

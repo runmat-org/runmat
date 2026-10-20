@@ -263,9 +263,9 @@ fn is_typed_integer(value: &Value) -> bool {
 fn contains_explicit_gpu(value: &Value) -> bool {
     match value {
         Value::GpuTensor(handle) => runmat_accelerate_api::handle_is_explicit(handle),
-        Value::Cell(cell) => cell.data.iter().any(contains_explicit_gpu),
+        Value::Cell(cell) => cell.data().iter().any(contains_explicit_gpu),
         Value::Struct(value) => value.fields.values().any(contains_explicit_gpu),
-        Value::Object(value) => value.properties.values().any(contains_explicit_gpu),
+        Value::Object(value) => value.properties().values().any(contains_explicit_gpu),
         Value::Closure(value) => value.captures.iter().any(contains_explicit_gpu),
         Value::OutputList(values) => values.iter().any(contains_explicit_gpu),
         _ => false,

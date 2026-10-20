@@ -97,24 +97,51 @@ fn network(layers: Vec<Value>) -> crate::execution::RootedValue {
 #[test]
 fn resident_layers_reject_missing_reverse_capabilities_before_provider_effects() {
     let normalization = network(vec![
-        block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap(),
-        block_on(layer_normalization_layer_builtin(vec![])).unwrap(),
-        block_on(relu_layer_builtin(vec![])).unwrap(),
+        block_on(feature_input_layer_builtin(
+            Value::Num(2.0),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap(),
+        block_on(layer_normalization_layer_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap(),
+        block_on(relu_layer_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap(),
     ]);
     let pooling = network(vec![
-        block_on(sequence_input_layer_builtin(Value::Num(2.0), vec![])).unwrap(),
-        block_on(global_average_pooling_1d_layer_builtin(vec![])).unwrap(),
-        block_on(relu_layer_builtin(vec![])).unwrap(),
+        block_on(sequence_input_layer_builtin(
+            Value::Num(2.0),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap(),
+        block_on(global_average_pooling_1d_layer_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap(),
+        block_on(relu_layer_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap(),
     ]);
     let convolution = network(vec![
-        block_on(sequence_input_layer_builtin(Value::Num(1.0), vec![])).unwrap(),
+        block_on(sequence_input_layer_builtin(
+            Value::Num(1.0),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap(),
         block_on(convolution_1d_layer_builtin(
             Value::Num(2.0),
             Value::Num(1.0),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .unwrap(),
-        block_on(relu_layer_builtin(vec![])).unwrap(),
+        block_on(relu_layer_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap(),
     ]);
     let _lock = crate::builtins::common::test_support::accel_test_lock();
     static FIXTURE: OnceLock<(TestAllocationOwner, RejectAdjoint)> = OnceLock::new();
@@ -146,7 +173,8 @@ fn resident_layers_reject_missing_reverse_capabilities_before_provider_effects()
                 ("Format", Value::String(format.into())),
                 ("Labels", Value::String(format.into())),
             ],
-        );
+        )
+        .expect("fixture object");
         let Value::Object(network) = network.value() else {
             panic!("dlnetwork expected")
         };

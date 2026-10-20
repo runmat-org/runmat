@@ -830,6 +830,30 @@ impl RuntimeContext {
         self.state.local_identity
     }
 
+    pub(in crate::context) fn capture_host_allocation_context(
+        &self,
+    ) -> Option<super::host_allocation::HostAllocationContext> {
+        Some(super::host_allocation::HostAllocationContext::new(
+            Rc::clone(&self.state),
+            Rc::clone(&self.cancellation),
+            Rc::clone(self.services.parallel()?),
+        ))
+    }
+
+    pub(in crate::context) fn capture_host_effect_stage_authority(
+        &self,
+    ) -> super::host_effect::HostEffectStageAuthority {
+        super::host_effect::HostEffectStageAuthority::new(
+            Rc::clone(&self.state),
+            Rc::clone(&self.cancellation),
+            Rc::clone(&self.execution),
+            self.program_revision.clone(),
+            self.services.placement().cloned(),
+            self.services.host_effect_resources().cloned(),
+            self.services.parallel().cloned(),
+        )
+    }
+
     /// Process-local, non-serialized authority for this session's lifetime.
     /// Values and foreign registries must retain only a weak copy.
     pub(crate) fn session_lease(&self) -> std::sync::Weak<()> {
@@ -897,8 +921,8 @@ impl RuntimeContext {
         let callbacks = self.state.plot_callbacks.borrow();
         let root = callbacks.get(&slot)?;
         match &root.value {
-            runmat_value::Value::String(text) => Some(text.clone()),
-            runmat_value::Value::CharArray(chars) => Some(chars.data.iter().collect()),
+            runmat_value::Value::String(text) => Some(text.as_str().to_owned()),
+            runmat_value::Value::CharArray(chars) => Some(chars.data().iter().collect()),
             _ => None,
         }
     }
@@ -928,6 +952,15 @@ impl RuntimeContext {
 
     pub fn cancellation(&self) -> CancellationToken {
         self.cancellation.borrow().clone()
+    }
+
+    /// Bind lifecycle cancellation until the returned scope retires. This
+    /// shares only the token slot, not workspace values or context projections.
+    pub fn scoped_cancellation_token(
+        &self,
+        token: CancellationToken,
+    ) -> super::RuntimeCancellationScope {
+        super::RuntimeCancellationScope::new(Rc::clone(&self.cancellation), token)
     }
 
     pub(crate) fn cancellation_context(&self) -> super::RuntimeCancellationContext {

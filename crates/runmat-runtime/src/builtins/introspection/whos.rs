@@ -20,8 +20,8 @@ use crate::{build_runtime_error, RuntimeError};
     binding_variant = "default",
     builtin_path = "crate::builtins::introspection::whos"
 )]
-async fn whos_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let request = parse_request(&args, WorkspaceQueryOwner::Whos)?;
+async fn whos_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
+    let request = parse_request(args.view(), WorkspaceQueryOwner::Whos)?;
 
     let file_entries = match &request.source {
         WorkspaceQuerySource::File(path) => Some(read_mat_file_for_builtin(path, "whos").await?),
@@ -110,7 +110,9 @@ pub(crate) mod tests {
     use tempfile::tempdir;
 
     fn whos_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::whos_builtin(args))
+        block_on(super::whos_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
 
     runmat_thread_local! {
@@ -168,9 +170,9 @@ pub(crate) mod tests {
             .fields
             .get(field)
             .and_then(|value| match value {
-                Value::String(s) => Some(s.clone()),
+                Value::String(s) => Some(s.to_string()),
                 Value::CharArray(ca) if ca.rows == 1 => {
-                    Some(ca.data.iter().collect::<String>().trim().to_string())
+                    Some(ca.data().iter().collect::<String>().trim().to_string())
                 }
                 _ => None,
             })

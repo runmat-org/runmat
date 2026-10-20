@@ -2261,13 +2261,9 @@ public:
         let metadata = futures::executor::block_on(lane.load(&artifact.module))
             .expect("load async property fixture");
         let mut first = runmat_value::ObjectInstance::new("FixtureValue");
-        first
-            .properties
-            .insert("Value".into(), runmat_value::Value::Num(2.0));
+        first.replace_property_unbounded("Value".into(), runmat_value::Value::Num(2.0));
         let mut second = runmat_value::ObjectInstance::new("FixtureValue");
-        second
-            .properties
-            .insert("Value".into(), runmat_value::Value::Num(4.0));
+        second.replace_property_unbounded("Value".into(), runmat_value::Value::Num(4.0));
         let input_value = runmat_value::Value::ObjectArray(
             runmat_value::ObjectArray::from_objects(
                 "FixtureValue",
@@ -2303,7 +2299,7 @@ public:
             panic!("second property element must remain a value object");
         };
         assert_eq!(
-            second.properties.get("Value"),
+            second.properties().get("Value"),
             Some(&runmat_value::Value::Num(9.0))
         );
     }

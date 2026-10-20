@@ -38,12 +38,12 @@ pub(super) fn parse_range(value: &Value) -> BuiltinResult<RangeSpec> {
     match value {
         Value::String(s) => parse_range_string(s),
         Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data.iter().collect();
+            let text: String = ca.data().iter().collect();
             parse_range_string(&text)
         }
         Value::StringArray(sa) => {
-            if sa.data.len() == 1 {
-                parse_range_string(&sa.data[0])
+            if sa.data().len() == 1 {
+                parse_range_string(&sa.data()[0])
             } else {
                 Err(readmatrix_error_with(
                     &READMATRIX_ERROR_RANGE,

@@ -492,7 +492,7 @@ pub struct IncrementalProgress {
 mod tests {
     use super::*;
     use crate::{GcConfig, GcStats, GenerationalAllocator};
-    use runmat_value::{StructArray, StructValue};
+    use runmat_value::StructArray;
 
     #[test]
     fn test_mark_sweep_collector_creation() {
@@ -624,7 +624,7 @@ mod tests {
         let first_addr = first_target.addr();
         let second_addr = second_target.addr();
         let element = |payload: f64, target| {
-            let mut value = StructValue::new();
+            let mut value = runmat_value::UnboundedStructValueBuilder::with_capacity(2);
             value.insert("payload", Value::Num(payload));
             value.insert(
                 "nested",
@@ -634,7 +634,7 @@ mod tests {
                     valid: true,
                 }),
             );
-            value
+            value.finish()
         };
         let array = StructArray::with_fields(
             vec!["payload".into(), "nested".into()],

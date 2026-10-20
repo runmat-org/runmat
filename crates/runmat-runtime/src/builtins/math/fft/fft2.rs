@@ -90,7 +90,10 @@ fn fft2_error_with_message(
     binding_variant = "default",
     builtin_path = "crate::builtins::math::fft::fft2"
 )]
-async fn fft2_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn fft2_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     crate::builtins::common::validation::reject_typed_complex_integer(&value, "fft2")?;
     if is_wide_integer_value(&value) {
         crate::compatibility::ensure_builtin_extension_enabled(
@@ -111,7 +114,7 @@ async fn fft2_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
             BUILTIN_NAME,
         )?;
     }
-    let lengths = parse_fft2_arguments(&rest)?;
+    let lengths = parse_fft2_arguments(rest.view())?;
     if !rest.is_empty()
         && (lengths.0.is_none()
             || lengths.1.is_none()
@@ -252,7 +255,9 @@ fn fft2_complex_tensor(
     .map_err(|source| fft2_error_with_source(&FFT2_ERROR_INTERNAL, "transform failed", source))
 }
 
-fn parse_fft2_arguments(args: &[Value]) -> BuiltinResult<(Option<usize>, Option<usize>)> {
+fn parse_fft2_arguments(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<(Option<usize>, Option<usize>)> {
     match args.len() {
         0 => Ok((None, None)),
         1 => parse_fft2_single(&args[0]),
@@ -657,6 +662,9 @@ pub(crate) mod tests {
     }
 
     fn fft2_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::fft2_builtin(value, rest))
+        block_on(super::fft2_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 }

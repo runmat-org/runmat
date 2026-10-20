@@ -16,7 +16,7 @@ use runmat_value::{CellArray, CharArray, Value};
     binding_variant = "default",
     builtin_path = "crate::builtins::introspection::identifiers"
 )]
-fn namelengthmax_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+fn namelengthmax_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     if !args.is_empty() {
         return Err(error("namelengthmax", &ERROR_NAMELENGTHMAX_ARG_COUNT));
     }
@@ -28,10 +28,10 @@ fn namelengthmax_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::introspection::identifiers"
 )]
-fn iskeyword_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    match args.as_slice() {
-        [] => keyword_cell(),
-        [value] => Ok(Value::Bool(is_matlab_keyword(&text_scalar(value)?))),
+fn iskeyword_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    match (args.len(), args.first()) {
+        (0, _) => keyword_cell(),
+        (1, Some(value)) => Ok(Value::Bool(is_matlab_keyword(&text_scalar(value)?))),
         _ => Err(error("iskeyword", &ERROR_ISKEYWORD_ARG_COUNT)),
     }
 }
@@ -55,8 +55,10 @@ fn keyword_cell() -> BuiltinResult<Value> {
 fn text_scalar(value: &Value) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.as_str().to_owned()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].as_str().to_owned()),
-        Value::CharArray(chars) if chars.rows <= 1 => Ok(chars.data.iter().collect()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(array.data()[0].as_str().to_owned())
+        }
+        Value::CharArray(chars) if chars.rows <= 1 => Ok(chars.data().iter().collect()),
         _ => Err(error("iskeyword", &ERROR_ISKEYWORD_TEXT)),
     }
 }
@@ -85,28 +87,39 @@ mod tests {
     #[test]
     fn namelengthmax_returns_current_identifier_limit() {
         assert_eq!(
-            namelengthmax_builtin(Vec::new()).expect("namelengthmax"),
+            namelengthmax_builtin(crate::builtins::common::test_support::builtin_arguments(
+                Vec::new()
+            ))
+            .expect("namelengthmax"),
             Value::Num(2048.0)
         );
     }
 
     #[test]
     fn namelengthmax_rejects_arguments() {
-        assert!(namelengthmax_builtin(vec![Value::Num(1.0)]).is_err());
+        assert!(
+            namelengthmax_builtin(crate::builtins::common::test_support::builtin_arguments(
+                vec![Value::Num(1.0)]
+            ))
+            .is_err()
+        );
     }
 
     #[test]
     fn iskeyword_lists_keywords_as_cell_column() {
-        let Value::Cell(cell) = iskeyword_builtin(Vec::new()).expect("iskeyword") else {
+        let Value::Cell(cell) = iskeyword_builtin(
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        )
+        .expect("iskeyword") else {
             panic!("expected cell")
         };
         assert_eq!(cell.shape, vec![20, 1]);
         assert_eq!(
-            cell.data.first(),
+            cell.data().first(),
             Some(&Value::CharArray(CharArray::new_row("break")))
         );
         assert_eq!(
-            cell.data.last(),
+            cell.data().last(),
             Some(&Value::CharArray(CharArray::new_row("while")))
         );
     }
@@ -114,17 +127,25 @@ mod tests {
     #[test]
     fn iskeyword_accepts_string_scalar_and_char_vector() {
         assert_eq!(
-            iskeyword_builtin(vec![Value::String("for".to_string())]).expect("keyword"),
+            iskeyword_builtin(crate::builtins::common::test_support::builtin_arguments(
+                vec![Value::String("for".to_string().into())]
+            ))
+            .expect("keyword"),
             Value::Bool(true)
         );
         assert_eq!(
-            iskeyword_builtin(vec![Value::CharArray(CharArray::new_row("plot"))]).expect("keyword"),
+            iskeyword_builtin(crate::builtins::common::test_support::builtin_arguments(
+                vec![Value::CharArray(CharArray::new_row("plot"))]
+            ))
+            .expect("keyword"),
             Value::Bool(false)
         );
         assert_eq!(
-            iskeyword_builtin(vec![Value::StringArray(
-                StringArray::new(vec!["end".to_string()], vec![1, 1]).expect("string")
-            )])
+            iskeyword_builtin(crate::builtins::common::test_support::builtin_arguments(
+                vec![Value::StringArray(
+                    StringArray::new(vec!["end".to_string()], vec![1, 1]).expect("string")
+                )]
+            ))
             .expect("keyword"),
             Value::Bool(true)
         );
@@ -132,22 +153,37 @@ mod tests {
 
     #[test]
     fn iskeyword_rejects_non_scalar_text_and_other_values() {
-        assert!(iskeyword_builtin(vec![Value::StringArray(
-            StringArray::new(vec!["for".to_string(), "end".to_string()], vec![1, 2])
-                .expect("string array")
-        )])
-        .is_err());
-        assert!(iskeyword_builtin(vec![Value::Num(1.0)]).is_err());
+        assert!(
+            iskeyword_builtin(crate::builtins::common::test_support::builtin_arguments(
+                vec![Value::StringArray(
+                    StringArray::new(vec!["for".to_string(), "end".to_string()], vec![1, 2])
+                        .expect("string array")
+                )]
+            ))
+            .is_err()
+        );
+        assert!(
+            iskeyword_builtin(crate::builtins::common::test_support::builtin_arguments(
+                vec![Value::Num(1.0)]
+            ))
+            .is_err()
+        );
     }
 
     #[test]
     fn identifier_errors_use_their_declared_public_descriptors() {
-        let length = namelengthmax_builtin(vec![Value::Num(1.0)]).unwrap_err();
+        let length = namelengthmax_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
+        )
+        .unwrap_err();
         assert_eq!(
             length.identifier(),
             ERROR_NAMELENGTHMAX_ARG_COUNT.identifier
         );
-        let predicate = iskeyword_builtin(vec![Value::Num(1.0)]).unwrap_err();
+        let predicate = iskeyword_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
+        )
+        .unwrap_err();
         assert_eq!(predicate.identifier(), ERROR_ISKEYWORD_TEXT.identifier);
     }
 }

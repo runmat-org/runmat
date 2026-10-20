@@ -34,10 +34,11 @@ fn arrayfun_text_callable_and_host_scalar_expansion_are_mode_gated() {
 
 #[test]
 fn arrayfun_error_struct_has_only_documented_fields() {
-    let Value::Struct(error) = make_error_struct("RunMat:test:Failure: detail", 4) else {
+    let error = make_error_struct(None, "RunMat:test:Failure: detail", 4).expect("error context");
+    let Value::Struct(error) = error.value() else {
         panic!("expected error struct");
     };
-    let mut fields: Vec<_> = error.fields.keys().map(String::as_str).collect();
+    let mut fields: Vec<_> = error.fields.keys().collect();
     fields.sort_unstable();
     assert_eq!(fields, vec!["identifier", "index", "message"]);
     assert_eq!(error.fields.get("index"), Some(&Value::Num(5.0)));

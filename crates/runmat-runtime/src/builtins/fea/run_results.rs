@@ -58,6 +58,6 @@ pub async fn step_result(run: Value, step_id: String) -> BuiltinResult<Value> {
         FEA_STEP_RUN_RESULT_CLASS,
         &step,
     )?;
-    copy_study_context_property(&run, &mut object);
+    copy_study_context_property(&run, &mut object)?;
     Ok(Value::Object(object))
 }

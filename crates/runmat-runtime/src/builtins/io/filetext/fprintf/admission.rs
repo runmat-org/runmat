@@ -62,7 +62,7 @@ fn numeric_format_row_width(shape: &[usize]) -> Option<usize> {
 
 fn char_format_row_shape(value: &runmat_value::CharArray) -> bool {
     value.rows == 1
-        && value.data.len() == value.cols
+        && value.data().len() == value.cols
         && value
             .shape
             .get(2..)
@@ -165,17 +165,20 @@ pub(super) fn preflight_format(value: &Value) -> BuiltinResult<()> {
     }
 }
 
+#[cfg(test)]
 pub(super) fn coerce_single_integer_string_argument(
     format: crate::builtins::common::format::FormatSummary,
     mut args: Vec<Value>,
 ) -> BuiltinResult<Vec<Value>> {
-    if args.len() != 1 || !format.sole_string_conversion_without_star() {
-        return Ok(args);
+    if args.len() == 1 && format.sole_string_conversion_without_star() {
+        let value = args.pop().expect("single formatting input");
+        args.push(coerce_single_integer_string_value(value)?);
     }
-    let Some(value) = args.pop() else {
-        return Ok(args);
-    };
-    let converted = match value {
+    Ok(args)
+}
+
+pub(super) fn coerce_single_integer_string_value(value: Value) -> BuiltinResult<Value> {
+    Ok(match value {
         Value::Int(value) => Value::string(integer_codes_to_string([value])?),
         Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
             let storage = tensor.integer_storage().expect("checked integer storage");
@@ -187,8 +190,7 @@ pub(super) fn coerce_single_integer_string_argument(
             Value::string(integer_codes_to_string(values)?)
         }
         other => other,
-    };
-    Ok(vec![converted])
+    })
 }
 
 fn integer_codes_to_string(values: impl IntoIterator<Item = IntValue>) -> BuiltinResult<String> {
@@ -215,9 +217,11 @@ fn char_from_int_value(value: &IntValue) -> Option<char> {
 pub(super) fn coerce_to_format_string(value: &Value) -> Result<Option<Value>, String> {
     match value {
         Value::String(s) => Ok(Some(Value::String(s.clone()))),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(Some(Value::String(sa.data[0].clone()))),
+        Value::StringArray(sa) if sa.data().len() == 1 => {
+            Ok(Some(Value::String(sa.data()[0].clone())))
+        }
         Value::CharArray(ca) if char_format_row_shape(ca) => {
-            let s: String = ca.data.iter().collect();
+            let s: String = ca.data().iter().collect();
             Ok(Some(Value::string(s)))
         }
         Value::CharArray(_) => {

@@ -290,9 +290,7 @@ mod tests {
             cpu_millicores: 1_000,
             memory_bytes: 1024,
             scratch_bytes: 1024,
-            accelerator_count: 0,
-            accelerator_class: None,
-            accelerator_memory_bytes: 0,
+            accelerators: Vec::new(),
             maximum_wall_millis: 60_000,
         }
     }

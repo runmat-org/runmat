@@ -23,8 +23,9 @@ use crate::builtins::common::spec::{
 
 use super::common::{tensor_to_surface_grid_matlab_xy, SurfaceDataInput};
 use super::op_common::surface_inputs::{
-    axis_sources_to_host, parse_surface_call_args_matlab_xy, surface_axis_sources_from_xy_values,
-    AxisSource,
+    axis_sources_to_host,
+    parse_surface_source_call_args_matlab_xy as parse_surface_call_args_matlab_xy,
+    surface_axis_sources_from_xy_values, AxisSource,
 };
 use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
@@ -304,7 +305,7 @@ pub async fn mesh_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let style = Arc::new(
         parse_surface_style_args(
             "mesh",
-            &rest,
+            crate::call::FunctionArgumentView::from_slice(&rest),
             SurfaceStyleDefaults::new(
                 ColorMap::Turbo,
                 ShadingMode::Faceted,

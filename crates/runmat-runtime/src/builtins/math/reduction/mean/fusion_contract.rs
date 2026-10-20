@@ -17,7 +17,10 @@ fn prepare(controls: FusionReductionControls<'_>) -> FusionReductionPrepareFutur
         if !controls.supported() {
             return Ok(None);
         }
-        let parsed = parse_arguments(controls.values).await?;
+        let parsed = parse_arguments(crate::call::FunctionArgumentView::from_slice(
+            controls.values,
+        ))
+        .await?;
         if parsed.weights.is_some() {
             return Ok(None);
         }
@@ -215,7 +218,11 @@ mod tests {
             Value::Tensor(Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap()),
             Value::String("native".into()),
         ];
-        let actual = futures::executor::block_on(mean_builtin(value, controls.to_vec())).unwrap();
+        let actual = futures::executor::block_on(mean_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(controls.to_vec()),
+        ))
+        .unwrap();
         let mut output = value_fact(&actual);
         output.storage = runmat_types::StorageFact::Unknown;
         let certify = |input: &runmat_types::ValueFact| {
@@ -248,7 +255,11 @@ mod tests {
         assert_eq!(contract.accumulator_class, NumericClass::Double);
         assert_eq!(contract.output_class, NumericClass::Single);
         assert_eq!(contract.count, FusionReductionCount::SliceLength);
-        let actual = futures::executor::block_on(mean_builtin(input.clone(), vec![])).unwrap();
+        let actual = futures::executor::block_on(mean_builtin(
+            input.clone(),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap();
         let Value::Tensor(actual) = actual else {
             panic!("Single mean must retain typed carrier");
         };
@@ -261,9 +272,11 @@ mod tests {
         assert_eq!(double.output_class, NumericClass::Double);
         let scalar = single(vec![-0.0], vec![1, 1]);
         assert!(receipt(&scalar, &[]).unwrap().identity);
-        let Value::Tensor(result) =
-            futures::executor::block_on(mean_builtin(scalar, vec![])).unwrap()
-        else {
+        let Value::Tensor(result) = futures::executor::block_on(mean_builtin(
+            scalar,
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap() else {
             panic!("Single mean");
         };
         assert!(result.materialize_f64()[0].is_sign_negative());
@@ -323,10 +336,11 @@ mod tests {
         let one = stages(&input, &[Value::Num(3.0)]).unwrap();
         assert_eq!(one[0].output_shape, vec![1, 1]);
         assert_eq!(one[0].output_class, NumericClass::Single);
-        let Value::Tensor(one_actual) =
-            futures::executor::block_on(mean_builtin(input.clone(), vec![Value::Num(3.0)]))
-                .unwrap()
-        else {
+        let Value::Tensor(one_actual) = futures::executor::block_on(mean_builtin(
+            input.clone(),
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(3.0)]),
+        ))
+        .unwrap() else {
             panic!("Single one-element mean is republished as a tensor");
         };
         assert_eq!(one_actual.shape(), one[0].output_shape);
@@ -336,10 +350,11 @@ mod tests {
         assert_eq!(pair[1].input_shape, vec![1, 1, 1]);
         assert_eq!(pair[1].output_shape, vec![1, 1]);
         assert_eq!(pair[1].output_class, NumericClass::Single);
-        let Value::Tensor(pair_actual) =
-            futures::executor::block_on(mean_builtin(input.clone(), vec![axes(vec![3.0, 4.0])]))
-                .unwrap()
-        else {
+        let Value::Tensor(pair_actual) = futures::executor::block_on(mean_builtin(
+            input.clone(),
+            crate::builtins::common::test_support::builtin_arguments(vec![axes(vec![3.0, 4.0])]),
+        ))
+        .unwrap() else {
             panic!("Single vecdim publication remains a tensor");
         };
         assert_eq!(pair_actual.shape(), pair[1].output_shape);
@@ -351,7 +366,10 @@ mod tests {
         assert_eq!(double[1].output_shape, vec![1, 1]);
         let double_actual = futures::executor::block_on(mean_builtin(
             input,
-            vec![axes(vec![3.0, 4.0]), Value::String("double".into())],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                axes(vec![3.0, 4.0]),
+                Value::String("double".into()),
+            ]),
         ))
         .unwrap();
         assert!(matches!(double_actual, Value::Num(4.0)));

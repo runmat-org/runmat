@@ -16,8 +16,8 @@ fn typed_integer_blocks_and_partitions_preserve_exact_values() {
         panic!("expected cell array");
     };
     assert_eq!(cells.shape, vec![2, 1]);
-    assert_eq!(cells.data[0], Value::Int(IntValue::U64(u64::MAX - 1)));
-    assert_eq!(cells.data[1], Value::Int(IntValue::U64(u64::MAX)));
+    assert_eq!(cells.data()[0], Value::Int(IntValue::U64(u64::MAX - 1)));
+    assert_eq!(cells.data()[1], Value::Int(IntValue::U64(u64::MAX)));
 }
 
 #[test]
@@ -40,7 +40,7 @@ fn typed_integer_partition_vectors_follow_extension_policy() {
         let Value::Cell(cells) = result else {
             panic!("expected cell array");
         };
-        assert_eq!(cells.data, vec![Value::Int(IntValue::U64(u64::MAX))]);
+        assert_eq!(cells.data(), vec![Value::Int(IntValue::U64(u64::MAX))]);
     }
 }
 

@@ -80,7 +80,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::strings::core::num2str"
 )]
-async fn num2str_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn num2str_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &NUM2STR_DESCRIPTOR,
         &NUM2STR_ERROR_TOO_MANY_OUTPUTS,
@@ -172,7 +175,7 @@ enum NumericData {
     },
 }
 
-async fn parse_options(args: Vec<Value>) -> BuiltinResult<FormatOptions> {
+async fn parse_options(args: crate::call::BuiltinArguments) -> BuiltinResult<FormatOptions> {
     if args.len() > 2 {
         return Err(num2str_error_with_message(
             "num2str: too many input arguments",
@@ -356,11 +359,11 @@ fn validate_precision(value: i64) -> BuiltinResult<()> {
 fn value_to_text(value: &Value) -> Option<std::borrow::Cow<'_, str>> {
     match value {
         Value::String(s) => Some(std::borrow::Cow::Borrowed(s.as_str())),
-        Value::StringArray(sa) if sa.data.len() == 1 => {
-            Some(std::borrow::Cow::Borrowed(sa.data[0].as_str()))
+        Value::StringArray(sa) if sa.data().len() == 1 => {
+            Some(std::borrow::Cow::Borrowed(sa.data()[0].as_str()))
         }
         Value::CharArray(ca) if ca.rows == 1 => {
-            Some(std::borrow::Cow::Owned(ca.data.iter().collect()))
+            Some(std::borrow::Cow::Owned(ca.data().iter().collect()))
         }
         _ => None,
     }
@@ -1276,7 +1279,10 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
 
     fn num2str_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(super::num2str_builtin(value, rest))
+        futures::executor::block_on(super::num2str_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
     use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, Tensor};
 
@@ -1291,7 +1297,7 @@ pub(crate) mod tests {
         let out = num2str_builtin(value, Vec::new()).expect("num2str");
         match out {
             Value::CharArray(ca) => {
-                let text: String = ca.data.iter().collect();
+                let text: String = ca.data().iter().collect();
                 assert_eq!(ca.rows, 1);
                 assert!(text.starts_with("3.1415926535897"));
             }
@@ -1306,7 +1312,7 @@ pub(crate) mod tests {
         let out = num2str_builtin(value, vec![Value::Int(IntValue::I32(4))]).expect("num2str");
         match out {
             Value::CharArray(ca) => {
-                let text: String = ca.data.iter().collect();
+                let text: String = ca.data().iter().collect();
                 assert_eq!(text.trim(), "3.142");
             }
             other => panic!("expected char array, got {other:?}"),
@@ -1344,7 +1350,7 @@ pub(crate) mod tests {
                 assert_eq!(ca.rows, 2);
                 assert_eq!(ca.cols, 11);
                 let rows: Vec<String> = ca
-                    .data
+                    .data()
                     .chunks(ca.cols)
                     .map(|chunk| chunk.iter().collect())
                     .collect();
@@ -1359,11 +1365,11 @@ pub(crate) mod tests {
     #[test]
     fn num2str_custom_format() {
         let tensor = Tensor::new(vec![1.234, 5.678], vec![1, 2]).expect("tensor");
-        let fmt = Value::String("%.2f".to_string());
+        let fmt = Value::String("%.2f".to_string().into());
         let out = num2str_builtin(Value::Tensor(tensor), vec![fmt]).expect("num2str");
         match out {
             Value::CharArray(ca) => {
-                let text: String = ca.data.iter().collect();
+                let text: String = ca.data().iter().collect();
                 assert_eq!(text, "1.23  5.68");
             }
             other => panic!("expected char array, got {other:?}"),
@@ -1377,7 +1383,7 @@ pub(crate) mod tests {
             .expect("default integer format");
         match scalar {
             Value::CharArray(ca) => {
-                let text: String = ca.data.iter().collect();
+                let text: String = ca.data().iter().collect();
                 assert_eq!(text, "1.84467440737096e+19");
             }
             other => panic!("expected char array, got {other:?}"),
@@ -1390,7 +1396,7 @@ pub(crate) mod tests {
         .expect("fixed integer format");
         match fixed {
             Value::CharArray(ca) => {
-                let text: String = ca.data.iter().collect();
+                let text: String = ca.data().iter().collect();
                 assert_eq!(text, format!("{}.00", u64::MAX));
             }
             other => panic!("expected char array, got {other:?}"),
@@ -1403,7 +1409,7 @@ pub(crate) mod tests {
         .expect("precision integer format");
         match rounded {
             Value::CharArray(ca) => {
-                let text: String = ca.data.iter().collect();
+                let text: String = ca.data().iter().collect();
                 assert_eq!(text, "1.845e+19");
             }
             other => panic!("expected char array, got {other:?}"),
@@ -1417,7 +1423,7 @@ pub(crate) mod tests {
         let out = num2str_builtin(Value::ComplexTensor(complex), Vec::new()).expect("num2str");
         match out {
             Value::CharArray(ca) => {
-                let text: String = ca.data.iter().collect();
+                let text: String = ca.data().iter().collect();
                 assert_eq!(text, "3 + 4i  5 - 6i");
             }
             other => panic!("expected char array, got {other:?}"),
@@ -1435,7 +1441,7 @@ pub(crate) mod tests {
             panic!("expected char array");
         };
         assert_eq!((real_scalar.rows, real_scalar.cols), (1, 1));
-        assert_eq!(real_scalar.data, vec!['7']);
+        assert_eq!(real_scalar.data(), vec!['7']);
 
         let Value::CharArray(real_vector) = num2str_builtin(
             Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2]).unwrap()),
@@ -1445,7 +1451,7 @@ pub(crate) mod tests {
             panic!("expected char array");
         };
         assert_eq!((real_vector.rows, real_vector.cols), (2, 1));
-        assert_eq!(real_vector.data, vec!['1', '2']);
+        assert_eq!(real_vector.data(), vec!['1', '2']);
 
         let Value::CharArray(complex_scalar) = num2str_builtin(
             Value::ComplexTensor(ComplexTensor::new(vec![(7.0, 1.0)], Vec::new()).unwrap()),
@@ -1455,7 +1461,7 @@ pub(crate) mod tests {
             panic!("expected char array");
         };
         assert_eq!((complex_scalar.rows, complex_scalar.cols), (0, 0));
-        assert!(complex_scalar.data.is_empty());
+        assert!(complex_scalar.data().is_empty());
 
         let Value::CharArray(complex_vector) = num2str_builtin(
             Value::ComplexTensor(
@@ -1468,7 +1474,7 @@ pub(crate) mod tests {
         };
         assert_eq!(complex_vector.rows, 1);
         assert_eq!(
-            complex_vector.data.iter().collect::<String>(),
+            complex_vector.data().iter().collect::<String>(),
             "1 + 2i  3 + 4i"
         );
     }
@@ -1487,7 +1493,7 @@ pub(crate) mod tests {
         let out = num2str_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("num2str");
         match out {
             Value::CharArray(ca) => {
-                let text: String = ca.data.iter().collect();
+                let text: String = ca.data().iter().collect();
                 assert_eq!(text, "1.84467440737096e+19 + 7i  9.00719925474099e+15");
             }
             other => panic!("expected char array, got {other:?}"),
@@ -1507,12 +1513,12 @@ pub(crate) mod tests {
 
         let out = num2str_builtin(
             Value::ComplexTensor(tensor),
-            vec![Value::String("%.0f".to_string())],
+            vec![Value::String("%.0f".to_string().into())],
         )
         .expect("num2str");
         match out {
             Value::CharArray(ca) => {
-                let text: String = ca.data.iter().collect();
+                let text: String = ca.data().iter().collect();
                 assert_eq!(text, format!("{} + 7i  9007199254740993", u64::MAX));
             }
             other => panic!("expected char array, got {other:?}"),
@@ -1535,7 +1541,7 @@ pub(crate) mod tests {
         }
         match out {
             Value::CharArray(ca) => {
-                let text: String = ca.data.iter().collect();
+                let text: String = ca.data().iter().collect();
                 assert_eq!(text, "0,5");
             }
             other => panic!("expected char array, got {other:?}"),
@@ -1549,7 +1555,7 @@ pub(crate) mod tests {
         let out = num2str_builtin(Value::LogicalArray(logical), Vec::new()).expect("num2str");
         match out {
             Value::CharArray(ca) => {
-                let text: String = ca.data.iter().collect();
+                let text: String = ca.data().iter().collect();
                 assert_eq!(text, "1  0  1");
             }
             other => panic!("expected char array, got {other:?}"),
@@ -1570,7 +1576,7 @@ pub(crate) mod tests {
                 .expect("num2str");
             match out {
                 Value::CharArray(ca) => {
-                    let text: String = ca.data.iter().collect();
+                    let text: String = ca.data().iter().collect();
                     assert_eq!(text, "10.5  20.5");
                 }
                 other => panic!("expected char array, got {other:?}"),
@@ -1621,14 +1627,14 @@ pub(crate) mod tests {
         let bounded_width = error_message(
             num2str_builtin(
                 Value::Num(1.0),
-                vec![Value::String(format!("%{}f", MAX_FORMAT_FIELD + 1))],
+                vec![Value::String(format!("%{}f", MAX_FORMAT_FIELD + 1).into())],
             )
             .unwrap_err(),
         );
         assert!(bounded_width.contains("format width exceeds"));
         let at_limit = num2str_builtin(
             Value::Num(1.0),
-            vec![Value::String(format!("%{}f", MAX_FORMAT_FIELD))],
+            vec![Value::String(format!("%{}f", MAX_FORMAT_FIELD).into())],
         )
         .expect("supported format width");
         let Value::CharArray(chars) = at_limit else {

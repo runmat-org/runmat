@@ -123,28 +123,33 @@ fn adamupdate_payload_preserves_native_single_representation() {
 fn adamupdate_admission_preserves_exact_rank_zero_and_one_payload_shapes() {
     let empty = || Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap());
     for (shape, data) in [(vec![], vec![1.0]), (vec![2], vec![1.0, 2.0])] {
-        let args = AdamUpdateArgs::parse(vec![
+        let values = vec![
             Value::Tensor(Tensor::new(data.clone(), shape.clone()).unwrap()),
             Value::Tensor(Tensor::new(vec![0.1; data.len()], shape.clone()).unwrap()),
             empty(),
             empty(),
             Value::Num(1.0),
-        ])
+        ];
+        let args = AdamUpdateArgs::parse(
+            crate::call::BuiltinArguments::from_borrowed(&values, None).unwrap(),
+        )
         .unwrap();
         assert_eq!(args.parameters.shape, shape);
         assert_eq!(args.gradient.shape, shape);
         assert_eq!(args.average_grad.shape, shape);
         assert_eq!(args.average_sq_grad.shape, shape);
     }
-    let error = AdamUpdateArgs::parse(vec![
+    let values = vec![
         Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2]).unwrap()),
         Value::Tensor(Tensor::new(vec![0.1, 0.2], vec![1, 2]).unwrap()),
         empty(),
         empty(),
         Value::Num(1.0),
-    ])
-    .err()
-    .unwrap();
+    ];
+    let error =
+        AdamUpdateArgs::parse(crate::call::BuiltinArguments::from_borrowed(&values, None).unwrap())
+            .err()
+            .unwrap();
     assert!(error.message().contains("grad"));
 }
 
@@ -168,14 +173,17 @@ fn adamupdate_gpu_inputs_return_resident_outputs() {
 
         provider.reset_telemetry();
         let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
-        let out = block_on(adamupdate_builtin(vec![
-            Value::GpuTensor(parameters),
-            Value::GpuTensor(gradient),
-            Value::Tensor(empty.clone()),
-            Value::Tensor(empty),
-            Value::Num(1.0),
-            Value::Num(0.01),
-        ]))
+        let out = block_on(adamupdate_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::GpuTensor(parameters),
+                Value::GpuTensor(gradient),
+                Value::Tensor(empty.clone()),
+                Value::Tensor(empty),
+                Value::Num(1.0),
+                Value::Num(0.01),
+            ]),
+        ))
         .expect("adamupdate gpu");
 
         let Value::OutputList(values) = out else {
@@ -229,13 +237,16 @@ fn adamupdate_resident_results_inherit_explicit_input_intent() {
         let empty = Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap());
         provider.reset_telemetry();
         let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
-        let result = block_on(adamupdate_builtin(vec![
-            Value::GpuTensor(parameters.clone()),
-            Value::GpuTensor(gradient.clone()),
-            empty.clone(),
-            empty,
-            Value::Num(1.0),
-        ]))
+        let result = block_on(adamupdate_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::GpuTensor(parameters.clone()),
+                Value::GpuTensor(gradient.clone()),
+                empty.clone(),
+                empty,
+                Value::Num(1.0),
+            ]),
+        ))
         .unwrap();
         let Value::OutputList(values) = result else {
             panic!("expected three results")
@@ -276,13 +287,16 @@ fn adamupdate_explicit_single_rejects_unsupported_provider_without_download() {
             .unwrap();
         let empty = Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap());
         provider.reset_telemetry();
-        let error = block_on(adamupdate_builtin(vec![
-            Value::GpuTensor(parameters.clone()),
-            Value::GpuTensor(gradient.clone()),
-            empty.clone(),
-            empty,
-            Value::Num(1.0),
-        ]))
+        let error = block_on(adamupdate_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::GpuTensor(parameters.clone()),
+                Value::GpuTensor(gradient.clone()),
+                empty.clone(),
+                empty,
+                Value::Num(1.0),
+            ]),
+        ))
         .unwrap_err();
         assert_eq!(error.identifier(), Some("RunMat:deepLearning:Unsupported"));
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
@@ -313,13 +327,16 @@ fn adamupdate_single_resident_inputs_fall_back_without_widening_class() {
 
         provider.reset_telemetry();
         let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
-        let result = block_on(adamupdate_builtin(vec![
-            Value::GpuTensor(parameters),
-            Value::GpuTensor(gradient),
-            Value::Tensor(empty.clone()),
-            Value::Tensor(empty),
-            Value::Num(1.0),
-        ]))
+        let result = block_on(adamupdate_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::GpuTensor(parameters),
+                Value::GpuTensor(gradient),
+                Value::Tensor(empty.clone()),
+                Value::Tensor(empty),
+                Value::Num(1.0),
+            ]),
+        ))
         .expect("single storage host fallback");
         let Value::OutputList(values) = result else {
             panic!("expected three optimizer outputs");
@@ -366,13 +383,16 @@ fn adamupdate_gpu_single_output_frees_state_outputs() {
             .expect("upload averageSqGrad");
 
         let _guard = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
-        let out = block_on(adamupdate_builtin(vec![
-            Value::GpuTensor(parameters),
-            Value::GpuTensor(gradient),
-            Value::GpuTensor(average_grad),
-            Value::GpuTensor(average_sq_grad),
-            Value::Num(1.0),
-        ]))
+        let out = block_on(adamupdate_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::GpuTensor(parameters),
+                Value::GpuTensor(gradient),
+                Value::GpuTensor(average_grad),
+                Value::GpuTensor(average_sq_grad),
+                Value::Num(1.0),
+            ]),
+        ))
         .expect("adamupdate gpu");
 
         let Value::OutputList(values) = out else {

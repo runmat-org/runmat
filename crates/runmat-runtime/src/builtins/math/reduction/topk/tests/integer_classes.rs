@@ -52,9 +52,13 @@ async fn topk_preserves_every_integer_class_and_returns_double_indices() {
             let input = Value::Tensor(
                 Tensor::new_integer(input.clone(), vec![3, 1]).expect("integer input"),
             );
-            let evaluation = evaluate_topk(kind, input, &[Value::Num(2.0)])
-                .await
-                .expect("topk");
+            let evaluation = evaluate_topk(
+                kind,
+                input,
+                crate::call::FunctionArgumentView::from_slice(&[Value::Num(2.0)]),
+            )
+            .await
+            .expect("topk");
             let Value::Tensor(output) = evaluation.values else {
                 panic!("expected typed tensor output");
             };

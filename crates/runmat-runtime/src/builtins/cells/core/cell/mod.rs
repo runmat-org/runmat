@@ -23,7 +23,7 @@ pub(crate) use spec::{
     binding_variant = "default",
     builtin_path = "crate::builtins::cells::core::cell"
 )]
-async fn cell_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn cell_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &runmat_builtins::CELL_DESCRIPTOR,
         &runmat_builtins::CELL_ERROR_TOO_MANY_OUTPUTS,

@@ -1,6 +1,8 @@
 use super::*;
 
-pub(super) async fn parse_params(rest: &[Value]) -> BuiltinResult<GauspulsParams> {
+pub(super) async fn parse_params(
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<GauspulsParams> {
     if rest.len() > 3 {
         return Err(gauspuls_error_with_detail(
             &GAUSPULS_ERROR_ARG_COUNT,
@@ -64,10 +66,10 @@ pub(super) async fn scalar_parameter(value: &Value, label: &str) -> BuiltinResul
 pub(super) fn text_scalar(value: &Value) -> Option<String> {
     match value {
         Value::String(text) => Some(text.as_str().to_owned()),
-        Value::StringArray(array) if array.data.len() == 1 => {
-            Some(array.data[0].as_str().to_owned())
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Some(array.data()[0].as_str().to_owned())
         }
-        Value::CharArray(array) if array.rows == 1 => Some(array.data.iter().collect()),
+        Value::CharArray(array) if array.rows == 1 => Some(array.data().iter().collect()),
         _ => None,
     }
 }

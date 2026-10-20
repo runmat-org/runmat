@@ -140,7 +140,7 @@ pub(super) enum WeightingInput {
     Pending(Value),
 }
 
-pub(super) fn parse_header(rest: Vec<Value>) -> BuiltinResult<LscovArguments> {
+pub(super) fn parse_header(rest: crate::call::BuiltinArguments) -> BuiltinResult<LscovArguments> {
     let mut arguments = rest.into_iter();
     let first = arguments.next();
     let second = arguments.next();

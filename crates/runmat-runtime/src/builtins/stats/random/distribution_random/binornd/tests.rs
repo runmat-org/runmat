@@ -40,10 +40,12 @@ fn tensor_data(value: Value) -> Vec<f64> {
 #[test]
 fn accepts_scalar_expansion_and_explicit_size_forms() {
     let _guard = reset();
-    let output = block_on(binornd_builtin(vec![
-        Value::Tensor(Tensor::new(vec![5.0, 10.0], vec![1, 2]).unwrap()),
-        Value::Num(0.5),
-    ]))
+    let output = block_on(binornd_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Tensor(Tensor::new(vec![5.0, 10.0], vec![1, 2]).unwrap()),
+            Value::Num(0.5),
+        ]),
+    ))
     .expect("scalar-expanded binornd");
     let Value::Tensor(output) = output else {
         panic!("expected tensor output");
@@ -52,12 +54,14 @@ fn accepts_scalar_expansion_and_explicit_size_forms() {
     assert!((0.0..=5.0).contains(&output.materialize_f64()[0]));
     assert!((0.0..=10.0).contains(&output.materialize_f64()[1]));
 
-    let output = block_on(binornd_builtin(vec![
-        Value::Num(10.0),
-        Value::Num(0.5),
-        Value::Num(2.0),
-        Value::Num(4.0),
-    ]))
+    let output = block_on(binornd_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(10.0),
+            Value::Num(0.5),
+            Value::Num(2.0),
+            Value::Num(4.0),
+        ]),
+    ))
     .expect("explicit-size binornd");
     let Value::Tensor(output) = output else {
         panic!("expected tensor output");
@@ -74,15 +78,23 @@ fn validates_domains_and_uses_a_bounded_large_trial_sampler() {
         vec![Value::Num(2.0), Value::Num(-0.1)],
         vec![Value::Num(2.0), Value::Num(1.1)],
     ] {
-        let error = block_on(binornd_builtin(arguments)).expect_err("invalid domain");
+        let error = block_on(binornd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(arguments),
+        ))
+        .expect_err("invalid domain");
         assert_eq!(
             error.identifier(),
             BINORND_ERROR_INVALID_ARGUMENT.identifier
         );
     }
 
-    let output = block_on(binornd_builtin(vec![Value::Num(1.0e12), Value::Num(0.5)]))
-        .expect("large trial count");
+    let output = block_on(binornd_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(1.0e12),
+            Value::Num(0.5),
+        ]),
+    ))
+    .expect("large trial count");
     let Value::Num(output) = output else {
         panic!("expected scalar output");
     };
@@ -96,27 +108,33 @@ fn every_integer_class_works_in_each_supported_role() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     for storage in all_integer_storages(1) {
         assert_eq!(
-            block_on(binornd_builtin(vec![
-                integer_tensor(storage.clone(), vec![1, 1]),
-                Value::Num(1.0),
-            ]))
+            block_on(binornd_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    integer_tensor(storage.clone(), vec![1, 1]),
+                    Value::Num(1.0),
+                ])
+            ))
             .expect("integer n"),
             Value::Num(1.0)
         );
         assert_eq!(
-            block_on(binornd_builtin(vec![
-                Value::Num(1.0),
-                integer_tensor(storage.clone(), vec![1, 1]),
-            ]))
+            block_on(binornd_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(1.0),
+                    integer_tensor(storage.clone(), vec![1, 1]),
+                ])
+            ))
             .expect("integer p"),
             Value::Num(1.0)
         );
         assert_eq!(
-            block_on(binornd_builtin(vec![
-                Value::Num(1.0),
-                Value::Num(1.0),
-                integer_tensor(storage, vec![1, 1]),
-            ]))
+            block_on(binornd_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(1.0),
+                    Value::Num(1.0),
+                    integer_tensor(storage, vec![1, 1]),
+                ])
+            ))
             .expect("integer size"),
             Value::Num(1.0)
         );
@@ -156,7 +174,10 @@ fn compatibility_gates_each_extension_before_gather() {
         ),
     ];
     for (arguments, identifier) in cases {
-        let error = block_on(binornd_builtin(arguments)).expect_err("extension gate");
+        let error = block_on(binornd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(arguments),
+        ))
+        .expect_err("extension gate");
         assert_eq!(error.identifier(), Some(identifier));
     }
 
@@ -168,10 +189,12 @@ fn compatibility_gates_each_extension_before_gather() {
         )
         .expect("genuine unregistered resident fixture")
         .handle;
-    let error = block_on(binornd_builtin(vec![
-        Value::GpuTensor(resident),
-        Value::Num(0.5),
-    ]))
+    let error = block_on(binornd_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::GpuTensor(resident),
+            Value::Num(0.5),
+        ]),
+    ))
     .expect_err("resident integer gate before gather");
     assert_eq!(
         error.identifier(),
@@ -192,7 +215,10 @@ fn preserves_single_from_either_parameter_and_exact_integer_boundaries() {
             Value::Tensor(Tensor::from_f32(vec![1.0, 1.0], vec![1, 2]).unwrap()),
         ],
     ] {
-        let output = block_on(binornd_builtin(arguments)).expect("single binornd");
+        let output = block_on(binornd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(arguments),
+        ))
+        .expect("single binornd");
         let Value::Tensor(output) = output else {
             panic!("expected single tensor");
         };
@@ -204,10 +230,12 @@ fn preserves_single_from_either_parameter_and_exact_integer_boundaries() {
         .expect("integer tensor");
     ensure_exact_integer_boundary(&exact_wide, "test")
         .expect("exact powers of two above 2^53 remain valid");
-    let error = block_on(binornd_builtin(vec![
-        integer_tensor(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1]),
-        Value::Num(0.5),
-    ]))
+    let error = block_on(binornd_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            integer_tensor(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1]),
+            Value::Num(0.5),
+        ]),
+    ))
     .expect_err("inexact integer parameter");
     assert!(error.message().contains("exactly representable as double"));
 }
@@ -215,23 +243,27 @@ fn preserves_single_from_either_parameter_and_exact_integer_boundaries() {
 #[test]
 fn applies_size_normalization_and_checks_both_parameter_shapes() {
     let _guard = reset();
-    let square = block_on(binornd_builtin(vec![
-        Value::Num(2.0),
-        Value::Num(1.0),
-        Value::Num(3.0),
-    ]))
+    let square = block_on(binornd_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(2.0),
+            Value::Num(1.0),
+            Value::Num(3.0),
+        ]),
+    ))
     .expect("scalar size");
     let Value::Tensor(square) = square else {
         panic!("expected square tensor");
     };
     assert_eq!(square.shape(), &[3, 3]);
 
-    let empty = block_on(binornd_builtin(vec![
-        Value::Num(2.0),
-        Value::Num(0.5),
-        Value::Num(-2.0),
-        Value::Num(4.0),
-    ]))
+    let empty = block_on(binornd_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(2.0),
+            Value::Num(0.5),
+            Value::Num(-2.0),
+            Value::Num(4.0),
+        ]),
+    ))
     .expect("nonpositive dimension");
     let Value::Tensor(empty) = empty else {
         panic!("expected empty tensor");
@@ -253,7 +285,10 @@ fn applies_size_normalization_and_checks_both_parameter_shapes() {
             Value::Num(2.0),
         ],
     ] {
-        let error = block_on(binornd_builtin(arguments)).expect_err("size mismatch");
+        let error = block_on(binornd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(arguments),
+        ))
+        .expect_err("size mismatch");
         assert_eq!(
             error.identifier(),
             BINORND_ERROR_INVALID_ARGUMENT.identifier
@@ -266,33 +301,39 @@ fn applies_size_normalization_and_checks_both_parameter_shapes() {
 fn binornd_size_tensor_preserves_rank_zero_rank_one_and_row_only_policy() {
     let _guard = reset();
 
-    let square = block_on(binornd_builtin(vec![
-        Value::Num(2.0),
-        Value::Num(0.5),
-        Value::Tensor(Tensor::new(vec![2.0], Vec::new()).unwrap()),
-    ]))
+    let square = block_on(binornd_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(2.0),
+            Value::Num(0.5),
+            Value::Tensor(Tensor::new(vec![2.0], Vec::new()).unwrap()),
+        ]),
+    ))
     .expect("rank-zero scalar size");
     let Value::Tensor(square) = square else {
         panic!("square output");
     };
     assert_eq!(square.shape(), &[2, 2]);
 
-    let rectangle = block_on(binornd_builtin(vec![
-        Value::Num(2.0),
-        Value::Num(0.5),
-        Value::Tensor(Tensor::new(vec![2.0, 3.0], vec![2]).unwrap()),
-    ]))
+    let rectangle = block_on(binornd_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(2.0),
+            Value::Num(0.5),
+            Value::Tensor(Tensor::new(vec![2.0, 3.0], vec![2]).unwrap()),
+        ]),
+    ))
     .expect("rank-one size vector");
     let Value::Tensor(rectangle) = rectangle else {
         panic!("rectangular output");
     };
     assert_eq!(rectangle.shape(), &[2, 3]);
 
-    let error = block_on(binornd_builtin(vec![
-        Value::Num(2.0),
-        Value::Num(0.5),
-        Value::Tensor(Tensor::new(vec![2.0, 3.0], vec![2, 1]).unwrap()),
-    ]))
+    let error = block_on(binornd_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(2.0),
+            Value::Num(0.5),
+            Value::Tensor(Tensor::new(vec![2.0, 3.0], vec![2, 1]).unwrap()),
+        ]),
+    ))
     .expect_err("column size vector remains invalid");
     assert!(error.message().contains("size vector must be a row vector"));
 }
@@ -305,19 +346,23 @@ fn rejects_unsupported_representations_and_excess_outputs() {
         Value::Complex(2.0, 0.0),
         Value::SparseTensor(runmat_value::SparseTensor::zeros(1, 1)),
     ] {
-        let error = block_on(binornd_builtin(vec![value, Value::Num(0.5)]))
-            .expect_err("unsupported parameter representation");
+        let error = block_on(binornd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![value, Value::Num(0.5)]),
+        ))
+        .expect_err("unsupported parameter representation");
         assert_eq!(
             error.identifier(),
             BINORND_ERROR_INVALID_ARGUMENT.identifier
         );
     }
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-    let error = block_on(binornd_builtin(vec![
-        Value::Num(2.0),
-        Value::Num(0.5),
-        Value::Bool(true),
-    ]))
+    let error = block_on(binornd_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(2.0),
+            Value::Num(0.5),
+            Value::Bool(true),
+        ]),
+    ))
     .expect_err("logical size");
     assert_eq!(
         error.identifier(),
@@ -325,8 +370,13 @@ fn rejects_unsupported_representations_and_excess_outputs() {
     );
 
     let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
-    let error = block_on(binornd_builtin(vec![Value::Num(2.0), Value::Num(0.5)]))
-        .expect_err("second output");
+    let error = block_on(binornd_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(2.0),
+            Value::Num(0.5),
+        ]),
+    ))
+    .expect_err("second output");
     assert_eq!(
         error.identifier(),
         BINORND_ERROR_TOO_MANY_OUTPUTS.identifier
@@ -337,9 +387,19 @@ fn rejects_unsupported_representations_and_excess_outputs() {
 fn reset_random_state_reproduces_samples() {
     let _guard = reset();
     let arguments = || vec![Value::Num(10.0), Value::Num(0.5), Value::Num(8.0)];
-    let first = tensor_data(block_on(binornd_builtin(arguments())).expect("first sample"));
+    let first = tensor_data(
+        block_on(binornd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(arguments()),
+        ))
+        .expect("first sample"),
+    );
     random::reset_rng();
-    let second = tensor_data(block_on(binornd_builtin(arguments())).expect("second sample"));
+    let second = tensor_data(
+        block_on(binornd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(arguments()),
+        ))
+        .expect("second sample"),
+    );
     assert_eq!(first, second);
 }
 
@@ -363,10 +423,12 @@ fn provider_fallback_preserves_explicit_residency_and_precision() {
                 .expect("upload")
                 .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
                 .expect("validated provenance");
-            let output = block_on(binornd_builtin(vec![
-                Value::Num(4.0),
-                Value::GpuTensor(handle),
-            ]))
+            let output = block_on(binornd_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(4.0),
+                    Value::GpuTensor(handle),
+                ]),
+            ))
             .expect("provider binornd");
             let Value::GpuTensor(output) = output else {
                 panic!("expected resident output");
@@ -405,10 +467,12 @@ fn wgpu_fallback_preserves_explicit_residency_and_precision() {
             .expect("upload")
             .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
             .expect("validated provenance");
-        let output = block_on(binornd_builtin(vec![
-            Value::Num(4.0),
-            Value::GpuTensor(handle),
-        ]))
+        let output = block_on(binornd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(4.0),
+                Value::GpuTensor(handle),
+            ]),
+        ))
         .expect("WGPU binornd");
         let Value::GpuTensor(output) = output else {
             panic!("expected resident output");

@@ -58,7 +58,7 @@ fn char_rows(chars: &CharArray) -> Vec<String> {
     (0..chars.rows)
         .map(|row| {
             (0..chars.cols)
-                .map(|col| chars.data[row * chars.cols + col])
+                .map(|col| chars.data()[row * chars.cols + col])
                 .collect()
         })
         .collect()

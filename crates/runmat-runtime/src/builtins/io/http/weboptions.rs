@@ -20,9 +20,13 @@ const BUILTIN_NAME: &str = "weboptions";
 #[runtime_builtin(
     name = "weboptions",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::http::weboptions"
 )]
-async fn weboptions_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn weboptions_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     crate::output_count::validate_fixed_outputs(
         &WEBOPTIONS_DESCRIPTOR,
         &WEBOPTIONS_ERROR_OUTPUTS,
@@ -43,16 +47,20 @@ async fn weboptions_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
             BUILTIN_NAME,
         )?;
     }
-    let prepared = PreparedWebOptions::parse(&rest)?;
-    prepared.preflight_host_values(&rest)?;
-    let mut gathered = Vec::with_capacity(rest.len());
-    for value in rest {
-        gathered.push(gather_if_needed_async(&value).await.map_err(|flow| {
-            remap_weboptions_flow(&WEBOPTIONS_ERROR_FLOW, flow, |err| {
-                format!("weboptions: {}", err.message())
-            })
-        })?);
-    }
+    let prepared = PreparedWebOptions::parse(rest.view())?;
+    prepared.preflight_host_values(rest.view())?;
+    let source = &rest;
+    let gathered = rest
+        .try_map_preserving_roots_async(rest.len(), runtime.as_ref(), |index| async move {
+            gather_if_needed_async(&source[index])
+                .await
+                .map_err(|flow| {
+                    remap_weboptions_flow(&WEBOPTIONS_ERROR_FLOW, flow, |err| {
+                        format!("weboptions: {}", err.message())
+                    })
+                })
+        })
+        .await?;
     let mut options = default_options_struct();
     if let Some(Value::Struct(source)) = gathered.first() {
         for (name, field) in &prepared.struct_fields {
@@ -67,9 +75,12 @@ async fn weboptions_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         set_option_field(&mut options, field, &gathered[value_index])?;
     }
 
-    validate_credentials(&options)?;
-
-    Ok(Value::Struct(options))
+    let options = options.finish(runtime.as_ref())?;
+    let Value::Struct(value) = options.value() else {
+        unreachable!("options publishes a structure");
+    };
+    validate_credentials(value)?;
+    Ok(options)
 }
 
 struct PreparedWebOptions {
@@ -78,12 +89,12 @@ struct PreparedWebOptions {
 }
 
 impl PreparedWebOptions {
-    fn parse(rest: &[Value]) -> BuiltinResult<Self> {
+    fn parse(rest: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<Self> {
         let mut struct_fields = Vec::new();
         let mut index = 0;
         if let Some(Value::Struct(source)) = rest.first() {
             for name in source.fields.keys() {
-                struct_fields.push((name.clone(), parse_option_field(name)?));
+                struct_fields.push((name.to_owned(), parse_option_field(name)?));
             }
             index = 1;
         }
@@ -122,7 +133,10 @@ impl PreparedWebOptions {
         })
     }
 
-    fn preflight_host_values(&self, rest: &[Value]) -> BuiltinResult<()> {
+    fn preflight_host_values(
+        &self,
+        rest: crate::call::FunctionArgumentView<'_>,
+    ) -> BuiltinResult<()> {
         let mut preview = default_options_struct();
         if let Some(Value::Struct(source)) = rest.first() {
             for (name, field) in &self.struct_fields {
@@ -180,6 +194,7 @@ where
 }
 
 mod options;
+mod builder;
 use options::*;
 
 #[cfg(test)]

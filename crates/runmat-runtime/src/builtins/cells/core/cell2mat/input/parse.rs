@@ -57,7 +57,7 @@ pub(super) fn value(value: Value) -> BuiltinResult<CellEntry> {
         Value::CharArray(array) => CellEntry {
             kind: ElementKind::Character,
             shape: array.shape().to_vec(),
-            data: EntryData::Character(array.data),
+            data: EntryData::Character(array.into_parts().0),
         },
         Value::Cell(_) => return Err(invalid("nested cell arrays are not supported")),
         Value::String(_) | Value::StringArray(_) => {

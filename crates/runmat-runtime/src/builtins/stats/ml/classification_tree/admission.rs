@@ -15,7 +15,7 @@ pub(super) fn classification_tree_matrix_dimensions(tensor: &Tensor) -> (usize, 
 
 pub(super) fn build_fit_spec(
     first: Value,
-    mut rest: Vec<Value>,
+    rest: crate::call::FunctionArgumentView<'_>,
     arguments: FitctreeArguments,
 ) -> BuiltinResult<FitSpec> {
     if is_table_value(&first) {
@@ -26,7 +26,8 @@ pub(super) fn build_fit_spec(
                 "fitctree: matrix input requires response vector Y",
             ));
         }
-        let y = rest.remove(0);
+        let y = rest[0].clone();
+        let rest = rest.range(1..)?;
         build_matrix_fit_spec(first, y, rest, arguments)
     }
 }
@@ -38,7 +39,7 @@ pub(super) fn is_table_value(value: &Value) -> bool {
 fn build_matrix_fit_spec(
     x_value: Value,
     y_value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::FunctionArgumentView<'_>,
     arguments: FitctreeArguments,
 ) -> BuiltinResult<FitSpec> {
     let x = tensor::value_into_tensor_for(FITCTREE_NAME, x_value)
@@ -55,7 +56,7 @@ fn build_matrix_fit_spec(
         ));
     }
     let mut options = FitOptions::default();
-    parse_fit_options(&rest, arguments.options, 1, &mut options)?;
+    parse_fit_options(rest, arguments.options, 1, &mut options)?;
     if let Some(WeightSpec::Variable(_)) = options.weights {
         return Err(fitctree_invalid(
             "fitctree: weights variable names require table input",
@@ -86,7 +87,7 @@ fn build_matrix_fit_spec(
 
 fn build_table_fit_spec(
     first: Value,
-    rest: Vec<Value>,
+    rest: crate::call::FunctionArgumentView<'_>,
     arguments: FitctreeArguments,
 ) -> BuiltinResult<FitSpec> {
     let object = match first {
@@ -128,7 +129,7 @@ fn build_table_fit_spec(
             }
         }
     }
-    parse_fit_options(&rest, arguments.options, 0, &mut options)?;
+    parse_fit_options(rest, arguments.options, 0, &mut options)?;
     if external_y.is_none() {
         response_name = options.response_name.clone().unwrap_or(response_name);
     }

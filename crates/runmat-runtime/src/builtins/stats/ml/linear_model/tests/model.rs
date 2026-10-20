@@ -12,17 +12,20 @@ fn fitlm_table_formula_uses_named_predictors() {
     )
     .unwrap();
     let model = block_on(fitlm_builtin(
+        None,
         table,
-        vec![Value::String("Y ~ A + B".into())],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+            "Y ~ A + B".into(),
+        )]),
     ))
     .unwrap();
     let object = object(model);
     assert_eq!(
-        object.properties.get("Formula"),
+        object.properties().get("Formula"),
         Some(&Value::String("Y ~ A + B".into()))
     );
-    let names = match object.properties.get("PredictorNames").unwrap() {
-        Value::StringArray(array) => array.data.clone(),
+    let names = match object.properties().get("PredictorNames").unwrap() {
+        Value::StringArray(array) => array.data(),
         other => panic!("names {other:?}"),
     };
     assert_eq!(names, vec!["A", "B"]);
@@ -32,9 +35,18 @@ fn fitlm_table_formula_uses_named_predictors() {
 fn fitlm_quadratic_adds_square_term() {
     let x = tensor_value(vec![-1.0, 0.0, 1.0, 2.0], 4, 1);
     let y = tensor_value(vec![3.0, 1.0, 3.0, 9.0], 4, 1);
-    let model =
-        object(block_on(fitlm_builtin(x, vec![y, Value::String("quadratic".into())])).unwrap());
-    let coeffs = match model.properties.get("Coefficients").unwrap() {
+    let model = object(
+        block_on(fitlm_builtin(
+            None,
+            x,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                y,
+                Value::String("quadratic".into()),
+            ]),
+        ))
+        .unwrap(),
+    );
+    let coeffs = match model.properties().get("Coefficients").unwrap() {
         Value::Object(object) => table_variables(object).unwrap(),
         other => panic!("coefficients {other:?}"),
     };
@@ -49,9 +61,16 @@ fn fitlm_quadratic_adds_square_term() {
 fn fitlm_omits_nan_rows() {
     let x = tensor_value(vec![0.0, 1.0, f64::NAN, 3.0], 4, 1);
     let y = tensor_value(vec![1.0, 3.0, 5.0, 7.0], 4, 1);
-    let model = object(block_on(fitlm_builtin(x, vec![y])).unwrap());
+    let model = object(
+        block_on(fitlm_builtin(
+            None,
+            x,
+            crate::builtins::common::test_support::builtin_arguments(vec![y]),
+        ))
+        .unwrap(),
+    );
     assert_eq!(
-        model.properties.get("NumObservations"),
+        model.properties().get("NumObservations"),
         Some(&Value::Num(3.0))
     );
 }
@@ -60,7 +79,12 @@ fn fitlm_omits_nan_rows() {
 fn predict_confidence_intervals_are_column_major() {
     let x = tensor_value(vec![0.0, 1.0, 2.0, 3.0], 4, 1);
     let y = tensor_value(vec![1.0, 3.1, 4.9, 7.0], 4, 1);
-    let model = block_on(fitlm_builtin(x, vec![y])).unwrap();
+    let model = block_on(fitlm_builtin(
+        None,
+        x,
+        crate::builtins::common::test_support::builtin_arguments(vec![y]),
+    ))
+    .unwrap();
     let output_count = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let predicted = block_on(predict_builtin(
         model,
@@ -92,12 +116,15 @@ fn fitlm_formula_no_intercept_and_intercept_only_are_supported() {
     .unwrap();
     let no_intercept = object(
         block_on(fitlm_builtin(
+            None,
             table.clone(),
-            vec![Value::String("Y ~ A - 1".into())],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "Y ~ A - 1".into(),
+            )]),
         ))
         .unwrap(),
     );
-    let coeffs = match no_intercept.properties.get("Coefficients").unwrap() {
+    let coeffs = match no_intercept.properties().get("Coefficients").unwrap() {
         Value::Object(object) => table_variables(object).unwrap(),
         other => panic!("coefficients {other:?}"),
     };
@@ -105,9 +132,17 @@ fn fitlm_formula_no_intercept_and_intercept_only_are_supported() {
     assert_eq!(estimates.shape(), [1, 1]);
     assert!((estimates.materialize_f64()[0] - 2.0).abs() < 1.0e-10);
 
-    let intercept_only =
-        object(block_on(fitlm_builtin(table, vec![Value::String("Y ~ 1".into())])).unwrap());
-    let coeffs = match intercept_only.properties.get("Coefficients").unwrap() {
+    let intercept_only = object(
+        block_on(fitlm_builtin(
+            None,
+            table,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "Y ~ 1".into(),
+            )]),
+        ))
+        .unwrap(),
+    );
+    let coeffs = match intercept_only.properties().get("Coefficients").unwrap() {
         Value::Object(object) => table_variables(object).unwrap(),
         other => panic!("coefficients {other:?}"),
     };
@@ -126,7 +161,14 @@ fn intercept_only_table_model_predicts_one_value_per_table_row() {
         ],
     )
     .unwrap();
-    let model = block_on(fitlm_builtin(train, vec![Value::String("Y ~ 1".into())])).unwrap();
+    let model = block_on(fitlm_builtin(
+        None,
+        train,
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+            "Y ~ 1".into(),
+        )]),
+    ))
+    .unwrap();
     let xnew = table_from_columns(
         vec!["A".into(), "Y".into()],
         vec![
@@ -145,7 +187,12 @@ fn intercept_only_table_model_predicts_one_value_per_table_row() {
 fn predict_rejects_unsupported_simultaneous_intervals() {
     let x = tensor_value(vec![0.0, 1.0, 2.0, 3.0], 4, 1);
     let y = tensor_value(vec![1.0, 3.0, 5.0, 7.0], 4, 1);
-    let model = block_on(fitlm_builtin(x, vec![y])).unwrap();
+    let model = block_on(fitlm_builtin(
+        None,
+        x,
+        crate::builtins::common::test_support::builtin_arguments(vec![y]),
+    ))
+    .unwrap();
     let err = block_on(predict_builtin(
         model,
         tensor_value(vec![4.0], 1, 1),
@@ -160,34 +207,37 @@ fn fitlm_matrix_rejects_table_only_options_and_bad_varnames() {
     let x = tensor_value(vec![0.0, 1.0, 2.0, 3.0], 4, 1);
     let y = tensor_value(vec![1.0, 3.0, 5.0, 7.0], 4, 1);
     let err = block_on(fitlm_builtin(
+        None,
         x.clone(),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             y.clone(),
             Value::from("ResponseVar"),
             Value::String("Y".into()),
-        ],
+        ]),
     ))
     .unwrap_err();
     assert!(err.message.contains("ResponseVar"));
 
     let err = block_on(fitlm_builtin(
+        None,
         x.clone(),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             y.clone(),
             Value::from("PredictorVars"),
             Value::String("X".into()),
-        ],
+        ]),
     ))
     .unwrap_err();
     assert!(err.message.contains("PredictorVars"));
 
     let err = block_on(fitlm_builtin(
+        None,
         x,
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             y,
             Value::from("VarNames"),
             Value::StringArray(StringArray::new(vec!["only_x".into()], vec![1, 1]).unwrap()),
-        ],
+        ]),
     ))
     .unwrap_err();
     assert!(err.message.contains("VarNames"));
@@ -197,18 +247,25 @@ fn fitlm_matrix_rejects_table_only_options_and_bad_varnames() {
 fn coefficients_table_exposes_row_names() {
     let x = tensor_value(vec![0.0, 1.0, 2.0, 3.0], 4, 1);
     let y = tensor_value(vec![1.0, 3.0, 5.0, 7.0], 4, 1);
-    let model = object(block_on(fitlm_builtin(x, vec![y])).unwrap());
-    let coeffs = match model.properties.get("Coefficients").unwrap() {
+    let model = object(
+        block_on(fitlm_builtin(
+            None,
+            x,
+            crate::builtins::common::test_support::builtin_arguments(vec![y]),
+        ))
+        .unwrap(),
+    );
+    let coeffs = match model.properties().get("Coefficients").unwrap() {
         Value::Object(object) => object,
         other => panic!("coefficients {other:?}"),
     };
-    let props = match coeffs.properties.get("Properties").unwrap() {
+    let props = match coeffs.properties().get("Properties").unwrap() {
         Value::Struct(props) => props,
         other => panic!("properties {other:?}"),
     };
     match props.fields.get("RowNames").unwrap() {
         Value::StringArray(array) => {
-            assert_eq!(array.data, vec!["(Intercept)", "x1"]);
+            assert_eq!(array.data(), vec!["(Intercept)", "x1"]);
             assert_eq!(array.shape, vec![2, 1]);
         }
         other => panic!("row names {other:?}"),
@@ -221,13 +278,18 @@ fn fitlm_accepts_exclude_indices_and_table_weight_variable() {
     let y = tensor_value(vec![100.0, 3.0, 5.0, 7.0], 4, 1);
     let model = object(
         block_on(fitlm_builtin(
+            None,
             x,
-            vec![y, Value::from("Exclude"), tensor_value(vec![1.0], 1, 1)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                y,
+                Value::from("Exclude"),
+                tensor_value(vec![1.0], 1, 1),
+            ]),
         ))
         .unwrap(),
     );
     assert_eq!(
-        model.properties.get("NumObservations"),
+        model.properties().get("NumObservations"),
         Some(&Value::Num(3.0))
     );
 
@@ -242,17 +304,18 @@ fn fitlm_accepts_exclude_indices_and_table_weight_variable() {
     .unwrap();
     let weighted = object(
         block_on(fitlm_builtin(
+            None,
             table,
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::String("Y ~ A".into()),
                 Value::from("Weights"),
                 Value::String("W".into()),
-            ],
+            ]),
         ))
         .unwrap(),
     );
     assert_eq!(
-        weighted.properties.get("NumPredictors"),
+        weighted.properties().get("NumPredictors"),
         Some(&Value::Num(1.0))
     );
 }

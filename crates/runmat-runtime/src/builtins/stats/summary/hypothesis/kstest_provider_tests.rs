@@ -106,12 +106,12 @@ fn registered_owner_observes_no_download_for_known_invalid_calls() {
             .unwrap();
         let error = block_on(kstest_builtin(
             resident(),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::from("CDF"),
                 Value::GpuTensor(valid_cdf.handle.clone()),
                 Value::from("Tail"),
                 Value::from("sideways"),
-            ],
+            ]),
         ))
         .unwrap_err();
         assert!(error.message().contains("unsupported Tail"), "{error}");
@@ -121,7 +121,10 @@ fn registered_owner_observes_no_download_for_known_invalid_calls() {
 
         let error = block_on(kstest_builtin(
             resident(),
-            vec![resident(), Value::Num(0.05)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                resident(),
+                Value::Num(0.05),
+            ]),
         ))
         .unwrap_err();
         assert!(error.message().contains("option name"), "{error}");
@@ -133,10 +136,10 @@ fn registered_owner_observes_no_download_for_known_invalid_calls() {
             .unwrap();
         let error = block_on(kstest_builtin(
             resident(),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::from("CDF"),
                 Value::GpuTensor(invalid_resident_cdf.handle.clone()),
-            ],
+            ]),
         ))
         .unwrap_err();
         assert!(error.message().contains("n-by-2"), "{error}");
@@ -158,10 +161,10 @@ fn registered_owner_observes_no_download_for_known_invalid_calls() {
             .unwrap();
         let error = block_on(kstest_builtin(
             resident(),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::from("CDF"),
                 Value::GpuTensor(complex_cdf.handle.clone()),
-            ],
+            ]),
         ))
         .unwrap_err();
         assert!(error.message().contains("real numeric matrix"), "{error}");
@@ -183,10 +186,10 @@ fn registered_owner_observes_no_download_for_known_invalid_calls() {
             .unwrap();
         let error = block_on(kstest_builtin(
             resident(),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::from("Alpha"),
                 Value::GpuTensor(complex_alpha.handle.clone()),
-            ],
+            ]),
         ))
         .unwrap_err();
         assert!(error.message().contains("real numeric"), "{error}");
@@ -201,7 +204,10 @@ fn registered_owner_observes_no_download_for_known_invalid_calls() {
         let invalid_cdf = Value::Tensor(Tensor::new(vec![0.0; 6], vec![2, 3]).unwrap());
         let error = block_on(kstest_builtin(
             resident(),
-            vec![Value::from("CDF"), invalid_cdf],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("CDF"),
+                invalid_cdf,
+            ]),
         ))
         .unwrap_err();
         assert!(error.message().contains("n-by-2"), "{error}");
@@ -213,7 +219,7 @@ fn registered_owner_observes_no_download_for_known_invalid_calls() {
             .unwrap();
         let error = block_on(kstest_builtin(
             Value::GpuTensor(matrix.handle.clone()),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .unwrap_err();
         assert!(error.message().contains("must be a vector"), "{error}");
@@ -222,7 +228,11 @@ fn registered_owner_observes_no_download_for_known_invalid_calls() {
         assert_eq!(matrix.probe.retirements(), 0);
 
         let _outputs = crate::output_count::push_output_count(Some(5)).expect("output-count scope");
-        let error = block_on(kstest_builtin(resident(), vec![])).unwrap_err();
+        let error = block_on(kstest_builtin(
+            resident(),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap_err();
         assert!(
             error.message().contains("too many output arguments"),
             "{error}"
@@ -241,7 +251,10 @@ fn registered_owner_observes_no_download_for_known_invalid_calls() {
         );
         let error = block_on(kstest_builtin(
             resident(),
-            vec![Value::from("CDF"), integer],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("CDF"),
+                integer,
+            ]),
         ))
         .unwrap_err();
         assert_eq!(
@@ -254,7 +267,11 @@ fn registered_owner_observes_no_download_for_known_invalid_calls() {
             .clone()
             .with_provenance(GpuHandleProvenance::Explicit)
             .unwrap();
-        let error = block_on(kstest_builtin(Value::GpuTensor(explicit), vec![])).unwrap_err();
+        let error = block_on(kstest_builtin(
+            Value::GpuTensor(explicit),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap_err();
         assert_eq!(
             error.identifier(),
             KSTEST_RESIDENT_INPUT_EXTENSION.error_identifier
@@ -282,7 +299,11 @@ fn provider_failures_retain_sources_and_borrowed_allocations() {
         .unwrap();
     let resident = || Value::GpuTensor(allocation.handle.clone());
 
-    let error = block_on(kstest_builtin(resident(), vec![])).unwrap_err();
+    let error = block_on(kstest_builtin(
+        resident(),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap_err();
     assert_owner_cause(&error);
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
     allocation
@@ -299,7 +320,10 @@ fn provider_failures_retain_sources_and_borrowed_allocations() {
         .unwrap();
     let error = block_on(kstest_builtin(
         sample,
-        vec![Value::from("CDF"), Value::GpuTensor(cdf.handle.clone())],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("CDF"),
+            Value::GpuTensor(cdf.handle.clone()),
+        ]),
     ))
     .unwrap_err();
     assert_owner_cause(&error);
@@ -330,7 +354,10 @@ fn unpolled_and_pending_call_drop_preserve_borrowed_owner() {
         .unwrap();
     let resident = || Value::GpuTensor(allocation.handle.clone());
 
-    let unpolled = kstest_builtin(resident(), vec![]);
+    let unpolled = kstest_builtin(
+        resident(),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    );
     drop(unpolled);
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
     allocation
@@ -339,7 +366,10 @@ fn unpolled_and_pending_call_drop_preserve_borrowed_owner() {
         .validate_live()
         .unwrap();
 
-    let mut pending = Box::pin(kstest_builtin(resident(), vec![]));
+    let mut pending = Box::pin(kstest_builtin(
+        resident(),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ));
     let mut context = Context::from_waker(futures::task::noop_waker_ref());
     assert!(matches!(pending.as_mut().poll(&mut context), Poll::Pending));
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);

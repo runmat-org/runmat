@@ -63,19 +63,19 @@ fn callback_proxy_reuses_only_the_same_callable_instance() {
             newly_created_equal.callable_instance_key()
         );
         let JavaValue::Callback(first_token) = adapter
-            .argument_to_java(&context, first)
+            .argument_to_java(&context, first.into())
             .expect("first callback")
         else {
             panic!("callback token");
         };
         let JavaValue::Callback(cloned_token) = adapter
-            .argument_to_java(&context, cloned)
+            .argument_to_java(&context, cloned.into())
             .expect("cloned callback")
         else {
             panic!("callback token");
         };
         let JavaValue::Callback(new_token) = adapter
-            .argument_to_java(&context, newly_created_equal)
+            .argument_to_java(&context, newly_created_equal.into())
             .expect("new callback")
         else {
             panic!("callback token");
@@ -90,13 +90,13 @@ fn callback_proxy_reuses_only_the_same_callable_instance() {
             external.callable_instance_key()
         );
         let JavaValue::Callback(workspace_token) = adapter
-            .argument_to_java(&context, workspace)
+            .argument_to_java(&context, workspace.into())
             .expect("workspace form")
         else {
             panic!("callback token");
         };
         let JavaValue::Callback(external_token) = adapter
-            .argument_to_java(&context, external)
+            .argument_to_java(&context, external.into())
             .expect("external form")
         else {
             panic!("callback token");

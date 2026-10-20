@@ -139,9 +139,10 @@ impl MinEvaluation {
 pub(crate) async fn min_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    if let Some(eval) = crate::builtins::table::categorical_min_evaluate(&value, &rest).await {
+    if let Some(eval) = crate::builtins::table::categorical_min_evaluate(&value, rest.view()).await
+    {
         return crate::builtins::table::categorical_extrema_to_value(eval?);
     }
     if crate::output_count::current_output_count().unwrap_or(1) > 1
@@ -158,7 +159,7 @@ pub(crate) async fn min_builtin(
     } else {
         super::extrema_provider::ExtremaDemand::ValuesOnly
     };
-    let eval = evaluate_for_demand(runtime.as_ref(), value, &rest, demand).await?;
+    let eval = evaluate_for_demand(runtime.as_ref(), value, rest.view(), demand).await?;
     min_output_from_eval(eval)
 }
 
@@ -166,7 +167,7 @@ pub(crate) async fn min_builtin(
 /// The alias can select reduction without constructing a placeholder argument.
 pub(crate) async fn min_reduction_with_nan_policy(
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
     imposed_nan_mode: ReductionNaN,
 ) -> BuiltinResult<Value> {
     if crate::builtins::common::validation::is_typed_complex_integer(&value) {
@@ -175,9 +176,9 @@ pub(crate) async fn min_reduction_with_nan_policy(
         ));
     }
     let controls = if rest.first().is_some_and(is_empty_placeholder) {
-        &rest[1..]
+        rest.view().range(1..)?
     } else {
-        &rest[..]
+        rest.view()
     };
     let mut parsed = ReductionArgs::default();
     parse_reduction_options(&mut parsed, controls).await?;
@@ -209,7 +210,10 @@ fn min_output_from_eval(eval: super::extrema_provider::ExtremaResult) -> Builtin
 }
 
 /// Evaluate the builtin once and expose both outputs (value + indices).
-pub async fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<MinEvaluation> {
+pub async fn evaluate(
+    value: Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<MinEvaluation> {
     let evaluated = evaluate_for_demand(
         None,
         value,
@@ -221,10 +225,10 @@ pub async fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<MinEvaluati
     Ok(MinEvaluation { values, indices })
 }
 
-async fn evaluate_for_demand(
+pub(super) async fn evaluate_for_demand(
     runtime: Option<&crate::context::RuntimeContext>,
     value: Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     demand: super::extrema_provider::ExtremaDemand,
 ) -> BuiltinResult<super::extrema_provider::ExtremaResult> {
     if crate::builtins::common::validation::is_typed_complex_integer(&value) {
@@ -241,7 +245,9 @@ async fn evaluate_for_demand(
 /// Validate a reduction's controls without materializing its data operand.
 /// L07 will move this parser together with the extrema engine into its domain
 /// service; bounds must not duplicate option or exact-dimension authority.
-pub(super) async fn validate_reduction_arguments(rest: &[Value]) -> BuiltinResult<()> {
+pub(super) async fn validate_reduction_arguments(
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     match parse_call(rest).await? {
         ParsedCall::Reduction(_) => Ok(()),
         ParsedCall::Elementwise(_) => Err(min_invalid_argument("expected reduction controls")),
@@ -287,14 +293,14 @@ struct ElementwiseArgs {
     comparison: ComparisonMethod,
 }
 
-async fn parse_call(rest: &[Value]) -> BuiltinResult<ParsedCall> {
+async fn parse_call(rest: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<ParsedCall> {
     if rest.is_empty() {
         return Ok(ParsedCall::Reduction(ReductionArgs::default()));
     }
 
     let first = &rest[0];
     if !is_empty_placeholder(first) {
-        let comparison = parse_elementwise_options(&rest[1..])?;
+        let comparison = parse_elementwise_options(rest.range(1..)?)?;
         return Ok(ParsedCall::Elementwise(ElementwiseArgs {
             other: first.clone(),
             comparison,
@@ -302,7 +308,7 @@ async fn parse_call(rest: &[Value]) -> BuiltinResult<ParsedCall> {
     }
 
     let mut args = ReductionArgs::default();
-    parse_reduction_options(&mut args, &rest[1..]).await?;
+    parse_reduction_options(&mut args, rest.range(1..)?).await?;
     Ok(ParsedCall::Reduction(args))
 }
 
@@ -310,9 +316,9 @@ fn is_empty_placeholder(value: &Value) -> bool {
     match value {
         Value::Tensor(t) => tensor_len(t) == 0,
         Value::LogicalArray(l) => l.data.is_empty(),
-        Value::StringArray(sa) => sa.data.is_empty(),
-        Value::CharArray(ca) => ca.data.is_empty(),
-        Value::Cell(cell) => cell.data.is_empty(),
+        Value::StringArray(sa) => sa.data().is_empty(),
+        Value::CharArray(ca) => ca.data().is_empty(),
+        Value::Cell(cell) => cell.data().is_empty(),
         Value::String(s) => s.is_empty(),
         _ => false,
     }
@@ -322,7 +328,10 @@ fn tensor_len(tensor: &Tensor) -> usize {
     tensor::tensor_element_len(tensor)
 }
 
-async fn parse_reduction_options(args: &mut ReductionArgs, rest: &[Value]) -> BuiltinResult<()> {
+async fn parse_reduction_options(
+    args: &mut ReductionArgs,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     let mut idx = 0usize;
     let mut selection_set = !matches!(args.selection, DimSelection::Auto);
     let mut comparison_set = matches!(args.comparison, ComparisonMethod::Auto);
@@ -394,7 +403,9 @@ async fn parse_reduction_options(args: &mut ReductionArgs, rest: &[Value]) -> Bu
     Ok(())
 }
 
-fn parse_elementwise_options(rest: &[Value]) -> BuiltinResult<ComparisonMethod> {
+fn parse_elementwise_options(
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<ComparisonMethod> {
     let mut comparison = ComparisonMethod::Auto;
     let mut comparison_set = false;
     let mut idx = 0usize;
@@ -1823,7 +1834,9 @@ pub(crate) mod tests {
     };
 
     fn min_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::min_builtin(None, value, rest))
+        let rest = crate::execution::RootedValues::new(rest)
+            .map_err(|error| error.into_runtime_error())?;
+        block_on(super::min_builtin(None, value, rest.into()))
     }
 
     #[test]
@@ -1866,7 +1879,10 @@ pub(crate) mod tests {
     }
 
     fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<MinEvaluation> {
-        block_on(super::evaluate(value, rest))
+        block_on(super::evaluate(
+            value,
+            crate::call::FunctionArgumentView::from_slice(rest),
+        ))
     }
 
     fn placeholder() -> Value {

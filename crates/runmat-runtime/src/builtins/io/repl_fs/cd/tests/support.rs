@@ -6,7 +6,9 @@ use runmat_value::Value;
 use crate::BuiltinResult;
 
 pub(super) fn call(args: Vec<Value>) -> BuiltinResult<Value> {
-    futures::executor::block_on(super::super::cd_builtin(args))
+    futures::executor::block_on(super::super::cd_builtin(
+        crate::builtins::common::test_support::builtin_arguments(args),
+    ))
 }
 
 pub(super) fn canonical(path: &Path) -> PathBuf {

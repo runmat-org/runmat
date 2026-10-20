@@ -11,10 +11,17 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 #[runtime_builtin(
     name = "bounds",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::reduction::bounds"
 )]
-async fn bounds_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    evaluate_bounds(value, &rest).await?.into_value()
+async fn bounds_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    evaluate_bounds(runtime.as_ref(), value, rest)
+        .await?
+        .into_value()
 }
 
 #[derive(Debug)]
@@ -38,7 +45,11 @@ impl BoundsEvaluation {
     }
 }
 
-async fn evaluate_bounds(value: Value, rest: &[Value]) -> BuiltinResult<BoundsEvaluation> {
+async fn evaluate_bounds(
+    runtime: Option<&crate::context::RuntimeContext>,
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<BoundsEvaluation> {
     if crate::output_count::current_output_count().is_some_and(|count| count > 2) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &BOUNDS_EXTRA_OUTPUTS_EXTENSION,
@@ -50,8 +61,8 @@ async fn evaluate_bounds(value: Value, rest: &[Value]) -> BuiltinResult<BoundsEv
             "complex numbers with integer types are not supported",
         ));
     }
-    let rest = normalize_bounds_args(rest)?;
-    super::min::validate_reduction_arguments(&rest)
+    let rest = arguments::normalize(runtime, rest).await?;
+    super::min::validate_reduction_arguments(rest.view())
         .await
         .map_err(|error| map_bounds_reduction_error("min", error))?;
     let source = match &value {
@@ -81,15 +92,27 @@ async fn evaluate_bounds(value: Value, rest: &[Value]) -> BuiltinResult<BoundsEv
             largest: empty,
         }
     } else {
-        let min_eval = super::min::evaluate(value.clone(), &rest)
-            .await
-            .map_err(|err| map_bounds_reduction_error("min", err))?;
-        let max_eval = super::max::evaluate(value, &rest)
-            .await
-            .map_err(|err| map_bounds_reduction_error("max", err))?;
+        let min_eval = super::min::evaluate_for_demand(
+            runtime,
+            value.clone(),
+            rest.view(),
+            super::extrema_provider::ExtremaDemand::ValuesAndIndices,
+        )
+        .await
+        .and_then(|result| result.into_pair(super::extrema_provider::ExtremaKind::Min))
+        .map_err(|err| map_bounds_reduction_error("min", err))?;
+        let max_eval = super::max::evaluate_for_demand(
+            runtime,
+            value,
+            rest.view(),
+            super::extrema_provider::ExtremaDemand::ValuesAndIndices,
+        )
+        .await
+        .and_then(|result| result.into_pair(super::extrema_provider::ExtremaKind::Max))
+        .map_err(|err| map_bounds_reduction_error("max", err))?;
         BoundsEvaluation {
-            smallest: min_eval.into_value(),
-            largest: max_eval.into_value(),
+            smallest: min_eval.0,
+            largest: max_eval.0,
         }
     };
     let Some(source) = source else {
@@ -107,25 +130,8 @@ async fn evaluate_bounds(value: Value, rest: &[Value]) -> BuiltinResult<BoundsEv
     Ok(BoundsEvaluation { smallest, largest })
 }
 
-fn normalize_bounds_args(rest: &[Value]) -> BuiltinResult<Vec<Value>> {
-    if rest.len() > 2 {
-        return Err(bounds_invalid_argument(
-            "bounds accepts at most a dimension selector and nanflag",
-        ));
-    }
-    let has_nanflag = rest.iter().any(is_nanflag);
-    let mut out = Vec::with_capacity(rest.len() + 2);
-    out.push(empty_placeholder());
-    out.extend(rest.iter().map(|value| match keyword_of(value).as_deref() {
-        Some("omitmissing") => Value::from("omitnan"),
-        Some("includemissing") => Value::from("includenan"),
-        _ => value.clone(),
-    }));
-    if !has_nanflag {
-        out.push(Value::from("omitnan"));
-    }
-    Ok(out)
-}
+#[path = "bounds/arguments.rs"]
+mod arguments;
 
 fn is_nanflag(value: &Value) -> bool {
     matches!(
@@ -146,10 +152,6 @@ fn map_bounds_reduction_error(label: &str, err: RuntimeError) -> RuntimeError {
         }
         _ => bounds_internal(detail),
     }
-}
-
-fn empty_placeholder() -> Value {
-    Value::Tensor(runmat_value::Tensor::new(Vec::new(), vec![0, 0]).unwrap())
 }
 
 fn bounds_error(

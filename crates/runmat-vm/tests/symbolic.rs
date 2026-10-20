@@ -63,7 +63,7 @@ fn symbolic_mixed_numeric_horizontal_concatenation_promotes_to_symbolic_array() 
         matches!(&vars[a_pt_slot], Value::SymbolicArray(array) if {
             array.shape == vec![1, 3]
                 && array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>()
@@ -94,7 +94,7 @@ fn symbolic_mixed_numeric_vertical_concatenation_promotes_to_symbolic_array() {
         matches!(value, Value::SymbolicArray(array) if {
             array.shape == vec![3, 1]
                 && array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>()

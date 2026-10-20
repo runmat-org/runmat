@@ -28,18 +28,18 @@ pub(super) fn graph_object(graph: GraphData) -> BuiltinResult<Value> {
     } else {
         GRAPH_CLASS
     };
-    let mut object = ObjectInstance::new(class_name.to_string());
-    object.properties.insert(
-        NUM_NODES_PROPERTY.to_string(),
-        Value::Num(graph.node_count as f64),
-    );
-    object
-        .properties
-        .insert("Edges".to_string(), edges_table(&graph)?);
-    object
-        .properties
-        .insert("Nodes".to_string(), nodes_table(&graph)?);
-    Ok(Value::Object(object))
+    let fields = [
+        (NUM_NODES_PROPERTY, Value::Num(graph.node_count as f64)),
+        ("Edges", edges_table(&graph)?),
+        ("Nodes", nodes_table(&graph)?),
+    ];
+    let context = crate::context::legacy::active();
+    crate::execution::object::construct_object_from_borrowed_fields(
+        context.as_ref(),
+        class_name.display_name(),
+        fields.iter().map(|(name, value)| (*name, value)),
+    )
+    .map(|value| value.with_owned(|value| value))
 }
 
 pub(super) fn edges_table(graph: &GraphData) -> BuiltinResult<Value> {
@@ -144,7 +144,7 @@ pub(in crate::builtins::graph::domain) fn graph_data(
         }
     };
     let directed = object.is_class(DIGRAPH_CLASS);
-    let node_count = match object.properties.get(NUM_NODES_PROPERTY) {
+    let node_count = match object.properties().get(NUM_NODES_PROPERTY) {
         Some(value) => positive_integer_scalar(value, name)?,
         None => infer_node_count_from_nodes(object, name)?,
     };
@@ -163,7 +163,7 @@ pub(super) fn node_names_from_object(
     node_count: usize,
     name: &'static str,
 ) -> BuiltinResult<Option<Vec<String>>> {
-    let Some(Value::Object(nodes)) = object.properties.get("Nodes") else {
+    let Some(Value::Object(nodes)) = object.properties().get("Nodes") else {
         return Ok(None);
     };
     let variables = table_variables(nodes)
@@ -185,7 +185,7 @@ pub(in crate::builtins::graph::domain) fn infer_node_count_from_nodes(
     object: &ObjectInstance,
     name: &'static str,
 ) -> BuiltinResult<usize> {
-    let Some(Value::Object(nodes)) = object.properties.get("Nodes") else {
+    let Some(Value::Object(nodes)) = object.properties().get("Nodes") else {
         return Ok(0);
     };
     crate::builtins::table::table_height(nodes)
@@ -199,7 +199,7 @@ pub(super) fn edges_from_object(
     node_count: usize,
     name: &'static str,
 ) -> BuiltinResult<Vec<Edge>> {
-    let Some(Value::Object(edges_table)) = object.properties.get("Edges") else {
+    let Some(Value::Object(edges_table)) = object.properties().get("Edges") else {
         return Ok(Vec::new());
     };
     let variables = table_variables(edges_table)
@@ -267,20 +267,20 @@ pub(super) fn edge_pairs_from_value(
                 .collect();
             let mut out = Vec::with_capacity(array.rows);
             for row in 0..array.rows {
-                let source = *lookup.get(array.data[row].as_str()).ok_or_else(|| {
+                let source = *lookup.get(array.data()[row].as_str()).ok_or_else(|| {
                     graph_error(
                         name,
-                        format!("{name}: unknown source node '{}'", array.data[row]),
+                        format!("{name}: unknown source node '{}'", array.data()[row]),
                     )
                 })?;
                 let target = *lookup
-                    .get(array.data[row + array.rows].as_str())
+                    .get(array.data()[row + array.rows].as_str())
                     .ok_or_else(|| {
                         graph_error(
                             name,
                             format!(
                                 "{name}: unknown target node '{}'",
-                                array.data[row + array.rows]
+                                array.data()[row + array.rows]
                             ),
                         )
                     })?;

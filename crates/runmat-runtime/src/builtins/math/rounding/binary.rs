@@ -135,7 +135,7 @@ pub(super) fn finish_duration(
     builtin: &str,
 ) -> BuiltinResult<Value> {
     let days = tensor::value_into_tensor_for(builtin, value)?;
-    crate::builtins::duration::duration_object_from_days_tensor(days, plan.format)
+    crate::builtins::duration::duration_object_from_days_tensor(None, days, plan.format)
 }
 
 #[cfg(test)]
@@ -149,6 +149,7 @@ mod tests {
     #[test]
     fn duration_plan_accepts_numeric_day_counts_in_either_operand_position() {
         let duration = crate::builtins::duration::duration_object_from_days_tensor(
+            None,
             Tensor::new(vec![1.25, 2.5], vec![1, 2]).unwrap(),
             "hh:mm:ss",
         )

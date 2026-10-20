@@ -33,7 +33,10 @@ pub(super) async fn gauspuls_with_output_count(
     ))
 }
 
-pub(super) async fn gauspuls_mode(mode: String, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn gauspuls_mode(
+    mode: String,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if !mode.eq_ignore_ascii_case("cutoff") {
         return Err(gauspuls_error_with_detail(
             &GAUSPULS_ERROR_INVALID_INPUT,
@@ -46,8 +49,13 @@ pub(super) async fn gauspuls_mode(mode: String, rest: Vec<Value>) -> BuiltinResu
             format!("got {}", rest.len() + 1),
         ));
     }
-    ensure_gauspuls_control_extensions(&rest)?;
-    let params = parse_params(&rest[..rest.len().min(3)]).await?;
+    ensure_gauspuls_control_extensions(rest.view())?;
+    let params = parse_params(
+        rest.view()
+            .range(..rest.len().min(3))
+            .expect("gauspuls prefix is in bounds"),
+    )
+    .await?;
     let tpe = match rest.get(3) {
         Some(value) if !is_empty_default_placeholder(value) => {
             validate_tpe(scalar_parameter(value, "TPE").await?).map_err(|err| {

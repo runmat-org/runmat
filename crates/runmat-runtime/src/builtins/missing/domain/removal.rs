@@ -15,7 +15,7 @@ pub(super) struct RemoveOptions {
 }
 
 impl RemoveOptions {
-    pub(super) fn parse(args: &[Value]) -> BuiltinResult<Self> {
+    pub(super) fn parse(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<Self> {
         let mut dim = RemoveDim::Auto;
         let mut idx = 0;
         while idx < args.len() {
@@ -67,12 +67,13 @@ pub(super) fn dim_from_value(value: &Value) -> BuiltinResult<RemoveDim> {
 }
 
 pub(super) fn remove_missing_value(
+    runtime: Option<&RuntimeContext>,
     value: Value,
     options: RemoveOptions,
 ) -> BuiltinResult<(Value, LogicalArray)> {
     match value {
         Value::Object(object) if is_tabular_object(&object) => {
-            remove_missing_table(object, options)
+            remove_missing_table(runtime, object, options)
         }
         Value::Tensor(tensor) => remove_missing_tensor(tensor, options),
         Value::StringArray(array) => remove_missing_string_array(array, options),
@@ -95,6 +96,7 @@ pub(super) fn remove_missing_value(
 }
 
 pub(super) fn remove_missing_table(
+    runtime: Option<&RuntimeContext>,
     object: ObjectInstance,
     options: RemoveOptions,
 ) -> BuiltinResult<(Value, LogicalArray)> {
@@ -121,7 +123,7 @@ pub(super) fn remove_missing_table(
         }
         let row_names = selected_row_names(&object, &(0..height).collect::<Vec<_>>())?;
         Ok((
-            table_from_columns_like(&object, keep_names, keep_values, row_names, None)?,
+            table_from_columns_like(runtime, &object, keep_names, keep_values, row_names, None)?,
             LogicalArray::new(removed, vec![1, width]).map_err(internal_error)?,
         ))
     } else {
@@ -151,7 +153,7 @@ pub(super) fn remove_missing_table(
         }
         let row_names = selected_row_names(&object, &keep_rows)?;
         Ok((
-            table_from_columns_like(&object, names, values, row_names, Some(&keep_rows))?,
+            table_from_columns_like(runtime, &object, names, values, row_names, Some(&keep_rows))?,
             LogicalArray::new(row_has_missing, vec![height, 1]).map_err(internal_error)?,
         ))
     }
@@ -275,8 +277,9 @@ pub(super) fn remove_missing_string_array(
 ) -> BuiltinResult<(Value, LogicalArray)> {
     let rows = array.rows();
     let cols = array.cols();
+    let (data, _shape, _rows, _cols) = array.into_parts();
     remove_missing_column_major(
-        match array.data.try_into_owned() {
+        match data.try_into_owned() {
             Ok(values) => values.into_iter().collect(),
             Err(shared) => shared.iter().cloned().collect(),
         },
@@ -327,8 +330,9 @@ pub(super) fn remove_missing_cell(
 
     if rows == 1 || cols == 1 {
         let mut out = Vec::new();
-        let mut removed = Vec::with_capacity(cell.data.len());
-        let data = match cell.data.try_into_owned() {
+        let mut removed = Vec::with_capacity(cell.data().len());
+        let (data, _shape, _rows, _cols) = cell.into_parts();
+        let data = match data.try_into_owned() {
             Ok(values) => values.into_iter().collect::<Vec<_>>(),
             Err(shared) => shared.iter().cloned().collect::<Vec<_>>(),
         };
@@ -510,3 +514,4 @@ pub(super) fn empty_like(value: Value) -> BuiltinResult<Value> {
         _ => Ok(Value::output_list(Vec::new())),
     }
 }
+use crate::context::RuntimeContext;

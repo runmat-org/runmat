@@ -142,7 +142,7 @@ mod tests {
             runmat_runtime::object::indexing::ObjectIndexKind::Brace
         );
         match step.selector_value().expect("selector") {
-            Value::Cell(cell) => assert_eq!(cell.data[0].clone(), Value::Num(2.0)),
+            Value::Cell(cell) => assert_eq!(cell.data()[0].clone(), Value::Num(2.0)),
             other => panic!("expected selector cell, got {other:?}"),
         }
     }

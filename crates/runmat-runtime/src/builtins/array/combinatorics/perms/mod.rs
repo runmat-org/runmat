@@ -55,7 +55,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::array::combinatorics::perms"
 )]
-async fn perms_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn perms_builtin(value: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &runmat_builtins::PERMS_DESCRIPTOR,
         &runmat_builtins::PERMS_ERROR_TOO_MANY_OUTPUTS,

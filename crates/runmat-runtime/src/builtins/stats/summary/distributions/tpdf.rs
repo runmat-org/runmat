@@ -10,14 +10,21 @@ use runmat_builtins::{
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::summary::distributions::tpdf"
 )]
-pub(crate) async fn tpdf_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(crate) async fn tpdf_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if rest.len() != 1 {
         return Err(super::normal_error("tpdf", "tpdf: expected x and nu"));
     }
     let nu_value = rest.into_iter().next().expect("one nu argument");
     ensure_extensions(&value, &nu_value)?;
     numeric_inputs("tpdf", &[&value, &nu_value], NumericShapePolicy::Broadcast)?;
-    let output = NormalOutputPlan::inspect("tpdf", &value, std::slice::from_ref(&nu_value))?;
+    let output = NormalOutputPlan::inspect(
+        "tpdf",
+        &value,
+        crate::call::FunctionArgumentView::from_slice(std::slice::from_ref(&nu_value)),
+    )?;
     let x = super::normal_value_to_tensor("tpdf", "x", value).await?;
     let nu = super::normal_value_to_tensor("tpdf", "nu", nu_value).await?;
     let (x, nu, shape) = super::broadcast_pair("tpdf", &x, &nu)?;

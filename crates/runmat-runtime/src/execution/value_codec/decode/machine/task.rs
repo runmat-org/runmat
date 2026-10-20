@@ -3,6 +3,10 @@ use runmat_execution::value::{InlineValue, ValuePayload};
 
 #[path = "task/aggregate.rs"]
 mod aggregate;
+#[path = "task/aggregate_output.rs"]
+mod aggregate_output;
+#[path = "task/structure.rs"]
+mod structure;
 #[path = "task/dense.rs"]
 mod dense;
 #[path = "task/durable.rs"]
@@ -29,20 +33,20 @@ use text_value::TextValueTask;
 pub(super) enum Task<'a> {
     Decode {
         payload: &'a ValuePayload,
-        path: String,
+        path: ControlPath<'a>,
     },
     Expand(expansion::Expansion<'a>),
-    Struct(Box<StructTask<'a>>),
-    Cell(CellTask<'a>),
-    Callable(Box<CallableTask<'a>>),
-    Immutable(Box<ImmutableTask<'a>>),
-    PlainObject(Box<PlainObjectTask<'a>>),
-    StructArray(Box<StructArrayTask<'a>>),
-    ObjectArray(Box<ObjectArrayTask<'a>>),
+    Struct(ControlBox<StructTask<'a>>),
+    Cell(ControlBox<CellTask<'a>>),
+    Callable(ControlBox<CallableTask<'a>>),
+    Immutable(ControlBox<ImmutableTask<'a>>),
+    PlainObject(ControlBox<PlainObjectTask<'a>>),
+    StructArray(ControlBox<StructArrayTask<'a>>),
+    ObjectArray(ControlBox<ObjectArrayTask<'a>>),
     Dense(DenseTask<'a>),
-    Sparse(Box<SparseTask<'a>>),
+    Sparse(ControlBox<SparseTask<'a>>),
     Text(TextValueTask<'a>),
-    Exception(Box<ExceptionTask<'a>>),
+    Exception(ControlBox<ExceptionTask<'a>>),
 }
 
 pub(super) fn advance<'a>(
@@ -54,13 +58,13 @@ pub(super) fn advance<'a>(
         Task::Decode { payload, path } => decode_task(payload, path, machine),
         Task::Expand(task) => expansion::advance(task, machine, maximum_work),
         Task::Struct(mut task) => {
-            let (completed, complete) = task.advance(maximum_work);
+            let (completed, complete) = task.advance(maximum_work)?;
             if complete {
                 let value = task.finish();
                 let children = task.take_children();
-                machine.push_aggregate(value, children);
+                machine.push_aggregate(value, children)?;
             } else {
-                machine.tasks.push(Task::Struct(task));
+                machine.tasks.push(Task::Struct(task))?;
             }
             Ok(completed)
         }
@@ -68,9 +72,9 @@ pub(super) fn advance<'a>(
             let (completed, value) = task.advance(maximum_work)?;
             if let Some(value) = value {
                 let children = task.take_children();
-                machine.push_aggregate(value, children);
+                machine.push_aggregate(value, children)?;
             } else {
-                machine.tasks.push(Task::Cell(task));
+                machine.tasks.push(Task::Cell(task))?;
             }
             Ok(completed)
         }
@@ -78,9 +82,9 @@ pub(super) fn advance<'a>(
             let (completed, value) = task.advance(maximum_work)?;
             if let Some(value) = value {
                 let children = task.take_children();
-                machine.push_aggregate(value, children);
+                machine.push_aggregate(value, children)?;
             } else {
-                machine.tasks.push(Task::Callable(task));
+                machine.tasks.push(Task::Callable(task))?;
             }
             Ok(completed)
         }
@@ -88,9 +92,9 @@ pub(super) fn advance<'a>(
             let (completed, value) = task.advance(maximum_work)?;
             if let Some(value) = value {
                 let children = task.take_children();
-                machine.push_aggregate(value, children);
+                machine.push_aggregate(value, children)?;
             } else {
-                machine.tasks.push(Task::Immutable(task));
+                machine.tasks.push(Task::Immutable(task))?;
             }
             Ok(completed)
         }
@@ -98,9 +102,9 @@ pub(super) fn advance<'a>(
             let (completed, value) = task.advance(maximum_work)?;
             if let Some(value) = value {
                 let children = task.take_children();
-                machine.push_aggregate(value, children);
+                machine.push_aggregate(value, children)?;
             } else {
-                machine.tasks.push(Task::PlainObject(task));
+                machine.tasks.push(Task::PlainObject(task))?;
             }
             Ok(completed)
         }
@@ -108,9 +112,9 @@ pub(super) fn advance<'a>(
             let (completed, value) = task.advance(maximum_work)?;
             if let Some(value) = value {
                 let children = task.take_children();
-                machine.push_aggregate(value, children);
+                machine.push_aggregate(value, children)?;
             } else {
-                machine.tasks.push(Task::StructArray(task));
+                machine.tasks.push(Task::StructArray(task))?;
             }
             Ok(completed)
         }
@@ -118,49 +122,49 @@ pub(super) fn advance<'a>(
             let (completed, value) = task.advance(maximum_work)?;
             if let Some(value) = value {
                 let children = task.take_children();
-                machine.push_aggregate(value, children);
+                machine.push_aggregate(value, children)?;
             } else {
-                machine.tasks.push(Task::ObjectArray(task));
+                machine.tasks.push(Task::ObjectArray(task))?;
             }
             Ok(completed)
         }
         Task::Dense(mut task) => {
             let completed = task.advance(maximum_work)?;
             if task.is_complete() {
-                let path = task.path().to_owned();
+                let path = task.path().try_clone()?;
                 machine.push_value(task.finish()?, &path)?;
             } else {
-                machine.tasks.push(Task::Dense(task));
+                machine.tasks.push(Task::Dense(task))?;
             }
             Ok(completed)
         }
         Task::Sparse(mut task) => {
             let (completed, value) = task.advance(maximum_work)?;
             if let Some(value) = value {
-                let path = task.path().to_owned();
+                let path = task.path().try_clone()?;
                 machine.push_value(value, &path)?;
             } else {
-                machine.tasks.push(Task::Sparse(task));
+                machine.tasks.push(Task::Sparse(task))?;
             }
             Ok(completed)
         }
         Task::Text(mut task) => {
             let (completed, value) = task.advance(maximum_work)?;
             if let Some(value) = value {
-                let path = task.path().to_owned();
+                let path = task.path().try_clone()?;
                 machine.push_value(value, &path)?;
             } else {
-                machine.tasks.push(Task::Text(task));
+                machine.tasks.push(Task::Text(task))?;
             }
             Ok(completed)
         }
         Task::Exception(mut task) => {
             let (completed, value) = task.advance(maximum_work)?;
             if let Some(value) = value {
-                let path = task.path().to_owned();
+                let path = task.path().try_clone()?;
                 machine.push_value(value, &path)?;
             } else {
-                machine.tasks.push(Task::Exception(task));
+                machine.tasks.push(Task::Exception(task))?;
             }
             Ok(completed)
         }
@@ -169,17 +173,17 @@ pub(super) fn advance<'a>(
 
 fn decode_task<'a>(
     payload: &'a ValuePayload,
-    path: String,
+    path: ControlPath<'a>,
     machine: &mut DecodeMachine<'a>,
 ) -> Result<usize, ValueCodecError> {
     let value = match payload {
         ValuePayload::Inline(value) => value,
         ValuePayload::Distributed(handle) => {
-            machine.push_value(Value::Distributed(handle.clone()), &path)?;
+            machine.push_value(Value::Distributed(handle.clone().into()), &path)?;
             return Ok(1);
         }
         ValuePayload::Composite(handle) => {
-            machine.push_value(Value::Composite(handle.clone()), &path)?;
+            machine.push_value(Value::Composite(handle.clone().into()), &path)?;
             return Ok(1);
         }
         ValuePayload::Object(_) => {
@@ -215,20 +219,21 @@ fn decode_task<'a>(
         InlineValue::String(value) => {
             let runtime = machine.runtime();
             let task = TextValueTask::string(value, path, runtime)?;
-            machine.tasks.push(Task::Text(task));
+            machine.tasks.push(Task::Text(task))?;
         }
         InlineValue::Char { shape, code_points } => machine.tasks.push(Task::Text(
-            TextValueTask::character(shape, code_points, path),
-        )),
-        InlineValue::StringArray { shape, values } => machine
-            .tasks
-            .push(Task::Text(TextValueTask::string_array(shape, values, path))),
-        InlineValue::Dense(value) => machine
-            .tasks
-            .push(Task::Dense(DenseTask::new(value, path)?)),
+            TextValueTask::character(shape, code_points, path)?,
+        ))?,
+        InlineValue::StringArray { shape, values } => machine.tasks.push(Task::Text(
+            TextValueTask::string_array(shape, values, path)?,
+        ))?,
+        InlineValue::Dense(value) => {
+            let task = DenseTask::new_with_runtime(value, path, machine.runtime())?;
+            machine.tasks.push(Task::Dense(task))?;
+        }
         InlineValue::Sparse(value) => machine
             .tasks
-            .push(Task::Sparse(Box::new(SparseTask::new(value, path)?))),
+            .push(Task::Sparse(machine.boxed(SparseTask::new(value, path)?)?))?,
         InlineValue::Symbolic(_) => {
             return Err(ValueCodecError::unsupported(
                 &path,
@@ -236,14 +241,16 @@ fn decode_task<'a>(
             ))
         }
         InlineValue::Cell { shape, values } => {
-            machine.tasks.push(Task::Expand(expansion::Expansion::Cell {
-                shape,
-                values,
-                index: 0,
-                children: Vec::with_capacity(values.len()),
-                awaiting: false,
-                path,
-            }));
+            machine
+                .tasks
+                .push(Task::Expand(expansion::Expansion::Cell {
+                    shape,
+                    values,
+                    index: 0,
+                    children: machine.control.vector(values.len(), &path)?,
+                    awaiting: false,
+                    path,
+                }))?;
         }
         InlineValue::Struct(fields) | InlineValue::DurableOrderedStruct(fields) => {
             machine
@@ -251,20 +258,21 @@ fn decode_task<'a>(
                 .push(Task::Expand(expansion::Expansion::Struct {
                     fields,
                     index: 0,
-                    children: Vec::with_capacity(fields.len()),
+                    children: machine.control.vector(fields.len(), &path)?,
                     awaiting: false,
                     path,
-                }));
+                }))?;
         }
         InlineValue::Exception(value) => {
             let frame_sources = machine.frame_sources();
             machine
                 .tasks
-                .push(Task::Exception(Box::new(ExceptionTask::new(
+                .push(Task::Exception(machine.boxed(ExceptionTask::new(
                     value,
                     path,
                     frame_sources,
-                ))));
+                    machine.runtime(),
+                )?)?))?;
         }
         InlineValue::Callable(callable) => {
             machine
@@ -272,10 +280,10 @@ fn decode_task<'a>(
                 .push(Task::Expand(expansion::Expansion::Callable {
                     callable,
                     index: 0,
-                    children: Vec::with_capacity(callable.captures.len()),
+                    children: machine.control.vector(callable.captures.len(), &path)?,
                     awaiting: false,
                     path,
-                }));
+                }))?;
         }
         InlineValue::ImmutableValueClass(value) => {
             // Registered domain value classes carry their own schema version;
@@ -288,7 +296,10 @@ fn decode_task<'a>(
             if value.schema_version != expected_schema {
                 return Err(ValueCodecError::unsupported(
                     &path,
-                    "the immutable value-class schema version is unavailable in this runtime",
+                    format!(
+                        "immutable value-class schema version {}, expected {expected_schema}",
+                        value.schema_version,
+                    ),
                 ));
             }
             machine
@@ -296,12 +307,12 @@ fn decode_task<'a>(
                 .push(Task::Expand(expansion::Expansion::Immutable {
                     value,
                     index: 0,
-                    children: Vec::with_capacity(value.fields.len()),
+                    children: machine.control.vector(value.fields.len(), &path)?,
                     awaiting: false,
                     class_name: Some(TextCopy::new(&value.type_identity)),
                     class_identity: None,
                     path,
-                }));
+                }))?;
         }
         InlineValue::DurablePlainObject(value) => {
             machine
@@ -309,10 +320,10 @@ fn decode_task<'a>(
                 .push(Task::Expand(expansion::Expansion::PlainObject {
                     value,
                     index: 0,
-                    children: Vec::with_capacity(value.properties.len()),
+                    children: machine.control.vector(value.properties.len(), &path)?,
                     awaiting: false,
                     path,
-                }))
+                }))?
         }
         InlineValue::DurableStructArray(value) => {
             machine
@@ -321,16 +332,17 @@ fn decode_task<'a>(
                     value,
                     field: 0,
                     index: 0,
-                    children: Vec::with_capacity(
+                    children: machine.control.vector(
                         value
                             .fields
                             .len()
                             .checked_mul(value.fields.first().map_or(0, |field| field.values.len()))
                             .expect("validated structure-array child count"),
-                    ),
+                        &path,
+                    )?,
                     awaiting: false,
                     path,
-                }));
+                }))?;
         }
         InlineValue::DurableObjectArray(value) => {
             machine
@@ -338,10 +350,10 @@ fn decode_task<'a>(
                 .push(Task::Expand(expansion::Expansion::ObjectArray {
                     value,
                     index: 0,
-                    children: Vec::with_capacity(value.elements.len()),
+                    children: machine.control.vector(value.elements.len(), &path)?,
                     awaiting: false,
                     path,
-                }));
+                }))?;
         }
     }
     Ok(1)

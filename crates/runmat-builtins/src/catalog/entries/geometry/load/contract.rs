@@ -22,7 +22,8 @@ const INPUT: [BuiltinParamDescriptor; 2] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Variadic,
         default: None,
-        description: "Optional 'Units' and 'm', 'mm', or 'in': the source unit when the file declares none.",
+        description:
+            "Optional 'Units' and 'm', 'mm', or 'in': the source unit when the file declares none.",
     },
 ];
 const OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {

@@ -7,7 +7,10 @@ use crate::RuntimeError;
 const IDENT_PARPOOL_INVALID_INPUT: &str = "RunMat:parpool:InvalidInput";
 const IDENT_GCP_INVALID_INPUT: &str = "RunMat:gcp:InvalidInput";
 
-pub fn ensure(context: &RuntimeContext, arguments: &[Value]) -> Result<Value, RuntimeError> {
+pub fn ensure(
+    context: &RuntimeContext,
+    arguments: crate::call::FunctionArgumentView<'_>,
+) -> Result<Value, RuntimeError> {
     let request = parse_pool_request(arguments)?;
     let previous = context
         .execution()
@@ -23,10 +26,13 @@ pub fn ensure(context: &RuntimeContext, arguments: &[Value]) -> Result<Value, Ru
     Ok(Value::Pool(snapshot.handle))
 }
 
-pub fn current(context: &RuntimeContext, arguments: &[Value]) -> Result<Value, RuntimeError> {
-    let create = match arguments {
-        [] => true,
-        [value] if text(value).as_deref() == Some("nocreate") => false,
+pub fn current(
+    context: &RuntimeContext,
+    arguments: crate::call::FunctionArgumentView<'_>,
+) -> Result<Value, RuntimeError> {
+    let create = match (arguments.len(), arguments.first()) {
+        (0, _) => true,
+        (1, Some(value)) if text(value).as_deref() == Some("nocreate") => false,
         _ => {
             return Err(crate::runtime_error::semantic_error(
                 IDENT_GCP_INVALID_INPUT,
@@ -63,10 +69,12 @@ pub fn close(
     crate::parallel::lease::retire_pool(context, pool)
 }
 
-fn parse_pool_request(arguments: &[Value]) -> Result<PoolRequest, RuntimeError> {
-    match arguments {
-        [] => Ok(PoolRequest::automatic()),
-        [value] => {
+fn parse_pool_request(
+    arguments: crate::call::FunctionArgumentView<'_>,
+) -> Result<PoolRequest, RuntimeError> {
+    match (arguments.len(), arguments.get(0), arguments.get(1)) {
+        (0, _, _) => Ok(PoolRequest::automatic()),
+        (1, Some(value), _) => {
             if let Some(workers) = worker_count(value) {
                 return Ok(PoolRequest {
                     backend: None,
@@ -84,7 +92,7 @@ fn parse_pool_request(arguments: &[Value]) -> Result<PoolRequest, RuntimeError> 
                 workers: None,
             })
         }
-        [kind, workers] => {
+        (2, Some(kind), Some(workers)) => {
             let kind = text(kind).ok_or_else(|| {
                 crate::runtime_error::semantic_error(
                     IDENT_PARPOOL_INVALID_INPUT,

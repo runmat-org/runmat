@@ -29,8 +29,8 @@ fn admit_host_positions(
     Ok(())
 }
 
-pub(crate) async fn evaluate_bitcmp(args: Vec<Value>) -> BuiltinResult<Value> {
-    let protected = borrowed_gpu_inputs(&args);
+pub(crate) async fn evaluate_bitcmp(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let protected = borrowed_gpu_inputs(args.view());
     let output_source = args.first().and_then(|value| match value {
         Value::GpuTensor(handle) => Some(handle.clone()),
         _ => None,
@@ -69,8 +69,8 @@ fn sparse_bitcmp(
     })
 }
 
-pub(crate) async fn evaluate_bitget(args: Vec<Value>) -> BuiltinResult<Value> {
-    let protected = borrowed_gpu_inputs(&args);
+pub(crate) async fn evaluate_bitget(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let protected = borrowed_gpu_inputs(args.view());
     let output_source = args.first().and_then(|value| match value {
         Value::GpuTensor(handle) => Some(handle.clone()),
         _ => None,
@@ -150,8 +150,8 @@ async fn sparse_bitget(
     )
 }
 
-pub(crate) async fn evaluate_bitset(args: Vec<Value>) -> BuiltinResult<Value> {
-    let protected = borrowed_gpu_inputs(&args);
+pub(crate) async fn evaluate_bitset(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let protected = borrowed_gpu_inputs(args.view());
     let output_source = args.first().and_then(|value| match value {
         Value::GpuTensor(handle) => Some(handle.clone()),
         _ => None,

@@ -99,7 +99,10 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::ops::pagemtimes"
 )]
-async fn pagemtimes_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn pagemtimes_builtin(
+    first: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     let call = PagemtimesCall::parse(first, rest)?;
     for value in [&call.lhs, &call.rhs] {
         if crate::builtins::common::validation::value_has_native_integer_class(value) {
@@ -160,19 +163,18 @@ struct PagemtimesCall {
 }
 
 impl PagemtimesCall {
-    fn parse(first: Value, rest: Vec<Value>) -> BuiltinResult<Self> {
+    fn parse(first: Value, mut rest: crate::call::BuiltinArguments) -> BuiltinResult<Self> {
         match rest.len() {
             1 => Ok(Self {
                 lhs: first,
-                rhs: rest.into_iter().next().expect("one rhs"),
+                rhs: rest.pop_front().expect("one rhs"),
                 transp_lhs: PageTranspose::None,
                 transp_rhs: PageTranspose::None,
             }),
             3 => {
-                let mut iter = rest.into_iter();
-                let transp_lhs = PageTranspose::parse(&iter.next().expect("transpose lhs"))?;
-                let rhs = iter.next().expect("rhs");
-                let transp_rhs = PageTranspose::parse(&iter.next().expect("transpose rhs"))?;
+                let transp_lhs = PageTranspose::parse(&rest.pop_front().expect("transpose lhs"))?;
+                let rhs = rest.pop_front().expect("rhs");
+                let transp_rhs = PageTranspose::parse(&rest.pop_front().expect("transpose rhs"))?;
                 Ok(Self {
                     lhs: first,
                     rhs,
@@ -738,6 +740,7 @@ mod tests {
     use runmat_value::{CharArray, IntValue, IntegerStorage};
 
     fn call(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let rest = crate::call::BuiltinArguments::from_borrowed(&rest, None)?;
         block_on(pagemtimes_builtin(first, rest))
     }
 
@@ -925,7 +928,7 @@ mod tests {
                 vec![
                     Value::CharArray(CharArray::new_row("transpose")),
                     rhs,
-                    Value::String("none".to_string()),
+                    Value::String("none".to_string().into()),
                 ],
             )
             .unwrap(),
@@ -944,9 +947,9 @@ mod tests {
         let out = call(
             Value::ComplexTensor(lhs),
             vec![
-                Value::String("ctranspose".to_string()),
+                Value::String("ctranspose".to_string().into()),
                 Value::ComplexTensor(rhs),
-                Value::String("none".to_string()),
+                Value::String("none".to_string().into()),
             ],
         )
         .unwrap();
@@ -1001,7 +1004,7 @@ mod tests {
         let rhs = tensor(vec![2.0], vec![1, 1]);
         let err = call(
             lhs.clone(),
-            vec![Value::String("transpose".to_string()), rhs.clone()],
+            vec![Value::String("transpose".to_string().into()), rhs.clone()],
         )
         .unwrap_err();
         assert_eq!(err.identifier(), PAGEMTIMES_ERROR_INVALID_ARITY.identifier);
@@ -1009,9 +1012,9 @@ mod tests {
         let err = call(
             lhs,
             vec![
-                Value::String("bad".to_string()),
+                Value::String("bad".to_string().into()),
                 rhs,
-                Value::String("none".to_string()),
+                Value::String("none".to_string().into()),
             ],
         )
         .unwrap_err();

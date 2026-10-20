@@ -67,7 +67,7 @@ impl TextCollection {
     }
 
     fn from_string_array(array: StringArray) -> Self {
-        let StringArray { data, shape, .. } = array;
+        let (data, shape, _, _) = array.into_parts();
         let elements = match data.try_into_owned() {
             Ok(values) => values.into_iter().map(make_text_element).collect(),
             Err(data) => data.iter().cloned().map(make_text_element).collect(),
@@ -115,9 +115,7 @@ impl TextCollection {
     }
 
     fn from_cell_array(fn_name: &str, cell: CellArray) -> BuiltinResult<Self> {
-        let CellArray {
-            data, rows, cols, ..
-        } = cell;
+        let (data, _, rows, cols) = cell.into_parts();
         let mut elements = Vec::with_capacity(rows * cols);
         for col in 0..cols {
             for row in 0..rows {
@@ -145,7 +143,10 @@ impl TextCollection {
     }
 }
 
-pub(crate) fn parse_ignore_case(fn_name: &str, rest: &[Value]) -> BuiltinResult<bool> {
+pub(crate) fn parse_ignore_case(
+    fn_name: &str,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<bool> {
     if rest.is_empty() {
         return Ok(false);
     }
@@ -175,7 +176,7 @@ pub(crate) fn parse_ignore_case(fn_name: &str, rest: &[Value]) -> BuiltinResult<
     }
 
     let mut ignore_case = None;
-    for pair in rest.chunks(2) {
+    for pair in rest.chunks_exact(2) {
         let name = value_to_owned_string(&pair[0]).ok_or_else(|| {
             text_error(
                 fn_name,
@@ -309,8 +310,8 @@ fn make_text_element(text: Utf8Text) -> TextElement {
 fn cell_value_to_text(fn_name: &str, value: &Value) -> BuiltinResult<TextElement> {
     match value {
         Value::String(text) => Ok(make_text_element(text.clone())),
-        Value::StringArray(array) if array.data.len() == 1 => {
-            Ok(make_text_element(array.data[0].clone()))
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(make_text_element(array.data()[0].clone()))
         }
         Value::CharArray(array) if array.rows == 0 => Ok(TextElement::Text(String::new().into())),
         Value::CharArray(array) if array.rows == 1 => {

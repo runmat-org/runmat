@@ -55,13 +55,16 @@ fn setfield_creates_nested_structs() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn setfield_updates_struct_array_element() {
-    let mut a = StructValue::new();
+    let mut a = runmat_value::UnboundedStructValueBuilder::new();
     a.fields
         .insert("id".to_string(), Value::Int(IntValue::I32(1)));
-    let mut b = StructValue::new();
+    a.insert("tag", Value::Num(11.0));
+    let mut b = runmat_value::UnboundedStructValueBuilder::new();
     b.fields
         .insert("id".to_string(), Value::Int(IntValue::I32(2)));
-    let array = StructArray::new(vec![a, b], vec![1, 2]).unwrap();
+    b.insert("tag", Value::Num(22.0));
+    let array = StructArray::new(vec![a.finish(), b.finish()], vec![1, 2]).unwrap();
+    let original = array.clone();
     let indices =
         CellArray::new_with_shape(vec![Value::Int(IntValue::I32(2))], vec![1, 1]).unwrap();
     let updated = run_setfield(
@@ -74,10 +77,20 @@ fn setfield_updates_struct_array_element() {
     )
     .expect("setfield");
     match updated.value() {
-        Value::StructArray(array) => assert_eq!(
-            array.get_linear(1).unwrap().fields.get("id"),
-            Some(&Value::Int(IntValue::I32(42)))
-        ),
+        Value::StructArray(array) => {
+            assert_eq!(
+                array.get_linear(1).unwrap().fields.get("id"),
+                Some(&Value::Int(IntValue::I32(42)))
+            );
+            assert_eq!(
+                original.get_linear(1).unwrap().fields.get("id"),
+                Some(&Value::Int(IntValue::I32(2)))
+            );
+            assert_eq!(
+                array.column_owner("tag").unwrap().as_slice().as_ptr(),
+                original.column_owner("tag").unwrap().as_slice().as_ptr()
+            );
+        }
         other => panic!("expected structure array, got {other:?}"),
     }
 }
@@ -101,15 +114,15 @@ fn setfield_rejects_nonscalar_leading_structure_selection() {
 #[test]
 fn setfield_struct_array_with_end_index() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-    let mut first = StructValue::new();
+    let mut first = runmat_value::UnboundedStructValueBuilder::new();
     first
         .fields
         .insert("id".to_string(), Value::Int(IntValue::I32(1)));
-    let mut second = StructValue::new();
+    let mut second = runmat_value::UnboundedStructValueBuilder::new();
     second
         .fields
         .insert("id".to_string(), Value::Int(IntValue::I32(2)));
-    let array = StructArray::new(vec![first, second], vec![1, 2]).unwrap();
+    let array = StructArray::new(vec![first.finish(), second.finish()], vec![1, 2]).unwrap();
     let index_cell = CellArray::new_with_shape(vec![Value::from("end")], vec![1, 1]).unwrap();
     let updated = run_setfield(
         Value::StructArray(array),

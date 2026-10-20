@@ -87,7 +87,9 @@ fn mail_text(value: &Value, arg: &str) -> BuiltinResult<String> {
     })
 }
 
-pub(super) fn parse_sendmail_args(args: &[Value]) -> BuiltinResult<(Vec<String>, String, String)> {
+pub(super) fn parse_sendmail_args(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<(Vec<String>, String, String)> {
     if args.len() < 2 || args.len() > 4 {
         return Err(sendmail_error(
             SendmailFailure::Arity,
@@ -119,9 +121,9 @@ pub(super) fn parse_sendmail_args(args: &[Value]) -> BuiltinResult<(Vec<String>,
 pub(super) fn value_contains_resident(value: &Value) -> bool {
     match value {
         Value::GpuTensor(_) => true,
-        Value::Cell(value) => value.data.iter().any(value_contains_resident),
+        Value::Cell(value) => value.data().iter().any(value_contains_resident),
         Value::Struct(value) => value.fields.values().any(value_contains_resident),
-        Value::Object(value) => value.properties.values().any(value_contains_resident),
+        Value::Object(value) => value.properties().values().any(value_contains_resident),
         Value::Closure(value) => value.captures.iter().any(value_contains_resident),
         Value::OutputList(values) => values.iter().any(value_contains_resident),
         _ => false,
@@ -131,14 +133,14 @@ pub(super) fn value_contains_resident(value: &Value) -> bool {
 pub(super) fn recipients_from_value(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
         Value::StringArray(array) => Ok(array
-            .data
+            .data()
             .iter()
             .filter(|value| !value.trim().is_empty())
             .map(|value| value.as_str().to_owned())
             .collect()),
         Value::Cell(cell) => {
             let mut out = Vec::new();
-            for value in &cell.data {
+            for value in cell.data() {
                 let recipient = mail_text(value, "recipient")?;
                 if !recipient.trim().is_empty() {
                     out.push(recipient);

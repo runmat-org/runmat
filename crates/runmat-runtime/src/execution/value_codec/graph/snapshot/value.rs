@@ -56,7 +56,7 @@ impl<'a> Encoder<'a> {
             }
             let target = runmat_gc::gc_with_value(&handle.target, |value| match value {
                 Value::Object(object)
-                    if object.class_name == handle.class_name
+                    if object.class_name() == &*handle.class_name
                         && object.selected_class().is_some() =>
                 {
                     Ok(object.clone())
@@ -166,7 +166,7 @@ impl<'a> Encoder<'a> {
         } else if let Value::Object(object) = input.value() {
             if let Some(facts) = object.selected_class() {
                 if object.has_native_payload()
-                    || object.class_name != *facts.class()
+                    || object.class_name() != facts.class()
                     || facts.is_handle_class() != self.selected_handle_nodes.contains(&index)
                 {
                     return Err(invalid(
@@ -189,17 +189,16 @@ impl<'a> Encoder<'a> {
                 self.bound_authorities
                     .push((index, origin, constructor.authority.clone()));
                 let mut sorted_dynamic = object
-                    .dynamic_properties
-                    .iter()
-                    .flat_map(|properties| properties.values())
+                    .dynamic_property_definitions()
+                    .map(|(_, definition)| definition)
                     .collect::<Vec<_>>();
                 sorted_dynamic.sort_unstable_by(|left, right| left.name.cmp(&right.name));
                 let dynamic_properties = sorted_dynamic
                     .iter()
                     .map(|property| runmat_execution::value::DurableDynamicProperty {
-                        name: property.name.clone(),
-                        definition_name: property.name.clone(),
-                        defining_class: property.defining_class.clone(),
+                        name: property.name.to_string(),
+                        definition_name: property.name.to_string(),
+                        defining_class: property.defining_class.as_identity().clone(),
                         get_access: property.get_access,
                         set_access: property.set_access,
                         dependent: property.dependent,
@@ -209,7 +208,7 @@ impl<'a> Encoder<'a> {
                         abort_set: property.abort_set,
                         set_observable: property.set_observable,
                         get_observable: property.get_observable,
-                        description: property.description.clone(),
+                        description: property.description.to_string(),
                     })
                     .collect::<Vec<_>>();
                 let metadata_inputs = sorted_dynamic
@@ -255,7 +254,7 @@ impl<'a> Encoder<'a> {
                 });
                 return Ok(());
             }
-            if !crate::parallel::codistributor::is_supported_class(&object.class_name) {
+            if !crate::parallel::codistributor::is_supported_class(object.class_name()) {
                 return Err(ValueCodecError::unsupported(
                     "$",
                     "value has no portable graph codec",
@@ -263,7 +262,7 @@ impl<'a> Encoder<'a> {
             }
             crate::parallel::codistributor::validate_definition(object)
                 .map_err(|error| invalid(error.to_string()))?;
-            let type_identity = object.class_name.to_string();
+            let type_identity = object.class_name().to_string();
             let fields = input.named_children();
             let names = fields
                 .iter()
@@ -297,7 +296,7 @@ impl<'a> Encoder<'a> {
                 }
                 None => CallableOwner::Workspace,
             };
-            let name = closure.function_name.clone();
+            let name = closure.function_name.to_string();
             let role = closure.source_role;
             let source_file = closure.source_file.as_deref().map(str::to_owned);
             let environment = closure.lexical_environment.clone();
@@ -376,7 +375,7 @@ impl<'a> Encoder<'a> {
                     self.pending_bound_callables.push(PreparedBoundCallable {
                         index,
                         origin,
-                        qualified_name: handle.name.clone(),
+                        qualified_name: handle.name.to_string(),
                         callable_digest: CallableValue::identity_digest(
                             CallableOwner::Bound(origin),
                             &handle.name,
@@ -386,7 +385,7 @@ impl<'a> Encoder<'a> {
                         ),
                         form: CallableForm::Handle,
                         source_role: handle.source_role,
-                        source_file: handle.source_file.clone(),
+                        source_file: handle.source_file.as_deref().map(str::to_owned),
                         captures: Vec::new(),
                         activation: None,
                     });

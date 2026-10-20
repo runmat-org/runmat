@@ -22,7 +22,7 @@ pub(super) fn values<'a>(
     function: &'static str,
 ) -> BuiltinResult<&'a CellArray> {
     match variables(table, property, function)?.fields.get("Value") {
-        Some(Value::Cell(cell)) if cell.shape == [cell.data.len(), 1] => Ok(cell),
+        Some(Value::Cell(cell)) if cell.shape == [cell.data().len(), 1] => Ok(cell),
         _ => Err(deep_learning_error(
             function,
             format!("{function}: {property}.Value must be a column cell array"),
@@ -37,12 +37,12 @@ pub(super) fn text(
     function: &'static str,
 ) -> BuiltinResult<Vec<String>> {
     match variables(table, property, function)?.fields.get(name) {
-        Some(Value::StringArray(array)) if array.shape == [array.data.len(), 1] => {
-            Ok(array.data.iter().map(ToString::to_string).collect())
+        Some(Value::StringArray(array)) if array.shape == [array.data().len(), 1] => {
+            Ok(array.data().iter().map(ToString::to_string).collect())
         }
         // Kept only as an input extension for older value-network callers.
-        Some(Value::Cell(cell)) if cell.shape == [cell.data.len(), 1] => cell
-            .data
+        Some(Value::Cell(cell)) if cell.shape == [cell.data().len(), 1] => cell
+            .data()
             .iter()
             .map(|value| scalar_text(value, function))
             .collect(),

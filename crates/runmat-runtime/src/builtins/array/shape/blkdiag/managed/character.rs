@@ -1,6 +1,9 @@
 use super::*;
 
-pub(super) fn assemble(context: &RuntimeContext, values: &[Value]) -> BuiltinResult<Value> {
+pub(super) fn assemble(
+    context: &RuntimeContext,
+    values: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Value> {
     let (rows, cols) = values
         .iter()
         .try_fold((0usize, 0usize), |(rows, cols), value| {
@@ -20,7 +23,7 @@ pub(super) fn assemble(context: &RuntimeContext, values: &[Value]) -> BuiltinRes
                 [rows, cols, rest @ ..] if rest.iter().all(|&dim| dim == 1) => Some((*rows, *cols)),
                 _ => None,
             };
-            if chars.data.len() != expected || matrix_shape != Some((chars.rows, chars.cols)) {
+            if chars.data().len() != expected || matrix_shape != Some((chars.rows, chars.cols)) {
                 return Err(error_with_detail(
                     &BLKDIAG_ERROR_INVALID_INPUT,
                     "character block shape does not match storage",
@@ -56,7 +59,7 @@ pub(super) fn assemble(context: &RuntimeContext, values: &[Value]) -> BuiltinRes
                                 .checkpoint(context)
                                 .map_err(|cause| admission(context, cause))?;
                         }
-                        data[dst] = chars.data[row * chars.cols + col];
+                        data[dst] = chars.data()[row * chars.cols + col];
                     }
                 }
                 row_offset += chars.rows;

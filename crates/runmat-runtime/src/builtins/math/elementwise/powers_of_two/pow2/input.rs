@@ -110,8 +110,8 @@ pub(super) fn scalar_component(value: &Value) -> Option<(f64, f64)> {
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
             Some((f64::from(logical.data[0] != 0), 0.0))
         }
-        Value::CharArray(chars) if chars.data.len() == 1 => chars
-            .data
+        Value::CharArray(chars) if chars.data().len() == 1 => chars
+            .data()
             .first()
             .map(|character| (*character as u32 as f64, 0.0)),
         Value::Complex(real, imaginary) => Some((*real, *imaginary)),
@@ -128,7 +128,7 @@ pub(super) fn integer_values_as_f64(storage: NumericStorage) -> BuiltinResult<Ve
 
 fn char_tensor(chars: CharArray) -> BuiltinResult<Tensor> {
     let values = chars
-        .data
+        .data()
         .iter()
         .map(|character| *character as u32 as f64)
         .collect();

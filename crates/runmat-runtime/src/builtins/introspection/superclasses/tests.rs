@@ -13,7 +13,7 @@ fn inferred_storage_matches_runtime_cell_storage() {
     };
     let (_, _, child) = register_hierarchy("StorageOracle");
     for name in [child, "uint64".to_string()] {
-        let input = Value::String(name.clone());
+        let input = Value::String(name.clone().into());
         let request = CallRequest {
             arguments: vec![crate::value_fact::value_fact(&input)],
             literals: LiteralContext::new(vec![LiteralValue::String(name)]),
@@ -82,10 +82,10 @@ fn cell_strings(value: Value) -> Vec<String> {
     let Value::Cell(cell) = value else {
         panic!("superclasses should return cell");
     };
-    cell.data
-        .into_iter()
+    cell.data()
+        .iter()
         .map(|value| match value {
-            Value::CharArray(chars) => chars.data.iter().collect::<String>(),
+            Value::CharArray(chars) => chars.data().iter().collect::<String>(),
             other => panic!("expected char superclass name, got {other:?}"),
         })
         .collect()
@@ -101,7 +101,7 @@ fn superclasses_returns_parent_chain_for_class_name_text() {
     let (grand, parent, child) = register_hierarchy("ClassName");
 
     assert_eq!(
-        call(Value::String(child.clone())),
+        call(Value::String(child.clone().into())),
         vec![parent.clone(), grand.clone()]
     );
     assert_eq!(

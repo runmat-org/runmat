@@ -75,9 +75,11 @@ fn invoke_function_without_profile(argument_count: usize, max_profile_bytes: usi
                     &unit,
                     ProcedureInvocation {
                         target: ProcedureTarget::Function("unprofiled".into()),
-                        arguments: (0..argument_count)
-                            .map(|index| Value::Num(index as f64))
-                            .collect(),
+                        arguments: crate::ProcedureArguments::Source(
+                            (0..argument_count)
+                                .map(|index| Value::Num(index as f64))
+                                .collect(),
+                        ),
                         requested_outputs: 1,
                     },
                     &InvocationControl::default(),
@@ -128,7 +130,7 @@ fn profile_byte_bound_does_not_disable_empty_argument_entrypoint() {
                 &unit,
                 ProcedureInvocation {
                     target: ProcedureTarget::Entrypoint,
-                    arguments: vec![],
+                    arguments: crate::ProcedureArguments::Source(vec![]),
                     requested_outputs: 0,
                 },
                 &InvocationControl::default(),

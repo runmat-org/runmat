@@ -7,22 +7,122 @@ pub fn normalize_option_key(name: &str) -> String {
         .collect()
 }
 
+/// Options accepted by the existing model constructor. Decoding does not
+/// impose uniqueness: model options retain their ordered last-wins behavior.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum FeaStructuralOption {
-    Profile,
-    FailFast,
-    WindowSize,
+pub enum FeaModelOption {
+    Frame,
+    Materials,
+    MaterialAssignments,
+    Constraints,
+    Boundaries,
+    Signals,
+    Excitations,
+    ExcitationCases,
+    InitialConditions,
+    ResponseSpectra,
+    Steps,
+    Sequence,
+    Domains,
+    Interfaces,
 }
 
-impl FeaStructuralOption {
+impl FeaModelOption {
     pub fn decode(name: &str) -> Option<Self> {
         Self::from_normalized(&normalize_option_key(name))
     }
 
     pub fn from_normalized(name: &str) -> Option<Self> {
         Some(match name {
-            "profile" => Self::Profile,
-            "failfast" => Self::FailFast,
+            "frame" => Self::Frame,
+            "materials" => Self::Materials,
+            "materialassignments" => Self::MaterialAssignments,
+            "constraints" => Self::Constraints,
+            "boundaries" => Self::Boundaries,
+            "signals" => Self::Signals,
+            "excitations" => Self::Excitations,
+            "excitationcases" => Self::ExcitationCases,
+            "initialconditions" => Self::InitialConditions,
+            "responsespectra" => Self::ResponseSpectra,
+            "steps" => Self::Steps,
+            "sequence" => Self::Sequence,
+            "domains" => Self::Domains,
+            "interfaces" => Self::Interfaces,
+            _ => return None,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FeaStudyOption {
+    Execution,
+    Mesh,
+}
+
+impl FeaStudyOption {
+    pub fn decode(name: &str) -> Option<Self> {
+        Self::from_normalized(&normalize_option_key(name))
+    }
+
+    pub fn from_normalized(name: &str) -> Option<Self> {
+        Some(match name {
+            "execution" => Self::Execution,
+            "mesh" => Self::Mesh,
+            _ => return None,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FeaMaterialAssignmentOption {
+    ExpectedMaterial,
+    Confidence,
+}
+
+impl FeaMaterialAssignmentOption {
+    pub fn decode(name: &str) -> Option<Self> {
+        Self::from_normalized(&normalize_option_key(name))
+    }
+
+    pub fn from_normalized(name: &str) -> Option<Self> {
+        Some(match name {
+            "expectedmaterial" | "expectedmaterialid" => Self::ExpectedMaterial,
+            "confidence" => Self::Confidence,
+            _ => return None,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FeaSweepOption {
+    FailFast,
+}
+
+impl FeaSweepOption {
+    pub fn decode(name: &str) -> Option<Self> {
+        Self::from_normalized(&normalize_option_key(name))
+    }
+
+    pub fn from_normalized(name: &str) -> Option<Self> {
+        match name {
+            "failfast" => Some(Self::FailFast),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FeaTrendsOption {
+    WindowSize,
+}
+
+impl FeaTrendsOption {
+    pub fn decode(name: &str) -> Option<Self> {
+        Self::from_normalized(&normalize_option_key(name))
+    }
+
+    pub fn from_normalized(name: &str) -> Option<Self> {
+        Some(match name {
             "windowsize" => Self::WindowSize,
             _ => return None,
         })
@@ -57,17 +157,25 @@ mod tests {
 
     #[test]
     fn structural_spellings_normalize_but_plot_spellings_do_not_widen() {
+        assert_eq!(FeaModelOption::decode("P_rofile"), None);
         assert_eq!(
-            FeaStructuralOption::decode("P_rofile"),
-            Some(FeaStructuralOption::Profile)
+            FeaTrendsOption::decode("Window-Size"),
+            Some(FeaTrendsOption::WindowSize)
         );
         assert_eq!(
-            FeaStructuralOption::decode("Window-Size"),
-            Some(FeaStructuralOption::WindowSize)
+            FeaSweepOption::decode("FAIL_FAST"),
+            Some(FeaSweepOption::FailFast)
         );
         assert_eq!(
-            FeaStructuralOption::decode("FAIL_FAST"),
-            Some(FeaStructuralOption::FailFast)
+            FeaModelOption::decode("S_te-ps"),
+            Some(FeaModelOption::Steps)
+        );
+        assert_eq!(FeaModelOption::decode("Assignments"), None);
+        assert_eq!(FeaModelOption::decode("Cases"), None);
+        assert_eq!(FeaStudyOption::decode("P_rofile"), None);
+        assert_eq!(
+            FeaMaterialAssignmentOption::decode("Expected_Material-Id"),
+            Some(FeaMaterialAssignmentOption::ExpectedMaterial)
         );
         assert_eq!(
             FeaPlotOption::decode("FIELD_ID"),

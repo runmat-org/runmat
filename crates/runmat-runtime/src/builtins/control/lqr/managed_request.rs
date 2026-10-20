@@ -131,34 +131,33 @@ impl ManagedRiccatiRequest {
 
     pub(super) fn from_lqr(
         first: Value,
-        rest: Vec<Value>,
+        mut rest: crate::call::BuiltinArguments,
         runtime: &RuntimeContext,
     ) -> BuiltinResult<Self> {
         match first {
-            Value::Object(mut object) if object.is_class(SS_CLASS) => {
+            Value::Object(object) if object.is_class(SS_CLASS) => {
                 let sample_time = super::scalar_property(&object, "Ts")?;
                 validate_sample_time(sample_time, "lqr")?;
-                let a = object.properties.remove("A").ok_or_else(|| {
+                let a = object.property("A").cloned().ok_or_else(|| {
                     super::lqr_error(
                         &runmat_builtins::LQR_ERROR_INVALID_MODEL,
                         "ss object missing A property",
                     )
                 })?;
-                let b = object.properties.remove("B").ok_or_else(|| {
+                let b = object.property("B").cloned().ok_or_else(|| {
                     super::lqr_error(
                         &runmat_builtins::LQR_ERROR_INVALID_MODEL,
                         "ss object missing B property",
                     )
                 })?;
-                let mut values = rest.into_iter();
-                let q = values.next().expect("validated Q");
-                let r = values.next().expect("validated R");
+                let q = rest.pop_front().expect("validated Q");
+                let r = rest.pop_front().expect("validated R");
                 Self::new(
                     a,
                     b,
                     q,
                     Some(r),
-                    values.next(),
+                    rest.pop_front(),
                     if sample_time > 0.0 {
                         LqrDomain::Discrete
                     } else {
@@ -173,16 +172,15 @@ impl ManagedRiccatiRequest {
                 "lqr(sys,Q,R) requires a state-space ss model",
             )),
             a => {
-                let mut values = rest.into_iter();
-                let b = values.next().expect("validated B");
-                let q = values.next().expect("validated Q");
-                let r = values.next().expect("validated R");
+                let b = rest.pop_front().expect("validated B");
+                let q = rest.pop_front().expect("validated Q");
+                let r = rest.pop_front().expect("validated R");
                 Self::new(
                     a,
                     b,
                     q,
                     Some(r),
-                    values.next(),
+                    rest.pop_front(),
                     LqrDomain::Continuous,
                     RiccatiApi::Lqr,
                     runtime,

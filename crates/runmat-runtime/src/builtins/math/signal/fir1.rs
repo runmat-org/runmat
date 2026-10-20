@@ -98,20 +98,26 @@ async fn fir1_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     n: Value,
     wn: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    evaluate_in_runtime(runtime.as_ref(), n, wn, &rest).await
+    evaluate_in_runtime(runtime.as_ref(), n, wn, rest.view()).await
 }
 
 pub async fn evaluate(n: Value, wn: Value, rest: &[Value]) -> BuiltinResult<Value> {
-    evaluate_in_runtime(None, n, wn, rest).await
+    evaluate_in_runtime(
+        None,
+        n,
+        wn,
+        crate::call::FunctionArgumentView::from_slice(rest),
+    )
+    .await
 }
 
 async fn evaluate_in_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
     n: Value,
     wn: Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<Value> {
     let mut cooperation = SignalCooperation::new(runtime, BUILTIN_NAME);
     evaluate_with_cooperation(n, wn, rest, &mut cooperation).await
@@ -120,7 +126,7 @@ async fn evaluate_in_runtime(
 async fn evaluate_with_cooperation(
     n: Value,
     wn: Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<Value> {
     cooperation.completed(0).await?;
@@ -291,7 +297,11 @@ fn ensure_role_extensions(
     Ok(())
 }
 
-fn ensure_input_extensions(n: &Value, wn: &Value, rest: &[Value]) -> BuiltinResult<()> {
+fn ensure_input_extensions(
+    n: &Value,
+    wn: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     ensure_role_extensions(
         n,
         &FIR1_INTEGER_ORDER_EXTENSION,
@@ -572,7 +582,7 @@ mod tests {
         let error = block_on(evaluate_with_cooperation(
             Value::Num(SIGNAL_WORK_CHUNK as f64),
             Value::Num(0.25),
-            &[],
+            crate::call::FunctionArgumentView::from_slice(&[]),
             &mut cooperation,
         ))
         .expect_err("cancelled design must not produce coefficients");

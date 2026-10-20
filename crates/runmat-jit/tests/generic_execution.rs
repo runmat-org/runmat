@@ -728,7 +728,7 @@ fn injected_failure_at_every_safepoint_does_not_replay_completed_calls() {
 
 #[test]
 fn gc_collection_during_deopt_resume_preserves_native_handle_values() {
-    let rooted = runmat_gc::gc_allocate_rooted(Value::String("native-live".to_string()))
+    let rooted = runmat_gc::gc_allocate_rooted(Value::String("native-live".into()))
         .expect("allocate rooted native test value");
     let handle = rooted.handle();
     let handle_value = Value::HandleObject(runmat_value::HandleRef {
@@ -1210,7 +1210,7 @@ fn generic_super_dispatch_uses_runtime_class_and_semantic_call_services() {
     let Value::Object(value) = execution.outputs.first().unwrap() else {
         panic!("super constructor must return the active child receiver");
     };
-    assert_eq!(value.class_name.display_name(), "NativeChild");
+    assert_eq!(value.class_name().display_name(), "NativeChild");
     drop(invoker);
     drop(resolver);
 }
@@ -1918,11 +1918,11 @@ fn caught_contextual_selector_call_error_clears_native_site_state() {
 
 #[test]
 fn suspended_contextual_site_roots_completed_calls_and_captured_sequences() {
-    let rooted = runmat_gc::gc_allocate_rooted(Value::String("contextual-live".to_string()))
+    let rooted = runmat_gc::gc_allocate_rooted(Value::String("contextual-live".into()))
         .expect("allocate rooted contextual test value");
     let handle = rooted.handle();
     let completion_root =
-        runmat_gc::gc_allocate_rooted(Value::String("completed-call-live".to_string()))
+        runmat_gc::gc_allocate_rooted(Value::String("completed-call-live".into()))
             .expect("allocate rooted completed-call test value");
     let completion_handle = completion_root.handle();
     thread_local! {

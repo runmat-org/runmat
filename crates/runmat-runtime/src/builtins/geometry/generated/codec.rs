@@ -93,15 +93,23 @@ fn validate_product_object(
 
 fn object_value(class_name: &str, bytes: Vec<u8>) -> BuiltinResult<Value> {
     ensure_classes_registered();
-    let mut object = ObjectInstance::new(class_name);
-    object.properties.insert(
-        CONTRACT_PROPERTY.into(),
+    let length = bytes.len();
+    let fields = [(
+        CONTRACT_PROPERTY,
         Value::Tensor(
-            Tensor::new_integer(IntegerStorage::U8(bytes.clone()), vec![bytes.len(), 1])
+            Tensor::new_integer(IntegerStorage::U8(bytes), vec![length, 1])
                 .map_err(|error| invalid("geometry.value", error))?,
         ),
-    );
-    Ok(Value::Object(object))
+    )];
+    // These legacy entrypoints have no selected contextual factory authority.
+    // The shared constructor enforces ordinary policy rather than demoting an
+    // admitted object to an unclaimed mutable generation.
+    crate::execution::object::construct_object_from_borrowed_fields(
+        None,
+        class_name,
+        fields.iter().map(|(name, value)| (*name, value)),
+    )
+    .map(|output| output.with_owned(|value| value))
 }
 
 fn object_bytes(value: &Value, class_name: &str, builtin: &'static str) -> BuiltinResult<Vec<u8>> {
@@ -112,10 +120,10 @@ fn object_bytes(value: &Value, class_name: &str, builtin: &'static str) -> Built
 }
 
 fn object_contract_bytes(object: &ObjectInstance, class_name: &str) -> Result<Vec<u8>, String> {
-    if object.class_name.display_name() != class_name || object.properties.len() != 1 {
+    if object.class_name().display_name() != class_name || object.properties().len() != 1 {
         return Err(format!("expected one immutable {class_name} value"));
     }
-    let Some(Value::Tensor(contract)) = object.properties.get(CONTRACT_PROPERTY) else {
+    let Some(Value::Tensor(contract)) = object.properties().get(CONTRACT_PROPERTY) else {
         return Err(format!("{class_name} has no byte contract"));
     };
     let Some(IntegerStorage::U8(bytes)) = contract.integer_storage() else {

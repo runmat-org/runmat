@@ -10,7 +10,7 @@ use runmat_builtins::{
     RegexOutput as OutputSpec, RegexParseMode,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{CharArray, StringArray, StructValue, Tensor, Value};
+use runmat_value::{CharArray, StringArray, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinGpuSpec, ConstantStrategy, GpuOpKind, ReductionNaN, ResidencyPolicy,
@@ -64,14 +64,21 @@ pub async fn evaluate_with(
     pattern: Value,
     rest: &[Value],
 ) -> BuiltinResult<RegexpEvaluation> {
-    evaluate_with_default(builtin, subject, pattern, rest, false).await
+    evaluate_with_default(
+        builtin,
+        subject,
+        pattern,
+        crate::call::FunctionArgumentView::from_slice(rest),
+        false,
+    )
+    .await
 }
 
 pub(crate) async fn evaluate_with_default(
     builtin: &'static str,
     subject: Value,
     pattern: Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     case_insensitive_by_default: bool,
 ) -> BuiltinResult<RegexpEvaluation> {
     if contains_numeric_or_resident_text_input(&subject)
@@ -101,9 +108,10 @@ pub(crate) async fn evaluate_with_default(
 async fn regexp_builtin(
     subject: Value,
     pattern: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
-    let evaluation = evaluate(subject, pattern, &rest).await?;
+    let evaluation =
+        evaluate_with_default(BUILTIN_NAME, subject, pattern, rest.view(), false).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Value::output_list(Vec::new()));
@@ -133,7 +141,7 @@ type RegexpOptions = RegexOptions;
 
 fn parse_options(
     builtin: &'static str,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     case_insensitive_by_default: bool,
 ) -> BuiltinResult<RegexpOptions> {
     let mut options = project_regex_options(
@@ -226,7 +234,7 @@ fn collect_char_array(
         });
     }
     if array.rows == 1 {
-        let text: String = array.data.into_char_iter().collect();
+        let text: String = array.data().iter().copied().collect();
         return Ok(SubjectCollection {
             entries: vec![runmat_value::Utf8Text::new(text)],
             rows: 1,
@@ -239,7 +247,7 @@ fn collect_char_array(
     for r in 0..array.rows {
         let mut line = String::with_capacity(array.cols);
         for c in 0..array.cols {
-            line.push(array.data[r * array.cols + c]);
+            line.push(array.data()[r * array.cols + c]);
         }
         entries.push(runmat_value::Utf8Text::new(line));
     }
@@ -261,17 +269,18 @@ fn collect_string_array(
 ) -> BuiltinResult<SubjectCollection> {
     let rows = array.rows();
     let cols = array.cols();
-    let total = array.data.len();
+    let (data, _shape, _rows, _cols) = array.into_parts();
+    let total = data.len();
     if total == 1 && rows == 1 && cols == 1 {
         return Ok(SubjectCollection {
-            entries: vec![array.data[0].clone()],
+            entries: vec![data[0].clone()],
             rows: 1,
             cols: 1,
             kind: InputKind::StringScalar,
             force_cell_output,
         });
     }
-    let entries = match array.data.try_into_owned() {
+    let entries = match data.try_into_owned() {
         Ok(values) => values.into_iter().collect(),
         Err(shared) => shared.iter().cloned().collect(),
     };
@@ -289,8 +298,8 @@ async fn collect_cell_array(
     cell: runmat_value::CellArray,
     _force_cell_output: bool,
 ) -> BuiltinResult<SubjectCollection> {
-    let mut entries = Vec::with_capacity(cell.data.len());
-    for ptr in &cell.data {
+    let mut entries = Vec::with_capacity(cell.data().len());
+    for ptr in cell.data() {
         let value = gather_if_needed_async(ptr)
             .await
             .map_err(|err| with_builtin_context(builtin, err))?;
@@ -319,9 +328,9 @@ async fn collect_cell_array(
 fn extract_string(value: &Value) -> Option<runmat_value::Utf8Text> {
     match value {
         Value::String(s) => Some(s.clone()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
+        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].clone()),
         Value::CharArray(ca) if ca.rows == 1 => Some(runmat_value::Utf8Text::new(
-            ca.data.iter().copied().collect(),
+            ca.data().iter().copied().collect(),
         )),
         _ => None,
     }
@@ -330,8 +339,10 @@ fn extract_string(value: &Value) -> Option<runmat_value::Utf8Text> {
 fn value_to_option_text(value: &Value) -> Option<Cow<'_, str>> {
     match value {
         Value::String(s) => Some(Cow::Borrowed(s.as_str())),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(Cow::Borrowed(sa.data[0].as_str())),
-        Value::CharArray(ca) if ca.rows == 1 => Some(Cow::Owned(ca.data.iter().collect())),
+        Value::StringArray(sa) if sa.data().len() == 1 => {
+            Some(Cow::Borrowed(sa.data()[0].as_str()))
+        }
+        Value::CharArray(ca) if ca.rows == 1 => Some(Cow::Owned(ca.data().iter().collect())),
         _ => None,
     }
 }
@@ -820,7 +831,7 @@ fn empty_token_extents(builtin: &'static str) -> BuiltinResult<Value> {
 }
 
 fn names_struct(names: &[String], match_data: Option<&MatchComponents>) -> Value {
-    let mut st = StructValue::new();
+    let mut st = runmat_value::UnboundedStructValueBuilder::new();
     for name in names {
         let value = match match_data {
             Some(m) => m.named.get(name).cloned().unwrap_or_default(),
@@ -828,7 +839,7 @@ fn names_struct(names: &[String], match_data: Option<&MatchComponents>) -> Value
         };
         st.fields.insert(name.clone(), Value::string(value));
     }
-    Value::Struct(st)
+    Value::Struct(st.finish())
 }
 
 #[cfg(test)]
@@ -887,8 +898,8 @@ pub(crate) mod tests {
         assert_eq!(outputs.len(), 1);
         match &outputs[0] {
             Value::Cell(ca) => {
-                assert_eq!(ca.data.len(), 1);
-                assert_eq!(&ca.data[0], &Value::String("123".into()));
+                assert_eq!(ca.data().len(), 1);
+                assert_eq!(&ca.data()[0], &Value::String("123".into()));
             }
             other => panic!("unexpected output {other:?}"),
         }
@@ -907,16 +918,16 @@ pub(crate) mod tests {
         assert_eq!(outputs.len(), 1);
         match &outputs[0] {
             Value::Cell(ca) => {
-                assert_eq!(ca.data.len(), 1);
-                let token_cell = &ca.data[0];
+                assert_eq!(ca.data().len(), 1);
+                let token_cell = &ca.data()[0];
                 match token_cell {
                     Value::Cell(inner) => {
-                        assert_eq!(inner.data.len(), 3);
-                        let year = &inner.data[0];
+                        assert_eq!(inner.data().len(), 3);
+                        let year = &inner.data()[0];
                         assert_eq!(year, &Value::String("2024".into()));
-                        let month = &inner.data[1];
+                        let month = &inner.data()[1];
                         assert_eq!(month, &Value::String("03".into()));
-                        let day = &inner.data[2];
+                        let day = &inner.data()[2];
                         assert_eq!(day, &Value::String("14".into()));
                     }
                     other => panic!("unexpected nested value {other:?}"),
@@ -958,12 +969,12 @@ pub(crate) mod tests {
             Value::Cell(ca) => {
                 assert_eq!(ca.rows, 1);
                 assert_eq!(ca.cols, 3);
-                assert_eq!(ca.data.len(), 3);
-                let year = &ca.data[0];
+                assert_eq!(ca.data().len(), 3);
+                let year = &ca.data()[0];
                 assert_eq!(year, &Value::String("2024".into()));
-                let month = &ca.data[1];
+                let month = &ca.data()[1];
                 assert_eq!(month, &Value::String("03".into()));
-                let day = &ca.data[2];
+                let day = &ca.data()[2];
                 assert_eq!(day, &Value::String("14".into()));
             }
             other => panic!("expected cell row of tokens, got {other:?}"),
@@ -1033,10 +1044,10 @@ pub(crate) mod tests {
         assert_eq!(outputs.len(), 1);
         match &outputs[0] {
             Value::Cell(ca) => {
-                assert_eq!(ca.data.len(), 2);
-                for ptr in &ca.data {
+                assert_eq!(ca.data().len(), 2);
+                for ptr in ca.data() {
                     match ptr {
-                        Value::Cell(split) => assert_eq!(split.data.len(), 3),
+                        Value::Cell(split) => assert_eq!(split.data().len(), 3),
                         other => panic!("unexpected nested value {other:?}"),
                     }
                 }
@@ -1084,8 +1095,8 @@ pub(crate) mod tests {
         }
         match &outputs[2] {
             Value::Cell(ca) => {
-                assert_eq!(ca.data.len(), 2);
-                for entry in &ca.data {
+                assert_eq!(ca.data().len(), 2);
+                for entry in ca.data() {
                     match entry {
                         Value::Tensor(t) => assert_eq!(t.shape(), &[1, 2]),
                         other => panic!("expected token extents, got {other:?}"),
@@ -1095,7 +1106,7 @@ pub(crate) mod tests {
             other => panic!("unexpected output {other:?}"),
         }
         match &outputs[3] {
-            Value::Cell(ca) => assert_eq!(ca.data.len(), 2),
+            Value::Cell(ca) => assert_eq!(ca.data().len(), 2),
             other => panic!("expected match cells, got {other:?}"),
         }
     }
@@ -1186,8 +1197,8 @@ pub(crate) mod tests {
         assert_eq!(outputs.len(), 1);
         match &outputs[0] {
             Value::Cell(ca) => {
-                assert_eq!(ca.data.len(), 2);
-                let first = &ca.data[0];
+                assert_eq!(ca.data().len(), 2);
+                let first = &ca.data()[0];
                 match first {
                     Value::Struct(st) => {
                         match st.fields.get("name") {
@@ -1201,7 +1212,7 @@ pub(crate) mod tests {
                     }
                     other => panic!("unexpected struct {other:?}"),
                 }
-                let second = &ca.data[1];
+                let second = &ca.data()[1];
                 match second {
                     Value::Struct(st) => {
                         match st.fields.get("name") {
@@ -1233,8 +1244,8 @@ pub(crate) mod tests {
         assert_eq!(outputs.len(), 1);
         match &outputs[0] {
             Value::Cell(ca) => {
-                assert_eq!(ca.data.len(), 1);
-                let matrix = &ca.data[0];
+                assert_eq!(ca.data().len(), 1);
+                let matrix = &ca.data()[0];
                 match matrix {
                     Value::Tensor(t) => {
                         assert_eq!(t.shape(), &[3, 2]);
@@ -1268,8 +1279,8 @@ pub(crate) mod tests {
             Value::Cell(ca) => {
                 assert_eq!(ca.rows, 1);
                 assert_eq!(ca.cols, 1);
-                assert_eq!(ca.data.len(), 1);
-                let inner = &ca.data[0];
+                assert_eq!(ca.data().len(), 1);
+                let inner = &ca.data()[0];
                 match inner {
                     Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![1.0, 4.0]),
                     other => panic!("unexpected inner value {other:?}"),
@@ -1299,25 +1310,25 @@ pub(crate) mod tests {
             Value::Cell(ca) => {
                 assert_eq!(ca.rows, 2);
                 assert_eq!(ca.cols, 2);
-                assert_eq!(ca.data.len(), 4);
+                assert_eq!(ca.data().len(), 4);
                 // Row 0, Col 0
-                match &ca.data[0] {
-                    Value::Cell(inner) => assert_eq!(inner.data.len(), 1),
+                match &ca.data()[0] {
+                    Value::Cell(inner) => assert_eq!(inner.data().len(), 1),
                     other => panic!("unexpected inner cell {other:?}"),
                 }
                 // Row 0, Col 1
-                match &ca.data[1] {
-                    Value::Cell(inner) => assert_eq!(inner.data.len(), 1),
+                match &ca.data()[1] {
+                    Value::Cell(inner) => assert_eq!(inner.data().len(), 1),
                     other => panic!("unexpected inner cell {other:?}"),
                 }
                 // Row 1, Col 0
-                match &ca.data[2] {
-                    Value::Cell(inner) => assert_eq!(inner.data.len(), 0),
+                match &ca.data()[2] {
+                    Value::Cell(inner) => assert_eq!(inner.data().len(), 0),
                     other => panic!("unexpected inner cell {other:?}"),
                 }
                 // Row 1, Col 1
-                match &ca.data[3] {
-                    Value::Cell(inner) => assert_eq!(inner.data.len(), 0),
+                match &ca.data()[3] {
+                    Value::Cell(inner) => assert_eq!(inner.data().len(), 0),
                     other => panic!("unexpected inner cell {other:?}"),
                 }
             }
@@ -1351,24 +1362,24 @@ pub(crate) mod tests {
             Value::Cell(ca) => {
                 assert_eq!(ca.rows, 2);
                 assert_eq!(ca.cols, 2);
-                assert_eq!(ca.data.len(), 4);
+                assert_eq!(ca.data().len(), 4);
                 // Row 0, Col 0 should have one match
-                match &ca.data[0] {
-                    Value::Cell(inner) => assert_eq!(inner.data.len(), 1),
+                match &ca.data()[0] {
+                    Value::Cell(inner) => assert_eq!(inner.data().len(), 1),
                     other => panic!("unexpected inner cell {other:?}"),
                 }
                 // Row 0, Col 1 should have one match
-                match &ca.data[1] {
-                    Value::Cell(inner) => assert_eq!(inner.data.len(), 1),
+                match &ca.data()[1] {
+                    Value::Cell(inner) => assert_eq!(inner.data().len(), 1),
                     other => panic!("unexpected inner cell {other:?}"),
                 }
                 // Row 1 entries should be empty
-                match &ca.data[2] {
-                    Value::Cell(inner) => assert_eq!(inner.data.len(), 0),
+                match &ca.data()[2] {
+                    Value::Cell(inner) => assert_eq!(inner.data().len(), 0),
                     other => panic!("unexpected inner cell {other:?}"),
                 }
-                match &ca.data[3] {
-                    Value::Cell(inner) => assert_eq!(inner.data.len(), 0),
+                match &ca.data()[3] {
+                    Value::Cell(inner) => assert_eq!(inner.data().len(), 0),
                     other => panic!("unexpected inner cell {other:?}"),
                 }
             }
@@ -1392,12 +1403,12 @@ pub(crate) mod tests {
         assert_eq!(outputs.len(), 1);
         match &outputs[0] {
             Value::Cell(ca) => {
-                assert_eq!(ca.data.len(), 1);
-                match &ca.data[0] {
+                assert_eq!(ca.data().len(), 1);
+                match &ca.data()[0] {
                     Value::String(s) => assert_eq!(s, "AbC"),
                     Value::Cell(inner) => {
-                        assert_eq!(inner.data.len(), 1);
-                        match &inner.data[0] {
+                        assert_eq!(inner.data().len(), 1);
+                        match &inner.data()[0] {
                             Value::String(s) => assert_eq!(s, "AbC"),
                             other => panic!("unexpected match value {other:?}"),
                         }
@@ -1444,12 +1455,12 @@ pub(crate) mod tests {
         assert_eq!(outputs.len(), 1);
         match &outputs[0] {
             Value::Cell(ca) => {
-                assert_eq!(ca.data.len(), 1);
-                match &ca.data[0] {
+                assert_eq!(ca.data().len(), 1);
+                match &ca.data()[0] {
                     Value::String(s) => assert_eq!(s, "first\nsecond"),
                     Value::Cell(inner) => {
                         // When forceCellOutput influences outer container, the inner should still be the match
-                        assert_eq!(inner.data.len(), 1);
+                        assert_eq!(inner.data().len(), 1);
                     }
                     other => panic!("unexpected dotall output {other:?}"),
                 }
@@ -1465,7 +1476,7 @@ pub(crate) mod tests {
             futures::executor::block_on(regexp_builtin(
                 Value::String("aba".into()),
                 Value::String("a".into()),
-                rest,
+                crate::builtins::common::test_support::builtin_arguments(rest),
             ))
             .expect("registered regexp")
         };

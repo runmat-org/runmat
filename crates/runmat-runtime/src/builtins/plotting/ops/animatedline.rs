@@ -30,7 +30,7 @@ const DEFAULT_MAXIMUM_NUM_POINTS: usize = 1_000_000;
     binding_variant = "default",
     builtin_path = "crate::builtins::plotting::animatedline"
 )]
-pub async fn animatedline_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn animatedline_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &ANIMATEDLINE_DESCRIPTOR,
         &ANIMATEDLINE_ERROR_TOO_MANY_OUTPUTS,
@@ -49,7 +49,7 @@ pub async fn animatedline_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     crate::runtime_error::complete_with_cleanup(result, cleanup)
 }
 
-async fn construct_animatedline(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn construct_animatedline(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     let (leading_axes, args) = split_leading_axes_handle_allow_empty(args)
         .await
         .map_err(|error| contextual_error(error, "RunMat:animatedline:InvalidArgument"))?;
@@ -122,7 +122,7 @@ async fn construct_animatedline(args: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 async fn split_leading_axes_handle_allow_empty(
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<(AxesTarget, Vec<Value>)> {
     let mut iter = args.into_iter();
     let Some(mut first) = iter.next() else {

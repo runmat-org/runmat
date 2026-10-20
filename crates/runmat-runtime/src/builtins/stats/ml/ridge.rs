@@ -41,7 +41,12 @@ use admission::{parse_resident_scaled, preflight_data, preflight_scaled, value_t
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::ml::ridge"
 )]
-async fn ridge_builtin(y: Value, x: Value, k: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn ridge_builtin(
+    y: Value,
+    x: Value,
+    k: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(invalid_argument(
             "ridge: accepts at most one scaled argument",

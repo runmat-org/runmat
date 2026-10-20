@@ -428,7 +428,7 @@ fn admit_borrowed_tensor<'a>(
     source: ValueFact,
 ) -> Result<AdmittedReal64Array<'a>, AnalysisValueAdmissionError> {
     if let Some(values) = tensor.as_f64_slice() {
-        return Ok(borrowed(values, &tensor.shape(), source));
+        return Ok(borrowed(values, tensor.shape(), source));
     }
     materialized(
         tensor.materialize_f64(),

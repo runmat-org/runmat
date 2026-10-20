@@ -155,12 +155,15 @@ mod tests {
             },
         );
         let mut cooperation = XmlCooperation::with_budget(budget, XmlOperation::XmlRead);
-        let object = futures::executor::block_on(node.into_object(&mut cooperation))
+        let object = futures::executor::block_on(node.into_object(&mut cooperation, None))
             .expect("empty ordered items project to element children");
-        let Some(Value::Cell(children)) = object.properties.get("ChildNodes") else {
+        let Value::Object(object) = object.value() else {
+            panic!("projected XML element")
+        };
+        let Some(Value::Cell(children)) = object.property("ChildNodes") else {
             panic!("expected projected children");
         };
-        assert_eq!(children.data.len(), 128);
+        assert_eq!(children.data().len(), 128);
         assert!(turns.load(Ordering::Relaxed) >= 256);
         assert!(cooperation.budget_owner().unwrap().borrow().is_some());
     }

@@ -25,7 +25,7 @@ pub(crate) async fn isstrprop_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     text: Value,
     prop: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &ISSTRPROP_DESCRIPTOR,
@@ -61,7 +61,7 @@ pub(crate) async fn isstrprop_builtin(
             format!("isstrprop: unknown character category '{}'", prop.as_str()),
         )
     })?;
-    let force_cell_output = parse_force_cell_output(runtime.as_ref(), &rest)?;
+    let force_cell_output = parse_force_cell_output(runtime.as_ref(), rest.view())?;
     // Category and option values are host-only. Reject known invalid controls
     // before a selected resident input incurs provider work.
     let text = match &text {

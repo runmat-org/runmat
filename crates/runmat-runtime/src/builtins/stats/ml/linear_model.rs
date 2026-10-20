@@ -11,9 +11,7 @@ use runmat_builtins::{
     PREDICT_ERROR_INVALID_ARGUMENT as ERROR_PREDICT_INVALID_ARGUMENT,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{
-    CharArray, NumericScalar, ObjectInstance, StringArray, StructValue, Tensor, Value,
-};
+use runmat_value::{CharArray, NumericScalar, StringArray, Tensor, Value};
 
 use crate::builtins::common::tensor;
 use crate::builtins::stats::summary::distribution_math::{student_t_cdf_upper, student_t_inv};
@@ -209,27 +207,32 @@ struct OlsFit {
 
 #[runtime_builtin(
     name = "fitlm",
+    context = true,
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::ml::linear_model"
 )]
-async fn fitlm_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let inspection = HeaderInspection::inspect(&first, &rest);
-    ensure_fitlm_integer_extensions(&first, &rest, &inspection)?;
-    ensure_fitlm_resident_fallback_extension(&first, &rest)?;
+async fn fitlm_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    first: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let inspection = HeaderInspection::inspect(&first, rest.view());
+    ensure_fitlm_integer_extensions(&first, rest.view(), &inspection)?;
+    ensure_fitlm_resident_fallback_extension(&first, rest.view())?;
     preflight_matrix_rank(&first)?;
     let arguments = inspection.validate(rest.len())?;
-    preflight_response_shape(&first, &rest)?;
-    let arguments = arguments.preflight_values(&rest)?;
+    preflight_response_shape(&first, rest.view())?;
+    let arguments = arguments.preflight_values(rest.view())?;
     let first = gather(first).await?;
-    let rest = gather_all(rest, &arguments).await?;
-    let spec = build_fit_spec(first, rest, arguments)?;
+    let rest = gather_all(rest, &arguments, runtime.as_ref()).await?;
+    let spec = build_fit_spec(first, rest.view(), arguments)?;
     let fit = fit_ols(&spec)?;
-    model_object(spec, fit).map(Value::Object)
+    model_object(runtime.as_ref(), spec, fit)
 }
 
 fn ensure_fitlm_integer_extensions(
     first: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     inspection: &HeaderInspection,
 ) -> BuiltinResult<()> {
     if !is_table_value(first) {
@@ -340,9 +343,9 @@ fn ensure_fitlm_integer_extensions(
             if !is_typed_integer_value(value) {
                 continue;
             }
-            let extension = if response_name.as_ref() == Some(name) {
+            let extension = if response_name.as_deref() == Some(name) {
                 &FITLM_INTEGER_RESPONSE_EXTENSION
-            } else if weights_name.as_ref() == Some(name) {
+            } else if weights_name.as_deref() == Some(name) {
                 &FITLM_INTEGER_WEIGHTS_EXTENSION
             } else if active_predictors.iter().any(|predictor| predictor == name) {
                 &FITLM_INTEGER_PREDICTOR_EXTENSION
@@ -361,7 +364,10 @@ fn is_typed_integer_value(value: &Value) -> bool {
         || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
 }
 
-fn ensure_fitlm_resident_fallback_extension(first: &Value, rest: &[Value]) -> BuiltinResult<()> {
+fn ensure_fitlm_resident_fallback_extension(
+    first: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     let mut resident = matches!(first, Value::GpuTensor(_))
         || rest
             .iter()
@@ -397,7 +403,7 @@ pub(crate) async fn predict_builtin(
 pub(crate) fn predict_linear_model_dispatch(
     model: Value,
     xnew: Value,
-    rest: Vec<Value>,
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<Vec<Value>> {
     let options = parse_predict_options(rest)?;
     let output = predict_linear_model(model, xnew, options)?;
@@ -408,16 +414,24 @@ async fn gather(value: Value) -> BuiltinResult<Value> {
     gather_if_needed_async(&value).await
 }
 
-async fn gather_all(values: Vec<Value>, arguments: &FitlmArguments) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(values.len());
-    for (index, value) in values.into_iter().enumerate() {
-        if index >= arguments.option_start && (index - arguments.option_start).is_multiple_of(2) {
-            out.push(value);
-        } else {
-            out.push(gather(value).await?);
-        }
+async fn gather_all(
+    values: crate::call::BuiltinArguments,
+    arguments: &FitlmArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    if !values.iter().any(crate::dispatcher::value_contains_gpu) {
+        return Ok(values);
     }
-    Ok(out)
+    values
+        .try_map_preserving_roots_async(values.len(), runtime, async |index| {
+            if index >= arguments.option_start && (index - arguments.option_start).is_multiple_of(2)
+            {
+                Ok(values[index].clone())
+            } else {
+                gather(values[index].clone()).await
+            }
+        })
+        .await
 }
 
 #[cfg(test)]

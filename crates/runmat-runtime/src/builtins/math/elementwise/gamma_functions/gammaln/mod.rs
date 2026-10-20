@@ -272,7 +272,7 @@ fn gammaln_tensor_into_value(tensor: Tensor) -> Value {
 
 fn gammaln_char_array(chars: CharArray) -> BuiltinResult<Value> {
     let data = chars
-        .data
+        .data()
         .iter()
         .map(|&ch| gammaln_nonnegative_scalar(ch as u32 as f64))
         .collect::<Vec<_>>();

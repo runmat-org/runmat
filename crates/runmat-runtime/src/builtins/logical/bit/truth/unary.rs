@@ -19,7 +19,7 @@ pub(crate) async fn execute(
                 .map_err(|error| operand::error_with_detail(name, invalid, error))?;
             let mut names = Vec::with_capacity(variables.fields.len());
             let mut output = RootedValuesBuilder::with_capacity(variables.fields.len());
-            for (variable_name, value) in variables.fields {
+            for (variable_name, value) in variables.into_fields_unbounded() {
                 let result = scalar_or_array(value, operation, name, invalid)
                     .await
                     .map_err(|error| {

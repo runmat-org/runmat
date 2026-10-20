@@ -16,7 +16,6 @@ use runmat_runtime::context::{
     RuntimeContext, RuntimePlacementService, RuntimeWholeWorkSelection,
 };
 use runmat_runtime::RuntimeError;
-use runmat_value::Value;
 
 use crate::ExecutableUnit;
 
@@ -26,7 +25,7 @@ use crate::ExecutableUnit;
 pub(crate) struct ReadyInvocation<'a> {
     pub unit: &'a ExecutableUnit,
     pub preferred_function: Option<&'a str>,
-    pub arguments: &'a [Value],
+    pub arguments: runmat_runtime::call::FunctionArgumentView<'a>,
     pub requested_outputs: usize,
     pub profile: Option<Digest>,
 }

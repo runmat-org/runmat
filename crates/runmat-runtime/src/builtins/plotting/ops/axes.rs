@@ -24,19 +24,22 @@ const BUILTIN_NAME: &str = "axes";
 )]
 pub fn axes_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<f64> {
     axes_builtin_with_runtime(runtime.as_ref(), args)
 }
 
 #[cfg(test)]
 pub fn axes_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
-    axes_builtin_with_runtime(None, args)
+    axes_builtin_with_runtime(
+        None,
+        crate::call::BuiltinArguments::from_borrowed(&args, None)?,
+    )
 }
 
 fn axes_builtin_with_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<f64> {
     crate::output_count::validate_fixed_outputs(
         &AXES_DESCRIPTOR,
@@ -54,7 +57,7 @@ fn axes_builtin_with_runtime(
 
 fn axes_state(
     runtime: Option<&crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<f64> {
     let selected = args
         .first()
@@ -67,11 +70,11 @@ fn axes_state(
     {
         Some(runmat_value::GraphicsReceiverKind::Axes { figure, index }) => (
             Some(AxesTarget::ExistingAxes(FigureHandle::from(figure), index)),
-            args.into_iter().skip(1).collect(),
+            args.into_range(1..)?,
         ),
         Some(runmat_value::GraphicsReceiverKind::Figure { figure }) => (
             Some(AxesTarget::ParentFigure(FigureHandle::from(figure))),
-            args.into_iter().skip(1).collect(),
+            args.into_range(1..)?,
         ),
         _ => split_axes_target(args)?,
     };
@@ -95,7 +98,7 @@ fn axes_state(
                 set_properties_with_authority(
                     &property,
                     PlotHandle::Axes(handle, axes_index),
-                    &property_args,
+                    property_args.view(),
                     BUILTIN_NAME,
                 )?;
             }
@@ -105,7 +108,7 @@ fn axes_state(
             create_and_configure_axes(&property, Some(handle), property_args)
         }
         None => {
-            let (parent, selected, filtered) = extract_parent_property(property_args)?;
+            let (parent, selected, filtered) = extract_parent_property(property_args, runtime)?;
             let property = selected
                 .map_or(property, PropertyMutationTarget::selected)
                 .with_runtime(runtime);
@@ -120,41 +123,37 @@ enum AxesTarget {
     ParentFigure(FigureHandle),
 }
 
-fn split_axes_target(args: Vec<Value>) -> crate::BuiltinResult<(Option<AxesTarget>, Vec<Value>)> {
-    let mut iter = args.into_iter();
-    let Some(first) = iter.next() else {
-        return Ok((None, Vec::new()));
+fn split_axes_target(
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<(Option<AxesTarget>, crate::call::BuiltinArguments)> {
+    let Some(first) = args.first() else {
+        return Ok((None, args));
     };
-    if starts_property_pairs(&first) {
-        let mut property_args = vec![first];
-        property_args.extend(iter);
-        return Ok((None, property_args));
+    if starts_property_pairs(first) {
+        return Ok((None, args));
     }
-    match resolve_plot_handle(&first, BUILTIN_NAME) {
-        Ok(PlotHandle::Axes(handle, axes_index)) => Ok((
-            Some(AxesTarget::ExistingAxes(handle, axes_index)),
-            iter.collect(),
+    match resolve_plot_handle(first, BUILTIN_NAME) {
+        Ok(PlotHandle::Axes(handle, index)) => Ok((
+            Some(AxesTarget::ExistingAxes(handle, index)),
+            args.into_range(1..)?,
         )),
-        Ok(PlotHandle::Figure(handle)) => {
-            Ok((Some(AxesTarget::ParentFigure(handle)), iter.collect()))
-        }
+        Ok(PlotHandle::Figure(handle)) => Ok((
+            Some(AxesTarget::ParentFigure(handle)),
+            args.into_range(1..)?,
+        )),
         Ok(_) => Err(plotting_error(
             BUILTIN_NAME,
             "axes: target must be an axes or figure handle",
         )),
-        Err(err) if iter.len() == 0 => Err(err),
-        Err(_) => {
-            let mut property_args = vec![first];
-            property_args.extend(iter);
-            Ok((None, property_args))
-        }
+        Err(error) if args.len() == 1 => Err(error),
+        Err(_) => Ok((None, args)),
     }
 }
 
 fn create_and_configure_axes(
     property: &PropertyMutationTarget,
     parent: Option<FigureHandle>,
-    property_args: Vec<Value>,
+    property_args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<f64> {
     if !property_args.len().is_multiple_of(2) {
         return Err(plotting_error(
@@ -168,7 +167,7 @@ fn create_and_configure_axes(
         set_properties_with_authority(
             property,
             PlotHandle::Axes(handle, axes_index),
-            &property_args,
+            property_args.view(),
             BUILTIN_NAME,
         )?;
     }
@@ -176,11 +175,12 @@ fn create_and_configure_axes(
 }
 
 fn extract_parent_property(
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
 ) -> crate::BuiltinResult<(
     Option<FigureHandle>,
     Option<super::state::GraphicsPropertySelection>,
-    Vec<Value>,
+    crate::call::BuiltinArguments,
 )> {
     if !args.len().is_multiple_of(2) {
         return Err(plotting_error(
@@ -190,7 +190,7 @@ fn extract_parent_property(
     }
     let mut parent = None;
     let mut selected = None;
-    let mut filtered = Vec::with_capacity(args.len());
+    let mut retained_count = 0usize;
     for pair in args.chunks_exact(2) {
         if property_name_is(&pair[0], "parent") {
             selected = select_graphics_property(&pair[1], BUILTIN_NAME)?;
@@ -206,10 +206,18 @@ fn extract_parent_property(
                 },
             );
         } else {
-            filtered.push(pair[0].clone());
-            filtered.push(pair[1].clone());
+            retained_count += 2;
         }
     }
+    let mut cursor = 0usize;
+    let filtered = args.try_map_preserving_roots(retained_count, runtime, |_, source| {
+        while cursor < source.len() && property_name_is(&source[cursor - cursor % 2], "parent") {
+            cursor = (cursor / 2 + 1) * 2;
+        }
+        let value = source[cursor].clone();
+        cursor += 1;
+        Ok(value)
+    })?;
     Ok((parent, selected, filtered))
 }
 

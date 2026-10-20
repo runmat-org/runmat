@@ -15,7 +15,9 @@ pub(super) fn run(
     let _outputs =
         crate::output_count::push_output_count(Some(outputs)).expect("output-count scope");
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(extensions);
-    futures::executor::block_on(super::super::savepath_builtin(args))
+    futures::executor::block_on(super::super::savepath_builtin(
+        crate::builtins::common::test_support::builtin_arguments(args),
+    ))
 }
 
 pub(super) fn run_without_output_context(
@@ -23,7 +25,9 @@ pub(super) fn run_without_output_context(
     extensions: bool,
 ) -> crate::BuiltinResult<Value> {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(extensions);
-    futures::executor::block_on(super::super::savepath_builtin(args))
+    futures::executor::block_on(super::super::savepath_builtin(
+        crate::builtins::common::test_support::builtin_arguments(args),
+    ))
 }
 
 pub(super) fn set_path(path: &str) -> PathGuard {

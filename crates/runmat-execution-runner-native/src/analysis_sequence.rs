@@ -248,9 +248,11 @@ mod tests {
 
     fn accelerator(class: &str, memory_bytes_each: u64) -> AcceleratorRequest {
         AcceleratorRequest {
-            class: class.into(),
+            class: runmat_execution::resource::AcceleratorClass::new(class).unwrap(),
             count: 1,
-            memory_bytes_each,
+            minimum_allocation_bytes: memory_bytes_each,
+            provider: None,
+            required_features: Default::default(),
         }
     }
 

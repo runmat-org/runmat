@@ -7,35 +7,45 @@ use super::error;
 pub(super) struct MaterializedRequest {
     pub subscripts: Value,
     pub data: Value,
-    pub options: Vec<Value>,
+    pub options: crate::call::BuiltinArguments,
     pub roots: crate::execution::RootedValueLease,
+    pub runtime: Option<crate::context::RuntimeContext>,
+}
+
+struct ScalarInputs {
+    subscripts: Value,
+    data: Value,
+    // Retire source payloads before their original roots, including failure.
+    _roots: crate::execution::RootedValueLease,
 }
 
 pub(super) async fn materialize(
+    runtime: Option<crate::context::RuntimeContext>,
     subscripts: Value,
     data: Value,
-    options: Vec<Value>,
+    options: crate::call::BuiltinArguments,
 ) -> BuiltinResult<MaterializedRequest> {
-    let _inputs_root = crate::execution::RootedValueLease::for_values(
-        [&subscripts, &data].into_iter().chain(options.iter()),
-    )
-    .map_err(|error| error.into_runtime_error())?;
-    reject_resident_integer(&data, "input data")?;
+    let roots = root_scalars(&subscripts, &data, runtime.as_ref())?;
+    let inputs = ScalarInputs {
+        subscripts,
+        data,
+        _roots: roots,
+    };
+    reject_resident_integer(&inputs.data, "input data")?;
     if let Some(fill) = options.get(2) {
         reject_resident_integer(fill, "fill value")?;
     }
-    let subscripts = gather_if_needed_async(&subscripts).await?;
-    let data = gather_if_needed_async(&data).await?;
-    let options = gather_all(options).await?;
-    let roots = crate::execution::RootedValueLease::for_values(
-        [&subscripts, &data].into_iter().chain(options.iter()),
-    )
-    .map_err(|error| error.into_runtime_error())?;
+    let subscripts = gather_if_needed_async(&inputs.subscripts).await?;
+    let data = gather_if_needed_async(&inputs.data).await?;
+    let options =
+        crate::dispatcher::gather_builtin_arguments_async(options, runtime.as_ref()).await?;
+    let roots = root_scalars(&subscripts, &data, runtime.as_ref())?;
     Ok(MaterializedRequest {
         subscripts,
         data,
         options,
         roots,
+        runtime,
     })
 }
 
@@ -49,10 +59,30 @@ fn reject_resident_integer(value: &Value, role: &str) -> BuiltinResult<()> {
     Ok(())
 }
 
-async fn gather_all(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {
-    let mut materialized = Vec::with_capacity(values.len());
-    for value in values {
-        materialized.push(gather_if_needed_async(&value).await?);
+fn root_scalars(
+    subscripts: &Value,
+    data: &Value,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<crate::execution::RootedValueLease> {
+    let values = [subscripts, data].into_iter();
+    if let Some(runtime) = runtime {
+        return crate::execution::RootedValueLease::for_values_iterator_in_context(values, runtime);
     }
-    Ok(materialized)
+    use crate::context::host_allocation::{
+        host_allocation_runtime_error, HostAllocationError, HostAllocationPolicy,
+        HostAllocationReceipt,
+    };
+    let allocation = |source| {
+        host_allocation_runtime_error(
+            None,
+            "RunMat:accumarray:Roots",
+            "accumarray input root admission failed",
+            source,
+        )
+    };
+    if HostAllocationReceipt::policy(None).map_err(allocation)? != HostAllocationPolicy::Unbounded {
+        return Err(allocation(HostAllocationError::MissingManagedOwner));
+    }
+    crate::execution::RootedValueLease::for_values(values)
+        .map_err(|error| error.into_runtime_error())
 }

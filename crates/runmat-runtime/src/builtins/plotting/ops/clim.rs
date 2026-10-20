@@ -12,19 +12,22 @@ use super::op_common::color_limits::apply_color_limits;
 )]
 pub fn clim_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     clim_with_runtime(runtime.as_ref(), args)
 }
 
 #[cfg(test)]
 pub fn clim_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    clim_with_runtime(None, args)
+    clim_with_runtime(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(args),
+    )
 }
 
 fn clim_with_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &CLIM_DESCRIPTOR,

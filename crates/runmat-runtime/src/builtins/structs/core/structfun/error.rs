@@ -18,6 +18,13 @@ pub(super) fn uniform(message: impl Into<String>) -> RuntimeError {
 pub(super) fn function(message: impl Into<String>) -> RuntimeError {
     build(message, &runmat_builtins::STRUCTFUN_ERROR_FUNCTION_ERROR)
 }
+pub(super) fn function_with_source(error: RuntimeError) -> RuntimeError {
+    let mut builder = build_runtime_error(error.message()).with_builtin(BUILTIN_NAME);
+    if let Some(identifier) = runmat_builtins::STRUCTFUN_ERROR_FUNCTION_ERROR.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.with_source(error).build()
+}
 pub(super) fn undefined(message: impl Into<String>) -> RuntimeError {
     build(
         message,

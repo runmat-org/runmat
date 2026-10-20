@@ -353,7 +353,7 @@ mod lexical_tests {
             Box::pin(async move {
                 assert_eq!(call.function, 0);
                 assert_eq!(call.display_name, "published");
-                assert_eq!(call.arguments, vec![Value::Num(2.0)]);
+                assert!(call.arguments.iter().eq([Value::Num(2.0)].iter()));
                 assert_eq!(call.requested_outputs, 1);
                 crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(12.0))
             })
@@ -362,7 +362,10 @@ mod lexical_tests {
             futures::executor::block_on(try_call_external_function(ExternalFunctionCall {
                 function: 0,
                 display_name: "published".into(),
-                arguments: vec![Value::Num(2.0)],
+                arguments: crate::call::RootedFunctionArguments::ordinary(
+                    crate::execution::RootedValues::new(vec![Value::Num(2.0)])
+                        .expect("root external invocation fixture"),
+                ),
                 requested_outputs: 1,
             }))
             .expect("external invoker is installed")

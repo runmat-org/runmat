@@ -130,7 +130,7 @@ fn metaclass_builtin(value: Value) -> crate::BuiltinResult<Value> {
         }
         builder.build()
     })?;
-    Ok(Value::ClassRef(identity))
+    Ok(Value::ClassRef(identity.into()))
 }
 
 #[cfg(test)]
@@ -174,7 +174,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn metaclass_reports_runtime_classes_for_text_values() {
-        assert_eq!(call(Value::String("Point".to_string())), "string");
+        assert_eq!(call(Value::String("Point".to_string().into())), "string");
         assert_eq!(call(Value::CharArray(CharArray::new_row("Point"))), "char");
         assert_eq!(
             call(Value::StringArray(

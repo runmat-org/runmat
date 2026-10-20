@@ -1,3 +1,4 @@
+use super::test_arguments::{h5read_builtin, h5write_builtin, hdf5read_builtin, hdf5write_builtin};
 use futures::executor::block_on;
 
 use super::*;
@@ -18,6 +19,7 @@ fn invalid_text_and_selection_precede_resident_download() {
     let resident = unregistered_resident();
     let original = resident.handle.wire_descriptor();
     let invalid_filename = block_on(h5read_builtin(
+        None,
         Value::Bool(true),
         Value::String("/data".into()),
         vec![Value::GpuTensor(resident.handle.clone()), Value::Num(1.0)],
@@ -26,6 +28,7 @@ fn invalid_text_and_selection_precede_resident_download() {
     assert_eq!(invalid_filename.identifier(), ERR_ARGUMENT.identifier);
 
     let invalid_selection = block_on(h5read_builtin(
+        None,
         Value::String("never-opened.h5".into()),
         Value::String("/data".into()),
         vec![Value::Bool(true), Value::GpuTensor(resident.handle.clone())],
@@ -39,6 +42,7 @@ fn invalid_text_and_selection_precede_resident_download() {
             .expect("paged character array"),
     );
     let paged = block_on(h5read_builtin(
+        None,
         paged_filename,
         Value::String("/data".into()),
         vec![Value::GpuTensor(resident.handle.clone()), Value::Num(1.0)],
@@ -63,6 +67,7 @@ fn singleton_trailing_character_pages_remain_scalar_text() {
 fn invalid_write_payload_precedes_resident_selection_and_file_creation() {
     let resident = unregistered_resident();
     let error = block_on(h5write_builtin(
+        None,
         Value::String("never-created.h5".into()),
         Value::String("/data".into()),
         Value::Complex(1.0, 2.0),
@@ -78,10 +83,10 @@ fn metadata_location_controls_reject_before_provider_download() {
     let resident = unregistered_resident();
     let error = block_on(h5info_builtin(
         Value::String("never-opened.h5".into()),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::Bool(false),
             Value::GpuTensor(resident.handle.clone()),
-        ],
+        ]),
     ))
     .expect_err("too many location controls before provider access");
     assert_eq!(error.identifier(), ERR_ARGUMENT.identifier);
@@ -95,11 +100,20 @@ fn fixed_output_arity_rejects_all_eight_before_file_access() {
     {
         let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         for result in [
-            block_on(h5read_builtin(file(), object(), Vec::new())),
-            block_on(hdf5read_builtin(file(), object(), Vec::new())),
-            block_on(h5info_builtin(file(), Vec::new())),
-            block_on(hdf5info_builtin(file(), Vec::new())),
-            block_on(h5disp_builtin(file(), Vec::new())),
+            block_on(h5read_builtin(None, file(), object(), Vec::new())),
+            block_on(hdf5read_builtin(None, file(), object(), Vec::new())),
+            block_on(h5info_builtin(
+                file(),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+            )),
+            block_on(hdf5info_builtin(
+                file(),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+            )),
+            block_on(h5disp_builtin(
+                file(),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+            )),
         ] {
             assert_eq!(
                 result.expect_err("too many outputs").identifier(),
@@ -111,18 +125,21 @@ fn fixed_output_arity_rejects_all_eight_before_file_access() {
         let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         for result in [
             block_on(h5write_builtin(
+                None,
                 file(),
                 object(),
                 Value::Num(1.0),
                 Vec::new(),
             )),
             block_on(hdf5write_builtin(
+                None,
                 file(),
                 object(),
                 Value::Num(1.0),
                 Vec::new(),
             )),
             block_on(h5writeatt_builtin(
+                None,
                 file(),
                 object(),
                 Value::String("units".into()),
@@ -143,6 +160,7 @@ fn nested_implicit_output_does_not_inherit_enclosing_presentation_count() {
     let _presentation = crate::output_context::push_output_count(3).expect("output-count scope");
     let _invocation = crate::output_count::push_output_count(None).expect("output-count scope");
     let error = block_on(h5write_builtin(
+        None,
         Value::Bool(true),
         Value::String("/A".into()),
         Value::Num(1.0),
@@ -160,7 +178,7 @@ fn captured_h5disp_text_is_gated_before_native_file_access() {
     let _captured = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     let denied = block_on(h5disp_builtin(
         Value::String("never-opened.h5".into()),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect_err("captured text is a RunMat-only form");
     assert_eq!(
@@ -170,15 +188,21 @@ fn captured_h5disp_text_is_gated_before_native_file_access() {
     drop(_captured);
 
     let _statement = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
-    let invalid = block_on(h5disp_builtin(Value::Bool(true), Vec::new()))
-        .expect_err("statement form must continue into ordinary argument validation");
+    let invalid = block_on(h5disp_builtin(
+        Value::Bool(true),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect_err("statement form must continue into ordinary argument validation");
     assert_eq!(invalid.identifier(), ERR_ARGUMENT.identifier);
     drop(_statement);
 
     let _enabled = crate::compatibility::push_runmat_extensions_enabled(true);
     let _captured = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
-    let invalid = block_on(h5disp_builtin(Value::Bool(true), Vec::new()))
-        .expect_err("enabled captured form must continue into argument validation");
+    let invalid = block_on(h5disp_builtin(
+        Value::Bool(true),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect_err("enabled captured form must continue into argument validation");
     assert_eq!(invalid.identifier(), ERR_ARGUMENT.identifier);
 }
 
@@ -202,7 +226,7 @@ fn h5disp_invalid_mode_and_encoding_precede_native_path_capture() {
     ] {
         let error = block_on(h5disp_builtin(
             Value::String("never-opened-display.h5".into()),
-            rest,
+            crate::builtins::common::test_support::builtin_arguments(rest),
         ))
         .expect_err("invalid controls before native path capture");
         assert_eq!(error.identifier(), ERR_ARGUMENT.identifier);

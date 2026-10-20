@@ -141,7 +141,7 @@ fn provider_rejected_nonfinite_signal(
 async fn envelope_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     x: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let mut cooperation = SignalCooperation::new(runtime.as_ref(), BUILTIN_NAME);
     cooperation.completed(0).await?;
@@ -157,7 +157,7 @@ async fn envelope_builtin(
             BUILTIN_NAME,
         )?;
     }
-    let options = parse_options(&rest, &mut cooperation).await?;
+    let options = parse_options(rest.view(), &mut cooperation).await?;
     if crate::output_count::current_output_count().is_some_and(|count| count > 2) {
         return Err(envelope_error(&ENVELOPE_ERROR_TOO_MANY_OUTPUTS));
     }
@@ -481,7 +481,7 @@ fn tensor_to_signal_input(tensor: Tensor) -> BuiltinResult<SignalInput> {
 }
 
 async fn parse_options(
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<EnvelopeOptions> {
     match args.len() {

@@ -124,7 +124,10 @@ fn invocation_retains_selected_provider_and_cwd_across_pending_open() {
     let mut call = Box::pin(xlsread_builtin(
         None,
         Value::from("input.xlsx"),
-        vec![Value::from("Data"), Value::from("A2:B4")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("Data"),
+            Value::from("A2:B4"),
+        ]),
     ));
     let waker = futures::task::noop_waker();
     assert!(matches!(
@@ -155,11 +158,18 @@ fn invalid_host_range_and_output_count_reject_without_open() {
     let bad_range = block_on(xlsread_builtin(
         None,
         Value::from("input.xlsx"),
-        vec![Value::from("Data"), Value::from("A0:B2")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("Data"),
+            Value::from("A0:B2"),
+        ]),
     ));
     assert!(bad_range.is_err());
     let _outputs = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
-    let bad_outputs = block_on(xlsread_builtin(None, Value::from("input.xlsx"), Vec::new()));
+    let bad_outputs = block_on(xlsread_builtin(
+        None,
+        Value::from("input.xlsx"),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ));
     assert_eq!(
         bad_outputs.expect_err("four outputs").identifier(),
         XLSREAD_ERROR_OUTPUT_COUNT.identifier
@@ -184,7 +194,7 @@ fn cancelling_pending_open_releases_selected_work_without_replay() {
     let mut call = Box::pin(xlsread_builtin(
         Some(runtime),
         Value::from("input.xlsx"),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ));
     let waker = futures::task::noop_waker();
     assert!(matches!(

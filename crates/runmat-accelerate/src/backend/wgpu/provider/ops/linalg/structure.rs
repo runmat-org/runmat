@@ -10,7 +10,7 @@ impl WgpuProvider {
         let tensor = self.download_real_floating_tensor_exec(handle).await?;
         let eval = runmat_runtime::builtins::math::linalg::factor::eig::evaluate(
             Value::Tensor(tensor),
-            &[],
+            runmat_runtime::call::FunctionArgumentView::from_slice(&[]),
             compute_left,
         )
         .await

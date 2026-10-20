@@ -794,7 +794,7 @@ fn gather_logical(value: &LogicalArray, plan: &IndexPlan) -> NativeExecutorResul
 }
 
 fn gather_symbolic(value: &SymbolicArray, plan: &IndexPlan) -> NativeExecutorResult<Value> {
-    let values = gather(&value.data, plan, "symbolic")?;
+    let values = gather(value.data(), plan, "symbolic")?;
     if let [value] = values.as_slice() {
         return Ok(Value::Symbolic(value.clone()));
     }
@@ -870,7 +870,7 @@ fn value_shape(value: &Value) -> Vec<usize> {
         Value::Cell(value) => value.shape.to_vec(),
         Value::StructArray(value) => value.shape().to_vec(),
         Value::ObjectArray(value) => value.shape().to_vec(),
-        Value::SymbolicArray(value) => value.shape.clone(),
+        Value::SymbolicArray(value) => value.shape.to_vec(),
         _ => vec![1, 1],
     }
 }
@@ -988,6 +988,6 @@ mod tests {
             panic!("expected character column");
         };
         assert_eq!(column.shape(), &[2, 1]);
-        assert_eq!(column.data, vec!['c', 'y']);
+        assert_eq!(column.data(), vec!['c', 'y']);
     }
 }

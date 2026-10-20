@@ -6,15 +6,15 @@ use runmat_builtins::{NAMEDARGS2CELL_CATALOG_ENTRY, NAMEDARGS2CELL_ERROR_OUTPUTS
     binding_variant = "default",
     builtin_path = "crate::builtins::common::validation::namedargs2cell"
 )]
-fn builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+fn builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     evaluate(args)
 }
 
-pub(super) fn evaluate(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) fn evaluate(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     super::admission::inputs(
         &NAMEDARGS2CELL_CATALOG_ENTRY,
         &NAMEDARGS2CELL_ERROR_OUTPUTS,
-        &args,
+        args.view(),
     )?;
     super::namedargs2cell_value(args.into_iter().next().expect("admitted input"))
 }

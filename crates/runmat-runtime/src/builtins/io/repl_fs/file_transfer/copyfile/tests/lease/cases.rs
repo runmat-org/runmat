@@ -53,10 +53,10 @@ fn move_reports_resource_lease_retirement_after_provider_rename() {
     });
     let outcome = runmat_filesystem::with_provider_override(provider, || {
         futures::executor::block_on(super::super::super::super::movefile::execute::evaluate(
-            &[
+            crate::call::FunctionArgumentView::from_slice(&[
                 runmat_value::Value::from("source.bin"),
                 runmat_value::Value::from("target.bin"),
-            ],
+            ]),
             None,
         ))
         .expect("lease retirement is a filesystem status result")
@@ -90,10 +90,10 @@ fn selected_move_builtin_drops_pending_provider_without_replay() {
     runmat_filesystem::with_provider_override(provider, || {
         let mut call = Box::pin(super::super::super::super::movefile::movefile_builtin(
             Some(runtime),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 runmat_value::Value::from("source.bin"),
                 runmat_value::Value::from("target.bin"),
-            ],
+            ]),
         ));
         assert!(matches!(
             call.as_mut()
@@ -134,10 +134,10 @@ fn selected_move_builtin_cancels_pending_provider_with_typed_error() {
     let error = runmat_filesystem::with_provider_override(provider, || {
         let mut call = Box::pin(super::super::super::super::movefile::movefile_builtin(
             Some(runtime),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 runmat_value::Value::from("source.bin"),
                 runmat_value::Value::from("target.bin"),
-            ],
+            ]),
         ));
         let mut context = Context::from_waker(futures::task::noop_waker_ref());
         assert!(matches!(call.as_mut().poll(&mut context), Poll::Pending));

@@ -99,7 +99,7 @@ async fn erase_between_builtin(
     text: Value,
     start: Value,
     stop: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     if is_numeric_or_resident(&text) || contains_nested_numeric_or_resident(&text) {
         return Err(erase_between_error(&ERASE_BETWEEN_ERROR_INVALID_INPUT));
@@ -137,7 +137,7 @@ async fn erase_between_builtin(
     let start = gather_if_needed_async(&start).await.map_err(map_flow)?;
     let stop = gather_if_needed_async(&stop).await.map_err(map_flow)?;
 
-    let mode_override = parse_boundaries_option(&rest).await?;
+    let mode_override = parse_boundaries_option(rest.view()).await?;
 
     let normalized_text = NormalizedText::from_value(text)?;
     let start_boundary = BoundaryArg::from_value(start)?;
@@ -233,7 +233,7 @@ fn is_numeric_or_resident(value: &Value) -> bool {
 
 fn contains_nested_numeric_or_resident(value: &Value) -> bool {
     match value {
-        Value::Cell(cell) => cell.data.iter().any(|value| {
+        Value::Cell(cell) => cell.data().iter().any(|value| {
             is_numeric_or_resident(value) || contains_nested_numeric_or_resident(value)
         }),
         Value::Struct(value) => value.fields.values().any(|value| {
@@ -249,7 +249,7 @@ fn contains_nested_numeric_or_resident(value: &Value) -> bool {
 fn is_resident_or_contains_resident(value: &Value) -> bool {
     match value {
         Value::GpuTensor(_) => true,
-        Value::Cell(cell) => cell.data.iter().any(is_resident_or_contains_resident),
+        Value::Cell(cell) => cell.data().iter().any(is_resident_or_contains_resident),
         Value::Struct(value) => value.fields.values().any(is_resident_or_contains_resident),
         Value::StructArray(array) => array.any_value(is_resident_or_contains_resident),
         _ => false,
@@ -295,7 +295,9 @@ fn shape_is_scalar_or_same(shape: &[usize], text_shape: &[usize]) -> bool {
         || shape == text_shape
 }
 
-async fn parse_boundaries_option(args: &[Value]) -> BuiltinResult<Option<BoundariesMode>> {
+async fn parse_boundaries_option(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Option<BoundariesMode>> {
     if args.is_empty() {
         return Ok(None);
     }
@@ -333,17 +335,17 @@ async fn parse_boundaries_option(args: &[Value]) -> BuiltinResult<Option<Boundar
 fn value_to_string(value: &Value) -> Option<String> {
     match value {
         Value::String(s) => Some(s.as_str().to_owned()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].as_str().to_owned()),
+        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].as_str().to_owned()),
         Value::CharArray(ca) if ca.rows <= 1 => {
             if ca.rows == 0 {
                 Some(String::new())
             } else {
-                Some(char_row_to_string_slice(&ca.data, ca.cols, 0))
+                Some(char_row_to_string_slice(ca.data(), ca.cols, 0))
             }
         }
         Value::CharArray(_) => None,
-        Value::Cell(cell) if cell.data.len() == 1 => {
-            let element = &cell.data[0];
+        Value::Cell(cell) if cell.data().len() == 1 => {
+            let element = &cell.data()[0];
             value_to_string(element)
         }
         _ => None,
@@ -512,7 +514,7 @@ impl NormalizedText {
             }),
             Value::StringArray(sa) => Ok(Self {
                 data: sa
-                    .data
+                    .data()
                     .iter()
                     .map(|text| text.as_str().to_owned())
                     .collect(),
@@ -523,7 +525,7 @@ impl NormalizedText {
                 let rows = ca.rows;
                 let mut data = Vec::with_capacity(rows);
                 for row in 0..rows {
-                    data.push(char_row_to_string_slice(&ca.data, ca.cols, row));
+                    data.push(char_row_to_string_slice(ca.data(), ca.cols, row));
                 }
                 Ok(Self {
                     data,
@@ -533,23 +535,23 @@ impl NormalizedText {
             }
             Value::Cell(cell) => {
                 let shape = cell.shape.to_vec();
-                let mut data = Vec::with_capacity(cell.data.len());
-                let mut kinds = Vec::with_capacity(cell.data.len());
-                for element in &cell.data {
+                let mut data = Vec::with_capacity(cell.data().len());
+                let mut kinds = Vec::with_capacity(cell.data().len());
+                for element in cell.data() {
                     match &element {
                         Value::String(s) => {
                             data.push(s.as_str().to_owned());
                             kinds.push(CellElementKind::String);
                         }
-                        Value::StringArray(sa) if sa.data.len() == 1 => {
-                            data.push(sa.data[0].as_str().to_owned());
+                        Value::StringArray(sa) if sa.data().len() == 1 => {
+                            data.push(sa.data()[0].as_str().to_owned());
                             kinds.push(CellElementKind::String);
                         }
                         Value::CharArray(ca) if ca.rows <= 1 => {
                             if ca.rows == 0 {
                                 data.push(String::new());
                             } else {
-                                data.push(char_row_to_string_slice(&ca.data, ca.cols, 0));
+                                data.push(char_row_to_string_slice(ca.data(), ca.cols, 0));
                             }
                             kinds.push(CellElementKind::Char);
                         }
@@ -798,7 +800,7 @@ impl BoundaryText {
             }),
             Value::StringArray(sa) => Ok(Self {
                 data: sa
-                    .data
+                    .data()
                     .iter()
                     .cloned()
                     .map(|text| BoundaryMarker::Literal(text.as_str().to_owned()))
@@ -809,7 +811,9 @@ impl BoundaryText {
                 let mut data = Vec::with_capacity(ca.rows);
                 for row in 0..ca.rows {
                     data.push(BoundaryMarker::Literal(char_row_to_string_slice(
-                        &ca.data, ca.cols, row,
+                        ca.data(),
+                        ca.cols,
+                        row,
                     )));
                 }
                 Ok(Self {
@@ -819,21 +823,23 @@ impl BoundaryText {
             }
             Value::Cell(cell) => {
                 let shape = cell.shape.to_vec();
-                let mut data = Vec::with_capacity(cell.data.len());
-                for element in &cell.data {
+                let mut data = Vec::with_capacity(cell.data().len());
+                for element in cell.data() {
                     match &element {
                         Value::String(s) => {
                             data.push(BoundaryMarker::Literal(s.as_str().to_owned()))
                         }
-                        Value::StringArray(sa) if sa.data.len() == 1 => {
-                            data.push(BoundaryMarker::Literal(sa.data[0].as_str().to_owned()));
+                        Value::StringArray(sa) if sa.data().len() == 1 => {
+                            data.push(BoundaryMarker::Literal(sa.data()[0].as_str().to_owned()));
                         }
                         Value::CharArray(ca) if ca.rows <= 1 => {
                             if ca.rows == 0 {
                                 data.push(BoundaryMarker::Literal(String::new()));
                             } else {
                                 data.push(BoundaryMarker::Literal(char_row_to_string_slice(
-                                    &ca.data, ca.cols, 0,
+                                    ca.data(),
+                                    ca.cols,
+                                    0,
                                 )));
                             }
                         }
@@ -951,7 +957,12 @@ pub(crate) mod tests {
         stop: Value,
         rest: Vec<Value>,
     ) -> BuiltinResult<Value> {
-        futures::executor::block_on(super::erase_between_builtin(text, start, stop, rest))
+        futures::executor::block_on(super::erase_between_builtin(
+            text,
+            start,
+            stop,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1198,7 +1209,7 @@ pub(crate) mod tests {
         .expect("eraseBetween");
         match result {
             Value::StringArray(sa) => {
-                assert_eq!(sa.data.len(), 0);
+                assert_eq!(sa.data().len(), 0);
                 assert_eq!(sa.shape, vec![0, 1]);
             }
             other => panic!("expected string array, got {other:?}"),
@@ -1220,7 +1231,7 @@ pub(crate) mod tests {
         .expect("eraseBetween");
         match result {
             Value::StringArray(sa) => {
-                assert_eq!(sa.data, vec!["d".to_string(), "w".to_string()]);
+                assert_eq!(sa.data(), vec!["d".to_string(), "w".to_string()]);
                 assert_eq!(sa.shape, vec![2, 1]);
             }
             other => panic!("expected string array, got {other:?}"),
@@ -1287,7 +1298,7 @@ pub(crate) mod tests {
         .expect("eraseBetween");
         match default {
             Value::CharArray(out) => {
-                let text: String = out.data.iter().collect();
+                let text: String = out.data().iter().collect();
                 assert_eq!(text.trim_end(), "Device<>");
             }
             other => panic!("expected char array, got {other:?}"),
@@ -1305,7 +1316,7 @@ pub(crate) mod tests {
         .expect("eraseBetween");
         match inclusive {
             Value::CharArray(out) => {
-                let text: String = out.data.iter().collect();
+                let text: String = out.data().iter().collect();
                 assert_eq!(text.trim_end(), "Device");
             }
             other => panic!("expected char array, got {other:?}"),
@@ -1342,7 +1353,7 @@ pub(crate) mod tests {
         .expect("eraseBetween");
         match result {
             Value::StringArray(sa) => {
-                assert_eq!(sa.data, vec!["alpha[]".to_string(), "beta[]".to_string()]);
+                assert_eq!(sa.data(), vec!["alpha[]".to_string(), "beta[]".to_string()]);
             }
             other => panic!("expected string array, got {other:?}"),
         }

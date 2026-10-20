@@ -9,6 +9,8 @@
 //! coverage applies here. GPU inputs are gathered to host memory before
 //! replication runs because there is no native provider hook today.
 
+use crate::aggregate::structure::operations as struct_ops;
+
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::context::host_allocation::{HostAllocationPolicy, HostAllocationReceipt};
@@ -73,7 +75,7 @@ fn repelem_with_source(
 async fn repelem_builtin(
     context: Option<crate::context::RuntimeContext>,
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
         return Err(repelem_missing_factors(
@@ -149,12 +151,12 @@ async fn repelem_builtin(
                 .all(|control| !matches!(control, Value::GpuTensor(_)))
         {
             if let Value::CharArray(chars) = &value {
-                return managed::character(context, chars, &rest);
+                return managed::character(context, chars, rest.view());
             }
-            return managed::dense(context, &value, &rest);
+            return managed::dense(context, &value, rest.view());
         }
     }
-    let factors = parse_factor_args(&rest).await?;
+    let factors = parse_factor_args(rest.view()).await?;
     // Treat single-argument form as a vector shorthand (only valid when the
     // input array is a vector; the per-type implementations enforce this).
     let single_arg = factors.len() == 1;
@@ -225,15 +227,15 @@ fn repelem_host_value(
         }
         Value::Struct(structure) => {
             let (_, shape) = repelem_column_major(&[0usize], &[1, 1], factors, single_arg)?;
-            runmat_value::StructArray::replicate_scalar(structure, shape).map_err(repelem_internal)
+            struct_ops::replicate_scalar(&structure, &shape)
+                .map_err(|error| struct_ops::remap(error, |message| repelem_internal(message)))
         }
         Value::StructArray(array) => {
             let shape = array.shape().to_vec();
             let source = (0..array.len()).collect::<Vec<_>>();
             let (indices, shape) = repelem_column_major(&source, &shape, factors, single_arg)?;
-            array
-                .select_linear(&indices, shape)
-                .map_err(repelem_internal)
+            struct_ops::select(&array, &indices, &shape)
+                .map_err(|error| struct_ops::remap(error, |message| repelem_internal(message)))
         }
         Value::GpuTensor(_) => Err(repelem_internal(
             "repelem: resident input reached the host replication boundary",
@@ -251,7 +253,9 @@ enum RepFactor {
     Vector(Vec<usize>),
 }
 
-async fn parse_factor_args(args: &[Value]) -> crate::BuiltinResult<Vec<RepFactor>> {
+async fn parse_factor_args(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<Vec<RepFactor>> {
     let mut out = Vec::with_capacity(args.len());
     for (idx, value) in args.iter().enumerate() {
         out.push(parse_single_factor(value, idx + 1).await?);
@@ -400,7 +404,7 @@ fn vector_replication_axis(shape: &[usize]) -> crate::BuiltinResult<usize> {
     if let Some(axis) = first_axis {
         return Ok(axis);
     }
-    let total: usize = shape.iter().product();
+    let total: usize = shape.iter().product::<usize>();
     // Empty column vectors have no non-singleton dimension, but MATLAB still
     // preserves their 0x1 orientation for the single-factor vector form.
     if total == 0 && shape.first().copied().unwrap_or(1) != 1 {
@@ -483,7 +487,7 @@ fn repelem_string_array(
     factors: &[RepFactor],
     single_arg: bool,
 ) -> crate::BuiltinResult<StringArray> {
-    let (data, shape) = repelem_column_major(&sa.data, &sa.shape, factors, single_arg)?;
+    let (data, shape) = repelem_column_major(sa.data(), &sa.shape, factors, single_arg)?;
     StringArray::from_texts_unbounded(data, shape)
         .map_err(|e| repelem_internal(format!("repelem: {e}")))
 }
@@ -495,7 +499,7 @@ fn repelem_char_array(
 ) -> crate::BuiltinResult<CharArray> {
     let (rows, cols, plan) = build_2d_plan(ca.rows, ca.cols, factors, single_arg)?;
     let (data, new_rows, new_cols) =
-        repelem_row_major(&ca.data, ca.rows, ca.cols, rows, cols, &plan)?;
+        repelem_row_major(ca.data(), ca.rows, ca.cols, rows, cols, &plan)?;
     CharArray::new(data, new_rows, new_cols).map_err(|e| repelem_internal(format!("repelem: {e}")))
 }
 
@@ -523,10 +527,10 @@ fn repelem_cell_row_major(
     }
 
     let orig_total = checked_total(&input_shape)?;
-    if !(orig_total == cell.data.len() || (orig_total == 0 && cell.data.is_empty())) {
+    if !(orig_total == cell.data().len() || (orig_total == 0 && cell.data().is_empty())) {
         return Err(repelem_internal(format!(
             "repelem: internal cell shape mismatch (expected {orig_total} elements, found {})",
-            cell.data.len()
+            cell.data().len()
         )));
     }
 
@@ -577,7 +581,7 @@ fn repelem_cell_row_major(
             let src_coord = idx_tables[k][coord];
             src_index += src_coord * src_strides[k];
         }
-        values.push(cell.data[src_index].clone());
+        values.push(cell.data()[src_index].clone());
     }
     Ok((values, output_shape))
 }
@@ -845,9 +849,10 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage, StructArray, StructValue};
+    use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage, StructArray};
 
     fn repelem_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+        let rest = crate::call::BuiltinArguments::from_borrowed(&rest, None)?;
         block_on(super::repelem_builtin(None, value, rest))
     }
 
@@ -1433,15 +1438,17 @@ pub(crate) mod tests {
 
     #[test]
     fn structure_replication_normalizes_scalar_and_preserves_column_major_order() {
-        let mut scalar = StructValue::new();
+        let mut scalar = runmat_value::UnboundedStructValueBuilder::new();
         scalar.insert("id", Value::Num(1.0));
+        let scalar = scalar.finish();
         assert!(matches!(
             repelem_builtin(Value::Struct(scalar.clone()), vec![Value::Num(1.0)]).unwrap(),
             Value::Struct(_)
         ));
 
-        let mut second = StructValue::new();
+        let mut second = runmat_value::UnboundedStructValueBuilder::new();
         second.insert("id", Value::Num(2.0));
+        let second = second.finish();
         let array = StructArray::new(vec![scalar, second], vec![2, 1]).unwrap();
         let Value::StructArray(output) = repelem_builtin(
             Value::StructArray(array),
@@ -1482,7 +1489,7 @@ pub(crate) mod tests {
             Value::Cell(out) => {
                 assert_eq!(out.shape, vec![1, 1, 4]);
                 let values: Vec<f64> = out
-                    .data
+                    .data()
                     .iter()
                     .map(|ptr| match ptr {
                         Value::Num(n) => *n,
@@ -1507,7 +1514,7 @@ pub(crate) mod tests {
             Value::CharArray(out) => {
                 assert_eq!(out.rows, 1);
                 assert_eq!(out.cols, 6);
-                let s: String = out.data.iter().collect();
+                let s: String = out.data().iter().collect();
                 assert_eq!(s, "hhhiii");
             }
             other => panic!("expected char array, got {other:?}"),
@@ -1546,7 +1553,7 @@ pub(crate) mod tests {
             Value::StringArray(out) => {
                 assert_eq!(out.shape, vec![1, 4]);
                 assert_eq!(
-                    out.data,
+                    out.data(),
                     vec![
                         "a".to_string(),
                         "a".to_string(),

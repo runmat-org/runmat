@@ -5,6 +5,22 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+async fn notify_builtin(
+    target: Value,
+    event_name: String,
+    arguments: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    // Explicit test ingress; production forwards its injected invocation context.
+    let runtime = crate::context::legacy::active();
+    super::notify_builtin(
+        runtime.as_ref(),
+        target,
+        event_name,
+        crate::call::BuiltinArguments::from_borrowed(&arguments, runtime.as_ref())?,
+    )
+    .await
+}
+
 static EVENT_ADMISSION_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 fn in_event_test(test: impl FnOnce()) {
@@ -105,11 +121,11 @@ fn default_and_subclass_event_data_reach_callbacks_as_second_argument() {
                         unreachable!()
                     };
                     assert!(matches!(
-                        object.properties.get("Source"),
+                        object.properties().get("Source"),
                         Some(Value::HandleObject(_))
                     ));
                     assert_eq!(
-                        object.properties.get("EventName"),
+                        object.properties().get("EventName"),
                         Some(&Value::CharArray(runmat_value::CharArray::new_row(
                             "Changed"
                         )))

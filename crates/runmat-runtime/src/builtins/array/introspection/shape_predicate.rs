@@ -153,35 +153,42 @@ mod tests {
     };
 
     fn distributed_value(global_shape: Vec<u64>) -> Value {
+        distributed_value_with_generation(global_shape, 1)
+    }
+
+    fn distributed_value_with_generation(global_shape: Vec<u64>, generation: u64) -> Value {
         let scope_id = ExecutionScopeId::derive(&[b"shape-predicate"]);
         let function = ProgramFunctionId(7);
         let owner = ParallelRegionId(RegionId {
             function,
             ordinal: 2,
         });
-        Value::Distributed(Box::new(DistributedValueHandle {
-            id: DistributedObjectId::derive(&[b"shape-predicate-value"]),
-            contract: DistributedValueId {
-                function,
-                ordinal: 1,
-            },
-            owner: DistributedOwner::Region(owner),
-            scope_id,
-            generation: 1,
-            pool: PoolHandle {
-                id: PoolId::derive(&[b"shape-predicate-pool"]),
+        Value::Distributed(
+            Box::new(DistributedValueHandle {
+                id: DistributedObjectId::derive(&[b"shape-predicate-value"]),
+                contract: DistributedValueId {
+                    function,
+                    ordinal: 1,
+                },
+                owner: DistributedOwner::Region(owner),
                 scope_id,
-                generation: 1,
-            },
-            partition_count: LabCount(2),
-            value: ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
-                class: NumericClass::Double,
-                domain: NumericDomain::Real,
-            })),
-            global_shape,
-            scheme: DistributionScheme::Replicated,
-            materializable: true,
-        }))
+                generation,
+                pool: PoolHandle {
+                    id: PoolId::derive(&[b"shape-predicate-pool"]),
+                    scope_id,
+                    generation: 1,
+                },
+                partition_count: LabCount(2),
+                value: ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                    class: NumericClass::Double,
+                    domain: NumericDomain::Real,
+                })),
+                global_shape,
+                scheme: DistributionScheme::Replicated,
+                materializable: true,
+            })
+            .into(),
+        )
     }
 
     fn classify_distributed(predicate: ShapePredicate, global_shape: Vec<u64>) -> bool {
@@ -216,11 +223,8 @@ mod tests {
             &runmat_builtins::ISEMPTY_ERROR_TOO_MANY_OUTPUTS,
             ShapePredicate::Empty,
         );
-        let Value::Distributed(mut handle) = distributed_value(vec![2, 2]) else {
-            unreachable!();
-        };
-        handle.generation = 0;
-        let error = block_on(boundary.execute(Value::Distributed(handle))).expect_err("invalid");
+        let error = block_on(boundary.execute(distributed_value_with_generation(vec![2, 2], 0)))
+            .expect_err("invalid");
         assert_eq!(error.identifier(), Some("RunMat:isempty:InternalError"));
     }
 }

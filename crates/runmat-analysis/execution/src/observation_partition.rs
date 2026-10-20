@@ -825,15 +825,17 @@ mod placement_tests {
 
     fn accelerator(class: &str) -> AcceleratorRequest {
         AcceleratorRequest {
-            class: class.into(),
+            class: runmat_execution::resource::AcceleratorClass::new(class).unwrap(),
             count: 1,
-            memory_bytes_each: 1024,
+            minimum_allocation_bytes: 1024,
+            provider: None,
+            required_features: BTreeSet::new(),
         }
     }
 
     fn capability(class: &str) -> AnalysisCapabilityRequirement {
         AnalysisCapabilityRequirement::Accelerator {
-            class: class.into(),
+            class: runmat_execution::resource::AcceleratorClass::new(class).unwrap(),
         }
     }
 
@@ -851,7 +853,7 @@ mod placement_tests {
             )
             .unwrap(),
             super::ObservationExecutionTarget::GovernedAccelerator {
-                class: "gpu-a".into(),
+                class: runmat_execution::resource::AcceleratorClass::new("gpu-a").unwrap(),
             }
         );
         for (backend, eligibility, allocated, capable) in [
@@ -905,10 +907,21 @@ mod placement_tests {
         let second =
             serde_json::from_value(serde_json::to_value(Digest::sha256("second")).unwrap())
                 .unwrap();
-        validate_acceleration_binding("gpu-a", first, &allocation, first, &allocation).unwrap();
-        assert!(
-            validate_acceleration_binding("gpu-a", first, &allocation, second, &allocation,)
-                .is_err()
-        );
+        validate_acceleration_binding(
+            &runmat_execution::resource::AcceleratorClass::new("gpu-a").unwrap(),
+            first,
+            &allocation,
+            first,
+            &allocation,
+        )
+        .unwrap();
+        assert!(validate_acceleration_binding(
+            &allocation.class,
+            first,
+            &allocation,
+            second,
+            &allocation,
+        )
+        .is_err());
     }
 }

@@ -9,7 +9,10 @@ fn unwrap_error_message(err: RuntimeError) -> String {
 }
 
 fn run_fileread(path: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    futures::executor::block_on(fileread_builtin(path, rest))
+    futures::executor::block_on(fileread_builtin(
+        path,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    ))
 }
 
 fn unowned_resident_value() -> Value {
@@ -60,7 +63,7 @@ fn fileread_rejects_numeric_and_resident_paths_before_provider_access() {
 
 #[test]
 fn fileread_rejects_numeric_and_resident_encoding_inputs_before_provider_access() {
-    let filename = Value::String("unused-fileread-path".to_string());
+    let filename = Value::String("unused-fileread-path".to_string().into());
     for invalid in [Value::Num(1.0), unowned_resident_value()] {
         let error =
             run_fileread(filename.clone(), vec![invalid]).expect_err("invalid encoding input");
@@ -71,7 +74,7 @@ fn fileread_rejects_numeric_and_resident_encoding_inputs_before_provider_access(
     let error = run_fileread(
         filename,
         vec![
-            Value::String("Encoding".to_string()),
+            Value::String("Encoding".to_string().into()),
             unowned_resident_value(),
         ],
     )
@@ -107,7 +110,7 @@ fn fileread_reads_text_file() {
 
     match result {
         Value::CharArray(ca) => {
-            let text: String = ca.data.iter().collect();
+            let text: String = ca.data().iter().collect();
             assert_eq!(ca.rows, 1);
             assert_eq!(ca.cols, contents.chars().count());
             assert_eq!(text, contents);
@@ -135,7 +138,7 @@ fn fileread_accepts_char_array_input() {
     let result = run_fileread(value, Vec::new()).expect("fileread");
     match result {
         Value::CharArray(ca) => {
-            let text: String = ca.data.iter().collect();
+            let text: String = ca.data().iter().collect();
             assert_eq!(text, "abc");
         }
         other => panic!("expected char array, got {other:?}"),
@@ -160,7 +163,7 @@ fn fileread_accepts_string_array_scalar() {
     let result = run_fileread(value, Vec::new()).expect("fileread");
     match result {
         Value::CharArray(ca) => {
-            let text: String = ca.data.iter().collect();
+            let text: String = ca.data().iter().collect();
             assert_eq!(text, "xyz");
         }
         other => panic!("expected char array, got {other:?}"),
@@ -183,7 +186,7 @@ fn fileread_returns_empty_for_empty_file() {
         Value::CharArray(ca) => {
             assert_eq!(ca.rows, 1);
             assert_eq!(ca.cols, 0);
-            assert!(ca.data.is_empty());
+            assert!(ca.data().is_empty());
         }
         other => panic!("expected char array, got {other:?}"),
     }
@@ -220,7 +223,7 @@ fn fileread_preserves_non_utf8_bytes() {
         .expect("fileread");
     match result {
         Value::CharArray(ca) => {
-            let collected: Vec<u32> = ca.data.iter().map(|ch| *ch as u32).collect();
+            let collected: Vec<u32> = ca.data().iter().map(|ch| *ch as u32).collect();
             assert_eq!(collected, vec![0x00FF, 0x0061, 0x0000]);
         }
         other => panic!("expected char array, got {other:?}"),
@@ -245,7 +248,7 @@ fn fileread_supports_encoding_keyword() {
     .expect("fileread");
     match result {
         Value::CharArray(ca) => {
-            let text: String = ca.data.iter().collect();
+            let text: String = ca.data().iter().collect();
             assert_eq!(text, contents);
         }
         other => panic!("expected char array, got {other:?}"),
@@ -270,7 +273,7 @@ fn fileread_supports_single_encoding_argument() {
     .expect("fileread");
     match result {
         Value::CharArray(ca) => {
-            let codes: Vec<u32> = ca.data.iter().map(|ch| *ch as u32).collect();
+            let codes: Vec<u32> = ca.data().iter().map(|ch| *ch as u32).collect();
             assert_eq!(codes, vec![0x00C0, 0x0020, 0x0041]);
         }
         other => panic!("expected char array, got {other:?}"),
@@ -295,7 +298,7 @@ fn fileread_raw_encoding_returns_bytes() {
     .expect("fileread");
     match result {
         Value::CharArray(ca) => {
-            let codes: Vec<u8> = ca.data.iter().map(|ch| *ch as u8).collect();
+            let codes: Vec<u8> = ca.data().iter().map(|ch| *ch as u8).collect();
             assert_eq!(codes, bytes);
         }
         other => panic!("expected char array, got {other:?}"),

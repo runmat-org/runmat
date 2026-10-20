@@ -7,7 +7,7 @@ pub(super) enum FilterPreparation {
 }
 
 pub(super) async fn parse_resample_options(
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
     p: usize,
     q: usize,
 ) -> BuiltinResult<ResampleOptions> {
@@ -17,7 +17,7 @@ pub(super) async fn parse_resample_options(
 }
 
 pub(super) async fn validate_resample_options(
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
     p: usize,
     q: usize,
 ) -> BuiltinResult<()> {
@@ -27,7 +27,7 @@ pub(super) async fn validate_resample_options(
 }
 
 async fn parse_resample_options_inner(
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
     p: usize,
     q: usize,
     preparation: FilterPreparation,
@@ -402,7 +402,7 @@ pub(super) fn parse_nonnegative_integer(
 pub(super) fn value_as_text(value: &Value) -> Option<String> {
     match value {
         Value::String(text) => Some(text.as_str().to_owned()),
-        Value::CharArray(chars) if chars.rows == 1 => Some(chars.data.iter().collect()),
+        Value::CharArray(chars) if chars.rows == 1 => Some(chars.data().iter().collect()),
         _ => None,
     }
 }

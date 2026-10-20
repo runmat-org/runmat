@@ -14,7 +14,8 @@ use crate::builtins::plotting::state::{
     register_line_handle, FigureHandle, PlotRenderOptions,
 };
 use crate::builtins::plotting::style::{
-    marker_metadata_from_appearance, parse_line_style_args, value_as_f64, LineStyleParseOptions,
+    marker_metadata_from_appearance, parse_line_style_arguments, value_as_f64,
+    LineStyleParseOptions,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use admission::{
@@ -34,22 +35,25 @@ use runmat_value::{Tensor, Value};
 const NAME: &str = "refline";
 
 pub(super) async fn run_reference_lines(
-    args: Vec<Value>,
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
     owner: ReferenceLineOwner,
 ) -> BuiltinResult<Value> {
-    let (target, mut args) = split_optional_axes(args)?;
-    let coefficient_count = coefficient_count(&args, owner)?;
-    let style = parse_line_style_args(
-        &args[coefficient_count..],
+    let (target, args) = split_optional_axes(args)?;
+    let coefficient_count = coefficient_count(args.view(), owner)?;
+    let style = parse_line_style_arguments(
+        args.view().range(coefficient_count..)?,
         &LineStyleParseOptions::generic(owner.name()),
     )
     .map_err(|err| {
         let message = err.message.clone();
         owner.invalid_with_source(message, err)
     })?;
-    normalize_refline_coefficients(&mut args, owner, coefficient_count).await?;
-    let (plan, style_args) = parse_refline_coefficients(&args, owner)?;
-    debug_assert_eq!(style_args.len(), args.len() - coefficient_count);
+    let coefficients =
+        normalize_refline_coefficients(args.fork(), runtime.as_ref(), owner, coefficient_count)
+            .await?;
+    let (plan, remaining) = parse_refline_coefficients(coefficients.view(), owner)?;
+    debug_assert!(remaining.is_empty());
     apply_axes_target(target, owner.name()).map_err(|err| {
         if matches!(owner, ReferenceLineOwner::Refline) && err.identifier().is_some() {
             return err;

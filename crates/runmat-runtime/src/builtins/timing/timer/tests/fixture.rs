@@ -212,19 +212,25 @@ pub(in crate::builtins::timing::timer) fn install_timer_bound_forwarders(
 pub(in crate::builtins::timing::timer) async fn timer_builtin(
     args: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    super::super::timer_builtin(Some(test_runtime()), args).await
+    let runtime = test_runtime();
+    let args = crate::call::BuiltinArguments::from_borrowed(&args, Some(&runtime))?;
+    super::super::timer_builtin(Some(runtime), args).await
 }
 
 pub(in crate::builtins::timing::timer) async fn timerfind_builtin(
     args: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    super::super::timerfind_builtin(Some(test_runtime()), args).await
+    let runtime = test_runtime();
+    let args = crate::call::BuiltinArguments::from_borrowed(&args, Some(&runtime))?;
+    super::super::timerfind_builtin(Some(runtime), args).await
 }
 
 pub(in crate::builtins::timing::timer) async fn timerfindall_builtin(
     args: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    super::super::timerfindall_builtin(Some(test_runtime()), args).await
+    let runtime = test_runtime();
+    let args = crate::call::BuiltinArguments::from_borrowed(&args, Some(&runtime))?;
+    super::super::timerfindall_builtin(Some(runtime), args).await
 }
 
 pub(in crate::builtins::timing::timer) async fn timer_start_builtin(

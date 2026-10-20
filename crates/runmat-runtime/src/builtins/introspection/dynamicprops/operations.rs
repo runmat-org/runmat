@@ -11,9 +11,14 @@ use runmat_value::{DynamicPropertyDef, ObjectInstance, Value};
 #[runtime_builtin(
     name = "addprop",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::introspection::dynamicprops::operations"
 )]
-pub(crate) async fn addprop_builtin(target: Value, property_name: String) -> BuiltinResult<Value> {
+pub(crate) async fn addprop_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    target: Value,
+    property_name: runmat_value::Utf8Text,
+) -> BuiltinResult<crate::execution::RootedValue> {
     crate::output_count::validate_fixed_outputs(
         &runmat_builtins::ADDPROP_DESCRIPTOR,
         &runmat_builtins::ADDPROP_ERROR_OUTPUTS,
@@ -55,15 +60,20 @@ pub(crate) async fn addprop_builtin(target: Value, property_name: String) -> Bui
             source,
         )
     })??;
-    let _receiver_root = runmat_gc::gc_root(handle.target).map_err(|source| {
-        dynamic_error_with_source(
-            "addprop",
-            &runmat_builtins::ADDPROP_ERROR_ALLOCATION,
-            "addprop: failed to retain target through metadata allocation",
-            source,
-        )
-    })?;
-    let metadata_handle = allocate_dynamic_property_handle(&definition, target.clone())?;
+    let _receiver_root =
+        crate::execution::RootedValue::in_optional_context(target.clone(), runtime.as_ref())
+            .map_err(|source| {
+                dynamic_error_with_source(
+                    "addprop",
+                    &runmat_builtins::ADDPROP_ERROR_ALLOCATION,
+                    "addprop: failed to retain target through metadata allocation",
+                    source,
+                )
+            })?;
+    let metadata = allocate_dynamic_property_handle(runtime.as_ref(), &definition, target.clone())?;
+    let Value::HandleObject(metadata_handle) = metadata.value() else {
+        unreachable!("dynamic metadata handle")
+    };
     let mut published = definition;
     published.metadata_handle = Some(metadata_handle.target);
     runmat_gc::gc_record_handle_write(
@@ -81,11 +91,22 @@ pub(crate) async fn addprop_builtin(target: Value, property_name: String) -> Bui
         // Recheck after allocation in case a GC hook changed observable
         // state. No property or value is published on this rejection path.
         admitted_addprop_definition(object, &property_name)?;
-        object.insert_dynamic_property(property_name.clone(), published);
-        object
-            .properties
-            .entry(property_name)
-            .or_insert_with(empty_default_value);
+        let default = super::projection::empty_default(runtime.as_ref())?;
+        crate::execution::object::replacement::add_dynamic_property(
+            runtime.as_ref(),
+            object,
+            published,
+            default.value().clone(),
+            |message, source| {
+                dynamic_error_with_source(
+                    "addprop",
+                    &runmat_builtins::ADDPROP_ERROR_ALLOCATION,
+                    message,
+                    source,
+                )
+            },
+            |message| dynamic_error("addprop", &DYNAMIC_ERROR_INVALID_TARGET, message),
+        )?;
         Ok(())
     })
     .map_err(|source| {
@@ -96,16 +117,16 @@ pub(crate) async fn addprop_builtin(target: Value, property_name: String) -> Bui
             source,
         )
     })??;
-    Ok(Value::HandleObject(metadata_handle))
+    Ok(metadata)
 }
 
 fn admitted_addprop_definition(
     object: &ObjectInstance,
-    property_name: &str,
+    property_name: &runmat_value::Utf8Text,
 ) -> BuiltinResult<DynamicPropertyDef> {
     let selected = crate::class_registry::checked_receiver_projection(object)?;
     if let Some(projection) = &selected {
-        if !projection.class_is_or_subclass(&object.class_name, &super::DYNAMICPROPS_CLASS.owned())
+        if !projection.class_is_or_subclass(object.class_name(), &super::DYNAMICPROPS_CLASS.owned())
         {
             return Err(dynamic_error(
                 "addprop",
@@ -114,21 +135,21 @@ fn admitted_addprop_definition(
             ));
         }
     } else {
-        require_dynamicprops_target(&object.class_name)?;
+        require_dynamicprops_target(object.class_name())?;
     }
     let declared = selected.as_ref().map_or_else(
         || {
             crate::class_registry::lookup_property(
-                &object.class_name,
-                &runmat_types::MemberName::from(property_name),
+                object.class_name(),
+                &runmat_types::MemberName::from(property_name.as_str()),
             )
             .is_some()
         },
         |projection| {
             projection
                 .receiver_property(
-                    &object.class_name,
-                    &runmat_types::MemberName::from(property_name),
+                    object.class_name(),
+                    &runmat_types::MemberName::from(property_name.as_str()),
                 )
                 .is_some()
         },
@@ -140,18 +161,23 @@ fn admitted_addprop_definition(
             format!("addprop: property '{property_name}' already exists"),
         ));
     }
-    Ok(DynamicPropertyDef::new(
-        property_name.to_string(),
-        object.class_name.clone(),
-    ))
+    let mut definition = DynamicPropertyDef::new(String::new(), object.class_name_owner().clone());
+    definition.name = property_name.clone();
+    Ok(definition)
 }
 
 #[runtime_builtin(
     name = "findprop",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::introspection::dynamicprops::operations"
 )]
-pub(crate) fn findprop_builtin(target: Value, property_name: String) -> BuiltinResult<Value> {
+pub(crate) fn findprop_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    target: Value,
+    property_name: runmat_value::Utf8Text,
+) -> BuiltinResult<crate::execution::RootedValue> {
+    let runtime = runtime.as_ref();
     crate::output_count::validate_fixed_outputs(
         &runmat_builtins::FINDPROP_DESCRIPTOR,
         &runmat_builtins::FINDPROP_ERROR_OUTPUTS,
@@ -185,17 +211,18 @@ pub(crate) fn findprop_builtin(target: Value, property_name: String) -> BuiltinR
             let selected = crate::class_registry::checked_receiver_projection(&obj)?;
             if let Some(def) = obj.dynamic_property(&property_name) {
                 if let Some(metadata_handle) = def.metadata_handle {
-                    return Ok(dynamic_property_handle_from_gc(metadata_handle));
+                    return dynamic_property_handle_from_gc(runtime, metadata_handle);
                 }
-                return Ok(Value::HandleObject(allocate_dynamic_property_handle(
+                return allocate_dynamic_property_handle(
+                    runtime,
                     def,
                     Value::HandleObject(handle.clone()),
-                )?));
+                );
             }
             let property = selected.as_ref().map_or_else(
                 || {
                     crate::class_registry::lookup_property(
-                        &obj.class_name,
+                        obj.class_name(),
                         &runmat_types::MemberName::from(property_name.as_str()),
                     )
                     .map(|(property, owner)| {
@@ -207,38 +234,36 @@ pub(crate) fn findprop_builtin(target: Value, property_name: String) -> BuiltinR
                 },
                 |projection| {
                     projection.receiver_property(
-                        &obj.class_name,
+                        obj.class_name(),
                         &runmat_types::MemberName::from(property_name.as_str()),
                     )
                 },
             );
             if let Some((prop, owner)) = property {
-                let def = dynamic_def_from_class_property(
-                    &owner,
-                    &runmat_types::MemberName::from(property_name.as_str()),
-                    &prop,
-                );
-                return Ok(Value::Object(dynamic_def_to_metadata_object(
+                let def = dynamic_def_from_class_property(runtime, &owner, &property_name, &prop)?;
+                return super::projection::metadata_object(
+                    runtime,
                     &def,
                     None,
                     STATIC_PROPERTY_METADATA_CLASS,
-                )));
+                );
             }
-            Ok(empty_metadata_result())
+            super::projection::empty_default(runtime)
         }
         Value::Object(obj) => {
             let selected = crate::class_registry::checked_receiver_projection(&obj)?;
             if let Some(def) = obj.dynamic_property(&property_name) {
-                return Ok(Value::Object(dynamic_def_to_metadata_object(
+                return super::projection::metadata_object(
+                    runtime,
                     def,
                     None,
                     DYNAMIC_PROPERTY_CLASS,
-                )));
+                );
             }
             let property = selected.as_ref().map_or_else(
                 || {
                     crate::class_registry::lookup_property(
-                        &obj.class_name,
+                        obj.class_name(),
                         &runmat_types::MemberName::from(property_name.as_str()),
                     )
                     .map(|(property, owner)| {
@@ -250,24 +275,21 @@ pub(crate) fn findprop_builtin(target: Value, property_name: String) -> BuiltinR
                 },
                 |projection| {
                     projection.receiver_property(
-                        &obj.class_name,
+                        obj.class_name(),
                         &runmat_types::MemberName::from(property_name.as_str()),
                     )
                 },
             );
             if let Some((prop, owner)) = property {
-                let def = dynamic_def_from_class_property(
-                    &owner,
-                    &runmat_types::MemberName::from(property_name.as_str()),
-                    &prop,
-                );
-                return Ok(Value::Object(dynamic_def_to_metadata_object(
+                let def = dynamic_def_from_class_property(runtime, &owner, &property_name, &prop)?;
+                return super::projection::metadata_object(
+                    runtime,
                     &def,
                     None,
                     STATIC_PROPERTY_METADATA_CLASS,
-                )));
+                );
             }
-            Ok(empty_metadata_result())
+            super::projection::empty_default(runtime)
         }
         other => Err(dynamic_error(
             "findprop",
@@ -280,9 +302,13 @@ pub(crate) fn findprop_builtin(target: Value, property_name: String) -> BuiltinR
 #[runtime_builtin(
     name = "matlab.metadata.DynamicProperty.delete",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::introspection::dynamicprops::operations"
 )]
-pub(crate) async fn dynamic_property_delete_builtin(prop: Value) -> BuiltinResult<Value> {
+pub(crate) async fn dynamic_property_delete_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    prop: Value,
+) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &runmat_builtins::DYNAMIC_PROPERTY_DELETE_DESCRIPTOR,
         &runmat_builtins::DYNAMIC_PROPERTY_DELETE_ERROR_OUTPUTS,
@@ -302,6 +328,6 @@ pub(crate) async fn dynamic_property_delete_builtin(prop: Value) -> BuiltinResul
             "dynamic property delete requires matlab.metadata.DynamicProperty",
         ));
     }
-    delete_metadata_property(&prop_handle, || Ok(()))?;
+    delete_metadata_property(runtime.as_ref(), &prop_handle, || Ok(()))?;
     Ok(Value::Num(0.0))
 }

@@ -102,7 +102,7 @@ pub(super) fn fill_selection_map(
                     if position % 4096 == 0 {
                         checkpoint(index)?;
                     }
-                    if is_missing_text(input.data[index].as_str()) {
+                    if is_missing_text(input.data()[index].as_str()) {
                         destinations[index] = usize::MAX;
                     }
                 }
@@ -120,7 +120,7 @@ pub(super) fn fill_selection_map(
                     if ordinal % 4096 == 0 {
                         checkpoint(index)?;
                     }
-                    if is_missing_text(input.data[index].as_str()) {
+                    if is_missing_text(input.data()[index].as_str()) {
                         if let Some(source) = source {
                             destinations[index] = source;
                         }
@@ -136,7 +136,7 @@ pub(super) fn fill_selection_map(
                     if position % 4096 == 0 {
                         checkpoint(index)?;
                     }
-                    if is_missing_text(input.data[index].as_str()) {
+                    if is_missing_text(input.data()[index].as_str()) {
                         destinations[index] = previous.unwrap_or(usize::MAX);
                     } else {
                         previous = Some(index);
@@ -149,7 +149,7 @@ pub(super) fn fill_selection_map(
                     if ordinal % 4096 == 0 {
                         checkpoint(index)?;
                     }
-                    if is_missing_text(input.data[index].as_str()) {
+                    if is_missing_text(input.data()[index].as_str()) {
                         if let Some(next_index) = next {
                             let previous_distance = if destinations[index] == usize::MAX {
                                 usize::MAX

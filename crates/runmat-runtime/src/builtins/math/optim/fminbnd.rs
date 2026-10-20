@@ -111,7 +111,7 @@ pub(super) async fn fminbnd_builtin_registered(
     function: Value,
     x1: Value,
     x2: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     fminbnd_in_runtime(runtime.as_ref(), function, x1, x2, rest).await
 }
@@ -121,7 +121,7 @@ pub(super) async fn fminbnd_builtin(
     function: Value,
     x1: Value,
     x2: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     fminbnd_in_runtime(None, function, x1, x2, rest).await
 }
@@ -131,7 +131,7 @@ async fn fminbnd_in_runtime(
     function: Value,
     x1: Value,
     x2: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let mut cooperation = ScalarCooperation::new(OptimSolver::Fminbnd, runtime);
     cooperation.completed(0).await?;
@@ -283,8 +283,8 @@ fn parse_options(value: Option<Value>) -> BuiltinResult<Option<StructValue>> {
 fn option_string(field: &str, value: &Value) -> BuiltinResult<String> {
     match value {
         Value::String(s) => Ok(s.as_str().to_owned()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].as_str().to_owned()),
-        Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data.iter().collect()),
+        Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].as_str().to_owned()),
+        Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data().iter().collect()),
         other => Err(fminbnd_error_with_detail(
             &FMINBND_ERROR_INVALID_ARGUMENT,
             format!("option {field} must be a string, got {other:?}"),
@@ -508,21 +508,21 @@ fn empty_double() -> Value {
 }
 
 fn build_output_struct(result: &BrentMinResult, message: &str) -> StructValue {
-    let mut fields = StructValue::new();
+    let mut fields = runmat_value::UnboundedStructValueBuilder::new();
     fields.insert("iterations", Value::Num(result.iterations as f64));
     fields.insert("funcCount", Value::Num(result.func_count as f64));
     fields.insert("algorithm", Value::from(ALGORITHM));
     fields.insert("message", Value::from(message.to_string()));
-    fields
+    fields.finish()
 }
 
 fn build_invalid_output_struct(message: &str) -> StructValue {
-    let mut fields = StructValue::new();
+    let mut fields = runmat_value::UnboundedStructValueBuilder::new();
     fields.insert("iterations", Value::Num(0.0));
     fields.insert("funcCount", Value::Num(0.0));
     fields.insert("algorithm", Value::from(ALGORITHM));
     fields.insert("message", Value::from(message.to_string()));
-    fields
+    fields.finish()
 }
 
 fn build_message(result: &BrentMinResult) -> String {

@@ -74,9 +74,12 @@ fn factorial_error(error: FactorialError, detail: impl std::fmt::Display) -> Run
     binding_variant = "default",
     builtin_path = "crate::builtins::math::discrete::factorial"
 )]
-async fn factorial_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn factorial_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     reject_excess_outputs()?;
-    let output = parse_output_template(&rest)?;
+    let output = parse_output_template(rest.view())?;
     let base = match value {
         Value::GpuTensor(handle) => factorial_gpu(handle).await?,
         Value::Complex(_, _) | Value::ComplexTensor(_) => {

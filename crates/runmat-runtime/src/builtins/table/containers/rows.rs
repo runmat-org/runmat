@@ -48,7 +48,7 @@ pub(in crate::builtins::table) fn row_value(value: &Value, row: usize) -> Builti
         }
         Value::ComplexTensor(_) => select_rows(value, &[row]),
         Value::StringArray(array) if array.cols() == 1 => Ok(Value::String(
-            array.data.get(row).cloned().unwrap_or_default(),
+            array.data().get(row).cloned().unwrap_or_default(),
         )),
         Value::StringArray(_) => select_rows(value, &[row]),
         Value::LogicalArray(array) if array.shape.get(1).copied().unwrap_or(1) == 1 => {
@@ -63,7 +63,7 @@ pub(in crate::builtins::table) fn row_value(value: &Value, row: usize) -> Builti
             }
             let start = row * array.cols;
             CharArray::new(
-                array.data[start..start + array.cols].to_vec(),
+                array.data()[start..start + array.cols].to_vec(),
                 1,
                 array.cols,
             )

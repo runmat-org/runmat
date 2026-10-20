@@ -5,6 +5,8 @@
 //! automatically computes the inverse order vector before delegating to the shared
 //! permutation helpers.
 
+use crate::aggregate::structure::operations as struct_ops;
+
 use crate::builtins::array::shape::permute::{
     parse_order_argument, permute_char_array, permute_complex_tensor, permute_gpu,
     permute_logical_array, permute_string_array, permute_tensor, validate_rank,
@@ -76,10 +78,8 @@ async fn ipermute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Va
                 crate::builtins::common::shape::effective_rank(array.shape()),
             ).map_err(|error| super::error::declared(error, &IPERMUTE_ERROR_RANK_MISMATCH))?;
             let zero_based = inverse.iter().map(|dimension| dimension - 1).collect::<Vec<_>>();
-            array
-                .permute(&zero_based)
-                .map(Value::StructArray)
-                .map_err(ipermute_error)
+            struct_ops::permute(array,&zero_based).map(Value::StructArray)
+                .map_err(|error|struct_ops::remap(error,|message|ipermute_error(message)))
         }
         Value::GpuTensor(handle) => {
             validate_rank("ipermute", &order_vec, handle.shape().len()).map_err(|error| super::error::declared(error, &IPERMUTE_ERROR_RANK_MISMATCH))?;
@@ -125,6 +125,7 @@ pub(crate) mod tests {
     fn ipermute_builtin(value: Value, order: Value) -> crate::BuiltinResult<Value> {
         block_on(super::ipermute_builtin(value, order))
     }
+    use crate::aggregate::structure::operations as struct_ops;
     use crate::builtins::array::shape::permute::{
         parse_order_argument, permute_char_array, permute_complex_tensor, permute_gpu,
         permute_logical_array, permute_string_array, permute_tensor,
@@ -132,7 +133,7 @@ pub(crate) mod tests {
     use crate::builtins::common::{tensor, test_support};
     use runmat_value::{
         CharArray, ComplexTensor, IntegerComplexStorage, IntegerStorage, LogicalArray, StringArray,
-        StructArray, StructValue, Tensor, Value,
+        StructArray, Tensor, Value,
     };
 
     fn make_tensor(data: &[f64], shape: &[usize]) -> Tensor {
@@ -242,7 +243,7 @@ pub(crate) mod tests {
             Value::CharArray(out) => {
                 assert_eq!(out.rows, chars.rows);
                 assert_eq!(out.cols, chars.cols);
-                assert_eq!(out.data, chars.data);
+                assert_eq!(out.data(), chars.data());
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -357,7 +358,7 @@ pub(crate) mod tests {
         match restored {
             Value::StringArray(out) => {
                 assert_eq!(out.shape, strings.shape);
-                assert_eq!(out.data, data);
+                assert_eq!(out.data(), data);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -387,10 +388,12 @@ pub(crate) mod tests {
 
     #[test]
     fn ipermute_struct_array_uses_effective_rank_and_padding() {
-        let mut first = StructValue::new();
+        let mut first = runmat_value::UnboundedStructValueBuilder::new();
         first.insert("value", Value::Num(1.0));
-        let mut second = StructValue::new();
+        let mut second = runmat_value::UnboundedStructValueBuilder::new();
         second.insert("value", Value::Num(2.0));
+        let second = second.finish();
+        let first = first.finish();
         let array = StructArray::new(vec![first, second], vec![2, 1, 1]).unwrap();
         let short = make_tensor(&[2.0, 1.0], &[1, 2]);
         let Value::StructArray(direct) = ipermute_builtin(
@@ -401,7 +404,7 @@ pub(crate) mod tests {
             panic!("expected structure array");
         };
         assert_eq!(direct.shape(), &[1, 2]);
-        let short_permuted = array.clone().permute(&[1, 0]).unwrap();
+        let short_permuted = struct_ops::permute(array.clone(), &[1, 0]).unwrap();
         let Value::StructArray(permuted) =
             ipermute_builtin(Value::StructArray(short_permuted), Value::Tensor(short)).unwrap()
         else {
@@ -411,7 +414,7 @@ pub(crate) mod tests {
         assert_eq!(permuted.field_values("value"), array.field_values("value"));
 
         let padded = make_tensor(&[2.0, 1.0, 3.0, 4.0], &[1, 4]);
-        let padded_permuted = array.clone().permute(&[1, 0, 2, 3]).unwrap();
+        let padded_permuted = struct_ops::permute(array.clone(), &[1, 0, 2, 3]).unwrap();
         let Value::StructArray(permuted) =
             ipermute_builtin(Value::StructArray(padded_permuted), Value::Tensor(padded)).unwrap()
         else {

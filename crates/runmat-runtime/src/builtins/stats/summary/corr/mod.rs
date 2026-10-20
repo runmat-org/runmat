@@ -31,8 +31,8 @@ const NAME: &str = "corr";
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::summary::corr"
 )]
-async fn corr_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    ensure_corr_integer_extensions(&value, &rest)?;
+async fn corr_builtin(value: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    ensure_corr_integer_extensions(&value, rest.view())?;
     let args = parse_args(value, rest).await?;
     corr_compute(args)
 }

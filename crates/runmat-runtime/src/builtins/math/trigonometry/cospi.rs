@@ -436,7 +436,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[cfg_attr(not(target_arch = "wasm32"), test)]
     fn strings_are_rejected() {
-        let err = call(Value::String("0.5".to_string())).unwrap_err();
+        let err = call(Value::String("0.5".to_string().into())).unwrap_err();
         assert_eq!(err.identifier.as_deref(), Some("RunMat:cospi:InvalidInput"));
     }
 }

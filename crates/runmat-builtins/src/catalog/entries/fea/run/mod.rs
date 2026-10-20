@@ -15,32 +15,28 @@ fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
 const EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "run-closed-cube",
     title: "Run a closed-volume linear-static study",
-    program: "study = fea.load('cube.fea');\nrun = fea.run(study);",
+    program: "geom = geometry.load('cube.stl');\nsteel = fea.material('steel', 'YoungsModulusPa', int64(200000000000), 'PoissonRatio', 0.3);\ntarget = fea.PropertyRegionTarget.allSolids(geom);\nassignment = fea.materialAssignment(target, steel);\nregion = geometry.region(geom, 'region_default');\nfixed = fea.StructuralConstraint.fixed('fixed', region);\nstep = fea.StructuralStep.static('static');\nmodel = fea.model('cube_model', geom, 'Materials', {steel}, 'MaterialAssignments', {assignment}, 'Constraints', {fixed}, 'Steps', {step});\nstudy = fea.study('closed_cube_static', geom, model);\nrun = fea.run(study);\nstepRun = run.step('static');",
     display_output: None,
     compatibility: BuiltinExampleCompatibility::RunMat,
     harness: BuiltinExampleHarness::NativeFilesystem,
     fixture: CLOSED_CUBE_STUDY,
     requirements: BuiltinExampleRequirements::NONE,
     verification: BuiltinExampleVerification::Assertions {
-        source: "assert(strcmp(class(run), 'fea.RunResult'));\nassert(~isempty(run.run_id));",
+        source: "assert(strcmp(class(run), 'fea.RunResult'));\nassert(~isempty(stepRun.run_id));",
     },
 }];
 const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(ConstructorDocumentationDefinition {
     title: "fea.run", summary: "Execute a typed FEA study or sweep.",
-    description: "`fea.run(studyOrSweepOrPath)` resolves and executes a typed study, sequential sweep, or `.fea` document, then records solver and mesh evidence.",
-    keywords: &["fea", "run", "solve", "study", "sweep"], related: &["fea.study", "fea.validate", "fea.plan", "fea.results"],
-    sections: &[BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
-        "Exactly one host path, `fea.Study`, or `fea.Sweep` is required. Numeric and resident arguments are not silently gathered or treated as documents.",
-        "A study returns `fea.RunResult` with run id, status, quality gates, provenance, selected operation, and evidence path. A sweep returns the same class with aggregate counts, per-study entries, and one-based failure indexes.",
-        "The configured study backend may use a CPU or GPU solver; host-side input decoding and result serialization do not imply CPU-only solving. The solver can persist mesh, run, and evidence artifacts and may suspend.",
-        "Discrete provenance, counts, indexes, fingerprints, and options remain exact typed integers; solver measurements, tolerances, rates, and physical quantities remain binary64.",
-        "An already resolved study or STL document needs no OCCT. A topology-bearing CAD path may require the configured importer before solver work.",
-    ] }], examples: EXAMPLES,
-    faqs: &[BuiltinDocumentationFaq { question: "Does fea.run always use the CPU?", answer: "No. Solver backend selection is part of the study; the example requests CPU only for deterministic qualification." }],
-    links: &[BuiltinDocumentationLink { label: "FEA solves", target: BuiltinDocumentationLinkTarget::Documentation("/docs/fea/solves") }],
-    implementation: &[BuiltinDocumentationLink { label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/entrypoints.rs") }],
-    verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Closed-cube linear-static operation", location: "crates/runmat-runtime/src/analysis/tests.rs::analysis_run_study_executes_linear_static_path" }],
-    notes: &["A distributed array cannot stand in for a study document or typed FEA object; no partition-local solver route is exposed by this builtin."],
+    description: "`fea.run(studyOrSweep)` accepts exactly one typed host fea.Study or fea.Sweep, not a document path.",
+    keywords: &["fea", "run"], related: &["fea.model", "fea.study", "fea.results"],
+    sections: &[BuiltinDocumentationSection { heading: "Typed boundary", paragraphs: &[
+        "A study returns fea.RunResult containing procedure-step results; a sweep returns fea.SweepRunResult. Select one persisted run with run.step(stepId), returning fea.StepRunResult. Actual execution honors the typed execution plan and persists its evidence.",
+        "Host structural identities, revisions, shapes, and counts remain exact. Physics conversions occur only at their explicit owning boundaries; resident inputs are not implicitly gathered.",
+    ] }], examples: EXAMPLES, faqs: &[],
+    links: &[BuiltinDocumentationLink { label: "FEA API", target: BuiltinDocumentationLinkTarget::Documentation("/docs/fea/using-fea") }],
+    implementation: &[BuiltinDocumentationLink { label: "Current implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/mod.rs") }],
+    verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Typed Runtime FEA contracts", location: "crates/runmat-runtime/src/builtins/fea/mod.rs::tests::typed_constructors_build_full_study_and_sweep_objects" }],
+    notes: &["Catalog examples require execution qualification; these declarations are not solver or numerical conformance receipts."],
 });
 pub const FEA_RUN_CATALOG_ENTRY: BuiltinCatalogEntry =
     operation_entry::entry(OperationEntryDefinition {

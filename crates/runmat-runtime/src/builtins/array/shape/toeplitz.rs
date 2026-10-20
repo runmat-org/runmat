@@ -23,7 +23,7 @@ const NAME: &str = "toeplitz";
     binding_variant = "default",
     builtin_path = "crate::builtins::array::shape::toeplitz"
 )]
-async fn toeplitz_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn toeplitz_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     if matches!(crate::output_count::current_output_count(), Some(count) if count > 1) {
         return Err(error_with_detail(
             &runmat_builtins::TOEPLITZ_ERROR_TOO_MANY_OUTPUTS,

@@ -206,10 +206,10 @@ pub(super) fn numeric_size_to_usize(n: f64, context: &str) -> BuiltinResult<usiz
 pub(super) fn scalar_text(value: &Value) -> Option<String> {
     match value {
         Value::String(text) => Some(text.as_str().to_owned()),
-        Value::StringArray(array) if array.data.len() == 1 => {
-            Some(array.data[0].as_str().to_owned())
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Some(array.data()[0].as_str().to_owned())
         }
-        Value::CharArray(array) if array.rows == 1 => Some(array.data.iter().collect()),
+        Value::CharArray(array) if array.rows == 1 => Some(array.data().iter().collect()),
         _ => None,
     }
 }
@@ -218,7 +218,7 @@ pub(super) fn char_rows(array: &CharArray) -> Vec<String> {
     let mut out = Vec::with_capacity(array.rows);
     for row in 0..array.rows {
         let start = row * array.cols;
-        out.push(array.data[start..start + array.cols].iter().collect());
+        out.push(array.data()[start..start + array.cols].iter().collect());
     }
     out
 }

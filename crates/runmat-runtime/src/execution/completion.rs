@@ -3,6 +3,16 @@ use runmat_value::{LexicalEnvironment, OutputListStorage, Value, ValueSequence};
 
 use super::ExecutionServiceError;
 
+#[path = "completion/initialization.rs"]
+mod initialization;
+#[path = "completion/publication.rs"]
+mod publication;
+#[path = "completion/iteration.rs"]
+mod iteration;
+#[path = "completion/argument_transform.rs"]
+mod argument_transform;
+pub(crate) use argument_transform::ArgumentProjection;
+
 #[path = "completion/roots.rs"]
 mod roots;
 use roots::RetainedValueRoots;
@@ -24,7 +34,7 @@ pub type RootedValue = RootedResult<Value>;
 /// Owned values whose reachable managed handles remain roots while an async
 /// operation retains the batch. This is the canonical input counterpart to
 /// [`RootedValueSequence`].
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct RootedValues {
     values: OutputListStorage,
     _roots: RetainedValueRoots,
@@ -35,7 +45,7 @@ pub struct RootedValues {
 /// iteration and early failure.
 #[derive(Debug)]
 pub struct RootedValuesIntoIter {
-    values: runmat_value::OutputListIntoIter,
+    values: iteration::RootedValuesIteration,
     _roots: RetainedValueRoots,
 }
 
@@ -220,26 +230,37 @@ impl RootedValueLease {
         slices: &[&[Value]],
         runtime: &crate::context::RuntimeContext,
     ) -> Result<Self, crate::RuntimeError> {
-        let _roots =
-            RootedValueHandles::for_value_slices_in_context(slices, runtime).map_err(|source| {
-                match source {
-                    RootedValueAdmissionError::Host(source) => {
-                        crate::context::host_allocation::host_allocation_runtime_error(
-                            Some(runtime),
-                            "RunMat:Execution:RootLease",
-                            "queued value root admission failed",
-                            source,
-                        )
-                    }
-                    RootedValueAdmissionError::Gc(source) => {
-                        crate::runtime_error::semantic_error_with_source(
-                            "RunMat:Execution:RootLease",
-                            "queued value root admission failed",
-                            source,
-                        )
-                    }
+        Self::for_values_iterator_in_context(
+            slices.iter().flat_map(|values| values.iter()),
+            runtime,
+        )
+    }
+
+    /// Admit one repeatable borrowed root traversal without a reference or
+    /// Value collection. Sources remain owned by the caller through publication.
+    pub fn for_values_iterator_in_context<'a>(
+        values: impl Iterator<Item = &'a Value> + Clone,
+        runtime: &crate::context::RuntimeContext,
+    ) -> Result<Self, crate::RuntimeError> {
+        let _roots = RootedValueHandles::for_values_iterator_in_context(values, runtime).map_err(
+            |source| match source {
+                RootedValueAdmissionError::Host(source) => {
+                    crate::context::host_allocation::host_allocation_runtime_error(
+                        Some(runtime),
+                        "RunMat:Execution:RootLease",
+                        "queued value root admission failed",
+                        source,
+                    )
                 }
-            })?;
+                RootedValueAdmissionError::Gc(source) => {
+                    crate::runtime_error::semantic_error_with_source(
+                        "RunMat:Execution:RootLease",
+                        "queued value root admission failed",
+                        source,
+                    )
+                }
+            },
+        )?;
         Ok(Self { _roots })
     }
 
@@ -273,7 +294,7 @@ impl RootedValueLease {
 #[derive(Debug, Default)]
 pub struct RootedValuesBuilder {
     values: Vec<Value>,
-    member_roots: RootedValueChildren,
+    member_roots: RootedValueChildren<'static>,
 }
 
 impl RootedValuesBuilder {
@@ -311,13 +332,30 @@ impl RootedValuesBuilder {
 
     pub fn finish(self) -> Result<RootedValues, ExecutionServiceError> {
         Ok(RootedValues {
-            values: OutputListStorage::unbounded(self.values),
+            values: publication::ordinary(OutputListStorage::unbounded(self.values)),
             _roots: self.member_roots.finish(),
         })
     }
 }
 
+impl Clone for RootedValues {
+    fn clone(&self) -> Self {
+        self.fork()
+    }
+}
 impl RootedValues {
+    /// Retain the original physical argument collection and registrations.
+    /// Every production constructor publishes shared storage before escape.
+    pub fn fork(&self) -> Self {
+        assert!(
+            self.values.is_shallow_clone(),
+            "rooted argument publication invariant"
+        );
+        Self {
+            values: self.values.clone(),
+            _roots: self._roots.clone(),
+        }
+    }
     /// Prepend one already-owned metadata value while preserving every input
     /// Value and the original exact collection claim until the replacement
     /// collection is fully admitted. No payload is cloned.
@@ -538,8 +576,8 @@ impl RootedValues {
     }
 
     /// Take ownership of an already-allocated argument vector and admit its
-    /// external GC roots under the current operation without copying Values.
-    /// This does not certify arbitrary preexisting payload/vector backing.
+    /// external GC roots and actual-capacity slot backing under the current
+    /// operation without copying Values. Child payloads retain their own policy.
     pub fn in_context(
         values: Vec<Value>,
         runtime: &crate::context::RuntimeContext,
@@ -564,7 +602,7 @@ impl RootedValues {
             },
         )?;
         Ok(Self {
-            values: OutputListStorage::unbounded(values),
+            values: publication::in_context(OutputListStorage::unbounded(values), runtime)?,
             _roots: RetainedValueRoots::direct(roots),
         })
     }
@@ -576,7 +614,7 @@ impl RootedValues {
             ))
         })?;
         Ok(Self {
-            values: OutputListStorage::unbounded(values),
+            values: publication::ordinary(OutputListStorage::unbounded(values)),
             _roots: RetainedValueRoots::direct(roots),
         })
     }
@@ -590,7 +628,7 @@ impl RootedValues {
             ))
         })?;
         Ok(Self {
-            values,
+            values: publication::ordinary(values),
             _roots: RetainedValueRoots::direct(roots),
         })
     }
@@ -618,7 +656,7 @@ impl RootedValues {
                 }
             })?;
         Ok(Self {
-            values,
+            values: publication::in_context(values, runtime)?,
             _roots: RetainedValueRoots::direct(roots),
         })
     }
@@ -627,18 +665,13 @@ impl RootedValues {
         self.values.as_slice()
     }
 
-    /// Move every Value out of a unique collection while preserving both its
-    /// exact physical claim and GC roots through the last yielded member.
-    /// Shared aliases are rejected instead of cloning nested payloads.
+    /// Move unique slots or project canonical Value owners from shared slots.
+    /// The original physical claim and root forest survive partial iteration;
+    /// aliases never allocate a second collection or retrace the graph.
     pub fn try_into_values(self) -> Result<RootedValuesIntoIter, crate::RuntimeError> {
         let Self { values, _roots } = self;
-        let values = values.try_into_owned().map_err(|_| {
-            crate::sequence::sequence_error_to_runtime(
-                runmat_value::ValueSequenceError::SharedOutputStorage,
-            )
-        })?;
         Ok(RootedValuesIntoIter {
-            values: values.into_iter(),
+            values: iteration::RootedValuesIteration::new(values),
             _roots,
         })
     }
@@ -799,7 +832,79 @@ impl<T: Trace> RootedResult<T> {
     }
 }
 
+impl RootedResult<Value> {
+    /// Root with the actual selected context, or require an ordinary policy.
+    /// Absence of a context never licenses unbounded managed root planning.
+    pub(crate) fn in_optional_context(
+        value: Value,
+        runtime: Option<&crate::context::RuntimeContext>,
+    ) -> Result<Self, crate::RuntimeError> {
+        if let Some(runtime) = runtime {
+            return Self::in_context(value, runtime);
+        }
+        use crate::context::host_allocation::{
+            host_allocation_runtime_error, HostAllocationError, HostAllocationPolicy,
+            HostAllocationReceipt,
+        };
+        let allocation = |source| {
+            host_allocation_runtime_error(
+                None,
+                "RunMat:Value:Roots",
+                "value root admission failed",
+                source,
+            )
+        };
+        if HostAllocationReceipt::policy(None).map_err(allocation)?
+            != HostAllocationPolicy::Unbounded
+        {
+            return Err(allocation(HostAllocationError::MissingManagedOwner));
+        }
+        Self::new(value).map_err(|error| error.into_runtime_error())
+    }
+
+    pub fn in_context(
+        value: Value,
+        runtime: &crate::context::RuntimeContext,
+    ) -> Result<Self, crate::RuntimeError> {
+        let roots = RootedValueHandles::for_value_in_context(&value, runtime).map_err(
+            |source| match source {
+                RootedValueAdmissionError::Host(source) => {
+                    crate::context::host_allocation::host_allocation_runtime_error(
+                        Some(runtime),
+                        "RunMat:Value:Roots",
+                        "value root admission failed",
+                        source,
+                    )
+                }
+                RootedValueAdmissionError::Gc(source) => {
+                    crate::runtime_error::semantic_error_with_source(
+                        "RunMat:Value:Roots",
+                        "value root admission failed",
+                        source,
+                    )
+                }
+            },
+        )?;
+        Ok(Self {
+            value,
+            _roots: roots,
+        })
+    }
+}
+
 impl RootedResult<ValueSequence> {
+    /// Register the existing canonical sequence slice under the selected
+    /// operation; no output-slot or child payload copy is required.
+    pub fn in_context(
+        value: ValueSequence,
+        runtime: &crate::context::RuntimeContext,
+    ) -> Result<Self, crate::RuntimeError> {
+        let roots = RootedValueLease::for_value_slices_in_context(&[value.as_slice()], runtime)?;
+        Ok(Self {
+            value,
+            _roots: roots.shared_handles(),
+        })
+    }
     /// A zero-output result owns no managed values or root registrations.
     /// It is independent of ambient runtime context and needs no allocation.
     pub fn empty() -> Self {
@@ -843,6 +948,7 @@ impl PartialEq<RootedValueSequence> for ValueSequence {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
+    use crate::RuntimeError;
     use runmat_value::{
         ExactHostAllocationPermit, ExactHostAllocationReservation, ExactHostNumericAllocationError,
         HandleRef, Value,
@@ -892,6 +998,130 @@ mod tests {
         assert!(live.load(Ordering::SeqCst) > 0);
         drop(sequence);
         assert_eq!(live.load(Ordering::SeqCst), 0);
+
+        use crate::context::host_effect::ManagedHostEffectLedger;
+        use crate::context::{
+            ParallelCapability, RuntimeContext, RuntimeParallelResources, RuntimeParallelService,
+            RuntimeServicePorts,
+        };
+        struct Parallel(ManagedHostEffectLedger);
+        impl RuntimeParallelService for Parallel {
+            fn supports(&self, _: ParallelCapability) -> bool {
+                false
+            }
+            fn placement_resources(&self) -> RuntimeParallelResources {
+                let state = self.0.snapshot();
+                RuntimeParallelResources {
+                    cpu_millicores_available: 1_000,
+                    memory_available_bytes: Some(state.free_bytes()),
+                    epoch: state.epoch,
+                }
+            }
+            fn managed_host_effect_ledger(&self) -> Option<ManagedHostEffectLedger> {
+                Some(self.0.clone())
+            }
+        }
+        let context = |ledger: &ManagedHostEffectLedger| {
+            RuntimeContext::new(std::rc::Rc::new(
+                super::super::RuntimeExecutionService::new(),
+            ))
+            .with_service_ports(
+                RuntimeServicePorts::default()
+                    .with_parallel(std::rc::Rc::new(Parallel(ledger.clone()))),
+            )
+        };
+        let denied = ManagedHostEffectLedger::new(1);
+        let calls = std::cell::Cell::new(0);
+        let result = RootedValues::try_initialize_in_context(2, &context(&denied), |_| {
+            calls.set(calls.get() + 1);
+            Ok::<_, RuntimeError>(Value::Num(1.0))
+        });
+        assert!(result.is_err());
+        assert_eq!(
+            calls.get(),
+            0,
+            "admission precedes the first initializer call"
+        );
+        assert_eq!(denied.snapshot().live_reserved_bytes, 0);
+
+        let ledger = ManagedHostEffectLedger::new(1 << 20);
+        let runtime = context(&ledger);
+        #[derive(Debug, thiserror::Error)]
+        #[error("initializer failed")]
+        struct ElementFailure(Box<u64>);
+        let mut element_error = Some(Box::new(17_u64));
+        let identity = std::ptr::from_ref(element_error.as_deref().unwrap());
+        let result = RootedValues::try_initialize_in_context(2, &runtime, |index| {
+            assert!(
+                ledger.snapshot().live_claimed_bytes > 0,
+                "final backing already exists"
+            );
+            if index == 0 {
+                Ok(Value::Num(1.0))
+            } else {
+                Err(crate::runtime_error::semantic_error_with_source(
+                    "InitializerFixture",
+                    "initializer failed",
+                    ElementFailure(element_error.take().unwrap()),
+                ))
+            }
+        });
+        let error = result.expect_err("initializer failure must propagate");
+        let original = error
+            .source
+            .as_deref()
+            .and_then(|source| source.downcast_ref::<ElementFailure>())
+            .expect("initializer failure must retain its typed owner");
+        assert_eq!(std::ptr::from_ref(original.0.as_ref()), identity);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+
+        let values = RootedValues::try_initialize_in_context(2, &runtime, |index| {
+            Ok::<_, RuntimeError>(Value::Num(index as f64))
+        })
+        .unwrap();
+        let pointer = values.values().as_ptr();
+        values
+            .with_owned_output_storage(|storage| assert_eq!(storage.as_slice().as_ptr(), pointer));
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+        runmat_gc::gc_test_context(|| {
+            let runtime = context(&ledger);
+            let initial = runmat_gc::gc_allocate_rooted(Value::Num(42.0)).unwrap();
+            let handle = initial.handle();
+            let member = RootedValueMember::root_in_context(
+                Value::HandleObject(HandleRef {
+                    class_name: "AdmittedChildRoots".into(),
+                    target: handle,
+                    valid: true,
+                }),
+                &runtime,
+            )
+            .unwrap();
+            initial.unroot().unwrap();
+            let mut children = RootedValueChildren::in_context(&runtime).unwrap();
+            let value = member.into_child(&mut children).unwrap();
+            let member = RootedValueMember::aggregate(value, children).unwrap();
+            let (value, roots) = member.into_parts();
+            // Isolate the retained-root metadata owner; this ordinary value
+            // collection is fixture-owned, not a whole-ingress certificate.
+            let owner = RootedValues {
+                values: OutputListStorage::shared_unbounded(vec![value]),
+                _roots: roots,
+            };
+            let retained = ledger.snapshot().live_claimed_bytes;
+            let alias = owner.clone();
+            drop(owner);
+            assert_eq!(
+                ledger.snapshot().live_claimed_bytes,
+                retained,
+                "sharing root chunks neither copies metadata nor releases its claim"
+            );
+            runmat_gc::gc_collect_major().unwrap();
+            assert!(runmat_gc::gc_clone_value(&handle).is_ok());
+            drop(alias);
+            runmat_gc::gc_collect_major().unwrap();
+            assert!(runmat_gc::gc_clone_value(&handle).is_err());
+            assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+        });
     }
 
     #[test]

@@ -10,7 +10,7 @@ use runmat_native_ffi::{
     LoadedLibrary, NativePointerResource, NativeType, PointerBinding,
 };
 use runmat_process_host::private_bytes::PrivateByteLease;
-use runmat_value::{IntValue, IntegerStorage, StructValue, Tensor, Value};
+use runmat_value::{IntValue, IntegerStorage, Tensor, Value};
 
 fn compile_fixture(directory: &Path) -> Option<PathBuf> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -231,13 +231,13 @@ fn c_abi_corpus_covers_scalars_arrays_structures_and_outputs() {
     };
     assert_eq!(address.try_to_u64(), Some(expected_address as u64));
 
-    let mut record = StructValue::new();
+    let mut record = runmat_value::UnboundedStructValueBuilder::with_capacity(2);
     record.insert("value", Value::Num(2.5));
     record.insert("tag", Value::Int(IntValue::U32(7)));
     let scaled = invoke_symbol(
         &library,
         prototype("fixture_scale"),
-        &[Value::Struct(record), Value::Num(4.0)],
+        &[Value::Struct(record.finish()), Value::Num(4.0)],
         &metadata,
     )
     .expect("structure pointer invocation");

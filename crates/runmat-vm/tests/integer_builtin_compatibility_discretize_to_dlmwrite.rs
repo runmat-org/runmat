@@ -95,7 +95,7 @@ fn compiled_integer_controls_cover_dividerand_dot_doc2sequence_and_duration() {
         assert!(
             values.iter().any(|value| match value {
                 Value::CharArray(array) => {
-                    array.data.iter().collect::<String>().trim_end() == "01:15:00"
+                    array.data().iter().collect::<String>().trim_end() == "01:15:00"
                 }
                 _ => false,
             }),

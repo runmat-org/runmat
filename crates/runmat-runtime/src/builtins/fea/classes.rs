@@ -378,13 +378,13 @@ pub(crate) fn ensure_fea_classes_registered() {
 
 fn validate_fea_object(object: &ObjectInstance) -> Result<(), String> {
     if object
-        .properties
+        .properties()
         .keys()
         .any(|name| name.starts_with("__runmat_"))
     {
         return Err(format!(
             "immutable FEA class `{}` contains an opaque runtime property",
-            object.class_name
+            object.class_name()
         ));
     }
     for field in [
@@ -392,13 +392,13 @@ fn validate_fea_object(object: &ObjectInstance) -> Result<(), String> {
         super::signals::bindings::FROZEN_STUDY_GENERATORS_PROPERTY,
     ] {
         if object
-            .properties
+            .properties()
             .get(field)
             .is_some_and(|value| !matches!(value, Value::Cell(_)))
         {
             return Err(format!(
                 "immutable FEA class `{}` has malformed frozen generator data",
-                object.class_name
+                object.class_name()
             ));
         }
     }
@@ -407,28 +407,31 @@ fn validate_fea_object(object: &ObjectInstance) -> Result<(), String> {
 
 fn validate_bound_constraint_object(object: &ObjectInstance) -> Result<(), String> {
     validate_fea_object(object)?;
-    match object.properties.get("geometry_id") {
+    match object.properties().get("geometry_id") {
         Some(Value::String(value)) if !value.is_empty() => {}
         _ => {
             return Err(format!(
                 "{}.geometry_id must be a non-empty string",
-                object.class_name
+                object.class_name()
             ))
         }
     }
     if !matches!(
-        object.properties.get("geometry_revision"),
+        object.properties().get("geometry_revision"),
         Some(Value::Int(IntValue::U32(_)))
     ) {
         return Err(format!(
             "{}.geometry_revision must be uint32",
-            object.class_name
+            object.class_name()
         ));
     }
-    if !matches!(object.properties.get("constraint"), Some(Value::Struct(_))) {
+    if !matches!(
+        object.properties().get("constraint"),
+        Some(Value::Struct(_))
+    ) {
         return Err(format!(
             "{}.constraint must be a typed structure",
-            object.class_name
+            object.class_name()
         ));
     }
     Ok(())
@@ -436,28 +439,28 @@ fn validate_bound_constraint_object(object: &ObjectInstance) -> Result<(), Strin
 
 fn validate_bound_boundary_object(object: &ObjectInstance) -> Result<(), String> {
     validate_fea_object(object)?;
-    match object.properties.get("geometry_id") {
+    match object.properties().get("geometry_id") {
         Some(Value::String(value)) if !value.is_empty() => {}
         _ => {
             return Err(format!(
                 "{}.geometry_id must be a non-empty string",
-                object.class_name
+                object.class_name()
             ))
         }
     }
     if !matches!(
-        object.properties.get("geometry_revision"),
+        object.properties().get("geometry_revision"),
         Some(Value::Int(IntValue::U32(_)))
     ) {
         return Err(format!(
             "{}.geometry_revision must be uint32",
-            object.class_name
+            object.class_name()
         ));
     }
-    if !matches!(object.properties.get("boundary"), Some(Value::Struct(_))) {
+    if !matches!(object.properties().get("boundary"), Some(Value::Struct(_))) {
         return Err(format!(
             "{}.boundary must be a typed structure",
-            object.class_name
+            object.class_name()
         ));
     }
     Ok(())
@@ -465,28 +468,28 @@ fn validate_bound_boundary_object(object: &ObjectInstance) -> Result<(), String>
 
 fn validate_bound_interface_object(object: &ObjectInstance) -> Result<(), String> {
     validate_fea_object(object)?;
-    match object.properties.get("geometry_id") {
+    match object.properties().get("geometry_id") {
         Some(Value::String(value)) if !value.is_empty() => {}
         _ => {
             return Err(format!(
                 "{}.geometry_id must be a non-empty string",
-                object.class_name
+                object.class_name()
             ))
         }
     }
     if !matches!(
-        object.properties.get("geometry_revision"),
+        object.properties().get("geometry_revision"),
         Some(Value::Int(IntValue::U32(_)))
     ) {
         return Err(format!(
             "{}.geometry_revision must be uint32",
-            object.class_name
+            object.class_name()
         ));
     }
-    if !matches!(object.properties.get("interface"), Some(Value::Struct(_))) {
+    if !matches!(object.properties().get("interface"), Some(Value::Struct(_))) {
         return Err(format!(
             "{}.interface must be a typed structure",
-            object.class_name
+            object.class_name()
         ));
     }
     Ok(())

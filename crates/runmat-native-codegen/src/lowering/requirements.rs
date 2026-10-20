@@ -84,16 +84,52 @@ pub(super) fn reject_predeclared_capabilities(
                 runmat_mir::MirTerminatorKind::Spmd { header, .. } => match header.as_ref() {
                     runmat_mir::parallel::MirSpmdHeader::Default => {}
                     runmat_mir::parallel::MirSpmdHeader::One(a) => {
-                        reject_rvalue(*function, portable_function, block.id, block.statements.len(), a)?;
+                        reject_rvalue(
+                            *function,
+                            portable_function,
+                            block.id,
+                            block.statements.len(),
+                            a,
+                        )?;
                     }
                     runmat_mir::parallel::MirSpmdHeader::Two(a, b) => {
-                        reject_rvalue(*function, portable_function, block.id, block.statements.len(), a)?;
-                        reject_rvalue(*function, portable_function, block.id, block.statements.len(), b)?;
+                        reject_rvalue(
+                            *function,
+                            portable_function,
+                            block.id,
+                            block.statements.len(),
+                            a,
+                        )?;
+                        reject_rvalue(
+                            *function,
+                            portable_function,
+                            block.id,
+                            block.statements.len(),
+                            b,
+                        )?;
                     }
                     runmat_mir::parallel::MirSpmdHeader::Three(a, b, c) => {
-                        reject_rvalue(*function, portable_function, block.id, block.statements.len(), a)?;
-                        reject_rvalue(*function, portable_function, block.id, block.statements.len(), b)?;
-                        reject_rvalue(*function, portable_function, block.id, block.statements.len(), c)?;
+                        reject_rvalue(
+                            *function,
+                            portable_function,
+                            block.id,
+                            block.statements.len(),
+                            a,
+                        )?;
+                        reject_rvalue(
+                            *function,
+                            portable_function,
+                            block.id,
+                            block.statements.len(),
+                            b,
+                        )?;
+                        reject_rvalue(
+                            *function,
+                            portable_function,
+                            block.id,
+                            block.statements.len(),
+                            c,
+                        )?;
                     }
                 },
                 _ => {}

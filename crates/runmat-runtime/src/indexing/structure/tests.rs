@@ -4,9 +4,9 @@ use crate::indexing::selectors::SliceSelector;
 use runmat_value::{StructValue, Tensor};
 
 fn element(value: f64) -> StructValue {
-    let mut structure = StructValue::new();
+    let mut structure = runmat_value::UnboundedStructValueBuilder::new();
     structure.insert("value", Value::Num(value));
-    structure
+    structure.finish()
 }
 
 fn array(shape: Vec<usize>) -> Value {
@@ -59,12 +59,17 @@ fn scalar_linear_growth_preserves_schema_and_fills_holes() {
 
 #[test]
 fn assignment_requires_the_exact_ordered_schema() {
-    let mut reversed = StructValue::new();
+    let mut reversed = runmat_value::UnboundedStructValueBuilder::new();
     reversed.insert("other", Value::Num(1.0));
     reversed.insert("value", Value::Num(2.0));
     let plan = build_index_plan(&[SliceSelector::Scalar(1)], 1, &[1, 2]).unwrap();
-    let error =
-        assign_with_plan(array(vec![1, 2]), &plan, Value::Struct(reversed), false).unwrap_err();
+    let error = assign_with_plan(
+        array(vec![1, 2]),
+        &plan,
+        Value::Struct(reversed.finish()),
+        false,
+    )
+    .unwrap_err();
     assert_eq!(
         error.identifier(),
         Some("RunMat:DissimilarStructureAssignment")

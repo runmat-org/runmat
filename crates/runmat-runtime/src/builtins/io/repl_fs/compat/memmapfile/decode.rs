@@ -3,7 +3,7 @@ use super::{
     MemmapFormatPresentation,
 };
 use crate::BuiltinResult;
-use runmat_value::{CharArray, IntegerStorage, NumericDType, StructValue, Tensor, Value};
+use runmat_value::{CharArray, IntegerStorage, NumericDType, Tensor, Value};
 
 impl MemmapFormat {
     pub(in crate::builtins::io::repl_fs::compat) fn decode(
@@ -73,7 +73,7 @@ impl MemmapFormat {
             .collect();
         let mut elements = Vec::with_capacity(records);
         for record in bytes.chunks_exact(record_bytes).take(records) {
-            let mut structure = StructValue::new();
+            let mut structure = runmat_value::UnboundedStructValueBuilder::new();
             let mut cursor = 0usize;
             let mut fields = std::iter::once(MemmapField {
                 dtype: self.dtype,
@@ -94,6 +94,7 @@ impl MemmapFormat {
                 structure.insert(field.name, value);
                 cursor += field_bytes;
             }
+            let structure = structure.finish();
             elements.push(structure);
         }
         if records == 0 {

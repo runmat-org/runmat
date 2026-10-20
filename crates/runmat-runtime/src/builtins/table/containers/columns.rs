@@ -118,7 +118,7 @@ pub(in crate::builtins::table) fn split_value_columns(value: Value) -> BuiltinRe
             for col in 0..cols {
                 let mut data = Vec::with_capacity(rows);
                 for row in 0..rows {
-                    data.push(array.data[row + col * rows].clone());
+                    data.push(array.data()[row + col * rows].clone());
                 }
                 out.push(Value::StringArray(
                     StringArray::from_texts_unbounded(data, vec![rows, 1])

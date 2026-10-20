@@ -6,7 +6,7 @@ pub(super) fn evaluation(
     operation: FittedOperation,
     distribution: &Value,
     input: &Value,
-    parameters: &[Value],
+    parameters: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<DistributionSelection> {
     let builtin = operation.name();
     let mut shapes = vec![numeric_shape(builtin, input)?];
@@ -61,7 +61,7 @@ pub(super) struct FitAdmission<'a> {
 pub(super) fn fit<'a>(
     data: &Value,
     distribution: &Value,
-    options: &'a [Value],
+    options: crate::call::FunctionArgumentView<'a>,
 ) -> BuiltinResult<FitAdmission<'a>> {
     let kind = parse_distribution_name(distribution)?;
     let data_shape = numeric_shape(FITDIST_NAME, data)?;
@@ -86,7 +86,7 @@ pub(super) fn fit<'a>(
                         "fitdist: Frequency requires one count per observation",
                     ));
                 }
-                frequency = Some(&pair[1]);
+                frequency = pair.get(1);
             }
             Some(FittedFitOption::Frequency) => {
                 return Err(invalid("fitdist: Frequency may be specified only once"))
@@ -107,7 +107,10 @@ pub(super) fn fit<'a>(
     Ok(FitAdmission { kind, frequency })
 }
 
-pub(super) fn random(selection: &DistributionSelection, rest: &[Value]) -> BuiltinResult<()> {
+pub(super) fn random(
+    selection: &DistributionSelection,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     let sizes = match selection {
         DistributionSelection::Fitted(_) => rest,
         DistributionSelection::Named(family) => {
@@ -121,7 +124,7 @@ pub(super) fn random(selection: &DistributionSelection, rest: &[Value]) -> Built
                     ),
                 ));
             }
-            for parameter in &rest[..parameter_count] {
+            for parameter in rest.range(..parameter_count)? {
                 let shape = numeric_shape(RANDOM_NAME, parameter)?;
                 if crate::builtins::common::spec::checked_reduction_elements(shape) != Some(1) {
                     return Err(invalid_for(
@@ -130,7 +133,7 @@ pub(super) fn random(selection: &DistributionSelection, rest: &[Value]) -> Built
                     ));
                 }
             }
-            &rest[parameter_count..]
+            rest.range(parameter_count..)?
         }
     };
     for size in sizes {

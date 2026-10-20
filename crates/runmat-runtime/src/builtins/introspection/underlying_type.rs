@@ -134,11 +134,11 @@ fn underlying_type_matches_checked(
 fn parse_type_name(value: &Value) -> BuiltinResult<Option<runmat_types::ClassIdentity>> {
     match value {
         Value::String(s) => Ok(runmat_types::ClassIdentity::new(s.trim()).ok()),
-        Value::StringArray(sa) if sa.rows == 1 && sa.cols == 1 && !sa.data.is_empty() => {
-            Ok(runmat_types::ClassIdentity::new(sa.data[0].trim()).ok())
+        Value::StringArray(sa) if sa.rows == 1 && sa.cols == 1 && !sa.data().is_empty() => {
+            Ok(runmat_types::ClassIdentity::new(sa.data()[0].trim()).ok())
         }
         Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data.iter().collect();
+            let text: String = ca.data().iter().collect();
             Ok(runmat_types::ClassIdentity::new(text.trim()).ok())
         }
         _ => Err(is_underlying_type_error(&IS_UNDERLYING_TYPE_ERROR_TYPE_NAME_INVALID).into()),
@@ -159,7 +159,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_value::{
         CellArray, CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage,
-        LogicalArray, NumericDType, ObjectInstance, StringArray, StructValue, Tensor,
+        LogicalArray, NumericDType, ObjectInstance, StringArray, Tensor,
     };
 
     #[test]
@@ -299,9 +299,12 @@ pub(crate) mod tests {
             Value::Cell(CellArray::new(vec![Value::Num(1.0), Value::Num(2.0)], 1, 2).unwrap());
         assert_eq!(underlying_type_for_value(&cell), "cell");
 
-        let mut st = StructValue::new();
+        let mut st = runmat_value::UnboundedStructValueBuilder::new();
         st.fields.insert("x".into(), Value::Num(1.0));
-        assert_eq!(underlying_type_for_value(&Value::Struct(st)), "struct");
+        assert_eq!(
+            underlying_type_for_value(&Value::Struct(st.finish())),
+            "struct"
+        );
 
         let object = ObjectInstance::new("pkg.Point");
         assert_eq!(

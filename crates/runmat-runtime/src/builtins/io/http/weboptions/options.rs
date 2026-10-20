@@ -1,42 +1,18 @@
 use super::*;
 
-pub(super) fn default_options_struct() -> StructValue {
-    let mut out = StructValue::new();
-    out.fields
-        .insert("ContentType".to_string(), Value::from("auto"));
-    out.fields
-        .insert("Timeout".to_string(), Value::Num(DEFAULT_TIMEOUT_SECONDS));
-    out.fields.insert(
-        "HeaderFields".to_string(),
-        Value::Struct(StructValue::new()),
-    );
-    out.fields.insert("UserAgent".to_string(), Value::from(""));
-    out.fields.insert("Username".to_string(), Value::from(""));
-    out.fields.insert("Password".to_string(), Value::from(""));
-    out.fields.insert("KeyName".to_string(), Value::from(""));
-    out.fields.insert("KeyValue".to_string(), Value::from(""));
-    out.fields
-        .insert("RequestMethod".to_string(), Value::from("auto"));
-    out.fields
-        .insert("MediaType".to_string(), Value::from("auto"));
-    out.fields.insert(
-        "QueryParameters".to_string(),
-        Value::Struct(StructValue::new()),
-    );
-    out
+pub(super) fn default_options_struct() -> super::builder::Options {
+    super::builder::Options::new()
 }
 
 pub(super) fn set_option_field(
-    options: &mut StructValue,
+    options: &mut super::builder::Options,
     field: WebOptionField,
     value: &Value,
 ) -> BuiltinResult<()> {
     match field {
         WebOptionField::ContentType => {
             let canonical = parse_content_type_option(value)?;
-            options
-                .fields
-                .insert("ContentType".to_string(), Value::from(canonical));
+            options.set(field, Value::from(canonical));
             Ok(())
         }
         WebOptionField::Timeout => {
@@ -51,9 +27,7 @@ pub(super) fn set_option_field(
                     "weboptions: Timeout must be a positive numeric scalar within the supported range or Inf",
                 ));
             }
-            options
-                .fields
-                .insert("Timeout".to_string(), Value::Num(seconds));
+            options.set(field, Value::Num(seconds));
             Ok(())
         }
         WebOptionField::KeyName => {
@@ -62,16 +36,14 @@ pub(super) fn set_option_field(
                 "weboptions: KeyName must be a character vector or string scalar",
                 &WEBOPTIONS_ERROR_INVALID_OPTION_VALUE,
             )?;
-            options
-                .fields
-                .insert("KeyName".to_string(), Value::from(key));
+            options.set(field, Value::from(key));
             Ok(())
         }
         WebOptionField::KeyValue => {
             let supported = match value {
                 Value::String(_) | Value::Num(_) | Value::Int(_) | Value::Bool(_) => true,
                 Value::CharArray(array) => array.rows == 1,
-                Value::StringArray(array) => array.data.len() == 1,
+                Value::StringArray(array) => array.data().len() == 1,
                 Value::Tensor(tensor) => tensor::is_scalar_tensor(tensor),
                 Value::LogicalArray(array) => array.len() == 1,
                 _ => false,
@@ -82,12 +54,12 @@ pub(super) fn set_option_field(
                     "weboptions: KeyValue must be a text, numeric, or logical scalar",
                 ));
             }
-            options.fields.insert("KeyValue".to_string(), value.clone());
+            options.set(field, value.clone());
             Ok(())
         }
         WebOptionField::HeaderFields => {
             let canonical = canonical_header_fields(value)?;
-            options.fields.insert("HeaderFields".to_string(), canonical);
+            options.set(field, canonical);
             Ok(())
         }
         WebOptionField::UserAgent => {
@@ -96,9 +68,7 @@ pub(super) fn set_option_field(
                 "weboptions: UserAgent must be a character vector or string scalar",
                 &WEBOPTIONS_ERROR_INVALID_OPTION_VALUE,
             )?;
-            options
-                .fields
-                .insert("UserAgent".to_string(), Value::from(ua));
+            options.set(field, Value::from(ua));
             Ok(())
         }
         WebOptionField::Username => {
@@ -107,9 +77,7 @@ pub(super) fn set_option_field(
                 "weboptions: Username must be a character vector or string scalar",
                 &WEBOPTIONS_ERROR_INVALID_OPTION_VALUE,
             )?;
-            options
-                .fields
-                .insert("Username".to_string(), Value::from(username));
+            options.set(field, Value::from(username));
             Ok(())
         }
         WebOptionField::Password => {
@@ -118,16 +86,12 @@ pub(super) fn set_option_field(
                 "weboptions: Password must be a character vector or string scalar",
                 &WEBOPTIONS_ERROR_INVALID_OPTION_VALUE,
             )?;
-            options
-                .fields
-                .insert("Password".to_string(), Value::from(password));
+            options.set(field, Value::from(password));
             Ok(())
         }
         WebOptionField::RequestMethod => {
             let method = parse_request_method_option(value)?;
-            options
-                .fields
-                .insert("RequestMethod".to_string(), Value::from(method));
+            options.set(field, Value::from(method));
             Ok(())
         }
         WebOptionField::MediaType => {
@@ -136,14 +100,12 @@ pub(super) fn set_option_field(
                 "weboptions: MediaType must be a character vector or string scalar",
                 &WEBOPTIONS_ERROR_INVALID_OPTION_VALUE,
             )?;
-            options
-                .fields
-                .insert("MediaType".to_string(), Value::from(media));
+            options.set(field, Value::from(media));
             Ok(())
         }
         WebOptionField::QueryParameters => {
             let qp = canonical_query_parameters(value)?;
-            options.fields.insert("QueryParameters".to_string(), qp);
+            options.set(field, qp);
             Ok(())
         }
     }
@@ -192,7 +154,7 @@ fn parse_request_method_option(value: &Value) -> BuiltinResult<String> {
 fn canonical_header_fields(value: &Value) -> BuiltinResult<Value> {
     match value {
         Value::Struct(struct_value) => {
-            let mut out = StructValue::new();
+            let mut out = runmat_value::UnboundedStructValueBuilder::new();
             for (key, val) in &struct_value.fields {
                 let header_value = expect_string_scalar(
                     val,
@@ -211,9 +173,9 @@ fn canonical_header_fields(value: &Value) -> BuiltinResult<Value> {
                         "weboptions: header names must not be empty",
                     ));
                 }
-                out.fields.insert(key.clone(), Value::from(header_value));
+                out.insert(key, Value::from(header_value));
             }
-            Ok(Value::Struct(out))
+            Ok(Value::Struct(out.finish()))
         }
         Value::Cell(cell) => {
             if cell.cols != 2 {
@@ -222,7 +184,7 @@ fn canonical_header_fields(value: &Value) -> BuiltinResult<Value> {
                     "weboptions: HeaderFields cell array must have exactly two columns",
                 ));
             }
-            let mut out = StructValue::new();
+            let mut out = runmat_value::UnboundedStructValueBuilder::new();
             for row in 0..cell.rows {
                 let name_val = cell.get(row, 0).map_err(|err| {
                     weboptions_error_with(
@@ -259,9 +221,9 @@ fn canonical_header_fields(value: &Value) -> BuiltinResult<Value> {
                         "weboptions: header values must not be empty",
                     ));
                 }
-                out.fields.insert(name, Value::from(header_value));
+                out.insert(name, Value::from(header_value));
             }
-            Ok(Value::Struct(out))
+            Ok(Value::Struct(out.finish()))
         }
         _ => Err(weboptions_error_with(
             &WEBOPTIONS_ERROR_INVALID_OPTION_VALUE,
@@ -273,11 +235,11 @@ fn canonical_header_fields(value: &Value) -> BuiltinResult<Value> {
 fn canonical_query_parameters(value: &Value) -> BuiltinResult<Value> {
     match value {
         Value::Struct(struct_value) => {
-            let mut out = StructValue::new();
+            let mut out = runmat_value::UnboundedStructValueBuilder::new();
             for (key, val) in &struct_value.fields {
-                out.fields.insert(key.clone(), val.clone());
+                out.insert(key, val.clone());
             }
-            Ok(Value::Struct(out))
+            Ok(Value::Struct(out.finish()))
         }
         Value::Cell(cell) => {
             if cell.cols != 2 {
@@ -286,7 +248,7 @@ fn canonical_query_parameters(value: &Value) -> BuiltinResult<Value> {
                     "weboptions: QueryParameters cell array must have exactly two columns",
                 ));
             }
-            let mut out = StructValue::new();
+            let mut out = runmat_value::UnboundedStructValueBuilder::new();
             for row in 0..cell.rows {
                 let name_val = cell.get(row, 0).map_err(|err| {
                     weboptions_error_with(
@@ -305,9 +267,9 @@ fn canonical_query_parameters(value: &Value) -> BuiltinResult<Value> {
                     "weboptions: query parameter names must be character vectors or string scalars",
                     &WEBOPTIONS_ERROR_INVALID_OPTION_VALUE,
                 )?;
-                out.fields.insert(name, value_val);
+                out.insert(name, value_val);
             }
-            Ok(Value::Struct(out))
+            Ok(Value::Struct(out.finish()))
         }
         _ => Err(weboptions_error_with(
             &WEBOPTIONS_ERROR_INVALID_OPTION_VALUE,
@@ -331,8 +293,8 @@ pub(super) fn validate_credentials(options: &StructValue) -> BuiltinResult<()> {
 fn string_field(options: &StructValue, field: &str) -> Option<String> {
     options.fields.get(field).and_then(|value| match value {
         Value::String(text) => Some(text.as_str().to_owned()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect::<String>()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].as_str().to_owned()),
+        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data().iter().collect::<String>()),
+        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].as_str().to_owned()),
         _ => None,
     })
 }
@@ -363,8 +325,8 @@ pub(super) fn expect_string_scalar(
 ) -> BuiltinResult<String> {
     match value {
         Value::String(s) => Ok(s.as_str().to_owned()),
-        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].as_str().to_owned()),
+        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data().iter().collect()),
+        Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].as_str().to_owned()),
         _ => Err(weboptions_error_with(error, context)),
     }
 }

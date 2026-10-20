@@ -2,7 +2,7 @@ use crate::builtins::common::tensor::tensor_element_len;
 use crate::indexing::selectors::IndexScalar;
 use crate::runtime_error::semantic_error as mex;
 use crate::RuntimeError;
-use runmat_value::{CellArray, NumericScalar, SharedShape, Tensor, Value};
+use runmat_value::{CellArray, NumericScalar, Tensor, Value};
 
 mod selection;
 
@@ -16,64 +16,42 @@ fn map_cell_shape_error(context: &str, err: impl std::fmt::Display) -> RuntimeEr
     mex("ShapeMismatch", format!("{context}: {err}"))
 }
 
-fn replacement_shape(
-    shape: &[usize],
-    admitted: bool,
+fn writable_cell(
+    mut cell: CellArray,
     context: Option<&crate::context::RuntimeContext>,
-) -> Result<SharedShape, RuntimeError> {
-    if !admitted {
-        return Ok(SharedShape::new_unmanaged(shape.to_vec()));
+) -> Result<(CellArray, Option<crate::execution::RootedValueLease>), RuntimeError> {
+    if cell.data_owner().is_unique() {
+        return Ok((cell, None));
     }
-    use crate::context::host_allocation::{
-        host_allocation_runtime_error, HostAllocationError, HostAllocationPlan,
-        HostAllocationReceipt,
-    };
-    let context = context.ok_or_else(|| {
-        mex(
-            "RunMat:Cell:MissingAllocationAuthority",
-            "exact cell shape replacement requires its selected runtime context",
-        )
-    })?;
-    let failure = |source| {
-        host_allocation_runtime_error(
-            Some(context),
-            "RunMat:Cell:ShapeAllocation",
-            "cell shape replacement admission failed",
-            source,
-        )
-    };
-    let bytes = SharedShape::requested_bytes_for_rank(shape.len())
-        .map_err(|source| failure(HostAllocationError::Numeric(source)))?;
-    let retained = HostAllocationPlan::retained_exact_output_bytes(
-        u64::try_from(bytes).map_err(|_| failure(HostAllocationError::Overflow))?,
-        1,
-    )
-    .map_err(failure)?;
-    let receipt = HostAllocationReceipt::admit(
-        Some(context),
-        HostAllocationPlan::new(0, retained).map_err(failure)?,
-    )
-    .map_err(failure)?
-    .ok_or_else(|| failure(HostAllocationError::MissingManagedOwner))?;
-    let permit = receipt.output_permit(context).map_err(failure)?;
-    let shape = SharedShape::new_admitted_from_slice(shape, &permit)
-        .map_err(|source| failure(HostAllocationError::Numeric(source)))?;
-    receipt.checkpoint(context).map_err(failure)?;
-    Ok(shape)
+    if !cell.data_owner().is_exact() {
+        cell.make_data_unique_unbounded()
+            .map_err(|error| map_cell_shape_error("cell write owner", error))?;
+        return Ok((cell, None));
+    }
+    let (cell, roots) = crate::execution::structure::replacement::cell(&cell, context)?;
+    Ok((cell, Some(roots)))
 }
 
-fn writable_cell_data(ca: &mut CellArray) -> Result<&mut [Value], RuntimeError> {
-    if !ca.data.is_exact() {
-        ca.data
-            .make_unique_unbounded()
-            .map_err(|error| map_cell_shape_error("cell write owner", error))?;
-    }
-    ca.try_data_mut_unique().ok_or_else(|| {
+fn writable_cell_data(cell: &mut CellArray) -> Result<&mut [Value], RuntimeError> {
+    cell.try_data_mut_unique().ok_or_else(|| {
         mex(
             "RunMat:Cell:SharedOwner",
-            "shared exact cell write requires a preadmitted replacement owner",
+            "cell replacement owner is unexpectedly shared",
         )
     })
+}
+
+fn borrowed_cell<'a>(
+    context: Option<&crate::context::RuntimeContext>,
+    shape: &[usize],
+    values: impl Iterator<Item = &'a Value> + Clone,
+) -> Result<(CellArray, crate::execution::RootedValueLease), RuntimeError> {
+    let rooted = crate::execution::structure::cell::from_borrowed_values(context, shape, values)?;
+    let (value, roots) = rooted.into_value_and_lease();
+    let Value::Cell(cell) = value else {
+        unreachable!("cell constructor returned a non-cell value")
+    };
+    Ok((cell, roots))
 }
 
 fn empty_numeric_cell_value() -> Result<Value, RuntimeError> {
@@ -255,7 +233,10 @@ pub fn index_cell_value(ca: &CellArray, indices: &[usize]) -> Result<Value, Runt
     match indices.len() {
         1 => {
             let i = indices[0];
-            Ok(ca.data[row_major_pos_from_linear(ca, i)?].clone())
+            if i == 0 {
+                return Err(mex("CellIndexOutOfBounds", "Cell index out of bounds"));
+            }
+            Ok(ca.data()[row_major_pos_from_linear(ca, i)?].clone())
         }
         0 => Err(mex(
             "UnsupportedCellIndexCount",
@@ -263,7 +244,7 @@ pub fn index_cell_value(ca: &CellArray, indices: &[usize]) -> Result<Value, Runt
         )),
         _ => {
             let linear = linear_index_from_subscripts(ca, indices)?;
-            Ok(ca.data[row_major_pos_from_linear(ca, linear)?].clone())
+            Ok(ca.data()[row_major_pos_from_linear(ca, linear)?].clone())
         }
     }
 }
@@ -275,7 +256,7 @@ pub fn expand_cell_values(
 ) -> Result<Vec<Value>, RuntimeError> {
     let mut values: Vec<Value> = Vec::new();
     if indices.is_empty() {
-        for idx in 1..=ca.data.len() {
+        for idx in 1..=ca.data().len() {
             values.push(index_cell_value(ca, &[idx])?);
         }
     } else {
@@ -291,7 +272,7 @@ pub fn expand_cell_values(
 }
 
 pub fn expand_all_cell_values(ca: &CellArray) -> Result<Vec<Value>, RuntimeError> {
-    (1..=ca.data.len())
+    (1..=ca.data().len())
         .map(|idx| index_cell_value(ca, &[idx]))
         .collect()
 }
@@ -304,7 +285,7 @@ pub fn gather_cell_paren_linear_indices(
     let mut handles = Vec::with_capacity(indices.len());
     for &idx in indices {
         let pos = row_major_pos_from_linear(ca, idx)?;
-        handles.push(ca.data[pos].clone());
+        handles.push(ca.data()[pos].clone());
     }
     let shape = if output_shape.is_empty() {
         vec![1, handles.len().max(1)]
@@ -327,7 +308,7 @@ pub fn expand_cell_indices(ca: &CellArray, indices: &[Value]) -> Result<Vec<Valu
         1 => match &indices[0] {
             value if is_colon_selector(value) => expand_all_cell_values(ca),
             Value::Num(n) => {
-                if let Some(idx) = resolve_cell_end_relative_index(*n, ca.data.len())? {
+                if let Some(idx) = resolve_cell_end_relative_index(*n, ca.data().len())? {
                     return Ok(vec![index_cell_value(ca, &[idx])?]);
                 }
                 if n.is_nan() {
@@ -342,7 +323,7 @@ pub fn expand_cell_indices(ca: &CellArray, indices: &[Value]) -> Result<Vec<Valu
             }
             Value::Tensor(t) => {
                 if tensor_element_len(t) == 1 && t.shape().iter().product::<usize>() == 1 {
-                    let idx = parse_cell_index_value_for_len(&indices[0], ca.data.len())?;
+                    let idx = parse_cell_index_value_for_len(&indices[0], ca.data().len())?;
                     return Ok(vec![index_cell_value(ca, &[idx])?]);
                 }
                 (0..t.len())
@@ -375,8 +356,8 @@ where
 }
 
 pub fn assign_cell_value_in_context<OnWrite>(
-    _context: Option<&crate::context::RuntimeContext>,
-    mut ca: CellArray,
+    context: Option<&crate::context::RuntimeContext>,
+    ca: CellArray,
     indices: &[usize],
     rhs: Value,
     mut on_write: OnWrite,
@@ -387,52 +368,33 @@ where
     match indices.len() {
         1 => {
             let i = indices[0];
-            let old_len = ca.data.len();
-            if i > old_len {
-                if !(ca.data.is_empty() || ca.rows <= 1 || ca.cols <= 1) {
+            let old_len = ca.data().len();
+            let (mut ca, _roots) = if i > old_len {
+                if !(ca.data().is_empty() || ca.rows <= 1 || ca.cols <= 1) {
                     return Err(mex(
                         "UnsupportedCellGrowth",
                         "Cell growth via linear brace assignment is only supported for vectors",
                     ));
                 }
-                if ca.data.is_exact() || ca.shape.is_admitted() {
-                    return Err(mex(
-                        "RunMat:Cell:GrowthOwner",
-                        "exact cell growth requires a newly admitted collection and shape",
-                    ));
-                }
-                ca.data
-                    .make_unique_unbounded()
-                    .map_err(|error| map_cell_shape_error("cell growth owner", error))?;
-                while ca.data.len() < i {
-                    ca.data
-                        .try_push_unbounded(empty_numeric_cell_value()?)
-                        .map_err(|_| {
-                            mex(
-                                "RunMat:Cell:GrowthOwner",
-                                "cell growth lost its unique ordinary owner",
-                            )
-                        })?;
-                }
-                let len = ca.data.len();
-                if old_len == 0 {
+                let filler = empty_numeric_cell_value()?;
+                let shape = if old_len == 0 {
                     // MATLAB linear growth from empty cell shapes (for example `0x5` or `5x0`)
                     // normalizes to a row vector.
-                    ca.rows = 1;
-                    ca.cols = len;
-                    ca.shape = vec![1, len].into();
+                    vec![1, i]
                 } else if ca.rows <= 1 {
-                    ca.rows = 1;
-                    ca.cols = len;
-                    ca.shape = vec![1, len].into();
+                    vec![1, i]
                 } else {
-                    ca.rows = len;
-                    ca.cols = 1;
-                    ca.shape = vec![len, 1].into();
-                }
-            }
+                    vec![i, 1]
+                };
+                let old = ca.data();
+                let values = (0..i).map(|position| old.get(position).unwrap_or(&filler));
+                let (cell, roots) = borrowed_cell(context, &shape, values)?;
+                (cell, Some(roots))
+            } else {
+                writable_cell(ca, context)?
+            };
             let pos = row_major_pos_from_linear(&ca, i)?;
-            if let Some(oldv) = ca.data.get(pos) {
+            if let Some(oldv) = ca.data().get(pos) {
                 on_write(oldv, &rhs);
             }
             writable_cell_data(&mut ca)?[pos] = rhs;
@@ -447,7 +409,7 @@ where
                     "Cell subscript out of bounds",
                 ));
             }
-            if i > ca.rows || j > ca.cols {
+            let (mut ca, _roots) = if i > ca.rows || j > ca.cols {
                 let old_cols = ca.cols;
                 let new_rows = ca.rows.max(i);
                 let new_cols = old_cols.max(j);
@@ -457,47 +419,25 @@ where
                         "Cell array expansion exceeds supported size",
                     )
                 })?;
-                if ca.data.is_exact() || ca.shape.is_admitted() {
-                    return Err(mex(
-                        "RunMat:Cell:GrowthOwner",
-                        "exact cell growth requires a newly admitted collection and shape",
-                    ));
-                }
-                let mut grown = Vec::with_capacity(total);
-                for _ in 0..total {
-                    grown.push(empty_numeric_cell_value()?);
-                }
-                ca.data
-                    .make_unique_unbounded()
-                    .map_err(|error| map_cell_shape_error("cell growth owner", error))?;
-                let old_data =
-                    std::mem::replace(&mut ca.data, runmat_value::OutputListStorage::empty())
-                        .try_into_owned()
-                        .map_err(|_| {
-                            mex(
-                                "RunMat:Cell:GrowthOwner",
-                                "cell growth lost its unique ordinary owner",
-                            )
-                        })?
-                        .try_into_unbounded_vec()
-                        .map_err(|_| {
-                            mex(
-                                "RunMat:Cell:GrowthOwner",
-                                "cell growth cannot detach exact backing",
-                            )
-                        })?;
-                for (old_lin, value) in old_data.into_iter().enumerate() {
-                    let row = old_lin / old_cols;
-                    let col = old_lin % old_cols;
-                    grown[row * new_cols + col] = value;
-                }
-                ca.data = runmat_value::OutputListStorage::shared_unbounded(grown);
-                ca.rows = new_rows;
-                ca.cols = new_cols;
-                ca.shape = vec![new_rows, new_cols].into();
-            }
+                let filler = empty_numeric_cell_value()?;
+                let old = ca.data();
+                let old_rows = ca.rows;
+                let values = (0..total).map(|linear| {
+                    let row = linear / new_cols;
+                    let column = linear % new_cols;
+                    if row < old_rows && column < old_cols {
+                        &old[row * old_cols + column]
+                    } else {
+                        &filler
+                    }
+                });
+                let (cell, roots) = borrowed_cell(context, &[new_rows, new_cols], values)?;
+                (cell, Some(roots))
+            } else {
+                writable_cell(ca, context)?
+            };
             let lin = (i - 1) * ca.cols + (j - 1);
-            if let Some(oldv) = ca.data.get(lin) {
+            if let Some(oldv) = ca.data().get(lin) {
                 on_write(oldv, &rhs);
             }
             writable_cell_data(&mut ca)?[lin] = rhs;
@@ -510,7 +450,8 @@ where
         _ => {
             let linear = linear_index_from_subscripts(&ca, indices)?;
             let position = row_major_pos_from_linear(&ca, linear)?;
-            if let Some(old_value) = ca.data.get(position) {
+            let (mut ca, _roots) = writable_cell(ca, context)?;
+            if let Some(old_value) = ca.data().get(position) {
                 on_write(old_value, &rhs);
             }
             writable_cell_data(&mut ca)?[position] = rhs;
@@ -532,8 +473,8 @@ where
 }
 
 pub fn assign_cell_value_multi_in_context<OnWrite>(
-    _context: Option<&crate::context::RuntimeContext>,
-    mut ca: CellArray,
+    context: Option<&crate::context::RuntimeContext>,
+    ca: CellArray,
     positions: &[usize],
     rhs_values: &[Value],
     mut on_write: OnWrite,
@@ -550,52 +491,40 @@ where
             "Cell brace assignment target count does not match source value count",
         ));
     }
-    let old_len = ca.data.len();
-    if let Some(max_pos) = positions.iter().copied().max() {
+    if positions.contains(&0) {
+        return Err(mex("CellIndexOutOfBounds", "Cell index out of bounds"));
+    }
+    let old_len = ca.data().len();
+    let (mut ca, _roots) = if let Some(max_pos) = positions.iter().copied().max() {
         if max_pos > old_len {
-            if !(ca.data.is_empty() || ca.rows <= 1 || ca.cols <= 1) {
+            if !(ca.data().is_empty() || ca.rows <= 1 || ca.cols <= 1) {
                 return Err(mex(
                     "UnsupportedCellGrowth",
                     "Cell growth via linear brace assignment is only supported for vectors",
                 ));
             }
-            if ca.data.is_exact() || ca.shape.is_admitted() {
-                return Err(mex(
-                    "RunMat:Cell:GrowthOwner",
-                    "exact cell growth requires a newly admitted collection and shape",
-                ));
-            }
-            ca.data
-                .make_unique_unbounded()
-                .map_err(|error| map_cell_shape_error("cell growth owner", error))?;
-            while ca.data.len() < max_pos {
-                ca.data
-                    .try_push_unbounded(empty_numeric_cell_value()?)
-                    .map_err(|_| {
-                        mex(
-                            "RunMat:Cell:GrowthOwner",
-                            "cell growth lost its unique ordinary owner",
-                        )
-                    })?;
-            }
-            let len = ca.data.len();
-            if old_len == 0 || ca.rows <= 1 {
-                ca.rows = 1;
-                ca.cols = len;
-                ca.shape = vec![1, len].into();
+            let shape = if old_len == 0 || ca.rows <= 1 {
+                vec![1, max_pos]
             } else {
-                ca.rows = len;
-                ca.cols = 1;
-                ca.shape = vec![len, 1].into();
-            }
+                vec![max_pos, 1]
+            };
+            let filler = empty_numeric_cell_value()?;
+            let old = ca.data();
+            let values = (0..max_pos).map(|position| old.get(position).unwrap_or(&filler));
+            let (cell, roots) = borrowed_cell(context, &shape, values)?;
+            (cell, Some(roots))
+        } else {
+            writable_cell(ca, context)?
         }
-    }
+    } else {
+        writable_cell(ca, context)?
+    };
     for (position, rhs) in positions.iter().zip(rhs_values.iter()) {
-        if *position == 0 || *position > ca.data.len() {
+        if *position == 0 || *position > ca.data().len() {
             return Err(mex("CellIndexOutOfBounds", "Cell index out of bounds"));
         }
         let pos = row_major_pos_from_linear(&ca, *position)?;
-        if let Some(oldv) = ca.data.get(pos) {
+        if let Some(oldv) = ca.data().get(pos) {
             on_write(oldv, rhs);
         }
         writable_cell_data(&mut ca)?[pos] = rhs.clone();
@@ -620,10 +549,10 @@ pub fn delete_cell_linear(ca: CellArray, idx: usize) -> Result<Value, RuntimeErr
 
 pub fn delete_cell_linear_in_context(
     context: Option<&crate::context::RuntimeContext>,
-    mut ca: CellArray,
+    ca: CellArray,
     idx: usize,
 ) -> Result<Value, RuntimeError> {
-    let total = ca.data.len();
+    let total = ca.data().len();
     if idx == 0 || idx > total {
         return Err(mex("CellIndexOutOfBounds", "Cell index out of bounds"));
     }
@@ -633,7 +562,7 @@ pub fn delete_cell_linear_in_context(
             "Linear cell deletion is only supported for vectors",
         ));
     }
-    let len = ca.data.len() - 1;
+    let len = ca.data().len() - 1;
     let shape = if len == 0 {
         vec![0, 0]
     } else if ca.rows == 1 {
@@ -641,30 +570,15 @@ pub fn delete_cell_linear_in_context(
     } else {
         vec![len, 1]
     };
-    let new_shape = replacement_shape(&shape, ca.data.is_exact(), context)?;
-    if !ca.data.is_exact() {
-        ca.data
-            .make_unique_unbounded()
-            .map_err(|error| map_cell_shape_error("cell deletion owner", error))?;
-    }
-    let mut values = ca.into_owned_data().map_err(|_| {
-        mex(
-            "RunMat:Cell:SharedOwner",
-            "shared exact cell deletion requires a preadmitted replacement owner",
-        )
-    })?;
-    values
-        .try_remove(idx - 1)
-        .ok_or_else(|| mex("CellIndexOutOfBounds", "Cell index out of bounds"))?;
-    let data = values.try_into_storage().map_err(|_| {
-        mex(
-            "RunMat:Cell:OwnerPublication",
-            "cell deletion could not republish its original collection claim",
-        )
-    })?;
-    CellArray::from_shared_storage(data, new_shape)
-        .map(Value::Cell)
-        .map_err(|error| map_cell_shape_error("cell deletion error", error))
+    let position = idx - 1;
+    let values = ca
+        .data()
+        .iter()
+        .enumerate()
+        .filter(move |(index, _)| *index != position)
+        .map(|(_, value)| value);
+    let (cell, _roots) = borrowed_cell(context, &shape, values)?;
+    Ok(Value::Cell(cell))
 }
 
 pub fn assign_cell_paren_with_policy(
@@ -699,7 +613,7 @@ pub fn assign_cell_paren_with_policy_in_context(
         return delete_cell_linear_in_context(context, ca, indices[0]);
     }
     if let Value::Cell(rhs_cell) = rhs {
-        return assign_cell_paren_from_cell(ca, indices, rhs_cell);
+        return assign_cell_paren_from_cell(context, ca, indices, rhs_cell);
     }
     Err(mex(
         "UnsupportedCellParenAssignment",
@@ -718,7 +632,7 @@ pub fn assign_cell_paren_linear_indices_with_policy(
 
 pub fn assign_cell_paren_linear_indices_with_policy_in_context(
     context: Option<&crate::context::RuntimeContext>,
-    mut ca: CellArray,
+    ca: CellArray,
     indices: &[usize],
     rhs: &Value,
     delete: bool,
@@ -742,7 +656,7 @@ pub fn assign_cell_paren_linear_indices_with_policy_in_context(
             .collect::<Result<Vec<_>, _>>()?;
         positions.sort_unstable();
         positions.dedup();
-        let len = ca.data.len() - positions.len();
+        let len = ca.data().len() - positions.len();
         let shape = if len == 0 {
             vec![0, 0]
         } else if ca.rows == 1 {
@@ -750,30 +664,14 @@ pub fn assign_cell_paren_linear_indices_with_policy_in_context(
         } else {
             vec![len, 1]
         };
-        let new_shape = replacement_shape(&shape, ca.data.is_exact(), context)?;
-        if !ca.data.is_exact() {
-            ca.data
-                .make_unique_unbounded()
-                .map_err(|error| map_cell_shape_error("cell deletion owner", error))?;
-        }
-        let mut values = ca.into_owned_data().map_err(|_| {
-            mex(
-                "RunMat:Cell:SharedOwner",
-                "shared exact cell deletion requires a preadmitted replacement owner",
-            )
-        })?;
-        for pos in positions.into_iter().rev() {
-            values.try_remove(pos).expect("validated deletion index");
-        }
-        let data = values.try_into_storage().map_err(|_| {
-            mex(
-                "RunMat:Cell:OwnerPublication",
-                "cell deletion could not republish its original collection claim",
-            )
-        })?;
-        return CellArray::from_shared_storage(data, new_shape)
-            .map(Value::Cell)
-            .map_err(|error| map_cell_shape_error("cell deletion error", error));
+        let values = ca
+            .data()
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| positions.binary_search(index).is_err())
+            .map(|(_, value)| value);
+        let (cell, _roots) = borrowed_cell(context, &shape, values)?;
+        return Ok(Value::Cell(cell));
     }
     let Value::Cell(rhs_cell) = rhs else {
         return Err(mex(
@@ -781,17 +679,21 @@ pub fn assign_cell_paren_linear_indices_with_policy_in_context(
             "Cell paren assignment requires a cell RHS",
         ));
     };
-    if rhs_cell.data.len() != indices.len() && rhs_cell.data.len() != 1 {
+    if rhs_cell.data().len() != indices.len() && rhs_cell.data().len() != 1 {
         return Err(mex(
             "UnsupportedCellParenAssignment",
             "Cell RHS must be scalar or match assignment size",
         ));
     }
+    for &idx in indices {
+        row_major_pos_from_linear(&ca, idx)?;
+    }
+    let (mut ca, _roots) = writable_cell(ca, context)?;
     for (k, &idx) in indices.iter().enumerate() {
         let pos = row_major_pos_from_linear(&ca, idx)?;
-        let rhs_pos = if rhs_cell.data.len() == 1 { 0 } else { k };
-        let newv = rhs_cell.data[rhs_pos].clone();
-        if let Some(oldv) = ca.data.get(pos) {
+        let rhs_pos = if rhs_cell.data().len() == 1 { 0 } else { k };
+        let newv = rhs_cell.data()[rhs_pos].clone();
+        if let Some(oldv) = ca.data().get(pos) {
             runmat_gc::gc_record_write(oldv, &newv);
         }
         writable_cell_data(&mut ca)?[pos] = newv;
@@ -800,17 +702,18 @@ pub fn assign_cell_paren_linear_indices_with_policy_in_context(
 }
 
 fn assign_cell_paren_from_cell(
-    mut ca: CellArray,
+    context: Option<&crate::context::RuntimeContext>,
+    ca: CellArray,
     indices: &[usize],
     rhs: &CellArray,
 ) -> Result<Value, RuntimeError> {
-    if rhs.data.len() != 1 {
+    if rhs.data().len() != 1 {
         return Err(mex(
             "UnsupportedCellParenAssignment",
             "Only scalar cell paren assignment is supported",
         ));
     }
-    let newv = rhs.data[0].clone();
+    let newv = rhs.data()[0].clone();
     let lin = match indices.len() {
         1 => {
             let i = indices[0];
@@ -838,7 +741,8 @@ fn assign_cell_paren_from_cell(
             row_major_pos_from_linear(&ca, linear)?
         }
     };
-    if let Some(oldv) = ca.data.get(lin) {
+    let (mut ca, _roots) = writable_cell(ca, context)?;
+    if let Some(oldv) = ca.data().get(lin) {
         runmat_gc::gc_record_write(oldv, &newv);
     }
     writable_cell_data(&mut ca)?[lin] = newv;
@@ -867,7 +771,7 @@ mod tests {
         else {
             panic!("expected cell after deletion");
         };
-        assert_eq!(result.data, vec![Value::Num(20.0)]);
+        assert_eq!(result.data(), &[Value::Num(20.0)]);
         let vector_rhs = Value::Tensor(Tensor::new(vec![7.0], vec![1]).unwrap());
         let error =
             super::assign_cell_paren_with_policy(cell(), &[1], &vector_rhs, true).unwrap_err();
@@ -895,7 +799,7 @@ mod tests {
         let Value::Cell(cell) = result else {
             panic!("expected cell result");
         };
-        assert_eq!(cell.data[2], Value::Num(42.0));
+        assert_eq!(cell.data()[2], Value::Num(42.0));
     }
 
     #[test]

@@ -6,8 +6,9 @@
 use super::*;
 use chrono::{Datelike, NaiveTime};
 
-pub(crate) fn timer_firing_serials(
-    args: Vec<Value>,
+pub(crate) fn timer_firing_arguments(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
     reference_local: NaiveDateTime,
 ) -> BuiltinResult<Tensor> {
     match args.len() {
@@ -16,7 +17,7 @@ pub(crate) fn timer_firing_serials(
             if is_datetime_object(&value) {
                 if let Value::Object(object) = &value {
                     if object
-                        .properties
+                        .properties()
                         .get("TimeZone")
                         .is_some_and(|zone| !matches!(zone, Value::String(text) if text.is_empty()))
                     {
@@ -56,26 +57,46 @@ pub(crate) fn timer_firing_serials(
             serial_tensor_from_value(value, "startat")
         }
         3 | 6 => {
-            let mut args = args;
-            let month =
-                component_tensor(std::mem::replace(&mut args[1], Value::Num(0.0)), "month")?;
+            let month = component_tensor(args[1].clone(), "month")?;
             let shape = month.shape().to_vec();
             let values = month
                 .materialize_f64()
                 .into_iter()
                 .map(clamp_startat_month)
                 .collect();
-            args[1] = Value::Tensor(
+            let month = Value::Tensor(
                 Tensor::new(values, shape)
                     .map_err(|error| datetime_error(format!("startat: {error}")))?,
             );
-            let datetime = build_from_components(args, None)?;
+            let source = args.into_function_arguments();
+            let args = crate::execution::RootedValues::transform_arguments(
+                &source,
+                source.len(),
+                None,
+                runtime,
+                |index| {
+                    Ok(if index == 1 {
+                        month.clone()
+                    } else {
+                        source.get(index).expect("timer component index").clone()
+                    })
+                },
+            )?;
+            let datetime =
+                build_from_components(runtime, crate::call::BuiltinArguments::from(args), None)?;
             serials_from_datetime_value(&datetime)
         }
         _ => Err(datetime_error(
             "startat: expected one absolute firing time or Y/M/D[/H/MI/S] components",
         )),
     }
+}
+
+#[cfg(test)]
+fn timer_firing_serials(args: Vec<Value>, reference_local: NaiveDateTime) -> BuiltinResult<Tensor> {
+    let args = crate::execution::RootedValues::new(args)
+        .map_err(crate::execution::ExecutionServiceError::into_runtime_error)?;
+    timer_firing_arguments(None, args.into(), reference_local)
 }
 
 fn clamp_startat_month(month: f64) -> f64 {
@@ -91,7 +112,7 @@ fn timer_text_serials(value: &Value, reference: NaiveDateTime) -> BuiltinResult<
         Value::String(text) => (vec![text.as_str().to_owned()], vec![1, 1]),
         Value::StringArray(array) => (
             array
-                .data
+                .data()
                 .iter()
                 .map(|text| text.as_str().to_owned())
                 .collect(),
@@ -100,7 +121,7 @@ fn timer_text_serials(value: &Value, reference: NaiveDateTime) -> BuiltinResult<
         Value::CharArray(array) => (
             (0..array.rows)
                 .map(|row| {
-                    array.data[row * array.cols..(row + 1) * array.cols]
+                    array.data()[row * array.cols..(row + 1) * array.cols]
                         .iter()
                         .collect::<String>()
                         .trim_end()

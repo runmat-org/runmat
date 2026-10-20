@@ -153,7 +153,7 @@ impl RemoteExactMeshingExecutor {
                 pool_id: self.pool.pool_id(),
                 program_artifact_id: ArtifactId::derive(&[program.artifact.id.0.bytes()]),
                 host: crate::program_host::program_host(
-                    &program,
+                    program,
                     crate::remote::pool_tasks::admitted_trust(),
                 )
                 .map_err(stage_error)?,

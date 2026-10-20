@@ -27,7 +27,10 @@ const BUILTIN_NAME: &str = "pow2";
     binding_variant = "default",
     builtin_path = "crate::builtins::math::elementwise::powers_of_two::pow2"
 )]
-async fn pow2_builtin(first: Value, mut rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn pow2_builtin(
+    first: Value,
+    mut rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     errors::reject_excess_outputs()?;
     match rest.pop() {
         None => {

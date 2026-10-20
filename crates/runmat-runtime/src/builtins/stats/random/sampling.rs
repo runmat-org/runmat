@@ -1117,7 +1117,7 @@ fn sample_string_axis(
             for (dst_axis, src_axis) in indices.iter().enumerate() {
                 let src = prefix + src_axis * pre + suffix * pre * axis_len;
                 let dst = prefix + dst_axis * pre + suffix * pre * indices.len();
-                out[dst] = array.data[src].clone();
+                out[dst] = array.data()[src].clone();
             }
         }
     }
@@ -1146,7 +1146,7 @@ fn sample_char_axis(
             for (dst_axis, src_axis) in indices.iter().enumerate() {
                 let src = prefix + src_axis * pre + suffix * pre * axis_len;
                 let dst = prefix + dst_axis * pre + suffix * pre * indices.len();
-                out[dst] = array.data[src];
+                out[dst] = array.data()[src];
             }
         }
     }
@@ -1188,7 +1188,7 @@ fn sample_cell_axis(
             .zip(source_strides.iter())
             .map(|(coord, stride)| coord * stride)
             .sum::<usize>();
-        out[output_linear] = array.data[source_linear].clone();
+        out[output_linear] = array.data()[source_linear].clone();
     }
     CellArray::new_with_shape(out, out_shape)
         .map(Value::Cell)
@@ -2121,10 +2121,10 @@ fn is_empty_function(value: &Value) -> bool {
     match value {
         Value::Tensor(t) => tensor::tensor_element_len(t) == 0,
         Value::LogicalArray(a) => a.data.is_empty(),
-        Value::Cell(c) => c.data.is_empty(),
+        Value::Cell(c) => c.data().is_empty(),
         Value::String(s) => s.is_empty(),
-        Value::StringArray(a) => a.data.is_empty(),
-        Value::CharArray(a) => a.data.is_empty(),
+        Value::StringArray(a) => a.data().is_empty(),
+        Value::CharArray(a) => a.data().is_empty(),
         _ => false,
     }
 }
@@ -2134,9 +2134,9 @@ fn is_scalar_boot_arg(value: &Value) -> bool {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::String(_) => true,
         Value::Tensor(t) => tensor::is_scalar_tensor(t),
         Value::LogicalArray(a) => a.data.len() == 1,
-        Value::StringArray(a) => a.data.len() == 1,
-        Value::CharArray(a) => a.data.len() == 1,
-        Value::Cell(a) => a.data.len() == 1,
+        Value::StringArray(a) => a.data().len() == 1,
+        Value::CharArray(a) => a.data().len() == 1,
+        Value::Cell(a) => a.data().len() == 1,
         _ => false,
     }
 }
@@ -2696,7 +2696,7 @@ mod tests {
             Value::CharArray(chars) => {
                 assert_eq!(chars.rows, 1);
                 assert_eq!(chars.cols, 5);
-                assert_eq!(chars.data, vec!['G'; 5]);
+                assert_eq!(chars.data(), vec!['G'; 5]);
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -2732,7 +2732,7 @@ mod tests {
             Value::Cell(cell) => {
                 assert_eq!(cell.shape, vec![3, 2]);
                 assert_eq!(
-                    cell.data,
+                    cell.data(),
                     vec![
                         Value::from("c"),
                         Value::from("d"),

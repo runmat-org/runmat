@@ -3,7 +3,10 @@ use futures::executor::block_on;
 use runmat_value::{IntValue, IntegerStorage, LogicalArray, NumericStorage, Tensor};
 
 fn call(value: Value) -> BuiltinResult<Value> {
-    block_on(isprime_builtin(value, Vec::new()))
+    block_on(isprime_builtin(
+        value,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
 }
 
 #[test]
@@ -81,5 +84,9 @@ fn supports_empty_and_rejects_invalid_inputs_and_arity() {
     ] {
         assert!(call(value).is_err());
     }
-    assert!(block_on(isprime_builtin(Value::Num(2.0), vec![Value::Num(3.0)])).is_err());
+    assert!(block_on(isprime_builtin(
+        Value::Num(2.0),
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(3.0)])
+    ))
+    .is_err());
 }

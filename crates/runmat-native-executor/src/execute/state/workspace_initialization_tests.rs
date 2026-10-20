@@ -396,7 +396,7 @@ fn local_state_with(
     HostState::new(HostStateInput {
         functions: Arc::new(vec![function.clone()]),
         function,
-        inputs: NativeFunctionInputs::Legacy(vec![]),
+        inputs: NativeFunctionInputs::legacy(vec![]),
         requested_outputs: 0,
         runtime,
         program_capture: None,

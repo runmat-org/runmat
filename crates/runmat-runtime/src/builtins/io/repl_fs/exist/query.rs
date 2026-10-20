@@ -353,10 +353,10 @@ pub(super) fn value_to_string(value: &Value) -> Option<String> {
             if array.rows == 1
                 && crate::builtins::common::shape::effective_rank(&array.shape) <= 2 =>
         {
-            Some(array.data.iter().collect())
+            Some(array.data().iter().collect())
         }
-        Value::StringArray(array) if array.data.len() == 1 => {
-            Some(array.data[0].as_str().to_owned())
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Some(array.data()[0].as_str().to_owned())
         }
         _ => None,
     }

@@ -73,11 +73,13 @@ fn rem_maps_table_variables_and_preserves_container() {
 #[test]
 fn rem_duration_returns_duration_in_source_format() {
     let duration = crate::builtins::duration::duration_object_from_days_tensor(
+        None,
         Tensor::new(vec![25.0 / 24.0, 50.0 / 24.0], vec![1, 2]).unwrap(),
         "hh:mm:ss",
     )
     .unwrap();
     let divisor = crate::builtins::duration::duration_object_from_days_tensor(
+        None,
         Tensor::new(vec![1.0], vec![1, 1]).unwrap(),
         "hh:mm:ss",
     )
@@ -208,7 +210,7 @@ fn rem_char_array_support() {
         Value::Tensor(t) => {
             assert_eq!(t.shape(), vec![1, 2]);
             let expected: Vec<f64> = chars
-                .data
+                .data()
                 .iter()
                 .map(|&ch| rem_real_scalar(ch as u32 as f64, 5.0))
                 .collect();

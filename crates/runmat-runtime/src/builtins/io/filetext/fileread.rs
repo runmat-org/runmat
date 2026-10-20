@@ -81,8 +81,11 @@ impl FileEncoding {
     binding_variant = "default",
     builtin_path = "crate::builtins::io::filetext::fileread"
 )]
-async fn fileread_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let encoding = parse_encoding_args(&rest)?;
+async fn fileread_builtin(
+    path: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    let encoding = parse_encoding_args(rest.view())?;
     let resolved = resolve_path(&path)?;
     let bytes = read_all(&resolved).await?;
     let chars = decode_bytes(bytes, encoding)?;
@@ -92,7 +95,7 @@ async fn fileread_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResult
     Ok(Value::CharArray(char_array))
 }
 
-fn parse_encoding_args(args: &[Value]) -> BuiltinResult<FileEncoding> {
+fn parse_encoding_args(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<FileEncoding> {
     match args.len() {
         0 => Ok(FileEncoding::Auto),
         1 => {
@@ -149,15 +152,15 @@ fn encoding_name(value: &Value) -> BuiltinResult<std::borrow::Cow<'_, str>> {
     match value {
         Value::String(s) => Ok(std::borrow::Cow::Borrowed(s.as_str())),
         Value::CharArray(ca) if ca.rows == 1 => {
-            Ok(std::borrow::Cow::Owned(ca.data.iter().collect()))
+            Ok(std::borrow::Cow::Owned(ca.data().iter().collect()))
         }
         Value::CharArray(_) => Err(fileread_error_with_detail(
             &FILEREAD_ERROR_INVALID_OPTION,
             "encoding name must be a 1-by-N character vector",
         )),
         Value::StringArray(sa) => {
-            if sa.data.len() == 1 {
-                Ok(std::borrow::Cow::Borrowed(sa.data[0].as_str()))
+            if sa.data().len() == 1 {
+                Ok(std::borrow::Cow::Borrowed(sa.data()[0].as_str()))
             } else {
                 Err(fileread_error_with_detail(
                     &FILEREAD_ERROR_INVALID_OPTION,
@@ -176,7 +179,7 @@ fn resolve_path(value: &Value) -> BuiltinResult<PathBuf> {
     match value {
         Value::String(s) => normalize_path(s),
         Value::CharArray(ca) if ca.rows == 1 => {
-            let path: String = ca.data.iter().collect();
+            let path: String = ca.data().iter().collect();
             normalize_path(&path)
         }
         Value::CharArray(_) => Err(fileread_error_with_detail(
@@ -184,8 +187,8 @@ fn resolve_path(value: &Value) -> BuiltinResult<PathBuf> {
             "expected a 1-by-N character vector for the file name",
         )),
         Value::StringArray(sa) => {
-            if sa.data.len() == 1 {
-                normalize_path(&sa.data[0])
+            if sa.data().len() == 1 {
+                normalize_path(&sa.data()[0])
             } else {
                 Err(fileread_error_with_detail(
                     &FILEREAD_ERROR_INVALID_INPUT,

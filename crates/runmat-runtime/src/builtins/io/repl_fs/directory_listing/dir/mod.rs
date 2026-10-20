@@ -12,8 +12,8 @@ use runmat_value::Value;
     binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::directory_listing::dir"
 )]
-async fn dir_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let input = input::Input::parse(&args)?;
+async fn dir_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
+    let input = input::Input::parse(args.view())?;
     let records = query::execute(input).await?;
     if output::should_emit_stdout() {
         output::emit(&records)?;

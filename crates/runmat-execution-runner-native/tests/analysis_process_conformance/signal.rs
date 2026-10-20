@@ -98,7 +98,13 @@ impl SignalFixture {
         let anonymous_name = anonymous.name.0.clone();
         let executable = unit.portable_envelope_for(Some(&anonymous_name)).unwrap();
         let function = unit
-            .function_analysis(executable.manifest.identity.entrypoint_function)
+            .function_analysis(
+                executable
+                    .manifest
+                    .identity
+                    .entrypoint_function
+                    .expect("selected signal function"),
+            )
             .cloned()
             .unwrap();
         let callable = runmat_analysis_core::GeneratorCallable::BoundFunction {
@@ -127,13 +133,32 @@ impl SignalFixture {
                     .collect(),
             },
         )));
-        let function_id = function.function.0;
+        let owner = runmat_execution::value::CallableOwner::Bound(
+            runmat_execution::FunctionBindingOrigin::from_revision(&revision, function.function)
+                .unwrap(),
+        );
+        let form = runmat_execution::value::CallableForm::Closure;
+        let source_role = anonymous.source_role;
+        let source_file = unit
+            .source_map()
+            .entries()
+            .iter()
+            .find(|entry| entry.source_id == anonymous.source)
+            .expect("capturing signal source")
+            .full_path
+            .clone();
         let frozen_callable = CallableValue {
-            owner_identity: format!("bound:{function_id}"),
+            owner,
+            form,
+            source_role,
+            source_file: source_file.clone(),
             qualified_name: "loads.pulse".into(),
             callable_digest: CallableValue::identity_digest(
-                &format!("bound:{function_id}"),
+                owner,
                 "loads.pulse",
+                form,
+                source_role,
+                source_file.as_deref(),
             ),
             captures: vec![capture],
         };
@@ -208,11 +233,11 @@ impl SignalFixture {
                 )
                 .unwrap();
             let success = super::wait_for_native_task(&task).await;
-            assert!(success.result_objects.is_empty());
-            assert_eq!(success.outputs.len(), 1);
+            assert!(success.result_objects().is_empty());
+            assert_eq!(success.values().expect("signal value result").0.len(), 1);
             outputs.push(GeneratorChunkOutput {
                 chunk_identity: chunk.plan.identity,
-                value: success.outputs[0].clone(),
+                value: success.values().expect("signal value result").0[0].clone(),
             });
         }
         self.canonicalize(outputs)
@@ -309,6 +334,7 @@ impl SignalFixture {
             capabilities: BTreeSet::from([Capability::ProcessIsolation]),
         };
         let worker = WorkerSpec {
+            host: super::phase_execution_support::worker_host_inventory(),
             id: runmat_execution::identity::WorkerId::derive(&[b"signal-conformance-worker"]),
             pool_id,
             resources: inventory.clone(),
@@ -393,11 +419,11 @@ impl SignalFixture {
                     .await
                     .expect("remote signal completion timeout")
                     .unwrap();
-                assert!(success.result_objects.is_empty());
-                assert_eq!(success.outputs.len(), 1);
+                assert!(success.result_objects().is_empty());
+                assert_eq!(success.values().expect("signal value result").0.len(), 1);
                 outputs.push(GeneratorChunkOutput {
                     chunk_identity: chunk.plan.identity,
-                    value: success.outputs[0].clone(),
+                    value: success.values().expect("signal value result").0[0].clone(),
                 });
             }
             channel.drain().await.unwrap();
@@ -441,6 +467,7 @@ fn signal_submission(
         chunk,
         BTreeSet::new(),
         GeneratorExecutionContext {
+            host: super::phase_execution_support::host_requirement(&chunk.request),
             scope_id,
             pool_id,
             resources: ResourceRequest {
@@ -463,9 +490,11 @@ fn signal_submission(
 }
 
 fn response_output(identity: Digest, response: ProgramExecutionResponse) -> GeneratorChunkOutput {
-    let ProgramExecutionResponse::Success { value } = response else {
+    let ProgramExecutionResponse::Success { mut outputs } = response else {
         panic!("signal generator did not return an inline value: {response:?}")
     };
+    assert_eq!(outputs.len(), 1, "one generator output");
+    let value = outputs.remove(0);
     GeneratorChunkOutput {
         chunk_identity: identity,
         value,

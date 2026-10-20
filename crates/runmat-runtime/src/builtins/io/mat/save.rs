@@ -31,7 +31,7 @@ use runmat_builtins::{
 )]
 async fn save_builtin(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     let output_scope = crate::output_count::current_output_scope();
     let requested_outputs = match output_scope {
@@ -45,7 +45,7 @@ async fn save_builtin(
             BUILTIN_NAME,
         )?;
     }
-    preflight_known_options(&args)?;
+    preflight_known_options(args.view())?;
     // Public arguments are filename, option, and workspace-selector text;
     // saved payloads come from the workspace only after these controls pass.
     if args.iter().any(crate::dispatcher::value_contains_gpu) {
@@ -67,7 +67,7 @@ async fn save_builtin(
         }
     }
 
-    let request = parse_arguments(&args[option_start..]).await?;
+    let request = parse_arguments(args.view().range(option_start..)?).await?;
     let regex_patterns: Vec<Regex> = request
         .regex_patterns
         .iter()

@@ -46,7 +46,7 @@ pub(super) async fn restore_value_after_load_in_context(
                     Value::Struct(structure) => {
                         let mut names = Vec::with_capacity(structure.fields.len());
                         let mut values = Vec::with_capacity(structure.fields.len());
-                        for (name, value) in structure.fields {
+                        for (name, value) in structure.into_fields_unbounded() {
                             names.push(name);
                             values.push(value);
                         }
@@ -76,7 +76,7 @@ pub(super) async fn restore_value_after_load_in_context(
                         );
                     }
                     Value::Cell(cell) => {
-                        let count = cell.data.len();
+                        let count = cell.data().len();
                         work.push(Step::Cell(cell.shape.to_vec(), count));
                         match cell.into_owned_data() {
                             Ok(values) => work.extend(
@@ -87,7 +87,9 @@ pub(super) async fn restore_value_after_load_in_context(
                             ),
                             Err(cell) => work.extend((0..count).rev().map(|index| {
                                 Step::EnterRetained(
-                                    cell.data.retain_value_at(index).expect("shared cell child"),
+                                    cell.data_owner()
+                                        .retain_value_at(index)
+                                        .expect("shared cell child"),
                                     depth + 1,
                                 )
                             })),
@@ -118,8 +120,9 @@ pub(super) async fn restore_value_after_load_in_context(
                         work.push(Step::ObjectArray(class_name, shape, count));
                         work.extend(
                             array
-                                .into_data()
-                                .into_iter()
+                                .data()
+                                .iter()
+                                .cloned()
                                 .rev()
                                 .map(|value| Step::Enter(value, depth + 1)),
                         );
@@ -137,13 +140,13 @@ pub(super) async fn restore_value_after_load_in_context(
                 }
                 match value.value() {
                     Value::Cell(cell) => {
-                        let count = cell.data.len();
+                        let count = cell.data().len();
                         work.push(Step::Cell(cell.shape.to_vec(), count));
                         work.extend((0..count).rev().map(|index| {
                             Step::EnterRetained(
                                 value
                                     .project(|parent| match parent {
-                                        Value::Cell(cell) => cell.data.get(index),
+                                        Value::Cell(cell) => cell.data().get(index),
                                         _ => None,
                                     })
                                     .expect("retained cell child"),
@@ -167,7 +170,8 @@ pub(super) async fn restore_value_after_load_in_context(
                         }));
                     }
                     Value::Struct(structure) => {
-                        let names: Vec<String> = structure.fields.keys().cloned().collect();
+                        let names: Vec<String> =
+                            structure.fields.keys().map(ToOwned::to_owned).collect();
                         work.push(Step::Struct(names.clone()));
                         work.extend(names.into_iter().rev().map(|name| {
                             Step::EnterRetained(
@@ -182,7 +186,8 @@ pub(super) async fn restore_value_after_load_in_context(
                         }));
                     }
                     Value::StructArray(array) => {
-                        let names: Vec<String> = array.field_names().cloned().collect();
+                        let names: Vec<String> =
+                            array.field_names().map(ToOwned::to_owned).collect();
                         let shape = array.shape().to_vec();
                         let field_len = shape.iter().product::<usize>();
                         let count = names.len() * field_len;

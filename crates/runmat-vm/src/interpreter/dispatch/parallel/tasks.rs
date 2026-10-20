@@ -98,7 +98,7 @@ pub(super) fn spawn(
     stack.try_push(if explicit_pool {
         runmat_runtime::parallel::future::wrap_task(task)
     } else {
-        Value::Task(task)
+        Value::Task(task.into())
     })?;
     Ok(())
 }

@@ -23,7 +23,7 @@ enum DecodedOption {
 }
 
 impl BinscatterOptionPlan {
-    pub(super) fn admit(args: Vec<Value>) -> BuiltinResult<Self> {
+    pub(super) fn admit(args: crate::call::BuiltinArguments) -> BuiltinResult<Self> {
         let mut steps = Vec::new();
         let mut values = args.into_iter().peekable();
         if values.peek().is_some_and(|first| !is_option_name(first)) {

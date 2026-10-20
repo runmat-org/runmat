@@ -1,5 +1,17 @@
 use super::*;
 
+fn build_fit_spec(
+    first: Value,
+    rest: Vec<Value>,
+    arguments: FitctreeArguments,
+) -> BuiltinResult<FitSpec> {
+    super::super::build_fit_spec(
+        first,
+        crate::call::FunctionArgumentView::from_slice(&rest),
+        arguments,
+    )
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn fitctree_dense_rank_boundaries_preserve_observation_geometry() {
@@ -34,26 +46,37 @@ fn fitctree_dense_rank_boundaries_preserve_observation_geometry() {
 fn fitctree_header_retains_typed_options_and_rejects_malformed_pairs() {
     let first = tensor_value(vec![0.0, 1.0], 2, 1);
     let valid = vec![Value::Num(0.0), Value::from("MinLeafSize"), Value::Num(1.0)];
-    let header = HeaderInspection::inspect(&first, &valid)
-        .validate(valid.len())
-        .unwrap();
+    let header = HeaderInspection::inspect(
+        &first,
+        crate::call::FunctionArgumentView::from_slice(&valid),
+    )
+    .validate(valid.len())
+    .unwrap();
     assert_eq!(header.option_start, 1);
     assert_eq!(header.options.len(), 1);
     assert_eq!(header.options[0].name.identity, FitctreeOption::MinLeafSize);
     assert_eq!(header.options[0].name.index, 1);
 
     let odd = vec![Value::Num(0.0), Value::from("MinLeafSize")];
-    assert!(HeaderInspection::inspect(&first, &odd)
-        .validate(odd.len())
-        .is_err());
+    assert!(
+        HeaderInspection::inspect(&first, crate::call::FunctionArgumentView::from_slice(&odd))
+            .validate(odd.len())
+            .is_err()
+    );
     let unknown = vec![Value::Num(0.0), Value::from("Unknown"), Value::Num(1.0)];
-    assert!(HeaderInspection::inspect(&first, &unknown)
-        .validate(unknown.len())
-        .is_err());
+    assert!(HeaderInspection::inspect(
+        &first,
+        crate::call::FunctionArgumentView::from_slice(&unknown)
+    )
+    .validate(unknown.len())
+    .is_err());
     let unsupported = vec![Value::Num(0.0), Value::from("Prune"), Value::Bool(true)];
-    assert!(HeaderInspection::inspect(&first, &unsupported)
-        .validate(unsupported.len())
-        .is_err());
+    assert!(HeaderInspection::inspect(
+        &first,
+        crate::call::FunctionArgumentView::from_slice(&unsupported)
+    )
+    .validate(unsupported.len())
+    .is_err());
 }
 
 #[test]
@@ -81,8 +104,13 @@ fn structural_counts_reject_the_first_value_beyond_platform_usize() {
 fn fitctree_strict_mode_rejects_integer_numeric_extensions() {
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
     let error = block_on(fitctree_builtin(
+        None,
         poisoned_int_tensor(IntegerStorage::I16(vec![0, 1, 2, 3]), 4, 1),
-        vec![tensor_value(vec![0.0, 0.0, 1.0, 1.0], 4, 1)],
+        crate::builtins::common::test_support::builtin_arguments(vec![tensor_value(
+            vec![0.0, 0.0, 1.0, 1.0],
+            4,
+            1,
+        )]),
     ))
     .expect_err("integer predictor extension");
     assert_eq!(
@@ -91,12 +119,13 @@ fn fitctree_strict_mode_rejects_integer_numeric_extensions() {
     );
 
     let error = block_on(fitctree_builtin(
+        None,
         tensor_value(vec![0.0, 1.0, 2.0, 3.0], 4, 1),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             tensor_value(vec![0.0, 0.0, 1.0, 1.0], 4, 1),
             Value::from("MaxNumSplits"),
             poisoned_int_tensor(IntegerStorage::U8(vec![1]), 1, 1),
-        ],
+        ]),
     ))
     .expect_err("integer control extension");
     assert_eq!(
@@ -115,8 +144,13 @@ fn fitctree_strict_mode_rejects_integer_numeric_extensions() {
             .handle,
     );
     let error = block_on(fitctree_builtin(
+        None,
         poison,
-        vec![tensor_value(vec![0.0, 0.0, 1.0, 1.0], 4, 1)],
+        crate::builtins::common::test_support::builtin_arguments(vec![tensor_value(
+            vec![0.0, 0.0, 1.0, 1.0],
+            4,
+            1,
+        )]),
     ))
     .expect_err("resident gate before gather");
     assert_eq!(
@@ -130,19 +164,25 @@ fn fitctree_rejects_inexact_integer_predictors_and_weights() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     let inexact = 9_007_199_254_740_993_u64;
     let error = block_on(fitctree_builtin(
+        None,
         poisoned_int_tensor(IntegerStorage::U64(vec![0, 1, 2, inexact]), 4, 1),
-        vec![tensor_value(vec![0.0, 0.0, 1.0, 1.0], 4, 1)],
+        crate::builtins::common::test_support::builtin_arguments(vec![tensor_value(
+            vec![0.0, 0.0, 1.0, 1.0],
+            4,
+            1,
+        )]),
     ))
     .expect_err("inexact predictor");
     assert!(error.message.contains("exactly representable"));
 
     let error = block_on(fitctree_builtin(
+        None,
         tensor_value(vec![0.0, 1.0, 2.0, 3.0], 4, 1),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             tensor_value(vec![0.0, 0.0, 1.0, 1.0], 4, 1),
             Value::from("Weights"),
             poisoned_int_tensor(IntegerStorage::U64(vec![1, 1, 1, inexact]), 4, 1),
-        ],
+        ]),
     ))
     .expect_err("inexact weights");
     assert!(error.message.contains("exactly representable"));

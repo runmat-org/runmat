@@ -53,10 +53,11 @@ fn install_pending_saveobj(
                 let Value::Object(object) = receiver else {
                     panic!("saveobj receiver must be the typed MAT object");
                 };
+                let object = object
+                    .into_unbounded_builder()
+                    .expect("fixture receiver is ordinary");
                 crate::user_functions::test_support::rooted_single_value_sequence(Value::Struct(
-                    StructValue {
-                        fields: object.properties.into_iter().collect(),
-                    },
+                    StructValue::from_fields_unbounded(object.into_properties_unbounded()),
                 ))
             })
         },
@@ -101,8 +102,8 @@ fn typed_mat_object_preparation_retains_pending_callback_receiver_and_retires_on
             let setup = runmat_gc::gc_allocate_rooted(Value::String("pending child".into()))
                 .expect("allocate managed child");
             let target = setup.handle();
-            let mut object = ObjectInstance::new("PendingMatSave");
-            object.properties.insert(
+            let mut object = runmat_value::UnboundedObjectBuilder::new("PendingMatSave");
+            object.insert(
                 "child".into(),
                 Value::HandleObject(runmat_value::HandleRef {
                     class_name: "PendingMatChild".into(),
@@ -114,7 +115,7 @@ fn typed_mat_object_preparation_retains_pending_callback_receiver_and_retires_on
             let calls = Arc::new(AtomicUsize::new(0));
             let (_resolver, _invoker) = install_pending_saveobj(gate, Arc::clone(&calls));
             let mut future = Box::pin(prepare_mat_object_element(
-                Value::Object(object),
+                Value::Object(object.finish()),
                 Some(&runtime),
             ));
             for _ in 0..8 {
@@ -367,10 +368,13 @@ fn typed_mat_load_keeps_decoded_child_rooted_during_pending_selected_loadobj() {
                         let Value::Struct(payload) = arguments.supplied()[0].clone() else {
                             panic!("selected loadobj payload changed");
                         };
-                        let mut object = ObjectInstance::new("PendingMatLoad");
-                        object.properties = payload.fields.into_iter().collect();
+                        let mut object =
+                            runmat_value::UnboundedObjectBuilder::new("PendingMatLoad");
+                        for (name, value) in payload.clone().into_fields_unbounded() {
+                            object.insert(name, value);
+                        }
                         crate::user_functions::test_support::rooted_single_value_sequence(
-                            Value::Object(object),
+                            Value::Object(object.finish()),
                         )
                     })
                 },
@@ -408,7 +412,7 @@ fn typed_mat_load_keeps_decoded_child_rooted_during_pending_selected_loadobj() {
                     let restored =
                         futures::executor::block_on(future).expect("typed object result");
                     assert!(matches!(restored.value(), Value::Object(object)
-                        if matches!(object.properties.get("child"), Some(Value::HandleObject(handle)) if handle.target == target)));
+                        if matches!(object.property("child"), Some(Value::HandleObject(handle)) if handle.target == target)));
                     drop(restored);
                 }
             } else {

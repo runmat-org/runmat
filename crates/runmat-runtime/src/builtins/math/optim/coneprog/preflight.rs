@@ -12,8 +12,8 @@ pub(super) fn numeric(label: &str, value: &Value, role: Role) -> BuiltinResult<(
     Ok(())
 }
 
-pub(super) fn arguments(args: &[Value]) -> BuiltinResult<()> {
-    if let [Value::Struct(problem)] = args {
+pub(super) fn arguments(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<()> {
+    if let Some(Value::Struct(problem)) = args.first().filter(|_| args.len() == 1) {
         numeric("f", &required_field(problem, "f")?, Role::NonemptyVector)?;
         if let Some(value) = optional_field(problem, "socConstraints") {
             cones(&value)?;
@@ -62,8 +62,12 @@ pub(super) fn arguments(args: &[Value]) -> BuiltinResult<()> {
             "coneprog: optional linear constraints must be A,b,Aeq,beq,lb,ub",
         ));
     }
-    numeric("f", &args[0], Role::NonemptyVector)?;
-    cones(&args[1])?;
+    numeric(
+        "f",
+        args.get(0).expect("validated coneprog objective"),
+        Role::NonemptyVector,
+    )?;
+    cones(args.get(1).expect("validated coneprog constraints"))?;
     for (index, label, role) in [
         (2, "A", Role::OptionalMatrix),
         (3, "b", Role::OptionalVector),
@@ -86,7 +90,7 @@ fn cones(value: &Value) -> BuiltinResult<()> {
     match value {
         Value::Struct(constraint) => cone(constraint),
         Value::Cell(cell) => {
-            for value in &cell.data {
+            for value in cell.data() {
                 descriptor(value)?;
             }
             Ok(())

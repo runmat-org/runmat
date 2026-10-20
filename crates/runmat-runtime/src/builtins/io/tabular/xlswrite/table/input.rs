@@ -43,9 +43,9 @@ impl XlsTable {
     ) -> BuiltinResult<Self> {
         ensure_shape_2d(&cell.shape, "cell array")?;
         checked_cell_count(cell.rows, cell.cols, "cell array")?;
-        let mut cells = reserved_cells(cell.data.len())?;
+        let mut cells = reserved_cells(cell.data().len())?;
         let mut work = 0;
-        for value in cell.data.iter() {
+        for value in cell.data().iter() {
             let materialized = if matches!(value, Value::GpuTensor(_)) {
                 checkpoint_input(cooperation, selected, work).await?;
                 work = 0;
@@ -227,7 +227,7 @@ impl XlsTable {
             checkpoint_input(cooperation, selected, chunk).await?;
         }
         let mut work = 0;
-        for (index, text) in strings.data.iter().enumerate() {
+        for (index, text) in strings.data().iter().enumerate() {
             let row = index % rows;
             let col = index / rows;
             cells[row * cols + col] = CellValue::Text(text.as_str().to_owned());
@@ -254,8 +254,8 @@ impl XlsTable {
         }
         let rows = if chars.rows == 1 { 1 } else { chars.rows };
         let mut cells = reserved_cells(rows)?;
-        let character_count = chars.data.len();
-        let mut characters = chars.data.into_char_iter();
+        let character_count = chars.data().len();
+        let mut characters = chars.data().iter().copied();
         let mut work = 0;
         for _row in 0..rows {
             let mut text = String::new();
@@ -320,7 +320,7 @@ async fn cell_value_from_scalar(
         Value::String(s) => Ok(CellValue::Text(s.as_str().to_owned())),
         Value::CharArray(chars) if chars.rows == 1 => {
             let mut text = String::new();
-            text.try_reserve(chars.data.len()).map_err(|source| {
+            text.try_reserve(chars.data().len()).map_err(|source| {
                 xlswrite_error_with_source(
                     &XLSWRITE_ERROR_DATA,
                     "xlswrite: character cell allocation failed",
@@ -328,7 +328,7 @@ async fn cell_value_from_scalar(
                 )
             })?;
             let mut work = 0;
-            for character in chars.data.iter() {
+            for character in chars.data().iter() {
                 text.push(*character);
                 work += 1;
                 if work == 1024 {
@@ -339,8 +339,8 @@ async fn cell_value_from_scalar(
             checkpoint_input(cooperation, selected, work).await?;
             Ok(CellValue::Text(text))
         }
-        Value::StringArray(strings) if strings.data.is_empty() => Ok(CellValue::Empty),
-        Value::StringArray(strings) => Ok(CellValue::Text(strings.data[0].as_str().to_owned())),
+        Value::StringArray(strings) if strings.data().is_empty() => Ok(CellValue::Empty),
+        Value::StringArray(strings) => Ok(CellValue::Text(strings.data()[0].as_str().to_owned())),
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
             writecell::scalar_tensor_cell_value(tensor)
         }

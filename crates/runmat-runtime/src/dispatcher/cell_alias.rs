@@ -63,7 +63,7 @@ fn quote_cell(
         SharedShape::requested_bytes_for_rank(cell.shape.len()).map_err(|_| overflow())?,
         1,
     )?;
-    quote_values(&cell.data, quote, context, visited)
+    quote_values(cell.data_owner(), quote, context, visited)
 }
 
 fn quote_values(
@@ -109,8 +109,8 @@ fn supported_shallow_child(value: &Value) -> bool {
         | Value::LogicalArray(_)
         | Value::GpuTensor(_) => true,
         Value::String(_) => true,
-        Value::CharArray(array) => array.data.is_shallow_clone(),
-        Value::StringArray(array) => array.data.is_shallow_clone(),
+        Value::CharArray(array) => array.data_owner().is_shallow_clone(),
+        Value::StringArray(array) => array.data_owner().is_shallow_clone(),
         Value::Cell(_) => true,
         _ => false,
     }
@@ -166,7 +166,7 @@ fn prepare_cell(
             .with_source(error)
             .build()
     })?;
-    let data = prepare_values(&cell.data, permit, context, receipt, visited)?;
+    let data = prepare_values(cell.data_owner(), permit, context, receipt, visited)?;
     CellArray::from_admitted(data, shape).map_err(|reason| {
         build_runtime_error(format!("gather: shared Cell geometry: {reason}"))
             .with_identifier("RunMat:gather:CellShapeError")

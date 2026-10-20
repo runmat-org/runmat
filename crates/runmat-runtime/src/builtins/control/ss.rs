@@ -10,7 +10,7 @@ use runmat_builtins::{
     SS_INTEGER_MATRIX_EXTENSION, SS_INTEGER_SAMPLE_TIME_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{CellArray, CharArray, ObjectInstance, Tensor, Value};
+use runmat_value::{CellArray, CharArray, Tensor, Value};
 
 use crate::builtins::common::{
     spec::{
@@ -124,14 +124,16 @@ fn ensure_ss_class_registered() {
 #[runtime_builtin(
     name = "ss",
     binding_variant = "default",
-    builtin_path = "crate::builtins::control::ss"
+    builtin_path = "crate::builtins::control::ss",
+    context = true
 )]
 pub(crate) async fn ss_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     a: Value,
     b: Value,
     c: Value,
     d: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let matrices = [&a, &b, &c, &d];
     if matrices
@@ -154,7 +156,7 @@ pub(crate) async fn ss_builtin(
             )?;
         }
     }
-    let admitted_options = SsAdmittedOptions::parse(&rest)?;
+    let admitted_options = SsAdmittedOptions::parse(rest.view())?;
     let host_sample_times = admitted_options.preflight_host().await?;
     let host_a = preparse_host_matrix(&a, "A").await?;
     let host_b = preparse_host_matrix(&b, "B").await?;
@@ -176,35 +178,24 @@ pub(crate) async fn ss_builtin(
     let output_count = c.rows;
 
     ensure_ss_class_registered();
-    let mut object = ObjectInstance::new(SS_CLASS.to_string());
-    object.properties.insert("A".to_string(), a.into_value());
-    object.properties.insert("B".to_string(), b.into_value());
-    object.properties.insert("C".to_string(), c.into_value());
-    object.properties.insert("D".to_string(), d.into_value());
-    object
-        .properties
-        .insert("Ts".to_string(), Value::Num(sample_time));
-    object.properties.insert(
-        "InputDelay".to_string(),
-        zero_tensor_value(vec![input_count, 1])?,
-    );
-    object.properties.insert(
-        "OutputDelay".to_string(),
-        zero_tensor_value(vec![output_count, 1])?,
-    );
-    object.properties.insert(
-        "StateName".to_string(),
-        empty_name_cell_value(state_count, 1)?,
-    );
-    object.properties.insert(
-        "InputName".to_string(),
-        empty_name_cell_value(input_count, 1)?,
-    );
-    object.properties.insert(
-        "OutputName".to_string(),
-        empty_name_cell_value(output_count, 1)?,
-    );
-    Ok(Value::Object(object))
+    let fields = [
+        ("A", a.into_value()),
+        ("B", b.into_value()),
+        ("C", c.into_value()),
+        ("D", d.into_value()),
+        ("Ts", Value::Num(sample_time)),
+        ("InputDelay", zero_tensor_value(vec![input_count, 1])?),
+        ("OutputDelay", zero_tensor_value(vec![output_count, 1])?),
+        ("StateName", empty_name_cell_value(state_count, 1)?),
+        ("InputName", empty_name_cell_value(input_count, 1)?),
+        ("OutputName", empty_name_cell_value(output_count, 1)?),
+    ];
+    let object = crate::execution::object::construct_object_from_borrowed_fields(
+        runtime.as_ref(),
+        SS_CLASS.display_name(),
+        fields.iter().map(|(name, value)| (*name, value)),
+    )?;
+    Ok(object.into_value_and_lease().0)
 }
 
 async fn admitted_matrix(value: &Value, role: &str) -> BuiltinResult<Value> {
@@ -293,11 +284,11 @@ struct SsAdmittedOptions<'a> {
 }
 
 impl<'a> SsAdmittedOptions<'a> {
-    fn parse(rest: &'a [Value]) -> BuiltinResult<Self> {
+    fn parse(rest: crate::call::FunctionArgumentView<'a>) -> BuiltinResult<Self> {
         let mut sample_times = Vec::new();
-        match rest {
-            [] => {}
-            [sample_time] => sample_times.push(sample_time),
+        match rest.len() {
+            0 => {}
+            1 => sample_times.push(rest.first().expect("one ss option")),
             _ => {
                 if !rest.len().is_multiple_of(2) {
                     return Err(ss_error_with_detail(
@@ -305,11 +296,13 @@ impl<'a> SsAdmittedOptions<'a> {
                         "optional arguments must be name-value pairs or a scalar sample time",
                     ));
                 }
-                for pair in rest.chunks_exact(2) {
-                    let name = scalar_text(&pair[0], "option name")?;
+                for index in (0..rest.len()).step_by(2) {
+                    let name_value = rest.get(index).expect("validated ss option name");
+                    let sample_value = rest.get(index + 1).expect("validated ss option value");
+                    let name = scalar_text(name_value, "option name")?;
                     let lowered = name.trim().to_ascii_lowercase();
                     match lowered.as_str() {
-                        "ts" | "sampletime" => sample_times.push(&pair[1]),
+                        "ts" | "sampletime" => sample_times.push(sample_value),
                         _ => {
                             return Err(ss_error_with_detail(
                                 &SS_ERROR_INVALID_OPTION,
@@ -370,9 +363,9 @@ fn parse_sample_time(value: &Value) -> BuiltinResult<f64> {
 fn scalar_text(value: &Value, context: &str) -> BuiltinResult<runmat_value::Utf8Text> {
     match value {
         Value::String(text) => Ok(text.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::StringArray(array) if array.data().len() == 1 => Ok(array.data()[0].clone()),
         Value::CharArray(array) if array.rows == 1 => {
-            Ok(array.data.iter().collect::<String>().into())
+            Ok(array.data().iter().collect::<String>().into())
         }
         other => Err(ss_error_with_detail(
             &SS_ERROR_INVALID_OPTION,
@@ -523,7 +516,14 @@ mod tests {
     use runmat_value::{IntValue, IntegerStorage};
 
     fn run_ss(a: Value, b: Value, c: Value, d: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(ss_builtin(a, b, c, d, rest))
+        block_on(ss_builtin(
+            None,
+            a,
+            b,
+            c,
+            d,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     fn property<'a>(value: &'a Value, name: &str) -> &'a Value {
@@ -531,7 +531,7 @@ mod tests {
             panic!("expected object, got {value:?}");
         };
         object
-            .properties
+            .properties()
             .get(name)
             .unwrap_or_else(|| panic!("missing property {name}"))
     }
@@ -573,7 +573,7 @@ mod tests {
         let Value::Object(object) = &sys else {
             panic!("expected object");
         };
-        assert_eq!(object.class_name.display_name(), "ss");
+        assert_eq!(object.class_name().display_name(), "ss");
         assert_eq!(property(&sys, "Ts"), &Value::Num(0.0));
         assert_tensor(property(&sys, "A"), &[2, 2], &[0.0, -2.0, 1.0, -3.0]);
         assert_tensor(property(&sys, "B"), &[2, 1], &[0.0, 1.0]);

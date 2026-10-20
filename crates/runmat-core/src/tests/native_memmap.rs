@@ -249,10 +249,12 @@ impl FsProvider for GatedProvider {
 fn invocation(function: &str, outputs: usize) -> ProcedureInvocation {
     ProcedureInvocation {
         target: ProcedureTarget::Function(function.into()),
-        arguments: (outputs != 0)
-            .then(|| Value::String("/mapped-core/data.bin".into()))
-            .into_iter()
-            .collect(),
+        arguments: crate::ProcedureArguments::Source(
+            (outputs != 0)
+                .then(|| Value::String("/mapped-core/data.bin".into()))
+                .into_iter()
+                .collect(),
+        ),
         requested_outputs: outputs,
     }
 }

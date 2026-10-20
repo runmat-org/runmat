@@ -190,8 +190,10 @@ impl ExecutableUnit {
             None,
             true,
             |unit| match selected {
-                Some((_, function)) => {
-                    super::portable_entrypoint::resolve_compiled_function(unit, function)
+                Some((name, function)) => {
+                    super::portable_entrypoint::resolve_compiled_function_with_label(
+                        unit, function, &name,
+                    )
                 }
                 None => super::portable_entrypoint::script_entrypoint(unit),
             },

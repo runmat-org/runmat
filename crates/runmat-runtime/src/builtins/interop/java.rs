@@ -7,7 +7,9 @@ use crate::execution::RootedValue;
 use crate::BuiltinResult;
 
 mod dispatch;
-use dispatch::{invalid_call, invoke_java, text_entries, JavaOperation};
+use dispatch::{
+    invalid_call, invoke_java, invoke_java_prepared, text_entries, text_scalar_eq, JavaOperation,
+};
 
 const JAVA_ADAPTER: &str = "java";
 
@@ -19,7 +21,7 @@ const JAVA_ADAPTER: &str = "java";
 )]
 async fn java_object_builtin(
     context: Option<crate::context::RuntimeContext>,
-    arguments: Vec<Value>,
+    arguments: crate::call::BuiltinArguments,
 ) -> BuiltinResult<RootedValue> {
     invoke_java(context, JavaOperation::Construct, arguments).await
 }
@@ -32,7 +34,7 @@ async fn java_object_builtin(
 )]
 async fn java_object_edt_builtin(
     context: Option<crate::context::RuntimeContext>,
-    arguments: Vec<Value>,
+    arguments: crate::call::BuiltinArguments,
 ) -> BuiltinResult<RootedValue> {
     invoke_java(context, JavaOperation::ConstructEdt, arguments).await
 }
@@ -45,7 +47,7 @@ async fn java_object_edt_builtin(
 )]
 async fn java_method_builtin(
     context: Option<crate::context::RuntimeContext>,
-    arguments: Vec<Value>,
+    arguments: crate::call::BuiltinArguments,
 ) -> BuiltinResult<RootedValue> {
     java_method_dispatch(
         context,
@@ -65,7 +67,7 @@ async fn java_method_builtin(
 )]
 async fn java_method_edt_builtin(
     context: Option<crate::context::RuntimeContext>,
-    arguments: Vec<Value>,
+    arguments: crate::call::BuiltinArguments,
 ) -> BuiltinResult<RootedValue> {
     java_method_dispatch(
         context,
@@ -79,7 +81,7 @@ async fn java_method_edt_builtin(
 
 async fn java_method_dispatch(
     context: Option<crate::context::RuntimeContext>,
-    mut arguments: Vec<Value>,
+    arguments: crate::call::BuiltinArguments,
     member_operation: JavaOperation,
     static_operation: JavaOperation,
     builtin: &str,
@@ -89,20 +91,28 @@ async fn java_method_dispatch(
             "{builtin} expects a method and class or object"
         )));
     }
-    let method = arguments.remove(0);
-    let receiver = arguments.remove(0);
-    match receiver {
+    let receiver = arguments.get(1).expect("validated argument prefix");
+    let operation = match receiver {
         Value::Foreign(reference) if reference.type_identity.family == JAVA_ADAPTER => {
-            let mut call = vec![Value::Foreign(reference), method];
-            call.extend(arguments);
-            invoke_java(context, member_operation, call).await
+            member_operation
         }
-        class => {
-            let mut call = vec![class, method];
-            call.extend(arguments);
-            invoke_java(context, static_operation, call).await
-        }
-    }
+        _ => static_operation,
+    };
+    let count = arguments.len();
+    invoke_java_prepared(context, operation, move |runtime| {
+        arguments.try_map_preserving_roots_in_context(count, runtime, |slot, source| {
+            let source_index = match slot {
+                0 => 1,
+                1 => 0,
+                index => index,
+            };
+            Ok(source
+                .get(source_index)
+                .expect("validated Java argument slot")
+                .clone())
+        })
+    })
+    .await
 }
 
 #[runtime_builtin(
@@ -113,7 +123,7 @@ async fn java_method_dispatch(
 )]
 async fn java_array_builtin(
     context: Option<crate::context::RuntimeContext>,
-    arguments: Vec<Value>,
+    arguments: crate::call::BuiltinArguments,
 ) -> BuiltinResult<RootedValue> {
     invoke_java(context, JavaOperation::NewArray, arguments).await
 }
@@ -126,31 +136,30 @@ async fn java_array_builtin(
 )]
 async fn java_add_path_builtin(
     context: Option<crate::context::RuntimeContext>,
-    arguments: Vec<Value>,
+    arguments: crate::call::BuiltinArguments,
 ) -> BuiltinResult<RootedValue> {
-    let mut entries = text_entries(arguments, "javaaddpath")?;
+    let entries = text_entries(arguments, "javaaddpath")?;
     let position = entries
-        .last()
-        .and_then(|entry| runmat_builtins::JavaInsertionPosition::from_public_terminal(entry))
+        .len()
+        .checked_sub(1)
+        .and_then(|index| entries.get(index))
+        .filter(|entry| text_scalar_eq(entry, "-end", false))
+        .map(|_| runmat_builtins::JavaInsertionPosition::End)
         .unwrap_or(runmat_builtins::JavaInsertionPosition::Begin);
-    if position == runmat_builtins::JavaInsertionPosition::End {
-        entries.pop();
-    }
-    if entries.is_empty() {
+    let count =
+        entries.len() - usize::from(position == runmat_builtins::JavaInsertionPosition::End);
+    if count == 0 {
         return Err(invalid_call("javaaddpath requires a classpath entry"));
     }
-    if position == runmat_builtins::JavaInsertionPosition::Begin {
-        entries.reverse();
-    }
-    for entry in entries {
-        invoke_java(
-            context.clone(),
-            JavaOperation::AddClasspath,
-            vec![
-                Value::string(entry),
-                Value::String(position.wire_name().into()),
-            ],
-        )
+    for logical_index in 0..count {
+        let entry_index = if position == runmat_builtins::JavaInsertionPosition::Begin {
+            count - logical_index - 1
+        } else {
+            logical_index
+        };
+        invoke_java_prepared(context.clone(), JavaOperation::AddClasspath, |runtime| {
+            entries.entry_arguments(entry_index, Some(position.wire_name()), runtime)
+        })
         .await?;
     }
     RootedValue::new(Value::output_list(Vec::new())).map_err(|error| error.into_runtime_error())
@@ -164,14 +173,13 @@ async fn java_add_path_builtin(
 )]
 async fn java_remove_path_builtin(
     context: Option<crate::context::RuntimeContext>,
-    arguments: Vec<Value>,
+    arguments: crate::call::BuiltinArguments,
 ) -> BuiltinResult<RootedValue> {
-    for entry in text_entries(arguments, "javarmpath")? {
-        invoke_java(
-            context.clone(),
-            JavaOperation::RemoveClasspath,
-            vec![Value::string(entry)],
-        )
+    let entries = text_entries(arguments, "javarmpath")?;
+    for index in 0..entries.len() {
+        invoke_java_prepared(context.clone(), JavaOperation::RemoveClasspath, |runtime| {
+            entries.entry_arguments(index, None, runtime)
+        })
         .await?;
     }
     RootedValue::new(Value::output_list(Vec::new())).map_err(|error| error.into_runtime_error())
@@ -185,31 +193,42 @@ async fn java_remove_path_builtin(
 )]
 async fn java_class_path_builtin(
     context: Option<crate::context::RuntimeContext>,
-    arguments: Vec<Value>,
+    arguments: crate::call::BuiltinArguments,
 ) -> BuiltinResult<RootedValue> {
     if arguments.is_empty() {
-        return invoke_java(
-            context,
-            JavaOperation::Classpath,
-            vec![Value::String(
-                runmat_builtins::JavaClasspathQuery::Dynamic
-                    .wire_name()
-                    .into(),
-            )],
-        )
+        return invoke_java_prepared(context, JavaOperation::Classpath, |runtime| {
+            wire_arguments(
+                runtime,
+                &[runmat_builtins::JavaClasspathQuery::Dynamic.wire_name()],
+            )
+        })
         .await;
     }
     if arguments.len() == 1 {
-        if let Some(option) =
-            crate::builtins::common::validation::value_text_scalar_string(&arguments[0])
-        {
-            match runmat_builtins::JavaClasspathControl::parse_public(&option) {
+        let value = arguments.first().expect("one Java classpath argument");
+        let control = if text_scalar_eq(value, "-dynamic", true) {
+            Some(runmat_builtins::JavaClasspathControl::Query(
+                runmat_builtins::JavaClasspathQuery::Dynamic,
+            ))
+        } else if text_scalar_eq(value, "-static", true) {
+            Some(runmat_builtins::JavaClasspathControl::Query(
+                runmat_builtins::JavaClasspathQuery::Static,
+            ))
+        } else if text_scalar_eq(value, "-all", true) {
+            Some(runmat_builtins::JavaClasspathControl::Query(
+                runmat_builtins::JavaClasspathQuery::All,
+            ))
+        } else if text_scalar_eq(value, "-v0", true) || text_scalar_eq(value, "-v1", true) {
+            Some(runmat_builtins::JavaClasspathControl::Verbosity)
+        } else {
+            None
+        };
+        if let Some(control) = control {
+            match control {
                 runmat_builtins::JavaClasspathControl::Query(layer) => {
-                    return invoke_java(
-                        context,
-                        JavaOperation::Classpath,
-                        vec![Value::String(layer.wire_name().into())],
-                    )
+                    return invoke_java_prepared(context, JavaOperation::Classpath, |runtime| {
+                        wire_arguments(runtime, &[layer.wire_name()])
+                    })
                     .await;
                 }
                 runmat_builtins::JavaClasspathControl::Verbosity => {
@@ -220,11 +239,11 @@ async fn java_class_path_builtin(
             }
         }
     }
-    let entries = text_entries(arguments, "javaclasspath")?
-        .into_iter()
-        .map(Value::string)
-        .collect();
-    invoke_java(context, JavaOperation::SetClasspath, entries).await?;
+    let entries = text_entries(arguments, "javaclasspath")?;
+    invoke_java_prepared(context, JavaOperation::SetClasspath, move |runtime| {
+        entries.all_arguments(runtime)
+    })
+    .await?;
     RootedValue::new(Value::output_list(Vec::new())).map_err(|error| error.into_runtime_error())
 }
 
@@ -236,10 +255,10 @@ async fn java_class_path_builtin(
 )]
 async fn jenv_builtin(
     context: Option<crate::context::RuntimeContext>,
-    arguments: Vec<Value>,
+    arguments: crate::call::BuiltinArguments,
 ) -> BuiltinResult<RootedValue> {
     if arguments.is_empty() {
-        invoke_java(context, JavaOperation::Status, Vec::new()).await
+        invoke_java(context, JavaOperation::Status, arguments).await
     } else {
         invoke_java(context, JavaOperation::Configure, arguments).await
     }
@@ -268,7 +287,24 @@ async fn use_java_builtin(
         RootedValue::new(Value::Bool(false)).map_err(|error| error.into_runtime_error())
     }
     #[cfg(not(target_arch = "wasm32"))]
-    invoke_java(context, JavaOperation::UseJava, vec![feature]).await
+    invoke_java_prepared(context, JavaOperation::UseJava, move |runtime| {
+        crate::call::BuiltinArguments::from_borrowed(std::slice::from_ref(&feature), Some(runtime))
+    })
+    .await
+}
+
+fn wire_arguments(
+    runtime: &crate::context::RuntimeContext,
+    values: &[&str],
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    let values = crate::execution::RootedValues::try_initialize_in_context(
+        values.len(),
+        runtime,
+        |index| {
+            crate::call::argument_text::copy_str(values[index], Some(runtime)).map(Value::String)
+        },
+    )?;
+    Ok(values.into())
 }
 
 #[runtime_builtin(

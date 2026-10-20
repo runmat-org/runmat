@@ -100,6 +100,7 @@ fn paired_entries_and_request_results_keep_exact_product_and_attempt_identity() 
             schema_version: crate::PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
             context: runmat_execution::ProgramInvocationContext::Direct,
             arguments: vec![],
+            objects: vec![],
         },
         resources: runmat_execution::resource::ResourceRequest {
             cpu_millicores: 1000,

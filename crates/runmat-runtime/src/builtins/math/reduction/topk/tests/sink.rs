@@ -14,7 +14,12 @@ fn invalid_topk_control_precedes_unavailable_provider_access() {
     let probe = allocation.probe;
     let input = Value::GpuTensor(allocation.handle);
     for kind in [TopKKind::Max, TopKKind::Min] {
-        let error = block_on(evaluate_topk(kind, input.clone(), &[Value::Num(-1.0)])).unwrap_err();
+        let error = block_on(evaluate_topk(
+            kind,
+            input.clone(),
+            crate::call::FunctionArgumentView::from_slice(&[Value::Num(-1.0)]),
+        ))
+        .unwrap_err();
         assert_eq!(error.identifier(), TOPK_ERROR_INVALID_ARGUMENT.identifier);
     }
     assert_eq!(probe.retirements(), 0);
@@ -50,7 +55,7 @@ fn topk_barrier_preserves_explicit_owner_and_requested_resident_outputs() {
                 let evaluation = block_on(evaluate_topk(
                     kind,
                     Value::GpuTensor(input.clone()),
-                    &[Value::GpuTensor(k.clone())],
+                    crate::call::FunctionArgumentView::from_slice(&[Value::GpuTensor(k.clone())]),
                 ))
                 .unwrap();
                 let values = outputs(evaluation.into_value(kind).unwrap());
@@ -79,7 +84,7 @@ fn topk_barrier_preserves_explicit_owner_and_requested_resident_outputs() {
             assert!(block_on(evaluate_topk(
                 kind,
                 Value::GpuTensor(input.clone()),
-                &[Value::Num(-1.0)]
+                crate::call::FunctionArgumentView::from_slice(&[Value::Num(-1.0)])
             ))
             .is_err());
             assert!(runmat_accelerate::fusion_residency::is_resident(&input));

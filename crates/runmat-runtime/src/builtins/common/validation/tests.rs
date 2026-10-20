@@ -1,4 +1,10 @@
 use super::*;
+
+pub(super) fn retained_arguments(values: Vec<Value>) -> crate::call::BuiltinArguments {
+    crate::execution::RootedValues::new(values)
+        .expect("ordinary validator fixture arguments")
+        .into()
+}
 mod class_shape;
 mod admission;
 mod ownership;
@@ -12,7 +18,7 @@ use crate::builtins::common::test_support;
 use runmat_builtins::BuiltinIntegerAuditKind;
 use runmat_value::{
     ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, StringArray,
-    StructArray, StructValue, Tensor,
+    StructArray, Tensor,
 };
 
 fn ok(builtin: &str, args: Vec<Value>) {
@@ -293,8 +299,9 @@ fn value_is_empty_uses_typed_integer_storage_length() {
 }
 
 fn structure_array(shape: Vec<usize>) -> Value {
-    let mut element = StructValue::new();
+    let mut element = runmat_value::UnboundedStructValueBuilder::new();
     element.insert("value", Value::Num(1.0));
+    let element = element.finish();
     Value::StructArray(
         StructArray::new(vec![element; shape.iter().product()], shape).expect("structure array"),
     )
@@ -738,17 +745,17 @@ fn isvarname_returns_false_for_resident_integer_without_gather() {
 
 #[test]
 fn namedargs2cell_preserves_field_order() {
-    let mut st = StructValue::new();
+    let mut st = runmat_value::UnboundedStructValueBuilder::new();
     st.insert("Name", Value::String("entry-a".into()));
     st.insert("Value", Value::Num(7.0));
-    let out = namedargs2cell_value(Value::Struct(st)).expect("namedargs2cell");
+    let out = namedargs2cell_value(Value::Struct(st.finish())).expect("namedargs2cell");
     let Value::Cell(cell) = out else {
         panic!("expected cell");
     };
     assert_eq!(cell.rows, 1);
     assert_eq!(cell.cols, 4);
-    assert_eq!(cell.data[0], Value::String("Name".into()));
-    assert_eq!(cell.data[2], Value::String("Value".into()));
+    assert_eq!(cell.data()[0], Value::String("Name".into()));
+    assert_eq!(cell.data()[2], Value::String("Value".into()));
 }
 
 #[test]
@@ -765,14 +772,14 @@ fn namedargs2cell_rejects_top_level_integers_and_preserves_integer_fields_exactl
     ];
     for value in cases {
         assert!(namedargs2cell_value(Value::Int(value.clone())).is_err());
-        let mut structure = StructValue::new();
+        let mut structure = runmat_value::UnboundedStructValueBuilder::new();
         structure.insert("Exact", Value::Int(value.clone()));
-        let output = namedargs2cell_value(Value::Struct(structure))
+        let output = namedargs2cell_value(Value::Struct(structure.finish()))
             .expect("scalar struct with integer field");
         let Value::Cell(cell) = output else {
             panic!("expected name-value cell");
         };
-        assert_eq!(cell.data[1], Value::Int(value));
+        assert_eq!(cell.data()[1], Value::Int(value));
     }
 
     let allocation = resident_fixture(vec![1, 1], runmat_accelerate_api::NumericElementType::F64);
@@ -786,8 +793,8 @@ fn validator_surface_accepts_and_rejects_representative_values() {
     let temp_dir = tempfile::tempdir().unwrap();
     let file_path = temp_dir.path().join("data.txt");
     std::fs::write(&file_path, "ok").unwrap();
-    let dir_text = Value::String(temp_dir.path().to_string_lossy().into_owned());
-    let file_text = Value::String(file_path.to_string_lossy().into_owned());
+    let dir_text = Value::String(temp_dir.path().to_string_lossy().into_owned().into());
+    let file_text = Value::String(file_path.to_string_lossy().into_owned().into());
 
     ok(
         "mustBeA",
@@ -855,7 +862,7 @@ fn validator_surface_accepts_and_rejects_representative_values() {
     );
     err(
         "mustBeNonzeroLengthText",
-        vec![Value::String(String::new())],
+        vec![Value::String(String::new().into())],
     );
     ok("mustBeNonempty", vec![Value::String("x".into())]);
     err(
@@ -1121,10 +1128,10 @@ fn varname_rules_reject_keywords_underscores_and_overlong_names() {
     assert!(!isvarname_value(&Value::String("for".into())));
     assert!(!isvarname_value(&Value::String("end".into())));
     assert!(isvarname_value(&Value::String(
-        "a".repeat(MATLAB_NAME_LENGTH_MAX)
+        "a".repeat(MATLAB_NAME_LENGTH_MAX).into()
     )));
     assert!(!isvarname_value(&Value::String(
-        "a".repeat(MATLAB_NAME_LENGTH_MAX + 1)
+        "a".repeat(MATLAB_NAME_LENGTH_MAX + 1).into()
     )));
 }
 

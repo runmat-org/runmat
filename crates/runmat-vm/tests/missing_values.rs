@@ -1,4 +1,4 @@
-use runmat_value::{LogicalArray, StringArray, Value};
+use runmat_value::{LogicalArray, Value};
 
 #[path = "support/mod.rs"]
 mod test_helpers;
@@ -35,8 +35,8 @@ fn missing_constructs_and_detects_string_sentinel() {
         .expect("missing string script");
     assert!(vars.iter().any(|value| matches!(
         value,
-        Value::StringArray(StringArray { data, .. })
-            if data == &["<missing>".to_string(), "<missing>".to_string()]
+        Value::StringArray(array)
+            if array.data() == ["<missing>".to_string(), "<missing>".to_string()]
     )));
     assert!(has_logical(&vars, &[1, 1]));
     assert!(vars.iter().any(|value| matches!(value, Value::Bool(true))));
@@ -83,7 +83,7 @@ fn table_missing_interop_executes_from_scripts() {
     assert!(has_logical(&vars, &[0, 1, 0, 1, 1, 1]));
     assert!(vars
         .iter()
-        .any(|value| matches!(value, Value::Object(obj) if obj.class_name.is(runmat_types::StaticClassIdentity::new("table")))));
+        .any(|value| matches!(value, Value::Object(obj) if obj.class_name().is(runmat_types::StaticClassIdentity::new("table")))));
 }
 
 #[test]
@@ -95,5 +95,5 @@ fn numeric_table_fillmissing_executes_from_scripts() {
     assert!(has_logical(&vars, &[0, 1, 0, 0, 0, 1]));
     assert!(vars
         .iter()
-        .any(|value| matches!(value, Value::Object(obj) if obj.class_name.is(runmat_types::StaticClassIdentity::new("table")))));
+        .any(|value| matches!(value, Value::Object(obj) if obj.class_name().is(runmat_types::StaticClassIdentity::new("table")))));
 }

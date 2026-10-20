@@ -173,7 +173,7 @@ pub(super) fn prepare_run_artifact(
         crate::analysis::operations::collect_analysis_result_fields(&stripped_run);
     let run_value = serde_json::to_value(&stripped_run)
         .map_err(|error| format!("failed to encode stripped analysis run: {error}"))?;
-    let materialized_field_ids = fields.keys().cloned().collect::<Vec<_>>();
+    let materialized_field_ids = fields.keys().map(ToOwned::to_owned).collect::<Vec<_>>();
     let run_digest = persisted_run_digest(
         &run_value,
         &field_inventory,

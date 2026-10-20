@@ -8,6 +8,7 @@ use runmat_builtins::{
     CLA_DESCRIPTOR, CLA_ERROR_INVALID_ARGUMENT, CLA_ERROR_OUTPUTS, CLA_STATE_OUTPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
+#[cfg(test)]
 use runmat_value::Value;
 #[cfg(test)]
 #[path = "cla/tests.rs"]
@@ -20,19 +21,22 @@ mod tests;
 )]
 pub fn cla_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<bool> {
     cla_builtin_with_runtime(runtime.as_ref(), args)
 }
 
 #[cfg(test)]
 pub fn cla_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
-    cla_builtin_with_runtime(None, args)
+    cla_builtin_with_runtime(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(args),
+    )
 }
 
 fn cla_builtin_with_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<bool> {
     crate::output_count::validate_fixed_outputs(&CLA_DESCRIPTOR, &CLA_ERROR_OUTPUTS, "cla")?;
     if crate::output_count::current_output_count() == Some(1) {
@@ -63,20 +67,20 @@ fn cla_builtin_with_runtime(
                 crate::builtins::plotting::state::FigureHandle::from(figure),
                 index,
             )),
-            &args[1..],
+            args.view().range(1..)?,
         )
     } else if let Some(first) = args.first() {
         if let Ok(PlotHandle::Axes(handle, axes)) = resolve_plot_handle(first, "cla") {
-            (Some((handle, axes)), &args[1..])
+            (Some((handle, axes)), args.view().range(1..)?)
         } else {
-            (None, args.as_slice())
+            (None, args.view())
         }
     } else {
-        (None, args.as_slice())
+        (None, args.view())
     };
-    let reset = match rest {
-        [] => false,
-        [value] if as_lower_str(value).is_some_and(|text| text.trim() == "reset") => true,
+    let reset = match (rest.len(), rest.first()) {
+        (0, _) => false,
+        (1, Some(value)) if as_lower_str(value).is_some_and(|text| text.trim() == "reset") => true,
         _ => return Err(invalid()),
     };
     let selected = target.and(original);

@@ -170,20 +170,20 @@ fn complex_and_container_vectors_preserve_representation() {
     let Value::CharArray(characters) = call(Value::CharArray(characters)).expect("perms") else {
         panic!("expected characters")
     };
-    assert_eq!(characters.data[0..3].iter().collect::<String>(), "cba");
+    assert_eq!(characters.data()[0..3].iter().collect::<String>(), "cba");
     let strings = StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).expect("strings");
     let Value::StringArray(strings) = call(Value::StringArray(strings)).expect("perms") else {
         panic!("expected string array")
     };
     assert_eq!(strings.shape, vec![2, 2]);
-    assert_eq!(strings.data, vec!["b", "a", "a", "b"]);
+    assert_eq!(strings.data(), vec!["b", "a", "a", "b"]);
     let cells = CellArray::new(vec![Value::Num(1.0), Value::Num(2.0)], 1, 2).expect("cells");
     let Value::Cell(cells) = call(Value::Cell(cells)).expect("perms") else {
         panic!("expected cell array")
     };
     assert_eq!(cells.shape, vec![2, 2]);
     assert_eq!(
-        cells.data,
+        cells.data(),
         vec![
             Value::Num(2.0),
             Value::Num(1.0),

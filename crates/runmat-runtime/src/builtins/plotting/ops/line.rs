@@ -785,7 +785,7 @@ mod tests {
                 Value::String("DisplayName".into())
             ])
             .unwrap(),
-            Value::String(String::new())
+            Value::String(String::new().into())
         );
     }
 

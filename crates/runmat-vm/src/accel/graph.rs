@@ -214,10 +214,10 @@ impl<'a> GraphBuilder<'a> {
             }
             Instr::LoadBool(value) => self.push_constant(Type::Bool, Some(Value::Bool(*value))),
             Instr::LoadString(s) => {
-                self.push_constant(Type::String, Some(Value::String(s.clone())))
+                self.push_constant(Type::String, Some(Value::String(s.clone().into())))
             }
             Instr::LoadCharRow(s) => {
-                self.push_constant(Type::String, Some(Value::String(s.clone())))
+                self.push_constant(Type::String, Some(Value::String(s.clone().into())))
             }
             Instr::LoadVar(idx) => self.handle_load_var(*idx),
             Instr::LoadVarForIndexAssignment(idx)
@@ -1007,9 +1007,9 @@ impl<'a> GraphBuilder<'a> {
             Some(Value::Tensor(t)) => t.is_empty(),
             Some(Value::LogicalArray(l)) => l.data.is_empty(),
             Some(Value::String(s)) => s.is_empty(),
-            Some(Value::StringArray(sa)) => sa.data.is_empty(),
-            Some(Value::CharArray(ca)) => ca.data.is_empty(),
-            Some(Value::Cell(cell)) => cell.data.is_empty(),
+            Some(Value::StringArray(sa)) => sa.data().is_empty(),
+            Some(Value::CharArray(ca)) => ca.data().is_empty(),
+            Some(Value::Cell(cell)) => cell.data().is_empty(),
             _ => false,
         }
     }

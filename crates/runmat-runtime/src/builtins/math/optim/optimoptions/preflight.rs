@@ -1,7 +1,7 @@
 //! Preserve builder grammar and host diagnostics before any option readback.
 use super::*;
 
-pub(super) fn arguments(args: &[Value]) -> BuiltinResult<()> {
+pub(super) fn arguments(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<()> {
     let Some(first) = args.first() else {
         return Err(optimoptions_error_with(
             &OPTIMOPTIONS_ERROR_INVALID_ARGUMENT,
@@ -77,7 +77,7 @@ fn value_for_field(solver: Solver, field: OptimOptionField, value: &Value) -> Bu
             ));
         }
     } else {
-        normalized_option_value(solver, field, value)?;
+        prepared_option_value(solver, field, value)?;
     }
     Ok(())
 }

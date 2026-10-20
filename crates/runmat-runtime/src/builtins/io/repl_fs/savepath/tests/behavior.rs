@@ -12,7 +12,7 @@ fn explicit_file_preserves_order_and_escapes_source_text() {
     );
     let _path = super::support::set_path(&path);
     let value = super::support::run(
-        vec![Value::String(target.to_string_lossy().into_owned())],
+        vec![Value::String(target.to_string_lossy().into_owned().into())],
         1,
         false,
     )
@@ -43,7 +43,7 @@ fn zero_outputs_still_performs_the_write() {
     let directory = tempdir().expect("directory");
     let target = directory.path().join("zero.m");
     let value = super::support::run(
-        vec![Value::String(target.to_string_lossy().into_owned())],
+        vec![Value::String(target.to_string_lossy().into_owned().into())],
         0,
         false,
     )
@@ -58,7 +58,7 @@ fn direct_call_without_output_context_returns_bare_status() {
     let directory = tempdir().expect("directory");
     let target = directory.path().join("direct.m");
     let value = super::support::run_without_output_context(
-        vec![Value::String(target.to_string_lossy().into_owned())],
+        vec![Value::String(target.to_string_lossy().into_owned().into())],
         false,
     )
     .expect("savepath");
@@ -73,7 +73,7 @@ fn runmat_directory_target_and_diagnostic_outputs_are_preserved() {
     let profile = directory.path().join("profile");
     std::fs::create_dir(&profile).expect("profile");
     let value = super::support::run(
-        vec![Value::String(profile.to_string_lossy().into_owned())],
+        vec![Value::String(profile.to_string_lossy().into_owned().into())],
         3,
         true,
     )

@@ -39,10 +39,8 @@ fn strict_dot_store_updates_existing_handle_without_setfield_extension() {
                 methods: Default::default(),
             });
             let mut object = ObjectInstance::new("StrictDotHandle");
-            object.properties.insert("Value".into(), Value::Num(1.0));
-            object
-                .properties
-                .insert("UnrelatedNaN".into(), Value::Num(f64::NAN));
+            object.replace_property_unbounded("Value".into(), Value::Num(1.0));
+            object.replace_property_unbounded("UnrelatedNaN".into(), Value::Num(f64::NAN));
             HandleRef {
                 class_name: "StrictDotHandle".into(),
                 target: runmat_gc::gc_allocate(Value::Object(object)).unwrap(),
@@ -88,9 +86,9 @@ fn strict_dot_store_updates_existing_handle_without_setfield_extension() {
             let Value::Object(object) = value else {
                 panic!("object target")
             };
-            assert_eq!(object.properties["Value"], Value::Num(9.0));
+            assert_eq!(object.properties()["Value"], Value::Num(9.0));
             assert!(
-                matches!(object.properties["UnrelatedNaN"], Value::Num(value) if value.is_nan())
+                matches!(object.properties()["UnrelatedNaN"], Value::Num(value) if value.is_nan())
             );
         })
         .unwrap();

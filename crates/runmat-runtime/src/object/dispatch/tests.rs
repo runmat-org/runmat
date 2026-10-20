@@ -221,10 +221,12 @@ fn dependent_property_setter_uses_selected_session_not_unrelated_ambient_session
                 &expected_session
             ));
             observed_calls.fetch_add(1, Ordering::SeqCst);
-            let mut replacement = original.clone();
-            replacement
-                .properties
-                .insert("p_backing".into(), Value::Num(9.0));
+            let mut replacement = original
+                .clone()
+                .into_unbounded_builder()
+                .expect("ordinary selected receiver fixture");
+            replacement.insert("p_backing".into(), Value::Num(9.0));
+            let replacement = replacement.finish();
             Box::pin(async move {
                 crate::user_functions::test_support::rooted_single_value_sequence(Value::Object(
                     replacement,
@@ -247,6 +249,6 @@ fn dependent_property_setter_uses_selected_session_not_unrelated_ambient_session
     let Value::Object(updated) = updated.value() else {
         panic!("dependent setter returns replacement object")
     };
-    assert_eq!(updated.properties.get("p_backing"), Some(&Value::Num(9.0)));
+    assert_eq!(updated.property("p_backing"), Some(&Value::Num(9.0)));
     assert_eq!(calls.load(Ordering::SeqCst), 1);
 }

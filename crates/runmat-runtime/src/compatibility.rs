@@ -190,7 +190,7 @@ fn value_contains_sparse_integer(
     match value {
         Value::SparseTensor(sparse) => sparse.integer_storage().is_some(),
         Value::Cell(cell) => cell
-            .data
+            .data()
             .iter()
             .any(|value| value_contains_sparse_integer(value, visited_handles)),
         Value::Struct(struct_value) => struct_value
@@ -205,7 +205,7 @@ fn value_contains_sparse_integer(
             found
         }
         Value::Object(object) => object
-            .properties
+            .properties()
             .values()
             .any(|value| value_contains_sparse_integer(value, visited_handles)),
         Value::HandleObject(handle) => {
@@ -455,7 +455,7 @@ mod tests {
 
     #[test]
     fn sparse_integer_policy_checks_nested_results() {
-        use runmat_value::{IntegerStorage, SparseTensor, StructValue};
+        use runmat_value::{IntegerStorage, SparseTensor};
 
         let sparse = SparseTensor::new_integer(
             1,
@@ -465,9 +465,9 @@ mod tests {
             IntegerStorage::U64(vec![u64::MAX]),
         )
         .expect("sparse integer");
-        let mut fields = StructValue::new();
+        let mut fields = runmat_value::UnboundedStructValueBuilder::new();
         fields.insert("x", Value::SparseTensor(sparse));
-        let nested = Value::Struct(fields);
+        let nested = Value::Struct(fields.finish());
 
         {
             let _compat = push_runmat_extensions_enabled(false);

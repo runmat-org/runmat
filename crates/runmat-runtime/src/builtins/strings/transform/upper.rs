@@ -122,20 +122,10 @@ fn upper_admission(runtime: &RuntimeContext, cause: HostAllocationError) -> Runt
 }
 
 fn upper_char_array(array: CharArray) -> BuiltinResult<Value> {
-    let CharArray {
-        data,
-        shape,
-        rows,
-        cols,
-    } = array;
-    if rows == 0 || cols == 0 {
-        return Ok(Value::CharArray(CharArray {
-            data,
-            shape,
-            rows,
-            cols,
-        }));
+    if array.rows == 0 || array.cols == 0 {
+        return Ok(Value::CharArray(array));
     }
+    let (data, _, rows, cols) = array.into_parts();
 
     let mut upper_rows = Vec::with_capacity(rows);
     let mut target_cols = cols;
@@ -163,9 +153,7 @@ fn upper_char_array(array: CharArray) -> BuiltinResult<Value> {
 }
 
 fn upper_cell_array(runtime: Option<&RuntimeContext>, cell: CellArray) -> BuiltinResult<Value> {
-    let CellArray {
-        data, rows, cols, ..
-    } = cell;
+    let (data, _, rows, cols) = cell.into_parts();
     let mut upper_values = Vec::with_capacity(rows * cols);
     for row in 0..rows {
         for col in 0..cols {
@@ -185,9 +173,9 @@ fn upper_cell_element(runtime: Option<&RuntimeContext>, value: &Value) -> Builti
             transform_scalar_case(runtime, text.clone(), TextCase::Upper, upper_admission)
                 .map(Value::String)
         }
-        Value::StringArray(sa) if sa.data.len() == 1 => transform_scalar_case(
+        Value::StringArray(sa) if sa.data().len() == 1 => transform_scalar_case(
             runtime,
-            sa.data[0].clone(),
+            sa.data()[0].clone(),
             TextCase::Upper,
             upper_admission,
         )
@@ -253,7 +241,7 @@ pub(crate) mod tests {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 2);
                 assert_eq!(ca.cols, 3);
-                assert_eq!(ca.data, vec!['C', 'A', 'T', 'D', 'O', 'G']);
+                assert_eq!(ca.data(), vec!['C', 'A', 'T', 'D', 'O', 'G']);
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -269,7 +257,7 @@ pub(crate) mod tests {
                 assert_eq!(ca.rows, 1);
                 assert_eq!(ca.cols, 6);
                 let expected: Vec<char> = "HELLO ".chars().collect();
-                assert_eq!(ca.data, expected);
+                assert_eq!(ca.data(), expected);
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -287,7 +275,7 @@ pub(crate) mod tests {
                 assert_eq!(ca.rows, 1);
                 assert_eq!(ca.cols, 3);
                 let expected: Vec<char> = vec!['S', 'S', 'A'];
-                assert_eq!(ca.data, expected);
+                assert_eq!(ca.data(), expected);
             }
             other => panic!("expected char array, got {other:?}"),
         }

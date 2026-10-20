@@ -35,7 +35,7 @@ pub(super) fn fit_info_value(
     options: &LassoOptions,
     cv: Option<CvInfo>,
 ) -> BuiltinResult<Value> {
-    let mut st = StructValue::new();
+    let mut st = runmat_value::UnboundedStructValueBuilder::new();
     st.insert("Intercept", row_tensor(&path.intercepts)?);
     st.insert("Lambda", row_tensor(&path.lambdas)?);
     st.insert("Alpha", Value::Num(options.alpha));
@@ -58,7 +58,7 @@ pub(super) fn fit_info_value(
         st.insert("IndexMinMSE", Value::Num(cv.index_min_mse as f64));
         st.insert("Index1SE", Value::Num(cv.index_1se as f64));
     }
-    Ok(Value::Struct(st))
+    Ok(Value::Struct(st.finish()))
 }
 
 pub(super) fn predictor_names_value(options: &LassoOptions) -> BuiltinResult<Value> {

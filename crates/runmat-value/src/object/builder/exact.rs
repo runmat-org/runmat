@@ -450,6 +450,23 @@ impl ExactObjectBuilder {
         self.try_insert_dynamic_key_prepared(definition.name.clone(), definition)
     }
 
+    /// Replace only an existing declaration in an unpublished exact generation.
+    /// The caller admits the definition's original metadata owners first.
+    pub fn try_replace_existing_dynamic_property(
+        &mut self,
+        name: &str,
+        definition: DynamicPropertyDef,
+    ) -> Result<DynamicPropertyDef, DynamicPropertyDef> {
+        if (!definition.name.is_empty() && !definition.name.has_retained_claim())
+            || (!definition.description.is_empty() && !definition.description.has_retained_claim())
+            || !definition.defining_class.has_retained_claim()
+        {
+            return Err(definition);
+        }
+        self.dynamic_properties
+            .try_replace_existing(name, definition)
+    }
+
     /// Link a preallocated metadata shell while this destination is unpublished.
     /// Text, class and map owners are unchanged; no backing is allocated.
     pub fn try_set_dynamic_metadata_handle(

@@ -10,8 +10,8 @@ pub(super) fn cast_symbolic_array(
     array: SymbolicArray,
 ) -> Result<Value, CastError> {
     let values = array
-        .data
-        .into_iter()
+        .data()
+        .iter()
         .map(|expression| {
             expression
                 .numeric_constant_value()

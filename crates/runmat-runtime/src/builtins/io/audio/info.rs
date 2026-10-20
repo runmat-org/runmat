@@ -172,7 +172,7 @@ impl AudioMetadata {
                     .map(|rate| file_size * 8.0 / rate)
                     .unwrap_or(f64::NAN)
             });
-        let mut out = StructValue::new();
+        let mut out = runmat_value::UnboundedStructValueBuilder::new();
         out.insert(
             "Filename",
             Value::string(path.to_string_lossy().into_owned()),
@@ -192,7 +192,7 @@ impl AudioMetadata {
         out.insert("BitRate", Value::Num(self.bit_rate.unwrap_or(f64::NAN)));
         out.insert("FileSize", Value::Num(file_size));
         out.insert("Format", Value::string(self.format.to_string()));
-        out
+        out.finish()
     }
 }
 
@@ -222,10 +222,10 @@ pub(super) fn resolve_audioinfo_path(value: &Value) -> BuiltinResult<PathBuf> {
     match value {
         Value::String(s) => normalize_audioinfo_path(s),
         Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data.iter().collect();
+            let text: String = ca.data().iter().collect();
             normalize_audioinfo_path(&text)
         }
-        Value::StringArray(sa) if sa.data.len() == 1 => normalize_audioinfo_path(&sa.data[0]),
+        Value::StringArray(sa) if sa.data().len() == 1 => normalize_audioinfo_path(&sa.data()[0]),
         _ => Err(audioinfo_error(&AUDIOINFO_ERROR_ARGUMENT)),
     }
 }

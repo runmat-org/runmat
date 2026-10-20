@@ -12,8 +12,17 @@ use super::super::outcome::TransferOutcome;
 
 const BUILTIN: &str = "copyfile";
 
+#[cfg(test)]
 pub(in crate::builtins::io::repl_fs::file_transfer) async fn evaluate(
     args: &[Value],
+    runtime: Option<&RuntimeContext>,
+) -> BuiltinResult<TransferOutcome> {
+    let args = crate::call::BuiltinArguments::from_borrowed(args, runtime)?;
+    evaluate_retained(args, runtime).await
+}
+
+pub(in crate::builtins::io::repl_fs::file_transfer) async fn evaluate_retained(
+    args: crate::call::BuiltinArguments,
     runtime: Option<&RuntimeContext>,
 ) -> BuiltinResult<TransferOutcome> {
     let mut cooperation = super::super::cooperation::TransferCooperation::new(
@@ -36,12 +45,12 @@ pub(in crate::builtins::io::repl_fs::file_transfer) async fn evaluate(
         super::super::input::force_flag(flag, &COPYFILE_ERROR_FLAG_ARG, BUILTIN)?;
     }
     let gathered = cooperation
-        .await_operation(super::super::input::gather(args, BUILTIN))
+        .await_operation(super::super::input::gather(&args, runtime, BUILTIN))
         .await?;
-    let force = match gathered.as_slice() {
-        [_, _] => false,
-        [_, _, flag] => super::super::input::force_flag(flag, &COPYFILE_ERROR_FLAG_ARG, BUILTIN)?,
-        [] | [_] => {
+    let force = match gathered.len() {
+        2 => false,
+        3 => super::super::input::force_flag(&gathered[2], &COPYFILE_ERROR_FLAG_ARG, BUILTIN)?,
+        0 | 1 => {
             return Err(super::super::input::descriptor_error(
                 &COPYFILE_ERROR_NOT_ENOUGH_INPUTS,
                 BUILTIN,

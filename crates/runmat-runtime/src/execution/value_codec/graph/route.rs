@@ -29,7 +29,7 @@ fn value_requires_graph(root: &Value) -> bool {
                 }
                 work.extend(&closure.captures);
             }
-            Value::Cell(cell) => work.extend(&cell.data),
+            Value::Cell(cell) => work.extend(cell.data()),
             Value::Struct(value) => work.extend(value.fields.values()),
             Value::StructArray(array) => {
                 for element in array.elements() {
@@ -40,7 +40,7 @@ fn value_requires_graph(root: &Value) -> bool {
                 if object.selected_class().is_some() {
                     return true;
                 }
-                work.extend(object.properties.values());
+                work.extend(object.properties().values());
             }
             Value::ObjectArray(array) => {
                 if !array.selected_provenance().is_empty() {

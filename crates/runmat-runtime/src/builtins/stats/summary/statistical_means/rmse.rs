@@ -10,7 +10,7 @@ use runmat_builtins::{RMSE_INTEGER_DATA_EXTENSION, RMSE_INTEGER_WEIGHTS_EXTENSIO
 pub(crate) async fn rmse_builtin(
     forecast: Value,
     actual: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     let kind = ReductionKind::RootMeanSquaredError;
     admit_data(kind, &forecast)?;
@@ -21,7 +21,7 @@ pub(crate) async fn rmse_builtin(
             kind.name(),
         )?;
     }
-    let options = options::parse(kind, rest).await?;
+    let options = options::parse(kind, &rest).await?;
     if options
         .weights
         .as_ref()
@@ -77,4 +77,17 @@ pub(crate) async fn rmse_builtin(
     } else {
         host::reduce_rms(kind, values, shape, dtype, &options)
     }
+}
+#[cfg(test)]
+pub(crate) async fn rmse_builtin_source(
+    forecast: Value,
+    actual: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    rmse_builtin(
+        forecast,
+        actual,
+        crate::call::BuiltinArguments::from_borrowed(&rest, None)?,
+    )
+    .await
 }

@@ -204,7 +204,7 @@ async fn invoke_foreign_rooted(
         .scope(service.invoke(
             context.clone(),
             crate::context::ForeignCall {
-                adapter: reference.type_identity.family,
+                adapter: reference.type_identity.family.clone(),
                 symbol: operation.into(),
                 arguments,
                 requested_outputs,

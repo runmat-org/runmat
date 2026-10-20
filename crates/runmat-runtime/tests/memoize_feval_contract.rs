@@ -110,11 +110,11 @@ fn memoized_public_feval_validates_count_and_never_replays_or_caches_shortage() 
             let Value::Object(object) = target else {
                 panic!("object")
             };
-            let Value::Cell(cache) = &object.properties["__runmat_memoize_cache"] else {
+            let Value::Cell(cache) = &object.properties()["__runmat_memoize_cache"] else {
                 panic!("cache")
             };
             assert!(
-                cache.data.is_empty(),
+                cache.data().is_empty(),
                 "shortage cannot publish a cache entry"
             );
         })

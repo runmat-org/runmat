@@ -25,13 +25,13 @@ pub(crate) fn checked_metadata_owner(
     let Value::Object(metadata) = value else {
         return Err("dynamic metadata target is not an object".into());
     };
-    if !metadata.class_name.is(DYNAMIC_PROPERTY_CLASS) {
+    if !metadata.class_name().is(DYNAMIC_PROPERTY_CLASS) {
         return Err("dynamic metadata class differs from its handle".into());
     }
-    let Some(Value::String(property)) = metadata.properties.get("Name") else {
+    let Some(Value::String(property)) = metadata.property("Name") else {
         return Err("dynamic metadata has no canonical property name".into());
     };
-    let Some(Value::HandleObject(receiver)) = metadata.properties.get(TARGET_FIELD) else {
+    let Some(Value::HandleObject(receiver)) = metadata.property(TARGET_FIELD) else {
         return Err("dynamic metadata has no receiver handle".into());
     };
     if !crate::is_handle_valid(receiver) {
@@ -41,7 +41,7 @@ pub(crate) fn checked_metadata_owner(
         let Value::Object(object) = stored else {
             return None;
         };
-        if object.class_name != receiver.class_name
+        if object.class_name() != &receiver.class_name
             || object.has_native_payload()
             || object.selected_class().is_none()
         {

@@ -111,12 +111,13 @@ impl PreparedBlock {
                     .iter()
                     .zip(&values)
                     .filter(|(cell, _)| !cell.slots.contains(&Some(slot)))
-                    .fold((false, f64::INFINITY), |(inverted, minimum), (_, value)| {
-                        match value {
+                    .fold(
+                        (false, f64::INFINITY),
+                        |(inverted, minimum), (_, value)| match value {
                             Some(value) => (inverted, minimum.min(*value)),
                             None => (true, minimum),
-                        }
-                    })
+                        },
+                    )
             })
             .collect();
         Ok(Accepted { values, complement })
@@ -243,7 +244,9 @@ impl PreparedBlock {
 fn aggregate(values: &[Option<f64>]) -> f64 {
     values
         .iter()
-        .try_fold(f64::INFINITY, |minimum, value| value.map(|v| minimum.min(v)))
+        .try_fold(f64::INFINITY, |minimum, value| {
+            value.map(|v| minimum.min(v))
+        })
         .unwrap_or(0.)
 }
 

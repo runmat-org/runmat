@@ -716,10 +716,27 @@ fn finite_requires_its_managed_owner_and_cancellation_or_rebind_revokes_new_clai
         RuntimeServicePorts::default().with_parallel(Rc::new(ManagedParallel(ledger.clone()))),
     )
     .with_cancellation_token(cancellation.token());
+    let owner = HostAllocationReceipt::capture_owner(Some(&runtime))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        ledger.snapshot().live_reserved_bytes,
+        0,
+        "a read-only checkpoint grants no bytes"
+    );
+    let probe = HostAllocationReceipt::admit(Some(&runtime), plan)
+        .unwrap()
+        .unwrap();
+    drop(probe);
+    owner.check(&runtime).unwrap();
     let receipt = HostAllocationReceipt::admit(Some(&runtime), plan)
         .unwrap()
         .unwrap();
     cancellation.cancel(CancellationReason::User);
+    assert!(matches!(
+        owner.check(&runtime),
+        Err(HostAllocationError::Cancelled)
+    ));
     assert!(matches!(
         receipt.checkpoint(&runtime),
         Err(HostAllocationError::Cancelled)
@@ -731,11 +748,35 @@ fn finite_requires_its_managed_owner_and_cancellation_or_rebind_revokes_new_clai
     let receipt = HostAllocationReceipt::admit(Some(&fresh), plan)
         .unwrap()
         .unwrap();
+    let owner = HostAllocationReceipt::capture_owner(Some(&fresh))
+        .unwrap()
+        .unwrap();
+    {
+        let other = CancellationSource::new();
+        let _scope = fresh.scoped_cancellation_token(other.token());
+        assert!(matches!(
+            owner.check(&fresh),
+            Err(HostAllocationError::StaleAuthority)
+        ));
+    }
+    owner.check(&fresh).unwrap();
     fresh.invalidate_host_effect_session_authority();
+    assert!(matches!(
+        owner.check(&fresh),
+        Err(HostAllocationError::StaleAuthority)
+    ));
     assert!(matches!(
         receipt.checkpoint(&fresh),
         Err(HostAllocationError::StaleAuthority)
     ));
     drop(receipt);
     assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+    let owner = HostAllocationReceipt::capture_owner(Some(&fresh))
+        .unwrap()
+        .unwrap();
+    ledger.set_epoch_for_test(4);
+    assert!(matches!(
+        owner.check(&fresh),
+        Err(HostAllocationError::StaleAuthority)
+    ));
 }

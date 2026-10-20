@@ -52,8 +52,8 @@ pub(super) fn selected_string_array(
         return ordinary(input, literal, select, invalid);
     }
 
-    let count = input.data.len();
-    let reuse_data = input.data.is_exact() && input.data.is_unique();
+    let count = input.data().len();
+    let reuse_data = input.data_owner().is_exact() && input.data_owner().is_unique();
     let reuse_shape = input.shape.is_admitted();
     let mut physical = 0usize;
     let mut claims = 0usize;
@@ -81,7 +81,7 @@ pub(super) fn selected_string_array(
             TextSelection::Literal => uses_literal = true,
             TextSelection::Input(source) => {
                 let text = input
-                    .data
+                    .data()
                     .get(source)
                     .ok_or_else(|| invalid("text source index exceeds input".into()))?;
                 if !text.has_retained_claim() {
@@ -158,13 +158,13 @@ pub(super) fn selected_string_array(
                 selected_text(&output, selected, literal_owner.as_ref(), &receipt, runtime)
                     .map_err(|cause| admission_error(runtime, cause))?;
             output
-                .data
-                .try_as_mut_slice_unique()
+                .try_data_mut_unique()
                 .ok_or_else(|| admission_error(runtime, HostAllocationError::StaleAuthority))?
                 [index] = replacement;
         }
         output.shape = shape;
-        let result = StringArray::from_admitted(output.data, output.shape).map_err(invalid)?;
+        let (data, shape, _, _) = output.into_parts();
+        let result = StringArray::from_admitted(data, shape).map_err(invalid)?;
         receipt
             .checkpoint(runtime)
             .map_err(|cause| admission_error(runtime, cause))?;
@@ -206,7 +206,7 @@ fn selected_text(
     match selection {
         TextSelection::Literal => Ok(literal.expect("quoted literal selection").clone()),
         TextSelection::Input(index) => {
-            let text = &input.data[index];
+            let text = &input.data()[index];
             if text.has_retained_claim() {
                 Ok(text.clone())
             } else {
@@ -230,9 +230,9 @@ fn ordinary(
         TextLiteral::Utf8(text) => text.to_owned(),
         TextLiteral::Chars(chars) => chars.iter().collect(),
     };
-    let data = (0..input.data.len())
+    let data = (0..input.data().len())
         .map(|index| match select(&input, index) {
-            TextSelection::Input(source) => input.data[source].clone(),
+            TextSelection::Input(source) => input.data()[source].clone(),
             TextSelection::Literal => Utf8Text::from(literal.clone()),
         })
         .collect();

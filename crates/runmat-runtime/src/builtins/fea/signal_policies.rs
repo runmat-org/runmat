@@ -329,12 +329,12 @@ pub(super) fn ensure_signal_policy_classes_registered() {
 }
 
 fn validate_policy_object(object: &ObjectInstance) -> Result<(), String> {
-    if object.properties.len() != 1
-        || !matches!(object.properties.values().next(), Some(Value::String(_)))
+    if object.properties().len() != 1
+        || !matches!(object.properties().values().next(), Some(Value::String(_)))
     {
         return Err(format!(
             "{} has a malformed policy value",
-            object.class_name
+            object.class_name()
         ));
     }
     Ok(())

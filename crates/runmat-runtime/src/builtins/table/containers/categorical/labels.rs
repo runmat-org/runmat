@@ -13,11 +13,11 @@ pub(crate) fn categorical_label_view(
     if !object.is_class(CATEGORICAL_CLASS) {
         return Err(invalid_variable("categorical: expected categorical object"));
     }
-    let categories = match object.properties.get("Categories") {
-        Some(Value::StringArray(array)) => &array.data,
+    let categories = match object.properties().get("Categories") {
+        Some(Value::StringArray(array)) => &array.data(),
         _ => return Err(invalid_variable("categorical: missing Categories property")),
     };
-    let codes = match object.properties.get("Codes") {
+    let codes = match object.properties().get("Codes") {
         Some(Value::Tensor(tensor)) => tensor,
         _ => return Err(invalid_variable("categorical: missing Codes property")),
     };
@@ -63,16 +63,16 @@ mod tests {
     #[test]
     fn borrowed_labels_match_owned_labels_for_integer_and_undefined_codes() {
         let codes = Tensor::from_f32(vec![2.0, f32::NAN, 1.5], vec![1, 3]).unwrap();
-        let mut object = ObjectInstance::new(CATEGORICAL_CLASS.to_string());
-        object
-            .properties
-            .insert("Codes".into(), Value::Tensor(codes));
-        object.properties.insert(
+        let mut object =
+            runmat_value::UnboundedObjectBuilder::with_property_capacity(CATEGORICAL_CLASS, 2);
+        object.insert("Codes".into(), Value::Tensor(codes));
+        object.insert(
             "Categories".into(),
             Value::StringArray(
                 StringArray::new(vec!["one".into(), "two".into()], vec![1, 2]).unwrap(),
             ),
         );
+        let mut object = object.finish();
         let view = categorical_label_view(&object).unwrap();
         let borrowed = (0..view.len())
             .map(|index| view.label_at(index).unwrap().to_owned())
@@ -80,10 +80,14 @@ mod tests {
         assert_eq!(borrowed, categorical_object_labels(&object).unwrap());
         assert_eq!(borrowed, ["two", "", ""]);
 
-        object.properties.insert(
-            "Codes".into(),
-            Value::Tensor(Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).unwrap()),
-        );
+        object
+            .try_replace_property_unique(
+                "Codes",
+                Value::Tensor(
+                    Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).unwrap(),
+                ),
+            )
+            .expect("detached fixture has a unique property generation");
         assert_eq!(
             categorical_label_view(&object)
                 .unwrap()
@@ -96,16 +100,16 @@ mod tests {
     #[test]
     fn observation_view_distinguishes_undefined_from_invalid_nonmissing_code() {
         let codes = Tensor::new(vec![f64::NAN, 2.0, 3.0], vec![3, 1]).unwrap();
-        let mut object = ObjectInstance::new(CATEGORICAL_CLASS.to_string());
-        object
-            .properties
-            .insert("Codes".into(), Value::Tensor(codes));
-        object.properties.insert(
+        let mut object =
+            runmat_value::UnboundedObjectBuilder::with_property_capacity(CATEGORICAL_CLASS, 2);
+        object.insert("Codes".into(), Value::Tensor(codes));
+        object.insert(
             "Categories".into(),
             Value::StringArray(
                 StringArray::new(vec!["one".into(), "two".into()], vec![2, 1]).unwrap(),
             ),
         );
+        let object = object.finish();
         let view = categorical_label_view(&object).unwrap();
         assert_eq!(view.observation_label_at(0).unwrap(), None);
         assert_eq!(view.observation_label_at(1).unwrap(), Some("two"));

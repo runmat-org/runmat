@@ -98,31 +98,37 @@ fn known_invalid_ecdf_controls_and_cdfplot_shape_precede_downloads() {
     ));
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
 
-    let error = block_on(ecdf_builtin(vec![
-        resident(),
-        Value::from("Function"),
-        Value::from("sideways"),
-    ]))
+    let error = block_on(ecdf_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            resident(),
+            Value::from("Function"),
+            Value::from("sideways"),
+        ]),
+    ))
     .unwrap_err();
     assert!(error.message().contains("unsupported Function"), "{error}");
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
 
-    let error = block_on(ecdf_builtin(vec![
-        resident(),
-        Value::from("Frequency"),
-        resident(),
-        Value::from("Bounds"),
-        Value::from("sideways"),
-    ]))
+    let error = block_on(ecdf_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            resident(),
+            Value::from("Frequency"),
+            resident(),
+            Value::from("Bounds"),
+            Value::from("sideways"),
+        ]),
+    ))
     .unwrap_err();
     assert!(error.message().contains("unsupported Bounds"), "{error}");
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
 
-    let error = block_on(ecdf_builtin(vec![
-        resident(),
-        Value::from("Frequency"),
-        Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![2, 1]).unwrap()),
-    ]))
+    let error = block_on(ecdf_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            resident(),
+            Value::from("Frequency"),
+            Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![2, 1]).unwrap()),
+        ]),
+    ))
     .unwrap_err();
     assert!(
         error.message().contains("same number of elements"),
@@ -130,7 +136,14 @@ fn known_invalid_ecdf_controls_and_cdfplot_shape_precede_downloads() {
     );
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
 
-    let error = block_on(ecdf_builtin(vec![resident(), resident(), Value::Num(1.0)])).unwrap_err();
+    let error = block_on(ecdf_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            resident(),
+            resident(),
+            Value::Num(1.0),
+        ]),
+    ))
+    .unwrap_err();
     assert!(
         error.message().contains("option names must be text"),
         "{error}"
@@ -141,15 +154,19 @@ fn known_invalid_ecdf_controls_and_cdfplot_shape_precede_downloads() {
         .owner
         .allocate_zeroed(vec![2, 2], NumericElementType::F64, GpuTensorStorage::Real)
         .unwrap();
-    let error = block_on(ecdf_builtin(vec![Value::GpuTensor(
-        malformed.handle.clone(),
-    )]))
+    let error = block_on(ecdf_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(
+            malformed.handle.clone(),
+        )]),
+    ))
     .unwrap_err();
     assert!(error.message().contains("interval-censored"), "{error}");
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
-    let error = block_on(cdfplot_builtin(vec![Value::GpuTensor(
-        malformed.handle.clone(),
-    )]))
+    let error = block_on(cdfplot_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(
+            malformed.handle.clone(),
+        )]),
+    ))
     .unwrap_err();
     assert!(error.message().contains("expected a vector"), "{error}");
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
@@ -163,9 +180,11 @@ fn known_invalid_ecdf_controls_and_cdfplot_shape_precede_downloads() {
             GpuTensorStorage::ComplexInterleaved,
         )
         .unwrap();
-    let error = block_on(cdfplot_builtin(vec![Value::GpuTensor(
-        complex.handle.clone(),
-    )]))
+    let error = block_on(cdfplot_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(
+            complex.handle.clone(),
+        )]),
+    ))
     .unwrap_err();
     assert!(error.message().contains("expected real numeric"), "{error}");
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
@@ -192,11 +211,17 @@ fn gather_errors_preserve_owner_cause_and_borrowed_lease() {
         .unwrap();
     let resident = || Value::GpuTensor(allocation.handle.clone());
 
-    let error = block_on(ecdf_builtin(vec![resident()])).unwrap_err();
+    let error = block_on(ecdf_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![resident()]),
+    ))
+    .unwrap_err();
     assert_original_cause(&error, "RunMat:ecdf:InvalidArgument");
     #[cfg(feature = "plot-core")]
     {
-        let error = block_on(cdfplot_builtin(vec![resident()])).unwrap_err();
+        let error = block_on(cdfplot_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![resident()]),
+        ))
+        .unwrap_err();
         assert_original_cause(&error, "RunMat:cdfplot:InvalidArgument");
         assert_eq!(provider.downloads.load(Ordering::SeqCst), 2);
     }
@@ -225,12 +250,16 @@ fn abandoned_unpolled_and_pending_calls_retain_borrowed_input() {
         .allocate_zeroed(vec![4, 1], NumericElementType::F64, GpuTensorStorage::Real)
         .unwrap();
 
-    let unpolled = ecdf_builtin(vec![Value::GpuTensor(allocation.handle.clone())]);
+    let unpolled = ecdf_builtin(crate::builtins::common::test_support::builtin_arguments(
+        vec![Value::GpuTensor(allocation.handle.clone())],
+    ));
     drop(unpolled);
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
-    let mut pending = Box::pin(ecdf_builtin(vec![Value::GpuTensor(
-        allocation.handle.clone(),
-    )]));
+    let mut pending = Box::pin(ecdf_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(
+            allocation.handle.clone(),
+        )]),
+    ));
     let mut context = Context::from_waker(futures::task::noop_waker_ref());
     assert!(pending.as_mut().poll(&mut context).is_pending());
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
@@ -423,11 +452,13 @@ fn resident_frequency_alias_on_second_output_preserves_borrowed_control_and_clea
         .unwrap();
     *provider.borrowed_alias.lock().unwrap() = Some(frequency.handle.clone());
     let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
-    let error = block_on(ecdf_builtin(vec![
-        Value::GpuTensor(sample.handle.clone()),
-        Value::from("Frequency"),
-        Value::GpuTensor(frequency.handle.clone()),
-    ]))
+    let error = block_on(ecdf_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::GpuTensor(sample.handle.clone()),
+            Value::from("Frequency"),
+            Value::GpuTensor(frequency.handle.clone()),
+        ]),
+    ))
     .unwrap_err();
     assert_eq!(error.identifier(), Some("RunMat:ecdf:Internal"));
     assert!(error.message().contains("alias"), "{error}");

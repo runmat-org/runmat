@@ -16,8 +16,8 @@ impl Target {
 
     pub(super) fn source_order(&self) -> Vec<String> {
         match self {
-            Self::Scalar(structure) => structure.field_names().cloned().collect(),
-            Self::Array(array) => array.field_names().cloned().collect(),
+            Self::Scalar(structure) => structure.field_names().map(str::to_owned).collect(),
+            Self::Array(array) => array.field_names().map(str::to_owned).collect(),
         }
     }
 
@@ -28,15 +28,31 @@ impl Target {
         }
     }
 
-    pub(super) fn reorder(self, fields: &[String]) -> crate::BuiltinResult<Value> {
+    pub(super) fn reorder(
+        self,
+        runtime: Option<&crate::context::RuntimeContext>,
+        fields: &[String],
+    ) -> crate::BuiltinResult<crate::execution::RootedValue> {
         match self {
-            Self::Scalar(structure) => reorder_structure(structure, fields).map(Value::Struct),
-            Self::Array(mut array) => {
-                array
-                    .reorder_fields(fields)
-                    .map_err(super::error::rebuild)?;
-                Ok(Value::StructArray(array))
-            }
+            Self::Scalar(structure) => super::super::construction::scalar(
+                runtime,
+                fields.iter().map(|name| {
+                    (
+                        name.as_str(),
+                        structure.fields.get(name).expect("validated field order"),
+                    )
+                }),
+            ),
+            Self::Array(array) => super::super::construction::array(
+                runtime,
+                fields.iter().map(|name| {
+                    (
+                        name.as_str(),
+                        array.column_owner(name).expect("validated field order"),
+                    )
+                }),
+                array.shape_owner(),
+            ),
         }
     }
 }
@@ -53,26 +69,12 @@ fn validate_fields(structure: &StructValue, fields: &[String]) -> crate::Builtin
 }
 
 fn validate_field_set<'a>(
-    source: impl Iterator<Item = &'a String>,
+    source: impl Iterator<Item = &'a str>,
     fields: &[String],
 ) -> crate::BuiltinResult<()> {
     let source = source.collect::<Vec<_>>();
-    if source.len() != fields.len() || !fields.iter().all(|name| source.contains(&name)) {
+    if source.len() != fields.len() || !fields.iter().all(|name| source.contains(&name.as_str())) {
         return Err(super::error::field_mismatch());
     }
     Ok(())
-}
-
-fn reorder_structure(
-    mut structure: StructValue,
-    fields: &[String],
-) -> crate::BuiltinResult<StructValue> {
-    let mut reordered = StructValue::new();
-    for name in fields {
-        let value = structure
-            .remove(name)
-            .ok_or_else(|| super::error::unknown_field(name))?;
-        reordered.insert(name.clone(), value);
-    }
-    Ok(reordered)
 }

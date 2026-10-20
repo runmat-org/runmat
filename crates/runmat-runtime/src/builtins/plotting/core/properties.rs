@@ -2,7 +2,9 @@ use runmat_plot::plots::figure::AxisLimitAxis;
 use runmat_plot::plots::{
     ColorMap, LegendStyle, NumericPlotData, PolarHistogramDisplayStyle, ShadingMode, TextStyle,
 };
-use runmat_value::{CellArray, CharArray, NumericScalar, StringArray, StructValue, Tensor, Value};
+use runmat_value::{
+    CellArray, CharArray, NumericScalar, StringArray, Tensor, UnboundedStructValueBuilder, Value,
+};
 use std::borrow::Cow;
 
 #[path = "properties/async_readback.rs"]
@@ -174,13 +176,18 @@ pub fn set_properties(
     args: &[Value],
     builtin: &'static str,
 ) -> BuiltinResult<()> {
-    set_properties_with_runtime(None, handle, args, builtin)
+    set_properties_with_runtime(
+        None,
+        handle,
+        crate::call::FunctionArgumentView::from_slice(args),
+        builtin,
+    )
 }
 
 pub(crate) fn set_properties_with_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
     handle: PlotHandle,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
     set_properties_with_authority(
@@ -194,7 +201,7 @@ pub(crate) fn set_properties_with_runtime(
 pub(crate) fn set_properties_with_authority(
     authority: &super::state::PropertyMutationTarget,
     handle: PlotHandle,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
     set_properties_for_target(authority, (&handle).into(), args, builtin)?
@@ -205,7 +212,7 @@ fn set_properties_for_target(
     authority: &super::state::PropertyMutationTarget,
 
     handle: PropertySetHandle<'_>,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     builtin: &'static str,
 ) -> BuiltinResult<PropertySetOutcome> {
     if args.is_empty() || !args.len().is_multiple_of(2) {
@@ -315,7 +322,10 @@ fn set_properties_for_target(
     }
 }
 
-pub fn parse_text_style_pairs(builtin: &'static str, args: &[Value]) -> BuiltinResult<TextStyle> {
+pub fn parse_text_style_pairs(
+    builtin: &'static str,
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<TextStyle> {
     if args.is_empty() {
         return Ok(TextStyle::default());
     }
@@ -461,8 +471,8 @@ fn heatmap_exact_integer_limits_are_ordered(value: &Value) -> bool {
 
 pub fn split_legend_style_pairs<'a>(
     builtin: &'static str,
-    args: &'a [Value],
-) -> BuiltinResult<(&'a [Value], LegendStyle)> {
+    args: crate::call::FunctionArgumentView<'a>,
+) -> BuiltinResult<(crate::call::FunctionArgumentView<'a>, LegendStyle)> {
     let mut style = LegendStyle::default();
     let mut enabled = true;
     let mut labels = None;
@@ -498,7 +508,7 @@ pub fn split_legend_style_pairs<'a>(
         )?;
         split -= 2;
     }
-    Ok((&args[..split], style))
+    Ok((args.range(..split)?, style))
 }
 
 pub fn map_figure_error(
@@ -520,7 +530,7 @@ fn get_figure_property(
 fn get_root_property(property: Option<&str>, builtin: &'static str) -> BuiltinResult<Value> {
     match property.map(canonical_property_name).as_deref() {
         None => {
-            let mut st = StructValue::new();
+            let mut st = runmat_value::UnboundedStructValueBuilder::new();
             st.insert("Handle", Value::Num(0.0));
             st.insert("Type", Value::String("root".into()));
             st.insert("CurrentFigure", current_root_figure_value());
@@ -536,7 +546,7 @@ fn get_root_property(property: Option<&str>, builtin: &'static str) -> BuiltinRe
             for (name, value) in root_default_properties() {
                 st.insert(name, root_property_value_to_value(value));
             }
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("handle") => Ok(Value::Num(0.0)),
         Some("type") => Ok(Value::String("root".into())),
@@ -667,7 +677,7 @@ fn root_property_value_from_value(
         Value::Num(value) => Ok(RootPropertyValue::Num(*value)),
         Value::Int(value) => Ok(RootPropertyValue::Num(value.to_f64())),
         Value::String(value) => Ok(RootPropertyValue::String(value.as_str().to_owned())),
-        Value::CharArray(value) => Ok(RootPropertyValue::String(value.data.iter().collect())),
+        Value::CharArray(value) => Ok(RootPropertyValue::String(value.data().iter().collect())),
         Value::Tensor(value) => Ok(RootPropertyValue::Tensor(value.clone())),
         Value::StringArray(value) => Ok(RootPropertyValue::StringArray(value.clone())),
         _ => Err(plotting_error(
@@ -737,7 +747,7 @@ fn get_text_property(
     };
     match property.map(canonical_property_name).as_deref() {
         None => {
-            let mut st = StructValue::new();
+            let mut st = runmat_value::UnboundedStructValueBuilder::new();
             st.insert("Type", Value::String("text".into()));
             st.insert("Parent", parent.clone());
             st.insert("Children", handles_value(Vec::new()));
@@ -758,7 +768,7 @@ fn get_text_property(
             if let Some(color) = style.color {
                 st.insert("Color", rgb_triplet_value(color));
             }
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("text".into())),
         Some("parent") => Ok(parent),
@@ -822,7 +832,7 @@ fn get_ruler_property(
     let parent = Value::Num(super::state::encode_axes_handle(handle, axes_index));
     match property.map(canonical_property_name).as_deref() {
         None => {
-            let mut st = StructValue::new();
+            let mut st = runmat_value::UnboundedStructValueBuilder::new();
             st.insert("Type", Value::String("numericruler".into()));
             st.insert("Parent", parent);
             st.insert("Children", handles_value(Vec::new()));
@@ -832,7 +842,7 @@ fn get_ruler_property(
                 Value::string(tick_format_or_default(format)),
             );
             st.insert("TickLabelRotation", Value::Num(rotation.unwrap_or(0.0)));
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("numericruler".into())),
         Some("parent") => Ok(parent),
@@ -859,7 +869,7 @@ fn get_legend_property(
         .map_err(|err| map_figure_error(builtin, err))?;
     match property.map(canonical_property_name).as_deref() {
         None => {
-            let mut st = StructValue::new();
+            let mut st = runmat_value::UnboundedStructValueBuilder::new();
             st.insert("Type", Value::String("legend".into()));
             st.insert(
                 "Parent",
@@ -898,7 +908,7 @@ fn get_legend_property(
             if let Some(color) = meta.legend_style.text_color {
                 st.insert("TextColor", rgb_triplet_value(color));
             }
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("visible") => Ok(Value::Bool(
             meta.legend_enabled && meta.legend_style.visible,
@@ -992,8 +1002,8 @@ pub(crate) fn property_name_text(value: &Value, builtin: &'static str) -> Builti
     }
     let text = match value {
         Value::String(text) => text.as_str().to_owned(),
-        Value::StringArray(strings) => strings.data[0].as_str().to_owned(),
-        Value::CharArray(chars) => chars.data.iter().collect(),
+        Value::StringArray(strings) => strings.data()[0].as_str().to_owned(),
+        Value::CharArray(chars) => chars.data().iter().collect(),
         _ => {
             return Err(plotting_error(
                 builtin,
@@ -2017,7 +2027,7 @@ fn get_histogram_property(
 ) -> BuiltinResult<Value> {
     match property.map(canonical_property_name).as_deref() {
         None => {
-            let mut st = StructValue::new();
+            let mut st = runmat_value::UnboundedStructValueBuilder::new();
             st.insert("Type", Value::String("histogram".into()));
             st.insert(
                 "Parent",
@@ -2059,7 +2069,7 @@ fn get_histogram_property(
                 "DisplayName",
                 Value::string(hist.display_name.clone().unwrap_or_default()),
             );
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("histogram".into())),
         Some("parent") => Ok(Value::Num(super::state::encode_axes_handle(
@@ -2124,7 +2134,7 @@ fn get_histogram2_property(
                 "DisplayName",
                 Value::string(hist.display_name.clone().unwrap_or_default()),
             );
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("histogram2".into())),
         Some("parent") => Ok(child_parent_handle(hist.figure, hist.axes_index)),
@@ -2179,7 +2189,7 @@ fn get_binscatter_property(
                 "DisplayName",
                 Value::string(binscatter.display_name.clone().unwrap_or_default()),
             );
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("binscatter".into())),
         Some("parent") => Ok(child_parent_handle(
@@ -2446,12 +2456,15 @@ fn apply_plot_child_properties(
 
     handle: f64,
     state: &super::state::PlotChildHandleState,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
     let mut pairs = Vec::with_capacity(args.len() / 2);
     for pair in args.chunks_exact(2) {
-        pairs.push((property_name(&pair[0], builtin)?, &pair[1]));
+        pairs.push((
+            property_name(&pair[0], builtin)?,
+            pair.get(1).expect("paired property value"),
+        ));
     }
     match state {
         super::state::PlotChildHandleState::Line(plot) => {
@@ -2499,8 +2512,12 @@ fn child_parent_handle(figure: FigureHandle, axes_index: usize) -> Value {
     Value::Num(super::state::encode_axes_handle(figure, axes_index))
 }
 
-fn child_base_struct(kind: &str, figure: FigureHandle, axes_index: usize) -> StructValue {
-    let mut st = StructValue::new();
+fn child_base_struct(
+    kind: &str,
+    figure: FigureHandle,
+    axes_index: usize,
+) -> UnboundedStructValueBuilder {
+    let mut st = UnboundedStructValueBuilder::new();
     st.insert("Type", Value::String(kind.into()));
     st.insert("Parent", child_parent_handle(figure, axes_index));
     st.insert("Children", handles_value(Vec::new()));
@@ -2653,7 +2670,7 @@ fn get_world_text_property(
                 st.insert("FontSize", Value::Num(font_size as f64));
             }
             st.insert("Visible", Value::Bool(annotation.style.visible));
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("text".into())),
         Some("parent") => Ok(child_parent_handle(handle.figure, handle.axes_index)),
@@ -2816,7 +2833,7 @@ fn line_property_with_data(
                 Value::String(if line.visible { "on" } else { "off" }.into()),
             );
             insert_line_marker_struct_props(&mut st, line.marker.as_ref());
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("xdata") => Ok(numeric_plot_data_value(&x_data)),
         Some("ydata") => Ok(numeric_plot_data_value(&y_data)),
@@ -2895,7 +2912,7 @@ fn get_animated_line_property(
                         animated_line_maximum_value(line_handle.maximum_num_points),
                     );
                     insert_line_marker_struct_props(&mut st, line.marker.as_ref());
-                    Ok(Value::Struct(st))
+                    Ok(Value::Struct(st.finish()))
                 }
                 Some("type") => Ok(Value::String("animatedline".into())),
                 Some("parent") => Ok(child_parent_handle(
@@ -2949,7 +2966,7 @@ fn get_animated_line_property(
                         "MaximumNumPoints",
                         animated_line_maximum_value(line_handle.maximum_num_points),
                     );
-                    Ok(Value::Struct(st))
+                    Ok(Value::Struct(st.finish()))
                 }
                 Some("type") => Ok(Value::String("animatedline".into())),
                 Some("parent") => Ok(child_parent_handle(
@@ -3045,7 +3062,7 @@ fn get_reference_line_property(
                 "Visible",
                 Value::String(if line.visible { "on" } else { "off" }.into()),
             );
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("constantline".into())),
         Some("parent") => Ok(child_parent_handle(
@@ -3107,7 +3124,7 @@ fn get_stairs_property(
             if let Some(label) = stairs.label.clone() {
                 st.insert("DisplayName", Value::string(label));
             }
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("stairs".into())),
         Some("parent") => Ok(child_parent_handle(
@@ -3180,7 +3197,7 @@ fn scatter_property_with_data(
             if let Some(label) = scatter.label.clone() {
                 st.insert("DisplayName", Value::string(label));
             }
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("xdata") => Ok(numeric_plot_data_value(&x_data)),
         Some("ydata") => Ok(numeric_plot_data_value(&y_data)),
@@ -3253,7 +3270,7 @@ fn get_bar_property(
             if let Some(label) = bar.label.clone() {
                 st.insert("DisplayName", Value::string(label));
             }
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("bar".into())),
         Some("parent") => Ok(child_parent_handle(
@@ -3312,7 +3329,7 @@ fn get_surface_property(
                 "DisplayName",
                 Value::string(surface.label.clone().unwrap_or_default()),
             );
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("surface".into())),
         Some("parent") => Ok(child_parent_handle(
@@ -3390,7 +3407,7 @@ fn get_function_surface_property(
                 "DisplayName",
                 Value::string(surface.label.clone().unwrap_or_default()),
             );
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("functionsurface".into())),
         Some("parent") => Ok(child_parent_handle(
@@ -3462,7 +3479,7 @@ fn get_function_surface_property(
 }
 
 fn insert_function_surface_metadata(
-    st: &mut StructValue,
+    st: &mut UnboundedStructValueBuilder,
     function_surface: &super::state::FunctionSurfaceHandleState,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
@@ -3561,7 +3578,7 @@ fn get_function_contour_property(
                 "DisplayName",
                 Value::string(contour.label.clone().unwrap_or_default()),
             );
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("functioncontour".into())),
         Some("parent") => Ok(child_parent_handle(
@@ -3647,7 +3664,7 @@ fn get_patch_property(
             if let Some(label) = patch.label() {
                 st.insert("DisplayName", Value::string(label.to_string()));
             }
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("patch".into())),
         Some("parent") => Ok(child_parent_handle(
@@ -3772,7 +3789,7 @@ fn line3_property_with_data(
                 "Visible",
                 Value::String(if line.visible { "on" } else { "off" }.into()),
             );
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("line".into())),
         Some("parent") => Ok(child_parent_handle(
@@ -3863,7 +3880,7 @@ fn get_scatter3_property(
             if let Some(label) = scatter.label.clone() {
                 st.insert("DisplayName", Value::string(label));
             }
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("scatter".into())),
         Some("parent") => Ok(child_parent_handle(
@@ -3912,7 +3929,7 @@ fn get_pie_property(
             if let Some(label) = pie.label.clone() {
                 st.insert("DisplayName", Value::string(label));
             }
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("pie".into())),
         Some("parent") => Ok(child_parent_handle(
@@ -3949,7 +3966,7 @@ fn get_contour_property(
             if let Some(label) = contour.label.clone() {
                 st.insert("DisplayName", Value::string(label));
             }
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("contour".into())),
         Some("parent") => Ok(child_parent_handle(
@@ -3985,7 +4002,7 @@ fn get_contour_fill_property(
             if let Some(label) = fill.label.clone() {
                 st.insert("DisplayName", Value::string(label));
             }
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("contour".into())),
         Some("parent") => Ok(child_parent_handle(
@@ -4032,7 +4049,7 @@ fn get_stem_property(
         .unwrap_or_else(|| tensor_from_vec(stem.y.clone()));
     match property.map(canonical_property_name).as_deref() {
         None => {
-            let mut st = StructValue::new();
+            let mut st = runmat_value::UnboundedStructValueBuilder::new();
             st.insert("Type", Value::String("stem".into()));
             st.insert(
                 "Parent",
@@ -4062,7 +4079,7 @@ fn get_stem_property(
                 st.insert("MarkerEdgeColor", rgb_triplet_value(marker.edge_color));
                 st.insert("Filled", Value::Bool(marker.filled));
             }
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("stem".into())),
         Some("parent") => Ok(Value::Num(super::state::encode_axes_handle(
@@ -4128,7 +4145,7 @@ fn get_errorbar_property(
     };
     match property.map(canonical_property_name).as_deref() {
         None => {
-            let mut st = StructValue::new();
+            let mut st = runmat_value::UnboundedStructValueBuilder::new();
             st.insert("Type", Value::String("errorbar".into()));
             st.insert(
                 "Parent",
@@ -4152,7 +4169,7 @@ fn get_errorbar_property(
                 );
                 st.insert("MarkerSize", Value::Num(marker.size as f64));
             }
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("errorbar".into())),
         Some("parent") => Ok(Value::Num(super::state::encode_axes_handle(
@@ -4208,7 +4225,7 @@ fn get_quiver_property(
     let source = quiver.source_data();
     match property.map(canonical_property_name).as_deref() {
         None => {
-            let mut st = StructValue::new();
+            let mut st = runmat_value::UnboundedStructValueBuilder::new();
             st.insert("Type", Value::String("quiver".into()));
             st.insert(
                 "Parent",
@@ -4253,7 +4270,7 @@ fn get_quiver_property(
                 st.insert("UData", tensor_from_vec(quiver.u.clone()));
                 st.insert("VData", tensor_from_vec(quiver.v.clone()));
             }
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("quiver".into())),
         Some("parent") => Ok(Value::Num(super::state::encode_axes_handle(
@@ -4335,7 +4352,7 @@ fn get_image_property(
     }
     match property.map(canonical_property_name).as_deref() {
         None => {
-            let mut st = StructValue::new();
+            let mut st = runmat_value::UnboundedStructValueBuilder::new();
             st.insert("Type", Value::String("image".into()));
             st.insert(
                 "Parent",
@@ -4354,7 +4371,7 @@ fn get_image_property(
                 "CDataMapping",
                 Value::string(image_handle.c_data_mapping.clone()),
             );
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("image".into())),
         Some("parent") => Ok(Value::Num(super::state::encode_axes_handle(
@@ -4405,7 +4422,7 @@ fn get_heatmap_property(
         .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid heatmap axes")))?;
     match property.map(canonical_property_name).as_deref() {
         None => {
-            let mut st = StructValue::new();
+            let mut st = runmat_value::UnboundedStructValueBuilder::new();
             st.insert("Type", Value::String("heatmap".into()));
             st.insert(
                 "Parent",
@@ -4459,7 +4476,7 @@ fn get_heatmap_property(
                         crate::builtins::plotting::op_common::limits::limit_value(meta.color_limits)
                     }),
             );
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("heatmap".into())),
         Some("parent") => Ok(Value::Num(super::state::encode_axes_handle(
@@ -4514,7 +4531,7 @@ fn get_area_property(
     };
     match property.map(canonical_property_name).as_deref() {
         None => {
-            let mut st = StructValue::new();
+            let mut st = runmat_value::UnboundedStructValueBuilder::new();
             st.insert("Type", Value::String("area".into()));
             st.insert(
                 "Parent",
@@ -4528,7 +4545,7 @@ fn get_area_property(
             st.insert("YData", tensor_from_vec(area.y.clone()));
             st.insert("BaseValue", Value::Num(area.baseline));
             st.insert("Color", rgb_triplet_value(area.color));
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("area".into())),
         Some("parent") => Ok(Value::Num(super::state::encode_axes_handle(
@@ -7439,11 +7456,11 @@ fn tick_mode_value<T>(ticks: Option<&Vec<T>>) -> Value {
 fn tick_labels_from_value(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<String>> {
     match value {
         Value::String(s) => Ok(vec![s.as_str().to_owned()]),
-        Value::StringArray(strings) => Ok(strings.data.iter().map(|s| s.as_str().to_owned()).collect()),
+        Value::StringArray(strings) => Ok(strings.data().iter().map(|s| s.as_str().to_owned()).collect()),
         Value::CharArray(chars) => Ok(char_array_rows(chars)),
         Value::Cell(cell) => {
-            let mut labels = Vec::with_capacity(cell.data.len());
-            for entry in &cell.data {
+            let mut labels = Vec::with_capacity(cell.data().len());
+            for entry in cell.data() {
                 labels.extend(tick_labels_from_value(entry, builtin)?);
             }
             Ok(labels)
@@ -7495,7 +7512,7 @@ fn char_array_rows(chars: &CharArray) -> Vec<String> {
         .map(|row| {
             let start = row * chars.cols;
             let end = start + chars.cols;
-            chars.data[start..end]
+            chars.data()[start..end]
                 .iter()
                 .collect::<String>()
                 .trim_end()
@@ -7605,7 +7622,7 @@ fn collect_label_strings(builtin: &'static str, args: &[Value]) -> BuiltinResult
     for arg in args {
         match arg {
             Value::StringArray(arr) => {
-                labels.extend(arr.data.iter().map(|s| s.as_str().to_owned()))
+                labels.extend(arr.data().iter().map(|s| s.as_str().to_owned()))
             }
             Value::Cell(cell) => {
                 for row in 0..cell.rows {
@@ -7683,9 +7700,11 @@ pub(crate) fn label_strings_from_value(
     label_context: &str,
 ) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::StringArray(array) => Ok(array.data.iter().map(|s| s.as_str().to_owned()).collect()),
+        Value::StringArray(array) => {
+            Ok(array.data().iter().map(|s| s.as_str().to_owned()).collect())
+        }
         Value::Cell(cell) => cell
-            .data
+            .data()
             .iter()
             .map(|item| {
                 value_as_text_string(item).ok_or_else(|| {
@@ -7696,7 +7715,7 @@ pub(crate) fn label_strings_from_value(
                 })
             })
             .collect(),
-        Value::CharArray(chars) if chars.rows == 1 => Ok(vec![chars.data.iter().collect()]),
+        Value::CharArray(chars) if chars.rows == 1 => Ok(vec![chars.data().iter().collect()]),
         Value::String(text) => Ok(vec![text.as_str().to_owned()]),
         Value::Tensor(tensor) => Ok((0..tensor.len())
             .map(|index| {
@@ -7735,7 +7754,7 @@ fn heatmap_on_off_value(value: &Value) -> Option<bool> {
     match value {
         Value::Bool(value) => Some(*value),
         Value::CharArray(chars) => {
-            let text: String = chars.data.iter().collect();
+            let text: String = chars.data().iter().collect();
             heatmap_on_off_text(&text)
         }
         Value::String(text) => heatmap_on_off_text(text),
@@ -8098,7 +8117,7 @@ fn patch_edge_color_property(
 }
 
 fn insert_line_marker_struct_props(
-    st: &mut StructValue,
+    st: &mut UnboundedStructValueBuilder,
     marker: Option<&runmat_plot::plots::line::LineMarkerAppearance>,
 ) {
     if let Some(marker) = marker {

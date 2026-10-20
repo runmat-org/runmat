@@ -26,7 +26,30 @@ pub struct Closure {
     instance: CallableInstanceId,
 }
 
+#[derive(Debug)]
+pub enum ClosureHeaderError {
+    CapturesNotShared,
+    Allocation(crate::ExactHostNumericAllocationError),
+}
+
 impl Closure {
+    /// Constructs only the original immutable header. Captures must already
+    /// have their canonical shared owner; this never detaches or copies them.
+    pub fn try_from_data_with_exact_header(
+        data: ClosureData,
+        permit: &dyn crate::ExactHostAllocationPermit,
+    ) -> Result<Self, ClosureHeaderError> {
+        if !data.captures.is_shallow_clone() {
+            return Err(ClosureHeaderError::CapturesNotShared);
+        }
+        let data = crate::immutable_metadata::ImmutableMetadata::try_new_exact(data, permit)
+            .map_err(ClosureHeaderError::Allocation)?;
+        Ok(Self {
+            data,
+            instance: CallableInstanceId::mint(),
+        })
+    }
+
     pub fn new(
         function_name: String,
         binding: Option<crate::BoundFunctionBinding>,

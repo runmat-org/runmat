@@ -49,10 +49,12 @@ pub(super) struct ResolvedFreadControls {
 }
 
 impl<'a> PreparedFreadCall<'a> {
-    pub(super) fn new(fid: &'a Value, rest: &'a [Value]) -> BuiltinResult<Self> {
-        let references: Vec<&Value> = rest.iter().collect();
+    pub(super) fn new(
+        fid: &'a Value,
+        rest: crate::call::FunctionArgumentView<'a>,
+    ) -> BuiltinResult<Self> {
         let (size, precision, skip, machine, like) =
-            map_string_result(classify_arguments(&references), &FREAD_ERROR_INVALID_INPUT)?;
+            map_string_result(classify_arguments(rest), &FREAD_ERROR_INVALID_INPUT)?;
         if like.is_some() {
             crate::compatibility::ensure_builtin_extension_enabled(
                 &FREAD_LIKE_EXTENSION,

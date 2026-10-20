@@ -5,7 +5,7 @@ fn reference(bytes: &[u8]) -> ValueRef {
     let digest = Digest::sha256(bytes);
     let context = Digest::sha256(b"catalog-object-test-authority");
     ValueRef {
-        schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1,
+        schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION,
         id: artifact_object_value_id(digest, context, "catalog-object-test"),
         logical_digest: digest,
         encoded_length: bytes.len() as u64,

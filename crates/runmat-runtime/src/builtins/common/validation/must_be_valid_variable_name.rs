@@ -8,15 +8,15 @@ use runmat_builtins::{
     binding_variant = "default",
     builtin_path = "crate::builtins::common::validation::must_be_valid_variable_name"
 )]
-fn builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+fn builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     evaluate(args)
 }
 
-pub(super) fn evaluate(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) fn evaluate(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     super::admission::inputs(
         &MUST_BE_VALID_VARIABLE_NAME_CATALOG_ENTRY,
         &MUST_BE_VALID_VARIABLE_NAME_ERROR_OUTPUTS,
-        &args,
+        args.view(),
     )?;
     super::admission::reject_resident_text(&MUST_BE_VALID_VARIABLE_NAME_CATALOG_ENTRY, &args[0])?;
     super::check_validator(

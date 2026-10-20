@@ -96,7 +96,7 @@ pub(crate) fn columns_from_value(
         Value::LogicalArray(value) => numeric::logical_columns(base_name, value, split_matrices),
         Value::StringArray(value) => text::string_columns(base_name, value, split_matrices),
         Value::Cell(value) if is_group_vector_list(&value) => {
-            let mut columns = Vec::with_capacity(value.data.len());
+            let mut columns = Vec::with_capacity(value.data().len());
             match value.into_owned_data() {
                 Ok(values) => {
                     for (index, value) in values.into_iter().enumerate() {
@@ -108,9 +108,9 @@ pub(crate) fn columns_from_value(
                     }
                 }
                 Err(cell) => {
-                    for index in 0..cell.data.len() {
+                    for index in 0..cell.data().len() {
                         let value = cell
-                            .data
+                            .data_owner()
                             .retain_value_at(index)
                             .map_err(|error| error.to_string())?;
                         columns.extend(super::retained::columns(
@@ -135,8 +135,8 @@ pub(crate) fn columns_from_value(
 }
 
 pub(super) fn is_group_vector_list(value: &CellArray) -> bool {
-    !value.data.is_empty()
-        && value.data.iter().all(|value| {
+    !value.data().is_empty()
+        && value.data().iter().all(|value| {
             matches!(
                 value,
                 Value::Tensor(_)

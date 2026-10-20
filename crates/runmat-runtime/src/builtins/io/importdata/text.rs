@@ -1,5 +1,5 @@
 use super::*;
-use runmat_value::{CellArray, StructValue, Tensor};
+use runmat_value::{CellArray, Tensor};
 
 #[path = "text/lines.rs"]
 mod lines;
@@ -79,7 +79,7 @@ pub(super) async fn import_text_data(
         });
     }
 
-    let mut out = StructValue::new();
+    let mut out = runmat_value::UnboundedStructValueBuilder::new();
     out.insert("data", Value::Tensor(tensor));
     if !imported.textdata.is_empty() {
         out.insert(
@@ -100,7 +100,7 @@ pub(super) async fn import_text_data(
         );
     }
     Ok(ImportTextResult {
-        value: Value::Struct(out),
+        value: Value::Struct(out.finish()),
         delimiter: delimiter_out,
         header_lines: data_start,
     })

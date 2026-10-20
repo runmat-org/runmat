@@ -57,8 +57,8 @@ fn heatmap_invalid(detail: impl AsRef<str>) -> RuntimeError {
     binding_variant = "default",
     builtin_path = "crate::builtins::plotting::heatmap"
 )]
-pub async fn heatmap_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
-    gate_gpu_cdata_extension(&args)?;
+pub async fn heatmap_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<f64> {
+    gate_gpu_cdata_extension(args.view())?;
     let ParsedHeatmap {
         x_labels,
         y_labels,
@@ -196,10 +196,12 @@ struct ParsedHeatmap {
     rest: Vec<Value>,
 }
 
-async fn parse_heatmap_args(args: Vec<Value>) -> crate::BuiltinResult<ParsedHeatmap> {
+async fn parse_heatmap_args(
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<ParsedHeatmap> {
     if let Some(Value::Object(table)) = args.first() {
         if crate::builtins::table::is_tabular_object(table) {
-            return parse_table_heatmap_args(&args);
+            return parse_table_heatmap_args_view(args.view());
         }
     }
     let cdata_with_properties = args.len() >= 3
@@ -257,13 +259,22 @@ async fn parse_heatmap_args(args: Vec<Value>) -> crate::BuiltinResult<ParsedHeat
     }
 }
 
+#[cfg(test)]
 fn parse_table_heatmap_args(args: &[Value]) -> crate::BuiltinResult<ParsedHeatmap> {
-    let [Value::Object(table), x, y, options @ ..] = args else {
+    parse_table_heatmap_args_view(crate::call::FunctionArgumentView::from_slice(args))
+}
+
+fn parse_table_heatmap_args_view(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<ParsedHeatmap> {
+    let (Some(Value::Object(table)), Some(x), Some(y)) = (args.first(), args.get(1), args.get(2))
+    else {
         return Err(heatmap_invalid(
             "table heatmap requires SourceTable, XVariable, and YVariable",
         ));
     };
-    if options.len() % 2 != 0 {
+    let options = args.range(3..).expect("validated table heatmap prefix");
+    if !options.len().is_multiple_of(2) {
         return Err(heatmap_invalid(
             "table heatmap properties must be name/value pairs",
         ));
@@ -276,7 +287,7 @@ fn parse_table_heatmap_args(args: &[Value]) -> crate::BuiltinResult<ParsedHeatma
             crate::builtins::plotting::properties::property_name_text(&pair[0], BUILTIN_NAME)
                 .map_err(map_heatmap_invalid)?;
         if name.eq_ignore_ascii_case("ColorVariable") {
-            color_variable = Some(&pair[1]);
+            color_variable = Some(pair.get(1).expect("heatmap option value"));
         } else if name.eq_ignore_ascii_case("ColorMethod") {
             let value =
                 crate::builtins::plotting::properties::property_name_text(&pair[1], BUILTIN_NAME)
@@ -349,7 +360,9 @@ async fn cdata_tensor(value: Value) -> crate::BuiltinResult<Tensor> {
     Ok(tensor)
 }
 
-fn gate_gpu_cdata_extension(args: &[Value]) -> crate::BuiltinResult<()> {
+fn gate_gpu_cdata_extension(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<()> {
     if matches!(args.first(), Some(Value::Object(table)) if crate::builtins::table::is_tabular_object(table))
     {
         return Ok(());
@@ -698,6 +711,10 @@ mod tests {
     use runmat_plot::plots::PlotElement;
     use runmat_value::{CellArray, IntegerStorage, StringArray, Value};
 
+    async fn heatmap_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+        super::heatmap_builtin(crate::call::BuiltinArguments::from_borrowed(&args, None)?).await
+    }
+
     fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
         let guard = lock_plot_registry();
         ensure_plot_test_env();
@@ -866,7 +883,7 @@ mod tests {
         let Value::StringArray(labels) = labels else {
             panic!("expected string array");
         };
-        assert_eq!(labels.data, vec!["Small", "Medium", "Large"]);
+        assert_eq!(labels.data(), vec!["Small", "Medium", "Large"]);
 
         set_builtin(vec![
             Value::Num(handle),

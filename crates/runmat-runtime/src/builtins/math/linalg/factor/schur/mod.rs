@@ -214,10 +214,10 @@ fn output_pair(
 fn option_text(value: &Value) -> Option<String> {
     match value {
         Value::String(text) => Some(text.as_str().to_owned()),
-        Value::StringArray(array) if array.data.len() == 1 => {
-            Some(array.data[0].as_str().to_owned())
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Some(array.data()[0].as_str().to_owned())
         }
-        Value::CharArray(chars) if chars.rows <= 1 => Some(chars.data.iter().collect()),
+        Value::CharArray(chars) if chars.rows <= 1 => Some(chars.data().iter().collect()),
         _ => None,
     }
 }
@@ -238,7 +238,7 @@ fn validate_pair_outputs(context: SchurContext) -> BuiltinResult<()> {
     binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::factor::schur"
 )]
-async fn schur_builtin(matrix: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn schur_builtin(matrix: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     const NAME: SchurContext = SCHUR;
     validate_pair_outputs(NAME)?;
     if rest.len() > 1 {
@@ -274,10 +274,13 @@ async fn schur_builtin(matrix: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
     binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::factor::schur"
 )]
-async fn rsf2csf_builtin(vectors: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn rsf2csf_builtin(
+    vectors: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     const NAME: SchurContext = RSF2CSF;
     validate_pair_outputs(NAME)?;
-    let [triangular] = rest.as_slice() else {
+    let (1, Some(triangular)) = (rest.len(), rest.first()) else {
         return Err(invalid(NAME, "rsf2csf expects real Schur factors U and T"));
     };
     let dtype = precision(&vectors, NAME)?;
@@ -306,10 +309,10 @@ async fn rsf2csf_builtin(vectors: Value, rest: Vec<Value>) -> BuiltinResult<Valu
 async fn ordeig_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     triangular: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     const NAME: SchurContext = ORDEIG;
-    if let [second] = rest.as_slice() {
+    if let (1, Some(second)) = (rest.len(), rest.first()) {
         return super::qz::generalized_ordeig(runtime.as_ref(), &triangular, second).await;
     }
     if !rest.is_empty() {

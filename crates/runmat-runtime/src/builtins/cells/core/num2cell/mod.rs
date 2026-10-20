@@ -26,7 +26,7 @@ pub(crate) use spec::{
 async fn num2cell_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &runmat_builtins::NUM2CELL_DESCRIPTOR,

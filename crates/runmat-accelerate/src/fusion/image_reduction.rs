@@ -377,7 +377,7 @@ fn exact_output_class(graph: &AccelGraph, control: Option<ValueId>) -> Option<Im
     let option = match graph.value(control)?.constant.as_ref()? {
         Value::String(text) => MeanControl::from_public_option(text),
         Value::CharArray(chars) if chars.rows == 1 => {
-            MeanControl::from_public_option(&chars.data.iter().collect::<String>())
+            MeanControl::from_public_option(&chars.data().iter().collect::<String>())
         }
         _ => None,
     }?;

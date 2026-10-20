@@ -1,5 +1,6 @@
 use super::super::test_support::setup;
 use super::*;
+use runmat_value::Value;
 
 #[test]
 fn shading_changes_existing_surfaces_only_on_current_axes() {
@@ -20,7 +21,10 @@ fn shading_changes_existing_surfaces_only_on_current_axes() {
     }
     let handle = import_figure(figure);
     select_axes_for_figure(handle, 1).unwrap();
-    shading_builtin(vec![Value::String("interp".into())]).unwrap();
+    shading_builtin(crate::builtins::common::test_support::builtin_arguments(
+        vec![Value::String("interp".into())],
+    ))
+    .unwrap();
     let figure = clone_figure(handle).unwrap();
     for (index, plot) in figure.plots().enumerate() {
         let PlotElement::Surface(surface) = plot else {
@@ -41,10 +45,11 @@ fn shading_changes_existing_surfaces_only_on_current_axes() {
 fn extra_arguments_do_not_create_figure() {
     let _guard = setup();
     crate::builtins::plotting::state::reset_plot_state();
-    assert!(shading_builtin(vec![
-        Value::String("flat".into()),
-        Value::String("extra".into())
-    ])
-    .is_err());
+    assert!(
+        shading_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::String("flat".into()), Value::String("extra".into())]
+        ))
+        .is_err()
+    );
     assert!(crate::builtins::plotting::state::current_figure_handle_if_exists().is_none());
 }

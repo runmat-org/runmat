@@ -803,6 +803,7 @@ mod tests {
         FunctionAnalysis {
             function: ProgramFunctionId(7),
             callable: CallableFact {
+                capabilities: CapabilitySet::default(),
                 identity: None,
                 parameters: vec![numeric_column(), numeric()],
                 parameters_complete: true,
@@ -992,10 +993,28 @@ mod tests {
             function: runmat_types::ProgramFunctionId(7),
             display_name: "loads.pulse".into(),
         };
+        let owner = runmat_execution::value::CallableOwner::Bound(
+            runmat_execution::FunctionBindingOrigin::from_revision(
+                &revision(),
+                ProgramFunctionId(7),
+            )
+            .unwrap(),
+        );
+        let form = runmat_execution::value::CallableForm::Closure;
+        let source_role = runmat_types::FunctionSourceRole::Primary;
         let frozen = |capture: f64| CallableValue {
-            owner_identity: "bound:7".into(),
+            owner,
+            form,
+            source_role,
+            source_file: None,
             qualified_name: "loads.pulse".into(),
-            callable_digest: CallableValue::identity_digest("bound:7", "loads.pulse"),
+            callable_digest: CallableValue::identity_digest(
+                owner,
+                "loads.pulse",
+                form,
+                source_role,
+                None,
+            ),
             captures: vec![ValuePayload::Inline(Box::new(InlineValue::F64Bits(
                 capture.to_bits(),
             )))],
@@ -1028,9 +1047,14 @@ mod tests {
         );
 
         let mut unresolved = frozen(2.0);
-        unresolved.owner_identity = "workspace".into();
-        unresolved.callable_digest =
-            CallableValue::identity_digest(&unresolved.owner_identity, &unresolved.qualified_name);
+        unresolved.owner = runmat_execution::value::CallableOwner::Workspace;
+        unresolved.callable_digest = CallableValue::identity_digest(
+            unresolved.owner,
+            &unresolved.qualified_name,
+            unresolved.form,
+            unresolved.source_role,
+            unresolved.source_file.as_deref(),
+        );
         assert!(admit_callable_signal_generator(
             &bound_signal,
             revision(),

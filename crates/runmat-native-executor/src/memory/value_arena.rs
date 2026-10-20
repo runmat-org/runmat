@@ -136,7 +136,7 @@ impl ValueArena {
         let Value::Cell(cell) = self.get(parent)? else {
             return Err(NativeExecutorError::StaleValue);
         };
-        if cell.data.get(index).is_none() {
+        if cell.data().get(index).is_none() {
             return Err(NativeExecutorError::StaleValue);
         }
         self.retain(parent)?;
@@ -186,7 +186,9 @@ impl ValueArena {
                 let Value::Cell(cell) = self.get(*parent)? else {
                     return Err(NativeExecutorError::StaleValue);
                 };
-                cell.data.get(*index).ok_or(NativeExecutorError::StaleValue)
+                cell.data()
+                    .get(*index)
+                    .ok_or(NativeExecutorError::StaleValue)
             }
             value => Ok(value.value()),
         }
@@ -461,7 +463,7 @@ mod tests {
             runmat_value::CellArray::new(vec![Value::Num(9.0)], 1, 1).unwrap(),
         ));
         let original_element = match arena.get(cell).unwrap() {
-            Value::Cell(cell) => &cell.data[0] as *const Value,
+            Value::Cell(cell) => &cell.data()[0] as *const Value,
             _ => unreachable!(),
         };
         let element = arena.insert_cell_element(cell, 0).unwrap();

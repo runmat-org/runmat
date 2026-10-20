@@ -102,7 +102,7 @@ fn builtin(
     Box::pin(invoke_builtin(
         runtime,
         id,
-        args.clone(),
+        args,
         requested_outputs,
         metadata.function_input_callsite,
     ))
@@ -175,7 +175,7 @@ fn try_semantic(
     Box::pin(invoke_semantic(
         runtime,
         function,
-        args.clone(),
+        args,
         requested_outputs,
         metadata.function_input_callsite,
     ))
@@ -366,6 +366,18 @@ pub(super) async fn invoke_descriptor_required(
     metadata: &CallableMetadata,
     fallback_policy: CallableFallbackPolicy,
 ) -> Result<RootedValueSequence, RuntimeError> {
+    if let CallableIdentity::Builtin(id) = &identity {
+        return super::forward_named_fallback(
+            runtime,
+            id.0.clone(),
+            crate::call::BuiltinArguments::new(args),
+            requested_outputs,
+            metadata.function_input_callsite.clone(),
+            metadata.source_ref,
+            metadata.source_invocation,
+        )
+        .await;
+    }
     let request = crate::user_functions::CallableRequest::rooted_resolved(
         identity.clone(),
         fallback_policy,
@@ -378,19 +390,38 @@ pub(super) async fn invoke_descriptor_required(
         std::ops::ControlFlow::Break(result) => return result,
         std::ops::ControlFlow::Continue(returned) => args = returned,
     }
-    let Some(name) = fallback_policy.vm_fallback_name_for(&identity) else {
-        return Err(undefined_identity_error(&identity, metadata));
+    forward_descriptor_fallback(
+        runtime,
+        &identity,
+        args,
+        requested_outputs,
+        metadata,
+        fallback_policy,
+    )
+    .await
+}
+
+/// Continue only after semantic selection declined the exact original owner.
+/// Repeated callbacks use this port rather than replaying semantic dispatch.
+pub(super) async fn forward_descriptor_fallback(
+    runtime: Option<&RuntimeContext>,
+    identity: &CallableIdentity,
+    args: crate::call::RootedFunctionArguments,
+    requested_outputs: usize,
+    metadata: &CallableMetadata,
+    fallback_policy: CallableFallbackPolicy,
+) -> Result<RootedValueSequence, RuntimeError> {
+    let name = match identity {
+        CallableIdentity::Builtin(id) => Some(id.0.clone()),
+        _ => fallback_policy.vm_fallback_name_for(identity),
     };
-    let args = args.try_into_ordinary().map_err(|_| {
-        crate::runtime_error::semantic_error(
-            "RunMat:Callable:FallbackArguments",
-            "resolved fallback requires its original ordinary argument owner",
-        )
-    })?;
+    let Some(name) = name else {
+        return Err(undefined_identity_error(identity, metadata));
+    };
     forward_named_fallback(
         runtime,
         name,
-        args,
+        crate::call::BuiltinArguments::new(args),
         requested_outputs,
         metadata.function_input_callsite.clone(),
         metadata.source_ref,
@@ -407,6 +438,18 @@ async fn invoke_descriptor_optional(
     input_callsite: Option<crate::callsite::CallsiteInfo>,
     fallback_policy: CallableFallbackPolicy,
 ) -> Result<Option<RootedValueSequence>, RuntimeError> {
+    if let CallableIdentity::Builtin(id) = &identity {
+        return crate::callsite::with_callsite(
+            input_callsite,
+            crate::dispatcher::try_call_retained_builtin_sequence_with_outputs(
+                &id.0,
+                crate::call::BuiltinArguments::new(args),
+                requested_outputs,
+                runtime,
+            ),
+        )
+        .await?;
+    }
     let request = crate::user_functions::CallableRequest::rooted_resolved(
         identity.clone(),
         fallback_policy,
@@ -422,17 +465,11 @@ async fn invoke_descriptor_optional(
     let Some(name) = fallback_policy.vm_fallback_name_for(&identity) else {
         return Ok(None);
     };
-    let args = args.try_into_ordinary().map_err(|_| {
-        crate::runtime_error::semantic_error(
-            "RunMat:Callable:FallbackArguments",
-            "resolved fallback requires its original ordinary argument owner",
-        )
-    })?;
     let invoke = crate::callsite::with_callsite(
         input_callsite,
-        crate::dispatcher::try_call_builtin_sequence_async_with_outputs(
+        crate::dispatcher::try_call_retained_builtin_sequence_with_outputs(
             &name,
-            &args,
+            crate::call::BuiltinArguments::new(args),
             requested_outputs,
             runtime,
         ),

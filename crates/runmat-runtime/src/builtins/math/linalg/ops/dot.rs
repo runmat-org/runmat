@@ -132,7 +132,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::ops::dot"
 )]
-async fn dot_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn dot_builtin(
+    lhs: Value,
+    rhs: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(dot_invalid_argument("dot: too many input arguments"));
     }
@@ -1444,6 +1448,10 @@ pub(crate) mod tests {
     }
 
     fn dot_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::dot_builtin(lhs, rhs, rest))
+        block_on(super::dot_builtin(
+            lhs,
+            rhs,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 }

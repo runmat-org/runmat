@@ -4,7 +4,7 @@ use runmat_value::{IntegerStorage, Tensor};
 
 #[test]
 fn strict_mode_rejects_nested_resident_before_provider_access() {
-    use runmat_value::{CellArray, Closure, ObjectInstance, StructValue};
+    use runmat_value::{CellArray, Closure, ObjectInstance};
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
     let allocation_owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
     let resident = Value::GpuTensor(
@@ -17,12 +17,14 @@ fn strict_mode_rejects_nested_resident_before_provider_access() {
             .expect("genuine unregistered allocation")
             .handle,
     );
-    let mut structure = StructValue::new();
+    let mut structure = runmat_value::UnboundedStructValueBuilder::new();
     structure.insert("data", resident.clone());
     let mut object = ObjectInstance::new("GatherFixture");
-    object.properties.insert("data".into(), resident.clone());
+    object.replace_property_unbounded("data".into(), resident.clone());
     for input in [
-        Value::Cell(CellArray::new_with_shape(vec![Value::Struct(structure)], vec![1, 1]).unwrap()),
+        Value::Cell(
+            CellArray::new_with_shape(vec![Value::Struct(structure.finish())], vec![1, 1]).unwrap(),
+        ),
         Value::Object(object),
         Value::Closure(Closure::new(
             "fixture".into(),
@@ -43,7 +45,7 @@ fn strict_mode_rejects_nested_resident_before_provider_access() {
 
 #[test]
 fn nested_resident_gather_preserves_exact_class_shape_and_borrowed_buffer() {
-    use runmat_value::{CellArray, StructValue};
+    use runmat_value::CellArray;
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     test_support::with_test_provider(|provider| {
         let input = Tensor::new_integer(
@@ -52,10 +54,10 @@ fn nested_resident_gather_preserves_exact_class_shape_and_borrowed_buffer() {
         )
         .unwrap();
         let handle = gpu_helpers::upload_tensor(provider, &input).unwrap();
-        let mut structure = StructValue::new();
+        let mut structure = runmat_value::UnboundedStructValueBuilder::new();
         structure.insert("data", Value::GpuTensor(handle.clone()));
         let nested = Value::Cell(
-            CellArray::new_with_shape(vec![Value::Struct(structure)], vec![1, 1]).unwrap(),
+            CellArray::new_with_shape(vec![Value::Struct(structure.finish())], vec![1, 1]).unwrap(),
         );
         let output = table(call(nested, Vec::new()).unwrap());
         let variables = table_variables(&output).unwrap();
@@ -63,7 +65,7 @@ fn nested_resident_gather_preserves_exact_class_shape_and_borrowed_buffer() {
             panic!("cell column")
         };
         assert_eq!(column.shape, vec![1, 1]);
-        let Value::Struct(structure) = &column.data[0] else {
+        let Value::Struct(structure) = &column.data()[0] else {
             panic!("nested structure")
         };
         assert_eq!(structure.fields["data"], Value::Tensor(input.clone()));

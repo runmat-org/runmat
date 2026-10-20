@@ -20,6 +20,6 @@ pub use executable::NativeExecutable;
 #[cfg(not(target_arch = "wasm32"))]
 pub use execute::{
     NativeExecution, NativeExecutor, NativeExecutorOptions, NativeInvocationRequest,
-    RootedNativeExecution,
+    RootedNativeExecution, RootedNativeInvocationRequest,
 };
 pub use profile::RepresentationProfile;

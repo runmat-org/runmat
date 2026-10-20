@@ -120,11 +120,15 @@ fn public_selected_convolution_cancellation_produces_no_failure_feedback() {
         ..SelectedRoute::default()
     });
     let runtime = runtime(service.clone()).with_cancellation_token(provider.cancellation.token());
-    let input_layer = block_on(sequence_input_layer_builtin(Value::Num(1.0), vec![])).unwrap();
+    let input_layer = block_on(sequence_input_layer_builtin(
+        Value::Num(1.0),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap();
     let conv = block_on(convolution_1d_layer_builtin(
         Value::Num(2.0),
         Value::Num(1.0),
-        vec![],
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
     ))
     .unwrap();
     let network_owner = block_on(dlnetwork_builtin(vec![Value::Cell(

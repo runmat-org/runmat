@@ -89,26 +89,28 @@ pub(crate) fn validate_width(width: f64) -> Result<f64, String> {
 async fn rectpuls_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
     t: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     rectpuls_in_runtime(runtime.as_ref(), t, rest).await
 }
 
 #[cfg(test)]
 async fn rectpuls_builtin(t: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    rectpuls_in_runtime(None, t, rest).await
+    let rest =
+        crate::execution::RootedValues::new(rest).map_err(|error| error.into_runtime_error())?;
+    rectpuls_in_runtime(None, t, rest.into()).await
 }
 
 async fn rectpuls_in_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
     t: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let mut cooperation = SignalCooperation::new(runtime, BUILTIN_NAME)
         .with_integer_error_descriptor(&RECTPULS_ERROR_INTERNAL);
     cooperation.completed(0).await?;
-    ensure_rectpuls_compatibility(&t, &rest)?;
-    let mut width = prepare_width(&rest)?;
+    ensure_rectpuls_compatibility(&t, rest.view())?;
+    let mut width = prepare_width(rest.view())?;
     crate::builtins::common::validation::reject_typed_complex_integer(&t, BUILTIN_NAME)?;
     admit_real_waveform_sample(&t).map_err(|_| rectpuls_error(&RECTPULS_ERROR_INVALID_INPUT))?;
     if let Some(control) = &mut width {
@@ -125,7 +127,7 @@ async fn rectpuls_in_runtime(
     admit_resident_waveform_operand(&t, BUILTIN_NAME, "sample", &RECTPULS_ERROR_INTERNAL)?;
     // Authenticate every resident operand before preparation can download a
     // wide integer sample. The same handles later protect output restoration.
-    let (gpu_source, resident_inputs) = rectpuls_gpu_source(&t, &rest)?;
+    let (gpu_source, resident_inputs) = rectpuls_gpu_source(&t, rest.view())?;
     let prepared = cooperation
         .prepare_integer_boundary(&t, &RECTPULS_INTEGER_T_EXTENSION, "T")
         .await?;
@@ -166,7 +168,10 @@ async fn rectpuls_in_runtime(
     Ok(restored)
 }
 
-fn ensure_rectpuls_compatibility(t: &Value, rest: &[Value]) -> BuiltinResult<()> {
+fn ensure_rectpuls_compatibility(
+    t: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     if crate::builtins::common::validation::value_has_native_integer_class(t) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &RECTPULS_INTEGER_T_EXTENSION,
@@ -187,7 +192,7 @@ fn ensure_rectpuls_compatibility(t: &Value, rest: &[Value]) -> BuiltinResult<()>
 
 fn rectpuls_gpu_source(
     t: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<(Option<GpuTensorHandle>, Vec<GpuTensorHandle>)> {
     let handles: Vec<_> = std::iter::once(t)
         .chain(rest.iter())
@@ -200,12 +205,14 @@ fn rectpuls_gpu_source(
     Ok((source, handles))
 }
 
-fn prepare_width(rest: &[Value]) -> BuiltinResult<Option<PreparedWaveformControl<'_>>> {
+fn prepare_width<'a>(
+    rest: crate::call::FunctionArgumentView<'a>,
+) -> BuiltinResult<Option<PreparedWaveformControl<'a>>> {
     match rest.len() {
         0 => Ok(None),
         1 => {
             let prepared = PreparedWaveformControl::admit(
-                &rest[0],
+                rest.first().expect("single width operand was checked"),
                 &RECTPULS_INTEGER_W_EXTENSION,
                 BUILTIN_NAME,
                 "W",

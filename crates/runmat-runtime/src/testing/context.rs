@@ -16,8 +16,8 @@ pub struct ActiveTestContext {
 #[derive(Clone, Debug)]
 pub struct RuntimeTeardownInvocation {
     pub semantic_path: String,
-    pub callback: runmat_value::Value,
-    pub arguments: Vec<runmat_value::Value>,
+    pub callback: crate::execution::RootedValue,
+    pub arguments: crate::call::BuiltinArguments,
 }
 
 #[derive(Debug)]
@@ -137,21 +137,36 @@ fn current_test_context_state() -> Option<Rc<RefCell<ContextState>>> {
 }
 
 pub fn record_runtime_teardown(
+    runtime: Option<&crate::context::RuntimeContext>,
     callback: runmat_value::Value,
-    arguments: Vec<runmat_value::Value>,
-) -> Result<(), &'static str> {
+    arguments: crate::call::BuiltinArguments,
+) -> Result<(), crate::RuntimeError> {
+    // Source provenance helpers read the poll scope. Install only the caller's
+    // explicit context for this synchronous registration, then restore it.
+    let _runtime_scope = runtime.map(crate::context::RuntimeContext::enter);
     {
-        let state = runtime_teardown_context()?;
-        let mut state = state.borrow_mut();
-        validate_runtime_teardown_state(&state)?;
+        let lifecycle_error = |message| {
+            crate::build_runtime_error(message)
+                .with_builtin("addTeardown")
+                .build()
+        };
+        let state = runtime_teardown_context_in(runtime).map_err(lifecycle_error)?;
+        validate_runtime_teardown_state(&state.borrow()).map_err(lifecycle_error)?;
         let callback_name = match &callback {
             runmat_value::Value::FunctionHandle(name)
             | runmat_value::Value::ExternalFunctionHandle(name)
-            | runmat_value::Value::MethodFunctionHandle(name) => name.name().to_owned(),
+            | runmat_value::Value::MethodFunctionHandle(name) => name.clone().into_text_owner(),
             runmat_value::Value::BoundFunctionHandle(handle) => handle.name.clone(),
             runmat_value::Value::Closure(closure) => closure.function_name.clone(),
-            _ => return Err("addTeardown callback must be a function handle"),
+            _ => {
+                return Err(lifecycle_error(
+                    "addTeardown callback must be a function handle",
+                ))
+            }
         };
+        let callback = crate::execution::RootedValue::in_optional_context(callback, runtime)?;
+        let mut state = state.borrow_mut();
+        validate_runtime_teardown_state(&state).map_err(lifecycle_error)?;
         let semantic_path = format!(
             "runtime-teardown:{}:{}:{}",
             state.active.execution.test_id.as_str(),
@@ -171,7 +186,7 @@ pub fn record_runtime_teardown(
             .unwrap_or_default();
         let procedure = ProcedureDescriptor {
             semantic_path: semantic_path.clone(),
-            display_name: callback_name,
+            display_name: callback_name.into_string_unbounded(),
             kind: ProcedureKind::Teardown,
             source: SourceDescriptor {
                 owner_identity: "runtime:test-context".into(),
@@ -206,6 +221,24 @@ pub fn ensure_runtime_teardown_available() -> Result<(), &'static str> {
     let state = runtime_teardown_context()?;
     let result = validate_runtime_teardown_state(&state.borrow());
     result
+}
+
+pub fn ensure_runtime_teardown_available_in(
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> Result<(), &'static str> {
+    let state = runtime_teardown_context_in(runtime)?;
+    let result = validate_runtime_teardown_state(&state.borrow());
+    result
+}
+
+fn runtime_teardown_context_in(
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> Result<Rc<RefCell<ContextState>>, &'static str> {
+    match runtime {
+        Some(runtime) => runtime.state().test_contexts.borrow().last().cloned(),
+        None => TEST_CONTEXT_STACK.with(|stack| stack.borrow().last().cloned()),
+    }
+    .ok_or("addTeardown requires an active test lifecycle context")
 }
 
 fn runtime_teardown_context() -> Result<Rc<RefCell<ContextState>>, &'static str> {

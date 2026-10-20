@@ -129,11 +129,15 @@ fn selected_convolution_cancellation_after_dispatch_abandons_and_retires_only_ow
         probes: Mutex::new(Vec::new()),
     }));
     let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
-    let input_layer = block_on(sequence_input_layer_builtin(Value::Num(1.0), vec![])).unwrap();
+    let input_layer = block_on(sequence_input_layer_builtin(
+        Value::Num(1.0),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap();
     let conv = block_on(convolution_1d_layer_builtin(
         Value::Num(2.0),
         Value::Num(1.0),
-        vec![],
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
     ))
     .unwrap();
     let network_owner = block_on(dlnetwork_builtin(vec![Value::Cell(

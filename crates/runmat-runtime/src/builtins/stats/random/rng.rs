@@ -18,7 +18,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 use runmat_time::unix_timestamp_ns;
-use runmat_value::{IntValue, IntegerStorage, StructValue, Tensor, Value};
+use runmat_value::{IntValue, IntegerStorage, Tensor, Value};
 
 use crate::builtins::stats::type_resolvers::rng_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -446,7 +446,7 @@ fn apply_command(turn: &mut random::RandomTurn, command: ParsedCommand) -> Built
 }
 
 fn snapshot_to_value(snapshot: RngSnapshot) -> BuiltinResult<Value> {
-    let mut struct_value = StructValue::new();
+    let mut struct_value = runmat_value::UnboundedStructValueBuilder::new();
     let seed = snapshot.seed.unwrap_or(DEFAULT_USER_SEED);
     let seed_value =
         if crate::builtins::common::validation::integer_is_exact_f64(&IntValue::U64(seed)) {
@@ -476,7 +476,7 @@ fn snapshot_to_value(snapshot: RngSnapshot) -> BuiltinResult<Value> {
     struct_value
         .fields
         .insert("State".to_string(), Value::Tensor(tensor));
-    Ok(Value::Struct(struct_value))
+    Ok(Value::Struct(struct_value.finish()))
 }
 
 fn snapshot_from_value(value: &Value) -> BuiltinResult<RngSnapshot> {
@@ -920,9 +920,11 @@ pub(crate) mod tests {
         else {
             panic!("expected state struct");
         };
-        state
-            .fields
-            .insert("Seed".to_string(), Value::Int(IntValue::U32(7)));
+        crate::builtins::common::test_support::replace_struct_field_unbounded(
+            &mut state,
+            "Seed",
+            Value::Int(IntValue::U32(7)),
+        );
         let value = || Value::Struct(state.clone());
         {
             let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
@@ -1015,12 +1017,15 @@ pub(crate) mod tests {
             else {
                 panic!("rng snapshot struct");
             };
-            snapshot
-                .fields
-                .insert("State".to_string(), Value::Tensor(state));
-            snapshot.fields.insert(
-                "Type".to_string(),
-                Value::String(RngAlgorithm::RunMatLcgV1.as_str().to_string()),
+            crate::builtins::common::test_support::replace_struct_field_unbounded(
+                &mut snapshot,
+                "State",
+                Value::Tensor(state),
+            );
+            crate::builtins::common::test_support::replace_struct_field_unbounded(
+                &mut snapshot,
+                "Type",
+                Value::String(RngAlgorithm::RunMatLcgV1.as_str().to_string().into()),
             );
             block_on(rng_builtin(vec![Value::Struct(snapshot)])).expect("restore state");
             assert_eq!(
@@ -1135,10 +1140,10 @@ pub(crate) mod tests {
         let _guard = random::test_guard();
         random::reset_rng();
         let tensor = Tensor::new(vec![0.0, 0.0], vec![1, 2]).expect("tensor");
-        let mut st = StructValue::new();
+        let mut st = runmat_value::UnboundedStructValueBuilder::new();
         st.fields.insert("Seed".to_string(), Value::Num(0.0));
         st.fields.insert("State".to_string(), Value::Tensor(tensor));
-        let err = block_on(rng_builtin(vec![Value::Struct(st)])).unwrap_err();
+        let err = block_on(rng_builtin(vec![Value::Struct(st.finish())])).unwrap_err();
         assert_eq!(
             err.identifier(),
             RNG_ERROR_STATE_TYPE_FIELD_MISSING.identifier

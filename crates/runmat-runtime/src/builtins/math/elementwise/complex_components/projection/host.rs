@@ -82,7 +82,7 @@ fn project_chars(kind: ProjectionKind, chars: CharArray) -> BuiltinResult<Value>
             .iter()
             .map(|&character| character as u32 as f64)
             .collect(),
-        ProjectionKind::Imaginary => vec![0.0; chars.data.len()],
+        ProjectionKind::Imaginary => vec![0.0; chars.data().len()],
     };
     let tensor = Tensor::new(data, chars.shape.clone()).map_err(|error| kind.internal(error))?;
     Ok(tensor::tensor_into_value(tensor))

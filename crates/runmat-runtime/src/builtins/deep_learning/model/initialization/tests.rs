@@ -37,10 +37,12 @@ async fn initializer_once(shape: Value) -> BuiltinResult<Value> {
 fn layer(kind: K, name: &str, properties: &[(&str, Value)]) -> Value {
     let mut object = ObjectInstance::new(kind.class().owned());
     object
-        .properties
-        .insert("Name".into(), Value::String(name.into()));
+        .replace_dl_property("Name", Value::String(name.into()))
+        .expect("fixture property");
     for (name, value) in properties {
-        object.properties.insert((*name).into(), value.clone());
+        object
+            .replace_dl_property(name, value.clone())
+            .expect("fixture property");
     }
     Value::Object(object)
 }
@@ -49,7 +51,7 @@ fn property<'a>(layer: &'a Value, name: &str) -> &'a Value {
     let Value::Object(layer) = layer else {
         panic!("layer object")
     };
-    layer.properties.get(name).expect("initialized property")
+    layer.properties().get(name).expect("initialized property")
 }
 
 fn shape(layer: &Value, name: &str) -> Vec<usize> {
@@ -125,8 +127,8 @@ fn initializes_all_admitted_parameter_roles_from_canonical_geometry() {
             panic!("State table")
         };
         let values = super::super::table_rows::values(&table, "State", "test").unwrap();
-        assert_eq!(values.data.len(), 2);
-        for value in &values.data {
+        assert_eq!(values.data().len(), 2);
+        for value in values.data() {
             let Value::Tensor(state) = value else {
                 panic!("State tensor")
             };
@@ -273,7 +275,7 @@ fn explicit_single_weights_select_single_for_missing_bias_and_default_state() {
         unreachable!()
     };
     let values = super::super::table_rows::values(&state, "State", "test").unwrap();
-    assert!(values.data.iter().all(|value| matches!(value, Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32)));
+    assert!(values.data().iter().all(|value| matches!(value, Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32)));
 }
 
 #[test]
@@ -315,18 +317,22 @@ fn staged_dlarray_extra_handle_survives_collecting_publication_retirement() {
             .expect("allocate managed dlarray property");
         let handle = initial.handle();
         let mut dlarray = ObjectInstance::new(super::super::DLARRAY_CLASS);
-        dlarray.properties.insert(
-            "Data".into(),
-            Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).expect("numeric data")),
-        );
-        dlarray.properties.insert(
-            "Extra".into(),
-            Value::HandleObject(runmat_value::HandleRef {
-                class_name: "ExtraPayload".into(),
-                target: handle,
-                valid: true,
-            }),
-        );
+        dlarray
+            .replace_dl_property(
+                "Data",
+                Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).expect("numeric data")),
+            )
+            .expect("fixture property");
+        dlarray
+            .replace_dl_property(
+                "Extra",
+                Value::HandleObject(runmat_value::HandleRef {
+                    class_name: "ExtraPayload".into(),
+                    target: handle,
+                    valid: true,
+                }),
+            )
+            .expect("fixture property");
         let staged = RootedValue::new(Value::Object(dlarray)).expect("root staged value");
         initial.unroot().expect("transfer to staged owner");
         parameters::validate_initialized_parameter(
@@ -363,6 +369,7 @@ fn staged_dlarray_extra_handle_survives_collecting_publication_retirement() {
         }))
         .expect("register collecting retirement observer");
         let published = publish_staged_parameters(
+            None,
             &mut layers,
             vec![StagedParameter {
                 layer_index: 0,

@@ -123,20 +123,10 @@ fn lower_admission(runtime: &RuntimeContext, cause: HostAllocationError) -> Runt
 }
 
 fn lower_char_array(array: CharArray) -> BuiltinResult<Value> {
-    let CharArray {
-        data,
-        shape,
-        rows,
-        cols,
-    } = array;
-    if rows == 0 || cols == 0 {
-        return Ok(Value::CharArray(CharArray {
-            data,
-            shape,
-            rows,
-            cols,
-        }));
+    if array.rows == 0 || array.cols == 0 {
+        return Ok(Value::CharArray(array));
     }
+    let (data, _, rows, cols) = array.into_parts();
 
     let mut lowered_rows = Vec::with_capacity(rows);
     let mut target_cols = cols;
@@ -164,9 +154,7 @@ fn lower_char_array(array: CharArray) -> BuiltinResult<Value> {
 }
 
 fn lower_cell_array(runtime: Option<&RuntimeContext>, cell: CellArray) -> BuiltinResult<Value> {
-    let CellArray {
-        data, rows, cols, ..
-    } = cell;
+    let (data, _, rows, cols) = cell.into_parts();
     let mut lowered_values = Vec::with_capacity(rows * cols);
     for row in 0..rows {
         for col in 0..cols {
@@ -186,9 +174,9 @@ fn lower_cell_element(runtime: Option<&RuntimeContext>, value: &Value) -> Builti
             transform_scalar_case(runtime, text.clone(), TextCase::Lower, lower_admission)
                 .map(Value::String)
         }
-        Value::StringArray(sa) if sa.data.len() == 1 => transform_scalar_case(
+        Value::StringArray(sa) if sa.data().len() == 1 => transform_scalar_case(
             runtime,
-            sa.data[0].clone(),
+            sa.data()[0].clone(),
             TextCase::Lower,
             lower_admission,
         )
@@ -254,7 +242,7 @@ pub(crate) mod tests {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 2);
                 assert_eq!(ca.cols, 3);
-                assert_eq!(ca.data, vec!['c', 'a', 't', 'd', 'o', 'g']);
+                assert_eq!(ca.data(), vec!['c', 'a', 't', 'd', 'o', 'g']);
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -270,7 +258,7 @@ pub(crate) mod tests {
                 assert_eq!(ca.rows, 1);
                 assert_eq!(ca.cols, 6);
                 let expected: Vec<char> = "hello ".chars().collect();
-                assert_eq!(ca.data, expected);
+                assert_eq!(ca.data(), expected);
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -288,7 +276,7 @@ pub(crate) mod tests {
                 assert_eq!(ca.rows, 1);
                 assert_eq!(ca.cols, 3);
                 let expected: Vec<char> = vec!['i', '\u{307}', 'a'];
-                assert_eq!(ca.data, expected);
+                assert_eq!(ca.data(), expected);
             }
             other => panic!("expected char array, got {other:?}"),
         }

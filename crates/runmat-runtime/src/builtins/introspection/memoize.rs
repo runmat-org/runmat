@@ -221,10 +221,10 @@ pub(crate) async fn memoize_builtin(function: Value) -> BuiltinResult<Value> {
                 matches!(
                     target_value,
                     Value::Object(object)
-                        if object.class_name.is(MEMOIZED_FUNCTION_CLASS)
-                            && object.properties.get(FUNCTION_PROPERTY) == Some(&function)
+                        if object.class_name().is(MEMOIZED_FUNCTION_CLASS)
+                            && object.property(FUNCTION_PROPERTY) == Some(&function)
                             && matches!(
-                                object.properties.get(crate::HANDLE_VALID_FLAG_PROPERTY),
+                                object.property(crate::HANDLE_VALID_FLAG_PROPERTY),
                                 Some(Value::Bool(true))
                             )
                 )
@@ -236,32 +236,22 @@ pub(crate) async fn memoize_builtin(function: Value) -> BuiltinResult<Value> {
             registry.remove(&key);
         }
 
-        let mut object = ObjectInstance::new(MEMOIZED_FUNCTION_CLASS.to_string());
-        object
-            .properties
-            .insert(FUNCTION_PROPERTY.to_string(), function.clone());
-        object
-            .properties
-            .insert(ENABLED_PROPERTY.to_string(), Value::Bool(true));
-        object.properties.insert(
+        let mut object = runmat_value::UnboundedObjectBuilder::new(MEMOIZED_FUNCTION_CLASS);
+        object.insert(FUNCTION_PROPERTY.to_string(), function.clone());
+        object.insert(ENABLED_PROPERTY.to_string(), Value::Bool(true));
+        object.insert(
             CACHE_SIZE_PROPERTY.to_string(),
             Value::Num(DEFAULT_CACHE_SIZE as f64),
         );
-        object.properties.insert(
+        object.insert(
             crate::HANDLE_VALID_FLAG_PROPERTY.to_string(),
             Value::Bool(true),
         );
-        object
-            .properties
-            .insert(CACHE_PROPERTY.to_string(), empty_cache_value()?);
-        object
-            .properties
-            .insert(TOTAL_HITS_PROPERTY.to_string(), Value::Num(0.0));
-        object
-            .properties
-            .insert(TOTAL_MISSES_PROPERTY.to_string(), Value::Num(0.0));
+        object.insert(CACHE_PROPERTY.to_string(), empty_cache_value()?);
+        object.insert(TOTAL_HITS_PROPERTY.to_string(), Value::Num(0.0));
+        object.insert(TOTAL_MISSES_PROPERTY.to_string(), Value::Num(0.0));
 
-        let target = runmat_gc::gc_allocate(Value::Object(object))
+        let target = runmat_gc::gc_allocate(Value::Object(object.finish()))
             .map_err(|err| memoize_error(&MEMOIZE_ERROR_GC, format!("memoize: {err}")))?;
         let handle = handle_from_target(target);
         registry.insert(key, target);
@@ -372,10 +362,10 @@ pub(crate) async fn clear_all_memoized_caches_builtin() -> BuiltinResult<Value> 
                 let Value::Object(object) = target_value else {
                     return false;
                 };
-                if !object.class_name.is(MEMOIZED_FUNCTION_CLASS) {
+                if !object.class_name().is(MEMOIZED_FUNCTION_CLASS) {
                     return false;
                 }
-                reset_object_cache(object).is_ok()
+                edit_memoized_object(target_value, reset_object_cache).is_ok()
             })
             .unwrap_or(false)
         });
@@ -458,9 +448,9 @@ fn canonicalize_memoized_function(function: Value) -> BuiltinResult<Value> {
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle(_)
-        | Value::Closure(_) => Ok(crate::canonicalize_callback_handle_for_semantic_resolution(
-            function,
-        )),
+        | Value::Closure(_) => {
+            crate::canonicalize_callback_handle_for_semantic_resolution(function)
+        }
         _ => Err(memoize_error(
             &MEMOIZE_ERROR_INVALID_FUNCTION,
             MEMOIZE_ERROR_INVALID_FUNCTION.message,
@@ -498,18 +488,14 @@ fn memoized_handle(value: &Value) -> BuiltinResult<&HandleRef> {
 
 fn memoized_state(handle: &HandleRef) -> BuiltinResult<(Value, bool, usize)> {
     runmat_gc::gc_with_value(&handle.target, |target| match target {
-        Value::Object(object) if object.class_name == MEMOIZED_FUNCTION_CLASS => {
-            let function = object
-                .properties
-                .get(FUNCTION_PROPERTY)
-                .cloned()
-                .ok_or_else(|| {
-                    memoize_error(
-                        &MEMOIZE_ERROR_INVALID_OBJECT,
-                        "memoize: missing Function property",
-                    )
-                })?;
-            let enabled = match object.properties.get(ENABLED_PROPERTY) {
+        Value::Object(object) if object.class_name().is(MEMOIZED_FUNCTION_CLASS) => {
+            let function = object.property(FUNCTION_PROPERTY).cloned().ok_or_else(|| {
+                memoize_error(
+                    &MEMOIZE_ERROR_INVALID_OBJECT,
+                    "memoize: missing Function property",
+                )
+            })?;
+            let enabled = match object.property(ENABLED_PROPERTY) {
                 Some(Value::Bool(value)) => *value,
                 Some(Value::Num(value)) => *value != 0.0,
                 Some(Value::Int(value)) => !value.is_zero(),
@@ -523,7 +509,7 @@ fn memoized_state(handle: &HandleRef) -> BuiltinResult<(Value, bool, usize)> {
                 }
                 _ => true,
             };
-            let cache_size = parse_cache_size(object.properties.get(CACHE_SIZE_PROPERTY))?;
+            let cache_size = parse_cache_size(object.property(CACHE_SIZE_PROPERTY))?;
             Ok((function, enabled, cache_size))
         }
         _ => Err(memoize_error(
@@ -604,7 +590,7 @@ async fn call_memoized(
             "memoize: function invocation payload must be a cell array",
         ));
     };
-    let args = cell.data;
+    let args = cell.data_owner().clone();
     let requested_outputs = crate::current_requested_outputs();
     let (function, enabled, cache_size) = memoized_state(handle)?;
 
@@ -659,22 +645,24 @@ fn take_cache_hit(
     cache_size: usize,
 ) -> BuiltinResult<Option<Value>> {
     runmat_gc::gc_with_value_mut(&handle.target, |target| -> BuiltinResult<Option<Value>> {
-        let object = memoized_object_mut(target)?;
-        let mut cache = object_cache(object)?;
-        trim_cache(&mut cache, cache_size);
-        let mut hit = None;
-        for entry in &mut cache {
-            if entry.nargout == requested_outputs && values_equal_for_cache(&entry.inputs, args) {
-                entry.hit_count = entry.hit_count.saturating_add(1);
-                hit = Some(entry.output.clone());
-                break;
+        edit_memoized_object(target, |object| {
+            let mut cache = object_cache_value(object.property(CACHE_PROPERTY))?;
+            trim_cache(&mut cache, cache_size);
+            let mut hit = None;
+            for entry in &mut cache {
+                if entry.nargout == requested_outputs && values_equal_for_cache(&entry.inputs, args)
+                {
+                    entry.hit_count = entry.hit_count.saturating_add(1);
+                    hit = Some(entry.output.clone());
+                    break;
+                }
             }
-        }
-        if hit.is_some() {
-            increment_counter(object, TOTAL_HITS_PROPERTY)?;
-        }
-        set_object_cache(object, cache)?;
-        Ok(hit)
+            if hit.is_some() {
+                increment_counter(object, TOTAL_HITS_PROPERTY)?;
+            }
+            set_object_cache(object, cache)?;
+            Ok(hit)
+        })
     })
     .map_err(|err| memoize_error(&MEMOIZE_ERROR_GC, format!("memoize: {err}")))?
 }
@@ -687,18 +675,19 @@ fn store_cache_miss(
     cache_size: usize,
 ) -> BuiltinResult<()> {
     runmat_gc::gc_with_value_mut(&handle.target, |target| -> BuiltinResult<()> {
-        let object = memoized_object_mut(target)?;
-        let mut cache = object_cache(object)?;
-        increment_counter(object, TOTAL_MISSES_PROPERTY)?;
-        cache.push(MemoizedCacheEntry {
-            inputs: args,
-            nargout: requested_outputs,
-            output,
-            hit_count: 0,
-        });
-        trim_cache(&mut cache, cache_size);
-        set_object_cache(object, cache)?;
-        Ok(())
+        edit_memoized_object(target, |object| {
+            let mut cache = object_cache_value(object.property(CACHE_PROPERTY))?;
+            increment_counter(object, TOTAL_MISSES_PROPERTY)?;
+            cache.push(MemoizedCacheEntry {
+                inputs: args,
+                nargout: requested_outputs,
+                output,
+                hit_count: 0,
+            });
+            trim_cache(&mut cache, cache_size);
+            set_object_cache(object, cache)?;
+            Ok(())
+        })
     })
     .map_err(|err| memoize_error(&MEMOIZE_ERROR_GC, format!("memoize: {err}")))?
 }
@@ -720,7 +709,7 @@ fn memoized_member(handle: &HandleRef, payload: Value) -> BuiltinResult<Value> {
         }
         FUNCTION_PROPERTY | ENABLED_PROPERTY | CACHE_SIZE_PROPERTY => {
             runmat_gc::gc_with_value(&handle.target, |target| match target {
-                Value::Object(object) => object.properties.get(member.as_str()).cloned(),
+                Value::Object(object) => object.property(member.as_str()).cloned(),
                 _ => None,
             })
             .map_err(|err| memoize_error(&MEMOIZE_ERROR_GC, format!("memoize: {err}")))?
@@ -741,7 +730,7 @@ fn memoized_member(handle: &HandleRef, payload: Value) -> BuiltinResult<Value> {
 fn member_name(value: Value) -> BuiltinResult<String> {
     match value {
         Value::String(name) => Ok(name.as_str().to_owned()),
-        Value::CharArray(chars) => Ok(chars.data.iter().collect()),
+        Value::CharArray(chars) => Ok(chars.data().iter().collect()),
         other => Err(memoize_error(
             &MEMOIZE_ERROR_INVALID_INDEX,
             format!("memoize: invalid member selector {other:?}"),
@@ -751,90 +740,116 @@ fn member_name(value: Value) -> BuiltinResult<String> {
 
 fn clear_cache_for_handle(handle: &HandleRef) -> BuiltinResult<()> {
     runmat_gc::gc_with_value_mut(&handle.target, |target| -> BuiltinResult<()> {
-        let object = memoized_object_mut(target)?;
-        reset_object_cache(object)
+        edit_memoized_object(target, reset_object_cache)
     })
     .map_err(|err| memoize_error(&MEMOIZE_ERROR_GC, format!("memoize: {err}")))?
 }
 
 fn stats_for_handle(handle: &HandleRef) -> BuiltinResult<Value> {
     runmat_gc::gc_with_value_mut(&handle.target, |target| -> BuiltinResult<Value> {
-        let object = memoized_object_mut(target)?;
-        let cache_size = parse_cache_size(object.properties.get(CACHE_SIZE_PROPERTY))?;
-        let mut entries = object_cache(object)?;
-        trim_cache(&mut entries, cache_size);
-        set_object_cache(object, entries.clone())?;
-        let total_hits = object_counter(object, TOTAL_HITS_PROPERTY);
-        let total_misses = object_counter(object, TOTAL_MISSES_PROPERTY);
+        edit_memoized_object(target, |object| {
+            let cache_size = parse_cache_size(object.property(CACHE_SIZE_PROPERTY))?;
+            let mut entries = object_cache_value(object.property(CACHE_PROPERTY))?;
+            trim_cache(&mut entries, cache_size);
+            set_object_cache(object, entries.clone())?;
+            let total_hits = object_counter(object, TOTAL_HITS_PROPERTY);
+            let total_misses = object_counter(object, TOTAL_MISSES_PROPERTY);
 
-        let mut input_cells = Vec::with_capacity(entries.len());
-        let mut nargout = Vec::with_capacity(entries.len());
-        let mut output_cells = Vec::with_capacity(entries.len());
-        let mut hit_count = Vec::with_capacity(entries.len());
-        for entry in &entries {
-            input_cells.push(Value::Cell(
-                CellArray::from_shared_storage(
-                    entry.inputs.clone(),
-                    SharedShape::new_unmanaged(vec![1, entry.inputs.len()]),
-                )
-                .map_err(|err| memoize_error(&MEMOIZE_ERROR_GC, format!("memoize: {err}")))?,
-            ));
-            nargout.push(entry.nargout as f64);
-            output_cells.push(Value::Cell(output_value_to_cell(
-                &entry.output,
-                entry.nargout,
-            )?));
-            hit_count.push(entry.hit_count as f64);
-        }
+            let mut input_cells = Vec::with_capacity(entries.len());
+            let mut nargout = Vec::with_capacity(entries.len());
+            let mut output_cells = Vec::with_capacity(entries.len());
+            let mut hit_count = Vec::with_capacity(entries.len());
+            for entry in &entries {
+                input_cells.push(Value::Cell(
+                    CellArray::from_shared_storage(
+                        entry.inputs.clone(),
+                        SharedShape::new_unmanaged(vec![1, entry.inputs.len()]),
+                    )
+                    .map_err(|err| memoize_error(&MEMOIZE_ERROR_GC, format!("memoize: {err}")))?,
+                ));
+                nargout.push(entry.nargout as f64);
+                output_cells.push(Value::Cell(output_value_to_cell(
+                    &entry.output,
+                    entry.nargout,
+                )?));
+                hit_count.push(entry.hit_count as f64);
+            }
 
-        let cache_len = entries.len();
-        let mut cache = StructValue::new();
-        cache.insert(
-            "Inputs",
-            Value::Cell(
-                CellArray::new(input_cells, 1, cache_len)
-                    .map_err(|err| memoize_error(&MEMOIZE_ERROR_GC, format!("memoize: {err}")))?,
-            ),
-        );
-        cache.insert(
-            "Nargout",
-            Value::Tensor(
-                Tensor::new(nargout, vec![1, cache_len])
-                    .map_err(|err| memoize_error(&MEMOIZE_ERROR_GC, format!("memoize: {err}")))?,
-            ),
-        );
-        cache.insert(
-            "Outputs",
-            Value::Cell(
-                CellArray::new(output_cells, 1, cache_len)
-                    .map_err(|err| memoize_error(&MEMOIZE_ERROR_GC, format!("memoize: {err}")))?,
-            ),
-        );
-        cache.insert(
-            "HitCount",
-            Value::Tensor(
-                Tensor::new(hit_count, vec![1, cache_len])
-                    .map_err(|err| memoize_error(&MEMOIZE_ERROR_GC, format!("memoize: {err}")))?,
-            ),
-        );
-        cache.insert("TotalHits", Value::Num(total_hits as f64));
-        cache.insert("TotalMisses", Value::Num(total_misses as f64));
+            let cache_len = entries.len();
+            let mut cache = runmat_value::UnboundedStructValueBuilder::new();
+            cache.insert(
+                "Inputs",
+                Value::Cell(
+                    CellArray::new(input_cells, 1, cache_len).map_err(|err| {
+                        memoize_error(&MEMOIZE_ERROR_GC, format!("memoize: {err}"))
+                    })?,
+                ),
+            );
+            cache.insert(
+                "Nargout",
+                Value::Tensor(
+                    Tensor::new(nargout, vec![1, cache_len]).map_err(|err| {
+                        memoize_error(&MEMOIZE_ERROR_GC, format!("memoize: {err}"))
+                    })?,
+                ),
+            );
+            cache.insert(
+                "Outputs",
+                Value::Cell(
+                    CellArray::new(output_cells, 1, cache_len).map_err(|err| {
+                        memoize_error(&MEMOIZE_ERROR_GC, format!("memoize: {err}"))
+                    })?,
+                ),
+            );
+            cache.insert(
+                "HitCount",
+                Value::Tensor(
+                    Tensor::new(hit_count, vec![1, cache_len]).map_err(|err| {
+                        memoize_error(&MEMOIZE_ERROR_GC, format!("memoize: {err}"))
+                    })?,
+                ),
+            );
+            cache.insert("TotalHits", Value::Num(total_hits as f64));
+            cache.insert("TotalMisses", Value::Num(total_misses as f64));
 
-        let mut stats = StructValue::new();
-        stats.insert("Cache", Value::Struct(cache));
-        Ok(Value::Struct(stats))
+            let mut stats = runmat_value::UnboundedStructValueBuilder::new();
+            stats.insert("Cache", Value::Struct(cache.finish()));
+            Ok(Value::Struct(stats.finish()))
+        })
     })
     .map_err(|err| memoize_error(&MEMOIZE_ERROR_GC, format!("memoize: {err}")))?
 }
 
-fn memoized_object_mut(target: &mut Value) -> BuiltinResult<&mut ObjectInstance> {
-    match target {
-        Value::Object(object) if object.class_name == MEMOIZED_FUNCTION_CLASS => Ok(object),
-        _ => Err(memoize_error(
+fn edit_memoized_object<R>(
+    target: &mut Value,
+    edit: impl FnOnce(&mut runmat_value::UnboundedObjectBuilder) -> BuiltinResult<R>,
+) -> BuiltinResult<R> {
+    let Value::Object(object) = target else {
+        return Err(memoize_error(
             &MEMOIZE_ERROR_INVALID_OBJECT,
             "memoize: invalid object target",
-        )),
+        ));
+    };
+    if !object.class_name().is(MEMOIZED_FUNCTION_CLASS) {
+        return Err(memoize_error(
+            &MEMOIZE_ERROR_INVALID_OBJECT,
+            "memoize: invalid object target",
+        ));
     }
+    let previous = std::mem::replace(target, Value::Num(0.0));
+    let Value::Object(object) = previous else {
+        unreachable!("memoized target was checked as an object")
+    };
+    let mut object = object.into_unbounded_builder().map_err(|object| {
+        *target = Value::Object(object);
+        memoize_error(
+            &MEMOIZE_ERROR_INVALID_OBJECT,
+            "memoize: admitted object requires an admitted edit generation",
+        )
+    })?;
+    let result = edit(&mut object);
+    *target = Value::Object(object.finish());
+    result
 }
 
 fn empty_cache_value() -> BuiltinResult<Value> {
@@ -843,21 +858,20 @@ fn empty_cache_value() -> BuiltinResult<Value> {
     )?))
 }
 
-fn reset_object_cache(object: &mut ObjectInstance) -> BuiltinResult<()> {
-    object
-        .properties
-        .insert(CACHE_PROPERTY.to_string(), empty_cache_value()?);
-    object
-        .properties
-        .insert(TOTAL_HITS_PROPERTY.to_string(), Value::Num(0.0));
-    object
-        .properties
-        .insert(TOTAL_MISSES_PROPERTY.to_string(), Value::Num(0.0));
+fn reset_object_cache(object: &mut runmat_value::UnboundedObjectBuilder) -> BuiltinResult<()> {
+    object.insert(CACHE_PROPERTY.to_string(), empty_cache_value()?);
+    object.insert(TOTAL_HITS_PROPERTY.to_string(), Value::Num(0.0));
+    object.insert(TOTAL_MISSES_PROPERTY.to_string(), Value::Num(0.0));
     Ok(())
 }
 
+#[cfg(test)]
 fn object_cache(object: &ObjectInstance) -> BuiltinResult<Vec<MemoizedCacheEntry>> {
-    let Some(value) = object.properties.get(CACHE_PROPERTY) else {
+    object_cache_value(object.property(CACHE_PROPERTY))
+}
+
+fn object_cache_value(value: Option<&Value>) -> BuiltinResult<Vec<MemoizedCacheEntry>> {
+    let Some(value) = value else {
         return Ok(Vec::new());
     };
     let Value::Cell(cell) = value else {
@@ -866,21 +880,22 @@ fn object_cache(object: &ObjectInstance) -> BuiltinResult<Vec<MemoizedCacheEntry
             "memoize: internal cache property is invalid",
         ));
     };
-    cell.data.iter().map(decode_cache_entry).collect()
+    cell.data().iter().map(decode_cache_entry).collect()
 }
 
 fn set_object_cache(
-    object: &mut ObjectInstance,
+    object: &mut runmat_value::UnboundedObjectBuilder,
     entries: Vec<MemoizedCacheEntry>,
 ) -> BuiltinResult<()> {
     let values = entries
         .into_iter()
         .map(encode_cache_entry)
         .collect::<BuiltinResult<Vec<_>>>()?;
-    object.properties.insert(
+    let value_count = values.len();
+    object.insert(
         CACHE_PROPERTY.to_string(),
         Value::Cell(
-            CellArray::new(values.clone(), 1, values.len())
+            CellArray::new(values, 1, value_count)
                 .map_err(|err| memoize_error(&MEMOIZE_ERROR_GC, format!("memoize: {err}")))?,
         ),
     );
@@ -888,7 +903,7 @@ fn set_object_cache(
 }
 
 fn encode_cache_entry(entry: MemoizedCacheEntry) -> BuiltinResult<Value> {
-    let mut fields = StructValue::new();
+    let mut fields = runmat_value::UnboundedStructValueBuilder::new();
     let input_len = entry.inputs.len();
     fields.insert(
         "Inputs",
@@ -903,7 +918,7 @@ fn encode_cache_entry(entry: MemoizedCacheEntry) -> BuiltinResult<Value> {
     fields.insert("Nargout", Value::Num(entry.nargout as f64));
     fields.insert("Output", entry.output);
     fields.insert("HitCount", Value::Num(entry.hit_count as f64));
-    Ok(Value::Struct(fields))
+    Ok(Value::Struct(fields.finish()))
 }
 
 fn decode_cache_entry(value: &Value) -> BuiltinResult<MemoizedCacheEntry> {
@@ -914,7 +929,7 @@ fn decode_cache_entry(value: &Value) -> BuiltinResult<MemoizedCacheEntry> {
         ));
     };
     let inputs = match fields.fields.get("Inputs") {
-        Some(Value::Cell(cell)) => cell.data.clone(),
+        Some(Value::Cell(cell)) => cell.data_owner().clone(),
         _ => {
             return Err(memoize_error(
                 &MEMOIZE_ERROR_INVALID_OBJECT,
@@ -943,16 +958,19 @@ fn decode_cache_entry(value: &Value) -> BuiltinResult<MemoizedCacheEntry> {
     })
 }
 
-fn increment_counter(object: &mut ObjectInstance, name: &str) -> BuiltinResult<()> {
-    let next = object_counter(object, name).saturating_add(1);
-    object
-        .properties
-        .insert(name.to_string(), Value::Num(next as f64));
+fn increment_counter(
+    object: &mut runmat_value::UnboundedObjectBuilder,
+    name: &str,
+) -> BuiltinResult<()> {
+    let next = numeric_counter(object.property(name))
+        .unwrap_or(0)
+        .saturating_add(1);
+    object.insert(name.to_string(), Value::Num(next as f64));
     Ok(())
 }
 
-fn object_counter(object: &ObjectInstance, name: &str) -> usize {
-    numeric_counter(object.properties.get(name)).unwrap_or(0)
+fn object_counter(object: &runmat_value::UnboundedObjectBuilder, name: &str) -> usize {
+    numeric_counter(object.property(name)).unwrap_or(0)
 }
 
 fn numeric_counter(value: Option<&Value>) -> Option<usize> {
@@ -1007,7 +1025,7 @@ fn value_equal_for_cache(lhs: &Value, rhs: &Value) -> bool {
         (Value::Bool(a), Value::Bool(b)) => a == b,
         (Value::String(a), Value::String(b)) => a == b,
         (Value::CharArray(a), Value::CharArray(b)) => {
-            a.rows == b.rows && a.cols == b.cols && a.data == b.data
+            a.rows == b.rows && a.cols == b.cols && a.data() == b.data()
         }
         (Value::StringArray(a), Value::StringArray(b)) => string_arrays_equal(a, b),
         (Value::Tensor(a), Value::Tensor(b)) => tensors_equal(a, b),
@@ -1138,7 +1156,7 @@ fn numeric_scalars_equal_nan(a: NumericScalar, b: NumericScalar) -> bool {
 }
 
 fn string_arrays_equal(a: &StringArray, b: &StringArray) -> bool {
-    a.shape == b.shape && a.data == b.data
+    a.shape == b.shape && a.data() == b.data()
 }
 
 fn logical_arrays_equal(a: &LogicalArray, b: &LogicalArray) -> bool {
@@ -1146,7 +1164,7 @@ fn logical_arrays_equal(a: &LogicalArray, b: &LogicalArray) -> bool {
 }
 
 fn cells_equal(a: &CellArray, b: &CellArray) -> bool {
-    a.shape == b.shape && values_equal_for_cache(&a.data, &b.data)
+    a.shape == b.shape && values_equal_for_cache(a.data(), b.data())
 }
 
 fn structs_equal(a: &StructValue, b: &StructValue) -> bool {
@@ -1160,15 +1178,15 @@ fn structs_equal(a: &StructValue, b: &StructValue) -> bool {
 }
 
 fn objects_equal(a: &ObjectInstance, b: &ObjectInstance) -> bool {
-    a.class_name == b.class_name && structs_equal(&object_properties(a), &object_properties(b))
+    a.class_name() == b.class_name() && structs_equal(&object_properties(a), &object_properties(b))
 }
 
 fn object_properties(object: &ObjectInstance) -> StructValue {
-    let mut fields = StructValue::new();
-    for (name, value) in &object.properties {
-        fields.insert(name.clone(), value.clone());
+    let mut fields = runmat_value::UnboundedStructValueBuilder::new();
+    for (name, value) in object.properties().iter() {
+        fields.insert(name.to_owned(), value.clone());
     }
-    fields
+    fields.finish()
 }
 
 fn function_key(function: &Value) -> String {
@@ -1250,7 +1268,7 @@ fn value_fingerprint(value: &Value) -> String {
                 .collect::<Vec<_>>();
             format!("complex:{:?}:{values:?}", tensor.shape())
         }
-        Value::Cell(cell) => format!("cell:{:?}:{}", cell.shape, values_fingerprint(&cell.data)),
+        Value::Cell(cell) => format!("cell:{:?}:{}", cell.shape, values_fingerprint(cell.data())),
         Value::Struct(struct_value) => format!(
             "struct:{}",
             struct_value
@@ -1263,7 +1281,11 @@ fn value_fingerprint(value: &Value) -> String {
         Value::StructArray(array) => format!(
             "struct-array:{:?}:{}:{}",
             array.shape(),
-            array.field_names().cloned().collect::<Vec<_>>().join(","),
+            array
+                .field_names()
+                .map(ToOwned::to_owned)
+                .collect::<Vec<_>>()
+                .join(","),
             (0..array.len())
                 .map(|index| array
                     .field_names()
@@ -1417,16 +1439,7 @@ mod tests {
                 assert_eq!(arguments.capture_count(), 0);
                 let invoker = crate::user_functions::current_semantic_function_invoker()
                     .expect("numeric unit callback fixture");
-                let future = invoker(
-                    Some(runtime),
-                    actual.function,
-                    arguments.supplied(),
-                    outputs,
-                );
-                Box::pin(async move {
-                    let _arguments = arguments;
-                    future.await
-                })
+                invoker(Some(runtime), actual.function, arguments, outputs)
             },
         ))
         .expect("call-port scope");
@@ -1512,14 +1525,10 @@ mod tests {
         let enabled =
             Tensor::new_integer(IntegerStorage::U64(vec![1]), vec![1, 1]).expect("enabled");
 
-        let mut object = ObjectInstance::new(MEMOIZED_FUNCTION_CLASS.to_string());
-        object
-            .properties
-            .insert(FUNCTION_PROPERTY.to_string(), function);
-        object
-            .properties
-            .insert(ENABLED_PROPERTY.to_string(), Value::Tensor(enabled));
-        let target = runmat_gc::gc_allocate(Value::Object(object)).expect("target");
+        let mut object = runmat_value::UnboundedObjectBuilder::new(MEMOIZED_FUNCTION_CLASS);
+        object.insert(FUNCTION_PROPERTY.to_string(), function);
+        object.insert(ENABLED_PROPERTY.to_string(), Value::Tensor(enabled));
+        let target = runmat_gc::gc_allocate(Value::Object(object.finish())).expect("target");
         let handle = HandleRef {
             class_name: MEMOIZED_FUNCTION_CLASS.into(),
             target,
@@ -1655,10 +1664,11 @@ mod tests {
 
     fn set_handle_property(handle: &HandleRef, name: &str, value: Value) {
         runmat_gc::gc_with_value_mut(&handle.target, |target| {
-            let Value::Object(object) = target else {
-                panic!("expected object target")
-            };
-            object.properties.insert(name.to_string(), value);
+            edit_memoized_object(target, |object| {
+                object.insert(name.to_string(), value);
+                Ok(())
+            })
+            .expect("edit memoized target");
         })
         .expect("mutate handle target");
     }
@@ -1950,7 +1960,7 @@ mod tests {
         let Some(Value::Cell(inputs)) = cache.fields.get("Inputs") else {
             panic!("expected Inputs cell")
         };
-        assert_eq!(inputs.data.len(), 2);
+        assert_eq!(inputs.data().len(), 2);
         assert_eq!(*counter.lock().unwrap(), 4);
     }
 
@@ -2047,13 +2057,13 @@ mod tests {
         let enabled = block_on(memoized_subsref_builtin(
             f.clone(),
             OBJECT_INDEX_MEMBER.to_string(),
-            Value::String(ENABLED_PROPERTY.to_string()),
+            Value::String(ENABLED_PROPERTY.to_string().into()),
         ))
         .expect("enabled");
         let stats = block_on(memoized_subsref_builtin(
             f,
             OBJECT_INDEX_MEMBER.to_string(),
-            Value::String("stats".to_string()),
+            Value::String("stats".to_string().into()),
         ))
         .expect("stats");
 
@@ -2072,7 +2082,7 @@ mod tests {
         let err = block_on(memoized_subsref_builtin(
             f,
             OBJECT_INDEX_MEMBER.to_string(),
-            Value::String(CACHE_PROPERTY.to_string()),
+            Value::String(CACHE_PROPERTY.to_string().into()),
         ))
         .expect_err("internal cache property should not be public");
 
@@ -2125,11 +2135,11 @@ mod tests {
         let Some(Value::Cell(outputs)) = cache.fields.get("Outputs") else {
             panic!("expected Outputs cell")
         };
-        let Some(Value::Cell(first_entry_outputs)) = outputs.data.first() else {
+        let Some(Value::Cell(first_entry_outputs)) = outputs.data().first() else {
             panic!("expected first cached output cell")
         };
 
         assert_eq!(result, payload);
-        assert_eq!(first_entry_outputs.data.first(), Some(&payload));
+        assert_eq!(first_entry_outputs.data().first(), Some(&payload));
     }
 }

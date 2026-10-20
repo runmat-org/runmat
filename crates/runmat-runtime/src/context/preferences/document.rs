@@ -148,9 +148,7 @@ mod tests {
     #[test]
     fn document_version_is_explicit_and_plain_objects_round_trip() {
         let mut object = ObjectInstance::new("PreferencePayload");
-        object
-            .properties
-            .insert("revision".into(), Value::Int(IntValue::U64(u64::MAX)));
+        object.replace_property_unbounded("revision".into(), Value::Int(IntValue::U64(u64::MAX)));
         let mut document = PreferenceDocument::empty();
         document.groups.entry("app".into()).or_default().insert(
             "object".into(),

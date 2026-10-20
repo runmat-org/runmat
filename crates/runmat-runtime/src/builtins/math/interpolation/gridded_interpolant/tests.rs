@@ -1,4 +1,23 @@
 use super::*;
+async fn gridded_interpolant_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<crate::execution::RootedValue> {
+    super::gridded_interpolant_builtin(
+        runtime,
+        crate::execution::RootedValues::new(args)
+            .map_err(|error| error.into_runtime_error())?
+            .into(),
+    )
+    .await
+}
+fn parse_constructor(args: Vec<Value>) -> BuiltinResult<InterpolantSpec> {
+    super::parse_constructor(
+        crate::execution::RootedValues::new(args)
+            .map_err(|error| error.into_runtime_error())?
+            .into(),
+    )
+}
 use crate::{OBJECT_INDEX_MEMBER, OBJECT_INDEX_PAREN};
 use futures::executor::block_on;
 use runmat_value::{IntegerStorage, NumericStorage};
@@ -55,7 +74,10 @@ fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
 
 fn call(args: Vec<Value>) -> BuiltinResult<Value> {
     let _guard = crate::compatibility::push_runmat_extensions_enabled(true);
-    block_on(gridded_interpolant_builtin(args))
+    block_on(gridded_interpolant_builtin(None, args))
+        // Test-only adapter: interpolant fields are numeric/text owners, not
+        // newly published GC children. Clone while the original roots live.
+        .map(|rooted| rooted.value().clone())
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -104,7 +126,7 @@ fn gridded_integer_extensions_and_capabilities_are_declared() {
 fn gridded_strict_mode_rejects_integer_values() {
     let _guard = crate::compatibility::push_runmat_extensions_enabled(false);
     let values = int_col(IntegerStorage::I16(vec![1, 4, 9]));
-    let error = block_on(gridded_interpolant_builtin(vec![values]))
+    let error = block_on(gridded_interpolant_builtin(None, vec![values]))
         .expect_err("integer values are an extension");
     assert_eq!(
         error.identifier(),
@@ -173,13 +195,13 @@ fn constructor_returns_object_with_properties() {
     let Value::Object(obj) = value else {
         panic!("expected object");
     };
-    assert!(obj.class_name.is(CLASS_IDENTITY));
+    assert!(obj.class_name().is(CLASS_IDENTITY));
     assert_eq!(
-        obj.properties.get(METHOD),
-        Some(&Value::String("linear".to_string()))
+        obj.properties().get(METHOD),
+        Some(&Value::String("linear".to_string().into()))
     );
     assert!(matches!(
-        obj.properties.get(GRID_VECTORS),
+        obj.properties().get(GRID_VECTORS),
         Some(Value::Cell(_))
     ));
 }
@@ -189,8 +211,8 @@ fn one_dimensional_linear_interpolation_and_none_extrapolation() {
     let obj = call(vec![
         col(&[0.0, 1.0, 2.0]),
         col(&[0.0, 10.0, 40.0]),
-        Value::String("linear".to_string()),
-        Value::String("none".to_string()),
+        Value::String("linear".to_string().into()),
+        Value::String("none".to_string().into()),
     ])
     .unwrap();
     match subsref(obj, vec![row(&[-1.0, 0.5, 1.5, 3.0])])
@@ -238,7 +260,7 @@ fn one_dimensional_queries_preserve_rank_zero_and_rank_one_projection() {
 fn default_grid_and_nearest_method_work() {
     let obj = call(vec![
         row(&[10.0, 20.0, 40.0]),
-        Value::String("nearest".to_string()),
+        Value::String("nearest".to_string().into()),
     ])
     .unwrap();
     match subsref(obj, vec![row(&[1.2, 2.6])]).unwrap().value() {
@@ -409,7 +431,7 @@ fn one_dimensional_spline_uses_piecewise_polynomial_path() {
     let obj = call(vec![
         col(&[1.0, 2.0, 3.0]),
         int_col(IntegerStorage::I16(vec![1, 4, 9])),
-        Value::String("spline".to_string()),
+        Value::String("spline".to_string().into()),
     ])
     .unwrap();
     match subsref(obj, vec![Value::Num(1.5)]).unwrap().value() {
@@ -423,8 +445,8 @@ fn one_dimensional_pchip_preserves_samples_and_nearest_extrapolates() {
     let obj = call(vec![
         col(&[1.0, 2.0, 3.0, 4.0]),
         int_col(IntegerStorage::I16(vec![0, 10, 15, 18])),
-        Value::String("pchip".to_string()),
-        Value::String("nearest".to_string()),
+        Value::String("pchip".to_string().into()),
+        Value::String("nearest".to_string().into()),
     ])
     .unwrap();
     match subsref(obj, vec![row(&[0.0, 3.0, 5.0])]).unwrap().value() {
@@ -442,8 +464,8 @@ fn extrapolation_method_is_independent_from_interpolation_method() {
     let obj = call(vec![
         col(&[0.0, 1.0, 2.0]),
         col(&[0.0, 10.0, 40.0]),
-        Value::String("nearest".to_string()),
-        Value::String("linear".to_string()),
+        Value::String("nearest".to_string().into()),
+        Value::String("linear".to_string().into()),
     ])
     .unwrap();
     match subsref(obj, vec![row(&[-1.0, 0.4, 3.0])]).unwrap().value() {
@@ -460,7 +482,7 @@ fn extrapolation_method_is_independent_from_interpolation_method() {
 fn unsupported_cubic_method_is_explicit() {
     let err = call(vec![
         row(&[10.0, 20.0, 40.0]),
-        Value::String("cubic".to_string()),
+        Value::String("cubic".to_string().into()),
     ])
     .expect_err("cubic is not implemented yet");
     assert_eq!(
@@ -484,7 +506,7 @@ fn higher_order_methods_reject_nd_grids_explicitly() {
     let err = call(vec![
         Value::Cell(grid),
         Value::Tensor(values),
-        Value::String("spline".to_string()),
+        Value::String("spline".to_string().into()),
     ])
     .expect_err("three-dimensional spline is not implemented");
     assert_eq!(
@@ -498,7 +520,7 @@ fn pchip_requires_four_grid_points() {
     let err = call(vec![
         col(&[1.0, 2.0, 3.0]),
         col(&[1.0, 4.0, 9.0]),
-        Value::String("pchip".to_string()),
+        Value::String("pchip".to_string().into()),
     ])
     .expect_err("pchip requires four points");
     assert_eq!(
@@ -545,7 +567,7 @@ fn mutated_object_properties_are_revalidated_before_evaluation() {
     let Value::Object(mut obj) = value else {
         panic!("expected object");
     };
-    obj.properties.insert(
+    obj.replace_property_unbounded(
         VALUES.to_string(),
         Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
     );
@@ -563,7 +585,7 @@ fn member_subsref_returns_public_properties() {
     let value = block_on(gridded_interpolant_subsref(
         obj,
         OBJECT_INDEX_MEMBER.to_string(),
-        Value::String(VALUES.to_string()),
+        Value::String(VALUES.to_string().into()),
     ))
     .unwrap();
     assert!(matches!(value.value(), Value::Tensor(_)));
@@ -575,19 +597,19 @@ fn one_dimensional_makima_preserves_class_and_rejects_nd() {
     let obj = call(vec![
         col(&[0.0, 1.0, 2.0, 3.0, 4.0]),
         Value::Tensor(values),
-        Value::String("makima".to_string()),
+        Value::String("makima".to_string().into()),
     ])
     .expect("one-dimensional makima");
     let Value::Object(ref object) = obj else {
         panic!("expected interpolant object");
     };
     assert_eq!(
-        object.properties.get(METHOD),
-        Some(&Value::String("makima".to_string()))
+        object.properties().get(METHOD),
+        Some(&Value::String("makima".to_string().into()))
     );
     assert_eq!(
-        object.properties.get(EXTRAPOLATION_METHOD),
-        Some(&Value::String("makima".to_string()))
+        object.properties().get(EXTRAPOLATION_METHOD),
+        Some(&Value::String("makima".to_string().into()))
     );
     let result = subsref(obj, vec![row(&[2.5, 4.0])]).expect("makima query");
     let Value::Tensor(tensor) = result.value() else {
@@ -604,7 +626,7 @@ fn one_dimensional_makima_preserves_class_and_rejects_nd() {
     let err = call(vec![
         Value::Cell(grid),
         Value::Tensor(values),
-        Value::String("makima".to_string()),
+        Value::String("makima".to_string().into()),
     ])
     .expect_err("N-D makima remains unavailable");
     assert_eq!(

@@ -1,5 +1,5 @@
 use runmat_execution::{PoolBackend, ProgramExecutionAssignment};
-use runmat_value::{ObjectInstance, Tensor, Value};
+use runmat_value::{Tensor, UnboundedObjectBuilder, Value};
 
 use crate::context::RuntimeContext;
 
@@ -32,38 +32,34 @@ pub fn job(context: &RuntimeContext) -> Value {
 }
 
 fn task_object(assignment: ProgramExecutionAssignment) -> Value {
-    let mut object = ObjectInstance::new(TASK_CLASS.to_string());
+    let mut object = UnboundedObjectBuilder::new(TASK_CLASS.to_string());
     insert_text(&mut object, "ID", assignment.task_id);
     insert_text(&mut object, "AttemptID", assignment.attempt_id);
     insert_text(&mut object, "PoolID", assignment.pool_id);
     insert_text(&mut object, "WorkerID", assignment.worker_id);
-    object
-        .properties
-        .insert("State".into(), Value::String("running".into()));
-    Value::Object(object)
+    object.insert("State".into(), Value::String("running".into()));
+    Value::Object(object.finish())
 }
 
 fn worker_object(assignment: ProgramExecutionAssignment) -> Value {
-    let mut object = ObjectInstance::new(WORKER_CLASS.to_string());
+    let mut object = UnboundedObjectBuilder::new(WORKER_CLASS.to_string());
     insert_text(&mut object, "ID", assignment.worker_id);
     insert_text(&mut object, "PoolID", assignment.pool_id);
-    object.properties.insert(
+    object.insert(
         "Backend".into(),
         Value::String(backend_name(assignment.backend).into()),
     );
-    Value::Object(object)
+    Value::Object(object.finish())
 }
 
 fn job_object(job_id: runmat_execution::JobId) -> Value {
-    let mut object = ObjectInstance::new(JOB_CLASS.to_string());
+    let mut object = UnboundedObjectBuilder::new(JOB_CLASS.to_string());
     insert_text(&mut object, "ID", job_id);
-    Value::Object(object)
+    Value::Object(object.finish())
 }
 
-fn insert_text(object: &mut ObjectInstance, property: &str, value: impl std::fmt::Display) {
-    object
-        .properties
-        .insert(property.into(), Value::string(value.to_string()));
+fn insert_text(object: &mut UnboundedObjectBuilder, property: &str, value: impl std::fmt::Display) {
+    object.insert(property.into(), Value::string(value.to_string()));
 }
 
 const fn backend_name(backend: PoolBackend) -> &'static str {
@@ -126,25 +122,27 @@ mod tests {
         let runmat_value::Value::Object(task) = task(&runtime) else {
             panic!("task assignment should produce an object");
         };
-        assert_eq!(task.class_name.display_name(), "parallel.Task");
+        assert_eq!(task.class_name().display_name(), "parallel.Task");
         assert_eq!(
-            task.properties.get("ID"),
-            Some(&runmat_value::Value::String(assignment.task_id.to_string()))
+            task.properties().get("ID"),
+            Some(&runmat_value::Value::String(
+                assignment.task_id.to_string().into()
+            ))
         );
 
         let runmat_value::Value::Object(worker) = worker(&runtime) else {
             panic!("worker assignment should produce an object");
         };
-        assert_eq!(worker.class_name.display_name(), "parallel.Worker");
+        assert_eq!(worker.class_name().display_name(), "parallel.Worker");
         assert_eq!(
-            worker.properties.get("Backend"),
+            worker.properties().get("Backend"),
             Some(&runmat_value::Value::String("local_processes".into()))
         );
 
         let runmat_value::Value::Object(job) = job(&runtime) else {
             panic!("job assignment should produce an object");
         };
-        assert_eq!(job.class_name.display_name(), "parallel.Job");
+        assert_eq!(job.class_name().display_name(), "parallel.Job");
     }
 
     #[test]

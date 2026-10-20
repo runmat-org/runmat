@@ -19,14 +19,14 @@ fn empty_character_rows_keep_the_column_cell_shape() {
     let input = CharArray::new(Vec::new(), 0, 5).unwrap();
     let output = cell(call(Value::CharArray(input)).unwrap());
     assert_eq!(output.shape, vec![0, 1]);
-    assert!(output.data.is_empty());
+    assert!(output.data().is_empty());
 }
 
 #[test]
 fn all_space_row_becomes_an_empty_character_vector() {
     let input = CharArray::new(vec![' '; 3], 1, 3).unwrap();
     let output = cell(call(Value::CharArray(input)).unwrap());
-    let Value::CharArray(row) = &output.data[0] else {
+    let Value::CharArray(row) = &output.data()[0] else {
         panic!("expected character row");
     };
     assert_eq!(row.shape, vec![1, 0]);

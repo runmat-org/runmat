@@ -219,7 +219,10 @@ fn zero_requested_outputs_preserve_input_and_numerical_errors() {
                 None,
                 beta.clone(),
                 residual.clone(),
-                vec![method.clone(), source.clone()],
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    method.clone(),
+                    source.clone(),
+                ]),
             ))
             .expect_err("invalid call must reject independent of output count");
             assert_eq!(error.identifier(), Some(identifier));
@@ -269,7 +272,10 @@ fn cancelled_invocation_does_not_enter_interval_work() {
         Some(&runtime),
         Value::Num(1.0),
         tensor(vec![1.0, -1.0], 2, 1),
-        vec![Value::from("Covar"), Value::Num(1.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("Covar"),
+            Value::Num(1.0),
+        ]),
     ))
     .expect_err("cancelled before materialization");
     let cancelled = crate::execution::ExecutionServiceError::Cancelled.into_runtime_error();
@@ -287,7 +293,10 @@ fn finite_host_precharge_and_retained_interval_claim_share_one_owner() {
         Some(&runtime),
         beta.clone(),
         residual.clone(),
-        vec![Value::from("Jacobian"), jacobian.clone()],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("Jacobian"),
+            jacobian.clone(),
+        ]),
     ))
     .expect("finite admitted interval");
     let Value::Tensor(ref interval_tensor) = output else {
@@ -321,12 +330,12 @@ fn finite_host_precharge_and_retained_interval_claim_share_one_owner() {
         Some(&scalar_runtime),
         scalar_beta,
         scalar_residual,
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("Covar"),
             scalar_covar,
             Value::from("Alpha"),
             scalar_alpha,
-        ],
+        ]),
     ))
     .expect("borrowed host scalars fit their checked finite envelope");
     assert!(matches!(&scalar_output, Value::Tensor(tensor) if tensor.shape() == [1, 2]));
@@ -355,7 +364,10 @@ fn finite_host_precharge_and_retained_interval_claim_share_one_owner() {
             Some(&zero_runtime),
             Value::Num(1.0),
             tensor(vec![1.0, -1.0], 2, 1),
-            vec![Value::from("Covar"), Value::Num(0.25)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("Covar"),
+                Value::Num(0.25),
+            ]),
         ))
         .expect("zero outputs still perform the admitted interval calculation");
         assert!(matches!(zero_output, Value::OutputList(values) if values.is_empty()));
@@ -369,7 +381,10 @@ fn finite_host_precharge_and_retained_interval_claim_share_one_owner() {
         Some(&runtime),
         beta,
         residual,
-        vec![Value::from("Jacobian"), jacobian],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("Jacobian"),
+            jacobian,
+        ]),
     ))
     .expect_err("finite envelope must reject before numerical work");
     assert_eq!(error.identifier(), Some("RunMat:nlparci:HostAllocation"));

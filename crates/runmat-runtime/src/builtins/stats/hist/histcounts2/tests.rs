@@ -8,6 +8,16 @@ use runmat_builtins::{
 };
 use runmat_value::{IntValue, IntegerStorage};
 
+async fn evaluate(x: Value, y: Value, rest: &[Value]) -> BuiltinResult<Histcounts2Evaluation> {
+    super::evaluate(x, y, crate::call::FunctionArgumentView::from_slice(rest)).await
+}
+
+async fn histcounts2_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let rest =
+        crate::execution::RootedValues::new(rest).map_err(|error| error.into_runtime_error())?;
+    super::histcounts2_builtin(x, y, rest.into()).await
+}
+
 fn tensor_from_value(value: Value) -> Tensor {
     match value {
         Value::Tensor(t) => t,

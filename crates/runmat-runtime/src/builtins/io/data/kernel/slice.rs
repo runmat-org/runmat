@@ -113,12 +113,12 @@ pub(in crate::builtins::io::data) fn parse_slice_spec(
 ) -> BuiltinResult<Vec<DimRange>> {
     match slice_spec {
         Value::Cell(cell) => {
-            if cell.data.is_empty() {
+            if cell.data().is_empty() {
                 return Err(data_error("INVALID_SLICE: empty slice specification"));
             }
             let mut ranges = Vec::with_capacity(shape.len());
             for (dim, extent) in shape.iter().enumerate() {
-                if let Some(item) = cell.data.get(dim) {
+                if let Some(item) = cell.data().get(dim) {
                     ranges.push(parse_dim_range(item, *extent)?);
                 } else {
                     ranges.push(DimRange {

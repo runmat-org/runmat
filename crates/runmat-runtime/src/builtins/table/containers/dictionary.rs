@@ -76,16 +76,19 @@ pub(in crate::builtins::table) fn dictionary_from_args(args: Vec<Value>) -> Buil
     let values = unique_values;
     let key_count = keys.len();
     let value_count = values.len();
-    let mut object = ObjectInstance::new(DICTIONARY_CLASS.to_string());
-    object.properties.insert(
+    let mut object = runmat_value::UnboundedObjectBuilder::with_property_capacity(
+        DICTIONARY_CLASS.to_string(),
+        2,
+    );
+    object.insert(
         "Keys".to_string(),
         Value::Cell(CellArray::new(keys, 1, key_count).map_err(invalid_variable)?),
     );
-    object.properties.insert(
+    object.insert(
         "Values".to_string(),
         Value::Cell(CellArray::new(values, 1, value_count).map_err(invalid_variable)?),
     );
-    Ok(Value::Object(object))
+    Ok(Value::Object(object.finish()))
 }
 
 pub(in crate::builtins::table) fn into_dictionary_object(
@@ -104,7 +107,7 @@ pub(in crate::builtins::table) fn dictionary_cells<'a>(
     object: &'a ObjectInstance,
     field: &str,
 ) -> BuiltinResult<&'a CellArray> {
-    match object.properties.get(field) {
+    match object.properties().get(field) {
         Some(Value::Cell(cell)) => Ok(cell),
         Some(other) => Err(invalid_variable(format!(
             "dictionary: {field} storage must be a cell array, got {other:?}"
@@ -126,13 +129,13 @@ pub(in crate::builtins::table) fn dictionary_lookup(
     let query_keys = convert_queries_to_key_class(keys, query_keys)?;
     for query in &query_keys {
         let idx = keys
-            .data
+            .data()
             .iter()
             .position(|key| dictionary_keys_equal(key, query))
             .ok_or_else(|| invalid_index(format!("dictionary: key {query:?} not found")))?;
         out.push(
             values
-                .data
+                .data()
                 .get(idx)
                 .cloned()
                 .ok_or_else(|| invalid_index("dictionary: value index out of bounds"))?,
@@ -219,7 +222,7 @@ fn normalize_to_existing_class(existing: &[Value], values: &mut [Value]) -> Buil
                 *value = match value {
                     Value::String(_) => unreachable!("preserved existing string above"),
                     Value::CharArray(array) if array.rows == 1 => {
-                        Value::string(array.data.iter().collect::<String>())
+                        Value::string(array.data().iter().collect::<String>())
                     }
                     other => {
                         return Err(invalid_argument(format!(
@@ -245,7 +248,7 @@ fn convert_queries_to_key_class(
     keys: &CellArray,
     mut queries: Vec<Value>,
 ) -> BuiltinResult<Vec<Value>> {
-    normalize_to_existing_class(&keys.data, &mut queries)?;
+    normalize_to_existing_class(keys.data(), &mut queries)?;
     Ok(queries)
 }
 
@@ -359,11 +362,11 @@ fn integer_values_to_storage(
 pub(in crate::builtins::table) fn dictionary_keys_equal(left: &Value, right: &Value) -> bool {
     match (left, right) {
         (Value::String(a), Value::String(b)) => a == b,
-        (Value::CharArray(a), Value::CharArray(b)) => a.data == b.data,
+        (Value::CharArray(a), Value::CharArray(b)) => a.data() == b.data(),
         (Value::String(a), Value::CharArray(b)) | (Value::CharArray(b), Value::String(a))
             if b.rows == 1 =>
         {
-            a.chars().eq(b.data.iter().copied())
+            a.chars().eq(b.data().iter().copied())
         }
         (Value::Num(a), Value::Num(b)) => a == b,
         (Value::Int(a), Value::Int(b)) => a == b,
@@ -374,8 +377,8 @@ pub(in crate::builtins::table) fn dictionary_keys_equal(left: &Value, right: &Va
 
 pub(in crate::builtins::table) fn value_elements(value: &Value) -> BuiltinResult<Vec<Value>> {
     match value {
-        Value::Cell(cell) => Ok(cell.data.iter().cloned().collect()),
-        Value::StringArray(array) => Ok(array.data.iter().cloned().map(Value::String).collect()),
+        Value::Cell(cell) => Ok(cell.data().to_vec()),
+        Value::StringArray(array) => Ok(array.data().iter().cloned().map(Value::String).collect()),
         Value::Tensor(tensor) => Ok((0..tensor.len())
             .map(|index| {
                 numeric_scalar_value(
@@ -450,8 +453,8 @@ mod tests {
         let values = Value::Cell(
             CellArray::new(
                 vec![
-                    Value::String("first".to_string()),
-                    Value::String("second".to_string()),
+                    Value::String("first".to_string().into()),
+                    Value::String("second".to_string().into()),
                 ],
                 1,
                 2,
@@ -465,7 +468,7 @@ mod tests {
 
         let found = dictionary_lookup(&object, &Value::Int(IntValue::U64(second))).expect("lookup");
 
-        assert_eq!(found, Value::String("second".to_string()));
+        assert_eq!(found, Value::String("second".to_string().into()));
     }
 
     #[test]
@@ -480,11 +483,11 @@ mod tests {
         let keys = dictionary_cells(&object, "Keys").unwrap();
         let values = dictionary_cells(&object, "Values").unwrap();
         assert_eq!(
-            keys.data,
+            keys.data(),
             vec![Value::Int(IntValue::U16(1)), Value::Int(IntValue::U16(2))]
         );
         assert_eq!(
-            values.data,
+            values.data(),
             vec![Value::Int(IntValue::I8(7)), Value::Int(IntValue::I8(7))]
         );
     }
@@ -506,7 +509,7 @@ mod tests {
             panic!("expected dictionary");
         };
         assert_eq!(
-            dictionary_cells(&object, "Keys").unwrap().data,
+            dictionary_cells(&object, "Keys").unwrap().data(),
             vec![
                 Value::Int(IntValue::I16(1)),
                 Value::Int(IntValue::I16(2)),

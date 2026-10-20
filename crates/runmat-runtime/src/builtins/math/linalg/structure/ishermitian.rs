@@ -80,7 +80,10 @@ fn ishermitian_error_with_detail(
     binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::structure::ishermitian"
 )]
-async fn ishermitian_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn ishermitian_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     if value_has_integer_storage(&value) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &ISHERMITIAN_INTEGER_INPUT_EXTENSION,
@@ -99,7 +102,7 @@ async fn ishermitian_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinRe
             NAME,
         )?;
     }
-    let (mode, tol) = parse_optional_args(&rest)?;
+    let (mode, tol) = parse_optional_args(rest.view())?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, "ishermitian")?;
     match value {
         Value::GpuTensor(handle) => ishermitian_gpu(handle, mode, tol).await,
@@ -126,7 +129,7 @@ fn is_tolerance_argument(value: &Value) -> bool {
 fn is_flag_alias_argument(value: &Value) -> bool {
     let text = match value {
         Value::String(value) => Some(value.as_str()),
-        Value::StringArray(value) if value.data.len() == 1 => Some(value.data[0].as_str()),
+        Value::StringArray(value) if value.data().len() == 1 => Some(value.data()[0].as_str()),
         _ => None,
     };
     text.is_some_and(|value| {
@@ -135,7 +138,7 @@ fn is_flag_alias_argument(value: &Value) -> bool {
             "skew" | "nonskew"
         )
     }) || matches!(value, Value::CharArray(value) if value.rows == 1 && {
-        let text = value.data.iter().collect::<String>().trim().to_ascii_lowercase();
+        let text = value.data().iter().collect::<String>().trim().to_ascii_lowercase();
         !matches!(text.as_str(), "skew" | "nonskew")
     })
 }
@@ -257,7 +260,9 @@ fn evaluate_matrix(matrix: &MatrixInput, mode: HermitianMode, tol: f64) -> bool 
     }
 }
 
-fn parse_optional_args(args: &[Value]) -> BuiltinResult<(HermitianMode, f64)> {
+fn parse_optional_args(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<(HermitianMode, f64)> {
     if args.len() > 2 {
         return Err(ishermitian_error_with_detail(
             &ISHERMITIAN_ERROR_INVALID_ARGUMENT,
@@ -299,8 +304,8 @@ fn parse_optional_args(args: &[Value]) -> BuiltinResult<(HermitianMode, f64)> {
 fn parse_mode_flag(value: &Value) -> BuiltinResult<Option<HermitianMode>> {
     let text = match value {
         Value::String(s) => Some(s.as_str().to_owned()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].as_str().to_owned()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
+        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].as_str().to_owned()),
+        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data().iter().collect()),
         _ => None,
     };
 
@@ -658,7 +663,7 @@ pub(crate) mod tests {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let integer_error = block_on(super::ishermitian_builtin(
             Value::Int(IntValue::I32(1)),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect_err("integer input is an extension");
         assert_eq!(
@@ -667,7 +672,7 @@ pub(crate) mod tests {
         );
         let tolerance_error = block_on(super::ishermitian_builtin(
             Value::Num(1.0),
-            vec![Value::Num(0.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(0.0)]),
         ))
         .expect_err("tolerance form is an extension");
         assert_eq!(
@@ -1058,6 +1063,9 @@ pub(crate) mod tests {
 
     fn ishermitian_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
-        block_on(super::ishermitian_builtin(value, rest))
+        block_on(super::ishermitian_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 }

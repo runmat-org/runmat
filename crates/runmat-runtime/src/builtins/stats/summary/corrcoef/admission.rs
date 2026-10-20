@@ -9,7 +9,7 @@ pub(super) struct CorrcoefArgs {
 }
 
 impl CorrcoefArgs {
-    pub(super) fn parse(first: Value, rest: Vec<Value>) -> BuiltinResult<Self> {
+    pub(super) fn parse(first: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Self> {
         let mut values = rest.into_iter();
         let mut second = None;
         let mut rows = CorrcoefRows::All;

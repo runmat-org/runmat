@@ -137,20 +137,10 @@ fn strtrim_admission(runtime: &RuntimeContext, cause: HostAllocationError) -> Ru
 }
 
 fn strtrim_char_array(array: CharArray) -> BuiltinResult<Value> {
-    let CharArray {
-        data,
-        shape,
-        rows,
-        cols,
-    } = array;
-    if rows == 0 {
-        return Ok(Value::CharArray(CharArray {
-            data,
-            shape,
-            rows,
-            cols,
-        }));
+    if array.rows == 0 {
+        return Ok(Value::CharArray(array));
     }
+    let (data, _, rows, cols) = array.into_parts();
 
     let mut trimmed_rows: Vec<Vec<char>> = Vec::with_capacity(rows);
     let mut target_cols: usize = 0;
@@ -181,9 +171,7 @@ async fn strtrim_cell_array(
     runtime: Option<&RuntimeContext>,
     cell: CellArray,
 ) -> BuiltinResult<Value> {
-    let CellArray {
-        data, rows, cols, ..
-    } = cell;
+    let (data, _, rows, cols) = cell.into_parts();
     let mut trimmed_values = Vec::with_capacity(rows * cols);
     for value in &data {
         let trimmed = strtrim_cell_element(runtime, value).await?;
@@ -209,7 +197,7 @@ async fn strtrim_cell_element(
             )
             .map(Value::String)
         }
-        Value::StringArray(sa) if sa.data.len() == 1 => {
+        Value::StringArray(sa) if sa.data().len() == 1 => {
             let strict = !crate::compatibility::runmat_extensions_enabled();
             transform_scalar_borrowed(
                 runtime,
@@ -223,7 +211,7 @@ async fn strtrim_cell_element(
             if ca.rows == 0 {
                 return Ok(Value::CharArray(ca));
             }
-            let source = char_row_to_string_slice(&ca.data, ca.cols, 0);
+            let source = char_row_to_string_slice(ca.data(), ca.cols, 0);
             let trimmed = trim_whitespace(&source);
             let chars: Vec<char> = trimmed.chars().collect();
             let cols = chars.len();
@@ -308,7 +296,7 @@ pub(crate) mod tests {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 2);
                 assert_eq!(ca.cols, 3);
-                assert_eq!(ca.data, vec!['c', 'a', 't', 'd', 'o', 'g']);
+                assert_eq!(ca.data(), vec!['c', 'a', 't', 'd', 'o', 'g']);
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -323,7 +311,7 @@ pub(crate) mod tests {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 1);
                 assert_eq!(ca.cols, 0);
-                assert!(ca.data.is_empty());
+                assert!(ca.data().is_empty());
             }
             other => panic!("expected empty char array, got {other:?}"),
         }
@@ -425,8 +413,8 @@ pub(crate) mod tests {
             let input = format!("  {significant}RunMat{significant}  ");
             let expected = format!("{significant}RunMat{significant}");
             assert_eq!(
-                run_strtrim(Value::String(input)).expect("strict string trim"),
-                Value::String(expected.clone())
+                run_strtrim(Value::String(input.into())).expect("strict string trim"),
+                Value::String(expected.clone().into())
             );
             assert_eq!(
                 run_strtrim(Value::CharArray(CharArray::new_row(&format!(

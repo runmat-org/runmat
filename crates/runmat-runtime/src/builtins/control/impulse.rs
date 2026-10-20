@@ -79,10 +79,15 @@ fn impulse_error_with_message(
 
 #[runtime_builtin(
     name = "impulse",
+    context = true,
     binding_variant = "default",
     builtin_path = "crate::builtins::control::impulse"
 )]
-async fn impulse_builtin(system: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn impulse_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    system: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if rest.len() > 1 || crate::output_count::current_output_count().is_some_and(|count| count > 2)
     {
         return Err(impulse_error_with_detail(
@@ -90,11 +95,11 @@ async fn impulse_builtin(system: Value, rest: Vec<Value>) -> BuiltinResult<Value
             "impulse accepts at most one time argument and two outputs",
         ));
     }
-    TimeSpec::preflight_host(&rest)?;
+    TimeSpec::preflight_host(rest.view())?;
     preflight_response_model_operand(&system, ResponseKind::Impulse)?;
-    ensure_impulse_extensions(&system, &rest)?;
-    let system = TfSystem::parse(system).await?;
-    let time = TimeSpec::parse(&system, &rest).await?;
+    ensure_impulse_extensions(&system, rest.view())?;
+    let system = TfSystem::parse(runtime.as_ref(), system).await?;
+    let time = TimeSpec::parse(&system, rest.view()).await?;
     let response = evaluate_impulse(&system, time)?;
 
     if let Some(out_count) = crate::output_count::current_output_count() {
@@ -119,7 +124,10 @@ async fn impulse_builtin(system: Value, rest: Vec<Value>) -> BuiltinResult<Value
     response.y_value()
 }
 
-fn ensure_impulse_extensions(system: &Value, rest: &[Value]) -> BuiltinResult<()> {
+fn ensure_impulse_extensions(
+    system: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     let mut values = consumed_numeric_inputs(system, rest).into_iter();
     let integer = values.clone().any(value_contains_typed_integer);
     let logical = values.clone().any(value_contains_logical);
@@ -152,7 +160,10 @@ fn ensure_impulse_extensions(system: &Value, rest: &[Value]) -> BuiltinResult<()
     Ok(())
 }
 
-fn consumed_numeric_inputs<'a>(system: &'a Value, rest: &'a [Value]) -> Vec<&'a Value> {
+fn consumed_numeric_inputs<'a>(
+    system: &'a Value,
+    rest: crate::call::FunctionArgumentView<'a>,
+) -> Vec<&'a Value> {
     let mut values = Vec::with_capacity(7);
     if let Value::Object(object) = system {
         for name in [
@@ -163,7 +174,7 @@ fn consumed_numeric_inputs<'a>(system: &'a Value, rest: &'a [Value]) -> Vec<&'a 
             "OutputDelay",
             "Variable",
         ] {
-            if let Some(value) = object.properties.get(name) {
+            if let Some(value) = object.properties().get(name) {
                 values.push(value);
             }
         }
@@ -238,8 +249,11 @@ struct TfSystem {
 }
 
 impl TfSystem {
-    async fn parse(value: Value) -> BuiltinResult<Self> {
-        let model = parse_real_model(value, ResponseKind::Impulse).await?;
+    async fn parse(
+        runtime: Option<&crate::context::RuntimeContext>,
+        value: Value,
+    ) -> BuiltinResult<Self> {
+        let model = parse_real_model(runtime, value, ResponseKind::Impulse).await?;
         if model.sample_time() < 0.0 {
             return Err(impulse_error_with_detail(
                 &IMPULSE_ERROR_INVALID_MODEL,

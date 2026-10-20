@@ -17,7 +17,10 @@ enum Request {
     Change(UserPathMutation),
 }
 
-pub(super) async fn run(runtime: Option<RuntimeContext>, args: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn run(
+    runtime: Option<RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     let request = decode(args)?;
     let runtime = runtime.ok_or_else(unavailable)?;
     let service = runtime
@@ -130,7 +133,10 @@ pub(super) async fn run(runtime: Option<RuntimeContext>, args: Vec<Value>) -> Bu
     Ok(super::char_value(&resolved.presentation))
 }
 
-pub(super) fn restore(runtime: Option<RuntimeContext>, args: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) fn restore(
+    runtime: Option<RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if crate::output_count::current_output_count().is_some_and(|count| count > 1) {
         return Err(
             build_runtime_error("restoredefaultpath: too many output arguments")
@@ -167,7 +173,7 @@ pub(super) fn restore(runtime: Option<RuntimeContext>, args: Vec<Value>) -> Buil
     Ok(super::char_value(&search.current_string()))
 }
 
-fn decode(args: Vec<Value>) -> BuiltinResult<Request> {
+fn decode(args: crate::call::BuiltinArguments) -> BuiltinResult<Request> {
     if crate::output_count::current_output_count().is_some_and(|count| count > 1) {
         return Err(build_runtime_error("userpath: too many output arguments")
             .with_builtin("userpath")

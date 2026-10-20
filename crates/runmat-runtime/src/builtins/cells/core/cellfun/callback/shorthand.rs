@@ -15,9 +15,9 @@ impl CellfunShorthand {
         let text = match value {
             Value::String(text) => text.as_str(),
             Value::CharArray(value) if value.rows == 1 => {
-                return Self::parse_name(&value.data.iter().collect::<String>());
+                return Self::parse_name(&value.data().iter().collect::<String>());
             }
-            Value::StringArray(value) if value.data.len() == 1 => value.data[0].as_str(),
+            Value::StringArray(value) if value.data().len() == 1 => value.data()[0].as_str(),
             _ => return None,
         };
         Self::parse_name(text)
@@ -31,7 +31,10 @@ impl CellfunShorthand {
         }
     }
 
-    pub(super) async fn call(self, arguments: &[Value]) -> BuiltinResult<Value> {
+    pub(super) async fn call(
+        self,
+        arguments: crate::call::FunctionArgumentView<'_>,
+    ) -> BuiltinResult<Value> {
         match self {
             Self::ProdOfSize => prod_of_size(arguments).await,
             Self::IsClass => is_class(arguments).await,
@@ -39,20 +42,21 @@ impl CellfunShorthand {
     }
 }
 
-async fn prod_of_size(arguments: &[Value]) -> BuiltinResult<Value> {
+async fn prod_of_size(arguments: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<Value> {
     let value = arguments
         .first()
         .ok_or_else(|| error::invalid("cellfun: prodofsize requires one input"))?;
     Ok(Value::Num(value_numel(value).await? as f64))
 }
 
-async fn is_class(arguments: &[Value]) -> BuiltinResult<Value> {
-    let [value, requested, ..] = arguments else {
+async fn is_class(arguments: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<Value> {
+    if arguments.len() < 2 {
         return Err(error::invalid(
             "cellfun: 'isclass' requires a class name argument",
         ));
     };
-    let requested = class_identity(requested)
+    let value = &arguments[0];
+    let requested = class_identity(&arguments[1])
         .ok_or_else(|| error::invalid("cellfun: class name must be a string scalar"))?;
     let actual = crate::builtins::introspection::class_identity::class_identity_for_value(value);
     Ok(Value::Bool(actual == requested))
@@ -61,8 +65,8 @@ async fn is_class(arguments: &[Value]) -> BuiltinResult<Value> {
 fn class_identity(value: &Value) -> Option<runmat_types::ClassIdentity> {
     let text = match value {
         Value::String(text) => text.to_string(),
-        Value::CharArray(value) if value.rows == 1 => value.data.iter().collect(),
-        Value::StringArray(value) if value.data.len() == 1 => value.data[0].to_string(),
+        Value::CharArray(value) if value.rows == 1 => value.data().iter().collect(),
+        Value::StringArray(value) if value.data().len() == 1 => value.data()[0].to_string(),
         _ => return None,
     };
     runmat_types::ClassIdentity::new(text.trim()).ok()

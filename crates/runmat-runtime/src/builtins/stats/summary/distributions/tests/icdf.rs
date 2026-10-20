@@ -384,7 +384,7 @@ fn icdf_fitted_object_form_uses_the_same_integer_admission_boundary() {
     let pd = block_on(crate::builtins::stats::summary::fitdist::fitdist_builtin(
         Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap().into(),
         Value::from("Normal"),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("fitted distribution");
     {

@@ -70,7 +70,7 @@ fn gray2rgb_map_error(
 async fn gray2rgb_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     gray: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<crate::execution::RootedValue> {
     if !rest.is_empty() {
         return Err(gray2rgb_error(&GRAY2RGB_ERROR_TOO_MANY_INPUTS));
@@ -285,9 +285,13 @@ mod tests {
         gray: Value,
         rest: Vec<Value>,
     ) -> BuiltinResult<Value> {
-        super::gray2rgb_builtin(runtime, gray, rest)
-            .await
-            .map(|owned| owned.with_owned(|value| value))
+        super::gray2rgb_builtin(
+            runtime,
+            gray,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        )
+        .await
+        .map(|owned| owned.with_owned(|value| value))
     }
     use futures::executor::block_on;
     use runmat_value::{IntegerStorage, NumericDType, Tensor};

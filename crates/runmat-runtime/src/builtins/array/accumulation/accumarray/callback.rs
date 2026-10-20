@@ -4,23 +4,34 @@ use runmat_value::{IntValue, IntegerStorage, Value};
 
 use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::table::select_rows;
-use crate::{call_feval_async_with_outputs, BuiltinResult};
+use crate::BuiltinResult;
 
 use super::{data, error, output};
 
+pub(super) struct Request {
+    pub data: Value,
+    pub groups: BTreeMap<usize, Vec<usize>>,
+    pub shape: Vec<usize>,
+    pub output_len: usize,
+    pub function: Value,
+    pub fill: Option<Value>,
+    pub sparse: bool,
+}
+
 pub(super) async fn evaluate(
-    data: Value,
-    groups: BTreeMap<usize, Vec<usize>>,
-    shape: Vec<usize>,
-    output_len: usize,
-    function: Value,
-    fill: Option<Value>,
-    sparse: bool,
+    runtime: Option<&crate::context::RuntimeContext>,
+    request: Request,
 ) -> BuiltinResult<crate::execution::RootedValue> {
-    let _inputs_root = crate::execution::RootedValueLease::for_values(
-        [&data, &function].into_iter().chain(fill.iter()),
-    )
-    .map_err(|error| error.into_runtime_error())?;
+    let Request {
+        data,
+        groups,
+        shape,
+        output_len,
+        function,
+        fill,
+        sparse,
+    } = request;
+    let function = crate::execution::RootedValue::in_optional_context(function, runtime)?;
     if sparse && !data::is_double(&data) {
         return Err(error::invalid(
             "accumarray: sparse output requires double input data",
@@ -29,7 +40,7 @@ pub(super) async fn evaluate(
     let mut computed = BTreeMap::new();
     for (linear, rows) in groups {
         let group = select_rows(&data, &rows)?;
-        computed.insert(linear, invoke(function.clone(), group).await?);
+        computed.insert(linear, invoke(runtime, function.clone(), group).await?);
     }
     let prototype = computed.values().next();
     let fill = match fill {
@@ -44,47 +55,40 @@ pub(super) async fn evaluate(
             "accumarray: sparse output requires a zero fill value",
         ));
     }
-    let fill =
-        crate::execution::RootedValue::new(fill).map_err(|error| error.into_runtime_error())?;
-    let mut values = crate::execution::RootedValuesBuilder::with_capacity(output_len);
+    let fill = crate::execution::RootedValue::in_optional_context(fill, runtime)?;
+    // Numerical/output assembly scratch is distinct from the argument ABI.
+    // Keep every computed source and fill rooted until final publication.
+    let mut values = Vec::with_capacity(output_len);
     for linear in 0..output_len {
-        if let Some(value) = computed.remove(&linear) {
-            value
-                .with_owned(|value| values.push(value))
-                .map_err(|error| error.into_runtime_error())?;
+        if let Some(value) = computed.get(&linear) {
+            values.push(value.value().clone());
         } else {
-            values
-                .push(fill.value().clone())
-                .map_err(|error| error.into_runtime_error())?;
+            values.push(fill.value().clone());
         }
     }
-    values
-        .finish()
-        .map_err(|error| error.into_runtime_error())?
-        .with_unbounded_values(|values| {
-            let output = output::from_scalars(values, shape, sparse)?;
-            crate::execution::RootedValue::new(output).map_err(|error| error.into_runtime_error())
-        })?
+    let output = output::from_scalars(values, shape, sparse)?;
+    crate::execution::RootedValue::in_optional_context(output, runtime)
 }
 
-async fn invoke(function: Value, values: Value) -> BuiltinResult<crate::execution::RootedValue> {
-    let _inputs_root =
-        crate::execution::RootedValueLease::for_values([&function, &values].into_iter())
-            .map_err(|error| error.into_runtime_error())?;
-    let result = call_feval_async_with_outputs(function, &[values], 1)
+async fn invoke(
+    runtime: Option<&crate::context::RuntimeContext>,
+    function: crate::execution::RootedValue,
+    values: Value,
+) -> BuiltinResult<crate::execution::RootedValue> {
+    let arguments =
+        crate::call::BuiltinArguments::from_borrowed(std::slice::from_ref(&values), runtime)?;
+    let result = crate::call::feval::invoke_rooted_target(runtime, function, arguments, 1, None)
         .await
         .map_err(|source| error::callback("accumarray: callback failed", source))?;
-    result.try_map_owned(
-        |value| {
-            scalar(match value {
-                Value::OutputList(values) if values.len() == 1 => {
-                    crate::sequence::into_first_output(values)?.expect("one callback output")
-                }
-                other => other,
-            })
-        },
-        |error| error.into_runtime_error(),
-    )
+    result.with_owned_sequence(|sequence| {
+        let value = scalar(match sequence.into_legacy_value() {
+            Value::OutputList(values) if values.len() == 1 => {
+                crate::sequence::into_first_output(values)?.expect("one callback output")
+            }
+            other => other,
+        })?;
+        crate::execution::RootedValue::in_optional_context(value, runtime)
+    })
 }
 
 fn scalar(value: Value) -> BuiltinResult<Value> {
@@ -99,12 +103,12 @@ fn scalar(value: Value) -> BuiltinResult<Value> {
             Ok(Value::Tensor(tensor))
         }
         Value::LogicalArray(array) if array.data.len() == 1 => Ok(Value::Bool(array.data[0] != 0)),
-        Value::Cell(cell) if cell.data.len() == 1 => cell
-            .data
+        Value::Cell(cell) if cell.data().len() == 1 => cell
+            .data()
             .first()
             .cloned()
             .ok_or_else(|| error::invalid("accumarray: empty scalar cell result")),
-        Value::CharArray(chars) if chars.data.len() == 1 => Ok(Value::CharArray(chars)),
+        Value::CharArray(chars) if chars.data().len() == 1 => Ok(Value::CharArray(chars)),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => Ok(value),
         other => Err(error::invalid(format!(
             "accumarray: group function must return a scalar, got {other:?}"

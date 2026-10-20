@@ -563,6 +563,59 @@ pub(in crate::builtins::strings::text_analytics) fn text_analytics_error(
     }
 }
 
+pub(in crate::builtins::strings::text_analytics) fn replace_document_properties<'a, I>(
+    runtime: Option<&crate::context::RuntimeContext>,
+    object: &mut ObjectInstance,
+    updates: I,
+    fn_name: &str,
+) -> BuiltinResult<()>
+where
+    I: Iterator<Item = (&'a str, &'a Value)> + Clone,
+{
+    crate::execution::object::replacement::replace_properties(
+        runtime,
+        object,
+        updates,
+        |message, source| {
+            crate::context::host_allocation::host_allocation_runtime_error(
+                runtime,
+                "RunMat:textAnalytics:HostAllocation",
+                message,
+                source,
+            )
+        },
+        |message| text_analytics_error(fn_name, message),
+    )
+}
+
+pub(in crate::builtins::strings::text_analytics) fn remove_document_properties(
+    runtime: Option<&crate::context::RuntimeContext>,
+    object: &mut ObjectInstance,
+    names: impl IntoIterator<Item = &'static str>,
+    fn_name: &str,
+) -> BuiltinResult<()> {
+    for name in names {
+        if object.property(name).is_none() {
+            continue;
+        }
+        crate::execution::object::replacement::remove_property(
+            runtime,
+            object,
+            name,
+            |message, source| {
+                crate::context::host_allocation::host_allocation_runtime_error(
+                    runtime,
+                    "RunMat:textAnalytics:HostAllocation",
+                    message,
+                    source,
+                )
+            },
+            |message| text_analytics_error(fn_name, message),
+        )?;
+    }
+    Ok(())
+}
+
 fn ensure_tokenized_document_class_registered() {
     TOKENIZED_DOCUMENT_CLASS_REGISTERED.ensure(|| {
         let mut properties = HashMap::new();
@@ -712,7 +765,7 @@ async fn bag_of_words_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
                 "bagOfWords",
                 format!(
                     "bagOfWords: expected tokenizedDocument object, got {}",
-                    object.class_name
+                    object.class_name()
                 ),
             )),
             other => bag_from_documents(vec![words_from_word_vector(other, "bagOfWords")?]),
@@ -774,7 +827,7 @@ async fn remove_short_words_builtin(value: Value, len: Value) -> BuiltinResult<V
             "removeShortWords",
             format!(
                 "removeShortWords: expected tokenizedDocument or bagOfWords object, got {}",
-                object.class_name
+                object.class_name()
             ),
         )),
         other => Err(text_analytics_error(
@@ -829,7 +882,7 @@ async fn remove_long_words_builtin(value: Value, len: Value) -> BuiltinResult<Va
             "removeLongWords",
             format!(
                 "removeLongWords: expected tokenizedDocument or bagOfWords object, got {}",
-                object.class_name
+                object.class_name()
             ),
         )),
         other => Err(text_analytics_error(
@@ -888,7 +941,7 @@ async fn remove_words_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             "removeWords",
             format!(
                 "removeWords: expected tokenizedDocument or bagOfWords object, got {}",
-                object.class_name
+                object.class_name()
             ),
         )),
         other => Err(text_analytics_error(
@@ -933,7 +986,7 @@ async fn remove_stop_words_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             "removeStopWords",
             format!(
                 "removeStopWords: expected tokenizedDocument object, got {}",
-                object.class_name
+                object.class_name()
             ),
         ));
     }
@@ -1692,9 +1745,9 @@ fn text_documents(value: Value, options: &DocumentOptions) -> BuiltinResult<Pars
         }
         Value::StringArray(array) => {
             let shape = array.shape.to_vec();
-            let mut docs = Vec::with_capacity(array.data.len());
+            let mut docs = Vec::with_capacity(array.data().len());
             let mut type_details = options.requires_type_details().then(Vec::new);
-            for text in array.data.iter() {
+            for text in array.data().iter() {
                 let tokenized = if is_missing_string(text) {
                     TokenizedText {
                         tokens: Vec::new(),
@@ -1718,7 +1771,7 @@ fn text_documents(value: Value, options: &DocumentOptions) -> BuiltinResult<Pars
             let text = if array.rows == 0 {
                 String::new()
             } else {
-                char_row_to_string_slice(&array.data, array.cols, 0)
+                char_row_to_string_slice(array.data(), array.cols, 0)
             };
             let tokenized = tokenize_text(&text, options);
             Ok(ParsedDocuments {
@@ -1732,7 +1785,7 @@ fn text_documents(value: Value, options: &DocumentOptions) -> BuiltinResult<Pars
             let mut type_details = options.requires_type_details().then(Vec::new);
             for row in 0..array.rows {
                 let tokenized = tokenize_text(
-                    &char_row_to_string_slice(&array.data, array.cols, row),
+                    &char_row_to_string_slice(array.data(), array.cols, row),
                     options,
                 );
                 if let Some(details) = &mut type_details {
@@ -1748,9 +1801,9 @@ fn text_documents(value: Value, options: &DocumentOptions) -> BuiltinResult<Pars
         }
         Value::Cell(cell) => {
             let shape = cell.shape.to_vec();
-            let mut docs = Vec::with_capacity(cell.data.len());
+            let mut docs = Vec::with_capacity(cell.data().len());
             let mut type_details = options.requires_type_details().then(Vec::new);
-            for item in cell.data.iter() {
+            for item in cell.data().iter() {
                 let text = scalar_text(item, "tokenizedDocument")
                     .map_err(|err| text_analytics_error("tokenizedDocument", err.to_string()))?;
                 let tokenized = tokenize_text(&text, options);
@@ -1781,7 +1834,7 @@ fn pretokenized_documents(value: Value) -> BuiltinResult<ParsedDocuments> {
         }),
         Value::StringArray(array) => Ok(ParsedDocuments {
             documents: vec![array
-                .data
+                .data()
                 .iter()
                 .filter(|text| !is_missing_string(text))
                 .map(|text| text.as_str().to_owned())
@@ -1793,7 +1846,7 @@ fn pretokenized_documents(value: Value) -> BuiltinResult<ParsedDocuments> {
             let text = if array.rows == 0 {
                 String::new()
             } else {
-                char_row_to_string_slice(&array.data, array.cols, 0)
+                char_row_to_string_slice(array.data(), array.cols, 0)
             };
             Ok(ParsedDocuments {
                 documents: vec![vec![text]],
@@ -1803,11 +1856,11 @@ fn pretokenized_documents(value: Value) -> BuiltinResult<ParsedDocuments> {
         }
         Value::Cell(cell) => {
             let shape = cell.shape.to_vec();
-            if cell.data.len() == 1 {
-                if let Value::StringArray(array) = &cell.data[0] {
+            if cell.data().len() == 1 {
+                if let Value::StringArray(array) = &cell.data()[0] {
                     return Ok(ParsedDocuments {
                         documents: vec![array
-                            .data
+                            .data()
                             .iter()
                             .filter(|text| !is_missing_string(text))
                             .map(|text| text.as_str().to_owned())
@@ -1818,12 +1871,12 @@ fn pretokenized_documents(value: Value) -> BuiltinResult<ParsedDocuments> {
                 }
             }
             let mut all_string_arrays = true;
-            let mut docs = Vec::with_capacity(cell.data.len());
-            for item in cell.data.iter() {
+            let mut docs = Vec::with_capacity(cell.data().len());
+            for item in cell.data().iter() {
                 match item {
                     Value::StringArray(array) => docs.push(
                         array
-                            .data
+                            .data()
                             .iter()
                             .filter(|text| !is_missing_string(text))
                             .map(|text| text.as_str().to_owned())
@@ -2177,68 +2230,67 @@ fn tokenized_document_value(
     type_details: Option<Vec<Vec<String>>>,
 ) -> BuiltinResult<Value> {
     ensure_tokenized_document_class_registered();
-    let mut object = ObjectInstance::new(TOKENIZED_DOCUMENT_CLASS.to_string());
-    object
-        .properties
-        .insert("Documents".to_string(), documents_cell(&documents)?);
-    object
-        .properties
-        .insert("Vocabulary".to_string(), vocabulary_value(&documents)?);
-    object.properties.insert(
-        "NumDocuments".to_string(),
-        Value::Num(documents.len() as f64),
-    );
-    object.properties.insert(
-        "DocumentLengths".to_string(),
-        Value::Tensor(
-            Tensor::new(
-                documents.iter().map(|doc| doc.len() as f64).collect(),
-                vec![documents.len(), 1],
-            )
-            .map_err(|err| text_analytics_error("tokenizedDocument", err))?,
+    let fields = [
+        ("Documents", documents_cell(&documents)?),
+        ("Vocabulary", vocabulary_value(&documents)?),
+        ("NumDocuments", Value::Num(documents.len() as f64)),
+        (
+            "DocumentLengths",
+            Value::Tensor(
+                Tensor::new(
+                    documents.iter().map(|doc| doc.len() as f64).collect(),
+                    vec![documents.len(), 1],
+                )
+                .map_err(|err| text_analytics_error("tokenizedDocument", err))?,
+            ),
         ),
-    );
-    object.properties.insert(
-        "Shape".to_string(),
-        Value::Tensor(
-            Tensor::new(
-                shape.iter().map(|dim| *dim as f64).collect(),
-                vec![1, shape.len()],
-            )
-            .map_err(|err| text_analytics_error("tokenizedDocument", err))?,
+        (
+            "Shape",
+            Value::Tensor(
+                Tensor::new(
+                    shape.iter().map(|dim| *dim as f64).collect(),
+                    vec![1, shape.len()],
+                )
+                .map_err(|err| text_analytics_error("tokenizedDocument", err))?,
+            ),
         ),
-    );
-    object.properties.insert(
-        "TokenizeMethod".to_string(),
-        Value::string(
-            match options.tokenize_method {
-                TokenizeMethod::Unicode => "unicode",
-                TokenizeMethod::None => "none",
-            }
-            .to_string(),
+        (
+            "TokenizeMethod",
+            Value::string(
+                match options.tokenize_method {
+                    TokenizeMethod::Unicode => "unicode",
+                    TokenizeMethod::None => "none",
+                }
+                .to_string(),
+            ),
         ),
-    );
-    object
-        .properties
-        .insert("Language".to_string(), Value::string(options.language));
-    object.properties.insert(
-        "DetectPatterns".to_string(),
-        detect_patterns_value(options.detect_patterns)?,
-    );
-    object.properties.insert(
-        "TopLevelDomains".to_string(),
-        top_level_domains_value(&options.top_level_domains, "tokenizedDocument")?,
-    );
-    object.properties.insert(
-        "TopLevelDomainsCustom".to_string(),
-        Value::Bool(options.top_level_domains_custom),
-    );
-    if let Some(type_details) = type_details {
-        object
-            .properties
-            .insert("TypeDetails".to_string(), type_details_cell(&type_details)?);
-    }
-    Ok(Value::Object(object))
+        ("Language", Value::string(options.language)),
+        (
+            "DetectPatterns",
+            detect_patterns_value(options.detect_patterns)?,
+        ),
+        (
+            "TopLevelDomains",
+            top_level_domains_value(&options.top_level_domains, "tokenizedDocument")?,
+        ),
+        (
+            "TopLevelDomainsCustom",
+            Value::Bool(options.top_level_domains_custom),
+        ),
+    ];
+    let type_details = type_details
+        .as_ref()
+        .map(|details| type_details_cell(details).map(|value| ("TypeDetails", value)))
+        .transpose()?;
+    crate::execution::object::construct_object_from_borrowed_fields(
+        None,
+        TOKENIZED_DOCUMENT_CLASS.display_name(),
+        fields
+            .iter()
+            .chain(type_details.iter())
+            .map(|(name, value)| (*name, value)),
+    )
+    .map(|output| output.with_owned(|value| value))
 }
 
 fn type_details_cell(type_details: &[Vec<String>]) -> BuiltinResult<Value> {
@@ -2296,7 +2348,7 @@ pub(in crate::builtins::strings::text_analytics) fn top_level_domains_value(
 pub(in crate::builtins::strings::text_analytics) fn tokenized_document_language(
     object: &ObjectInstance,
 ) -> String {
-    match object.properties.get("Language") {
+    match object.properties().get("Language") {
         Some(Value::String(value)) => value.as_str().to_owned(),
         _ => "en".to_string(),
     }
@@ -2363,14 +2415,14 @@ impl DocumentTokenType {
 
 pub(in crate::builtins::strings) fn erase_punctuation_tokenized_document(
     object: ObjectInstance,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     if !object.is_class(TOKENIZED_DOCUMENT_CLASS) {
         return Err(text_analytics_error(
             "erasePunctuation",
             format!(
                 "erasePunctuation: expected tokenizedDocument object, got {}",
-                object.class_name
+                object.class_name()
             ),
         ));
     }
@@ -2392,7 +2444,7 @@ pub(in crate::builtins::strings) fn erase_urls_tokenized_document(
             "eraseURLs",
             format!(
                 "eraseURLs: expected tokenizedDocument object, got {}",
-                object.class_name
+                object.class_name()
             ),
         ));
     }
@@ -2457,7 +2509,7 @@ fn explicit_type_details(
     documents: &[Vec<String>],
     fn_name: &str,
 ) -> BuiltinResult<Option<Vec<Vec<String>>>> {
-    let Some(value) = object.properties.get("TypeDetails") else {
+    let Some(value) = object.properties().get("TypeDetails") else {
         return Ok(None);
     };
     let Value::Cell(cell) = value else {
@@ -2466,16 +2518,16 @@ fn explicit_type_details(
             format!("{fn_name}: invalid token type details"),
         ));
     };
-    if cell.data.len() != documents.len() {
+    if cell.data().len() != documents.len() {
         return Err(text_analytics_error(
             fn_name,
             format!("{fn_name}: token type details do not match document shape"),
         ));
     }
     let mut all_types = Vec::with_capacity(documents.len());
-    for (value, document) in cell.data.iter().zip(documents) {
+    for (value, document) in cell.data().iter().zip(documents) {
         let types = match value {
-            Value::StringArray(array) => array.data.as_slice(),
+            Value::StringArray(array) => array.data_owner().as_slice(),
             Value::String(text) if document.len() == 1 => std::slice::from_ref(text),
             _ => {
                 return Err(text_analytics_error(
@@ -2495,12 +2547,14 @@ fn explicit_type_details(
     Ok(Some(all_types))
 }
 
-fn parse_erase_punctuation_args(args: Vec<Value>) -> BuiltinResult<HashSet<String>> {
-    match args.as_slice() {
-        [] => Ok(["punctuation".to_string(), "other".to_string()]
+fn parse_erase_punctuation_args(
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<HashSet<String>> {
+    match (args.len(), args.get(0), args.get(1)) {
+        (0, _, _) => Ok(["punctuation".to_string(), "other".to_string()]
             .into_iter()
             .collect()),
-        [name, types] => {
+        (2, Some(name), Some(types)) => {
             let option = scalar_text(name, "erasePunctuation")
                 .map_err(|err| text_analytics_error("erasePunctuation", err.to_string()))?
                 .to_ascii_lowercase();
@@ -2697,20 +2751,21 @@ pub(in crate::builtins::strings::text_analytics) fn documents_from_object(
     object: &ObjectInstance,
     fn_name: &str,
 ) -> BuiltinResult<Vec<Vec<String>>> {
-    let Some(Value::Cell(cell)) = object.properties.get("Documents") else {
+    let Some(Value::Cell(cell)) = object.properties().get("Documents") else {
         return Err(text_analytics_error(
             fn_name,
             format!("{fn_name}: tokenizedDocument object missing Documents property"),
         ));
     };
-    let mut documents = Vec::with_capacity(cell.data.len());
-    for item in &cell.data {
+    let mut documents = Vec::with_capacity(cell.data().len());
+    for item in cell.data() {
         documents.push(words_from_word_vector(item, fn_name)?);
     }
     Ok(documents)
 }
 
 pub(in crate::builtins::strings::text_analytics) fn replace_tokenized_document_documents(
+    runtime: Option<&crate::context::RuntimeContext>,
     object: &mut ObjectInstance,
     documents: Vec<Vec<String>>,
     fn_name: &str,
@@ -2733,27 +2788,28 @@ pub(in crate::builtins::strings::text_analytics) fn replace_tokenized_document_d
             ),
         ));
     }
-    object
-        .properties
-        .insert("Documents".to_string(), documents_cell(&documents)?);
-    object
-        .properties
-        .insert("Vocabulary".to_string(), vocabulary_value(&documents)?);
-    object.properties.insert(
-        "NumDocuments".to_string(),
-        Value::Num(documents.len() as f64),
+    let documents_value = documents_cell(&documents)?;
+    let vocabulary = vocabulary_value(&documents)?;
+    let count = Value::Num(documents.len() as f64);
+    let lengths = Value::Tensor(
+        Tensor::new(
+            documents.iter().map(|doc| doc.len() as f64).collect(),
+            vec![documents.len(), 1],
+        )
+        .map_err(|err| text_analytics_error(fn_name, err))?,
     );
-    object.properties.insert(
-        "DocumentLengths".to_string(),
-        Value::Tensor(
-            Tensor::new(
-                documents.iter().map(|doc| doc.len() as f64).collect(),
-                vec![documents.len(), 1],
-            )
-            .map_err(|err| text_analytics_error(fn_name, err))?,
-        ),
-    );
-    Ok(())
+    let updates = [
+        ("Documents", documents_value),
+        ("Vocabulary", vocabulary),
+        ("NumDocuments", count),
+        ("DocumentLengths", lengths),
+    ];
+    replace_document_properties(
+        runtime,
+        object,
+        updates.iter().map(|(name, value)| (*name, value)),
+        fn_name,
+    )
 }
 
 pub(in crate::builtins::strings::text_analytics) fn document_shape_from_object(
@@ -2761,15 +2817,15 @@ pub(in crate::builtins::strings::text_analytics) fn document_shape_from_object(
     fn_name: &str,
 ) -> BuiltinResult<Vec<usize>> {
     let expected = object
-        .properties
+        .properties()
         .get("Documents")
         .and_then(|value| match value {
-            Value::Cell(cell) => Some(cell.data.len()),
+            Value::Cell(cell) => Some(cell.data().len()),
             _ => None,
         })
         .or_else(|| {
             object
-                .properties
+                .properties()
                 .get("NumDocuments")
                 .and_then(nonnegative_dimension)
         })
@@ -2795,7 +2851,7 @@ pub(in crate::builtins::strings::text_analytics) fn document_shape_from_object(
 }
 
 fn shape_from_object(object: &ObjectInstance, fn_name: &str) -> BuiltinResult<Vec<usize>> {
-    if let Some(Value::Tensor(tensor)) = object.properties.get("Shape") {
+    if let Some(Value::Tensor(tensor)) = object.properties().get("Shape") {
         (0..tensor.len())
             .map(|index| {
                 let value = tensor
@@ -2812,7 +2868,7 @@ fn shape_from_object(object: &ObjectInstance, fn_name: &str) -> BuiltinResult<Ve
             })
             .collect()
     } else {
-        let num_documents = match object.properties.get("NumDocuments") {
+        let num_documents = match object.properties().get("NumDocuments") {
             Some(value) => nonnegative_dimension(value).ok_or_else(|| {
                 text_analytics_error(
                     fn_name,
@@ -2870,25 +2926,25 @@ pub(in crate::builtins::strings::text_analytics) fn is_nonnegative_integer_count
 pub(in crate::builtins::strings::text_analytics) fn options_from_document_object(
     object: &ObjectInstance,
 ) -> DocumentOptions {
-    let tokenize_method = match object.properties.get("TokenizeMethod") {
+    let tokenize_method = match object.properties().get("TokenizeMethod") {
         Some(Value::String(value)) if value == "none" => TokenizeMethod::None,
         _ => TokenizeMethod::Unicode,
     };
-    let language = match object.properties.get("Language") {
+    let language = match object.properties().get("Language") {
         Some(Value::String(value)) => value.as_str().to_owned(),
         _ => "en".to_string(),
     };
     let detect_patterns = object
-        .properties
+        .properties()
         .get("DetectPatterns")
         .and_then(|value| parse_detect_patterns(value, "tokenizedDocument").ok())
         .unwrap_or(DetectPatterns::All);
     let top_level_domains = object
-        .properties
+        .properties()
         .get("TopLevelDomains")
         .and_then(|value| parse_top_level_domains(value, "tokenizedDocument").ok())
         .unwrap_or_else(default_top_level_domains);
-    let top_level_domains_custom = match object.properties.get("TopLevelDomainsCustom") {
+    let top_level_domains_custom = match object.properties().get("TopLevelDomainsCustom") {
         Some(Value::Bool(value)) => *value,
         _ => false,
     };
@@ -3016,28 +3072,30 @@ fn bag_object(vocabulary: Vec<String>, counts: Vec<f64>, rows: usize) -> Builtin
             ),
         ));
     }
-    let mut object = ObjectInstance::new(BAG_OF_WORDS_CLASS.to_string());
-    object.properties.insert(
-        "Vocabulary".to_string(),
-        Value::StringArray(
-            StringArray::new(vocabulary.clone(), vec![1, vocabulary.len()])
-                .map_err(|err| text_analytics_error("bagOfWords", err))?,
+    let fields = [
+        (
+            "Vocabulary",
+            Value::StringArray(
+                StringArray::new(vocabulary, vec![1, cols])
+                    .map_err(|err| text_analytics_error("bagOfWords", err))?,
+            ),
         ),
-    );
-    object.properties.insert(
-        "Counts".to_string(),
-        Value::Tensor(
-            Tensor::new(counts, vec![rows, cols])
-                .map_err(|err| text_analytics_error("bagOfWords", err))?,
+        (
+            "Counts",
+            Value::Tensor(
+                Tensor::new(counts, vec![rows, cols])
+                    .map_err(|err| text_analytics_error("bagOfWords", err))?,
+            ),
         ),
-    );
-    object
-        .properties
-        .insert("NumWords".to_string(), Value::Num(cols as f64));
-    object
-        .properties
-        .insert("NumDocuments".to_string(), Value::Num(rows as f64));
-    Ok(Value::Object(object))
+        ("NumWords", Value::Num(cols as f64)),
+        ("NumDocuments", Value::Num(rows as f64)),
+    ];
+    crate::execution::object::construct_object_from_borrowed_fields(
+        None,
+        BAG_OF_WORDS_CLASS.display_name(),
+        fields.iter().map(|(name, value)| (*name, value)),
+    )
+    .map(|output| output.with_owned(|value| value))
 }
 
 pub(in crate::builtins::strings::text_analytics) fn checked_count_len(
@@ -3102,7 +3160,7 @@ fn filter_bag_columns(
 }
 
 fn documents_vocabulary(object: &ObjectInstance, fn_name: &str) -> BuiltinResult<Vec<String>> {
-    match object.properties.get("Vocabulary") {
+    match object.properties().get("Vocabulary") {
         Some(value) => words_from_word_vector(value, fn_name),
         None => Ok(vocabulary_from_documents(&documents_from_object(
             object, fn_name,
@@ -3125,7 +3183,7 @@ pub(in crate::builtins::strings::text_analytics) fn vocabulary_from_bag(
     object: &ObjectInstance,
     fn_name: &str,
 ) -> BuiltinResult<Vec<String>> {
-    match object.properties.get("Vocabulary") {
+    match object.properties().get("Vocabulary") {
         Some(value) => words_from_word_vector(value, fn_name),
         None => Err(text_analytics_error(
             fn_name,
@@ -3138,7 +3196,7 @@ pub(in crate::builtins::strings::text_analytics) fn counts_from_bag(
     object: &ObjectInstance,
     fn_name: &str,
 ) -> BuiltinResult<Tensor> {
-    match object.properties.get("Counts") {
+    match object.properties().get("Counts") {
         Some(Value::Tensor(tensor)) => Ok(tensor.clone()),
         _ => Err(text_analytics_error(
             fn_name,
@@ -3154,7 +3212,7 @@ pub(in crate::builtins::strings::text_analytics) fn words_from_word_vector(
     match value {
         Value::String(text) => Ok(vec![text.as_str().to_owned()]),
         Value::StringArray(array) => Ok(array
-            .data
+            .data()
             .iter()
             .filter(|text| !is_missing_string(text))
             .map(|text| text.as_str().to_owned())
@@ -3163,19 +3221,19 @@ pub(in crate::builtins::strings::text_analytics) fn words_from_word_vector(
             let text = if array.rows == 0 {
                 String::new()
             } else {
-                char_row_to_string_slice(&array.data, array.cols, 0)
+                char_row_to_string_slice(array.data(), array.cols, 0)
             };
             Ok(vec![text])
         }
         Value::CharArray(array) => {
             let mut words = Vec::with_capacity(array.rows);
             for row in 0..array.rows {
-                words.push(char_row_to_string_slice(&array.data, array.cols, row));
+                words.push(char_row_to_string_slice(array.data(), array.cols, row));
             }
             Ok(words)
         }
         Value::Cell(cell) => cell
-            .data
+            .data()
             .iter()
             .map(|item| {
                 scalar_text(item, fn_name)
@@ -3196,7 +3254,7 @@ pub(in crate::builtins::strings::text_analytics) fn words_from_word_vector_prese
     match value {
         Value::String(text) => Ok(vec![text.as_str().to_owned()]),
         Value::StringArray(array) => Ok(array
-            .data
+            .data()
             .iter()
             .map(|text| text.as_str().to_owned())
             .collect()),
@@ -3204,19 +3262,19 @@ pub(in crate::builtins::strings::text_analytics) fn words_from_word_vector_prese
             let text = if array.rows == 0 {
                 String::new()
             } else {
-                char_row_to_string_slice(&array.data, array.cols, 0)
+                char_row_to_string_slice(array.data(), array.cols, 0)
             };
             Ok(vec![text])
         }
         Value::CharArray(array) => {
             let mut words = Vec::with_capacity(array.rows);
             for row in 0..array.rows {
-                words.push(char_row_to_string_slice(&array.data, array.cols, row));
+                words.push(char_row_to_string_slice(array.data(), array.cols, row));
             }
             Ok(words)
         }
         Value::Cell(cell) => cell
-            .data
+            .data()
             .iter()
             .map(|item| {
                 scalar_text(item, fn_name)
@@ -3311,14 +3369,14 @@ mod tests {
     }
 
     fn string_array_property(object: &ObjectInstance, name: &str) -> Vec<String> {
-        let Some(Value::StringArray(array)) = object.properties.get(name) else {
+        let Some(Value::StringArray(array)) = object.properties().get(name) else {
             panic!("expected string array property {name}");
         };
-        array.data.clone()
+        array.data().iter().map(ToString::to_string).collect()
     }
 
     fn tensor_property(object: &ObjectInstance, name: &str) -> Tensor {
-        let Some(Value::Tensor(tensor)) = object.properties.get(name) else {
+        let Some(Value::Tensor(tensor)) = object.properties().get(name) else {
             panic!("expected tensor property {name}");
         };
         tensor.clone()
@@ -3329,16 +3387,16 @@ mod tests {
     }
 
     fn type_details_property(object: &ObjectInstance) -> Vec<Vec<String>> {
-        let Some(Value::Cell(cell)) = object.properties.get("TypeDetails") else {
+        let Some(Value::Cell(cell)) = object.properties().get("TypeDetails") else {
             panic!("expected TypeDetails property");
         };
-        cell.data
+        cell.data()
             .iter()
             .map(|value| {
                 let Value::StringArray(array) = value else {
                     panic!("expected TypeDetails string array");
                 };
-                array.data.clone()
+                array.data().iter().map(ToString::to_string).collect()
             })
             .collect()
     }
@@ -3355,8 +3413,8 @@ mod tests {
         )
         .unwrap();
         let doc = object(run_tokenized(vec![Value::StringArray(input)]).expect("tokenized"));
-        assert!(doc.class_name.is(TOKENIZED_DOCUMENT_CLASS));
-        assert_eq!(doc.properties.get("NumDocuments"), Some(&Value::Num(2.0)));
+        assert!(doc.class_name().is(TOKENIZED_DOCUMENT_CLASS));
+        assert_eq!(doc.properties().get("NumDocuments"), Some(&Value::Num(2.0)));
         assert_eq!(
             string_array_property(&doc, "Vocabulary"),
             vec!["an", "example", "of", "a", "short", "sentence", "second"]
@@ -3382,8 +3440,8 @@ mod tests {
         let doc = object(
             run_tokenized(vec![
                 Value::StringArray(input),
-                Value::String("TokenizeMethod".to_string()),
-                Value::String("none".to_string()),
+                Value::String("TokenizeMethod".to_string().into()),
+                Value::String("none".to_string().into()),
             ])
             .expect("tokenized"),
         );
@@ -3397,7 +3455,7 @@ mod tests {
     #[test]
     fn tokenized_document_no_input_is_scalar_empty_document() {
         let doc = object(run_tokenized(Vec::new()).expect("tokenized"));
-        assert_eq!(doc.properties.get("NumDocuments"), Some(&Value::Num(1.0)));
+        assert_eq!(doc.properties().get("NumDocuments"), Some(&Value::Num(1.0)));
         assert_eq!(
             string_array_property(&doc, "Vocabulary"),
             Vec::<String>::new()
@@ -3409,8 +3467,8 @@ mod tests {
         assert_eq!(shape.materialize_f64(), vec![1.0, 1.0]);
 
         let bag = object(run_bag(vec![Value::Object(doc)]).expect("bag"));
-        assert_eq!(bag.properties.get("NumDocuments"), Some(&Value::Num(1.0)));
-        assert_eq!(bag.properties.get("NumWords"), Some(&Value::Num(0.0)));
+        assert_eq!(bag.properties().get("NumDocuments"), Some(&Value::Num(1.0)));
+        assert_eq!(bag.properties().get("NumWords"), Some(&Value::Num(0.0)));
         let counts = tensor_property(&bag, "Counts");
         assert_eq!(counts.shape(), [1, 0]);
         assert!(counts.materialize_f64().is_empty());
@@ -3425,8 +3483,11 @@ mod tests {
             .expect("tokenized"),
         );
 
-        document.properties.remove("Shape");
-        document.properties.insert(
+        crate::builtins::common::test_support::remove_object_property_unbounded(
+            &mut document,
+            "Shape",
+        );
+        document.replace_property_unbounded(
             "NumDocuments".to_string(),
             Value::Int(runmat_value::IntValue::U16(2)),
         );
@@ -3435,18 +3496,16 @@ mod tests {
             vec![2, 1]
         );
 
-        document
-            .properties
-            .insert("NumDocuments".to_string(), Value::Num(1.5));
+        document.replace_property_unbounded("NumDocuments".to_string(), Value::Num(1.5));
         assert!(document_shape_from_object(&document, "test").is_err());
 
-        document.properties.insert(
+        document.replace_property_unbounded(
             "Shape".to_string(),
             Value::Tensor(Tensor::new(vec![1.5, 1.0], vec![1, 2]).unwrap()),
         );
         assert!(document_shape_from_object(&document, "test").is_err());
 
-        document.properties.insert(
+        document.replace_property_unbounded(
             "Shape".to_string(),
             Value::Tensor(Tensor::new(vec![usize::MAX as f64 + 1.0, 1.0], vec![1, 2]).unwrap()),
         );
@@ -3456,7 +3515,7 @@ mod tests {
     #[test]
     fn tokenized_document_shape_reads_native_single_storage() {
         let mut document = object(run_tokenized(Vec::new()).expect("tokenized"));
-        document.properties.insert(
+        document.replace_property_unbounded(
             "Shape".to_string(),
             Value::Tensor(
                 Tensor::from_numeric_storage(NumericStorage::F32(vec![1.0, 1.0]), vec![1, 2])
@@ -3475,7 +3534,8 @@ mod tests {
         let doc = object(
             run_tokenized(vec![Value::String(
                 "Analyze #MATLAB :-) at help@example.com or https://www.mathworks.com/help/"
-                    .to_string(),
+                    .to_string()
+                    .into(),
             )])
             .expect("tokenized"),
         );
@@ -3491,7 +3551,7 @@ mod tests {
     fn tokenized_document_preserves_trailing_punctuation_after_url_token() {
         let doc = object(
             run_tokenized(vec![Value::String(
-                "Visit https://example.com.".to_string(),
+                "Visit https://example.com.".to_string().into(),
             )])
             .expect("tokenized"),
         );
@@ -3505,7 +3565,9 @@ mod tests {
     fn tokenized_document_preserves_explicit_urls_with_uncommon_default_tlds() {
         let doc = object(
             run_tokenized(vec![Value::String(
-                "Visit HTTPS://example.software and www.example.community.".to_string(),
+                "Visit HTTPS://example.software and www.example.community."
+                    .to_string()
+                    .into(),
             )])
             .expect("tokenized"),
         );
@@ -3527,8 +3589,12 @@ mod tests {
         let tlds = StringArray::new(vec!["zz".into(), "dev".into()], vec![1, 2]).unwrap();
         let doc = object(
             run_tokenized(vec![
-                Value::String("See example.zz, docs.example.dev/path and example.com".to_string()),
-                Value::String("TopLevelDomains".to_string()),
+                Value::String(
+                    "See example.zz, docs.example.dev/path and example.com"
+                        .to_string()
+                        .into(),
+                ),
+                Value::String("TopLevelDomains".to_string().into()),
                 Value::StringArray(tlds),
             ])
             .expect("tokenized"),
@@ -3559,8 +3625,12 @@ mod tests {
             StringArray::new(vec!["hashtag".into(), "email-address".into()], vec![1, 2]).unwrap();
         let doc = object(
             run_tokenized(vec![
-                Value::String("Mail a@example.com #MATLAB at https://example.com :-D".to_string()),
-                Value::String("DetectPatterns".to_string()),
+                Value::String(
+                    "Mail a@example.com #MATLAB at https://example.com :-D"
+                        .to_string()
+                        .into(),
+                ),
+                Value::String("DetectPatterns".to_string().into()),
                 Value::StringArray(patterns),
             ])
             .expect("tokenized"),
@@ -3592,8 +3662,8 @@ mod tests {
         let custom = StringArray::new(vec!["C++".into(), "C++17".into()], vec![1, 2]).unwrap();
         let doc = object(
             run_tokenized(vec![
-                Value::String("Use C++17 and C++.".to_string()),
-                Value::String("CustomTokens".to_string()),
+                Value::String("Use C++17 and C++.".to_string().into()),
+                Value::String("CustomTokens".to_string().into()),
                 Value::StringArray(custom),
             ])
             .expect("tokenized"),
@@ -3631,8 +3701,8 @@ mod tests {
         .expect("custom table");
         let doc = object(
             run_tokenized(vec![
-                Value::String("Na+ in H2O".to_string()),
-                Value::String("CustomTokens".to_string()),
+                Value::String("Na+ in H2O".to_string().into()),
+                Value::String("CustomTokens".to_string().into()),
                 table,
             ])
             .expect("tokenized"),
@@ -3663,10 +3733,10 @@ mod tests {
         .expect("regex table");
         let doc = object(
             run_tokenized(vec![
-                Value::String("abc123 xyz9".to_string()),
-                Value::String("CustomTokens".to_string()),
+                Value::String("abc123 xyz9".to_string().into()),
+                Value::String("CustomTokens".to_string().into()),
                 Value::StringArray(custom),
-                Value::String("RegularExpressions".to_string()),
+                Value::String("RegularExpressions".to_string().into()),
                 regex_table,
             ])
             .expect("tokenized"),
@@ -3680,8 +3750,8 @@ mod tests {
     fn tokenized_document_supports_non_table_custom_and_regex_vectors() {
         let custom = CellArray::new(
             vec![
-                Value::String("R&D".to_string()),
-                Value::String("C#".to_string()),
+                Value::String("R&D".to_string().into()),
+                Value::String("C#".to_string().into()),
             ],
             1,
             2,
@@ -3690,10 +3760,10 @@ mod tests {
         let regexes = StringArray::new(vec![r"\d{4}-\d{2}-\d{2}".into()], vec![1, 1]).unwrap();
         let doc = object(
             run_tokenized(vec![
-                Value::String("R&D shipped C# on 2026-07-17.".to_string()),
-                Value::String("CustomTokens".to_string()),
+                Value::String("R&D shipped C# on 2026-07-17.".to_string().into()),
+                Value::String("CustomTokens".to_string().into()),
                 Value::Cell(custom),
-                Value::String("RegularExpressions".to_string()),
+                Value::String("RegularExpressions".to_string().into()),
                 Value::StringArray(regexes),
             ])
             .expect("tokenized"),
@@ -3720,9 +3790,9 @@ mod tests {
     #[test]
     fn tokenized_document_rejects_invalid_custom_and_regex_options() {
         let err = run_tokenized(vec![
-            Value::String("abc".to_string()),
-            Value::String("RegularExpressions".to_string()),
-            Value::String("(".to_string()),
+            Value::String("abc".to_string().into()),
+            Value::String("RegularExpressions".to_string().into()),
+            Value::String("(".to_string().into()),
         ])
         .expect_err("invalid regex");
         assert!(err
@@ -3730,9 +3800,9 @@ mod tests {
             .contains("invalid RegularExpressions pattern"));
 
         let err = run_tokenized(vec![
-            Value::String("abc".to_string()),
-            Value::String("RegularExpressions".to_string()),
-            Value::String(".*".to_string()),
+            Value::String("abc".to_string().into()),
+            Value::String("RegularExpressions".to_string().into()),
+            Value::String(".*".to_string().into()),
         ])
         .expect_err("empty regex");
         assert!(err.to_string().contains("can match empty text"));
@@ -3745,8 +3815,8 @@ mod tests {
         )
         .expect("bad custom table");
         let err = run_tokenized(vec![
-            Value::String("abc".to_string()),
-            Value::String("CustomTokens".to_string()),
+            Value::String("abc".to_string().into()),
+            Value::String("CustomTokens".to_string().into()),
             table,
         ])
         .expect_err("missing token variable");
@@ -3766,12 +3836,12 @@ mod tests {
         .unwrap();
         let docs = run_tokenized(vec![Value::StringArray(input)]).expect("tokenized");
         let bag = object(run_bag(vec![docs]).expect("bag"));
-        assert!(bag.class_name.is(BAG_OF_WORDS_CLASS));
+        assert!(bag.class_name().is(BAG_OF_WORDS_CLASS));
         assert_eq!(
             string_array_property(&bag, "Vocabulary"),
             vec!["an", "example", "of", "a", "short", "sentence", "second"]
         );
-        let Some(Value::Tensor(counts)) = bag.properties.get("Counts") else {
+        let Some(Value::Tensor(counts)) = bag.properties().get("Counts") else {
             panic!("expected Counts");
         };
         assert_eq!(counts.shape(), [2, 7]);
@@ -3788,8 +3858,8 @@ mod tests {
         let counts = Tensor::new(vec![2.0, 0.0, 1.0, 3.0], vec![2, 2]).unwrap();
         let bag =
             object(run_bag(vec![Value::StringArray(words), Value::Tensor(counts)]).expect("bag"));
-        assert_eq!(bag.properties.get("NumDocuments"), Some(&Value::Num(2.0)));
-        assert_eq!(bag.properties.get("NumWords"), Some(&Value::Num(2.0)));
+        assert_eq!(bag.properties().get("NumDocuments"), Some(&Value::Num(2.0)));
+        assert_eq!(bag.properties().get("NumWords"), Some(&Value::Num(2.0)));
     }
 
     #[test]
@@ -3972,7 +4042,7 @@ mod tests {
     #[test]
     fn remove_short_words_filters_documents_and_bag() {
         let docs = run_tokenized(vec![Value::String(
-            "an example of a short sentence".to_string(),
+            "an example of a short sentence".to_string().into(),
         )])
         .expect("tokenized");
         let filtered_docs =
@@ -3988,7 +4058,7 @@ mod tests {
             string_array_property(&filtered_bag, "Vocabulary"),
             vec!["example", "short", "sentence"]
         );
-        let Some(Value::Tensor(counts)) = filtered_bag.properties.get("Counts") else {
+        let Some(Value::Tensor(counts)) = filtered_bag.properties().get("Counts") else {
             panic!("expected Counts");
         };
         assert_eq!(counts.shape(), [1, 3]);
@@ -4049,7 +4119,7 @@ mod tests {
             run_remove_words(vec![
                 docs.clone(),
                 Value::StringArray(words),
-                Value::String("IgnoreCase".to_string()),
+                Value::String("IgnoreCase".to_string().into()),
                 Value::Bool(true),
             ])
             .expect("remove words"),
@@ -4087,7 +4157,8 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn remove_words_rejects_bad_indices_and_mask_lengths() {
-        let docs = run_tokenized(vec![Value::String("alpha beta".to_string())]).expect("tokenized");
+        let docs =
+            run_tokenized(vec![Value::String("alpha beta".to_string().into())]).expect("tokenized");
         let err = run_remove_words(vec![docs.clone(), Value::Num(0.0)])
             .expect_err("expected bad numeric index");
         assert!(err.to_string().contains("positive integers"));
@@ -4126,14 +4197,14 @@ mod tests {
         .unwrap();
         let docs = run_tokenized(vec![
             Value::StringArray(words),
-            Value::String("TokenizeMethod".to_string()),
-            Value::String("none".to_string()),
+            Value::String("TokenizeMethod".to_string().into()),
+            Value::String("none".to_string().into()),
         ])
         .expect("tokenized");
         let filtered = object(
             run_remove_stop(vec![
                 docs,
-                Value::String("IgnoreCase".to_string()),
+                Value::String("IgnoreCase".to_string().into()),
                 Value::Bool(false),
             ])
             .expect("case-sensitive remove stop words"),
@@ -4164,12 +4235,19 @@ mod tests {
     fn erase_punctuation_filters_document_tokens_by_token_type() {
         let docs = object(
             run_tokenized(vec![Value::String(
-                "An example: email help@example.com, visit https://example.com.".to_string(),
+                "An example: email help@example.com, visit https://example.com."
+                    .to_string()
+                    .into(),
             )])
             .expect("tokenized"),
         );
-        let filtered =
-            object(erase_punctuation_tokenized_document(docs, vec![]).expect("erase punctuation"));
+        let filtered = object(
+            erase_punctuation_tokenized_document(
+                docs,
+                crate::builtins::common::test_support::builtin_arguments(vec![]),
+            )
+            .expect("erase punctuation"),
+        );
         assert_eq!(
             documents_property(&filtered),
             vec![vec![
@@ -4195,18 +4273,18 @@ mod tests {
         let docs = object(
             run_tokenized(vec![
                 Value::StringArray(words),
-                Value::String("TokenizeMethod".to_string()),
-                Value::String("none".to_string()),
+                Value::String("TokenizeMethod".to_string().into()),
+                Value::String("none".to_string().into()),
             ])
             .expect("tokenized"),
         );
         let filtered = object(
             erase_punctuation_tokenized_document(
                 docs,
-                vec![
-                    Value::String("TokenTypes".to_string()),
-                    Value::String("letters".to_string()),
-                ],
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::String("TokenTypes".to_string().into()),
+                    Value::String("letters".to_string().into()),
+                ]),
             )
             .expect("erase letters punctuation"),
         );
@@ -4228,12 +4306,12 @@ mod tests {
         let mut docs = object(
             run_tokenized(vec![
                 Value::StringArray(words),
-                Value::String("TokenizeMethod".to_string()),
-                Value::String("none".to_string()),
+                Value::String("TokenizeMethod".to_string().into()),
+                Value::String("none".to_string().into()),
             ])
             .expect("tokenized"),
         );
-        docs.properties.insert(
+        docs.replace_property_unbounded(
             "TypeDetails".to_string(),
             type_details_cell(&[vec!["language".to_string(), "letters".to_string()]])
                 .expect("type details"),
@@ -4241,10 +4319,10 @@ mod tests {
         let filtered = object(
             erase_punctuation_tokenized_document(
                 docs,
-                vec![
-                    Value::String("TokenTypes".to_string()),
-                    Value::String("language".to_string()),
-                ],
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::String("TokenTypes".to_string().into()),
+                    Value::String("language".to_string().into()),
+                ]),
             )
             .expect("erase custom type"),
         );
@@ -4281,9 +4359,9 @@ mod tests {
     #[test]
     fn rejects_unimplemented_japanese_tokenization() {
         let err = run_tokenized(vec![
-            Value::String("東京に行きます".to_string()),
-            Value::String("Language".to_string()),
-            Value::String("ja".to_string()),
+            Value::String("東京に行きます".to_string().into()),
+            Value::String("Language".to_string().into()),
+            Value::String("ja".to_string().into()),
         ])
         .expect_err("expected unsupported ja");
         assert!(err.to_string().contains("MeCab"));
@@ -4293,8 +4371,8 @@ mod tests {
     #[test]
     fn tokenized_document_rejects_invalid_detect_patterns() {
         let err = run_tokenized(vec![
-            Value::String("email me at a@example.com".to_string()),
-            Value::String("DetectPatterns".to_string()),
+            Value::String("email me at a@example.com".to_string().into()),
+            Value::String("DetectPatterns".to_string().into()),
             Value::StringArray(
                 StringArray::new(vec!["all".into(), "web-address".into()], vec![1, 2]).unwrap(),
             ),
@@ -4303,9 +4381,9 @@ mod tests {
         assert!(err.to_string().contains("specified alone"));
 
         let err = run_tokenized(vec![
-            Value::String("email me at a@example.com".to_string()),
-            Value::String("DetectPatterns".to_string()),
-            Value::String("url".to_string()),
+            Value::String("email me at a@example.com".to_string().into()),
+            Value::String("DetectPatterns".to_string().into()),
+            Value::String("url".to_string().into()),
         ])
         .expect_err("expected unsupported pattern");
         assert!(err.to_string().contains("unsupported DetectPatterns"));
@@ -4315,9 +4393,9 @@ mod tests {
     #[test]
     fn tokenized_document_rejects_invalid_top_level_domains() {
         let err = run_tokenized(vec![
-            Value::String("visit example.com".to_string()),
-            Value::String("TopLevelDomains".to_string()),
-            Value::String("co.uk".to_string()),
+            Value::String("visit example.com".to_string().into()),
+            Value::String("TopLevelDomains".to_string().into()),
+            Value::String("co.uk".to_string().into()),
         ])
         .expect_err("expected invalid tld");
         assert!(err.to_string().contains("TopLevelDomains"));
@@ -4326,8 +4404,8 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn remove_short_words_requires_positive_integer_length() {
-        let docs =
-            run_tokenized(vec![Value::String("a short document".to_string())]).expect("tokenized");
+        let docs = run_tokenized(vec![Value::String("a short document".to_string().into())])
+            .expect("tokenized");
         let zero =
             run_remove_short(docs.clone(), Value::Num(0.0)).expect_err("expected zero rejection");
         assert!(zero.to_string().contains("positive integer"));
@@ -4399,27 +4477,28 @@ mod tests {
     #[test]
     fn bag_column_filters_read_typed_integer_storage_exactly() {
         let mut bag = ObjectInstance::new(BAG_OF_WORDS_CLASS.to_string());
-        bag.properties.insert(
+        bag.replace_property_unbounded(
             "Vocabulary".to_string(),
             Value::StringArray(
                 StringArray::new(vec!["keep".to_string(), "drop".to_string()], vec![1, 2]).unwrap(),
             ),
         );
-        bag.properties.insert(
+        bag.replace_property_unbounded(
             "Counts".to_string(),
             Value::Tensor(poisoned_integer_vector(
                 IntegerStorage::U16(vec![1, 2, 3, 4]),
                 vec![2, 2],
             )),
         );
-        bag.properties
-            .insert("NumWords".to_string(), Value::Num(2.0));
-        bag.properties
-            .insert("NumDocuments".to_string(), Value::Num(2.0));
+        bag.replace_property_unbounded("NumWords".to_string(), Value::Num(2.0));
+        bag.replace_property_unbounded("NumDocuments".to_string(), Value::Num(2.0));
 
         let filtered = object(
-            run_remove_words(vec![Value::Object(bag), Value::String("drop".to_string())])
-                .expect("filtered"),
+            run_remove_words(vec![
+                Value::Object(bag),
+                Value::String("drop".to_string().into()),
+            ])
+            .expect("filtered"),
         );
 
         assert_eq!(string_array_property(&filtered, "Vocabulary"), vec!["keep"]);

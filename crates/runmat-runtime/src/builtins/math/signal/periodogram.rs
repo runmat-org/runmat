@@ -144,11 +144,22 @@ fn periodogram_error_with_message(
     binding_variant = "default",
     builtin_path = "crate::builtins::math::signal::periodogram"
 )]
-async fn periodogram_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    evaluate(x, &rest).await
+async fn periodogram_builtin(
+    x: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    evaluate_view(x, rest.view()).await
 }
 
+#[cfg(test)]
 pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
+    evaluate_view(x, crate::call::FunctionArgumentView::from_slice(rest)).await
+}
+
+async fn evaluate_view(
+    x: Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Value> {
     if rest.len() > 6 {
         return Err(periodogram_error(&PERIODOGRAM_ERROR_ARG_COUNT));
     }
@@ -537,7 +548,7 @@ fn complex_tensor_to_signal_columns(
 }
 
 async fn parse_options(
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     signal_len: usize,
     complex_input: bool,
 ) -> BuiltinResult<PeriodogramOptions> {
@@ -928,12 +939,12 @@ fn is_empty(value: &Value) -> bool {
 fn keyword(value: &Value) -> Option<String> {
     match value {
         Value::String(text) => Some(text.trim().to_ascii_lowercase()),
-        Value::StringArray(array) if array.data.len() == 1 => {
-            Some(array.data[0].trim().to_ascii_lowercase())
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Some(array.data()[0].trim().to_ascii_lowercase())
         }
         Value::CharArray(chars) if chars.rows <= 1 => Some(
             chars
-                .data
+                .data()
                 .iter()
                 .collect::<String>()
                 .trim()
@@ -955,7 +966,13 @@ mod tests {
     #[test]
     fn empty_numeric_frequency_tensor_selects_default_fft_grid() {
         let empty = Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap());
-        let options = block_on(parse_options(&[empty.clone(), empty], 8, false)).unwrap();
+        let controls = [empty.clone(), empty];
+        let options = block_on(parse_options(
+            crate::call::FunctionArgumentView::from_slice(&controls),
+            8,
+            false,
+        ))
+        .unwrap();
         assert!(matches!(options.grid, FrequencyGrid::Uniform { nfft: 256 }));
     }
 

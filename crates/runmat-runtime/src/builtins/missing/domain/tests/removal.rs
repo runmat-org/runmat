@@ -1,16 +1,15 @@
-use super::super::entrypoints::rmmissing_builtin;
 use super::*;
 
 #[test]
 fn rmmissing_removes_rows_and_columns() {
     let value = tensor(vec![1.0, 2.0, f64::NAN, 4.0, 5.0, 6.0], vec![3, 2]);
-    let result = block_on(rmmissing_builtin(value, Vec::new())).unwrap();
+    let result = block_on(rmmissing_builtin(None, value, Vec::new())).unwrap();
     assert!(
         matches!(result, Value::Tensor(t) if t.shape() == [2, 2] && t.materialize_f64() == vec![1.0, 2.0, 4.0, 5.0])
     );
 
     let value = tensor(vec![1.0, 2.0, f64::NAN, 4.0, 5.0, 6.0], vec![3, 2]);
-    let result = block_on(rmmissing_builtin(value, vec![Value::Num(2.0)])).unwrap();
+    let result = block_on(rmmissing_builtin(None, value, vec![Value::Num(2.0)])).unwrap();
     assert!(
         matches!(result, Value::Tensor(t) if t.shape() == [3, 1] && t.materialize_f64() == vec![4.0, 5.0, 6.0])
     );
@@ -26,6 +25,7 @@ fn rmmissing_rejects_invalid_options_before_resident_download() {
         )
         .unwrap();
     let error = block_on(rmmissing_builtin(
+        None,
         Value::GpuTensor(allocation.handle.clone()),
         vec![Value::from("not-a-removal-option")],
     ))
@@ -47,6 +47,7 @@ fn rmmissing_rejects_more_than_two_outputs_before_resident_download() {
         .unwrap();
     let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let error = block_on(rmmissing_builtin(
+        None,
         Value::GpuTensor(allocation.handle.clone()),
         Vec::new(),
     ))
@@ -62,7 +63,10 @@ fn rmmissing_typed_integer_tensor_preserves_storage_and_reports_no_missing() {
     let expected = IntegerStorage::U64(vec![1, u64::MAX, 3, 4]);
     let input = Tensor::new_integer(expected.clone(), vec![2, 2]).expect("integer tensor");
 
-    let options = RemoveOptions::parse(&[Value::from("rows")]).unwrap();
+    let options = RemoveOptions::parse(crate::call::FunctionArgumentView::from_slice(&[
+        Value::from("rows"),
+    ]))
+    .unwrap();
     let result = remove_missing_tensor(input, options).unwrap();
 
     match result {
@@ -80,7 +84,10 @@ fn rmmissing_typed_integer_vector_mask_uses_storage_len_not_mirror() {
     let expected = IntegerStorage::I16(vec![1, 2, 3]);
     let input = Tensor::new_integer(expected.clone(), vec![1, 3]).expect("integer tensor");
 
-    let options = RemoveOptions::parse(&[Value::from("rows")]).unwrap();
+    let options = RemoveOptions::parse(crate::call::FunctionArgumentView::from_slice(&[
+        Value::from("rows"),
+    ]))
+    .unwrap();
     let result = remove_missing_tensor(input, options).unwrap();
 
     match result {
@@ -107,6 +114,7 @@ fn rmmissing_resident_integer_restores_value_and_mask_through_exact_owner() {
             .unwrap();
         let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let result = block_on(rmmissing_builtin(
+            None,
             Value::GpuTensor(source.clone()),
             Vec::new(),
         ))
@@ -158,7 +166,7 @@ fn rmmissing_cell_arrays_use_cell_row_major_order() {
         )
         .unwrap(),
     );
-    let result = block_on(rmmissing_builtin(value.clone(), Vec::new())).unwrap();
+    let result = block_on(rmmissing_builtin(None, value.clone(), Vec::new())).unwrap();
     match result {
         Value::Cell(cell) => {
             assert_eq!((cell.rows, cell.cols), (1, 2));
@@ -168,7 +176,7 @@ fn rmmissing_cell_arrays_use_cell_row_major_order() {
         other => panic!("expected cell result, got {other:?}"),
     }
 
-    let result = block_on(rmmissing_builtin(value, vec![Value::Num(2.0)])).unwrap();
+    let result = block_on(rmmissing_builtin(None, value, vec![Value::Num(2.0)])).unwrap();
     match result {
         Value::Cell(cell) => {
             assert_eq!((cell.rows, cell.cols), (2, 1));

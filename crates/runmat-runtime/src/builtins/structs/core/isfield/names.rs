@@ -15,7 +15,7 @@ pub(super) fn parse(value: Value) -> crate::BuiltinResult<Query> {
     match value {
         Value::String(name) => Ok(Query::Scalar(name)),
         Value::CharArray(array) if array.rows == 1 => {
-            Ok(Query::Scalar(Utf8Text::new(array.data.iter().collect())))
+            Ok(Query::Scalar(Utf8Text::new(array.data().iter().collect())))
         }
         Value::CharArray(_) => Err(super::error::field_name_type()),
         Value::StringArray(array) => Ok(Query::Strings(array)),

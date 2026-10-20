@@ -29,20 +29,27 @@ fn malformed_calls_fail_at_host_visible_admission() {
         FittedOperation::Density,
         &wrong_class,
         &Value::Num(0.0),
-        &[]
+        crate::call::FunctionArgumentView::from_slice(&[])
     )
     .is_err());
     assert!(admission::evaluation(
         FittedOperation::Cumulative,
         &Value::String("Normal".into()),
         &Value::Num(0.0),
-        &[Value::Num(0.0), Value::Num(1.0), Value::Num(2.0)],
+        crate::call::FunctionArgumentView::from_slice(&[
+            Value::Num(0.0),
+            Value::Num(1.0),
+            Value::Num(2.0)
+        ]),
     )
     .is_err());
     assert!(admission::fit(
         &Value::Num(1.0),
         &Value::String("Normal".into()),
-        &[Value::String("Unsupported".into()), Value::Num(1.0)],
+        crate::call::FunctionArgumentView::from_slice(&[
+            Value::String("Unsupported".into()),
+            Value::Num(1.0)
+        ]),
     )
     .is_err());
     let gamma = DistributionSelection::from_value(
@@ -50,7 +57,11 @@ fn malformed_calls_fail_at_host_visible_admission() {
         &Value::String("Gamma".into()),
     )
     .unwrap();
-    assert!(admission::random(&gamma, &[Value::Num(2.0)]).is_err());
+    assert!(admission::random(
+        &gamma,
+        crate::call::FunctionArgumentView::from_slice(&[Value::Num(2.0)])
+    )
+    .is_err());
 }
 
 #[test]
@@ -58,15 +69,20 @@ fn malformed_fitted_object_errors_use_the_invoked_public_operation() {
     let malformed = Value::Object(ObjectInstance::new(
         runmat_types::standard::PROBABILITY_DISTRIBUTION.to_string(),
     ));
-    let pdf = admission::evaluation(FittedOperation::Density, &malformed, &Value::Num(0.0), &[])
-        .err()
-        .unwrap();
+    let pdf = admission::evaluation(
+        FittedOperation::Density,
+        &malformed,
+        &Value::Num(0.0),
+        crate::call::FunctionArgumentView::from_slice(&[]),
+    )
+    .err()
+    .unwrap();
     assert_eq!(pdf.identifier(), Some("RunMat:pdf:InvalidArgument"));
     let cdf = admission::evaluation(
         FittedOperation::Cumulative,
         &malformed,
         &Value::Num(0.0),
-        &[],
+        crate::call::FunctionArgumentView::from_slice(&[]),
     )
     .err()
     .unwrap();
@@ -90,8 +106,12 @@ fn random_provider_error_context_preserves_the_original_identifier() {
 #[test]
 fn fitted_preflight_carries_typed_family_and_frequency_roles() {
     let options = vec![Value::from("freq"), Value::Num(1.0)];
-    let admitted = admission::fit(&Value::Num(2.0), &Value::from("norm"), &options)
-        .expect("public aliases decode at admission");
+    let admitted = admission::fit(
+        &Value::Num(2.0),
+        &Value::from("norm"),
+        crate::call::FunctionArgumentView::from_slice(&options),
+    )
+    .expect("public aliases decode at admission");
     assert_eq!(admitted.kind, DistributionKind::Normal);
     assert!(matches!(admitted.frequency, Some(Value::Num(value)) if *value == 1.0));
 
@@ -112,10 +132,10 @@ fn generic_pdf_cdf_random_name_overloads_execute() {
     let density = block_on(pdf_builtin(
         Value::String("Normal".into()),
         mirrorless_int_tensor(IntegerStorage::I16(vec![0, 1]), vec![2, 1]),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             mirrorless_int_tensor(IntegerStorage::I16(vec![0]), vec![1, 1]),
             mirrorless_int_tensor(IntegerStorage::I16(vec![1]), vec![1, 1]),
-        ],
+        ]),
     ))
     .unwrap();
     let Value::Tensor(density) = density else {
@@ -130,7 +150,7 @@ fn generic_pdf_cdf_random_name_overloads_execute() {
     let probability = block_on(cdf_builtin(
         Value::String("Poisson".into()),
         Value::Num(2.0),
-        vec![Value::Num(3.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(3.0)]),
     ))
     .unwrap();
     let Value::Num(probability) = probability else {
@@ -160,7 +180,7 @@ fn fitted_evaluators_preserve_rank_zero_and_rank_one_input_geometry() {
     let fitted = block_on(fitdist_builtin(
         vec_tensor(&[-1.0, 0.0, 1.0]),
         Value::from("Normal"),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("fitted normal distribution");
 
@@ -172,12 +192,12 @@ fn fitted_evaluators_preserve_rank_zero_and_rank_one_input_geometry() {
             block_on(pdf_builtin(
                 fitted.clone(),
                 Value::Tensor(Tensor::new(points.clone(), shape.clone()).unwrap()),
-                Vec::new(),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
             )),
             block_on(cdf_builtin(
                 fitted.clone(),
                 Value::Tensor(Tensor::new(points, shape.clone()).unwrap()),
-                Vec::new(),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
             )),
             block_on(
                 crate::builtins::stats::summary::distributions::icdf::icdf_builtin(

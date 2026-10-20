@@ -1,7 +1,6 @@
 //! Pure sampled-response metrics and scalar-structure assembly.
 
 use super::*;
-use runmat_value::StructValue;
 
 pub(super) struct StepMetrics {
     rise_time: f64,
@@ -141,7 +140,7 @@ fn crossing_with_index(
 }
 
 pub(super) fn to_value(metrics: StepMetrics) -> BuiltinResult<Value> {
-    let mut value = StructValue::new();
+    let mut value = runmat_value::UnboundedStructValueBuilder::new();
     value.insert("RiseTime", Value::Num(metrics.rise_time));
     value.insert("TransientTime", Value::Num(metrics.transient_time));
     value.insert("SettlingTime", Value::Num(metrics.settling_time));
@@ -152,7 +151,7 @@ pub(super) fn to_value(metrics: StepMetrics) -> BuiltinResult<Value> {
     value.insert("Peak", Value::Num(metrics.peak));
     value.insert("PeakTime", Value::Num(metrics.peak_time));
     value.insert("SteadyStateValue", Value::Num(metrics.steady_state_value));
-    Ok(Value::Struct(value))
+    Ok(Value::Struct(value.finish()))
 }
 
 fn error(message: impl Into<String>) -> crate::RuntimeError {

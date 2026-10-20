@@ -107,7 +107,8 @@ impl ActiveInvocation {
         &mut self,
         error: runmat_runtime::RuntimeError,
     ) -> NativeExecutorResult<()> {
-        let original = std::sync::Arc::new(self.state.annotate_error(error));
+        let original =
+            runmat_runtime::runtime_error::RuntimeErrorOwner::new(self.state.annotate_error(error));
         let exception = self.state.arena.insert(runmat_value::Value::MException(
             runmat_runtime::runtime_error::exception_from_error(original.clone()),
         ));
@@ -198,10 +199,12 @@ impl ActiveInvocation {
                 }
                 NativeExitKind::EXCEPTION => {
                     let error = self.state.last_error.take().unwrap_or_else(|| {
-                        std::sync::Arc::new(runmat_runtime::runtime_error::semantic_error(
-                            "NativeException",
-                            "native execution returned an exception without host error state",
-                        ))
+                        runmat_runtime::runtime_error::RuntimeErrorOwner::new(
+                            runmat_runtime::runtime_error::semantic_error(
+                                "NativeException",
+                                "native execution returned an exception without host error state",
+                            ),
+                        )
                     });
                     if let Some(target) =
                         super::super::site::redirect_exception(&mut self.state, exit.exception)?

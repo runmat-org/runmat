@@ -287,7 +287,10 @@ mod tests {
         let Some(Value::Cell(elements)) = projected.fields.get("b") else {
             panic!("expected grouped repeated elements");
         };
-        assert_eq!(elements.data, vec![char_value("inner"), char_value("last")]);
+        assert_eq!(
+            elements.data(),
+            vec![char_value("inner"), char_value("last")]
+        );
         assert!(
             matches!(&root.content[..], [XmlContent::Text(before), XmlContent::Element(_), XmlContent::Text(after), XmlContent::Element(_)] if before == "before" && after == "after")
         );
@@ -315,7 +318,7 @@ mod tests {
         let Value::Struct(projected) = projected else {
             panic!("expected structured root with child elements");
         };
-        let names: Vec<_> = projected.field_names().map(String::as_str).collect();
+        let names: Vec<_> = projected.field_names().collect();
         let expected: Vec<_> = (0..64).map(|index| format!("n{index}")).collect();
         assert_eq!(
             names,
@@ -326,7 +329,7 @@ mod tests {
                 panic!("expected repeated element cell");
             };
             assert_eq!(
-                values.data,
+                values.data(),
                 vec![
                     char_value(&format!("first{index}")),
                     char_value(&format!("second{index}")),

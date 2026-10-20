@@ -11,7 +11,7 @@ use runmat_value::Value;
     binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::directory_lifecycle::mkdir"
 )]
-async fn mkdir_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn mkdir_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     let outcome = execute::evaluate(args).await?;
     super::result::complete(outcome, "mkdir")
 }

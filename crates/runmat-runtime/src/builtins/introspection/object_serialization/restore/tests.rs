@@ -5,9 +5,9 @@ use runmat_value::StructArray;
 fn nested_structs(depth: usize) -> Value {
     let mut value = Value::Int(runmat_value::IntValue::U64(u64::MAX));
     for _ in 0..depth {
-        let mut structure = StructValue::new();
+        let mut structure = runmat_value::UnboundedStructValueBuilder::new();
         structure.insert("next", value);
-        value = Value::Struct(structure);
+        value = Value::Struct(structure.finish());
     }
     value
 }
@@ -46,16 +46,16 @@ fn structure_array_restoration_visits_field_major_values() {
         vec!["first".into(), "second".into()],
         vec![
             {
-                let mut element = StructValue::new();
+                let mut element = runmat_value::UnboundedStructValueBuilder::new();
                 element.insert("first", Value::Num(1.0));
                 element.insert("second", Value::Num(2.0));
-                element
+                element.finish()
             },
             {
-                let mut element = StructValue::new();
+                let mut element = runmat_value::UnboundedStructValueBuilder::new();
                 element.insert("first", nested_structs(MAX_SERIALIZATION_DEPTH + 1));
                 element.insert("second", Value::Num(2.0));
-                element
+                element.finish()
             },
         ],
         vec![1, 2],

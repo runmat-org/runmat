@@ -63,7 +63,7 @@ fn known_invalid_alpha_precedes_resident_design_download() {
     let error = block_on(regress_builtin(
         y,
         resident_design(provider),
-        vec![Value::Num(1.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
     ))
     .expect_err("alpha outside open interval");
     assert!(error.message().contains("alpha"));
@@ -76,8 +76,12 @@ fn known_invalid_response_geometry_precedes_resident_design_download() {
     let provider = CountingProvider::new();
     let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
     let y = tensor(vec![1.0, 3.0], 2, 1);
-    let error = block_on(regress_builtin(y, resident_design(provider), Vec::new()))
-        .expect_err("response/design mismatch");
+    let error = block_on(regress_builtin(
+        y,
+        resident_design(provider),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect_err("response/design mismatch");
     assert!(error.message().contains("length(y)"));
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
 }
@@ -91,8 +95,12 @@ fn integer_alpha_extension_gate_precedes_resident_design_download() {
     let y = tensor(vec![1.0, 3.0, 5.0], 3, 1);
     let alpha =
         Value::Tensor(Tensor::new_integer(IntegerStorage::I64(vec![1]), vec![1, 1]).unwrap());
-    let error = block_on(regress_builtin(y, resident_design(provider), vec![alpha]))
-        .expect_err("integer alpha is extension-only");
+    let error = block_on(regress_builtin(
+        y,
+        resident_design(provider),
+        crate::builtins::common::test_support::builtin_arguments(vec![alpha]),
+    ))
+    .expect_err("integer alpha is extension-only");
     assert_eq!(
         error.identifier(),
         Some("RunMat:compatibility:RegressIntegerAlphaExtension")
@@ -112,7 +120,7 @@ fn empty_observations_precede_resident_alpha_download() {
     let error = block_on(regress_builtin(
         response,
         design,
-        vec![Value::GpuTensor(alpha)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(alpha)]),
     ))
     .expect_err("empty observations");
     assert!(error.message().contains("complete observation"));

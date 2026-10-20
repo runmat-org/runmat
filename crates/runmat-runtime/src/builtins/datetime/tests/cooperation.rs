@@ -76,7 +76,7 @@ impl RuntimeExecutionServices for PendingDateService {
     }
     fn claim_next_task_result(
         &self,
-        _: &[TaskHandle],
+        _: &[runmat_value::SharedTaskHandle],
     ) -> Result<TaskResultClaim, ExecutionServiceError> {
         Err(ExecutionServiceError::UnknownHandle)
     }
@@ -88,7 +88,7 @@ impl RuntimeExecutionServices for PendingDateService {
     }
     fn complete_future(
         &self,
-        _: &FutureHandle,
+        _: crate::execution::FutureCompletionRef<'_>,
         _: Result<RootedValueSequence, ExecutionServiceError>,
     ) -> Result<(), ExecutionServiceError> {
         Err(ExecutionServiceError::UnknownHandle)
@@ -120,7 +120,7 @@ fn public_datetime_cellstr_parse_turn_cancels_or_drops_without_publication() {
             }),
             source.token(),
         );
-        let mut call = Box::pin(super::super::constructor_builtin::datetime_builtin(
+        let mut call = Box::pin(super::super::constructor_builtin::datetime_builtin_source(
             Some(runtime),
             vec![input, Value::from("InputFormat"), Value::from("yyyy-MM-dd")],
         ));
@@ -149,12 +149,13 @@ fn public_datetime_cellstr_parse_turn_cancels_or_drops_without_publication() {
             dropped.get(),
             "pending service turn must retire on cancellation/drop"
         );
-        let fresh =
-            futures::executor::block_on(super::super::constructor_builtin::datetime_builtin(
+        let fresh = futures::executor::block_on(
+            super::super::constructor_builtin::datetime_builtin_source(
                 None,
                 vec![Value::CharArray(CharArray::new_row("2024-04-09"))],
-            ))
-            .expect("subsequent invocation remains usable");
+            ),
+        )
+        .expect("subsequent invocation remains usable");
         assert_eq!(
             serial_tensor_for_object(&as_datetime(fresh))
                 .unwrap()
@@ -224,7 +225,7 @@ fn one_large_cellstr_character_vector_suspends_during_bounded_decode() {
         }),
         source.token(),
     );
-    let mut call = Box::pin(super::super::constructor_builtin::datetime_builtin(
+    let mut call = Box::pin(super::super::constructor_builtin::datetime_builtin_source(
         Some(runtime),
         vec![
             input.clone(),
@@ -250,11 +251,12 @@ fn one_large_cellstr_character_vector_suspends_during_bounded_decode() {
     drop(call);
     assert!(dropped.get());
 
-    let result = futures::executor::block_on(super::super::constructor_builtin::datetime_builtin(
-        None,
-        vec![input, Value::from("InputFormat"), Value::from("yyyy-MM-dd")],
-    ))
-    .expect("cooperative whitespace scanning preserves the original date grammar");
+    let result =
+        futures::executor::block_on(super::super::constructor_builtin::datetime_builtin_source(
+            None,
+            vec![input, Value::from("InputFormat"), Value::from("yyyy-MM-dd")],
+        ))
+        .expect("cooperative whitespace scanning preserves the original date grammar");
     let object = as_datetime(result);
     assert_eq!(serial_tensor_for_object(&object).unwrap().shape(), [1, 1]);
     assert_eq!(

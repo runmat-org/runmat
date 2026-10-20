@@ -31,7 +31,7 @@ impl TextContainer {
             Value::StringArray(array) => Ok(Self {
                 representation: TextRepresentation::StringArray,
                 values: array
-                    .data
+                    .data()
                     .iter()
                     .map(|text| text.as_str().to_owned())
                     .collect(),
@@ -43,7 +43,7 @@ impl TextContainer {
             {
                 Ok(Self::scalar(
                     TextRepresentation::Character,
-                    array.data.iter().take(array.cols).collect(),
+                    array.data().iter().take(array.cols).collect(),
                 ))
             }
             Value::Cell(array) => Self::decode_cell(array, identity, error),
@@ -64,7 +64,7 @@ impl TextContainer {
         identity: &'static str,
         error: &'static runmat_builtins::BuiltinErrorDescriptor,
     ) -> BuiltinResult<Self> {
-        let mut values = Vec::with_capacity(array.data.len());
+        let mut values = Vec::with_capacity(array.data().len());
         for value in array.iter_column_major() {
             let Value::CharArray(chars) = value else {
                 return Err(super::error::catalog(error, identity));
@@ -72,7 +72,7 @@ impl TextContainer {
             if chars.rows != 1 || crate::builtins::common::shape::effective_rank(&chars.shape) > 2 {
                 return Err(super::error::catalog(error, identity));
             }
-            values.push(chars.data.iter().take(chars.cols).collect());
+            values.push(chars.data().iter().take(chars.cols).collect());
         }
         Ok(Self {
             representation: TextRepresentation::Cell,

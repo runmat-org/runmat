@@ -40,7 +40,7 @@ fn exprnd_internal_error(message: impl Into<String>) -> crate::RuntimeError {
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::random::exprnd"
 )]
-async fn exprnd_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn exprnd_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     ensure_output_arity()?;
     let integer_mu = args.first().is_some_and(is_typed_integer_value);
     let integer_size = args.iter().skip(1).any(is_typed_integer_value);
@@ -56,7 +56,7 @@ async fn exprnd_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             BUILTIN_NAME,
         )?;
     }
-    reject_unsupported_classes(&args)?;
+    reject_unsupported_classes(args.view())?;
     let parsed = parse_args(args).await?;
     if parsed.mu.iter().any(|mu| !mu.is_finite() || *mu <= 0.0) {
         return Err(exprnd_error(&EXPRND_ERROR_MU_MUST_BE_POSITIVE));

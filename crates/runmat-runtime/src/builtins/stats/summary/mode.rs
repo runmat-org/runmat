@@ -45,8 +45,8 @@ fn mode_internal_error(message: impl Into<String>) -> RuntimeError {
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::summary::mode"
 )]
-async fn mode_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let parsed = parse_arguments(&rest).await?;
+async fn mode_builtin(value: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let parsed = parse_arguments(rest.view()).await?;
     let gpu_source = match &value {
         Value::GpuTensor(handle) => Some(handle.clone()),
         _ => None,
@@ -125,12 +125,11 @@ fn upload_mode_value(
         Value::Bool(logical) => upload_logical(&[u8::from(logical)], &[1, 1]),
         Value::LogicalArray(logical) => upload_logical(&logical.data, &logical.shape),
         Value::Cell(mut cell) => {
-            if !cell.data.is_unique() {
-                cell.data
-                    .make_unique_unbounded()
+            if !cell.data_owner().is_unique() {
+                cell.make_data_unique_unbounded()
                     .map_err(|error| mode_internal_error(error.to_string()))?;
             }
-            let slots = cell.data.try_as_mut_slice_unique().ok_or_else(|| {
+            let slots = cell.try_data_mut_unique().ok_or_else(|| {
                 mode_internal_error("shared admitted Cell output requires an admitted replacement")
             })?;
             for slot in slots {
@@ -140,9 +139,7 @@ fn upload_mode_value(
                     protected,
                 )?;
             }
-            runmat_value::CellArray::from_shared_storage(cell.data, cell.shape)
-                .map(Value::Cell)
-                .map_err(mode_internal_error)
+            Ok(Value::Cell(cell))
         }
         Value::OutputList(values) => runmat_value::ValueSequence::from_output_storage(values)
             .map_err(crate::sequence::sequence_error_to_runtime)?
@@ -168,7 +165,9 @@ struct ParsedArguments {
     axes: ModeAxes,
 }
 
-async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
+async fn parse_arguments(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<ParsedArguments> {
     let mut axes = ModeAxes::Default;
     let mut axes_set = false;
 
@@ -281,11 +280,11 @@ fn mode_dimension_error(message: String, scalar: bool) -> RuntimeError {
 fn value_as_str(value: &Value) -> Option<std::borrow::Cow<'_, str>> {
     match value {
         Value::String(s) => Some(std::borrow::Cow::Borrowed(s.as_str())),
-        Value::StringArray(sa) if sa.data.len() == 1 => {
-            Some(std::borrow::Cow::Borrowed(sa.data[0].as_str()))
+        Value::StringArray(sa) if sa.data().len() == 1 => {
+            Some(std::borrow::Cow::Borrowed(sa.data()[0].as_str()))
         }
         Value::CharArray(ca) if ca.rows == 1 => {
-            Some(std::borrow::Cow::Owned(ca.data.iter().collect()))
+            Some(std::borrow::Cow::Owned(ca.data().iter().collect()))
         }
         _ => None,
     }
@@ -1331,7 +1330,10 @@ pub(crate) mod tests {
     use runmat_value::{IntValue, LogicalArray, NumericDType, Tensor, Value};
 
     fn mode_call(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::mode_builtin(value, rest))
+        block_on(super::mode_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     fn mode_outputs(value: Value, rest: Vec<Value>, out_count: usize) -> BuiltinResult<Vec<Value>> {
@@ -1455,7 +1457,7 @@ pub(crate) mod tests {
         let Value::Cell(ties) = &outputs[2] else {
             panic!("expected ties cell");
         };
-        let Value::Tensor(tie_values) = &ties.data[0] else {
+        let Value::Tensor(tie_values) = &ties.data()[0] else {
             panic!("expected tie tensor");
         };
         assert_eq!(tie_values.numeric_dtype(), NumericDType::F32);
@@ -1471,8 +1473,8 @@ pub(crate) mod tests {
         match &outputs[2] {
             Value::Cell(cell) => {
                 assert_eq!(cell.shape, vec![1, 1]);
-                assert_eq!(cell.data.len(), 1);
-                let entry = &cell.data[0];
+                assert_eq!(cell.data().len(), 1);
+                let entry = &cell.data()[0];
                 match entry {
                     Value::Tensor(t) => {
                         assert_eq!(t.shape(), [2, 1]);
@@ -1549,7 +1551,7 @@ pub(crate) mod tests {
         match &outputs[2] {
             Value::Cell(cell) => {
                 assert_eq!(cell.shape, vec![1, 1]);
-                let entry = &cell.data[0];
+                let entry = &cell.data()[0];
                 match entry {
                     Value::Tensor(t) => {
                         assert_eq!(t.shape(), [1, 1]);
@@ -1581,10 +1583,10 @@ pub(crate) mod tests {
         };
         assert_eq!(ties.shape, vec![1, 1, 2]);
         assert_eq!(
-            expect_tensor(&ties.data[0]).materialize_f64(),
+            expect_tensor(&ties.data()[0]).materialize_f64(),
             vec![1.0, 2.0]
         );
-        assert_eq!(expect_tensor(&ties.data[1]).materialize_f64(), vec![3.0]);
+        assert_eq!(expect_tensor(&ties.data()[1]).materialize_f64(), vec![3.0]);
     }
 
     #[test]
@@ -1617,11 +1619,11 @@ pub(crate) mod tests {
             panic!("expected tied-value cell");
         };
         assert_eq!(
-            expect_tensor(&ties.data[0]).integer_storage(),
+            expect_tensor(&ties.data()[0]).integer_storage(),
             Some(&IntegerStorage::U64(vec![wide - 1, wide]))
         );
         assert_eq!(
-            expect_tensor(&ties.data[1]).integer_storage(),
+            expect_tensor(&ties.data()[1]).integer_storage(),
             Some(&IntegerStorage::U64(vec![wide]))
         );
     }
@@ -1646,7 +1648,7 @@ pub(crate) mod tests {
         match &outputs[2] {
             Value::Cell(cell) => {
                 assert_eq!(cell.shape, vec![1, 1]);
-                let entry = &cell.data[0];
+                let entry = &cell.data()[0];
                 match entry {
                     Value::Tensor(t) => {
                         assert_eq!(t.shape(), [0, 1]);
@@ -1682,7 +1684,7 @@ pub(crate) mod tests {
         assert_eq!(outputs[1], Value::Num(2.0));
         match &outputs[2] {
             Value::Cell(cell) => {
-                let entry = &cell.data[0];
+                let entry = &cell.data()[0];
                 match entry {
                     Value::Tensor(t) => {
                         assert_eq!(t.numeric_dtype(), NumericDType::U16);
@@ -1714,11 +1716,11 @@ pub(crate) mod tests {
         match &outputs[2] {
             Value::Cell(cell) => {
                 assert_eq!(
-                    expect_tensor(&cell.data[0]).integer_storage(),
+                    expect_tensor(&cell.data()[0]).integer_storage(),
                     Some(&IntegerStorage::U16(vec![2]))
                 );
                 assert_eq!(
-                    expect_tensor(&cell.data[1]).integer_storage(),
+                    expect_tensor(&cell.data()[1]).integer_storage(),
                     Some(&IntegerStorage::U16(vec![3]))
                 );
             }
@@ -1738,7 +1740,7 @@ pub(crate) mod tests {
         }
         match &outputs[2] {
             Value::Cell(cell) => assert_eq!(
-                expect_tensor(&cell.data[1]).integer_storage(),
+                expect_tensor(&cell.data()[1]).integer_storage(),
                 Some(&IntegerStorage::I16(vec![-2]))
             ),
             other => panic!("expected tied-value cell array, got {other:?}"),
@@ -1826,11 +1828,11 @@ pub(crate) mod tests {
             Value::Cell(cell) => {
                 assert_eq!(cell.shape, vec![2, 1]);
                 assert_eq!(
-                    expect_tensor(&cell.data[0]).integer_storage(),
+                    expect_tensor(&cell.data()[0]).integer_storage(),
                     Some(&IntegerStorage::U64(vec![wide]))
                 );
                 assert_eq!(
-                    expect_tensor(&cell.data[1]).integer_storage(),
+                    expect_tensor(&cell.data()[1]).integer_storage(),
                     Some(&IntegerStorage::U64(vec![wide - 1]))
                 );
             }
@@ -1848,7 +1850,7 @@ pub(crate) mod tests {
         assert_eq!(all_outputs[1], Value::Num(2.0));
         match &all_outputs[2] {
             Value::Cell(cell) => assert_eq!(
-                expect_tensor(&cell.data[0]).integer_storage(),
+                expect_tensor(&cell.data()[0]).integer_storage(),
                 Some(&IntegerStorage::I64(vec![i64::MIN + 2, 8]))
             ),
             other => panic!("expected tied-value cell array, got {other:?}"),
@@ -1873,7 +1875,7 @@ pub(crate) mod tests {
         }
         match &outputs[2] {
             Value::Cell(cell) => assert_eq!(
-                expect_tensor(&cell.data[1]).integer_storage(),
+                expect_tensor(&cell.data()[1]).integer_storage(),
                 Some(&IntegerStorage::U64(vec![u64::MAX - 1]))
             ),
             other => panic!("expected tied-value cell array, got {other:?}"),
@@ -1888,7 +1890,7 @@ pub(crate) mod tests {
         assert_eq!(outputs[1], Value::Num(3.0));
         match &outputs[2] {
             Value::Cell(cell) => {
-                let entry = &cell.data[0];
+                let entry = &cell.data()[0];
                 match entry {
                     Value::LogicalArray(array) => {
                         assert_eq!(array.shape, vec![1, 1]);
@@ -2038,7 +2040,7 @@ pub(crate) mod tests {
             let Value::Cell(ties) = &outputs[2] else {
                 panic!("expected tied-value cell");
             };
-            let Value::GpuTensor(tie_handle) = &ties.data[0] else {
+            let Value::GpuTensor(tie_handle) = &ties.data()[0] else {
                 panic!("expected resident integer tied values");
             };
             assert_eq!(
@@ -2046,7 +2048,7 @@ pub(crate) mod tests {
                 Some(runmat_accelerate_api::IntegerElementType::U64)
             );
             assert_eq!(
-                test_support::gather(ties.data[0].clone())
+                test_support::gather(ties.data()[0].clone())
                     .expect("gather ties")
                     .integer_storage(),
                 Some(&IntegerStorage::U64(vec![wide - 1, wide]))

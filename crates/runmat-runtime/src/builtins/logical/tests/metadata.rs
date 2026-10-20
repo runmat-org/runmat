@@ -74,7 +74,7 @@ impl MetadataBoundary {
             },
             MetadataPredicate::CellString => match value {
                 Value::Cell(cell) => cell
-                    .data
+                    .data()
                     .iter()
                     .all(|element| matches!(element, Value::CharArray(_))),
                 _ => false,

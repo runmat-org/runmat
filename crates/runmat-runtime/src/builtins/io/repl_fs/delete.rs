@@ -30,7 +30,7 @@ use error::*;
 )]
 async fn delete_builtin(
     context: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     if args.is_empty() {
         return Err(delete_error_with(
@@ -39,7 +39,7 @@ async fn delete_builtin(
         ));
     }
     let mut cooperation = DeleteCooperation::new(context.as_ref());
-    if let [Value::Pool(pool)] = args.as_slice() {
+    if let (1, Some(Value::Pool(pool))) = (args.len(), args.first()) {
         cooperation.completed(0).await?;
         let context = context
             .or_else(crate::context::legacy::active)
@@ -53,7 +53,7 @@ async fn delete_builtin(
         cooperation.completed(0).await?;
         return Ok(Value::Num(0.0));
     }
-    let (operands, resolve_symbolic_links) = parse_delete_options(&args)?;
+    let (operands, resolve_symbolic_links) = parse_delete_options(args.view())?;
     if operands.iter().all(is_handle_input) {
         if resolve_symbolic_links.is_some() {
             return Err(delete_error_with(

@@ -101,7 +101,7 @@ fn fill_cell(value: &Value) -> BuiltinResult<ImportCell> {
         Value::Bool(value) => Ok(ImportCell::Logical(*value)),
         Value::String(value) => Ok(ImportCell::Text(value.to_string())),
         Value::CharArray(value) if value.rows == 1 => {
-            Ok(ImportCell::Text(value.data.iter().collect()))
+            Ok(ImportCell::Text(value.data().iter().collect()))
         }
         _ => Err(invalid_variable(
             "readtable: unsupported variable FillValue class",

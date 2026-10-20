@@ -1,5 +1,7 @@
 //! MATLAB-compatible `reshape` builtin with GPU-aware semantics for RunMat.
 
+use crate::aggregate::structure::operations as struct_ops;
+
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::shape::value_numel;
 use crate::builtins::common::tensor;
@@ -36,7 +38,10 @@ fn reshape_dimension_error(error: tensor::DimensionDecodeError) -> RuntimeError 
     binding_variant = "default",
     builtin_path = "crate::builtins::array::shape::reshape"
 )]
-async fn reshape_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn reshape_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     if !rest.is_empty()
         && (matches!(value, Value::Object(_) | Value::HandleObject(_))
             || !shape_transform_input_supported(
@@ -82,15 +87,16 @@ async fn reshape_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult
         Value::Tensor(_) | Value::ComplexTensor(_) | Value::LogicalArray(_)
     ) {
         if let Some(runtime) = runtime.as_ref() {
-            if let Some(mut admitted) = admission::ReshapeDimensions::prepare(runtime, &rest)? {
-                admitted.parse(&rest, runtime).await?;
+            if let Some(mut admitted) = admission::ReshapeDimensions::prepare(runtime, rest.view())?
+            {
+                admitted.parse(rest.view(), runtime).await?;
                 let numel = value_numel(&value).await?;
                 admitted.finalize(numel)?;
                 return admitted.publish(value, runtime);
             }
         }
     }
-    let tokens = parse_size_arguments(&rest).await?;
+    let tokens = parse_size_arguments(rest.view()).await?;
     let numel = value_numel(&value).await?;
     let dims = finalize_dimensions(tokens, numel)?;
     reshape_value(value, &dims)
@@ -123,7 +129,7 @@ fn reshape_value(value: Value, dims: &[usize]) -> crate::BuiltinResult<Value> {
             }
         }
         Value::StringArray(strings) => {
-            let StringArray { data, .. } = strings;
+            let (data, _, _, _) = strings.into_parts();
             StringArray::from_shared_storage(data, runmat_value::SharedShape::new_unmanaged(dims.to_vec()))
                 .map(Value::StringArray)
                 .map_err(|e| reshape_error(format!("reshape: {e}")))
@@ -131,18 +137,12 @@ fn reshape_value(value: Value, dims: &[usize]) -> crate::BuiltinResult<Value> {
         Value::CharArray(chars) => reshape_char_array(chars, dims),
         Value::Cell(cell) => reshape_cell_array(cell, dims),
         Value::Struct(structure) => Ok(Value::Struct(structure)),
-        Value::StructArray(array) => array
-            .reshape(if dims.len() == 1 {
-                vec![dims[0], 1]
-            } else {
-                dims.to_vec()
-            })
-            .map(Value::StructArray)
-            .map_err(|error| reshape_error(format!("reshape: {error}"))),
-        Value::ObjectArray(array) => array
-            .reshape_preserving_provenance(dims.to_vec())
-            .map(Value::ObjectArray)
-            .map_err(|error| reshape_error(format!("reshape: {error}"))),
+        Value::StructArray(array)=>struct_ops::reshape(array,if dims.len()==1{vec![dims[0],1]}else{dims.to_vec()}).map(Value::StructArray).map_err(|error|struct_ops::remap(error,|message|reshape_error(format!("reshape: {message}")))),
+        Value::ObjectArray(array) => {
+            let context = crate::context::legacy::active();
+            crate::execution::object_array::reshape(array, dims, context.as_ref())
+                .map(Value::ObjectArray)
+        },
         Value::GpuTensor(handle) => reshape_gpu_tensor(handle, dims),
         Value::Num(n) => {
             if dims.len() <= 2 && dims.iter().all(|&d| d == 1) {
@@ -244,7 +244,9 @@ enum DimToken {
     Auto,
 }
 
-async fn parse_size_arguments(args: &[Value]) -> crate::BuiltinResult<Vec<DimToken>> {
+async fn parse_size_arguments(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<Vec<DimToken>> {
     if args.len() == 1 {
         let value = &args[0];
         match value {
@@ -453,7 +455,10 @@ pub(crate) mod tests {
     use runmat_accelerate_api::AccelProvider;
 
     fn reshape_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-        block_on(super::reshape_builtin(value, rest))
+        block_on(super::reshape_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
     use crate::builtins::common::test_support;
     use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray};
@@ -502,8 +507,10 @@ pub(crate) mod tests {
             .expect("exact integer dimension values");
         assert_eq!(borrowed, vec![2, 3]);
 
-        let parsed =
-            block_on(parse_size_arguments(&[Value::Tensor(dims)])).expect("dimension vector");
+        let parsed = block_on(parse_size_arguments(
+            crate::call::FunctionArgumentView::from_slice(&[Value::Tensor(dims)]),
+        ))
+        .expect("dimension vector");
         assert!(matches!(
             parsed.as_slice(),
             [DimToken::Known(2), DimToken::Known(3)]
@@ -548,10 +555,17 @@ pub(crate) mod tests {
                         .with_parallel(Rc::new(FiniteParallel(ledger.clone()))),
                 );
         let controls = [Value::Num(3.0), Value::Num(2.0)];
-        let mut dimensions = admission::ReshapeDimensions::prepare(&runtime, &controls)
-            .expect("shape admission")
-            .expect("finite shape receipt");
-        block_on(dimensions.parse(&controls, &runtime)).expect("dimension parsing");
+        let mut dimensions = admission::ReshapeDimensions::prepare(
+            &runtime,
+            crate::call::FunctionArgumentView::from_slice(&controls),
+        )
+        .expect("shape admission")
+        .expect("finite shape receipt");
+        block_on(dimensions.parse(
+            crate::call::FunctionArgumentView::from_slice(&controls),
+            &runtime,
+        ))
+        .expect("dimension parsing");
         dimensions.finalize(6).expect("matching element count");
         let result = dimensions
             .publish(
@@ -700,7 +714,7 @@ pub(crate) mod tests {
             Value::CharArray(out) => {
                 assert_eq!(out.rows, 4);
                 assert_eq!(out.cols, 1);
-                let collected: String = out.data.iter().collect();
+                let collected: String = out.data().iter().collect();
                 assert_eq!(collected, "abcd");
             }
             other => panic!("expected CharArray, got {other:?}"),
@@ -730,14 +744,14 @@ pub(crate) mod tests {
     #[test]
     fn reshape_string_scalar_high_rank() {
         let result = reshape_builtin(
-            Value::String("runmat".to_string()),
+            Value::String("runmat".to_string().into()),
             vec![Value::from(1.0), Value::from(1.0), Value::from(1.0)],
         )
         .expect("reshape");
         match result {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![1, 1, 1]);
-                assert_eq!(sa.data, vec!["runmat".to_string()]);
+                assert_eq!(sa.data(), vec!["runmat".to_string()]);
             }
             other => panic!("expected StringArray, got {other:?}"),
         }

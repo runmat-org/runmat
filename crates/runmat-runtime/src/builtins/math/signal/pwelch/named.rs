@@ -28,7 +28,9 @@ pub(super) fn statement_form_call() -> bool {
             && crate::output_count::current_output_count().is_none())
 }
 
-pub(super) fn split_named_controls(rest: &[Value]) -> BuiltinResult<NamedControls<'_>> {
+pub(super) fn split_named_controls(
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<NamedControls<'_>> {
     let mut positional = Vec::new();
     positional
         .try_reserve_exact(rest.len())
@@ -51,7 +53,7 @@ pub(super) fn split_named_controls(rest: &[Value]) -> BuiltinResult<NamedControl
             parent = Some(resolve_parent(target)?);
             index += 2;
         } else {
-            positional.push(&rest[index]);
+            positional.push(rest.get(index).expect("Welch positional argument"));
             tokens.push(token);
             index += 1;
         }
@@ -66,11 +68,11 @@ pub(super) fn split_named_controls(rest: &[Value]) -> BuiltinResult<NamedControl
 pub(super) fn keyword(value: &Value) -> Option<PwelchKeyword> {
     match value {
         Value::String(text) => Some(PwelchKeyword::decode(text)),
-        Value::StringArray(array) if array.data.len() == 1 => {
-            Some(PwelchKeyword::decode(&array.data[0]))
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Some(PwelchKeyword::decode(&array.data()[0]))
         }
         Value::CharArray(chars) if chars.rows <= 1 => {
-            let text = chars.data.iter().collect::<String>();
+            let text = chars.data().iter().collect::<String>();
             Some(PwelchKeyword::decode(&text))
         }
         _ => None,

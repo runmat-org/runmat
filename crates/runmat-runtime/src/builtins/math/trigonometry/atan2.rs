@@ -295,7 +295,7 @@ fn ensure_atan2_input_extensions(value: &Value) -> BuiltinResult<()> {
 fn value_into_atan2_tensor(value: Value) -> BuiltinResult<Tensor> {
     match value {
         Value::CharArray(chars) => {
-            let data: Vec<f64> = chars.data.iter().map(|&ch| ch as u32 as f64).collect();
+            let data: Vec<f64> = chars.data().iter().map(|&ch| ch as u32 as f64).collect();
             Tensor::new(data, vec![chars.rows, chars.cols])
                 .map_err(|e| atan2_error_with_detail(&ATAN2_ERROR_INTERNAL, e))
         }

@@ -5,14 +5,17 @@ use super::*;
     binding_variant = "default",
     builtin_path = "crate::builtins::geometry"
 )]
-pub async fn geometry_load_builtin(path: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn geometry_load_builtin(
+    path: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &GEOMETRY_LOAD_DESCRIPTOR,
         &GEOMETRY_LOAD_ERROR_OUTPUTS,
         GEOMETRY_LOAD_NAME,
     )?;
     let path = geometry_path_from_value(&path, GEOMETRY_LOAD_NAME, &GEOMETRY_LOAD_ERROR_INPUT)?;
-    let import_options = super::display::parse_load_options(&rest)?;
+    let import_options = super::display::parse_load_options(rest.view())?;
     let bytes = read_file(GEOMETRY_LOAD_NAME, &GEOMETRY_LOAD_ERROR_IO, &path).await?;
     operation_result_to_value(
         GEOMETRY_LOAD_NAME,

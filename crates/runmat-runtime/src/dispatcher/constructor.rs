@@ -17,6 +17,7 @@ pub(super) enum ConstructorInvocationTarget {
 /// bound dispatch still borrow their actual contiguous arguments.
 pub(super) enum ConstructorArguments<'a> {
     Borrowed(&'a [Value]),
+    Retained(crate::call::BuiltinArguments),
     PreparedCount(usize),
 }
 
@@ -24,13 +25,18 @@ impl ConstructorArguments<'_> {
     pub(super) fn is_empty(&self) -> bool {
         match self {
             Self::Borrowed(values) => values.is_empty(),
+            Self::Retained(values) => values.is_empty(),
             Self::PreparedCount(count) => *count == 0,
         }
     }
 
-    pub(super) fn borrowed(&self) -> Result<&[Value], RuntimeError> {
+    pub(super) fn retained(
+        &self,
+        context: Option<&crate::context::RuntimeContext>,
+    ) -> Result<crate::call::BuiltinArguments, RuntimeError> {
         match self {
-            Self::Borrowed(values) => Ok(values),
+            Self::Borrowed(values) => crate::call::BuiltinArguments::from_borrowed(values, context),
+            Self::Retained(values) => Ok(values.fork()),
             Self::PreparedCount(_) => Err(build_runtime_error(
                 "prepared constructor has no borrowed argument slice",
             )

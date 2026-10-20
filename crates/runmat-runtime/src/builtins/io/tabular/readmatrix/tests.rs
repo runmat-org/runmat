@@ -135,7 +135,7 @@ fn readmatrix_applies_typed_per_column_missing_and_numeric_rules() {
     let _fs_lock = runmat_filesystem::provider_override_lock();
     let path = unique_path("readmatrix_variable_options");
     fs::write(&path, "N/A,1.234\n2,2.500\n").expect("write numeric fixture");
-    let mut base = runmat_value::StructValue::new();
+    let mut base = runmat_value::UnboundedStructValueBuilder::new();
     base.insert("FileType", Value::from("text"));
     base.insert("NumVariables", Value::Num(2.0));
     base.insert("Delimiter", Value::from(","));
@@ -149,6 +149,7 @@ fn readmatrix_applies_typed_per_column_missing_and_numeric_rules() {
             StringArray::new(vec!["double".into(), "double".into()], vec![1, 2]).unwrap(),
         ),
     );
+    let base = base.finish();
     let mut options = ImportOptions::from_legacy(base).expect("typed import options");
     options
         .set_options(
@@ -171,7 +172,9 @@ fn readmatrix_applies_typed_per_column_missing_and_numeric_rules() {
     let output = block_on(readmatrix_builtin(
         None,
         Value::from(path.to_string_lossy().to_string()),
-        vec![options.to_value().expect("encode import options")],
+        crate::builtins::common::test_support::builtin_arguments(vec![options
+            .to_value(None)
+            .expect("encode import options")]),
     ))
     .expect("readmatrix with per-variable options");
     let Value::Tensor(output) = output else {
@@ -272,7 +275,10 @@ fn readmatrix_output_type_parses_wide_integer_text_without_binary64() {
     let result = block_on(readmatrix_builtin(
         None,
         Value::from(path.to_string_lossy().to_string()),
-        vec![Value::from("OutputType"), Value::from("uint64")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("OutputType"),
+            Value::from("uint64"),
+        ]),
     ))
     .expect("readmatrix");
     let Value::Tensor(result) = result else {
@@ -299,7 +305,10 @@ fn readmatrix_documented_integer_output_remains_enabled_in_matlab_mode() {
     let result = block_on(readmatrix_builtin(
         None,
         Value::from(path.to_string_lossy().to_string()),
-        vec![Value::from("OutputType"), Value::from("uint64")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("OutputType"),
+            Value::from("uint64"),
+        ]),
     ))
     .expect("documented integer output");
     let Value::Tensor(result) = result else {
@@ -320,7 +329,10 @@ fn readmatrix_compatibility_gates_extensions_before_file_access() {
     let like_error = block_on(readmatrix_builtin(
         None,
         missing.clone(),
-        vec![Value::from("Like"), Value::Int(IntValue::U8(0))],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("Like"),
+            Value::Int(IntValue::U8(0)),
+        ]),
     ))
     .expect_err("Like must be gated");
     assert_eq!(
@@ -331,7 +343,10 @@ fn readmatrix_compatibility_gates_extensions_before_file_access() {
     let control_error = block_on(readmatrix_builtin(
         None,
         missing,
-        vec![Value::from("NumHeaderLines"), Value::Int(IntValue::U8(1))],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("NumHeaderLines"),
+            Value::Int(IntValue::U8(1)),
+        ]),
     ))
     .expect_err("typed control must be gated");
     assert_eq!(
@@ -378,7 +393,7 @@ fn readmatrix_reads_csv_data() {
     let result = block_on(readmatrix_builtin(
         None,
         Value::from(path.to_string_lossy().to_string()),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("readmatrix");
     match result {
@@ -538,7 +553,7 @@ fn readmatrix_skips_header_lines() {
     let result = block_on(readmatrix_builtin(
         None,
         Value::from(path.to_string_lossy().to_string()),
-        args,
+        crate::builtins::common::test_support::builtin_arguments(args),
     ))
     .expect("readmatrix");
     match result {
@@ -561,7 +576,7 @@ fn readmatrix_respects_delimiter_option() {
     let result = block_on(readmatrix_builtin(
         None,
         Value::from(path.to_string_lossy().to_string()),
-        args,
+        crate::builtins::common::test_support::builtin_arguments(args),
     ))
     .expect("readmatrix");
     match result {
@@ -584,7 +599,7 @@ fn readmatrix_respects_range_string() {
     let result = block_on(readmatrix_builtin(
         None,
         Value::from(path.to_string_lossy().to_string()),
-        args,
+        crate::builtins::common::test_support::builtin_arguments(args),
     ))
     .expect("readmatrix");
     match result {
@@ -608,7 +623,7 @@ fn readmatrix_respects_range_numeric_vector() {
     let result = block_on(readmatrix_builtin(
         None,
         Value::from(path.to_string_lossy().to_string()),
-        args,
+        crate::builtins::common::test_support::builtin_arguments(args),
     ))
     .expect("readmatrix");
     match result {
@@ -633,7 +648,7 @@ fn readmatrix_treats_custom_missing_tokens() {
     let result = block_on(readmatrix_builtin(
         None,
         Value::from(path.to_string_lossy().to_string()),
-        args,
+        crate::builtins::common::test_support::builtin_arguments(args),
     ))
     .expect("readmatrix");
     match result {
@@ -666,7 +681,7 @@ fn readmatrix_uses_decimal_and_thousands_separators() {
     let result = block_on(readmatrix_builtin(
         None,
         Value::from(path.to_string_lossy().to_string()),
-        args,
+        crate::builtins::common::test_support::builtin_arguments(args),
     ))
     .expect("readmatrix");
     match result {
@@ -691,7 +706,7 @@ fn readmatrix_applies_empty_value() {
     let result = block_on(readmatrix_builtin(
         None,
         Value::from(path.to_string_lossy().to_string()),
-        args,
+        crate::builtins::common::test_support::builtin_arguments(args),
     ))
     .expect("readmatrix");
     match result {
@@ -711,18 +726,18 @@ fn readmatrix_accepts_struct_options() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let path = unique_path("readmatrix_struct_opts");
     fs::write(&path, "header1,header2\n9,10\n11,12\n").expect("write sample file");
-    let mut options_struct = runmat_value::StructValue::new();
+    let mut options_struct = runmat_value::UnboundedStructValueBuilder::new();
     options_struct
         .fields
         .insert("Delimiter".to_string(), Value::from(","));
     options_struct
         .fields
         .insert("NumHeaderLines".to_string(), Value::Int(IntValue::I32(1)));
-    let args = vec![Value::Struct(options_struct)];
+    let args = vec![Value::Struct(options_struct.finish())];
     let result = block_on(readmatrix_builtin(
         None,
         Value::from(path.to_string_lossy().to_string()),
-        args,
+        crate::builtins::common::test_support::builtin_arguments(args),
     ))
     .expect("readmatrix");
     match result {
@@ -744,7 +759,7 @@ fn readmatrix_errors_on_non_numeric_field() {
     let err = block_on(readmatrix_builtin(
         None,
         Value::from(path.to_string_lossy().to_string()),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect_err("readmatrix should fail");
     let message = err.message().to_string();
@@ -764,7 +779,7 @@ fn readmatrix_returns_empty_on_no_data() {
     let result = block_on(readmatrix_builtin(
         None,
         Value::from(path.to_string_lossy().to_string()),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("readmatrix");
     match result {
@@ -787,7 +802,7 @@ fn readmatrix_output_type_logical() {
     let result = block_on(readmatrix_builtin(
         None,
         Value::from(path.to_string_lossy().to_string()),
-        args,
+        crate::builtins::common::test_support::builtin_arguments(args),
     ))
     .expect("readmatrix");
     match result {
@@ -812,7 +827,7 @@ fn readmatrix_like_logical_proto() {
     let result = block_on(readmatrix_builtin(
         None,
         Value::from(path.to_string_lossy().to_string()),
-        args,
+        crate::builtins::common::test_support::builtin_arguments(args),
     ))
     .expect("readmatrix");
     match result {
@@ -839,7 +854,7 @@ fn readmatrix_like_gpu_proto() {
         let result = block_on(readmatrix_builtin(
             None,
             Value::from(path.to_string_lossy().to_string()),
-            args,
+            crate::builtins::common::test_support::builtin_arguments(args),
         ))
         .expect("readmatrix");
         let Value::GpuTensor(output) = &result else {
@@ -879,7 +894,10 @@ fn readmatrix_integer_gpu_like_preserves_wide_storage_and_exact_owner() {
         let result = block_on(readmatrix_builtin(
             None,
             Value::from(path.to_string_lossy().to_string()),
-            vec![Value::from("Like"), Value::GpuTensor(prototype)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("Like"),
+                Value::GpuTensor(prototype),
+            ]),
         ))
         .expect("integer Like readmatrix");
         let Value::GpuTensor(output) = &result else {
@@ -916,7 +934,7 @@ fn readmatrix_accepts_character_vector_path() {
     let result = block_on(readmatrix_builtin(
         None,
         Value::CharArray(char_array),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("readmatrix");
     match result {
@@ -938,7 +956,7 @@ fn readmatrix_handles_quoted_fields() {
     let result = block_on(readmatrix_builtin(
         None,
         Value::from(path.to_string_lossy().to_string()),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("readmatrix");
     match result {
@@ -960,7 +978,7 @@ fn readmatrix_preserves_negative_infinity() {
     let result = block_on(readmatrix_builtin(
         None,
         Value::from(path.to_string_lossy().to_string()),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("readmatrix");
     match result {
@@ -985,7 +1003,10 @@ fn readmatrix_accepts_shift_jis_encoding_label() {
     let result = block_on(readmatrix_builtin(
         None,
         Value::from(path.to_string_lossy().to_string()),
-        vec![Value::from("Encoding"), Value::from("shift_jis")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("Encoding"),
+            Value::from("shift_jis"),
+        ]),
     ))
     .expect("readmatrix");
     match result {
@@ -1011,7 +1032,10 @@ fn readmatrix_auto_detects_utf16_bom() {
     let result = block_on(readmatrix_builtin(
         None,
         Value::from(path.to_string_lossy().to_string()),
-        vec![Value::from("Encoding"), Value::from("auto")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("Encoding"),
+            Value::from("auto"),
+        ]),
     ))
     .expect("readmatrix");
     match result {
@@ -1033,7 +1057,7 @@ fn readmatrix_supports_whitespace_delimiter() {
     let result = block_on(readmatrix_builtin(
         None,
         Value::from(path.to_string_lossy().to_string()),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("readmatrix");
     match result {

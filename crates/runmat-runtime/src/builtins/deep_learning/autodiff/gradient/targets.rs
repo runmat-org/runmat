@@ -9,7 +9,7 @@ pub(super) fn node_ids(target: &Value) -> BuiltinResult<Vec<usize>> {
 
 fn collect_node_ids(target: &Value, nodes: &mut Vec<usize>) -> BuiltinResult<()> {
     match target {
-        Value::Object(object) if object.class_name.is(DLARRAY_CLASS) => {
+        Value::Object(object) if object.class_name().is(DLARRAY_CLASS) => {
             validate_tape_dlarray_data(target)?;
             nodes.push(dlarray_node_id(target).ok_or_else(|| {
                 deep_learning_error(
@@ -33,7 +33,7 @@ fn collect_node_ids(target: &Value, nodes: &mut Vec<usize>) -> BuiltinResult<()>
         }
         Value::Object(object) if crate::builtins::table::is_tabular_object(object) => {
             if let Some(values) = parameter_table::values(object, "dlgradient")? {
-                return collect_values(values.data.iter(), nodes);
+                return collect_values(values.data().iter(), nodes);
             }
             let variables = crate::builtins::table::table_variables_ref(object)
                 .map_err(|error| deep_learning_error("dlgradient", error.to_string()))?
@@ -60,7 +60,7 @@ fn collect_node_ids(target: &Value, nodes: &mut Vec<usize>) -> BuiltinResult<()>
             }
             Ok(())
         }
-        Value::Cell(values) => collect_values(values.data.iter(), nodes),
+        Value::Cell(values) => collect_values(values.data().iter(), nodes),
         other => Err(deep_learning_error(
             "dlgradient",
             format!("dlgradient: target must be a traced dlarray, learnables tree, or dlnetwork, got {other:?}"),

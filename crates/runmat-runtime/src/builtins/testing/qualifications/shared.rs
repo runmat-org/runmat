@@ -1,7 +1,7 @@
 use runmat_test::context::TestCommand;
 use runmat_test::lifecycle::{ExecutionPhase, QualificationKind};
 use runmat_test::result::{Diagnostic, DiagnosticDetail, DiagnosticSeverity};
-use runmat_value::{ObjectInstance, Value};
+use runmat_value::Value;
 
 use crate::{build_runtime_error, BuiltinResult};
 
@@ -20,7 +20,7 @@ pub async fn qualify_binary(
     receiver: Value,
     actual: Value,
     expected: Value,
-    diagnostic_args: Vec<Value>,
+    diagnostic_args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     validate_receiver(builtin, &receiver)?;
     let passed = match predicate {
@@ -54,7 +54,7 @@ pub async fn qualify_logical(
     expected: bool,
     receiver: Value,
     actual: Value,
-    diagnostic_args: Vec<Value>,
+    diagnostic_args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     validate_receiver(builtin, &receiver)?;
     let passed = logical_scalar(&actual).is_some_and(|actual| actual == expected);
@@ -83,7 +83,7 @@ pub async fn qualify_empty(
     expected_empty: bool,
     receiver: Value,
     actual: Value,
-    diagnostic_args: Vec<Value>,
+    diagnostic_args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     validate_receiver(builtin, &receiver)?;
     let empty = crate::builtins::common::shape::value_numel(&actual).await? == 0;
@@ -109,7 +109,7 @@ pub fn qualify_that(
     receiver: Value,
     actual: Value,
     constraint: Value,
-    diagnostic_args: Vec<Value>,
+    diagnostic_args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     validate_receiver(builtin, &receiver)?;
     let Value::Object(constraint) = constraint else {
@@ -121,39 +121,39 @@ pub fn qualify_that(
         .build());
     };
     if !crate::class_registry::is_class_or_subclass(
-        &constraint.class_name,
+        constraint.class_name(),
         &runmat_types::standard::UNIT_TEST_CONSTRAINT.owned(),
     ) {
         return Err(build_runtime_error(format!(
             "{builtin}: '{}' is not a compatible Constraint",
-            constraint.class_name
+            constraint.class_name()
         ))
         .with_identifier("RunMat:Testing:InvalidConstraint")
         .with_builtin(builtin)
         .build());
     }
     let passed = if constraint
-        .class_name
+        .class_name()
         .is(runmat_types::standard::UNIT_TEST_IS_EQUAL_TO)
     {
         constraint
-            .properties
+            .properties()
             .get("Expected")
             .is_some_and(|expected| crate::testing::constraint_values_equal(&actual, expected))
     } else if constraint
-        .class_name
+        .class_name()
         .is(runmat_types::standard::UNIT_TEST_IS_TRUE)
     {
         logical_scalar(&actual) == Some(true)
     } else if constraint
-        .class_name
+        .class_name()
         .is(runmat_types::standard::UNIT_TEST_IS_FALSE)
     {
         logical_scalar(&actual) == Some(false)
     } else {
         return Err(build_runtime_error(format!(
             "{builtin}: constraint '{}' requires an unsupported custom satisfaction hook",
-            constraint.class_name
+            constraint.class_name()
         ))
         .with_identifier("RunMat:Testing:UnsupportedConstraint")
         .with_builtin(builtin)
@@ -163,7 +163,7 @@ pub fn qualify_that(
         builtin,
         qualification,
         passed,
-        format!("{builtin} failed for {}", constraint.class_name),
+        format!("{builtin} failed for {}", constraint.class_name()),
         diagnostic_args,
         vec![DiagnosticDetail {
             label: "Actual".into(),
@@ -177,13 +177,13 @@ fn finish_qualification(
     qualification: QualificationKind,
     passed: bool,
     default_message: String,
-    diagnostic_args: Vec<Value>,
+    diagnostic_args: crate::call::BuiltinArguments,
     details: Vec<DiagnosticDetail>,
 ) -> BuiltinResult<Value> {
     if passed {
         return empty_value();
     }
-    let message = diagnostic_message(&diagnostic_args).unwrap_or(default_message);
+    let message = diagnostic_message(diagnostic_args.view()).unwrap_or(default_message);
     let phase = crate::testing::active_test_context()
         .map(|context| context.phase)
         .unwrap_or(ExecutionPhase::TestBody);
@@ -213,8 +213,8 @@ fn finish_qualification(
 fn validate_receiver(builtin: &'static str, receiver: &Value) -> BuiltinResult<()> {
     crate::testing::ensure_testing_classes();
     let class_name = match receiver {
-        Value::Object(object) => &object.class_name,
-        Value::HandleObject(handle) => &handle.class_name,
+        Value::Object(object) => object.class_name(),
+        Value::HandleObject(handle) => &*handle.class_name,
         _ => {
             return Err(build_runtime_error(format!(
                 "{builtin}: first argument must be a matlab.unittest.TestCase"
@@ -278,20 +278,17 @@ fn logical_scalar(value: &Value) -> Option<bool> {
     }
 }
 
-fn diagnostic_message(values: &[Value]) -> Option<String> {
+fn diagnostic_message(values: crate::call::FunctionArgumentView<'_>) -> Option<String> {
     values.first().and_then(|value| match value {
         Value::String(message) => Some(message.as_str().to_owned()),
-        Value::CharArray(chars) if chars.rows <= 1 => Some(chars.data.iter().collect::<String>()),
-        Value::Object(ObjectInstance {
-            class_name,
-            properties,
-            ..
-        }) if crate::class_registry::is_class_or_subclass(
-            class_name,
-            &runmat_types::standard::UNIT_TEST_DIAGNOSTIC.owned(),
-        ) =>
+        Value::CharArray(chars) if chars.rows <= 1 => Some(chars.data().iter().collect::<String>()),
+        Value::Object(object)
+            if crate::class_registry::is_class_or_subclass(
+                object.class_name(),
+                &runmat_types::standard::UNIT_TEST_DIAGNOSTIC.owned(),
+            ) =>
         {
-            properties.get("Message").and_then(|value| match value {
+            object.property("Message").and_then(|value| match value {
                 Value::String(message) => Some(message.as_str().to_owned()),
                 _ => None,
             })
@@ -335,6 +332,7 @@ mod tests {
     use runmat_test::identity::{RunId, TestId};
     use runmat_test::lifecycle::FixtureScopeKey;
     use runmat_test::protocol::ProtocolLimits;
+    use runmat_value::ObjectInstance;
 
     use super::*;
 
@@ -367,13 +365,14 @@ mod tests {
     #[test]
     fn concrete_string_diagnostic_is_accepted_as_custom_failure_message() {
         crate::testing::ensure_testing_classes();
-        let mut diagnostic =
-            ObjectInstance::new(runmat_types::standard::UNIT_TEST_STRING_DIAGNOSTIC);
-        diagnostic
-            .properties
-            .insert("Message".into(), Value::String("specific failure".into()));
+        let mut diagnostic = runmat_value::UnboundedObjectBuilder::new(
+            runmat_types::standard::UNIT_TEST_STRING_DIAGNOSTIC,
+        );
+        diagnostic.insert("Message".into(), Value::String("specific failure".into()));
         assert_eq!(
-            diagnostic_message(&[Value::Object(diagnostic)]),
+            diagnostic_message(crate::call::FunctionArgumentView::from_slice(&[
+                Value::Object(diagnostic.finish())
+            ])),
             Some("specific failure".into())
         );
     }
@@ -388,7 +387,9 @@ mod tests {
             crate::testing::test_case_object("test", false),
             Value::Num(1.0),
             Value::Num(2.0),
-            Vec::new(),
+            crate::execution::RootedValues::new(Vec::new())
+                .unwrap()
+                .into(),
         ))
         .unwrap();
         assert!(matches!(value, Value::Tensor(tensor) if tensor.is_empty()));
@@ -410,7 +411,9 @@ mod tests {
             true,
             crate::testing::test_case_object("test", false),
             Value::Bool(false),
-            Vec::new(),
+            crate::execution::RootedValues::new(Vec::new())
+                .unwrap()
+                .into(),
         ))
         .unwrap_err();
         assert_eq!(
@@ -422,17 +425,17 @@ mod tests {
 
     #[test]
     fn equality_constraint_reads_its_public_expected_property() {
-        let mut constraint = ObjectInstance::new(runmat_types::standard::UNIT_TEST_IS_EQUAL_TO);
-        constraint
-            .properties
-            .insert("Expected".into(), Value::Num(42.0));
+        let mut constraint = runmat_value::UnboundedObjectBuilder::new(
+            runmat_types::standard::UNIT_TEST_IS_EQUAL_TO,
+        );
+        constraint.insert("Expected".into(), Value::Num(42.0));
         let outcome = qualify_that(
             "verifyThat",
             QualificationKind::VerificationFailed,
             crate::testing::test_case_object("test", false),
             Value::Num(42.0),
-            Value::Object(constraint),
-            vec![],
+            Value::Object(constraint.finish()),
+            crate::execution::RootedValues::new(vec![]).unwrap().into(),
         )
         .unwrap();
         assert!(matches!(outcome, Value::Tensor(tensor) if tensor.is_empty()));
@@ -448,15 +451,17 @@ mod tests {
             ),
             (Value::Num(1.0), Value::Int(runmat_value::IntValue::U64(1))),
         ] {
-            let mut constraint = ObjectInstance::new(runmat_types::standard::UNIT_TEST_IS_EQUAL_TO);
-            constraint.properties.insert("Expected".into(), expected);
+            let mut constraint = runmat_value::UnboundedObjectBuilder::new(
+                runmat_types::standard::UNIT_TEST_IS_EQUAL_TO,
+            );
+            constraint.insert("Expected".into(), expected);
             qualify_that(
                 "verifyThat",
                 QualificationKind::VerificationFailed,
                 crate::testing::test_case_object("test", false),
                 actual,
-                Value::Object(constraint),
-                vec![],
+                Value::Object(constraint.finish()),
+                crate::execution::RootedValues::new(vec![]).unwrap().into(),
             )
             .unwrap();
         }
@@ -478,7 +483,7 @@ mod tests {
                 crate::testing::test_case_object("test", false),
                 actual,
                 Value::Object(ObjectInstance::new(class)),
-                vec![],
+                crate::execution::RootedValues::new(vec![]).unwrap().into(),
             )
             .unwrap();
             assert!(matches!(outcome, Value::Tensor(tensor) if tensor.is_empty()));
@@ -492,7 +497,7 @@ mod tests {
             Value::Object(ObjectInstance::new(
                 runmat_types::standard::UNIT_TEST_IS_TRUE,
             )),
-            vec![],
+            crate::execution::RootedValues::new(vec![]).unwrap().into(),
         )
         .unwrap();
         assert_eq!(guard.handle().commands().len(), 1);

@@ -19,8 +19,8 @@ pub enum SymbolicExpr {
         digits: usize,
     },
     Variable(Utf8Text),
-    FunctionReference(Utf8Text, ExactArrayStorage<Utf8Text>),
-    FunctionCall(Utf8Text, ExactArrayStorage<SymbolicExpr>),
+    FunctionReference(Utf8Text, SymbolicList<Utf8Text>),
+    FunctionCall(Utf8Text, SymbolicList<SymbolicExpr>),
     Equation(SymbolicOwner<SymbolicExpr>, SymbolicOwner<SymbolicExpr>),
     Derivative {
         expr: SymbolicOwner<SymbolicExpr>,
@@ -75,16 +75,17 @@ impl SymbolicExpr {
     pub fn function_reference(name: impl Into<Utf8Text>, parameters: Vec<String>) -> Self {
         SymbolicExpr::FunctionReference(
             name.into(),
-            ExactArrayStorage::shared_unbounded(
-                parameters.into_iter().map(Utf8Text::from).collect(),
-            ),
+            parameters
+                .into_iter()
+                .map(Utf8Text::from)
+                .collect::<Vec<_>>()
+                .into(),
         )
         .simplify()
     }
 
     pub fn function_call(name: impl Into<Utf8Text>, args: Vec<SymbolicExpr>) -> Self {
-        SymbolicExpr::FunctionCall(name.into(), ExactArrayStorage::shared_unbounded(args))
-            .simplify()
+        SymbolicExpr::FunctionCall(name.into(), args.into()).simplify()
     }
 
     pub fn equation(lhs: SymbolicExpr, rhs: SymbolicExpr) -> Self {
@@ -606,12 +607,11 @@ impl SymbolicExpr {
             }
             SymbolicExpr::FunctionCall(name, args) => SymbolicExpr::FunctionCall(
                 name,
-                ExactArrayStorage::shared_unbounded(
-                    owned_args_unbounded(args)
-                        .into_iter()
-                        .map(SymbolicExpr::simplify)
-                        .collect::<Vec<_>>(),
-                ),
+                owned_args_unbounded(args)
+                    .into_iter()
+                    .map(SymbolicExpr::simplify)
+                    .collect::<Vec<_>>()
+                    .into(),
             ),
             SymbolicExpr::Equation(lhs, rhs) => SymbolicExpr::Equation(
                 SymbolicOwner::new_unbounded(lhs.into_inner_unbounded().simplify()),
@@ -869,7 +869,7 @@ impl SymbolicExpr {
 }
 
 fn owned_args_unbounded(
-    args: ExactArrayStorage<SymbolicExpr>,
+    args: SymbolicList<SymbolicExpr>,
 ) -> crate::OwnedExactArrayValues<SymbolicExpr> {
     match args.try_into_owned() {
         Ok(values) => values,

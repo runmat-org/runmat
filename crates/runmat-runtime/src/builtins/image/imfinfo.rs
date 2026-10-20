@@ -10,7 +10,7 @@ use runmat_builtins::{
 };
 use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
-use runmat_value::{CharArray, StructValue, Value};
+use runmat_value::{CharArray, Value};
 
 use crate::builtins::common::fs::{expand_user_path, path_to_string};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -57,7 +57,7 @@ fn char_value(text: &str) -> Value {
     binding_variant = "default",
     builtin_path = "crate::builtins::image::imfinfo"
 )]
-async fn imfinfo_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn imfinfo_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &IMFINFO_DESCRIPTOR,
         &IMFINFO_ERROR_OUTPUTS,
@@ -116,7 +116,7 @@ async fn imfinfo_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         .decode()
         .map_err(|err| info_error_with_source(&IMFINFO_ERROR_DECODE, err))?;
     let color = image.color();
-    let mut st = StructValue::new();
+    let mut st = runmat_value::UnboundedStructValueBuilder::new();
     st.insert("Filename", char_value(&path_to_string(&path)));
     st.insert("FileModDate", char_value(""));
     st.insert("FileSize", Value::Num(bytes.len() as f64));
@@ -126,7 +126,7 @@ async fn imfinfo_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     st.insert("Height", Value::Num(image.height() as f64));
     st.insert("BitDepth", Value::Num(color.bits_per_pixel() as f64));
     st.insert("ColorType", char_value(color_type_name(color)));
-    Ok(Value::Struct(st))
+    Ok(Value::Struct(st.finish()))
 }
 
 fn format_name(format: Option<image::ImageFormat>, path: &Path) -> &str {
@@ -178,7 +178,12 @@ mod tests {
         let path = root.path().join("image.png");
         let image = image::RgbImage::from_pixel(3, 2, image::Rgb([1, 2, 3]));
         image.save(&path).unwrap();
-        let value = run(imfinfo_builtin(vec![Value::String(path_to_string(&path))])).unwrap();
+        let value = run(imfinfo_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                path_to_string(&path).into(),
+            )]),
+        ))
+        .unwrap();
         match value {
             Value::Struct(st) => {
                 assert_eq!(st.fields.get("Width"), Some(&Value::Num(3.0)));
@@ -197,10 +202,12 @@ mod tests {
         let with_extension = root.path().join("sample.png");
         let image = image::RgbImage::from_pixel(3, 2, image::Rgb([1, 2, 3]));
         image.save(&with_extension).unwrap();
-        let info = run(imfinfo_builtin(vec![
-            Value::String(path_to_string(&bare)),
-            Value::String("png".into()),
-        ]))
+        let info = run(imfinfo_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String(path_to_string(&bare).into()),
+                Value::String("png".into()),
+            ]),
+        ))
         .unwrap();
         let Value::Struct(fields) = info else {
             panic!("expected metadata struct")
@@ -212,10 +219,12 @@ mod tests {
         assert_eq!(fields.fields.get("Width"), Some(&Value::Num(3.0)));
 
         std::fs::copy(&with_extension, &bare).unwrap();
-        let info = run(imfinfo_builtin(vec![
-            Value::String(path_to_string(&bare)),
-            Value::String("png".into()),
-        ]))
+        let info = run(imfinfo_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String(path_to_string(&bare).into()),
+                Value::String("png".into()),
+            ]),
+        ))
         .unwrap();
         let Value::Struct(fields) = info else {
             panic!("expected metadata struct")
@@ -227,10 +236,12 @@ mod tests {
 
         let upper = root.path().join("upper.PNG");
         std::fs::copy(&with_extension, &upper).unwrap();
-        let info = run(imfinfo_builtin(vec![
-            Value::String(path_to_string(&root.path().join("upper"))),
-            Value::String("PNG".into()),
-        ]))
+        let info = run(imfinfo_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String(path_to_string(&root.path().join("upper")).into()),
+                Value::String("PNG".into()),
+            ]),
+        ))
         .unwrap();
         let Value::Struct(fields) = info else {
             panic!("expected metadata struct")
@@ -244,22 +255,30 @@ mod tests {
     #[test]
     fn invalid_output_and_format_precede_missing_file_read() {
         let root = tempfile::TempDir::new().unwrap();
-        let missing = Value::String(path_to_string(&root.path().join("missing.png")));
+        let missing = Value::String(path_to_string(&root.path().join("missing.png")).into());
         let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
-        let error = run(imfinfo_builtin(vec![missing.clone()])).unwrap_err();
+        let error = run(imfinfo_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![missing.clone()]),
+        ))
+        .unwrap_err();
         assert_eq!(error.identifier(), IMFINFO_ERROR_OUTPUTS.identifier);
         drop(_outputs);
-        let error = run(imfinfo_builtin(vec![
-            missing,
-            Value::String("not_an_image_format".into()),
-        ]))
+        let error = run(imfinfo_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                missing,
+                Value::String("not_an_image_format".into()),
+            ]),
+        ))
         .unwrap_err();
         assert_eq!(error.identifier(), IMFINFO_ERROR_FORMAT.identifier);
     }
 
     #[test]
     fn nontext_path_rejects_before_filesystem_access() {
-        let error = run(imfinfo_builtin(vec![Value::Num(42.0)])).unwrap_err();
+        let error = run(imfinfo_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(42.0)]),
+        ))
+        .unwrap_err();
         assert_eq!(error.identifier(), IMFINFO_ERROR_ARGUMENT.identifier);
     }
 }

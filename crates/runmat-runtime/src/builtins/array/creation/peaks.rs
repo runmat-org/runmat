@@ -189,7 +189,7 @@ fn same_size_shape(lhs: &[Option<usize>], rhs: &[Option<usize>]) -> Option<Vec<O
     binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::peaks"
 )]
-async fn peaks_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn peaks_builtin(rest: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     if rest
         .first()
         .is_some_and(crate::builtins::common::validation::value_has_native_integer_class)
@@ -612,7 +612,9 @@ mod tests {
     use runmat_value::IntegerStorage;
 
     fn peaks_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-        block_on(super::peaks_builtin(rest))
+        block_on(super::peaks_builtin(
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     fn gather_result(value: Value) -> Tensor {

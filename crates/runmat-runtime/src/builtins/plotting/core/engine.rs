@@ -441,7 +441,9 @@ pub async fn render_figure_snapshot_with_camera_state(
 #[path = "engine/geometry_export.rs"]
 mod geometry_export;
 #[cfg(feature = "plot-core")]
-pub use geometry_export::{render_geometry_scene_snapshot, render_geometry_scene_snapshot_with_camera_state};
+pub use geometry_export::{
+    render_geometry_scene_snapshot, render_geometry_scene_snapshot_with_camera_state,
+};
 
 #[cfg(feature = "plot-core")]
 fn surface_plot_camera_to_core_camera(
@@ -625,9 +627,18 @@ mod tests {
             Value::Tensor(tensor_from(&centerline)),
         ]))
         .expect("left plot");
-        title_builtin(vec![Value::String("Centerline slice".into())]).expect("left title");
-        xlabel_builtin(vec![Value::String("x (mm)".into())]).expect("left xlabel");
-        ylabel_builtin(vec![Value::String("temperature (C)".into())]).expect("left ylabel");
+        title_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::String("Centerline slice".into())],
+        ))
+        .expect("left title");
+        xlabel_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::String("x (mm)".into())],
+        ))
+        .expect("left xlabel");
+        ylabel_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::String("temperature (C)".into())],
+        ))
+        .expect("left ylabel");
 
         subplot_builtin(Value::Num(1.0), Value::Num(2.0), Value::Num(2.0)).expect("subplot 2");
         block_on(plot_builtin(vec![
@@ -635,10 +646,18 @@ mod tests {
             Value::Tensor(tensor_from(&vertical)),
         ]))
         .expect("right plot");
-        title_builtin(vec![Value::String("Vertical slice through source".into())])
-            .expect("right title");
-        xlabel_builtin(vec![Value::String("y (mm)".into())]).expect("right xlabel");
-        ylabel_builtin(vec![Value::String("temperature (C)".into())]).expect("right ylabel");
+        title_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::String("Vertical slice through source".into())],
+        ))
+        .expect("right title");
+        xlabel_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::String("y (mm)".into())],
+        ))
+        .expect("right xlabel");
+        ylabel_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::String("temperature (C)".into())],
+        ))
+        .expect("right ylabel");
 
         let handle = current_figure_handle();
         let bytes =

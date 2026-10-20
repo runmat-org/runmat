@@ -8,7 +8,7 @@ use crate::context::RuntimeContext;
 use runmat_accelerate_api::{GpuTensorStorage, NumericElementType};
 
 pub(super) fn admit_before_gather(
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     runtime: Option<&RuntimeContext>,
 ) -> crate::BuiltinResult<Option<HostAllocationReceipt>> {
     let Some(runtime) = runtime else {
@@ -151,7 +151,7 @@ fn raw_grid_class(value: &Value) -> crate::BuiltinResult<(NumericDType, usize)> 
 }
 
 fn argument_envelope(
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     rows: usize,
     columns: usize,
     output_count: usize,

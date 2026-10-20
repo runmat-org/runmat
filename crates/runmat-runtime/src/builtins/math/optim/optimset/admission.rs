@@ -26,8 +26,8 @@ pub(super) enum Step {
     Pair(FieldName, Value),
 }
 
-pub(super) fn admit(args: Vec<Value>) -> BuiltinResult<Vec<Step>> {
-    ensure_optimset_extensions(&args)?;
+pub(super) fn admit(args: crate::call::BuiltinArguments) -> BuiltinResult<Vec<Step>> {
+    ensure_optimset_extensions(args.view())?;
     let pair_start = usize::from(matches!(args.first(), Some(Value::Struct(_))));
     if !(args.len() - pair_start).is_multiple_of(2) {
         return Err(optimset_error_with_detail(

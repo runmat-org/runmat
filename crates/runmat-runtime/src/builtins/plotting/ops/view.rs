@@ -37,18 +37,25 @@ fn map_view_figure_error(err: FigureError) -> RuntimeError {
     }
 }
 
-fn parse_view_target(args: &[Value]) -> (AxesTarget, &[Value]) {
+fn parse_view_target(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> (AxesTarget, crate::call::FunctionArgumentView<'_>) {
     if let Some(first) = args.first() {
         if let Ok(crate::builtins::plotting::properties::PlotHandle::Axes(fig, axes)) =
             crate::builtins::plotting::properties::resolve_plot_handle(first, "view")
         {
-            return (Some((fig, axes)), &args[1..]);
+            return (
+                Some((fig, axes)),
+                args.range(1..).expect("nonempty view target"),
+            );
         }
     }
     (None, args)
 }
 
-fn parse_view_angles(args: &[Value]) -> crate::BuiltinResult<(f32, f32)> {
+fn parse_view_angles(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<(f32, f32)> {
     match args.len() {
         1 => {
             let tensor = scalar_or_tensor(&args[0])?;
@@ -147,7 +154,7 @@ fn is_typed_integer(value: &Value) -> bool {
     binding_variant = "default",
     builtin_path = "crate::builtins::plotting::view"
 )]
-pub fn view_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub fn view_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     let outputs = crate::output_count::current_output_count();
     if outputs.is_some_and(|count| count > 2) {
         return Err(view_error(&VIEW_ERROR_TOO_MANY_OUTPUTS));
@@ -174,7 +181,7 @@ pub fn view_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             )?;
         }
     }
-    let (target, rest) = parse_view_target(&args);
+    let (target, rest) = parse_view_target(args.view());
     if rest.is_empty() {
         let target = target.unwrap_or_else(current_axes_target);
         let meta = crate::builtins::plotting::state::axes_metadata_snapshot(target.0, target.1)
@@ -206,3 +213,7 @@ fn view_outputs(az: f64, el: f64, outputs: Option<usize>) -> Value {
 #[cfg(test)]
 #[path = "view/tests.rs"]
 mod tests;
+#[cfg(test)]
+pub(crate) fn view_builtin_source(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    view_builtin(crate::call::BuiltinArguments::from_borrowed(&args, None)?)
+}

@@ -136,7 +136,7 @@ fn original_capture_controls_bind_request_identity_and_cold_parts() {
         schema_version: original.schema_version,
         recipe: original.recipe.clone(),
         artifact: original.artifact.clone(),
-        function: original.function,
+        callable: original.callable.clone(),
         requested_outputs: original.requested_outputs,
         environment: original.environment.clone(),
         console: original.console,
@@ -144,7 +144,8 @@ fn original_capture_controls_bind_request_identity_and_cold_parts() {
     let rebuilt = ProgramExecutionRequest::from_parts(
         descriptor,
         runmat_execution_artifact::ProgramExecutionInputs {
-            schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+            schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
+            context: original.context.clone(),
             objects: Vec::new(),
             arguments: original.arguments.clone(),
         },
@@ -167,9 +168,9 @@ fn ordinary_executable_invocation_rejects_sealed_host_without_running_source() {
             &unit,
             crate::ProcedureInvocation {
                 target: crate::ProcedureTarget::SemanticFunction(
-                    envelope.manifest.identity.entrypoint_function,
+                    envelope.manifest.identity.entrypoint_function.unwrap(),
                 ),
-                arguments: Vec::new(),
+                arguments: crate::ProcedureArguments::Source(Vec::new()),
                 requested_outputs: 1,
             },
             &control(native),

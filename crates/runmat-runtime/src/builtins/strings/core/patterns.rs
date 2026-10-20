@@ -58,7 +58,7 @@ impl BoundedPatternKind {
 }
 
 pub(crate) async fn bounded_regex(
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
     kind: BoundedPatternKind,
 ) -> BuiltinResult<String> {
     let name = kind.name();
@@ -183,13 +183,20 @@ mod tests {
         ] {
             let value = Value::Tensor(Tensor::new_integer(storage, vec![1, 1]).unwrap());
             assert_eq!(
-                block_on(bounded_regex(vec![value], BoundedPatternKind::Letters,)).unwrap(),
+                block_on(bounded_regex(
+                    crate::builtins::common::test_support::builtin_arguments(vec![value]),
+                    BoundedPatternKind::Letters,
+                ))
+                .unwrap(),
                 r"\p{Alphabetic}{2}"
             );
         }
         assert_eq!(
             block_on(bounded_regex(
-                vec![Value::Int(IntValue::U8(2)), Value::Int(IntValue::U64(4))],
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Int(IntValue::U8(2)),
+                    Value::Int(IntValue::U64(4))
+                ]),
                 BoundedPatternKind::Wildcard,
             ))
             .unwrap(),
@@ -200,28 +207,44 @@ mod tests {
     #[test]
     fn bounded_patterns_validate_ranges_and_infinity() {
         assert_eq!(
-            block_on(bounded_regex(Vec::new(), BoundedPatternKind::Wildcard)).unwrap(),
+            block_on(bounded_regex(
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+                BoundedPatternKind::Wildcard
+            ))
+            .unwrap(),
             ".*?"
         );
         assert_eq!(
-            block_on(bounded_regex(Vec::new(), BoundedPatternKind::Letters,)).unwrap(),
+            block_on(bounded_regex(
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+                BoundedPatternKind::Letters,
+            ))
+            .unwrap(),
             r"\p{Alphabetic}+"
         );
         assert_eq!(
             block_on(bounded_regex(
-                vec![Value::Int(IntValue::U8(3)), Value::Num(f64::INFINITY)],
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Int(IntValue::U8(3)),
+                    Value::Num(f64::INFINITY)
+                ]),
                 BoundedPatternKind::Letters,
             ))
             .unwrap(),
             r"\p{Alphabetic}{3,}"
         );
         assert!(block_on(bounded_regex(
-            vec![Value::Int(IntValue::U8(4)), Value::Int(IntValue::U8(3))],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Int(IntValue::U8(4)),
+                Value::Int(IntValue::U8(3))
+            ]),
             BoundedPatternKind::Wildcard,
         ))
         .is_err());
         assert!(block_on(bounded_regex(
-            vec![Value::Num(usize::MAX as f64)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(
+                usize::MAX as f64
+            )]),
             BoundedPatternKind::Wildcard,
         ))
         .is_err());
@@ -242,7 +265,9 @@ mod tests {
                 .expect("admit provenance view");
             assert_eq!(
                 block_on(bounded_regex(
-                    vec![Value::GpuTensor(handle.clone())],
+                    crate::builtins::common::test_support::builtin_arguments(vec![
+                        Value::GpuTensor(handle.clone())
+                    ]),
                     BoundedPatternKind::Letters,
                 ))
                 .expect("automatic residency is transparent"),
@@ -253,7 +278,9 @@ mod tests {
                 .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
                 .expect("admit provenance view");
             let error = block_on(bounded_regex(
-                vec![Value::GpuTensor(handle.clone())],
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(
+                    handle.clone(),
+                )]),
                 BoundedPatternKind::Letters,
             ))
             .expect_err("explicit gpuArray count is unsupported");

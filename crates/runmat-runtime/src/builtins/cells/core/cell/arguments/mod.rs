@@ -11,7 +11,7 @@ pub(super) struct ParsedCell {
     pub(super) prototype: Option<Value>,
 }
 
-pub(super) async fn parse(args: Vec<Value>) -> crate::BuiltinResult<ParsedCell> {
+pub(super) async fn parse(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<ParsedCell> {
     let mut dimensions = Vec::new();
     let mut prototype = None;
     let mut args = args.into_iter();

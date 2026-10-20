@@ -520,7 +520,7 @@ fn lsqcurvefit_output_reports_selected_algorithm() {
         },
     )))
     .expect("call-port scope");
-    let mut options = StructValue::new();
+    let mut options = runmat_value::UnboundedStructValueBuilder::new();
     options.insert("Algorithm", Value::from("trust-region-reflective"));
     let result = block_on(runtime.scope(lsqcurvefit_builtin(
         model,
@@ -530,7 +530,7 @@ fn lsqcurvefit_output_reports_selected_algorithm() {
         vec![
             Value::Tensor(Tensor::zeros(vec![0, 0])),
             Value::Tensor(Tensor::zeros(vec![0, 0])),
-            Value::Struct(options),
+            Value::Struct(options.finish()),
         ],
     )))
     .expect("lsqcurvefit");

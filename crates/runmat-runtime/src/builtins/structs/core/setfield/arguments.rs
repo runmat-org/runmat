@@ -5,9 +5,8 @@ use runmat_builtins::{
     SETFIELD_ERROR_FIELD_EXPECTED, SETFIELD_ERROR_FIELD_NAME_TYPE, SETFIELD_ERROR_INDEX_INVALID,
     SETFIELD_TEXTUAL_INDEX_EXTENSION,
 };
-use runmat_value::Value;
 
-pub(super) fn parse(arguments: Vec<Value>) -> BuiltinResult<FieldPath> {
+pub(super) fn parse(arguments: crate::call::BuiltinArguments) -> BuiltinResult<FieldPath> {
     let path = field_path::parse(arguments, BUILTIN_NAME).map_err(|error| {
         let descriptor = match error.kind {
             PathErrorKind::MissingPath => &SETFIELD_ERROR_FIELD_EXPECTED,

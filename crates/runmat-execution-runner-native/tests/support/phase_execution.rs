@@ -1,17 +1,52 @@
 //! Negative fixtures for the sealed original scheduler history.
+#[cfg(feature = "occt-native")]
 use runmat_analysis_execution::AnalysisPhaseExecutionEvidence;
+#[cfg(feature = "occt-native")]
 use runmat_execution::resource::ResourceAccounting;
 
-pub fn assert_foreign_allocation_cannot_be_sealed(execution: &AnalysisPhaseExecutionEvidence) {
-    let mut original = execution.task_evidence().clone();
-    let accounting = original
+pub fn host_requirement(
+    request: &runmat_execution_artifact::ProgramExecutionRequest,
+) -> runmat_execution::host::ExecutionHostRequirement {
+    request
+        .artifact
+        .execution_host_requirement(
+            &request.recipe,
+            std::collections::BTreeSet::from([
+                runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
+            ]),
+        )
+        .unwrap()
+}
+
+pub fn worker_host_inventory() -> runmat_execution::host::ExecutionHostInventory {
+    runmat_core::RunMatSession::with_options(false, false)
+        .unwrap()
+        .execution_host_inventory(runmat_execution::security::ExecutionTrustTier::CustomerTrusted)
+        .unwrap()
+}
+
+pub fn winning_accounting_mut(
+    execution: &mut runmat_execution_runner::TaskExecutionEvidence,
+) -> &mut runmat_execution_runner::AttemptResourceAccounting {
+    let runmat_execution_runner::AttemptSuccess::Values {
+        resources: Some(resources),
+        ..
+    } = &mut execution
         .task
         .committed
         .as_mut()
-        .unwrap()
-        .resources
-        .as_mut()
-        .unwrap();
+        .expect("original commit")
+        .result
+    else {
+        panic!("original analysis value accounting");
+    };
+    resources
+}
+
+#[cfg(feature = "occt-native")]
+pub fn assert_foreign_allocation_cannot_be_sealed(execution: &AnalysisPhaseExecutionEvidence) {
+    let mut original = execution.task_evidence().clone();
+    let accounting = winning_accounting_mut(&mut original);
     let mut allocation = accounting.resources.allocation.clone();
     allocation.memory_bytes += 1;
     accounting.resources = ResourceAccounting::for_reserved_interval(

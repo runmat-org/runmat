@@ -43,7 +43,7 @@ fn render(
         super::super::state::encode_plot_object_handle(handle, 0, PlotObjectKind::SuperTitle);
     let result = match property.map(canonical_property_name).as_deref() {
         None => {
-            let mut st = StructValue::new();
+            let mut st = runmat_value::UnboundedStructValueBuilder::new();
             st.insert("Handle", Value::Num(handle.as_u32() as f64));
             st.insert("Number", Value::Num(handle.as_u32() as f64));
             st.insert("Type", Value::String("figure".into()));
@@ -61,17 +61,14 @@ fn render(
             st.insert("NumberTitle", Value::Bool(figure.number_title));
             st.insert("Visible", Value::Bool(figure.visible));
             st.insert("Position", figure_position_value(figure.position));
-            st.insert(
-                "Color",
-                rgb_triplet_value(figure.background_color),
-            );
+            st.insert("Color", rgb_triplet_value(figure.background_color));
             st.insert("Tag", Value::string(tag));
             if let Some(waitbar) = waitbar {
                 st.insert("WaitbarProgress", Value::Num(waitbar.progress));
                 st.insert("WaitbarMessage", Value::string(waitbar.message));
             }
             st.insert("SGTitle", Value::Num(sg_title_handle));
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("number") => Ok(Value::Num(handle.as_u32() as f64)),
         Some("type") => Ok(Value::String("figure".into())),

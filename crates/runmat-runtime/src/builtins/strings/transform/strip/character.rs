@@ -9,7 +9,7 @@ const CHECKPOINT_CHUNK: usize = 4096;
 pub(super) async fn strip_char_array(
     runtime: Option<&RuntimeContext>,
     source: CharArray,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<Value> {
     source.validate_layout().map_err(invalid)?;
     let expectation = PatternExpectation::with_len(source.rows);
@@ -39,7 +39,7 @@ pub(super) async fn strip_char_array(
     let source_len = page_len
         .checked_mul(pages)
         .ok_or_else(|| invalid("Character payload geometry overflow"))?;
-    if source_len != source.data.len() {
+    if source_len != source.data().len() {
         return Err(invalid("Character shape does not match payload"));
     }
 
@@ -50,7 +50,7 @@ pub(super) async fn strip_char_array(
             .checked_mul(cols)
             .ok_or_else(|| invalid("Character row offset overflow"))?;
         let (left, right) = trimmed_bounds(
-            &source.data[start..start + cols],
+            &source.data()[start..start + cols],
             direction,
             patterns.pattern_for_index(index % rows),
         );
@@ -82,13 +82,13 @@ pub(super) async fn strip_char_array(
                 }
                 let source_start = index * cols;
                 let (left, right) = trimmed_bounds(
-                    &source.data[source_start..source_start + cols],
+                    &source.data()[source_start..source_start + cols],
                     direction,
                     patterns.pattern_for_index(index % rows),
                 );
                 let target_start = index * width;
                 output[target_start..target_start + right - left]
-                    .copy_from_slice(&source.data[source_start + left..source_start + right]);
+                    .copy_from_slice(&source.data()[source_start + left..source_start + right]);
             }
             Ok(())
         };
@@ -126,7 +126,7 @@ fn publish_empty(runtime: Option<&RuntimeContext>, source: CharArray) -> Builtin
         None => invalid(format!("Character output policy: {cause}")),
     })?;
     if policy == HostAllocationPolicy::Unbounded
-        || (source.shape.is_admitted() && source.data.is_exact())
+        || (source.shape.is_admitted() && source.data_owner().is_exact())
     {
         return Ok(Value::CharArray(source));
     }

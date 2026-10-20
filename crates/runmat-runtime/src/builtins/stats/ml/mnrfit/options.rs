@@ -26,14 +26,13 @@ impl Default for Options {
 use super::{invalid, scalar_text};
 use crate::BuiltinResult;
 pub(super) use runmat_builtins::MnrfitOption as OptionName;
-use runmat_value::Value;
 
 pub(super) struct OptionSlot {
     spelling: Option<runmat_value::Utf8Text>,
     identity: Option<OptionName>,
 }
 
-pub(super) fn inspect(values: &[Value]) -> Vec<OptionSlot> {
+pub(super) fn inspect(values: crate::call::FunctionArgumentView<'_>) -> Vec<OptionSlot> {
     values
         .chunks_exact(2)
         .map(|pair| {
@@ -48,7 +47,10 @@ pub(super) fn identities(slots: &[OptionSlot]) -> impl Iterator<Item = Option<Op
     slots.iter().map(|slot| slot.identity)
 }
 
-pub(super) fn validate(values: &[Value], slots: Vec<OptionSlot>) -> BuiltinResult<Vec<OptionName>> {
+pub(super) fn validate(
+    values: crate::call::FunctionArgumentView<'_>,
+    slots: Vec<OptionSlot>,
+) -> BuiltinResult<Vec<OptionName>> {
     if !values.len().is_multiple_of(2) {
         return Err(invalid("mnrfit: name-value options must be paired"));
     }

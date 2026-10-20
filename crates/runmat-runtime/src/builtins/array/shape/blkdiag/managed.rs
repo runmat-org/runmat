@@ -16,17 +16,23 @@ const CHECKPOINT_CHUNK: usize = 4096;
 mod sparse;
 mod character;
 
-pub(super) fn character(context: &RuntimeContext, values: &[Value]) -> BuiltinResult<Value> {
+pub(super) fn character(
+    context: &RuntimeContext,
+    values: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Value> {
     character::assemble(context, values)
 }
 
-pub(super) fn sparse(context: &RuntimeContext, values: &[Value]) -> BuiltinResult<Value> {
+pub(super) fn sparse(
+    context: &RuntimeContext,
+    values: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Value> {
     sparse::assemble(context, values)
 }
 
 pub(super) fn has_nonreal_dense_complex(
     context: &RuntimeContext,
-    values: &[Value],
+    values: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<bool> {
     for value in values {
         match value {
@@ -82,7 +88,7 @@ fn shape(value: &Value) -> BuiltinResult<(usize, usize)> {
     .ok_or_else(|| error_with_detail(&BLKDIAG_ERROR_INVALID_INPUT, "unsupported dense block"))
 }
 
-fn class(values: &[Value]) -> BuiltinResult<DenseClass> {
+fn class(values: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<DenseClass> {
     if values.is_empty() {
         return Ok(DenseClass::Real(NumericDType::F64));
     }
@@ -270,7 +276,10 @@ impl Output {
     }
 }
 
-pub(super) fn dense(context: &RuntimeContext, values: &[Value]) -> BuiltinResult<Value> {
+pub(super) fn dense(
+    context: &RuntimeContext,
+    values: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Value> {
     let class = class(values)?;
     let mut rows = 0usize;
     let mut cols = 0usize;
@@ -413,7 +422,11 @@ mod tests {
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 3]), vec![2, 1]).unwrap(),
         );
         let right = Value::Int(runmat_value::IntValue::U64(7));
-        let result = dense(&context, &[left, right]).unwrap();
+        let result = dense(
+            &context,
+            crate::call::FunctionArgumentView::from_slice(&[left, right]),
+        )
+        .unwrap();
         let Value::Tensor(tensor) = &result else {
             panic!("integer tensor output")
         };
@@ -429,10 +442,10 @@ mod tests {
 
         let chars = character(
             &context,
-            &[
+            crate::call::FunctionArgumentView::from_slice(&[
                 Value::CharArray(CharArray::new_row("ab")),
                 Value::CharArray(CharArray::new_row("c")),
-            ],
+            ]),
         )
         .unwrap();
         let Value::CharArray(output) = &chars else {
@@ -442,10 +455,10 @@ mod tests {
         assert_eq!(output.data().iter().collect::<String>(), "ab   c");
         let selected = futures::executor::block_on(super::super::blkdiag_builtin(
             Some(runtime(&ledger)),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::CharArray(CharArray::new_row("ab")),
                 Value::CharArray(CharArray::new_row("c")),
-            ],
+            ]),
         ))
         .unwrap();
         assert!(
@@ -458,20 +471,29 @@ mod tests {
         let denied = ManagedHostEffectLedger::new(0);
         assert!(character(
             &runtime(&denied),
-            &[Value::CharArray(CharArray::new_row("a"))]
+            crate::call::FunctionArgumentView::from_slice(&[Value::CharArray(CharArray::new_row(
+                "a"
+            ))])
         )
         .is_err());
 
-        assert!(dense(&runtime(&denied), &[Value::Num(1.0)]).is_err());
+        assert!(dense(
+            &runtime(&denied),
+            crate::call::FunctionArgumentView::from_slice(&[Value::Num(1.0)])
+        )
+        .is_err());
         assert_eq!(denied.snapshot().live_reserved_bytes, 0);
 
         let sparse_input = Value::SparseTensor(
             SparseTensor::new_f32(2, 1, vec![0, 1], vec![1], vec![4.25]).unwrap(),
         );
-        let dense = Value::Tensor(Tensor::new_f32(vec![0.0, 7.5], vec![2, 1]).unwrap());
+        let dense = Value::Tensor(Tensor::from_f32(vec![0.0, 7.5], vec![2, 1]).unwrap());
         let result = futures::executor::block_on(super::super::blkdiag_builtin(
             Some(runtime(&ledger)),
-            vec![sparse_input.clone(), dense.clone()],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                sparse_input.clone(),
+                dense.clone(),
+            ]),
         ))
         .unwrap();
         let Value::SparseTensor(output) = &result else {
@@ -486,7 +508,11 @@ mod tests {
         drop(result);
         assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
         assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
-        assert!(sparse(&runtime(&denied), &[sparse_input, dense]).is_err());
+        assert!(sparse(
+            &runtime(&denied),
+            crate::call::FunctionArgumentView::from_slice(&[sparse_input, dense])
+        )
+        .is_err());
         assert_eq!(denied.snapshot().live_reserved_bytes, 0);
 
         let complex_input = Value::SparseTensor(
@@ -494,7 +520,10 @@ mod tests {
         );
         let result = futures::executor::block_on(super::super::blkdiag_builtin(
             Some(runtime(&ledger)),
-            vec![complex_input.clone(), Value::Num(5.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                complex_input.clone(),
+                Value::Num(5.0),
+            ]),
         ))
         .unwrap();
         let Value::SparseTensor(output) = &result else {
@@ -508,7 +537,10 @@ mod tests {
 
         let result = futures::executor::block_on(super::super::blkdiag_builtin(
             Some(runtime(&ledger)),
-            vec![complex_input, Value::Complex(7.0, 1.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                complex_input,
+                Value::Complex(7.0, 1.0),
+            ]),
         ))
         .unwrap();
         let Value::ComplexTensor(output) = &result else {

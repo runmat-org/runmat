@@ -84,8 +84,8 @@ enum FillKind {
     binding_variant = "default",
     builtin_path = "crate::builtins::strings::core::strings"
 )]
-async fn strings_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    preflight_strings_extensions(&rest)?;
+async fn strings_builtin(rest: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
+    preflight_strings_extensions(rest.view())?;
     let ParsedStrings { shape, fill } = parse_arguments(rest).await?;
     let total = shape.iter().try_fold(1usize, |acc, &dim| {
         acc.checked_mul(dim)
@@ -107,7 +107,7 @@ async fn strings_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     Ok(Value::StringArray(array))
 }
 
-fn preflight_strings_extensions(args: &[Value]) -> BuiltinResult<()> {
+fn preflight_strings_extensions(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<()> {
     for value in args {
         let Some(keyword) = keyword_of(value) else {
             continue;
@@ -127,7 +127,7 @@ fn preflight_strings_extensions(args: &[Value]) -> BuiltinResult<()> {
     Ok(())
 }
 
-async fn parse_arguments(args: Vec<Value>) -> BuiltinResult<ParsedStrings> {
+async fn parse_arguments(args: crate::call::BuiltinArguments) -> BuiltinResult<ParsedStrings> {
     let mut size_values: Vec<Value> = Vec::new();
     let mut like_proto: Option<Value> = None;
     let mut fill = FillKind::Empty;
@@ -373,7 +373,9 @@ pub(crate) mod tests {
 
     fn strings_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
-        futures::executor::block_on(super::strings_builtin(rest))
+        futures::executor::block_on(super::strings_builtin(
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -387,7 +389,7 @@ pub(crate) mod tests {
             panic!("string array expected")
         };
         assert_eq!(square.shape, vec![2, 2]);
-        assert_eq!(square.data.len(), 4);
+        assert_eq!(square.data().len(), 4);
 
         let rectangle = strings_builtin(vec![Value::Tensor(
             Tensor::new(vec![2.0, 3.0], vec![2]).unwrap(),
@@ -397,7 +399,7 @@ pub(crate) mod tests {
             panic!("string array expected")
         };
         assert_eq!(rectangle.shape, vec![2, 3]);
-        assert_eq!(rectangle.data.len(), 6);
+        assert_eq!(rectangle.data().len(), 6);
     }
 
     fn error_message(err: crate::RuntimeError) -> String {
@@ -411,7 +413,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![1, 1]);
-                assert_eq!(array.data, vec![String::new()]);
+                assert_eq!(array.data(), vec![String::new()]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -425,7 +427,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![4, 4]);
-                assert!(array.data.iter().all(|s| s.is_empty()));
+                assert!(array.data().iter().all(|s| s.is_empty()));
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -439,7 +441,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![2, 3]);
-                assert_eq!(array.data.len(), 6);
+                assert_eq!(array.data().len(), 6);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -453,7 +455,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![2, 3]);
-                assert_eq!(array.data.len(), 6);
+                assert_eq!(array.data().len(), 6);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -467,7 +469,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![2, 3]);
-                assert_eq!(array.data.len(), 6);
+                assert_eq!(array.data().len(), 6);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -482,7 +484,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![large as usize, 0]);
-                assert!(array.data.is_empty());
+                assert!(array.data().is_empty());
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -541,7 +543,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![3, 1]);
-                assert_eq!(array.data.len(), 3);
+                assert_eq!(array.data().len(), 3);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -554,7 +556,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![1, 0]);
-                assert!(array.data.is_empty());
+                assert!(array.data().is_empty());
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -569,7 +571,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![1, 0]);
-                assert!(array.data.is_empty());
+                assert!(array.data().is_empty());
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -582,7 +584,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![0, 0]);
-                assert!(array.data.is_empty());
+                assert!(array.data().is_empty());
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -613,7 +615,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![0, 0]);
-                assert!(array.data.is_empty());
+                assert!(array.data().is_empty());
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -631,8 +633,8 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![2, 3]);
-                assert_eq!(array.data.len(), 6);
-                assert!(array.data.iter().all(|s| s == "<missing>"));
+                assert_eq!(array.data().len(), 6);
+                assert!(array.data().iter().all(|s| s == "<missing>"));
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -645,7 +647,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, vec![1, 1]);
-                assert_eq!(array.data, vec!["<missing>".to_string()]);
+                assert_eq!(array.data(), vec!["<missing>".to_string()]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -667,7 +669,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, proto.shape);
-                assert!(array.data.iter().all(|s| s.is_empty()));
+                assert!(array.data().iter().all(|s| s.is_empty()));
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -685,7 +687,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(array) => {
                 assert_eq!(array.shape, tensor.shape());
-                assert_eq!(array.data.len(), tensor.materialize_f64().len());
+                assert_eq!(array.data().len(), tensor.materialize_f64().len());
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -747,7 +749,7 @@ pub(crate) mod tests {
             match result {
                 Value::StringArray(array) => {
                     assert_eq!(array.shape, vec![2, 3]);
-                    assert_eq!(array.data.len(), 6);
+                    assert_eq!(array.data().len(), 6);
                 }
                 other => panic!("expected string array, got {other:?}"),
             }

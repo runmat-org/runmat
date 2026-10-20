@@ -35,7 +35,7 @@ pub(super) async fn char_array_to_utf16_cooperative(
     cooperation: &mut Option<&mut MatCodecCooperation<'_>>,
 ) -> BuiltinResult<Vec<u16>> {
     if (chars.shape.len() != 2 || chars.rows != 1)
-        && chars.data.iter().any(|ch| ch.len_utf16() != 1)
+        && chars.data().iter().any(|ch| ch.len_utf16() != 1)
     {
         return Err(owner.error(
             MatEncodingFailure::Unsupported,
@@ -67,7 +67,7 @@ pub(super) async fn char_array_to_utf16_cooperative(
                 )
             })?
     };
-    if page_len.checked_mul(pages) != Some(chars.data.len()) {
+    if page_len.checked_mul(pages) != Some(chars.data().len()) {
         return Err(owner.error(
             MatEncodingFailure::Io,
             "MAT character payload does not match its shape",
@@ -78,7 +78,7 @@ pub(super) async fn char_array_to_utf16_cooperative(
         for col in 0..chars.cols {
             for row in 0..chars.rows {
                 let mut units = [0; 2];
-                for &unit in chars.data[page_offset + row * chars.cols + col]
+                for &unit in chars.data()[page_offset + row * chars.cols + col]
                     .encode_utf16(&mut units)
                     .iter()
                 {

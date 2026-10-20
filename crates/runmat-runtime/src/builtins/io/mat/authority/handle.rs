@@ -198,7 +198,7 @@ pub(crate) fn resolve_matfile(
         ));
     }
     let expected_source = Value::string(record.public_path.clone());
-    let Some(Value::Struct(properties)) = object.properties.get(PROPERTIES_FIELD) else {
+    let Some(Value::Struct(properties)) = object.properties().get(PROPERTIES_FIELD) else {
         return Err(matfile_error(
             "matfile receiver presentation is missing Properties",
         ));

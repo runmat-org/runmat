@@ -61,7 +61,7 @@ impl RandomBoundary {
 
     pub(super) async fn prepare(
         &self,
-        args: &[Value],
+        args: crate::call::FunctionArgumentView<'_>,
         first_role: &str,
         second_role: &str,
     ) -> BuiltinResult<PreparedRandomArgs> {
@@ -74,7 +74,7 @@ impl RandomBoundary {
             tensor::binary_numeric_tensors(&first, &second, self.name(), self.name())
                 .map_err(|error| self.invalid(error.message()))?;
         let shape = if args.len() > 2 {
-            self.parse_shape_args(&args[2..]).await?
+            self.parse_shape_args(args.range(2..)?).await?
         } else {
             normalize_shape(parameter_shape.clone())
         };
@@ -118,7 +118,10 @@ impl RandomBoundary {
         Ok(())
     }
 
-    async fn parse_shape_args(&self, values: &[Value]) -> BuiltinResult<Vec<usize>> {
+    async fn parse_shape_args(
+        &self,
+        values: crate::call::FunctionArgumentView<'_>,
+    ) -> BuiltinResult<Vec<usize>> {
         let mut dimensions = Vec::new();
         for value in values {
             let parsed = self.parse_shape_value(value).await?;
@@ -181,7 +184,10 @@ struct RandomOutputPlan {
 }
 
 impl RandomOutputPlan {
-    fn inspect(boundary: &RandomBoundary, args: &[Value]) -> BuiltinResult<Self> {
+    fn inspect(
+        boundary: &RandomBoundary,
+        args: crate::call::FunctionArgumentView<'_>,
+    ) -> BuiltinResult<Self> {
         let single = args.iter().take(2).any(|value| {
             matches!(value, Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32)
                 || matches!(value, Value::GpuTensor(handle)

@@ -108,7 +108,10 @@ fn ifft2_provider_error(detail: impl AsRef<str>) -> RuntimeError {
     binding_variant = "default",
     builtin_path = "crate::builtins::math::fft::ifft2"
 )]
-async fn ifft2_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn ifft2_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     crate::builtins::common::validation::reject_typed_complex_integer(&value, "ifft2")?;
     if is_wide_integer_value(&value) {
         crate::compatibility::ensure_builtin_extension_enabled(
@@ -138,7 +141,7 @@ async fn ifft2_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<V
             BUILTIN_NAME,
         )?;
     }
-    let ((len_rows, len_cols), symmetric) = parse_ifft2_arguments(&rest)?;
+    let ((len_rows, len_cols), symmetric) = parse_ifft2_arguments(rest.view())?;
     if control_count != 0
         && (len_rows.is_none() || len_cols.is_none() || len_rows == Some(0) || len_cols == Some(0))
     {
@@ -362,7 +365,9 @@ fn finalize_ifft2_output(tensor: ComplexTensor, symmetric: bool) -> BuiltinResul
 type LengthPair = (Option<usize>, Option<usize>);
 type LengthsAndSymmetry = (LengthPair, bool);
 
-fn parse_ifft2_arguments(args: &[Value]) -> BuiltinResult<LengthsAndSymmetry> {
+fn parse_ifft2_arguments(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<LengthsAndSymmetry> {
     if args.is_empty() {
         return Ok(((None, None), false));
     }
@@ -399,8 +404,13 @@ fn parse_ifft2_arguments(args: &[Value]) -> BuiltinResult<LengthsAndSymmetry> {
     Ok((lengths, symmetry))
 }
 
-fn split_symflag(args: &[Value]) -> BuiltinResult<(Option<bool>, &[Value])> {
-    if let Some((last, rest)) = args.split_last() {
+fn split_symflag(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<(Option<bool>, crate::call::FunctionArgumentView<'_>)> {
+    if let Some(last) = args.last() {
+        let rest = args
+            .range(..args.len() - 1)
+            .expect("bounded ifft2 control range");
         if let Some(flag) = parse_symflag(last, BUILTIN_NAME).map_err(|source| {
             ifft2_error_with_source(&IFFT2_ERROR_INVALID_SYMFLAG, "symflag parse failed", source)
         })? {
@@ -890,7 +900,9 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ifft2_rejects_unknown_symmetry_flag() {
-        let err = parse_ifft2_arguments(&[Value::from("invalid")]).unwrap_err();
+        let invalid = [Value::from("invalid")];
+        let err = parse_ifft2_arguments(crate::call::FunctionArgumentView::from_slice(&invalid))
+            .unwrap_err();
         assert_eq!(
             error_identifier(&err),
             IFFT2_ERROR_INVALID_SYMFLAG.identifier
@@ -978,6 +990,7 @@ pub(crate) mod tests {
     }
 
     fn ifft2_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let rest = crate::call::BuiltinArguments::from_borrowed(&rest, None)?;
         block_on(super::ifft2_builtin(value, rest))
     }
 }

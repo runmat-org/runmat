@@ -18,6 +18,8 @@ mod selection;
 use selection::select_local_body;
 #[path = "selected_graph/snapshot.rs"]
 mod snapshot;
+#[path = "selected_graph/product.rs"]
+mod product;
 pub(in crate::session) use snapshot::SelectedGraphSnapshot;
 
 /// Immutable selected code and its already-issued source authority. This
@@ -65,7 +67,14 @@ impl<'a> SelectedGraphPublication<'a> {
 pub(in crate::session) struct SelectedGraphSource {
     pub unit: Rc<ExecutableUnit>,
     pub primary_source: Option<ProgramSourceId>,
-    pub already_published: Option<Arc<[u8]>>,
+    pub code: SelectedGraphCodeSource,
+}
+
+/// Exactly one immutable code state; no invocation authority can be cached here.
+pub(in crate::session) enum SelectedGraphCodeSource {
+    Unpublished,
+    PublishedBytes(Arc<[u8]>),
+    Admitted(Rc<runmat_vm::SelectedExecutableCode>),
 }
 
 /// Definitions and dependencies chosen by the same compiler publication.
@@ -86,8 +95,13 @@ impl SelectedGraphPrimary {
         let SelectedGraphSource {
             unit,
             primary_source,
-            already_published,
+            code,
         } = source;
+        let (already_published, already_admitted_code) = match code {
+            SelectedGraphCodeSource::Unpublished => (None, None),
+            SelectedGraphCodeSource::PublishedBytes(bytes) => (Some(bytes), None),
+            SelectedGraphCodeSource::Admitted(code) => (None, Some(code)),
+        };
         let SelectedGraphSelection {
             current_functions,
             interop,
@@ -174,8 +188,29 @@ impl SelectedGraphPrimary {
                 return Err("published selected product changes its static imports".into());
             }
         }
+        if let Some(code) = already_admitted_code.as_ref() {
+            if code.program_digest() != program || code.source_map() != source_owner.portable_map()
+            {
+                return Err("cached selected code changes its program/source facts".into());
+            }
+            let actual = if code.static_imports().is_empty() {
+                None
+            } else {
+                Some(
+                    runmat_execution::executable::static_import_section(
+                        code.static_imports().to_vec(),
+                    )
+                    .map_err(|error| error.to_string())?,
+                )
+            };
+            if actual != static_import_section_for(&static_targets)? {
+                return Err("cached selected code changes its static imports".into());
+            }
+        }
         let canonical = OnceCell::new();
-        if let Some(bytes) = already_published {
+        let published = already_published
+            .or_else(|| already_admitted_code.map(|code| Arc::clone(code.canonical_v3())));
+        if let Some(bytes) = published {
             let _ = canonical.set(Ok(bytes));
         }
         Ok(Self {

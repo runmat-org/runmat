@@ -44,16 +44,20 @@ pub(super) fn labels_from_value(value: Value, name: &str) -> BuiltinResult<Label
             labels: char_rows(&array).into_iter().map(|text| ClassLabel::Text(text.into())).collect(),
             kind: LabelKind::Text,
         }),
-        Value::StringArray(array) => Ok(LabelVector {
-            labels: match array.data.try_into_owned() {
+        Value::StringArray(array) => {
+            let (data, _shape, _rows, _cols) = array.into_parts();
+            let labels = match data.try_into_owned() {
                 Ok(values) => values.into_iter().map(ClassLabel::Text).collect(),
                 Err(values) => values.iter().cloned().map(ClassLabel::Text).collect(),
-            },
-            kind: LabelKind::Text,
-        }),
+            };
+            Ok(LabelVector {
+                labels,
+                kind: LabelKind::Text,
+            })
+        },
         Value::Cell(cell) => {
-            let mut labels = Vec::with_capacity(cell.data.len());
-            for item in cell.data.iter() {
+            let mut labels = Vec::with_capacity(cell.data().len());
+            for item in cell.data().iter() {
                 labels.push(ClassLabel::Text(scalar_text(item).ok_or_else(|| {
                     predict_invalid(format!("predict: {name} cell entries must be text"))
                 })?.into()));
@@ -359,7 +363,7 @@ pub(super) fn score_transform(spec: &FitSpec) -> ScoreTransform {
 }
 
 pub(super) fn score_transform_property(object: &ObjectInstance) -> BuiltinResult<ScoreTransform> {
-    match object.properties.get("ScoreTransform") {
+    match object.properties().get("ScoreTransform") {
         Some(Value::String(text)) if text.eq_ignore_ascii_case("none") => Ok(ScoreTransform::None),
         Some(Value::String(text)) if text.eq_ignore_ascii_case("logit") => {
             Ok(ScoreTransform::Logit)
@@ -374,9 +378,9 @@ pub(super) fn string_array_property(
     object: &ObjectInstance,
     name: &str,
 ) -> BuiltinResult<Vec<String>> {
-    match object.properties.get(name) {
+    match object.properties().get(name) {
         Some(Value::StringArray(array)) => Ok(array
-            .data
+            .data()
             .iter()
             .map(|text| text.as_str().to_owned())
             .collect()),
@@ -386,7 +390,7 @@ pub(super) fn string_array_property(
 }
 
 pub(super) fn tensor_property(object: &ObjectInstance, name: &str) -> BuiltinResult<Tensor> {
-    match object.properties.get(name) {
+    match object.properties().get(name) {
         Some(Value::Tensor(tensor)) => Ok(tensor.clone()),
         Some(Value::Num(value)) => Tensor::new(vec![*value], vec![1, 1])
             .map_err(|err| predict_internal(format!("predict: {err}"))),
@@ -398,7 +402,7 @@ pub(super) fn numeric_vector_property(
     object: &ObjectInstance,
     name: &str,
 ) -> BuiltinResult<Vec<f64>> {
-    match object.properties.get(name) {
+    match object.properties().get(name) {
         Some(Value::Tensor(tensor)) => vector_values_predict(tensor, name),
         Some(Value::Num(value)) => Ok(vec![*value]),
         _ => Err(predict_invalid(format!("predict: model is missing {name}"))),

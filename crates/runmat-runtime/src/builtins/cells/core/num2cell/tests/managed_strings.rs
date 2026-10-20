@@ -33,16 +33,16 @@ fn managed_string_partition_moves_unique_text_and_refunds_exact_output() {
             RuntimeServicePorts::default().with_parallel(Rc::new(ManagedParallel(ledger.clone()))),
         );
     let input = StringArray::new(vec!["alpha".into(), "beta".into()], vec![1, 2]).unwrap();
-    let source_ptr = input.data[0].as_str().as_ptr();
+    let source_ptr = input.data()[0].as_str().as_ptr();
     let Value::Cell(output) = block_on(super::super::num2cell_builtin(
         Some(context.clone()),
         Value::StringArray(input),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap() else {
         panic!("expected cell output")
     };
-    let Value::String(first) = &output.data[0] else {
+    let Value::String(first) = &output.data()[0] else {
         panic!("expected text child")
     };
     assert_eq!(first.as_str(), "alpha");
@@ -61,23 +61,23 @@ fn managed_string_partition_moves_unique_text_and_refunds_exact_output() {
         vec![2, 2],
     )
     .unwrap();
-    let source_ptr = grouped.data[0].as_str().as_ptr();
+    let source_ptr = grouped.data()[0].as_str().as_ptr();
     let Value::Cell(output) = block_on(super::super::num2cell_builtin(
         Some(context),
         Value::StringArray(grouped),
-        vec![Value::Num(1.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
     ))
     .unwrap() else {
         panic!("expected grouped cell output")
     };
     assert_eq!(output.shape.as_slice(), &[1, 2]);
-    let Value::StringArray(first) = &output.data[0] else {
+    let Value::StringArray(first) = &output.data()[0] else {
         panic!("expected grouped text child")
     };
     assert_eq!(first.shape.as_slice(), &[2, 1]);
-    assert_eq!(first.data[0].as_str().as_ptr(), source_ptr);
-    assert_eq!(first.data[0].as_str(), "a");
-    assert_eq!(first.data[1].as_str(), "b");
+    assert_eq!(first.data()[0].as_str().as_ptr(), source_ptr);
+    assert_eq!(first.data()[0].as_str(), "a");
+    assert_eq!(first.data()[1].as_str(), "b");
     drop(output);
     assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
 }

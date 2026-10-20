@@ -100,7 +100,10 @@ impl ContourFillPlot {
 
     /// Record each vertex's colormap position (0 to 1) so the colors can follow the colormap.
     pub fn with_colormap_positions(mut self, positions: Vec<f32>) -> Self {
-        let matches = self.vertices.as_ref().is_some_and(|v| v.len() == positions.len());
+        let matches = self
+            .vertices
+            .as_ref()
+            .is_some_and(|v| v.len() == positions.len());
         self.colormap_positions = matches.then_some(positions);
         self
     }

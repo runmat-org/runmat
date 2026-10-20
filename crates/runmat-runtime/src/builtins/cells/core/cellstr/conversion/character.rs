@@ -7,7 +7,7 @@ pub(super) fn convert(array: CharArray) -> crate::BuiltinResult<Value> {
     for row in 0..rows {
         let start = row * columns;
         let end = start + columns;
-        let text = trimmed_row(&array.data[start..end]);
+        let text = trimmed_row(&array.data()[start..end]);
         values.push(Value::CharArray(CharArray::new_row(&text)));
     }
     CellArray::new(values, rows, 1)

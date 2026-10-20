@@ -44,7 +44,7 @@ mod tests {
         let logical_digest = Digest::sha256(b"original");
         let encryption_context = Digest::sha256(b"authority");
         let reference = ValueRef {
-            schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1,
+            schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION,
             id: artifact_object_value_id(logical_digest, encryption_context, "authority"),
             logical_digest,
             encoded_length: 8,

@@ -34,10 +34,10 @@ pub(super) fn fill_missing_string_array(
     let literal = match &options.method {
         FillMethod::Constant(value) => match value {
             Value::String(value) => TextLiteral::Utf8(value.as_str()),
-            Value::StringArray(value) if value.data.len() == 1 => {
-                TextLiteral::Utf8(value.data[0].as_str())
+            Value::StringArray(value) if value.data().len() == 1 => {
+                TextLiteral::Utf8(value.data()[0].as_str())
             }
-            Value::CharArray(value) if value.rows == 1 => TextLiteral::Chars(&value.data),
+            Value::CharArray(value) if value.rows == 1 => TextLiteral::Chars(value.data()),
             _ => {
                 return Err(invalid_argument(
                     "fillmissing: string constant must be text",
@@ -47,7 +47,7 @@ pub(super) fn fill_missing_string_array(
         _ => TextLiteral::Utf8(MISSING_TEXT),
     };
     let admission = |cause| super::super::errors::allocation_error(runtime, "fillmissing", cause);
-    let count = array.data.len();
+    let count = array.data().len();
     let scratch = HostTypedWorkspace::<usize>::quoted_bytes(count).map_err(admission)?;
     let scratch_plan = HostAllocationPlan::new(scratch, 0).map_err(admission)?;
     let scratch_receipt = HostAllocationReceipt::admit(Some(runtime), scratch_plan)
@@ -83,7 +83,8 @@ pub(super) fn fill_missing_string_array(
             mask_receipt.checkpoint(runtime).map_err(admission)?;
         }
         *flag = u8::from(
-            selections.as_slice()[index] != index && !is_missing_text(output.data[index].as_str()),
+            selections.as_slice()[index] != index
+                && !is_missing_text(output.data()[index].as_str()),
         );
     }
     let mask = mask_receipt

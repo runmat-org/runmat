@@ -36,7 +36,7 @@ pub use runmat_builtins::{
 )]
 async fn unzip_builtin(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count > 1 {
@@ -50,18 +50,25 @@ async fn unzip_builtin(
         } else {
             crate::context::host_effect::HostEffectOutput::ReturnedValue
         };
-        let result = evaluate_with_output(&args, runtime.as_ref(), output).await?;
+        let result = evaluate_with_output(args.view(), runtime.as_ref(), output).await?;
         if out_count == 0 {
             return result.finish_effect_only();
         }
         return result.into_value_with(|value| Value::output_list(vec![value]));
     }
-    let result = evaluate(&args, runtime.as_ref()).await?;
+    let result = evaluate_view(args.view(), runtime.as_ref()).await?;
     result.into_value_with(std::convert::identity)
 }
 
 pub async fn evaluate(
     args: &[Value],
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<UnzipResult> {
+    evaluate_view(crate::call::FunctionArgumentView::from_slice(args), runtime).await
+}
+
+pub async fn evaluate_view(
+    args: crate::call::FunctionArgumentView<'_>,
     runtime: Option<&crate::context::RuntimeContext>,
 ) -> BuiltinResult<UnzipResult> {
     evaluate_with_output(
@@ -73,7 +80,7 @@ pub async fn evaluate(
 }
 
 async fn evaluate_with_output(
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     runtime: Option<&crate::context::RuntimeContext>,
     output: crate::context::host_effect::HostEffectOutput,
 ) -> BuiltinResult<UnzipResult> {

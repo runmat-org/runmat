@@ -4,7 +4,7 @@ use super::*;
 pub(in super::super) async fn execute_saveas(
     runtime: Option<crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<bool> {
     let selected_runtime = runtime.clone();
     in_selected_runtime(
@@ -17,11 +17,11 @@ pub(in super::super) async fn execute_saveas(
 async fn execute_saveas_in_context(
     runtime: Option<&crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<bool> {
     validate_status_output(runtime, requested_outputs, SAVEAS)?;
-    reject_resident_persistence_arguments(&args, SAVEAS)?;
-    let request = parse_saveas_args(&args)?;
+    reject_resident_persistence_arguments(args.view(), SAVEAS)?;
+    let request = parse_saveas_args(args.view())?;
     let selected = FigureFsPath::capture(&request.output_path).map_err(|source| {
         persistence_error_with_source(
             &ERROR_IO,
@@ -52,7 +52,7 @@ async fn execute_saveas_in_context(
 pub(in super::super) async fn execute_savefig(
     runtime: Option<crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<bool> {
     let selected_runtime = runtime.clone();
     in_selected_runtime(
@@ -65,11 +65,11 @@ pub(in super::super) async fn execute_savefig(
 async fn execute_savefig_in_context(
     runtime: Option<&crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<bool> {
     validate_status_output(runtime, requested_outputs, SAVEFIG)?;
-    reject_resident_persistence_arguments(&args, SAVEFIG)?;
-    let request = parse_savefig_args(&args, SAVEFIG)?;
+    reject_resident_persistence_arguments(args.view(), SAVEFIG)?;
+    let request = parse_savefig_args(args.view(), SAVEFIG)?;
     let selected = FigureFsPath::capture(&request.output_path).map_err(|source| {
         persistence_error_with_source(
             &ERROR_IO,
@@ -92,7 +92,7 @@ async fn execute_savefig_in_context(
 pub(in super::super) async fn execute_hgsave(
     runtime: Option<crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<bool> {
     let selected_runtime = runtime.clone();
     in_selected_runtime(
@@ -105,11 +105,11 @@ pub(in super::super) async fn execute_hgsave(
 async fn execute_hgsave_in_context(
     runtime: Option<&crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<bool> {
     validate_status_output(runtime, requested_outputs, HGSAVE)?;
-    reject_resident_persistence_arguments(&args, HGSAVE)?;
-    let request = parse_savefig_args(&args, HGSAVE)?;
+    reject_resident_persistence_arguments(args.view(), HGSAVE)?;
+    let request = parse_savefig_args(args.view(), HGSAVE)?;
     let selected = FigureFsPath::capture(&request.output_path).map_err(|source| {
         persistence_error_with_source(
             &ERROR_IO,

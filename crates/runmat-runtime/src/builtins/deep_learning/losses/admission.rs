@@ -24,7 +24,7 @@ fn known_shape(value: &Value, payload: Option<&LossPayload>) -> Option<Vec<usize
 pub(super) fn preflight_host_decidable(
     predictions: &Value,
     targets: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<()> {
     let prediction_payload = host_payload(predictions, "predictions")?;
     let target_payload = host_payload(targets, "targets")?;
@@ -64,8 +64,10 @@ pub(super) fn preflight_host_decidable(
     let positional_weights = rest
         .first()
         .is_some_and(|value| !is_crossentropy_option_name(value));
-    let mut options =
-        ParsedLossOptions::from_args(rest[usize::from(positional_weights)..].to_vec())?;
+    let mut options = ParsedLossOptions::from_view(
+        rest.range(usize::from(positional_weights)..)
+            .expect("crossentropy option suffix"),
+    )?;
     let weights = if positional_weights {
         Some(&rest[0])
     } else {

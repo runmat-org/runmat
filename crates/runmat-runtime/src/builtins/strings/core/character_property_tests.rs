@@ -94,7 +94,7 @@ fn text_unicode_numeric_and_empty_shapes_remain_distinct() {
             None,
             Value::Int(IntValue::U16(u16::from(b'A'))),
             Value::String("alpha".into()),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .unwrap(),
         Value::Bool(true)
@@ -123,7 +123,10 @@ fn output_count_errors_precede_classifier_input_errors() {
         None,
         Value::String("A".into()),
         Value::String("unknown-category".into()),
-        vec![Value::String("bad-option".into()), Value::Num(2.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::String("bad-option".into()),
+            Value::Num(2.0),
+        ]),
     ))
     .expect_err("excess outputs precede invalid category/option");
     assert_eq!(
@@ -159,7 +162,7 @@ fn all_eight_integer_text_classes_are_exact_only_for_isstrprop() {
                 None,
                 tensor,
                 Value::String("alpha".into()),
-                Vec::new(),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
             ))
             .unwrap(),
             Value::LogicalArray(LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap())
@@ -198,7 +201,7 @@ fn resident_numeric_is_false_without_download_for_two_and_exact_gather_for_isstr
                 None,
                 Value::GpuTensor(handle.clone()),
                 Value::String("alpha".into()),
-                Vec::new(),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
             ))
             .unwrap(),
             Value::LogicalArray(LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap())

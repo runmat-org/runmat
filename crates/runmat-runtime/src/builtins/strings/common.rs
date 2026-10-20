@@ -20,7 +20,7 @@ pub(crate) fn is_multirow_char_array(value: &Value) -> bool {
 
 pub(crate) fn cell_contains_string(value: &Value) -> bool {
     match value {
-        Value::Cell(cell) => cell.data.iter().any(|value| {
+        Value::Cell(cell) => cell.data().iter().any(|value| {
             matches!(value, Value::String(_) | Value::StringArray(_)) || cell_contains_string(value)
         }),
         _ => false,
@@ -34,10 +34,10 @@ pub(crate) fn cell_has_valid_string_scalar(value: &Value) -> bool {
         return false;
     };
     let mut has_string = false;
-    for element in &cell.data {
+    for element in cell.data() {
         match element {
             Value::String(_) => has_string = true,
-            Value::StringArray(array) if array.data.len() == 1 => has_string = true,
+            Value::StringArray(array) if array.data().len() == 1 => has_string = true,
             Value::CharArray(chars) if chars.rows <= 1 => {}
             _ => return false,
         }
@@ -79,7 +79,7 @@ pub(crate) fn uppercase_preserving_missing(text: String) -> String {
 /// Collect a row from a [`CharArray`] into a `String`.
 #[inline]
 pub(crate) fn char_row_to_string(array: &CharArray, row: usize) -> String {
-    char_row_to_string_slice(&array.data, array.cols, row)
+    char_row_to_string_slice(array.data(), array.cols, row)
 }
 
 /// Collect a row from a character slice laid out in row-major order.
@@ -129,10 +129,13 @@ pub(crate) fn contains_numeric_or_resident_text_input(value: &Value) -> bool {
 pub(crate) fn contains_resident_text_input(value: &Value) -> bool {
     match value {
         Value::GpuTensor(_) => true,
-        Value::Cell(cell) => cell.data.iter().any(contains_resident_text_input),
+        Value::Cell(cell) => cell.data().iter().any(contains_resident_text_input),
         Value::Struct(value) => value.fields.values().any(contains_resident_text_input),
         Value::StructArray(array) => array.any_value(contains_resident_text_input),
-        Value::Object(value) => value.properties.values().any(contains_resident_text_input),
+        Value::Object(value) => value
+            .properties()
+            .values()
+            .any(contains_resident_text_input),
         Value::Closure(value) => value.captures.iter().any(contains_resident_text_input),
         Value::OutputList(values) => values.iter().any(contains_resident_text_input),
         _ => false,
@@ -203,22 +206,22 @@ pub(crate) mod tests {
             )
             .unwrap();
         let resident = Value::GpuTensor(allocation.handle.clone());
-        let mut direct_struct = runmat_value::StructValue::new();
+        let mut direct_struct = runmat_value::UnboundedStructValueBuilder::new();
         direct_struct.insert("payload", resident.clone());
         assert!(contains_numeric_or_resident_text_input(&Value::Struct(
-            direct_struct
+            direct_struct.finish()
         )));
         let mut object = runmat_value::ObjectInstance::new("TextFixture".to_string());
-        object
-            .properties
-            .insert("payload".to_string(), resident.clone());
+        object.replace_property_unbounded("payload".to_string(), resident.clone());
         assert!(contains_numeric_or_resident_text_input(&Value::Object(
             object
         )));
-        let mut first = runmat_value::StructValue::new();
+        let mut first = runmat_value::UnboundedStructValueBuilder::new();
         first.insert("payload", resident);
-        let mut second = runmat_value::StructValue::new();
+        let mut second = runmat_value::UnboundedStructValueBuilder::new();
         second.insert("payload", Value::String("host".into()));
+        let second = second.finish();
+        let first = first.finish();
         let array = runmat_value::StructArray::new(vec![first, second], vec![2, 1]).unwrap();
         let value = Value::StructArray(array);
         assert!(contains_resident_text_input(&value));

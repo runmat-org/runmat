@@ -1,5 +1,8 @@
 mod invoke;
+pub(crate) use invoke::prepend_rooted_argument;
 mod parse;
+mod roots;
+pub(crate) use roots::root_callable_value;
 
 use runmat_builtins::BuiltinCatalogIdentity;
 use runmat_value::Value;
@@ -14,6 +17,7 @@ pub(crate) enum MappedCallable {
 
 #[derive(Debug)]
 pub(crate) enum CallableParseError {
+    Runtime(crate::RuntimeError),
     EmptyText,
     EmptyHandle,
     CharacterNameMustBeRow,
@@ -28,7 +32,7 @@ pub(crate) enum CallableCallError {
         identity: runmat_types::CallableIdentity,
     },
     SemanticUnavailable {
-        function_name: String,
+        function_name: runmat_value::Utf8Text,
         function: String,
     },
 }
@@ -41,3 +45,5 @@ impl MappedCallable {
         }
     }
 }
+#[cfg(test)]
+mod tests;

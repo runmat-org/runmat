@@ -8,5 +8,10 @@ use futures::executor::block_on;
 use runmat_value::Value;
 
 fn run(value: Value, dims: Vec<Value>) -> Value {
-    block_on(num2cell_builtin(None, value, dims)).expect("num2cell succeeds")
+    block_on(num2cell_builtin(
+        None,
+        value,
+        crate::builtins::common::test_support::builtin_arguments(dims),
+    ))
+    .expect("num2cell succeeds")
 }

@@ -23,6 +23,45 @@ struct ShapePayload {
 #[derive(Clone, Debug)]
 pub struct SharedShape(ExactShared<ShapePayload>);
 
+/// Incrementally initializes one already-admitted final shape backing.
+/// An incomplete builder never exposes a shape to array constructors.
+#[derive(Debug)]
+pub struct SharedShapeBuilder {
+    shape: SharedShape,
+    rank: usize,
+}
+
+impl SharedShapeBuilder {
+    pub fn len(&self) -> usize {
+        self.shape.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.shape.is_empty()
+    }
+
+    pub fn expected_len(&self) -> usize {
+        self.rank
+    }
+
+    pub fn try_push(&mut self, dimension: usize) -> Result<(), usize> {
+        let dimensions = &mut self.shape.0.get_mut_unique().dimensions;
+        if dimensions.len() == self.rank {
+            return Err(dimension);
+        }
+        dimensions.push(dimension);
+        Ok(())
+    }
+
+    pub fn try_finish(self) -> Result<SharedShape, Self> {
+        if self.len() == self.rank {
+            Ok(self.shape)
+        } else {
+            Err(self)
+        }
+    }
+}
+
 /// One canonical constructor input for a fresh ordinary shape or an
 /// independently owned shape transferred from another value.
 pub enum HostShapeInput {
@@ -43,6 +82,22 @@ impl From<SharedShape> for HostShapeInput {
 }
 
 impl SharedShape {
+    /// Reserves the original backing and header before either allocation.
+    pub fn begin_exact(
+        rank: usize,
+        permit: &dyn ExactHostAllocationPermit,
+    ) -> Result<SharedShapeBuilder, ExactHostNumericAllocationError> {
+        let claim = permit.reserve_exact_claim(Self::requested_bytes_for_rank(rank)?)?;
+        let dimensions = super::exact_vec::exact_capacity_vec(rank)?;
+        let payload = ShapePayload {
+            dimensions,
+            _retained_claim: OnceLock::from(claim),
+        };
+        let shape = ExactShared::try_new(payload)
+            .map(Self)
+            .map_err(|_| ExactHostNumericAllocationError::AllocationFailed)?;
+        Ok(SharedShapeBuilder { shape, rank })
+    }
     /// Physical shape bytes, excluding the permit's claim-control charge.
     pub fn requested_bytes_for_rank(rank: usize) -> Result<usize, ExactHostNumericAllocationError> {
         Self::requested_bytes_for_capacity(rank)
@@ -338,6 +393,18 @@ mod tests {
         let live = Arc::new(AtomicUsize::new(0));
         let permit = TestPermit(live.clone());
         let expected = SharedShape::requested_bytes_for_rank(2).unwrap();
+        let mut staged = SharedShape::begin_exact(2, &permit).unwrap();
+        assert_eq!(live.load(Ordering::SeqCst), expected);
+        staged.try_push(4).unwrap();
+        let mut staged = staged.try_finish().unwrap_err();
+        assert_eq!(staged.expected_len(), 2);
+        staged.try_push(7).unwrap();
+        assert_eq!(staged.try_push(9), Err(9));
+        let staged = staged.try_finish().unwrap();
+        assert_eq!(&*staged, &[4, 7]);
+        assert_eq!(staged.capacity(), 2);
+        drop(staged);
+        assert_eq!(live.load(Ordering::SeqCst), 0);
         let source = SharedShape::new_admitted_from_slice(&[4, 7], &permit).unwrap();
         let alias = source.clone();
         assert_eq!(live.load(Ordering::SeqCst), expected);

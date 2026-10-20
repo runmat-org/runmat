@@ -249,7 +249,7 @@ fn selected_relative_archive_and_default_output_survive_global_owner_and_cwd_swa
                 .with_parallel(Rc::new(FiniteHostBudget)),
         );
     let result = block_on(evaluate_with_output(
-        &[Value::String("archive.zip".into())],
+        crate::call::FunctionArgumentView::from_slice(&[Value::String("archive.zip".into())]),
         Some(&runtime),
         HostEffectOutput::ReturnedValue,
     ))

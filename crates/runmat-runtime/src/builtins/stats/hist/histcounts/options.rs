@@ -66,7 +66,9 @@ pub(super) enum HistogramNormalization {
     Cdf,
 }
 
-pub(super) fn parse_options(args: &[Value]) -> BuiltinResult<HistcountsOptions> {
+pub(super) fn parse_options(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<HistcountsOptions> {
     let mut options = HistcountsOptions::default();
     let mut index = 0;
 

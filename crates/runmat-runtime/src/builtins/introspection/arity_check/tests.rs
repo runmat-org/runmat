@@ -149,7 +149,7 @@ fn script_context_keeps_function_checks_unavailable_but_legacy_count_is_explicit
         vec![Value::Num(0.0), Value::Num(0.0), Value::Num(0.0)],
     )
     .expect("legacy explicit count has no function-context dependency");
-    assert!(matches!(explicit, Value::CharArray(value) if value.data.is_empty()));
+    assert!(matches!(explicit, Value::CharArray(value) if value.data().is_empty()));
 }
 
 #[test]
@@ -318,7 +318,7 @@ fn arity_checks_accept_every_documented_integer_class() {
         ])
         .expect("legacy text nargoutchk");
         assert!(
-            matches!(text, Value::CharArray(array) if array.data.iter().collect::<String>().contains("Too many"))
+            matches!(text, Value::CharArray(array) if array.data().iter().collect::<String>().contains("Too many"))
         );
 
         let structured = dispatch_nargoutchk(vec![
@@ -343,7 +343,7 @@ fn legacy_nargoutchk_returns_documented_empty_result_classes() {
     ])
     .expect("valid legacy text form");
     assert!(
-        matches!(text, Value::CharArray(array) if array.shape == vec![0, 0] && array.data.is_empty())
+        matches!(text, Value::CharArray(array) if array.shape == vec![0, 0] && array.data().is_empty())
     );
 
     let structured = dispatch_nargoutchk(vec![

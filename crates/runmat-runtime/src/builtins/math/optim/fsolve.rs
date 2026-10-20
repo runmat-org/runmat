@@ -62,21 +62,23 @@ async fn fsolve_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
     function: Value,
     x0: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     fsolve_in_runtime(runtime.as_ref(), function, x0, rest).await
 }
 
 #[cfg(test)]
 async fn fsolve_builtin(function: Value, x0: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    fsolve_in_runtime(None, function, x0, rest).await
+    let rest =
+        crate::execution::RootedValues::new(rest).map_err(|error| error.into_runtime_error())?;
+    fsolve_in_runtime(None, function, x0, rest.into()).await
 }
 
 async fn fsolve_in_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
     function: Value,
     x0: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     crate::output_count::validate_bounded_outputs(
         &FSOLVE_DESCRIPTOR,
@@ -101,11 +103,12 @@ async fn fsolve_in_runtime(
         options,
         Some(&FSOLVE_OPTION_EXTENSION),
         Some(&FSOLVE_RESIDENT_EXTENSION),
+        runtime,
         &mut cooperation,
     )
     .await
     .map_err(|err| fsolve_map_error(err, &FSOLVE_ERROR_INVALID_ARGUMENT))?;
-    let opts = FsolveOptions::from_struct(options.as_ref())
+    let opts = FsolveOptions::from_struct(options.as_ref().map(|options| options.structure()))
         .map_err(|err| fsolve_map_error(err, &FSOLVE_ERROR_INVALID_ARGUMENT))?;
     let guess = crate::builtins::math::optim::common::initial_guess_with_extensions(
         NAME,
@@ -373,14 +376,14 @@ async fn finalize(
         outputs.push(Value::Num(result.exitflag as f64));
     }
     if requested >= 4 {
-        let mut fields = StructValue::new();
+        let mut fields = runmat_value::UnboundedStructValueBuilder::new();
         fields.insert("iterations", Value::Num(result.iterations as f64));
         fields.insert("funcCount", Value::Num(result.func_count as f64));
         fields.insert("algorithm", Value::from("levenberg-marquardt"));
         fields.insert("firstorderopt", Value::Num(result.first_order_optimality));
         fields.insert("stepsize", Value::Num(result.step_size));
         fields.insert("message", Value::from(result.message.clone()));
-        outputs.push(Value::Struct(fields));
+        outputs.push(Value::Struct(fields.finish()));
     }
     if requested >= 5 {
         outputs.push(

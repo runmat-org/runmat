@@ -1,4 +1,16 @@
 use super::*;
+async fn weboptions_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
+    super::weboptions_builtin(
+        runtime,
+        crate::execution::RootedValues::new(args)
+            .map_err(|error| error.into_runtime_error())?
+            .into(),
+    )
+    .await
+}
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::{Read, Write};
 #[cfg(not(target_arch = "wasm32"))]
@@ -31,8 +43,8 @@ fn error_message(err: crate::RuntimeError) -> String {
     err.message().to_string()
 }
 
-fn run_weboptions(rest: Vec<Value>) -> BuiltinResult<Value> {
-    futures::executor::block_on(weboptions_builtin(rest))
+fn run_weboptions(rest: Vec<Value>) -> BuiltinResult<crate::execution::RootedValue> {
+    futures::executor::block_on(weboptions_builtin(None, rest))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -95,7 +107,7 @@ fn weboptions_descriptor_signatures_cover_core_forms() {
 #[test]
 fn weboptions_default_struct_matches_expected_fields() {
     let result = run_weboptions(Vec::new()).expect("weboptions");
-    let Value::Struct(options) = result else {
+    let Value::Struct(options) = result.value() else {
         panic!("expected struct result");
     };
     assert_eq!(
@@ -142,7 +154,7 @@ fn weboptions_timeout_reads_typed_integer_tensor_storage_exactly() {
 
     let result = run_weboptions(vec![Value::from("Timeout"), Value::Tensor(timeout)])
         .expect("weboptions timeout");
-    let Value::Struct(options) = result else {
+    let Value::Struct(options) = result.value() else {
         panic!("expected options struct");
     };
     assert_eq!(
@@ -164,7 +176,7 @@ fn weboptions_preserves_exact_integer_key_value() {
         value.clone(),
     ])
     .expect("integer key value");
-    let Value::Struct(options) = result else {
+    let Value::Struct(options) = result.value() else {
         panic!("expected options struct");
     };
     assert_eq!(options.fields.get("KeyValue"), Some(&value));
@@ -227,7 +239,7 @@ fn weboptions_runmat_only_forms_are_independently_gated() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn weboptions_overrides_timeout_and_headers() {
-    let mut headers = StructValue::new();
+    let mut headers = runmat_value::UnboundedStructValueBuilder::new();
     headers
         .fields
         .insert("Accept".to_string(), Value::from("application/json"));
@@ -238,10 +250,10 @@ fn weboptions_overrides_timeout_and_headers() {
         Value::from("Timeout"),
         Value::Num(10.0),
         Value::from("HeaderFields"),
-        Value::Struct(headers),
+        Value::Struct(headers.finish()),
     ];
     let result = run_weboptions(args).expect("weboptions overrides");
-    let Value::Struct(opts) = result else {
+    let Value::Struct(opts) = result.value() else {
         panic!("expected struct");
     };
     assert_eq!(
@@ -269,9 +281,13 @@ fn weboptions_updates_existing_struct() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     let base = run_weboptions(vec![Value::from("ContentType"), Value::from("json")])
         .expect("base weboptions");
-    let args = vec![base, Value::from("Timeout"), Value::Num(15.0)];
+    let args = vec![
+        base.value().clone(),
+        Value::from("Timeout"),
+        Value::Num(15.0),
+    ];
     let updated = run_weboptions(args).expect("weboptions update");
-    let Value::Struct(opts) = updated else {
+    let Value::Struct(opts) = updated.value() else {
         panic!("expected struct");
     };
     assert_eq!(
@@ -393,7 +409,7 @@ fn webread_uses_weboptions_without_polluting_query() {
         respond_with(stream, "application/json", br#"{"ok":true}"#);
     });
 
-    let args = vec![Value::from(url.clone()), options];
+    let args = vec![Value::from(url.clone()), options.value().clone()];
     let result = run_call_builtin("webread", &args).expect("webread with options");
     match result.value() {
         Value::Struct(reply) => {
@@ -432,7 +448,7 @@ fn webread_and_webwrite_apply_exact_integer_api_key_header() {
         if let Some(body) = payload {
             args.push(body);
         }
-        args.push(key.clone());
+        args.push(key.value().clone());
         run_call_builtin(builtin, &args).expect("HTTP request with API key");
         let headers = rx.recv().expect("captured headers");
         assert!(headers
@@ -455,7 +471,7 @@ fn webwrite_uses_weboptions_auto_request_method() {
         respond_with(stream, "application/json", br#"{"ack":true}"#);
     });
 
-    let args = vec![Value::from(url), payload, options];
+    let args = vec![Value::from(url), payload, options.value().clone()];
     let result = run_call_builtin("webwrite", &args).expect("webwrite with weboptions");
     match result.value() {
         Value::Struct(reply) => {

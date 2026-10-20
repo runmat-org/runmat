@@ -511,7 +511,7 @@ fn lookup_object_property_case_insensitive<'a>(
     name: &str,
 ) -> Option<&'a Value> {
     object
-        .properties
+        .properties()
         .iter()
         .find(|(key, _)| key.eq_ignore_ascii_case(name))
         .map(|(_, value)| value)
@@ -932,14 +932,14 @@ mod tests {
     #[test]
     fn triplot_accepts_triangulation_like_struct() {
         let _guard = setup();
-        let mut st = StructValue::new();
+        let mut st = runmat_value::UnboundedStructValueBuilder::new();
         st.fields
             .insert("ConnectivityList".into(), tensor(&[1.0, 2.0, 3.0], 1, 3));
         st.fields.insert(
             "Points".into(),
             tensor(&[0.0, 1.0, 0.0, 0.0, 0.0, 1.0], 3, 2),
         );
-        let handle = block_on(triplot_builtin(vec![Value::Struct(st)])).unwrap();
+        let handle = block_on(triplot_builtin(vec![Value::Struct(st.finish())])).unwrap();
         assert!(handle.is_finite());
         let fig = clone_figure(current_figure_handle()).unwrap();
         let PlotElement::Line(line) = fig.plots().next().unwrap() else {
@@ -965,11 +965,13 @@ mod tests {
     fn triplot_accepts_delaunaytri_object() {
         let _guard = setup();
         let dt = block_on(
-            crate::builtins::geometry::triangulation::delaunay_tri_builtin(vec![tensor(
-                &[0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
-                3,
-                2,
-            )]),
+            crate::builtins::geometry::triangulation::delaunay_tri_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![tensor(
+                    &[0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+                    3,
+                    2,
+                )]),
+            ),
         )
         .unwrap();
         let handle = block_on(triplot_builtin(vec![dt])).unwrap();

@@ -1,4 +1,5 @@
 use super::*;
+use crate::builtins::deep_learning::arguments::DeepLearningObjectEdit as _;
 use crate::builtins::deep_learning::autodiff::{
     array_methods::{dlarray_plus_builtin, dlarray_sum_builtin, dlarray_times_builtin},
     gradient::dlgradient_direct,
@@ -38,10 +39,12 @@ fn output_annotation_errors_identify_the_actual_network_caller() {
 fn layer(kind: K, fields: &[(&str, Value)]) -> Value {
     let mut layer = ObjectInstance::new(kind.class().owned());
     layer
-        .properties
-        .insert("Name".into(), Value::String(format!("{kind:?}")));
+        .replace_dl_property("Name", Value::String(format!("{kind:?}").into()))
+        .expect("fixture property");
     for (key, value) in fields {
-        layer.properties.insert((*key).into(), value.clone());
+        layer
+            .replace_dl_property(key, value.clone())
+            .expect("fixture property");
     }
     Value::Object(layer)
 }
@@ -115,12 +118,13 @@ fn input(data: Vec<f64>, dtype: NumericDType) -> Value {
             ("Labels", Value::String("CBT".into())),
         ],
     )
+    .expect("fixture object")
 }
 
 fn tensor(value: &Value) -> &Tensor {
     match value {
         Value::Tensor(tensor) => tensor,
-        Value::Object(object) => match object.properties.get("Data") {
+        Value::Object(object) => match object.properties().get("Data") {
             Some(Value::Tensor(tensor)) => tensor,
             _ => panic!("tensor Data"),
         },
@@ -129,7 +133,12 @@ fn tensor(value: &Value) -> &Tensor {
 }
 
 fn squared_output(net: &Value, data: Vec<f64>, dtype: NumericDType) -> f64 {
-    let output = block_on(forward_builtin(net.clone(), input(data, dtype), vec![])).unwrap();
+    let output = block_on(forward_builtin(
+        net.clone(),
+        input(data, dtype),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap();
     tensor(&output)
         .materialize_f64()
         .into_iter()
@@ -156,15 +165,30 @@ fn public_forward_tape_uses_every_numerical_layer_and_matches_finite_differences
             let gradient = {
                 let _activation = TapeActivation::enter(Rc::new(RefCell::new(Tape::new())));
                 let x = annotate_dlarray_value(input(data.clone(), dtype)).unwrap();
-                let y = block_on(forward_builtin(net.value().clone(), x.clone(), vec![])).unwrap();
+                let y = block_on(forward_builtin(
+                    net.value().clone(),
+                    x.clone(),
+                    crate::builtins::common::test_support::builtin_arguments(vec![]),
+                ))
+                .unwrap();
                 assert_eq!(tensor(&y).numeric_dtype(), dtype, "{kind:?}");
                 let loss = dlarray_sum_builtin(
                     dlarray_times_builtin(y.clone(), y).unwrap(),
-                    vec![Value::String("all".into())],
+                    crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                        "all".into(),
+                    )]),
                 )
                 .unwrap();
-                let first = block_on(dlgradient_direct(loss.clone(), vec![x.clone()])).unwrap();
-                let second = block_on(dlgradient_direct(loss, vec![x])).unwrap();
+                let first = block_on(dlgradient_direct(
+                    loss.clone(),
+                    crate::builtins::common::test_support::builtin_arguments(vec![x.clone()]),
+                ))
+                .unwrap();
+                let second = block_on(dlgradient_direct(
+                    loss,
+                    crate::builtins::common::test_support::builtin_arguments(vec![x]),
+                ))
+                .unwrap();
                 assert_eq!(tensor(&first), tensor(&second), "repeat reverse {kind:?}");
                 assert_eq!(tensor(&first).numeric_dtype(), dtype);
                 assert_eq!(tensor(&first).shape(), &[2, 1, 3]);
@@ -210,26 +234,40 @@ fn feature_input_and_both_output_layers_preserve_the_public_tape() {
         )]))
         .unwrap();
         let _activation = TapeActivation::enter(Rc::new(RefCell::new(Tape::new())));
-        let x = annotate_dlarray_value(object(
-            "dlarray",
-            vec![
-                (
-                    "Data",
-                    values(vec![1.0, -2.0], vec![2, 1], NumericDType::F32),
-                ),
-                ("Format", Value::String("CB".into())),
-                ("Labels", Value::String("CB".into())),
-            ],
+        let x = annotate_dlarray_value(
+            object(
+                "dlarray",
+                vec![
+                    (
+                        "Data",
+                        values(vec![1.0, -2.0], vec![2, 1], NumericDType::F32),
+                    ),
+                    ("Format", Value::String("CB".into())),
+                    ("Labels", Value::String("CB".into())),
+                ],
+            )
+            .expect("fixture object"),
+        )
+        .unwrap();
+        let y = block_on(forward_builtin(
+            net.value().clone(),
+            x.clone(),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .unwrap();
-        let y = block_on(forward_builtin(net.value().clone(), x.clone(), vec![])).unwrap();
         assert_eq!(tensor(&y).as_f32_slice().unwrap(), &[1.0, -2.0]);
         let loss = dlarray_sum_builtin(
             dlarray_times_builtin(y.clone(), y).unwrap(),
-            vec![Value::String("all".into())],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "all".into(),
+            )]),
         )
         .unwrap();
-        let gradient = block_on(dlgradient_direct(loss, vec![x])).unwrap();
+        let gradient = block_on(dlgradient_direct(
+            loss,
+            crate::builtins::common::test_support::builtin_arguments(vec![x]),
+        ))
+        .unwrap();
         assert_eq!(tensor(&gradient).as_f32_slice().unwrap(), &[2.0, -4.0]);
     }
 }
@@ -237,7 +275,12 @@ fn feature_input_and_both_output_layers_preserve_the_public_tape() {
 fn hidden_state(net: &Value, x: Value) -> Value {
     let outputs = {
         let _count = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
-        block_on(forward_builtin(net.clone(), x, vec![])).unwrap()
+        block_on(forward_builtin(
+            net.clone(),
+            x,
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap()
     };
     let Value::OutputList(outputs) = outputs else {
         panic!("[Y, State]")
@@ -299,8 +342,18 @@ fn returned_recurrent_state_is_an_output_of_the_shared_forward_trace() {
                     .expect("prediction output node");
                 assert!(Rc::ptr_eq(state_trace, prediction_trace));
             }
-            let loss = dlarray_sum_builtin(hidden, vec![Value::String("all".into())]).unwrap();
-            let gradient = block_on(dlgradient_direct(loss, vec![x])).unwrap();
+            let loss = dlarray_sum_builtin(
+                hidden,
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                    "all".into(),
+                )]),
+            )
+            .unwrap();
+            let gradient = block_on(dlgradient_direct(
+                loss,
+                crate::builtins::common::test_support::builtin_arguments(vec![x]),
+            ))
+            .unwrap();
             tensor(&gradient).materialize_f64()
         };
         for index in 0..data.len() {
@@ -326,7 +379,12 @@ fn returned_recurrent_state_is_an_output_of_the_shared_forward_trace() {
 fn prediction_and_states(net: &Value, x: Value) -> [Value; 3] {
     let outputs = {
         let _count = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
-        block_on(forward_builtin(net.clone(), x, vec![])).unwrap()
+        block_on(forward_builtin(
+            net.clone(),
+            x,
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap()
     };
     let Value::OutputList(outputs) = outputs else {
         panic!("[Y, State]")
@@ -379,7 +437,9 @@ fn joint_prediction_hidden_and_cell_loss_runs_one_reverse_per_shared_trace() {
                 let mut losses = outputs.into_iter().map(|output| {
                     dlarray_sum_builtin(
                         dlarray_times_builtin(output.clone(), output).unwrap(),
-                        vec![Value::String("all".into())],
+                        crate::builtins::common::test_support::builtin_arguments(vec![
+                            Value::String("all".into()),
+                        ]),
                     )
                     .unwrap()
                 });
@@ -388,9 +448,17 @@ fn joint_prediction_hidden_and_cell_loss_runs_one_reverse_per_shared_trace() {
                     losses.next().unwrap(),
                 )
                 .unwrap();
-                let first = block_on(dlgradient_direct(loss.clone(), vec![x.clone()])).unwrap();
+                let first = block_on(dlgradient_direct(
+                    loss.clone(),
+                    crate::builtins::common::test_support::builtin_arguments(vec![x.clone()]),
+                ))
+                .unwrap();
                 assert_eq!(execution.reverse_calls.get(), 1);
-                let second = block_on(dlgradient_direct(loss, vec![x])).unwrap();
+                let second = block_on(dlgradient_direct(
+                    loss,
+                    crate::builtins::common::test_support::builtin_arguments(vec![x]),
+                ))
+                .unwrap();
                 assert_eq!(execution.reverse_calls.get(), 2);
                 assert_eq!(tensor(&first), tensor(&second));
                 assert_eq!(tensor(&first).numeric_dtype(), dtype);

@@ -49,7 +49,7 @@ pub(crate) fn transform_string_array_borrowed_indexed(
     };
 
     let reuse_shape = input.shape.is_admitted();
-    let mut physical = ExactArrayStorage::<Utf8Text>::requested_bytes(input.data.len())
+    let mut physical = ExactArrayStorage::<Utf8Text>::requested_bytes(input.data().len())
         .map_err(|cause| admission_error(runtime, HostAllocationError::Numeric(cause)))?;
     if !reuse_shape {
         physical = physical
@@ -60,7 +60,7 @@ pub(crate) fn transform_string_array_borrowed_indexed(
             )
             .ok_or_else(|| admission_error(runtime, HostAllocationError::Overflow))?;
     }
-    let mut claims = usize::from(!input.data.is_empty()) + usize::from(!reuse_shape);
+    let mut claims = usize::from(!input.data().is_empty()) + usize::from(!reuse_shape);
     for (index, text) in input.data().iter().enumerate() {
         if index % CHECKPOINT_CHUNK == 0 && runtime.is_cancelled() {
             return Err(admission_error(runtime, HostAllocationError::Cancelled));
@@ -105,11 +105,11 @@ pub(crate) fn transform_string_array_borrowed_indexed(
     };
     let data = receipt
         .with_output_construction(runtime, |permit| {
-            ExactArrayStorage::try_initialize(input.data.len(), permit, |index| {
+            ExactArrayStorage::try_initialize(input.data().len(), permit, |index| {
                 if index % CHECKPOINT_CHUNK == 0 {
                     receipt.checkpoint(runtime)?;
                 }
-                let text = &input.data[index];
+                let text = &input.data()[index];
                 let selected = select(index, text.as_str());
                 if selected == text.as_str() && text.has_retained_claim() {
                     return Ok(text.clone());

@@ -6,11 +6,11 @@ use crate::{NativeExecutionError, NativeExecutionResult};
 /// provider and capacity terms the scheduler inventory reports for it.
 pub fn active_provider_resource() -> NativeExecutionResult<AcceleratorRequest> {
     let device = active_execution_device()?;
-    let required_features = device
-        .features
-        .contains(&AcceleratorFeature::Compute)
-        .then(|| std::collections::BTreeSet::from([AcceleratorFeature::Compute]))
-        .unwrap_or_default();
+    let required_features = if device.features.contains(&AcceleratorFeature::Compute) {
+        std::collections::BTreeSet::from([AcceleratorFeature::Compute])
+    } else {
+        Default::default()
+    };
     let request = AcceleratorRequest {
         class: device.class.clone(),
         count: 1,

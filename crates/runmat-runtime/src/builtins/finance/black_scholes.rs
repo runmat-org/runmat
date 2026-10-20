@@ -92,7 +92,7 @@ async fn blsprice_builtin(
     rate: Value,
     time: Value,
     volatility: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let requested_outputs = crate::output_count::current_output_count();
     if matches!(requested_outputs, Some(0)) {
@@ -164,7 +164,7 @@ async fn blsprice_builtin(
 
 pub(in crate::builtins) mod implied_volatility;
 #[cfg(test)]
-use implied_volatility::blsimpv_builtin;
+use implied_volatility::blsimpv_builtin_source;
 
 fn admit_nondouble_pricing_inputs<'a>(
     builtin: &'static str,
@@ -206,7 +206,7 @@ struct BroadcastInputs {
 impl BroadcastInputs {
     fn from_values(
         builtin: &'static str,
-        values: Vec<Value>,
+        values: impl IntoIterator<Item = Value>,
         class: precision::PricingClass,
     ) -> BuiltinResult<Self> {
         let mut inputs = values
@@ -449,10 +449,10 @@ fn scalar_numeric(builtin: &'static str, value: &Value, name: &str) -> BuiltinRe
 fn is_empty_value(value: &Value) -> bool {
     match value {
         Value::Tensor(tensor) => tensor_utils::tensor_element_len(tensor) == 0,
-        Value::StringArray(array) => array.data.is_empty(),
-        Value::CharArray(chars) => chars.data.is_empty() || chars.rows == 0 || chars.cols == 0,
+        Value::StringArray(array) => array.data().is_empty(),
+        Value::CharArray(chars) => chars.data().is_empty() || chars.rows == 0 || chars.cols == 0,
         Value::LogicalArray(logical) => logical.data.is_empty(),
-        Value::Cell(cell) => cell.data.is_empty(),
+        Value::Cell(cell) => cell.data().is_empty(),
         _ => false,
     }
 }
@@ -460,8 +460,10 @@ fn is_empty_value(value: &Value) -> bool {
 fn text_scalar(builtin: &'static str, value: &Value) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.as_str().to_owned()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].as_str().to_owned()),
-        Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data.iter().collect()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(array.data()[0].as_str().to_owned())
+        }
+        Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data().iter().collect()),
         _ => Err(error(
             builtin,
             format!("{builtin}: option names and text values must be scalar text"),

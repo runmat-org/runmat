@@ -164,7 +164,7 @@ impl PythonAdapter {
         authority: Option<&runmat_python::PythonReentryAuthority>,
     ) -> Result<Value, RuntimeError> {
         let PythonValue::Object(handle) = value else {
-            return value_from_python(value);
+            return value_from_python(value, Some(context));
         };
         if let Some(reference) = self
             .python_to_foreign

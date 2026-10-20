@@ -8,7 +8,7 @@ use crate::builtins::array::binning::numeric as numeric_order;
 pub(super) async fn apply(
     x: Value,
     edges_or_count: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let inputs = arguments::gather(x, edges_or_count, rest).await?;
     let shape = shape_of(&inputs.x);

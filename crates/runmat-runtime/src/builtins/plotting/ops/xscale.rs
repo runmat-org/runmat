@@ -13,19 +13,22 @@ use super::axis_ticks::TickAxis;
 )]
 pub fn xscale_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     xscale_with_runtime(runtime.as_ref(), args)
 }
 
 #[cfg(test)]
 pub fn xscale_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    xscale_with_runtime(None, args)
+    xscale_with_runtime(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(args),
+    )
 }
 
 fn xscale_with_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &XSCALE_DESCRIPTOR,

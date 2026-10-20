@@ -6,6 +6,8 @@ use std::{
     rc::Rc,
 };
 
+mod source_projection;
+
 impl ExecutableUnit {
     pub(crate) fn owns_callable(&self, function: FunctionId) -> bool {
         owns_callable_parts(self.mir(), self.analysis(), self.functions(), function)
@@ -29,6 +31,7 @@ impl ExecutableUnit {
         mut self,
         owners: &HashMap<FunctionId, Rc<Self>>,
     ) -> Result<Self, String> {
+        self.reset_direct_code_cache();
         for function in self.foreign_functions()? {
             let owner = owners.get(&function).ok_or_else(|| {
                 format!(
@@ -50,6 +53,12 @@ impl ExecutableUnit {
                 .get(id)
                 .ok_or("original function is absent")?
                 .clone();
+            source_projection::normalize_original(
+                self.source_map(),
+                owner.source_map(),
+                &projection,
+                &mut original,
+            )?;
             // Coverage sites are scoped to the compiling caller. All executable
             // instructions, source identities, spans and ABI remain exact.
             projection.coverage_sites.clear();

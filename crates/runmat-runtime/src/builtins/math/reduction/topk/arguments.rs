@@ -1,6 +1,9 @@
 use super::*;
 
-pub(super) async fn parse_topk_args(kind: TopKKind, rest: &[Value]) -> BuiltinResult<TopKArgs> {
+pub(super) async fn parse_topk_args(
+    kind: TopKKind,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<TopKArgs> {
     if rest.is_empty() {
         return Err(topk_invalid_argument(kind, "k is required"));
     }

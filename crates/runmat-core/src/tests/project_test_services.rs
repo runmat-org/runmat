@@ -62,7 +62,7 @@ fn project_backed_test_discovery_and_execution_share_parent_driver() {
     };
     assert!(result.is_class(runmat_runtime::testing::TEST_RESULT_CLASS));
     assert_eq!(
-        result.properties.get("Passed"),
+        result.properties().get("Passed"),
         Some(&runmat_value::Value::Bool(true))
     );
     assert_eq!(parent.project_revision(), Some(revision));

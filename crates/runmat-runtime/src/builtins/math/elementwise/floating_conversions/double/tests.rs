@@ -17,7 +17,12 @@ use runmat_value::{
 };
 
 fn double_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    block_on(super::double_builtin(None, value, rest)).map(|owned| owned.value().clone())
+    block_on(super::double_builtin(
+        None,
+        value,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    ))
+    .map(|owned| owned.value().clone())
 }
 
 mod errors;

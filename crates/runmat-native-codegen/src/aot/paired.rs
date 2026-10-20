@@ -45,8 +45,7 @@ pub fn validate_paired_product_header(
                 .ok()
                 .and_then(|index| assembly.functions.get(index))
                 .is_none_or(|function| {
-                    function.portable_id != entry.function
-                        || function.mir_body_digest != entry.body
+                    function.portable_id != entry.function || function.mir_body_digest != entry.body
                 })
         {
             return Err(paired_error(

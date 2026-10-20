@@ -201,7 +201,7 @@ mod wire_tests {
 }
 
 #[cfg(test)]
-mod tests {
+mod streaming_serialization_tests {
     use super::*;
 
     #[test]

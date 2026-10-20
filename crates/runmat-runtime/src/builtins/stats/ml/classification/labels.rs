@@ -37,7 +37,8 @@ pub(super) fn labels_from_value(value: Value, name: &str) -> BuiltinResult<Label
             kind: LabelKind::Char,
         }),
         Value::StringArray(array) => {
-            let labels = match array.data.try_into_owned() {
+            let (data, _shape, _rows, _cols) = array.into_parts();
+            let labels = match data.try_into_owned() {
                 Ok(values) => values.into_iter().map(ClassLabel::Text).collect(),
                 Err(values) => values.iter().cloned().map(ClassLabel::Text).collect(),
             };
@@ -45,10 +46,10 @@ pub(super) fn labels_from_value(value: Value, name: &str) -> BuiltinResult<Label
                 labels,
                 kind: LabelKind::String,
             })
-        }
+        },
         Value::Cell(cell) => {
-            let mut labels = Vec::with_capacity(cell.data.len());
-            for item in &cell.data {
+            let mut labels = Vec::with_capacity(cell.data().len());
+            for item in cell.data() {
                 labels.push(ClassLabel::Text(scalar_text(item, name)?));
             }
             Ok(LabelVector {
@@ -323,7 +324,7 @@ pub(super) fn char_rows(array: &CharArray) -> Vec<String> {
     let mut rows = Vec::with_capacity(array.rows);
     for row in 0..array.rows {
         let start = row * array.cols;
-        rows.push(array.data[start..start + array.cols].iter().collect());
+        rows.push(array.data()[start..start + array.cols].iter().collect());
     }
     rows
 }
@@ -347,8 +348,8 @@ pub(super) fn char_array_from_rows(rows: &[impl AsRef<str>]) -> BuiltinResult<Ch
 pub(super) fn scalar_text(value: &Value, name: &str) -> BuiltinResult<runmat_value::Utf8Text> {
     match value {
         Value::String(text) => Ok(text.clone()),
-        Value::CharArray(chars) => Ok(chars.data.iter().collect::<String>().into()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::CharArray(chars) => Ok(chars.data().iter().collect::<String>().into()),
+        Value::StringArray(array) if array.data().len() == 1 => Ok(array.data()[0].clone()),
         other => Err(invalid_argument(format!(
             "classify: {name} must be a string scalar, got {other:?}"
         ))),

@@ -75,7 +75,7 @@ pub(super) async fn execute_for_composition(
     let completed = match geometry? {
         RemoteExactMeshingComposition::Completed(completed) => completed,
         RemoteExactMeshingComposition::Terminal(outcome) => {
-            return Ok(super::exact_structural_study::composition(outcome))
+            return Ok(super::exact_structural_study::composition(*outcome))
         }
     };
     let mut input_outcomes = input_outcomes?;

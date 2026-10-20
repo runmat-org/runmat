@@ -2,29 +2,6 @@
 
 use super::*;
 
-const MATERIAL_ASSIGNMENT_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "target",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Typed beam, shell, solid, or cell property-region target.",
-    },
-    BuiltinParamDescriptor {
-        name: "material",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Typed fea.Material value.",
-    },
-    BuiltinParamDescriptor {
-        name: "Name, Value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Expected-material and confidence options.",
-    },
-];
 const SELECTED_TARGET_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "region",
     ty: BuiltinParamType::Any,
@@ -39,13 +16,6 @@ const ALL_TARGET_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     default: None,
     description: "Typed geometry asset whose compatible domains are selected.",
 }];
-
-const MATERIAL_ASSIGNMENT_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
-    [BuiltinSignatureDescriptor {
-        label: "assignment = fea.materialAssignment(target, material, Name, Value, ...)",
-        inputs: &MATERIAL_ASSIGNMENT_INPUTS,
-        outputs: &OUT_ANY,
-    }];
 
 macro_rules! target_descriptor {
     ($descriptor:ident, $signatures:ident, $label:literal, $inputs:ident) => {
@@ -63,12 +33,6 @@ macro_rules! target_descriptor {
     };
 }
 
-pub(super) const MATERIAL_ASSIGNMENT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &MATERIAL_ASSIGNMENT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
 target_descriptor!(
     BEAM_TARGET_DESCRIPTOR,
     BEAM_TARGET_SIGNATURES,
@@ -276,13 +240,11 @@ pub async fn fea_property_region_target_all_cells_builtin(geometry: Value) -> Bu
 
 #[runtime_builtin(
     name = "fea.materialAssignment",
-    category = "fea",
-    summary = "Create a typed FEA material assignment.",
-    keywords = "fea,material,assignment,region",
-    descriptor(crate::builtins::fea::material_assignments::MATERIAL_ASSIGNMENT_DESCRIPTOR),
-    integer_audit(crate::builtins::fea::FEA_STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::material_assignments"
 )]
-pub async fn fea_material_assignment_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn fea_material_assignment_builtin(
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     create_material_assignment_object_from_args(args)
 }

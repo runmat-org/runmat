@@ -52,21 +52,27 @@ pub(crate) async fn nlparci_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
     beta: Value,
     residual: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     nlparci_in_runtime(runtime.as_ref(), beta, residual, rest).await
 }
 
 #[cfg(test)]
 async fn nlparci_builtin(beta: Value, residual: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    nlparci_in_runtime(None, beta, residual, rest).await
+    nlparci_in_runtime(
+        None,
+        beta,
+        residual,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    )
+    .await
 }
 
 async fn nlparci_in_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
     beta: Value,
     residual: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let outputs = crate::output_count::current_output_count();
     if outputs.is_some_and(|count| count > 1) {

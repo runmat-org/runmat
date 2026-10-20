@@ -464,7 +464,7 @@ async fn failed_detached_launch_retains_original_unknown_attempt_accounting() {
 }
 
 #[test]
-fn exact_program_submission_round_trips_through_durable_storage() {
+fn legacy_program_workload_kind_is_checked_against_original_stored_request() {
     let temp = tempfile::tempdir().unwrap();
     let store = JobStore::open(SupervisorPaths::new(temp.path().join("state")).unwrap()).unwrap();
     let submission = original_program_submission(super::DurableExecutionContext {
@@ -514,10 +514,16 @@ fn persisted_graph_failure_keeps_its_typed_workload_identity() {
     // This is a positive stored-Graph control, not a historical revision
     // rejection. Keep the frozen fixture immutable and lift only its envelope
     // schema in memory to the current transport schema.
-    let mut envelope: runmat_execution::ExecutableUnitEnvelope = serde_json::from_slice(
-        include_bytes!("../../../runmat-execution/tests/fixtures/executable-unit-current.json"),
-    )
+    let mut frozen: serde_json::Value = serde_json::from_slice(include_bytes!(
+        "../../../runmat-execution/tests/fixtures/executable-unit-current.json"
+    ))
     .unwrap();
+    // This dependency-free positive control uses today's required field,
+    // without rewriting the historical compatibility fixture.
+    frozen["manifest"]["dependencies"] = serde_json::json!([]);
+    frozen["dependency_products"] = serde_json::json!([]);
+    let mut envelope: runmat_execution::ExecutableUnitEnvelope =
+        serde_json::from_value(frozen).unwrap();
     envelope.schema_version = runmat_execution::EXECUTABLE_UNIT_SCHEMA_VERSION;
     envelope.manifest.schema_version = runmat_execution::EXECUTABLE_UNIT_SCHEMA_VERSION;
     let bytes = envelope.canonical_bytes().unwrap();

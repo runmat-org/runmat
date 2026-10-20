@@ -73,7 +73,7 @@ fn source_pair(value: &Value, index: usize) -> BuiltinResult<(NumericScalar, Num
 pub(in super::super) fn complex(
     context: &RuntimeContext,
     dim_zero: usize,
-    values: &[Value],
+    values: FunctionArgumentView<'_>,
 ) -> BuiltinResult<Value> {
     let geometry = inspect_geometry(dim_zero, values)?;
     let integer = leftmost_complex_integer_target(values);

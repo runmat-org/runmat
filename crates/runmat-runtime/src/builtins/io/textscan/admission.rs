@@ -9,7 +9,7 @@ pub(super) fn preflight(
     runtime: Option<&crate::context::RuntimeContext>,
     input: &Value,
     format: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<HostAdmission> {
     if !matches!(
         input,

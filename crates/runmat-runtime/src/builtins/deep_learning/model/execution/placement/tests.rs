@@ -16,8 +16,9 @@ use runmat_execution::{
 use runmat_value::{CellArray, NumericDType, Tensor, Value};
 
 use super::super::{execute_network, NetworkCaller, NetworkExecutionRequest, NetworkOutputLayout};
+use crate::builtins::deep_learning::tests::fully_connected_layer_builtin;
 use crate::builtins::deep_learning::{
-    layers::{feature_input_layer_builtin, fully_connected_layer_builtin, relu_layer_builtin},
+    layers::{feature_input_layer_builtin, relu_layer_builtin},
     model::{dlnetwork_builtin, output},
 };
 use crate::context::{
@@ -86,8 +87,13 @@ impl RuntimePlacementService for SelectedRoute {
 }
 
 fn network() -> crate::execution::RootedValue {
-    let input = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
+    let input = block_on(feature_input_layer_builtin(
+        Value::Num(2.0),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap();
     let dense = block_on(fully_connected_layer_builtin(
+        None,
         Value::Num(1.0),
         vec![
             Value::String("Weights".into()),
@@ -199,8 +205,15 @@ impl AccelProvider for RacingReluProvider {
 }
 
 fn relu_network() -> crate::execution::RootedValue {
-    let input = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
-    let relu = block_on(relu_layer_builtin(vec![])).unwrap();
+    let input = block_on(feature_input_layer_builtin(
+        Value::Num(2.0),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap();
+    let relu = block_on(relu_layer_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap();
     block_on(dlnetwork_builtin(vec![Value::Cell(
         CellArray::new(vec![input, relu], 2, 1).unwrap(),
     )]))
@@ -340,7 +353,9 @@ fn cancellation_before_presentation_abandons_without_success_feedback() {
         crate::builtins::deep_learning::autodiff::with_test_tape(|| {
             let input = block_on(crate::builtins::deep_learning::training::dlarray_builtin(
                 Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
-                vec![Value::String("CB".into())],
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                    "CB".into(),
+                )]),
             ))
             .expect("an annotated dlarray input is required to prove tape publication");
             let source_nodes = crate::builtins::deep_learning::autodiff::test_tape_node_count();
@@ -392,7 +407,9 @@ fn uncancelled_annotated_network_publishes_tape_node() {
         crate::builtins::deep_learning::autodiff::with_test_tape(|| {
             let input = block_on(crate::builtins::deep_learning::training::dlarray_builtin(
                 Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
-                vec![Value::String("CB".into())],
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                    "CB".into(),
+                )]),
             ))
             .expect("an annotated dlarray input is required to prove tape publication");
             let source_nodes = crate::builtins::deep_learning::autodiff::test_tape_node_count();

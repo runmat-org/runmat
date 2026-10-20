@@ -37,27 +37,39 @@ fn checked_two_output_request(name: &'static str) -> BuiltinResult<TwoOutputRequ
 #[runtime_builtin(
     name = "graph",
     binding_variant = "default",
-    builtin_path = "crate::builtins::graph"
+    builtin_path = "crate::builtins::graph",
+    context = true
 )]
-pub(super) async fn graph_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    construct_graph(
-        GRAPH_NAME,
-        false,
-        constructor_arguments(args, false, GRAPH_NAME).await?,
-    )
+pub(super) async fn graph_builtin_context(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let args = constructor_arguments(args, runtime.as_ref(), false, GRAPH_NAME).await?;
+    construct_graph(GRAPH_NAME, false, args.view())
 }
 
 #[runtime_builtin(
     name = "digraph",
     binding_variant = "default",
-    builtin_path = "crate::builtins::graph"
+    builtin_path = "crate::builtins::graph",
+    context = true
 )]
-pub(super) async fn digraph_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    construct_graph(
-        DIGRAPH_NAME,
-        true,
-        constructor_arguments(args, true, DIGRAPH_NAME).await?,
-    )
+pub(super) async fn digraph_builtin_context(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let args = constructor_arguments(args, runtime.as_ref(), true, DIGRAPH_NAME).await?;
+    construct_graph(DIGRAPH_NAME, true, args.view())
+}
+
+#[cfg(test)]
+pub(super) async fn graph_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    graph_builtin_context(None, args).await
+}
+
+#[cfg(test)]
+pub(super) async fn digraph_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    digraph_builtin_context(None, args).await
 }
 
 #[runtime_builtin(
@@ -207,7 +219,10 @@ pub(super) async fn shortestpath_builtin(
     binding_variant = "default",
     builtin_path = "crate::builtins::graph"
 )]
-pub(super) async fn distances_builtin(graph: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn distances_builtin(
+    graph: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     let selectors = admit_distance_selectors(rest)?;
     let graph = graph_data_async(&graph, "distances").await?;
     let (sources, targets) = resolve_distance_selectors(&graph, selectors).await?;

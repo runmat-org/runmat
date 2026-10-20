@@ -102,12 +102,12 @@ fn later_invalid_host_control_precedes_resident_score_download() {
         labels(),
         Value::GpuTensor(scores.clone()),
         Value::Num(1.0),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("XCrit"),
             Value::from("tpr"),
             Value::from("Weights"),
             tensor(&[1.0, -1.0, 1.0, 1.0], &[4, 1]),
-        ],
+        ]),
     ))
     .expect_err("negative host weights");
     assert!(error.message().contains("Weights"));
@@ -126,7 +126,7 @@ fn known_invalid_host_label_or_option_geometry_precedes_download() {
         tensor(&[1.0, 0.0, 1.0, 0.0], &[2, 2]),
         Value::GpuTensor(scores.clone()),
         Value::Num(1.0),
-        vec![],
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
     ))
     .expect_err("matrix labels");
     assert!(label_error.message().contains("vector"));
@@ -134,7 +134,10 @@ fn known_invalid_host_label_or_option_geometry_precedes_download() {
         labels(),
         Value::GpuTensor(scores),
         Value::Num(1.0),
-        vec![Value::from("Cost"), tensor(&[0.0, 1.0, 1.0, 0.0], &[4, 1])],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("Cost"),
+            tensor(&[0.0, 1.0, 1.0, 0.0], &[4, 1]),
+        ]),
     ))
     .expect_err("invalid cost geometry");
     assert!(cost_error.message().contains("Cost"));
@@ -173,7 +176,7 @@ fn known_invalid_negative_classes_precede_resident_score_download() {
             observed_labels,
             Value::GpuTensor(scores.clone()),
             Value::Num(1.0),
-            options,
+            crate::builtins::common::test_support::builtin_arguments(options),
         ))
         .expect_err("host-known invalid class plan");
         assert!(error.message().contains(expected), "{}", error.message());
@@ -193,7 +196,7 @@ fn unsupported_output_count_precedes_download() {
         labels(),
         Value::GpuTensor(scores),
         Value::Num(1.0),
-        vec![],
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
     ))
     .expect_err("eight outputs are not supported");
     assert!(error.message().contains("too many output"));
@@ -212,10 +215,10 @@ fn discarded_call_admits_host_structure_without_download_or_curve_execution() {
         labels(),
         Value::GpuTensor(scores.clone()),
         Value::Num(1.0),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("Weights"),
             tensor(&[1.0, -1.0, 1.0, 1.0], &[4, 1]),
-        ],
+        ]),
     ))
     .expect_err("known-invalid host control is rejected even without output");
     assert!(error.message().contains("Weights"));
@@ -225,7 +228,7 @@ fn discarded_call_admits_host_structure_without_download_or_curve_execution() {
         labels(),
         Value::GpuTensor(scores.clone()),
         Value::Num(1.0),
-        vec![],
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
     ))
     .expect("discarded call does not materialize the resident score vector");
     assert!(matches!(empty, Value::OutputList(outputs) if outputs.is_empty()));
@@ -235,7 +238,7 @@ fn discarded_call_admits_host_structure_without_download_or_curve_execution() {
         labels(),
         tensor(&[f64::INFINITY, 0.8, 0.4, 0.1], &[4, 1]),
         Value::Num(1.0),
-        vec![],
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
     ))
     .expect("discarded call does not run the data-dependent curve kernel");
     assert!(matches!(empty, Value::OutputList(outputs) if outputs.is_empty()));
@@ -256,7 +259,7 @@ fn failed_gather_preserves_provider_cause_and_borrowed_input() {
         labels(),
         Value::GpuTensor(resident.handle.clone()),
         Value::Num(1.0),
-        vec![],
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
     ))
     .expect_err("provider download must fail");
     assert_eq!(error.identifier(), ERROR_INVALID_ARGUMENT.identifier);

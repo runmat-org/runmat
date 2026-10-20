@@ -1,5 +1,7 @@
 //! Typed, effect-free per-learnable training-factor admission.
 
+#[cfg(test)]
+use crate::builtins::deep_learning::arguments::DeepLearningObjectEdit as _;
 use std::collections::HashMap;
 
 use runmat_builtins::{DeepLearningLayerKind, DeepLearningLayerOption as O};
@@ -123,7 +125,7 @@ fn decode(
     function: &'static str,
 ) -> BuiltinResult<FactorValues> {
     let mut found = None;
-    for (name, value) in &layer.properties {
+    for (name, value) in layer.properties() {
         if O::from_name(name) != Some(option) {
             continue;
         }
@@ -214,7 +216,7 @@ impl FactorPlan {
             let Value::Object(layer) = &layers[row.key.layer_index] else {
                 unreachable!("canonical parameter view admitted layer")
             };
-            let kind = DeepLearningLayerKind::from_identity(&layer.class_name)
+            let kind = DeepLearningLayerKind::from_identity(layer.class_name())
                 .ok_or_else(|| fail(function, "unknown layer in parameter factor plan"))?;
             let (gate_rows, gate_count) =
                 recurrent_geometry(kind, row.key.role, &row.expected_shape, function)?;
@@ -246,9 +248,10 @@ impl FactorPlan {
 mod tests {
     use super::*;
     use crate::builtins::deep_learning::layers::{
-        bilstm_layer_builtin, feature_input_layer_builtin, fully_connected_layer_builtin,
-        lstm_layer_builtin, sequence_input_layer_builtin,
+        bilstm_layer_builtin, feature_input_layer_builtin, lstm_layer_builtin,
+        sequence_input_layer_builtin,
     };
+    use crate::builtins::deep_learning::tests::fully_connected_layer_builtin;
     use futures::executor::block_on;
     use runmat_value::Tensor;
 
@@ -260,19 +263,36 @@ mod tests {
     }
 
     fn recurrent_layers(bidirectional: bool) -> Vec<Value> {
-        let input = block_on(sequence_input_layer_builtin(Value::Num(3.0), vec![])).unwrap();
+        let input = block_on(sequence_input_layer_builtin(
+            Value::Num(3.0),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap();
         let recurrent = if bidirectional {
-            block_on(bilstm_layer_builtin(Value::Num(2.0), vec![])).unwrap()
+            block_on(bilstm_layer_builtin(
+                Value::Num(2.0),
+                crate::builtins::common::test_support::builtin_arguments(vec![]),
+            ))
+            .unwrap()
         } else {
-            block_on(lstm_layer_builtin(Value::Num(2.0), vec![])).unwrap()
+            block_on(lstm_layer_builtin(
+                Value::Num(2.0),
+                crate::builtins::common::test_support::builtin_arguments(vec![]),
+            ))
+            .unwrap()
         };
         vec![input, recurrent]
     }
 
     #[test]
     fn factors_bind_to_typed_roles_and_reject_invalid_mutations() {
-        let input = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
+        let input = block_on(feature_input_layer_builtin(
+            Value::Num(2.0),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap();
         let dense = block_on(fully_connected_layer_builtin(
+            None,
             Value::Num(3.0),
             vec![
                 Value::String("WeightLearnRateFactor".into()),
@@ -297,8 +317,8 @@ mod tests {
             panic!("dense layer expected")
         };
         layer
-            .properties
-            .insert("BiasL2Factor".into(), Value::Num(f64::NAN));
+            .replace_dl_property("BiasL2Factor", Value::Num(f64::NAN))
+            .expect("fixture property");
         assert!(FactorPlan::admit(&layers, "test").is_err());
     }
 
@@ -313,15 +333,21 @@ mod tests {
             vec![1.0, 2.0, 3.0, 4.0],
             vec![1, 4],
         );
-        layer.properties.insert(name, value);
+        layer
+            .replace_dl_property(&name, value)
+            .expect("fixture property");
         let (name, value) = option(
             "RecurrentWeightsL2Factor",
             vec![4.0, 3.0, 2.0, 1.0],
             vec![1, 4],
         );
-        layer.properties.insert(name, value);
+        layer
+            .replace_dl_property(&name, value)
+            .expect("fixture property");
         let (name, value) = option("BiasLearnRateFactor", vec![0.0, 1.0, 2.0, 3.0], vec![1, 4]);
-        layer.properties.insert(name, value);
+        layer
+            .replace_dl_property(&name, value)
+            .expect("fixture property");
         let rows = parameters::view_layers(&layers, "test").unwrap();
         let plan = FactorPlan::admit(&layers, "test").unwrap();
         for row in rows {
@@ -360,7 +386,9 @@ mod tests {
             panic!("BiLSTM layer expected")
         };
         let (name, value) = option("BiasL2Factor", (1..=8).map(f64::from).collect(), vec![1, 8]);
-        layer.properties.insert(name, value);
+        layer
+            .replace_dl_property(&name, value)
+            .expect("fixture property");
         let rows = parameters::view_layers(&layers, "test").unwrap();
         let bias = rows
             .iter()
@@ -383,13 +411,17 @@ mod tests {
             unreachable!()
         };
         let (name, column) = option("BiasL2Factor", (1..=8).map(f64::from).collect(), vec![8, 1]);
-        layer.properties.insert(name, column);
+        layer
+            .replace_dl_property(&name, column)
+            .expect("fixture property");
         assert!(FactorPlan::admit(&layers, "test").is_err());
         let Value::Object(layer) = &mut layers[1] else {
             unreachable!()
         };
         let (name, short) = option("BiasL2Factor", vec![1.0; 4], vec![1, 4]);
-        layer.properties.insert(name, short);
+        layer
+            .replace_dl_property(&name, short)
+            .expect("fixture property");
         assert!(FactorPlan::admit(&layers, "test").is_err());
     }
 
@@ -398,19 +430,28 @@ mod tests {
         let correct = option("InputWeightsLearnRateFactor", vec![1.0; 4], vec![1, 4]);
         assert!(block_on(lstm_layer_builtin(
             Value::Num(2.0),
-            vec![Value::String(correct.0), correct.1],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String(correct.0.into()),
+                correct.1
+            ]),
         ))
         .is_ok());
         let wrong_orientation = option("InputWeightsLearnRateFactor", vec![1.0; 4], vec![4, 1]);
         assert!(block_on(lstm_layer_builtin(
             Value::Num(2.0),
-            vec![Value::String(wrong_orientation.0), wrong_orientation.1],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String(wrong_orientation.0.into()),
+                wrong_orientation.1
+            ]),
         ))
         .is_err());
         let wrong_gate_count = option("BiasL2Factor", vec![1.0; 4], vec![1, 4]);
         assert!(block_on(bilstm_layer_builtin(
             Value::Num(2.0),
-            vec![Value::String(wrong_gate_count.0), wrong_gate_count.1],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String(wrong_gate_count.0.into()),
+                wrong_gate_count.1
+            ]),
         ))
         .is_err());
     }

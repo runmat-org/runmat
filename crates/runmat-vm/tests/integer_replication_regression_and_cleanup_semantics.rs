@@ -11,7 +11,7 @@ fn contains_integer_storage(values: &[Value], expected: &IntegerStorage) -> bool
             &structure.fields.values().cloned().collect::<Vec<_>>(),
             expected,
         ),
-        Value::Cell(cell) => contains_integer_storage(&cell.data, expected),
+        Value::Cell(cell) => contains_integer_storage(cell.data(), expected),
         Value::Int(value) => match (value, expected) {
             (IntValue::I8(actual), IntegerStorage::I8(expected)) => {
                 expected.as_slice() == [*actual]

@@ -48,7 +48,7 @@ impl ProgramExecutionObject {
         let bytes = serde_json::to_vec(&value)
             .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
         let reference = ValueRef {
-            schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1,
+            schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION,
             id: access.value_id(logical_digest),
             logical_digest,
             encoded_length: bytes.len() as u64,
@@ -493,7 +493,7 @@ fn collect_references(values: &[ValuePayload]) -> Vec<&ValueRef> {
 #[cfg(test)]
 mod tests {
     use runmat_execution::identity::ValueId;
-    use runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1;
+    use runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION;
     use runmat_execution::value::InlineValue;
     use runmat_execution::Digest;
 
@@ -503,7 +503,7 @@ mod tests {
     fn result_reference(bytes: &[u8]) -> ValueRef {
         let logical_digest = Digest::sha256(bytes);
         ValueRef {
-            schema_version: VALUE_PAYLOAD_SCHEMA_V1,
+            schema_version: VALUE_PAYLOAD_SCHEMA_VERSION,
             id: ValueId::derive(&[b"program-transport-test", logical_digest.bytes()]),
             logical_digest,
             encoded_length: bytes.len() as u64,
@@ -546,6 +546,11 @@ mod tests {
         )
         .unwrap();
 
+        assert_eq!(
+            object.reference.schema_version,
+            VALUE_PAYLOAD_SCHEMA_VERSION
+        );
+        object.validate().unwrap();
         assert_ne!(
             Digest::sha256(&object.bytes),
             object.reference.logical_digest
@@ -557,6 +562,11 @@ mod tests {
                 encryption_context: Digest::sha256(b"other-value-encryption"),
             })
             .unwrap();
+        assert_eq!(
+            rebound.reference.schema_version,
+            VALUE_PAYLOAD_SCHEMA_VERSION
+        );
+        rebound.validate().unwrap();
         assert_eq!(
             rebound.reference.logical_digest,
             object.reference.logical_digest
@@ -766,7 +776,7 @@ mod tests {
                         worker_id: WorkerId::derive(&[b"worker"]),
                         node_lease_id: NodeLeaseId::derive(&[b"lease"]),
                         process_generation: 1,
-                        device_identity: None,
+                        accelerator: None,
                     })
                 }
                 2 => invalid.objects[input].reference.authorization_scope = "foreign".into(),

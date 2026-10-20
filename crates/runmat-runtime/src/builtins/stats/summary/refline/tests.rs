@@ -51,7 +51,11 @@ fn refline_without_coefficients_adds_least_squares_line() {
         Vec::new(),
     ))
     .unwrap();
-    let handle = block_on(refline_builtin(Vec::new())).unwrap();
+    let handle = block_on(refline_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap();
     let Value::Num(handle) = handle else {
         panic!("expected line handle");
     };
@@ -62,13 +66,28 @@ fn refline_without_coefficients_adds_least_squares_line() {
 #[test]
 fn refline_accepts_coeff_vector_and_slope_intercept_forms() {
     let _guard = setup();
-    let handle = block_on(refline_builtin(vec![tensor(vec![2.0, -1.0], 1, 2)])).unwrap();
+    let handle = block_on(refline_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![tensor(
+            vec![2.0, -1.0],
+            1,
+            2,
+        )]),
+    ))
+    .unwrap();
     let Value::Num(handle) = handle else {
         panic!("expected line handle");
     };
     assert_eq!(y_data(handle), vec![-1.0, 1.0]);
 
-    let handle = block_on(refline_builtin(vec![Value::Num(-0.5), Value::Num(3.0)])).unwrap();
+    let handle = block_on(refline_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(-0.5),
+            Value::Num(3.0),
+        ]),
+    ))
+    .unwrap();
     let Value::Num(handle) = handle else {
         panic!("expected line handle");
     };
@@ -82,11 +101,14 @@ fn invalid_style_does_not_retarget_axes() {
     let figure = current_figure_handle();
     let target = encode_axes_handle(figure, 0);
     let before = current_axes_state().active_index;
-    let err = block_on(refline_builtin(vec![
-        Value::Num(target),
-        tensor(vec![1.0, 0.0], 1, 2),
-        Value::String("Color".into()),
-    ]))
+    let err = block_on(refline_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(target),
+            tensor(vec![1.0, 0.0], 1, 2),
+            Value::String("Color".into()),
+        ]),
+    ))
     .expect_err("a name without its value must fail before axes mutation");
     assert_eq!(err.identifier(), REFLINE_ERROR_INVALID_ARGUMENT.identifier);
     assert_eq!(current_axes_state().active_index, before);
@@ -96,11 +118,14 @@ fn invalid_style_does_not_retarget_axes() {
 fn refline_reads_typed_integer_coefficients_exactly() {
     let _guard = setup();
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-    let handle = block_on(refline_builtin(vec![int_tensor(
-        IntegerStorage::I16(vec![2, -1]),
-        1,
-        2,
-    )]))
+    let handle = block_on(refline_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![int_tensor(
+            IntegerStorage::I16(vec![2, -1]),
+            1,
+            2,
+        )]),
+    ))
     .unwrap();
     let Value::Num(handle) = handle else {
         panic!("expected line handle");
@@ -111,11 +136,14 @@ fn refline_reads_typed_integer_coefficients_exactly() {
 #[test]
 fn refline_integer_extension_is_gated_and_inexact_values_reject() {
     let strict = crate::compatibility::push_runmat_extensions_enabled(false);
-    let error = block_on(refline_builtin(vec![int_tensor(
-        IntegerStorage::I16(vec![2, -1]),
-        1,
-        2,
-    )]))
+    let error = block_on(refline_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![int_tensor(
+            IntegerStorage::I16(vec![2, -1]),
+            1,
+            2,
+        )]),
+    ))
     .expect_err("strict mode rejects integer coefficients");
     assert_eq!(
         error.identifier(),
@@ -124,11 +152,14 @@ fn refline_integer_extension_is_gated_and_inexact_values_reject() {
     drop(strict);
 
     let extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-    let error = block_on(refline_builtin(vec![int_tensor(
-        IntegerStorage::U64(vec![(1_u64 << 53) + 1, 0]),
-        1,
-        2,
-    )]))
+    let error = block_on(refline_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![int_tensor(
+            IntegerStorage::U64(vec![(1_u64 << 53) + 1, 0]),
+            1,
+            2,
+        )]),
+    ))
     .expect_err("inexact integer coefficients reject");
     assert!(error.message().contains("exactly representable as double"));
     drop(extensions);
@@ -148,8 +179,11 @@ fn refline_strict_mode_gates_explicit_gpu_before_provider_access() {
         .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
         .expect("validated provenance");
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-    let error = block_on(refline_builtin(vec![Value::GpuTensor(handle)]))
-        .expect_err("strict mode rejects explicit GPU coefficients before gather");
+    let error = block_on(refline_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(handle)]),
+    ))
+    .expect_err("strict mode rejects explicit GPU coefficients before gather");
     assert_eq!(
         error.identifier(),
         REFLINE_EXPLICIT_GPU_COEFFICIENT_EXTENSION.error_identifier
@@ -159,8 +193,14 @@ fn refline_strict_mode_gates_explicit_gpu_before_provider_access() {
 #[test]
 fn refline_logical_coefficients_are_a_gated_extension() {
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-    let error = block_on(refline_builtin(vec![Value::Bool(true), Value::Bool(false)]))
-        .expect_err("strict mode rejects logical coefficients");
+    let error = block_on(refline_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Bool(true),
+            Value::Bool(false),
+        ]),
+    ))
+    .expect_err("strict mode rejects logical coefficients");
     assert_eq!(
         error.identifier(),
         REFLINE_LOGICAL_COEFFICIENT_EXTENSION.error_identifier
@@ -175,7 +215,14 @@ fn refline_spans_existing_plot_or_explicit_axes_limits() {
         tensor(vec![10.0, 20.0], 1, 2),
     ]))
     .unwrap();
-    let handle = block_on(refline_builtin(vec![Value::Num(1.0), Value::Num(0.0)])).unwrap();
+    let handle = block_on(refline_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(1.0),
+            Value::Num(0.0),
+        ]),
+    ))
+    .unwrap();
     let Value::Num(handle) = handle else {
         panic!("expected line handle");
     };
@@ -184,7 +231,14 @@ fn refline_spans_existing_plot_or_explicit_axes_limits() {
 
     let _ =
         crate::builtins::plotting::xlim::xlim_builtin(vec![tensor(vec![-1.0, 3.0], 1, 2)]).unwrap();
-    let handle = block_on(refline_builtin(vec![Value::Num(2.0), Value::Num(1.0)])).unwrap();
+    let handle = block_on(refline_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(2.0),
+            Value::Num(1.0),
+        ]),
+    ))
+    .unwrap();
     let Value::Num(handle) = handle else {
         panic!("expected line handle");
     };
@@ -196,10 +250,13 @@ fn refline_spans_existing_plot_or_explicit_axes_limits() {
 fn refline_explicit_finite_endpoints_survive_intermediate_product_overflow() {
     let _guard = setup();
     crate::builtins::plotting::xlim::xlim_builtin(vec![tensor(vec![2.0, 2.5], 1, 2)]).unwrap();
-    let handle = block_on(refline_builtin(vec![
-        Value::Num(1.0e308),
-        Value::Num(-1.0e308),
-    ]))
+    let handle = block_on(refline_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(1.0e308),
+            Value::Num(-1.0e308),
+        ]),
+    ))
     .expect("finite fused endpoints");
     let Value::Num(handle) = handle else {
         panic!("expected line handle")
@@ -225,15 +282,23 @@ fn refline_targets_axes_and_accepts_style_args() {
     .unwrap();
     let fig = current_figure_handle();
     let ax = encode_axes_handle(fig, 1);
-    let handle = block_on(refline_builtin(vec![
-        Value::Num(ax),
+    let runtime = crate::context::RuntimeContext::new(std::rc::Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ));
+    let supplied = crate::builtins::common::test_support::builtin_arguments(vec![
         Value::Num(0.0),
         Value::Num(2.0),
         Value::String("--r".into()),
         Value::String("DisplayName".into()),
         Value::String("threshold".into()),
-    ]))
-    .unwrap();
+    ]);
+    let args = crate::call::BuiltinArguments::new(
+        supplied
+            .into_function_arguments()
+            .prepend_routing_in_context(Value::Num(ax), &runtime)
+            .unwrap(),
+    );
+    let handle = block_on(refline_builtin(Some(runtime), args)).unwrap();
     let Value::Num(handle) = handle else {
         panic!("expected line handle");
     };
@@ -253,10 +318,25 @@ fn refline_targets_axes_and_accepts_style_args() {
 #[test]
 fn refline_rejects_bad_coefficients() {
     let _guard = setup();
-    let err = block_on(refline_builtin(vec![tensor(vec![1.0, 2.0, 3.0], 1, 3)])).unwrap_err();
+    let err = block_on(refline_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![tensor(
+            vec![1.0, 2.0, 3.0],
+            1,
+            3,
+        )]),
+    ))
+    .unwrap_err();
     assert!(err.message.contains("coefficients"));
 
-    let err = block_on(refline_builtin(vec![Value::Num(f64::NAN), Value::Num(0.0)])).unwrap_err();
+    let err = block_on(refline_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(f64::NAN),
+            Value::Num(0.0),
+        ]),
+    ))
+    .unwrap_err();
     assert!(err.message.contains("finite"));
 }
 
@@ -349,7 +429,11 @@ fn refline_least_squares_reads_gpu_scatter_source_data() {
     )
     .expect("insert GPU scatter plot");
 
-    let handle = block_on(refline_builtin(Vec::new())).expect("gpu-backed refline");
+    let handle = block_on(refline_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect("gpu-backed refline");
     let Value::Num(handle) = handle else {
         panic!("expected line handle");
     };

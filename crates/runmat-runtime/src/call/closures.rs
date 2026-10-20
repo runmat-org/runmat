@@ -101,9 +101,9 @@ pub fn load_method_closure(
     match base {
         Value::Object(object) => {
             let function_name =
-                external_qualified_display_name(object.class_name.display_name(), &name);
+                external_qualified_display_name(object.class_name().display_name(), &name);
             let registered = crate::class_registry::lookup_bound_method(
-                &object.class_name,
+                object.class_name(),
                 &runmat_types::MethodName::from(name.as_str()),
             )
             .and_then(|method| method.bound_function);

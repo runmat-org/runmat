@@ -1,4 +1,5 @@
 use super::*;
+use crate::builtins::deep_learning::arguments::DeepLearningObjectEdit as _;
 
 fn options(solver: &str, extra: &[(&str, Value)]) -> Value {
     let identity = Solver::from_name(solver)
@@ -6,10 +7,12 @@ fn options(solver: &str, extra: &[(&str, Value)]) -> Value {
         .class_identity();
     let mut object = ObjectInstance::new(identity);
     object
-        .properties
-        .insert("SolverName".into(), Value::String(solver.into()));
+        .replace_dl_property("SolverName", Value::String(solver.into()))
+        .expect("fixture property");
     for (name, value) in extra {
-        object.properties.insert((*name).into(), value.clone());
+        object
+            .replace_dl_property(name, value.clone())
+            .expect("fixture property");
     }
     Value::Object(object)
 }
@@ -52,20 +55,23 @@ fn constructor_and_training_consumer_share_solver_defaults() {
         let value = futures::executor::block_on(
             crate::builtins::deep_learning::training::training_options_builtin(
                 Value::String(name.into()),
-                vec![],
+                crate::builtins::common::test_support::builtin_arguments(vec![]),
             ),
         )
         .unwrap();
         let Value::Object(object) = &value else {
             panic!("trainingOptions must return an object")
         };
-        assert!(object.class_name.is(solver.class_identity()));
+        assert!(object.class_name().is(solver.class_identity()));
         assert_eq!(
-            object.properties.get("InitialLearnRate"),
+            object.properties().get("InitialLearnRate"),
             Some(&Value::Num(rate))
         );
         assert_eq!(
-            object.properties.get("SquaredGradientDecayFactor").cloned(),
+            object
+                .properties()
+                .get("SquaredGradientDecayFactor")
+                .cloned(),
             decay.map(Value::Num)
         );
         let config = TrainingConfig::from_value(&value, "trainnet").unwrap();
@@ -82,8 +88,8 @@ fn solver_class_and_solver_name_must_agree_without_generic_class_fallback() {
         unreachable!()
     };
     object
-        .properties
-        .insert("SolverName".into(), Value::String("sgdm".into()));
+        .replace_dl_property("SolverName", Value::String("sgdm".into()))
+        .expect("fixture property");
     assert!(TrainingConfig::from_value(&mismatch, "trainnet")
         .err()
         .unwrap()
@@ -94,7 +100,9 @@ fn solver_class_and_solver_name_must_agree_without_generic_class_fallback() {
     let Value::Object(object) = &mut missing_name else {
         unreachable!()
     };
-    object.properties.remove("SolverName");
+    object
+        .remove_dl_property("SolverName")
+        .expect("fixture removal");
     assert_eq!(
         TrainingConfig::from_value(&missing_name, "trainnet")
             .unwrap()
@@ -106,7 +114,18 @@ fn solver_class_and_solver_name_must_agree_without_generic_class_fallback() {
     let Value::Object(object) = &mut legacy else {
         unreachable!()
     };
-    object.class_name = runmat_types::StaticClassIdentity::new("nnet.cnn.TrainingOptions").owned();
+    let properties = object
+        .properties()
+        .iter()
+        .map(|(name, value)| (name, value.clone()))
+        .collect::<Vec<_>>();
+    let Value::Object(reclassified) =
+        crate::builtins::deep_learning::object("nnet.cnn.TrainingOptions", properties)
+            .expect("fixture class replacement")
+    else {
+        unreachable!()
+    };
+    *object = reclassified;
     assert!(TrainingConfig::from_value(&legacy, "trainnet").is_err());
 }
 
@@ -115,10 +134,10 @@ fn positional_solver_cannot_be_overridden_by_a_named_property() {
     let error = futures::executor::block_on(
         crate::builtins::deep_learning::training::training_options_builtin(
             Value::String("sgdm".into()),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::String("SolverName".into()),
                 Value::String("adam".into()),
-            ],
+            ]),
         ),
     )
     .err()

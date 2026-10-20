@@ -40,7 +40,7 @@ fn admission(runtime: Option<&RuntimeContext>, error: HostAllocationError) -> Ru
 async fn care_builtin(
     runtime: Option<RuntimeContext>,
     a: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let out_count = crate::output_count::current_output_count();
     let requested = out_count.unwrap_or(1);
@@ -121,7 +121,11 @@ mod tests {
         let outputs = block_on(care_builtin(
             None,
             Value::Num(-1.0),
-            vec![Value::Num(1.0), Value::Num(1.0), Value::Num(1.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(1.0),
+                Value::Num(1.0),
+                Value::Num(1.0),
+            ]),
         ))
         .expect("standard CARE");
         let Value::OutputList(values) = outputs else {
@@ -151,7 +155,11 @@ mod tests {
             let output = block_on(care_builtin(
                 None,
                 Value::Num(-2.0),
-                vec![Value::Num(1.0), Value::Num(q), Value::Num(r)],
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(1.0),
+                    Value::Num(q),
+                    Value::Num(r),
+                ]),
             ))
             .expect("standard indefinite CARE has a stabilizing solution");
             let Value::OutputList(values) = output else {

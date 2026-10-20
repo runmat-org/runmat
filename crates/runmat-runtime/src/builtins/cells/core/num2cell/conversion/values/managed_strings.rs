@@ -89,18 +89,14 @@ pub(in crate::builtins::cells::core::num2cell) fn convert(
     runtime: &RuntimeContext,
 ) -> BuiltinResult<Value> {
     let plan = ManagedPartitionPlan::prepare(&input.shape, dimensions, runtime)?;
-    let unique = input.data.is_unique();
+    let unique = input.data_owner().is_unique();
     let retained = quote::retained_bytes(runtime, &input, &plan, unique)?;
     let allocation =
         HostAllocationPlan::new(0, retained).map_err(|cause| admission(runtime, cause))?;
     let receipt = HostAllocationReceipt::admit(Some(runtime), allocation)
         .map_err(|cause| admission(runtime, cause))?
         .ok_or_else(|| admission(runtime, HostAllocationError::MissingManagedOwner))?;
-    let StringArray {
-        data,
-        shape: _source_shape,
-        ..
-    } = input;
+    let (data, _source_shape, _, _) = input.into_parts();
     let mut source = if unique {
         Source::Unique(
             data.try_into_owned()

@@ -15,6 +15,7 @@ mod admission;
 mod owner;
 
 async fn writematrix_builtin(data: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let rest = crate::call::BuiltinArguments::from_borrowed(&rest, None)?;
     super::writematrix_builtin(None, data, rest).await
 }
 

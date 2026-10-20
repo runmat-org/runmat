@@ -17,7 +17,7 @@ fn prepends_returns_previous_path_and_deduplicates() {
         crate::builtins::common::path_state::PATH_LIST_SEPARATOR
     ));
 
-    let returned = super::run(vec![Value::String(second.clone())]).expect("addpath");
+    let returned = super::run(vec![Value::String(second.clone().into())]).expect("addpath");
     assert_eq!(
         String::try_from(&returned).expect("text"),
         format!(
@@ -65,7 +65,7 @@ fn asymmetric_cell_paths_follow_column_major_order() {
     let cells = CellArray::new(
         directories
             .iter()
-            .map(|dir| Value::String(dir.path().to_string_lossy().into_owned()))
+            .map(|dir| Value::String(dir.path().to_string_lossy().into_owned().into()))
             .collect(),
         2,
         2,
@@ -122,7 +122,7 @@ fn moving_the_user_entry_keeps_its_origin_for_later_setting_changes() {
     .with_search_path(search.clone());
     let _active = crate::context::RuntimeContextGuard::enter(runtime);
     super::run(vec![
-        Value::String(user.clone()),
+        Value::String(user.clone().into()),
         Value::String("-end".into()),
     ])
     .expect("move user entry");

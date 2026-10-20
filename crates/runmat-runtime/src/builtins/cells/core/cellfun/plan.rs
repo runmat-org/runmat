@@ -1,13 +1,13 @@
 use crate::BuiltinResult;
-use runmat_value::{CellArray, Value};
+use runmat_value::Value;
 
 use super::error;
 use super::options::Invocation;
 
 pub(super) struct Plan {
     pub(super) callable: super::callback::Callable,
-    pub(super) cells: Vec<CellArray>,
-    pub(super) extra_arguments: Vec<Value>,
+    pub(super) cells: crate::call::BuiltinArguments,
+    pub(super) extra_arguments: crate::call::BuiltinArguments,
     pub(super) uniform_output: bool,
     pub(super) error_handler: Option<super::callback::Callable>,
     pub(super) shape: Vec<usize>,
@@ -31,38 +31,42 @@ impl Plan {
     }
 }
 
-fn partition_arguments(arguments: Vec<Value>) -> BuiltinResult<(Vec<CellArray>, Vec<Value>)> {
-    let mut cells = Vec::new();
-    let mut extra = Vec::new();
+fn partition_arguments(
+    arguments: crate::call::BuiltinArguments,
+) -> BuiltinResult<(crate::call::BuiltinArguments, crate::call::BuiltinArguments)> {
+    let mut cell_count = 0usize;
     let mut constants_started = false;
-    for argument in arguments {
+    for argument in &arguments {
         match argument {
             Value::Cell(_) if constants_started => {
                 return Err(error::invalid(
                     "cellfun: cell array inputs must precede extra arguments",
                 ))
             }
-            Value::Cell(cell) => cells.push(cell),
-            value => {
-                constants_started = true;
-                extra.push(value);
-            }
+            Value::Cell(_) => cell_count += 1,
+            _ => constants_started = true,
         }
     }
-    if cells.is_empty() {
+    if cell_count == 0 {
         return Err(error::invalid(
             "cellfun: expected at least one cell array input",
         ));
     }
-    Ok((cells, extra))
+    Ok((
+        arguments.range(..cell_count)?,
+        arguments.into_range(cell_count..)?,
+    ))
 }
 
-fn common_shape(cells: &[CellArray]) -> BuiltinResult<Vec<usize>> {
-    let shape = cells
-        .first()
-        .map(|cell| cell.shape.as_slice().to_vec())
-        .unwrap_or_default();
-    if let Some(index) = cells.iter().position(|cell| cell.shape != shape) {
+fn common_shape(cells: &crate::call::BuiltinArguments) -> BuiltinResult<Vec<usize>> {
+    let Some(Value::Cell(first)) = cells.first() else {
+        unreachable!("partitioned cell inputs");
+    };
+    let shape = first.shape.as_slice().to_vec();
+    if let Some(index) = cells
+        .iter()
+        .position(|value| !matches!(value, Value::Cell(cell) if cell.shape == shape))
+    {
         return Err(error::invalid(format!(
             "cellfun: cell array input {} does not match the size of the first input",
             index + 1

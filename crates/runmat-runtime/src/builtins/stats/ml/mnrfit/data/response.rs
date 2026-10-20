@@ -48,7 +48,7 @@ pub(in super::super) async fn response_outcomes(
             numeric_outcomes(values, logical.shape.to_vec(), rows, cooperation).await
         }
         Value::StringArray(array) => {
-            text_outcomes(&array.data, &array.shape, rows, cooperation).await
+            text_outcomes(array.data(), &array.shape, rows, cooperation).await
         }
         Value::String(text) if rows == 1 => {
             text_outcomes(std::slice::from_ref(&text), &[1, 1], rows, cooperation).await
@@ -293,9 +293,9 @@ async fn cellstr_outcomes(
 ) -> BuiltinResult<ResponseOutcomes> {
     let mut labels = Vec::new();
     labels
-        .try_reserve_exact(cell.data.len())
+        .try_reserve_exact(cell.data().len())
         .map_err(|_| invalid("mnrfit: text response labels exceed available host resources"))?;
-    for (index, value) in cell.data.iter().enumerate() {
+    for (index, value) in cell.data().iter().enumerate() {
         let label = match value {
             Value::String(text) => class_census::clone_text(text, cooperation).await?,
             Value::CharArray(chars) if chars.rows == 1 => {
@@ -312,7 +312,7 @@ async fn cellstr_outcomes(
         }
     }
     cooperation
-        .completed((cell.data.len() % 16_384) as u64)
+        .completed((cell.data().len() % 16_384) as u64)
         .await?;
     text_outcomes(&labels, cell.shape(), rows, cooperation).await
 }
@@ -329,7 +329,7 @@ async fn char_rows_cooperatively(
         let mut text = String::new();
         text.try_reserve(array.cols)
             .map_err(|_| invalid("mnrfit: text response row exceeds available host resources"))?;
-        for (index, character) in array.data[start..start + array.cols].iter().enumerate() {
+        for (index, character) in array.data()[start..start + array.cols].iter().enumerate() {
             text.push(*character);
             if (index + 1).is_multiple_of(16_384) {
                 cooperation.completed(16_384).await?;

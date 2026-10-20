@@ -53,7 +53,10 @@ fn encode_error(message: impl Into<String>) -> crate::RuntimeError {
     builtin_path = "crate::builtins::strings::text_analytics::encode",
     context = true
 )]
-async fn encode_builtin(runtime: Option<RuntimeContext>, args: Vec<Value>) -> BuiltinResult<Value> {
+async fn encode_builtin(
+    runtime: Option<RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     let (bag, input, options) = parse_args(args, runtime.as_ref()).await?;
     let sparse = match bag {
         Value::Object(object) if object.is_class(BAG_OF_WORDS_CLASS) => {
@@ -65,7 +68,7 @@ async fn encode_builtin(runtime: Option<RuntimeContext>, args: Vec<Value>) -> Bu
         Value::Object(object) => {
             return Err(encode_error(format!(
                 "encode: expected bagOfWords or bagOfNgrams object, got {}",
-                object.class_name
+                object.class_name()
             )))
         }
         other => {
@@ -105,7 +108,7 @@ impl Default for EncodeOptions {
 }
 
 async fn parse_args(
-    mut args: Vec<Value>,
+    mut args: crate::call::BuiltinArguments,
     runtime: Option<&RuntimeContext>,
 ) -> BuiltinResult<(Value, Value, EncodeOptions)> {
     if args.len() < 2 {
@@ -118,8 +121,8 @@ async fn parse_args(
             "encode: name-value options must appear in pairs",
         ));
     }
-    let bag = args.remove(0);
-    let input = args.remove(0);
+    let bag = args.pop_front().expect("validated argument prefix");
+    let input = args.pop_front().expect("validated argument prefix");
     if crate::dispatcher::value_contains_gpu(&bag) {
         return Err(encode_error(
             "encode: bag model must be a host bagOfWords or bagOfNgrams object",
@@ -136,7 +139,7 @@ async fn parse_args(
         Value::Object(object) => {
             return Err(encode_error(format!(
                 "encode: expected bagOfWords or bagOfNgrams object, got {}",
-                object.class_name
+                object.class_name()
             )))
         }
         other => {
@@ -357,7 +360,7 @@ fn documents_from_input(input: Value, model_name: &str) -> BuiltinResult<Vec<Vec
         }
         Value::Object(object) => Err(encode_error(format!(
             "encode: expected tokenizedDocument or word vector for {model_name}, got {}",
-            object.class_name
+            object.class_name()
         ))),
         other => {
             validate_row_word_vector(&other, model_name)?;
@@ -475,7 +478,10 @@ mod tests {
     use runmat_value::{IntValue, IntegerStorage, StringArray, Tensor};
 
     fn run_encode(args: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(encode_builtin(None, args))
+        futures::executor::block_on(encode_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
 
     fn sparse(value: Value) -> SparseTensor {
@@ -507,32 +513,30 @@ mod tests {
             ));
         }
         let mut object = ObjectInstance::new(TOKENIZED_DOCUMENT_CLASS.to_string());
-        object.properties.insert(
+        object.replace_property_unbounded(
             "Documents".to_string(),
             Value::Cell(CellArray::new(data, docs.len(), 1).expect("documents cell")),
         );
         object
-            .properties
-            .insert("NumDocuments".to_string(), Value::Num(docs.len() as f64));
+            .replace_property_unbounded("NumDocuments".to_string(), Value::Num(docs.len() as f64));
         Value::Object(object)
     }
 
     fn bag_of_words(vocabulary: &[&str]) -> Value {
         let mut object = ObjectInstance::new(BAG_OF_WORDS_CLASS.to_string());
-        object.properties.insert(
+        object.replace_property_unbounded(
             "Vocabulary".to_string(),
             string_array(vocabulary, 1, vocabulary.len()),
         );
-        object.properties.insert(
+        object.replace_property_unbounded(
             "Counts".to_string(),
             Value::Tensor(Tensor::zeros(vec![0, vocabulary.len()])),
         );
-        object
-            .properties
-            .insert("NumWords".to_string(), Value::Num(vocabulary.len() as f64));
-        object
-            .properties
-            .insert("NumDocuments".to_string(), Value::Num(0.0));
+        object.replace_property_unbounded(
+            "NumWords".to_string(),
+            Value::Num(vocabulary.len() as f64),
+        );
+        object.replace_property_unbounded("NumDocuments".to_string(), Value::Num(0.0));
         Value::Object(object)
     }
 
@@ -546,11 +550,11 @@ mod tests {
             }
         }
         let mut object = ObjectInstance::new(BAG_OF_NGRAMS_CLASS.to_string());
-        object.properties.insert(
+        object.replace_property_unbounded(
             "Ngrams".to_string(),
             Value::StringArray(StringArray::new(data, vec![rows, cols]).expect("ngrams")),
         );
-        object.properties.insert(
+        object.replace_property_unbounded(
             "NgramLengths".to_string(),
             Value::Tensor(
                 Tensor::new(
@@ -560,16 +564,12 @@ mod tests {
                 .expect("lengths"),
             ),
         );
-        object.properties.insert(
+        object.replace_property_unbounded(
             "Counts".to_string(),
             Value::Tensor(Tensor::zeros(vec![0, ngrams.len()])),
         );
-        object
-            .properties
-            .insert("NumNgrams".to_string(), Value::Num(ngrams.len() as f64));
-        object
-            .properties
-            .insert("NumDocuments".to_string(), Value::Num(0.0));
+        object.replace_property_unbounded("NumNgrams".to_string(), Value::Num(ngrams.len() as f64));
+        object.replace_property_unbounded("NumDocuments".to_string(), Value::Num(0.0));
         Value::Object(object)
     }
 
@@ -655,7 +655,7 @@ mod tests {
             panic!("expected cell");
         };
         assert_eq!((cell.rows, cell.cols), (1, 1));
-        let Value::SparseTensor(sparse) = &cell.data[0] else {
+        let Value::SparseTensor(sparse) = &cell.data()[0] else {
             panic!("expected sparse cell element");
         };
         assert_eq!((sparse.rows, sparse.cols), (1, 2));

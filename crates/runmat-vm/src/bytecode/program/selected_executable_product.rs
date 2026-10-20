@@ -8,8 +8,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use runmat_execution::executable::{
-    selected_unit_content_digest, ExecutableStaticImport, SelectedBodySemanticDigest,
-    SelectedUnitContentDigest,
+    ExecutableStaticImport, SelectedBodySemanticDigest, SelectedUnitContentDigest,
 };
 use runmat_execution::{Digest, FunctionBindingOrigin};
 use runmat_runtime::source_context::SelectedProgramSourceOwner;
@@ -19,17 +18,14 @@ use runmat_hir::FunctionId;
 
 use super::FunctionRegistry;
 
+#[path = "selected_executable_product/code.rs"]
+mod code;
+pub use code::SelectedExecutableCode;
+
 #[derive(Debug)]
 pub struct SelectedExecutableProduct {
-    canonical_v3: Arc<[u8]>,
-    full_digest: Digest,
+    code: Rc<SelectedExecutableCode>,
     source_owner: SelectedProgramSourceOwner,
-    content_digest: SelectedUnitContentDigest,
-    program: Digest,
-    body_fingerprints: HashMap<FunctionBindingOrigin, String>,
-    body_semantic_digests: HashMap<FunctionBindingOrigin, SelectedBodySemanticDigest>,
-    static_imports: Vec<ExecutableStaticImport>,
-    linked_native_imports: Vec<runmat_execution::executable::LinkedNativeStaticImport>,
     foreign_basis: Option<Digest>,
     interop_receipt: Option<std::rc::Rc<crate::SelectedUnitInteropReceipt>>,
     /// Original invocation's finite dynamic-source authority. This local
@@ -431,11 +427,11 @@ fn validate_static_product_dependencies(
 
 impl SelectedExecutableProduct {
     pub fn canonical_v3(&self) -> &Arc<[u8]> {
-        &self.canonical_v3
+        &self.code.canonical_v3
     }
 
     pub fn full_digest(&self) -> Digest {
-        self.full_digest
+        self.code.full_digest
     }
 
     pub fn foreign_basis(&self) -> Option<Digest> {
@@ -451,32 +447,33 @@ impl SelectedExecutableProduct {
     }
 
     pub fn content_digest(&self) -> SelectedUnitContentDigest {
-        self.content_digest
+        self.code.content_digest
     }
 
     pub fn body_digest(&self, origin: FunctionBindingOrigin) -> Option<SelectedBodySemanticDigest> {
-        self.body_semantic_digests.get(&origin).copied()
+        self.code.body_semantic_digests.get(&origin).copied()
     }
 
     pub fn body_fingerprint(&self, origin: FunctionBindingOrigin) -> Option<&str> {
-        self.body_fingerprints.get(&origin).map(String::as_str)
+        self.code.body_fingerprints.get(&origin).map(String::as_str)
     }
 
     pub fn static_imports(&self) -> &[ExecutableStaticImport] {
-        &self.static_imports
+        &self.code.static_imports
     }
 
     pub fn linked_native_imports(
         &self,
     ) -> &[runmat_execution::executable::LinkedNativeStaticImport] {
-        &self.linked_native_imports
+        &self.code.linked_native_imports
     }
 
     pub fn fingerprint_imports(&self) -> Vec<ExecutableStaticImport> {
-        self.static_imports
+        self.code
+            .static_imports
             .iter()
             .copied()
-            .chain(self.linked_native_imports.iter().copied().map(
+            .chain(self.code.linked_native_imports.iter().copied().map(
                 runmat_execution::executable::LinkedNativeStaticImport::fingerprint_projection,
             ))
             .collect()
@@ -524,57 +521,56 @@ impl SelectedExecutableProduct {
         if !source_owner.is_live() {
             return Err("selected executable source issuer has retired".into());
         }
-        let admitted =
-            crate::admit_executable_unit(&canonical_v3).map_err(|error| error.to_string())?;
-        let interop = &admitted.envelope().manifest.interop;
-        let has_interop = !interop.foreign_types.is_empty()
-            || !interop.adapters.is_empty()
-            || !interop.adapter_contracts.is_empty();
-        if has_interop != foreign_basis.is_some() || has_interop != interop_receipt.is_some() {
+        let code = SelectedExecutableCode::admit(canonical_v3)?;
+        Self::bind_admitted_code(
+            code,
+            source_owner,
+            foreign_basis,
+            interop_receipt,
+            dynamic_admission,
+        )
+    }
+
+    /// Bind fresh invocation authority to already authenticated immutable code.
+    /// Code reuse never reuses a source issuance, foreign receipt or dynamic port.
+    pub fn bind_admitted_code(
+        code: Rc<SelectedExecutableCode>,
+        source_owner: SelectedProgramSourceOwner,
+        foreign_basis: Option<Digest>,
+        interop_receipt: Option<Rc<crate::SelectedUnitInteropReceipt>>,
+        dynamic_admission: Option<
+            crate::program_execution::dynamic_admission::DynamicEvalAdmissionPort,
+        >,
+    ) -> Result<Rc<Self>, String> {
+        if !source_owner.is_live() {
+            return Err("selected executable source issuer has retired".into());
+        }
+        if code.requires_interop() != foreign_basis.is_some()
+            || code.requires_interop() != interop_receipt.is_some()
+        {
             return Err(
                 "selected executable foreign basis differs from its interop manifest".into(),
             );
         }
-        if interop_receipt
-            .as_ref()
-            .is_some_and(|receipt| !receipt.matches_selected_unit(&canonical_v3, &source_owner))
-        {
+        if interop_receipt.as_ref().is_some_and(|receipt| {
+            !receipt.matches_selected_unit(code.canonical_v3(), &source_owner)
+        }) {
             return Err("selected executable foreign receipt differs from its issued V3".into());
         }
-        if admitted.admitted_source_map() != source_owner.portable_map() {
+        if &code.source_map != source_owner.portable_map() {
             return Err("selected executable differs from its issued source map".into());
         }
-        let content_digest =
-            selected_unit_content_digest(admitted.envelope()).map_err(|error| error.to_string())?;
-        let program = admitted
-            .envelope()
-            .manifest
-            .identity
-            .program
-            .identity_digest()
-            .map_err(|error| error.to_string())?;
-        let body_fingerprints = admitted
-            .retained_callable_origin_fingerprints()
-            .map_err(|error| error.to_string())?;
-        let body_semantic_digests = admitted
-            .admitted_semantic_body_digests()
-            .map_err(|error| error.to_string())?;
-        let static_imports = admitted.static_imports().to_vec();
-        let linked_native_imports = admitted.linked_native_imports().to_vec();
         Ok(Rc::new(Self {
-            full_digest: Digest::sha256(&canonical_v3),
-            canonical_v3,
+            code,
             source_owner,
-            content_digest,
-            program,
-            body_fingerprints,
-            body_semantic_digests,
-            static_imports,
-            linked_native_imports,
             foreign_basis,
             interop_receipt,
             dynamic_admission,
         }))
+    }
+
+    pub fn code(&self) -> &Rc<SelectedExecutableCode> {
+        &self.code
     }
 
     pub fn dynamic_admission(
@@ -646,12 +642,12 @@ impl FunctionRegistry {
             let origin = body
                 .binding_origin
                 .ok_or("selected executable body has no portable origin")?;
-            if origin.program != product.program
+            if origin.program != product.code.program
                 || selected_fingerprints
                     .get(id)
                     .is_none_or(|(checked, fingerprint)| {
                         *checked != origin
-                            || product.body_fingerprints.get(&origin) != Some(fingerprint)
+                            || product.code.body_fingerprints.get(&origin) != Some(fingerprint)
                     })
                 || body
                     .selected_source_owner

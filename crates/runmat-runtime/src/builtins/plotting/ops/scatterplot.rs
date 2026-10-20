@@ -57,7 +57,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::plotting::scatterplot"
 )]
-pub async fn scatterplot_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<f64> {
+pub async fn scatterplot_builtin(
+    x: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<f64> {
     crate::builtins::common::validation::reject_typed_complex_integer(&x, BUILTIN_NAME)?;
     crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
         &x,
@@ -103,7 +106,7 @@ struct ScatterplotOptions {
 }
 
 impl ScatterplotOptions {
-    fn parse(rest: Vec<Value>) -> BuiltinResult<Self> {
+    fn parse(rest: crate::call::BuiltinArguments) -> BuiltinResult<Self> {
         if rest.len() > 4 {
             return Err(scatterplot_error(
                 SCATTERPLOT_ERROR_INVALID_ARGUMENT.message,

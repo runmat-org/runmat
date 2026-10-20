@@ -100,7 +100,7 @@ pub(super) async fn execute_for_composition(
     let (meshing, input_outcomes) = tokio::join!(meshing, inputs);
     let completed = match meshing? {
         RemoteExactMeshingComposition::Completed(completed) => completed,
-        RemoteExactMeshingComposition::Terminal(outcome) => return Ok(composition(outcome)),
+        RemoteExactMeshingComposition::Terminal(outcome) => return Ok(composition(*outcome)),
     };
     let mut input_outcomes = input_outcomes?;
     input_outcomes.extend(
@@ -345,9 +345,17 @@ mod allocation_tests {
             cpu_millicores: 1_000,
             memory_bytes: 1 << 20,
             scratch_bytes: 1 << 20,
-            accelerator_count,
-            accelerator_class: (accelerator_count > 0).then(|| "gpu.test".into()),
-            accelerator_memory_bytes: if accelerator_count > 0 { 1 << 18 } else { 0 },
+            accelerators: if accelerator_count == 0 {
+                Vec::new()
+            } else {
+                vec![runmat_execution::resource::AcceleratorRequest {
+                    class: runmat_execution::resource::AcceleratorClass::new("gpu.test").unwrap(),
+                    count: u16::try_from(accelerator_count).unwrap(),
+                    minimum_allocation_bytes: 1 << 18,
+                    provider: None,
+                    required_features: Default::default(),
+                }]
+            },
             maximum_wall_millis: 10_000,
         }
     }
@@ -372,9 +380,11 @@ mod allocation_tests {
             .unwrap_err()
             .contains("immutable structural-study request"));
         let requested = runmat_execution::resource::AcceleratorRequest {
-            class: "gpu.test".into(),
+            class: runmat_execution::resource::AcceleratorClass::new("gpu.test").unwrap(),
             count: 1,
-            memory_bytes_each: 1 << 18,
+            minimum_allocation_bytes: 1 << 18,
+            provider: None,
+            required_features: Default::default(),
         };
         assert!(admit_analysis_task_resources(
             &resources(0),

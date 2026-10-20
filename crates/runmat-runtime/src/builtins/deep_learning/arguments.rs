@@ -6,8 +6,8 @@ pub(in crate::builtins) fn scalar_text(
 ) -> BuiltinResult<String> {
     match value {
         Value::String(s) => Ok(s.to_string()),
-        Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data.iter().collect()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].to_string()),
+        Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data().iter().collect()),
+        Value::StringArray(array) if array.data().len() == 1 => Ok(array.data()[0].to_string()),
         other => Err(deep_learning_error(
             function,
             format!("{function}: expected text scalar, got {other:?}"),
@@ -276,29 +276,107 @@ pub(in crate::builtins) fn tensor_value(
         .map_err(|err| deep_learning_error(function, err))
 }
 
-pub(in crate::builtins) fn object<K, I>(class_name: &str, properties: I) -> Value
+pub(in crate::builtins) fn object<K, I>(class_name: &str, properties: I) -> BuiltinResult<Value>
 where
-    K: Into<String>,
-    I: IntoIterator<Item = (K, Value)>,
+    K: AsRef<str>,
+    I: AsRef<[(K, Value)]>,
 {
-    let mut object = ObjectInstance::new(class_name.to_string());
-    for (name, value) in properties {
-        object.properties.insert(name.into(), value);
-    }
-    Value::Object(object)
+    let properties = properties.as_ref();
+    let context = crate::context::legacy::active();
+    crate::execution::object::construct_object_from_borrowed_fields(
+        context.as_ref(),
+        class_name,
+        properties
+            .iter()
+            .map(|(name, value)| (name.as_ref(), value)),
+    )
+    .map(|value| value.with_owned(|value| value))
 }
 
 pub(in crate::builtins) fn object_with_identity<K, I>(
     class_name: runmat_types::StaticClassIdentity,
     properties: I,
-) -> Value
+) -> BuiltinResult<Value>
 where
-    K: Into<String>,
-    I: IntoIterator<Item = (K, Value)>,
+    K: AsRef<str>,
+    I: AsRef<[(K, Value)]>,
 {
-    let mut object = ObjectInstance::new(class_name);
-    for (name, value) in properties {
-        object.properties.insert(name.into(), value);
+    object(class_name.display_name(), properties)
+}
+
+pub(in crate::builtins::deep_learning) fn replace_property(
+    object: &mut ObjectInstance,
+    name: &str,
+    value: Value,
+) -> BuiltinResult<Option<Value>> {
+    let context = crate::context::legacy::active();
+    let _source = crate::execution::structure::replacement::lease(
+        &Value::Object(object.clone()),
+        context.as_ref(),
+    )?;
+    let value = crate::execution::structure::replacement::root(value, context.as_ref())?;
+    value.with_owned(|value| {
+        crate::execution::object::replacement::replace_property(
+            context.as_ref(),
+            object,
+            name,
+            value,
+            |message, source| {
+                crate::context::host_allocation::host_allocation_runtime_error(
+                    context.as_ref(),
+                    "RunMat:deepLearning:ObjectAllocation",
+                    message,
+                    source,
+                )
+            },
+            |message| deep_learning_error("deepLearning", message),
+        )
+    })
+}
+
+/// Domain diagnostic adapter; physical replacement belongs to the execution
+/// owner. Method syntax reborrows owned and borrowed layer receivers equally.
+pub(in crate::builtins::deep_learning) trait DeepLearningObjectEdit {
+    fn replace_dl_property(&mut self, name: &str, value: Value) -> BuiltinResult<Option<Value>>;
+    fn remove_dl_property(&mut self, name: &str) -> BuiltinResult<Option<Value>>;
+    #[cfg(test)]
+    fn fixture_dl_property_mut(&mut self, name: &str) -> Option<&mut Value>;
+}
+
+impl DeepLearningObjectEdit for ObjectInstance {
+    #[cfg(test)]
+    fn fixture_dl_property_mut(&mut self, name: &str) -> Option<&mut Value> {
+        let value = self.property(name)?.clone();
+        replace_property(self, name, value).expect("fixture property destination");
+        self.try_property_mut_unique(name)
     }
-    Value::Object(object)
+    fn replace_dl_property(&mut self, name: &str, value: Value) -> BuiltinResult<Option<Value>> {
+        replace_property(self, name, value)
+    }
+
+    fn remove_dl_property(&mut self, name: &str) -> BuiltinResult<Option<Value>> {
+        if self.property(name).is_none() {
+            return Ok(None);
+        }
+        let context = crate::context::legacy::active();
+        let _source = crate::execution::structure::replacement::lease(
+            &Value::Object(self.clone()),
+            context.as_ref(),
+        )?;
+        crate::execution::object::replacement::remove_property(
+            context.as_ref(),
+            self,
+            name,
+            |message, source| {
+                crate::context::host_allocation::host_allocation_runtime_error(
+                    context.as_ref(),
+                    "RunMat:deepLearning:ObjectAllocation",
+                    message,
+                    source,
+                )
+            },
+            |message| deep_learning_error("deepLearning", message),
+        )
+        .map(Some)
+    }
 }

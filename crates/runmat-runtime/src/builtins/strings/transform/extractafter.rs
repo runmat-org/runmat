@@ -46,7 +46,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::strings::transform::extractafter"
 )]
-pub(super) async fn extract_after_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn extract_after_builtin(
+    text: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     boundary_transform(
         text,
         rest,

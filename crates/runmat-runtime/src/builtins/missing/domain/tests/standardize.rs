@@ -12,7 +12,7 @@ fn standardize_missing_retains_single_class_and_low_rank_shape() {
         let output = block_on(standardize_missing_builtin(
             None,
             Value::Tensor(input),
-            vec![Value::Num(-99.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(-99.0)]),
         ))
         .unwrap();
         let Value::Tensor(output) = output else {
@@ -32,7 +32,7 @@ fn standardize_missing_replaces_indicators() {
     let result = block_on(standardize_missing_builtin(
         None,
         tensor(vec![-99.0, 2.0], vec![1, 2]),
-        vec![Value::Num(-99.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(-99.0)]),
     ))
     .unwrap();
     assert!(
@@ -51,7 +51,7 @@ fn standardize_missing_reads_indicator_storage_and_does_not_nan_integer_targets(
     let result = block_on(standardize_missing_builtin(
         None,
         Value::Tensor(input),
-        vec![Value::Tensor(marker)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(marker)]),
     ))
     .unwrap();
 
@@ -72,7 +72,7 @@ fn standardize_missing_integer_data_is_mode_gated() {
     let error = block_on(standardize_missing_builtin(
         None,
         input,
-        vec![Value::Num(-99.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(-99.0)]),
     ))
     .expect_err("MATLAB-compatible mode must reject direct integer data");
     assert_eq!(
@@ -89,7 +89,7 @@ fn standardize_missing_documented_integer_indicator_needs_no_extension() {
     let result = block_on(standardize_missing_builtin(
         None,
         tensor(vec![-99.0, 2.0], vec![1, 2]),
-        vec![marker],
+        crate::builtins::common::test_support::builtin_arguments(vec![marker]),
     ))
     .expect("documented integer indicator");
     assert!(
@@ -110,7 +110,7 @@ fn standardize_missing_wide_integer_indicators_do_not_round_into_false_matches()
         let result = block_on(standardize_missing_builtin(
             None,
             tensor(vec![represented], vec![1, 1]),
-            vec![marker],
+            crate::builtins::common::test_support::builtin_arguments(vec![marker]),
         ))
         .expect("documented integer marker");
         assert!(matches!(result, Value::Tensor(t) if t.materialize_f64() == vec![represented]));
@@ -120,7 +120,7 @@ fn standardize_missing_wide_integer_indicators_do_not_round_into_false_matches()
     let result = block_on(standardize_missing_builtin(
         None,
         tensor(vec![(1_u64 << 54) as f64], vec![1, 1]),
-        vec![aligned],
+        crate::builtins::common::test_support::builtin_arguments(vec![aligned]),
     ))
     .expect("exact wide marker");
     assert!(matches!(result, Value::Tensor(t) if t.materialize_f64()[0].is_nan()));
@@ -144,7 +144,7 @@ fn standardize_missing_explicit_gpu_indicator_is_gated_before_provider_access() 
     let error = block_on(standardize_missing_builtin(
         None,
         tensor(vec![-99.0, 2.0], vec![1, 2]),
-        vec![Value::GpuTensor(handle)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(handle)]),
     ))
     .expect_err("explicit GPU indicator must be gated");
     assert_eq!(
@@ -168,7 +168,7 @@ fn standardize_missing_rejects_host_indicator_before_resident_input_download() {
     let error = block_on(standardize_missing_builtin(
         None,
         Value::GpuTensor(allocation.handle.clone()),
-        vec![Value::Bool(true)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Bool(true)]),
     ))
     .expect_err("invalid indicator must be rejected before input download");
     assert_eq!(error.identifier(), Some("RunMat:missing:UnsupportedType"));

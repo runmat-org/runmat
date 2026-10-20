@@ -38,12 +38,18 @@ struct PcodeOptions {
     binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::pcode"
 )]
-async fn pcode_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    evaluate(&args).await?;
+async fn pcode_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    evaluate_view(args.view()).await?;
     Ok(empty_array())
 }
 
 pub async fn evaluate(args: &[Value]) -> BuiltinResult<PcodeResult> {
+    evaluate_view(crate::call::FunctionArgumentView::from_slice(args)).await
+}
+
+pub async fn evaluate_view(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<PcodeResult> {
     if requested_output_count() > 0 {
         return Err(pcode_error(&PCODE_ERROR_TOO_MANY_OUTPUTS));
     }
@@ -87,7 +93,7 @@ pub async fn evaluate(args: &[Value]) -> BuiltinResult<PcodeResult> {
     Ok(PcodeResult { generated })
 }
 
-fn parse_options(args: &[Value]) -> BuiltinResult<PcodeOptions> {
+fn parse_options(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<PcodeOptions> {
     if args.is_empty() {
         return Err(pcode_error(&PCODE_ERROR_NOT_ENOUGH_INPUTS));
     }
@@ -127,10 +133,10 @@ fn value_to_string_scalar(value: &Value) -> Option<String> {
             if array.rows == 1
                 && crate::builtins::common::shape::effective_rank(&array.shape) <= 2 =>
         {
-            Some(array.data.iter().collect())
+            Some(array.data().iter().collect())
         }
-        Value::StringArray(array) if array.data.len() == 1 => {
-            Some(array.data[0].as_str().to_owned())
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Some(array.data()[0].as_str().to_owned())
         }
         _ => None,
     }

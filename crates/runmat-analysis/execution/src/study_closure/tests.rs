@@ -1,5 +1,5 @@
 use super::*;
-use runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1;
+use runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION;
 
 fn reference(label: &[u8], bytes: u64) -> ValueRef {
     let digest = Digest::sha256(label);
@@ -8,7 +8,7 @@ fn reference(label: &[u8], bytes: u64) -> ValueRef {
         encryption_context: digest,
     };
     ValueRef {
-        schema_version: VALUE_PAYLOAD_SCHEMA_V1,
+        schema_version: VALUE_PAYLOAD_SCHEMA_VERSION,
         id: access.value_id(digest),
         logical_digest: digest,
         encoded_length: bytes,

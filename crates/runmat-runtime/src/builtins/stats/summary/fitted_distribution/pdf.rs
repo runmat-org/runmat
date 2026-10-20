@@ -3,17 +3,18 @@ use super::*;
 pub(in crate::builtins::stats::summary) async fn evaluate_pdf_entry(
     distribution: Value,
     x: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    let selection = admission::evaluation(FittedOperation::Density, &distribution, &x, &rest)?;
-    ensure_pdf_integer_extensions(&selection, &x, &rest).await?;
+    let selection =
+        admission::evaluation(FittedOperation::Density, &distribution, &x, rest.view())?;
+    ensure_pdf_integer_extensions(&selection, &x, rest.view()).await?;
     evaluate_pdf(selection, x, rest).await
 }
 
 pub(super) async fn ensure_pdf_integer_extensions(
     selection: &DistributionSelection,
     input: &Value,
-    parameters: &[Value],
+    parameters: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<()> {
     if is_typed_integer_value(input) {
         crate::compatibility::ensure_builtin_extension_enabled(&PDF_INTEGER_X_EXTENSION, PDF_NAME)?;
@@ -50,7 +51,7 @@ pub(super) async fn ensure_exact_pdf_integer_boundary(
 pub(super) async fn evaluate_pdf(
     selection: DistributionSelection,
     input: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let kind = match selection {
         DistributionSelection::Fitted(fit) => {
@@ -72,7 +73,7 @@ pub(super) async fn evaluate_pdf(
     let precision = cdf_output_precision(&original_inputs);
     let residency = EvaluationResidency::capture(&original_inputs);
     let x = value_to_tensor(PDF_NAME, input).await?;
-    let parameters = parse_parameter_tensors(PDF_NAME, kind, rest).await?;
+    let parameters = parse_parameter_tensors(PDF_NAME, kind, rest.view()).await?;
     let mut tensors = Vec::with_capacity(parameters.len() + 1);
     tensors.push(&x);
     tensors.extend(parameters.iter());

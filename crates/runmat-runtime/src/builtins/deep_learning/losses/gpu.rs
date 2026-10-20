@@ -11,7 +11,7 @@ use validation::{checked_len, provider_error, validate_live, validate_result_han
 pub(super) async fn try_crossentropy_gpu(
     predictions: &Value,
     targets: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<Option<Value>> {
     let (Value::GpuTensor(predictions), Value::GpuTensor(targets)) = (predictions, targets) else {
         return Ok(None);
@@ -42,8 +42,7 @@ pub(super) async fn try_crossentropy_gpu(
         ));
     }
 
-    let Some(mut options) = GpuCrossentropyOptions::from_args(rest.to_vec(), predictions.shape())?
-    else {
+    let Some(mut options) = GpuCrossentropyOptions::from_args(rest, predictions.shape())? else {
         return Ok(None);
     };
     let Some(provider) =

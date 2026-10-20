@@ -3,8 +3,8 @@ use super::*;
 pub(super) fn scalar_text(value: &Value, context: &str) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.to_string()),
-        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].to_string()),
+        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data().iter().collect()),
+        Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].to_string()),
         _ => Err(invalid_argument(format!(
             "table: {context} must be a string scalar or character vector"
         ))),
@@ -122,16 +122,21 @@ pub(super) fn option_value_is_empty(value: &Value) -> bool {
     match value {
         Value::String(text) => text.trim().is_empty(),
         Value::CharArray(array) => {
-            array.data.is_empty()
-                || (array.rows == 1 && array.data.iter().all(|ch| ch.is_whitespace()))
+            array.data().is_empty()
+                || (array.rows == 1 && array.data().iter().all(|ch| ch.is_whitespace()))
         }
         Value::StringArray(array) => {
-            array.data.is_empty() || (array.data.len() == 1 && array.data[0].trim().is_empty())
+            array.data().is_empty()
+                || (array.data().len() == 1 && array.data()[0].trim().is_empty())
         }
         Value::Tensor(tensor) => crate::builtins::common::tensor::tensor_element_len(tensor) == 0,
         Value::LogicalArray(array) => array.data.is_empty(),
         Value::Cell(cell) => {
-            cell.data.is_empty() || cell.data.iter().all(|handle| option_value_is_empty(handle))
+            cell.data().is_empty()
+                || cell
+                    .data()
+                    .iter()
+                    .all(|handle| option_value_is_empty(handle))
         }
         _ => false,
     }
@@ -140,11 +145,11 @@ pub(super) fn option_value_is_empty(value: &Value) -> bool {
 pub(super) fn string_list(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
         Value::String(text) => Ok(vec![text.to_string()]),
-        Value::CharArray(ca) if ca.rows == 1 => Ok(vec![ca.data.iter().collect()]),
-        Value::StringArray(array) => Ok(array.data.iter().map(ToString::to_string).collect()),
+        Value::CharArray(ca) if ca.rows == 1 => Ok(vec![ca.data().iter().collect()]),
+        Value::StringArray(array) => Ok(array.data().iter().map(ToString::to_string).collect()),
         Value::Cell(cell) => {
-            let mut out = Vec::with_capacity(cell.data.len());
-            for handle in &cell.data {
+            let mut out = Vec::with_capacity(cell.data().len());
+            for handle in cell.data() {
                 let value = handle;
                 out.extend(string_list(value)?);
             }

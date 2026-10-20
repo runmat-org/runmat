@@ -1468,7 +1468,7 @@ fn unique_char_rows(
     for r in 0..rows {
         let start = r * cols;
         let end = start + cols;
-        let slice = &array.data[start..end];
+        let slice = &array.data()[start..end];
         let key = RowCharKey::from_slice(slice);
         match map.get(&key) {
             Some(&entry_idx) => {
@@ -1556,7 +1556,7 @@ fn unique_string_elements(
     opts: &UniqueOptions,
 ) -> crate::BuiltinResult<UniqueEvaluation> {
     let shape = array.shape.clone();
-    let len = array.data.len();
+    let len = array.data().len();
     if len == 0 {
         let values = StringArray::new(Vec::new(), unique_element_values_shape(&shape, 0))
             .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
@@ -1571,7 +1571,7 @@ fn unique_string_elements(
     let mut map: HashMap<&str, usize> = HashMap::new();
     let mut element_entry_index = Vec::with_capacity(len);
 
-    for (idx, value) in array.data.iter().enumerate() {
+    for (idx, value) in array.data().iter().enumerate() {
         match map.get(value.as_str()) {
             Some(&entry_idx) => {
                 entries[entry_idx].last = idx;
@@ -1664,7 +1664,7 @@ fn unique_string_rows(
         let mut row_values = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows;
-            row_values.push(&array.data[idx]);
+            row_values.push(&array.data()[idx]);
         }
         let key = RowStringKey(row_values.clone());
         match map.get(&key) {
@@ -2266,7 +2266,7 @@ pub(crate) mod tests {
             Value::CharArray(arr) => {
                 assert_eq!(arr.rows, 3);
                 assert_eq!(arr.cols, 1);
-                assert_eq!(arr.data, vec!['a', 'm', 'z']);
+                assert_eq!(arr.data(), vec!['a', 'm', 'z']);
             }
             other => panic!("unexpected values {other:?}"),
         }
@@ -2294,7 +2294,7 @@ pub(crate) mod tests {
             Value::CharArray(arr) => {
                 assert_eq!(arr.rows, 2);
                 assert_eq!(arr.cols, 2);
-                assert_eq!(arr.data, vec!['a', 'b', 'a', 'c']);
+                assert_eq!(arr.data(), vec!['a', 'b', 'a', 'c']);
             }
             other => panic!("unexpected values {other:?}"),
         }
@@ -2321,7 +2321,7 @@ pub(crate) mod tests {
         let (values, ia, ic) = eval.into_triple();
         match values {
             Value::StringArray(sa) => {
-                assert_eq!(sa.data, vec!["beta", "alpha"]);
+                assert_eq!(sa.data(), vec!["beta", "alpha"]);
                 assert_eq!(sa.shape, vec![2, 1]);
             }
             other => panic!("unexpected values {other:?}"),
@@ -2360,7 +2360,7 @@ pub(crate) mod tests {
         match values {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![2, 2]);
-                assert_eq!(sa.data, vec!["alpha", "gamma", "beta", "beta"]);
+                assert_eq!(sa.data(), vec!["alpha", "gamma", "beta", "beta"]);
             }
             other => panic!("unexpected values {other:?}"),
         }
@@ -2892,7 +2892,7 @@ pub(crate) mod tests {
             panic!("expected character array");
         };
         assert_eq!(chars.shape, vec![1, 2]);
-        assert_eq!(chars.data, vec!['a', 'z']);
+        assert_eq!(chars.data(), vec!['a', 'z']);
 
         let strings = StringArray::new(vec!["z".into(), "a".into(), "z".into()], vec![1, 3])
             .expect("string row input");

@@ -212,7 +212,11 @@ pub(super) fn publish_with_lease(
     }
     let root = root(&tree, &request.root)?;
     if let Some(lease) = lease {
-        crate::execution::require_current(tree.executions.get(&crate::execution::work_key(&lease.work)?), lease)?;
+        crate::execution::require_current(
+            tree.executions
+                .get(&crate::execution::work_key(&lease.work)?),
+            lease,
+        )?;
     }
     let excluded = excluded(&root, &request.excluded_subtrees)?;
     let current = revision(&tree, &root, &excluded)?;
@@ -285,7 +289,11 @@ pub(super) fn publish_with_lease(
         },
     );
     if let Some(lease) = lease {
-        crate::execution::require_current(tree.executions.get(&crate::execution::work_key(&lease.work)?), lease)?;
+        crate::execution::require_current(
+            tree.executions
+                .get(&crate::execution::work_key(&lease.work)?),
+            lease,
+        )?;
     }
     *tree = next;
     Ok(WorkspacePublicationOutcome::Published { receipt })

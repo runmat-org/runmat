@@ -10,7 +10,7 @@ pub fn as_lower_str(val: &Value) -> Option<String> {
         Value::CharArray(c)
             if c.rows <= 1 && crate::builtins::common::shape::effective_rank(&c.shape) <= 2 =>
         {
-            Some(c.data.iter().collect::<String>().to_ascii_lowercase())
+            Some(c.data().iter().collect::<String>().to_ascii_lowercase())
         }
         _ => None,
     }
@@ -115,7 +115,7 @@ pub fn parse_hold_mode(value: &Value) -> BuiltinResult<crate::builtins::plotting
     }
     match value {
         Value::CharArray(chars) => {
-            let text: String = chars.data.iter().collect();
+            let text: String = chars.data().iter().collect();
             parse_hold_mode_str(text.trim())
         }
         Value::String(s) => parse_hold_mode_str(s.trim()),

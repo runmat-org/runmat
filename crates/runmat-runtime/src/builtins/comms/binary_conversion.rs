@@ -193,8 +193,8 @@ impl TextConversion {
     binding_variant = "default",
     builtin_path = "crate::builtins::comms::binary_conversion"
 )]
-async fn bi2de_builtin(b: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let opts = Bi2deOptions::parse(&rest)?;
+async fn bi2de_builtin(b: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let opts = Bi2deOptions::parse(rest.view())?;
     if rest.first().is_some_and(is_fixed_width_integer) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &BI2DE_INTEGER_BASE_EXTENSION,
@@ -229,8 +229,8 @@ async fn bi2de_builtin(b: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::comms::binary_conversion"
 )]
-async fn de2bi_builtin(d: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let opts = De2biOptions::parse(&rest)?;
+async fn de2bi_builtin(d: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let opts = De2biOptions::parse(rest.view())?;
     if rest.iter().any(is_fixed_width_integer) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &DE2BI_INTEGER_CONTROL_EXTENSION,
@@ -315,7 +315,7 @@ fn is_fixed_width_integer(value: &Value) -> bool {
     binding_variant = "default",
     builtin_path = "crate::builtins::comms::binary_conversion"
 )]
-async fn dec2bin_builtin(d: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn dec2bin_builtin(d: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     decimal_to_text_builtin(d, rest, TextConversion::Dec2Bin).await
 }
 
@@ -324,7 +324,7 @@ async fn dec2bin_builtin(d: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::comms::binary_conversion"
 )]
-async fn dec2hex_builtin(d: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn dec2hex_builtin(d: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     decimal_to_text_builtin(d, rest, TextConversion::Dec2Hex).await
 }
 
@@ -353,19 +353,19 @@ struct Bi2deOptions {
 }
 
 impl Bi2deOptions {
-    fn parse(args: &[Value]) -> BuiltinResult<Self> {
+    fn parse(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<Self> {
         let mut base = 2usize;
         let mut order = DigitOrder::RightMsb;
-        match args {
-            [] => {}
-            [one] => {
+        match (args.len(), args.get(0), args.get(1)) {
+            (0, _, _) => {}
+            (1, Some(one), _) => {
                 if let Some(parsed) = parse_order(one, DigitConversion::Bi2de)? {
                     order = parsed;
                 } else {
                     base = parse_base(one, DigitConversion::Bi2de)?;
                 }
             }
-            [base_value, flag] => {
+            (2, Some(base_value), Some(flag)) => {
                 base = parse_base(base_value, DigitConversion::Bi2de)?;
                 order = parse_required_order(flag, DigitConversion::Bi2de)?;
             }
@@ -383,7 +383,7 @@ struct De2biOptions {
 }
 
 impl De2biOptions {
-    fn parse(args: &[Value]) -> BuiltinResult<Self> {
+    fn parse(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<Self> {
         let mut width = None;
         let mut base = 2usize;
         let mut order = DigitOrder::RightMsb;
@@ -429,7 +429,7 @@ impl De2biOptions {
 
 async fn decimal_to_text_builtin(
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
     conversion: TextConversion,
 ) -> BuiltinResult<Value> {
     let builtin = conversion.name();
@@ -529,8 +529,9 @@ async fn decimal_items_from_value(
             .map(|value| DecimalItem::Unsigned(u128::from(value != 0)))
             .collect()),
         Value::CharArray(chars) => Ok(chars
-            .data
-            .into_char_iter()
+            .data()
+            .iter()
+            .copied()
             .map(|ch| DecimalItem::Unsigned(u128::from(ch as u32)))
             .collect()),
         Value::GpuTensor(handle) => {
@@ -753,7 +754,7 @@ fn text_items_from_value(value: Value, builtin: &'static str) -> BuiltinResult<P
             for row in 0..chars.rows {
                 let start = row * chars.cols;
                 let end = start + chars.cols;
-                items.push(chars.data[start..end].iter().collect::<String>().into());
+                items.push(chars.data()[start..end].iter().collect::<String>().into());
             }
             Ok(ParsedTextItems {
                 items: runmat_value::ExactArrayStorage::unbounded(items),
@@ -771,7 +772,7 @@ fn text_items_from_value(value: Value, builtin: &'static str) -> BuiltinResult<P
         Value::StringArray(array) => {
             let shape = array.shape.to_vec();
             Ok(ParsedTextItems {
-                items: array.data,
+                items: array.into_parts().0,
                 shape,
                 preserve_shape: true,
                 column: false,
@@ -786,8 +787,8 @@ fn text_items_from_value(value: Value, builtin: &'static str) -> BuiltinResult<P
 }
 
 fn text_items_from_cell(cell: CellArray, builtin: &'static str) -> BuiltinResult<ParsedTextItems> {
-    let mut items = Vec::with_capacity(cell.data.len());
-    for value in &cell.data {
+    let mut items = Vec::with_capacity(cell.data().len());
+    for value in cell.data() {
         let Some(text) = value_as_string(value) else {
             return Err(conversion_error(
                 builtin,
@@ -1432,8 +1433,8 @@ fn parse_required_order(value: &Value, operation: DigitConversion) -> BuiltinRes
 fn value_as_string(value: &Value) -> Option<runmat_value::Utf8Text> {
     match value {
         Value::String(s) => Some(s.clone()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect::<String>().into()),
+        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].clone()),
+        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data().iter().collect::<String>().into()),
         _ => None,
     }
 }
@@ -1468,25 +1469,44 @@ mod tests {
     }
 
     fn bi2de(value: Value, rest: Vec<Value>) -> Value {
-        block_on(super::bi2de_builtin(value, rest)).expect("bi2de")
+        block_on(super::bi2de_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
+        .expect("bi2de")
     }
 
     fn de2bi(value: Value, rest: Vec<Value>) -> Tensor {
-        match block_on(super::de2bi_builtin(value, rest)).expect("de2bi") {
+        match block_on(super::de2bi_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
+        .expect("de2bi")
+        {
             Value::Tensor(tensor) => tensor,
             other => panic!("expected Tensor, got {other:?}"),
         }
     }
 
     fn dec2bin(value: Value, rest: Vec<Value>) -> CharArray {
-        match block_on(super::dec2bin_builtin(value, rest)).expect("dec2bin") {
+        match block_on(super::dec2bin_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
+        .expect("dec2bin")
+        {
             Value::CharArray(chars) => chars,
             other => panic!("expected CharArray, got {other:?}"),
         }
     }
 
     fn dec2hex(value: Value, rest: Vec<Value>) -> CharArray {
-        match block_on(super::dec2hex_builtin(value, rest)).expect("dec2hex") {
+        match block_on(super::dec2hex_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
+        .expect("dec2hex")
+        {
             Value::CharArray(chars) => chars,
             other => panic!("expected CharArray, got {other:?}"),
         }
@@ -1579,7 +1599,7 @@ mod tests {
         assert_eq!(empty_expansion.shape(), &[0, 0]);
         let err = block_on(super::bi2de_builtin(
             tensor(vec![1.0, 0.0], vec![1, 1, 2]),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .expect_err("bi2de rejects N-D digit arrays");
         assert!(err.to_string().contains("vector or 2-D matrix"));
@@ -1590,7 +1610,9 @@ mod tests {
         let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
         let err = block_on(super::bi2de_builtin(
             tensor(vec![1.0, 0.0, 1.0], vec![1, 3]),
-            vec![Value::Int(IntValue::U8(2))],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(
+                IntValue::U8(2),
+            )]),
         ))
         .expect_err("typed base should be mode gated");
         assert_eq!(
@@ -1600,7 +1622,7 @@ mod tests {
 
         let err = block_on(super::de2bi_builtin(
             Value::Int(IntValue::U64(u64::MAX)),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .expect_err("wide integer should be mode gated");
         assert_eq!(
@@ -1608,8 +1630,11 @@ mod tests {
             Some("RunMat:compatibility:De2biWideIntegerExtension")
         );
 
-        let err = block_on(super::de2bi_builtin(Value::Bool(true), vec![]))
-            .expect_err("logical data should be mode gated");
+        let err = block_on(super::de2bi_builtin(
+            Value::Bool(true),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .expect_err("logical data should be mode gated");
         assert_eq!(
             err.identifier(),
             Some("RunMat:compatibility:De2biLogicalInputExtension")
@@ -1617,7 +1642,7 @@ mod tests {
 
         let err = block_on(super::de2bi_builtin(
             tensor(vec![1.0, 2.0], vec![1, 1, 2]),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .expect_err("N-D input should be mode gated");
         assert_eq!(err.identifier(), DE2BI_ND_INPUT_EXTENSION.error_identifier);
@@ -1634,7 +1659,7 @@ mod tests {
             let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
             let bi_error = block_on(super::bi2de_builtin(
                 Value::GpuTensor(handle.clone()),
-                vec![],
+                crate::builtins::common::test_support::builtin_arguments(vec![]),
             ))
             .expect_err("resident input must reject");
             assert_eq!(
@@ -1643,7 +1668,7 @@ mod tests {
             );
             let de_error = block_on(super::de2bi_builtin(
                 Value::GpuTensor(handle.clone()),
-                vec![],
+                crate::builtins::common::test_support::builtin_arguments(vec![]),
             ))
             .expect_err("resident input must reject");
             assert_eq!(
@@ -1657,7 +1682,7 @@ mod tests {
                 value_data(
                     block_on(super::bi2de_builtin(
                         Value::GpuTensor(handle.clone()),
-                        vec![],
+                        crate::builtins::common::test_support::builtin_arguments(vec![]),
                     ))
                     .expect("RunMat resident digit conversion")
                 ),
@@ -1665,7 +1690,7 @@ mod tests {
             );
             let expanded = block_on(super::de2bi_builtin(
                 Value::GpuTensor(handle.clone()),
-                vec![],
+                crate::builtins::common::test_support::builtin_arguments(vec![]),
             ))
             .expect("RunMat resident decimal conversion");
             assert_eq!(value_data(expanded), vec![1.0, 0.0, 1.0]);
@@ -1679,7 +1704,7 @@ mod tests {
             .map(|row| {
                 let start = row * chars.cols;
                 let end = start + chars.cols;
-                chars.data[start..end].iter().collect()
+                chars.data()[start..end].iter().collect()
             })
             .collect()
     }
@@ -1706,7 +1731,7 @@ mod tests {
         assert_eq!(
             value_data(bi2de(
                 tensor(left_msb, vec![1, 140]),
-                vec![Value::String("left-msb".to_string())],
+                vec![Value::String("left-msb".to_string().into())],
             )),
             vec![1.0]
         );
@@ -1765,7 +1790,7 @@ mod tests {
     fn bi2de_rejects_digits_outside_base() {
         let err = block_on(super::bi2de_builtin(
             tensor(vec![1.0, 2.0], vec![1, 2]),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .expect_err("invalid binary digit should fail");
         assert!(err.to_string().contains("digit values must be integers"));
@@ -1784,8 +1809,11 @@ mod tests {
                 &BI2DE_ERROR_RANGE,
             ),
         ] {
-            let error =
-                block_on(super::bi2de_builtin(input, controls)).expect_err("bi2de domain error");
+            let error = block_on(super::bi2de_builtin(
+                input,
+                crate::builtins::common::test_support::builtin_arguments(controls),
+            ))
+            .expect_err("bi2de domain error");
             assert_eq!(error.identifier(), descriptor.identifier);
         }
         for (input, controls, descriptor) in [
@@ -1807,8 +1835,11 @@ mod tests {
                 &DE2BI_ERROR_RESOURCE,
             ),
         ] {
-            let error =
-                block_on(super::de2bi_builtin(input, controls)).expect_err("de2bi domain error");
+            let error = block_on(super::de2bi_builtin(
+                input,
+                crate::builtins::common::test_support::builtin_arguments(controls),
+            ))
+            .expect_err("de2bi domain error");
             assert_eq!(error.identifier(), descriptor.identifier);
         }
     }
@@ -1882,34 +1913,45 @@ mod tests {
 
     #[test]
     fn de2bi_rejects_too_small_width() {
-        let err = block_on(super::de2bi_builtin(Value::Num(8.0), vec![Value::Num(3.0)]))
-            .expect_err("width too small should fail");
+        let err = block_on(super::de2bi_builtin(
+            Value::Num(8.0),
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(3.0)]),
+        ))
+        .expect_err("width too small should fail");
         assert!(err.to_string().contains("N is too small"));
     }
 
     #[test]
     fn digit_conversions_reject_zero_width_and_fractional_values_exactly() {
-        let width = block_on(super::de2bi_builtin(Value::Num(0.0), vec![Value::Num(0.0)]))
-            .expect_err("explicit zero width is invalid even for zero input");
+        let width = block_on(super::de2bi_builtin(
+            Value::Num(0.0),
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(0.0)]),
+        ))
+        .expect_err("explicit zero width is invalid even for zero input");
         assert!(width.to_string().contains("N must be a positive integer"));
 
         let near_integer = 2.0 + 5e-10;
         let base = block_on(super::bi2de_builtin(
             tensor(vec![1.0], vec![1, 1]),
-            vec![Value::Num(near_integer)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(
+                near_integer,
+            )]),
         ))
         .expect_err("fractional base is invalid");
         assert!(base.to_string().contains("nonnegative integer"));
 
         let width = block_on(super::de2bi_builtin(
             Value::Num(1.0),
-            vec![Value::Num(1.0 + 5e-10)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0 + 5e-10)]),
         ))
         .expect_err("fractional width is invalid");
         assert!(width.to_string().contains("nonnegative integer"));
 
-        let data = block_on(super::de2bi_builtin(Value::Num(1.0 + 5e-10), vec![]))
-            .expect_err("fractional data is invalid");
+        let data = block_on(super::de2bi_builtin(
+            Value::Num(1.0 + 5e-10),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .expect_err("fractional data is invalid");
         assert!(data.to_string().contains("nonnegative integer"));
     }
 
@@ -1917,7 +1959,9 @@ mod tests {
     fn de2bi_rejects_excessive_output_before_allocation() {
         let err = block_on(super::de2bi_builtin(
             Value::Num(0.0),
-            vec![Value::Num((MAX_DE2BI_OUTPUT_ELEMENTS + 1) as f64)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(
+                (MAX_DE2BI_OUTPUT_ELEMENTS + 1) as f64,
+            )]),
         ))
         .expect_err("oversized output should fail");
         assert!(err.to_string().contains("requested output"));
@@ -2009,7 +2053,7 @@ mod tests {
     fn dec2bin_rejects_floating_two_to_sixty_four() {
         let err = block_on(super::dec2bin_builtin(
             Value::Num(MAX_FLOAT_DECIMAL_INPUT),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .expect_err("2^64 should fail");
         assert!(err
@@ -2021,7 +2065,9 @@ mod tests {
     fn dec2bin_rejects_excessive_output_before_allocation() {
         let err = block_on(super::dec2bin_builtin(
             tensor(vec![1.0, 2.0], vec![1, 2]),
-            vec![Value::Num((MAX_DECIMAL_TEXT_OUTPUT_CHARS + 1) as f64)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(
+                (MAX_DECIMAL_TEXT_OUTPUT_CHARS + 1) as f64,
+            )]),
         ))
         .expect_err("oversized output should fail");
         assert!(err.to_string().contains("requested output"));
@@ -2033,7 +2079,7 @@ mod tests {
         assert_eq!(char_rows(&nd), vec!["001", "010", "011", "100"]);
         let empty = dec2hex(tensor(vec![], vec![0, 3]), vec![]);
         assert_eq!((empty.rows, empty.cols), (0, 1));
-        assert!(empty.data.is_empty());
+        assert!(empty.data().is_empty());
     }
 
     #[test]
@@ -2053,7 +2099,9 @@ mod tests {
                 ] {
                     let error = block_on(decimal_to_text_builtin(
                         Value::GpuTensor(handle.clone()),
-                        vec![invalid_width],
+                        crate::builtins::common::test_support::builtin_arguments(vec![
+                            invalid_width,
+                        ]),
                         conversion,
                     ))
                     .expect_err("invalid width must reject");
@@ -2064,7 +2112,7 @@ mod tests {
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
             assert!(block_on(decimal_to_text_builtin(
                 Value::GpuTensor(handle.clone()),
-                vec![Value::Bool(true)],
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::Bool(true)]),
                 TextConversion::Dec2Bin,
             ))
             .is_ok());
@@ -2098,8 +2146,11 @@ mod tests {
             vec!["FFF0"]
         );
 
-        let err = block_on(super::dec2hex_builtin(Value::Num(12.5), vec![]))
-            .expect_err("fractional dec2hex input should fail");
+        let err = block_on(super::dec2hex_builtin(
+            Value::Num(12.5),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .expect_err("fractional dec2hex input should fail");
         assert!(err.to_string().contains("integer values"));
     }
 
@@ -2290,7 +2341,7 @@ mod tests {
         let too_wide = IntValue::U64(MAX_DECIMAL_TEXT_OUTPUT_CHARS as u64 + 1);
         let err = block_on(super::dec2bin_builtin(
             Value::Num(1.0),
-            vec![Value::Int(too_wide)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(too_wide)]),
         ))
         .expect_err("wide typed minDigits should reject before allocation");
         assert!(err.to_string().contains("requested output"));
@@ -2303,7 +2354,7 @@ mod tests {
         .unwrap();
         let err = block_on(super::dec2hex_builtin(
             Value::Num(1.0),
-            vec![Value::Tensor(width)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(width)]),
         ))
         .expect_err("wide typed tensor minDigits should reject before allocation");
         assert!(err.to_string().contains("requested output"));
@@ -2354,7 +2405,7 @@ mod tests {
 
         let err = block_on(super::de2bi_builtin(
             integer_tensor(IntegerStorage::I16(vec![-1]), vec![1, 1]),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .expect_err("negative signed integer tensor should fail");
         assert!(err.to_string().contains("nonnegative integer"));

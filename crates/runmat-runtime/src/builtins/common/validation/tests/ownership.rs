@@ -13,17 +13,22 @@ fn namedargs_preserves_nested_resident_payloads_and_source_reuse() {
                 crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor).unwrap();
             let nested =
                 Value::Cell(CellArray::new(vec![Value::GpuTensor(handle.clone())], 1, 1).unwrap());
-            let mut structure = StructValue::new();
+            let mut structure = runmat_value::UnboundedStructValueBuilder::new();
             structure.insert("payload", nested.clone());
+            let structure = structure.finish();
             for count in [0, 1] {
                 let _outputs = crate::output_count::push_output_count(Some(count))
                     .expect("output-count scope");
-                let output =
-                    namedargs2cell::evaluate(vec![Value::Struct(structure.clone())]).unwrap();
+                let output = namedargs2cell::evaluate(
+                    crate::builtins::common::validation::tests::retained_arguments(vec![
+                        Value::Struct(structure.clone()),
+                    ]),
+                )
+                .unwrap();
                 let Value::Cell(cell) = output else {
                     panic!("cell output")
                 };
-                assert_eq!(cell.data[1], nested);
+                assert_eq!(cell.data()[1], nested);
                 assert_eq!(
                     runmat_accelerate_api::handle_integer_type(&handle),
                     Some(runmat_accelerate_api::IntegerElementType::U64)
@@ -49,22 +54,34 @@ fn namedargs_preserves_nested_resident_payloads_and_source_reuse() {
 #[test]
 fn scalar_predicate_and_name_value_conversion_enforce_one_output_before_input_work() {
     for evaluate in [
-        isvarname::evaluate as fn(Vec<Value>) -> BuiltinResult<Value>,
+        isvarname::evaluate as fn(crate::call::BuiltinArguments) -> BuiltinResult<Value>,
         namedargs2cell::evaluate,
     ] {
         let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
-        let error = evaluate(vec![]).unwrap_err();
+        let error =
+            evaluate(crate::builtins::common::validation::tests::retained_arguments(vec![]))
+                .unwrap_err();
         assert!(error.identifier().unwrap().ends_with(":TooManyOutputs"));
     }
     for count in [0, 1] {
         let _outputs =
             crate::output_count::push_output_count(Some(count)).expect("output-count scope");
         assert_eq!(
-            isvarname::evaluate(vec![Value::String("valid_name".into())]).unwrap(),
+            isvarname::evaluate(
+                crate::builtins::common::validation::tests::retained_arguments(vec![
+                    Value::String("valid_name".into())
+                ])
+            )
+            .unwrap(),
             Value::Bool(true)
         );
         assert_eq!(
-            isvarname::evaluate(vec![Value::Int(IntValue::U64(u64::MAX))]).unwrap(),
+            isvarname::evaluate(
+                crate::builtins::common::validation::tests::retained_arguments(vec![Value::Int(
+                    IntValue::U64(u64::MAX)
+                )])
+            )
+            .unwrap(),
             Value::Bool(false)
         );
     }

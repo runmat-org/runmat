@@ -103,7 +103,9 @@ unsafe extern "C" fn execute_site(
                 Ok(())
             }
             Err(NativeExecutorError::Runtime(error)) => {
-                let error = std::sync::Arc::new(state.annotate_error(*error));
+                let error = runmat_runtime::runtime_error::RuntimeErrorOwner::new(
+                    state.annotate_error(*error),
+                );
                 let exception = state.arena.insert(runmat_value::Value::MException(
                     runmat_runtime::runtime_error::exception_from_error(error.clone()),
                 ));

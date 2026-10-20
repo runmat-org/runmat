@@ -195,13 +195,13 @@ fn is_all_selector(value: &Value) -> bool {
     match value {
         Value::String(text) => text.trim().eq_ignore_ascii_case("all"),
         Value::CharArray(chars) if chars.rows == 1 => chars
-            .data
+            .data()
             .iter()
             .collect::<String>()
             .trim()
             .eq_ignore_ascii_case("all"),
-        Value::StringArray(strings) if strings.data.len() == 1 => {
-            strings.data[0].trim().eq_ignore_ascii_case("all")
+        Value::StringArray(strings) if strings.data().len() == 1 => {
+            strings.data()[0].trim().eq_ignore_ascii_case("all")
         }
         _ => false,
     }
@@ -219,13 +219,13 @@ fn is_reset_selector(value: &Value) -> bool {
     match value {
         Value::String(text) => text.trim().eq_ignore_ascii_case("reset"),
         Value::CharArray(chars) if chars.rows == 1 => chars
-            .data
+            .data()
             .iter()
             .collect::<String>()
             .trim()
             .eq_ignore_ascii_case("reset"),
-        Value::StringArray(strings) if strings.data.len() == 1 => {
-            strings.data[0].trim().eq_ignore_ascii_case("reset")
+        Value::StringArray(strings) if strings.data().len() == 1 => {
+            strings.data()[0].trim().eq_ignore_ascii_case("reset")
         }
         _ => false,
     }
@@ -268,7 +268,7 @@ pub(crate) mod tests {
     #[test]
     fn parses_all_flag() {
         setup_plot_tests();
-        let values = vec![Value::String("all".to_string())];
+        let values = vec![Value::String("all".to_string().into())];
         assert!(matches!(
             parse_clf_action(&values).unwrap(),
             (FigureAction::All, false)

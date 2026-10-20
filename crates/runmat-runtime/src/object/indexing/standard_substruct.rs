@@ -107,7 +107,7 @@ fn index_values(value: &Value) -> Result<ObjectIndexSelector, RuntimeError> {
     };
     Ok(ObjectIndexSelector::IndexValues {
         components: cell
-            .data
+            .data()
             .iter()
             .cloned()
             .map(ObjectIndexComponent::from_protocol_value)
@@ -118,7 +118,7 @@ fn index_values(value: &Value) -> Result<ObjectIndexSelector, RuntimeError> {
 fn scalar_text(value: &Value) -> Result<String, RuntimeError> {
     match value {
         Value::String(value) => Ok(value.as_str().to_owned()),
-        Value::CharArray(value) if value.rows == 1 => Ok(value.data.iter().collect()),
+        Value::CharArray(value) if value.rows == 1 => Ok(value.data().iter().collect()),
         _ => Err(invalid(
             "subscript type and member selectors must be scalar text",
         )),

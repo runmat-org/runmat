@@ -7,6 +7,7 @@ use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::integer_conversion::{integer_values, IntegerClass, IntegerClassExt};
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::tensor;
+use crate::call::{BuiltinArguments, FunctionArgumentView};
 use crate::context::host_allocation::{HostAllocationPolicy, HostAllocationReceipt};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::AccelProvider;
@@ -29,11 +30,11 @@ mod managed;
 fn is_like_name(value: &Value) -> bool {
     match value {
         Value::String(text) => text.eq_ignore_ascii_case("like"),
-        Value::StringArray(array) if array.data.len() == 1 => {
-            array.data[0].eq_ignore_ascii_case("like")
+        Value::StringArray(array) if array.data().len() == 1 => {
+            array.data()[0].eq_ignore_ascii_case("like")
         }
-        Value::CharArray(array) if array.rows == 1 && array.data.len() == 4 => array
-            .data
+        Value::CharArray(array) if array.rows == 1 && array.data().len() == 4 => array
+            .data()
             .iter()
             .copied()
             .zip("like".chars())
@@ -120,7 +121,9 @@ impl LikeSpec {
     }
 }
 
-fn extract_like(mut inputs: Vec<Value>) -> BuiltinResult<(Vec<Value>, LikeSpec)> {
+fn extract_like(
+    mut inputs: crate::call::BuiltinArguments,
+) -> BuiltinResult<(crate::call::BuiltinArguments, LikeSpec)> {
     if inputs.len() >= 2 && is_like_name(&inputs[inputs.len() - 2]) {
         let prototype = inputs.last().expect("nonempty like suffix");
         if matches!(
@@ -149,7 +152,7 @@ fn extract_like(mut inputs: Vec<Value>) -> BuiltinResult<(Vec<Value>, LikeSpec)>
 async fn cat_builtin(
     context: Option<crate::context::RuntimeContext>,
     dim: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     if rest.len() < 2 {
         return Err(cat_err(CAT_ERROR_TOO_FEW_INPUTS.message));
@@ -204,36 +207,27 @@ async fn cat_builtin(
             matches!(value, Value::Struct(_))
                 || matches!(value, Value::StructArray(array) if !array.is_empty())
         });
-        let inputs = if has_nonempty_structure {
-            inputs
-                .into_iter()
-                .filter(|value| !crate::builtins::common::validation::value_is_empty(value))
-                .collect()
-        } else {
-            inputs
-        };
-        let operands = inputs
-            .into_iter()
-            .map(|value| match value {
-                Value::Struct(structure) => Ok(runmat_value::StructArrayOperand::Scalar(structure)),
-                Value::StructArray(array) => Ok(runmat_value::StructArrayOperand::Array(array)),
-                _ => Err(cat_err(
-                    "cat: structure arrays can concatenate only with structures",
-                )),
+        return crate::aggregate::structure::operations::concatenate_arguments(
+            dim_zero,
+            &inputs,
+            has_nonempty_structure,
+            context.as_ref(),
+        )
+        .map_err(|error| {
+            crate::aggregate::structure::operations::remap(error, |message| {
+                cat_err(format!("cat: {message}"))
             })
-            .collect::<BuiltinResult<Vec<_>>>()?;
-        return runmat_value::StructArray::concatenate(dim_zero, operands)
-            .map_err(|error| cat_err(format!("cat: {error}")));
+        });
     }
 
     if inputs.iter().any(|value| matches!(value, Value::Cell(_))) {
-        let category = determine_category(&inputs, &like)?;
+        let category = determine_category(inputs.view(), &like)?;
         debug_assert_eq!(category, CatCategory::Cell);
         return cat_cell_arrays(dim_zero, inputs);
     }
 
     if inputs.iter().any(|v| matches!(v, Value::GpuTensor(_))) {
-        return cat_gpu_values(dim_zero, inputs, &like).await;
+        return cat_gpu_values(dim_zero, inputs, &like, context.as_ref()).await;
     }
 
     cat_host_values(dim_zero, inputs, &like, context.as_ref())
@@ -258,25 +252,26 @@ pub(crate) fn is_canonical_host_binding(binding: crate::builtin::RuntimeBuiltinB
 /// Callers have already selected the canonical host route and excluded cell,
 /// struct, resident, and method-dispatched operands.
 pub(crate) fn concatenate_host_values(dim_zero: usize, inputs: Vec<Value>) -> BuiltinResult<Value> {
+    let inputs = BuiltinArguments::from_borrowed(&inputs, None)?;
     cat_host_values(dim_zero, inputs, &LikeSpec::default(), None)
 }
 
 fn cat_host_values(
     dim_zero: usize,
-    inputs: Vec<Value>,
+    inputs: BuiltinArguments,
     like: &LikeSpec,
     context: Option<&crate::context::RuntimeContext>,
 ) -> BuiltinResult<Value> {
-    let category = determine_category(&inputs, like)?;
+    let category = determine_category(inputs.view(), like)?;
     if let Some(context) = context {
         let policy = HostAllocationReceipt::policy(Some(context))
             .map_err(|cause| managed::admission_error(context, cause))?;
         if policy == HostAllocationPolicy::Managed && like.device == LikeDevice::Host {
             match category {
-                CatCategory::Numeric => return managed::numeric(context, dim_zero, &inputs),
-                CatCategory::Logical => return managed::logical(context, dim_zero, &inputs),
-                CatCategory::Complex => return managed::complex(context, dim_zero, &inputs),
-                CatCategory::Char => return managed::character(context, dim_zero, &inputs),
+                CatCategory::Numeric => return managed::numeric(context, dim_zero, inputs.view()),
+                CatCategory::Logical => return managed::logical(context, dim_zero, inputs.view()),
+                CatCategory::Complex => return managed::complex(context, dim_zero, inputs.view()),
+                CatCategory::Char => return managed::character(context, dim_zero, inputs.view()),
                 _ => {}
             }
         }
@@ -291,7 +286,10 @@ fn cat_host_values(
     }
 }
 
-fn determine_category(inputs: &[Value], like: &LikeSpec) -> BuiltinResult<CatCategory> {
+fn determine_category(
+    inputs: FunctionArgumentView<'_>,
+    like: &LikeSpec,
+) -> BuiltinResult<CatCategory> {
     let mut category = infer_category(inputs)?;
     if let Some(hint) = like.category_hint {
         category = match hint {
@@ -339,7 +337,7 @@ fn determine_category(inputs: &[Value], like: &LikeSpec) -> BuiltinResult<CatCat
     Ok(category)
 }
 
-fn infer_category(inputs: &[Value]) -> BuiltinResult<CatCategory> {
+fn infer_category(inputs: FunctionArgumentView<'_>) -> BuiltinResult<CatCategory> {
     // Direct cell concatenation encloses each complete non-cell operand in one
     // cell. Resolve this dominance before validating the enclosed value class.
     if inputs.iter().any(|value| matches!(value, Value::Cell(_))) {
@@ -452,15 +450,15 @@ fn upload_numeric_tensor(
 
 fn cat_numeric_tensors(
     dim_zero: usize,
-    values: Vec<Value>,
+    values: BuiltinArguments,
     like: &LikeSpec,
 ) -> BuiltinResult<Value> {
-    if let Some(target) = leftmost_integer_target(&values) {
+    if let Some(target) = leftmost_integer_target(values.view()) {
         return cat_integer_tensors(target, dim_zero, values, like);
     }
 
     let mut tensors = Vec::with_capacity(values.len());
-    for value in values {
+    for value in values.iter().cloned() {
         let tensor = tensor::value_into_tensor_for("cat", value).map_err(cat_err)?;
         tensors.push(tensor);
     }
@@ -524,7 +522,7 @@ fn concat_floating_tensors(dim_zero: usize, tensors: Vec<Tensor>) -> BuiltinResu
 
 /// MATLAB concatenation adopts the class of the leftmost integer operand,
 /// converting every other numeric or logical input to that class.
-fn leftmost_integer_target(values: &[Value]) -> Option<IntegerClass> {
+fn leftmost_integer_target(values: FunctionArgumentView<'_>) -> Option<IntegerClass> {
     let mut empty_integer_target = None;
     for value in values {
         match value {
@@ -547,7 +545,7 @@ fn leftmost_integer_target(values: &[Value]) -> Option<IntegerClass> {
 fn cat_integer_tensors(
     target: IntegerClass,
     dim_zero: usize,
-    values: Vec<Value>,
+    values: BuiltinArguments,
     like: &LikeSpec,
 ) -> BuiltinResult<Value> {
     let tensor = build_integer_cat_tensor(target, dim_zero, values)?;
@@ -557,12 +555,12 @@ fn cat_integer_tensors(
 fn build_integer_cat_tensor(
     target: IntegerClass,
     dim_zero: usize,
-    values: Vec<Value>,
+    values: BuiltinArguments,
 ) -> BuiltinResult<Tensor> {
     let mut shapes = Vec::with_capacity(values.len());
     let mut value_buffers = Vec::with_capacity(values.len());
 
-    for value in values {
+    for value in values.iter().cloned() {
         let (shape, values) = integer_concat_input(target, value)?;
         shapes.push(shape);
         value_buffers.push(values);
@@ -627,11 +625,11 @@ fn integer_concat_input(
 
 fn cat_logical_arrays(
     dim_zero: usize,
-    values: Vec<Value>,
+    values: BuiltinArguments,
     _like: &LikeSpec,
 ) -> BuiltinResult<Value> {
     let mut arrays = Vec::with_capacity(values.len());
-    for value in values {
+    for value in values.iter().cloned() {
         arrays.push(value_into_logical(value)?);
     }
     let shapes: Vec<&[usize]> = arrays.iter().map(|a| a.shape.as_slice()).collect();
@@ -643,7 +641,7 @@ fn cat_logical_arrays(
 
 fn cat_complex_arrays(
     dim_zero: usize,
-    values: Vec<Value>,
+    values: BuiltinArguments,
     like: &LikeSpec,
 ) -> BuiltinResult<Value> {
     if values.iter().any(|v| matches!(v, Value::GpuTensor(_))) {
@@ -652,12 +650,12 @@ fn cat_complex_arrays(
         ));
     }
 
-    if let Some(target) = leftmost_complex_integer_target(&values) {
+    if let Some(target) = leftmost_complex_integer_target(values.view()) {
         return cat_typed_complex_integer_arrays(target, dim_zero, values, like);
     }
 
     let mut tensors = Vec::with_capacity(values.len());
-    for value in values {
+    for value in values.iter().cloned() {
         let tensor = match value {
             Value::ComplexTensor(ct) => ct,
             Value::Complex(re, im) => ComplexTensor::new(vec![(re, im)], vec![1, 1])
@@ -688,7 +686,7 @@ fn cat_complex_arrays(
     Ok(complex_tensor_into_value(tensor))
 }
 
-fn leftmost_complex_integer_target(values: &[Value]) -> Option<IntegerClass> {
+fn leftmost_complex_integer_target(values: FunctionArgumentView<'_>) -> Option<IntegerClass> {
     let mut empty_target = None;
     for value in values {
         let Value::ComplexTensor(tensor) = value else {
@@ -709,7 +707,7 @@ fn leftmost_complex_integer_target(values: &[Value]) -> Option<IntegerClass> {
 fn cat_typed_complex_integer_arrays(
     target: IntegerClass,
     dim_zero: usize,
-    values: Vec<Value>,
+    values: BuiltinArguments,
     like: &LikeSpec,
 ) -> BuiltinResult<Value> {
     like.ensure_device(CatCategory::Complex)?;
@@ -722,7 +720,7 @@ fn cat_typed_complex_integer_arrays(
     let mut shapes = Vec::with_capacity(values.len());
     let mut real_buffers = Vec::with_capacity(values.len());
     let mut imag_buffers = Vec::with_capacity(values.len());
-    for value in values {
+    for value in values.iter().cloned() {
         let (shape, real, imag) = typed_complex_integer_concat_input(target, value)?;
         shapes.push(shape);
         real_buffers.push(real);
@@ -833,9 +831,9 @@ fn typed_complex_integer_concat_input(
     }
 }
 
-fn cat_char_arrays(dim_zero: usize, values: Vec<Value>) -> BuiltinResult<Value> {
+fn cat_char_arrays(dim_zero: usize, values: BuiltinArguments) -> BuiltinResult<Value> {
     let mut arrays = Vec::with_capacity(values.len());
-    for value in values {
+    for value in values.iter().cloned() {
         arrays.push(char_array_from_value(value)?);
     }
     let shapes: Vec<Vec<usize>> = arrays
@@ -898,9 +896,9 @@ fn char_from_numeric_code_point(value: f64) -> BuiltinResult<char> {
     char_from_f64_code_point(value, "cat")
 }
 
-fn cat_string_arrays(dim_zero: usize, values: Vec<Value>) -> BuiltinResult<Value> {
+fn cat_string_arrays(dim_zero: usize, values: BuiltinArguments) -> BuiltinResult<Value> {
     let mut arrays = Vec::with_capacity(values.len());
-    for value in values {
+    for value in values.iter().cloned() {
         arrays.push(value_into_string_array(value)?);
     }
     let shapes: Vec<&[usize]> = arrays.iter().map(StringArray::shape).collect();
@@ -911,10 +909,10 @@ fn cat_string_arrays(dim_zero: usize, values: Vec<Value>) -> BuiltinResult<Value
     Ok(Value::StringArray(array))
 }
 
-fn cat_cell_arrays(dim_zero: usize, values: Vec<Value>) -> BuiltinResult<Value> {
+fn cat_cell_arrays(dim_zero: usize, values: BuiltinArguments) -> BuiltinResult<Value> {
     let mut shapes = Vec::with_capacity(values.len());
     let mut buffers = Vec::with_capacity(values.len());
-    for value in values {
+    for value in values.iter().cloned() {
         let (shape, data) = match value {
             Value::Cell(cell) => {
                 let data = cell.to_column_major();
@@ -934,8 +932,9 @@ fn cat_cell_arrays(dim_zero: usize, values: Vec<Value>) -> BuiltinResult<Value> 
 
 async fn cat_gpu_values(
     dim_zero: usize,
-    values: Vec<Value>,
+    values: BuiltinArguments,
     like: &LikeSpec,
+    context: Option<&crate::context::RuntimeContext>,
 ) -> BuiltinResult<Value> {
     let has_complex_data = values.iter().any(|value| match value {
         Value::Complex(_, _) | Value::ComplexTensor(_) => true,
@@ -1077,18 +1076,17 @@ async fn cat_gpu_values(
         }
     }
 
-    let mut gathered_values = Vec::with_capacity(values.len());
-    for value in values {
-        match value {
-            Value::GpuTensor(handle) => {
-                gathered_values
-                    .push(gpu_helpers::gather_value_async(&Value::GpuTensor(handle)).await?);
+    let gathered_values = values
+        .try_map_preserving_roots_async(values.len(), context, async |index| {
+            let value = &values[index];
+            match value {
+                Value::GpuTensor(_) => gpu_helpers::gather_value_async(value).await,
+                value => Ok(value.clone()),
             }
-            value => gathered_values.push(value),
-        }
-    }
+        })
+        .await?;
 
-    let category = determine_category(&gathered_values, &output_like)?;
+    let category = determine_category(gathered_values.view(), &output_like)?;
     if matches!(category, CatCategory::Complex) {
         let host_like = LikeSpec {
             device: LikeDevice::Host,
@@ -1105,13 +1103,13 @@ async fn cat_gpu_values(
     if !matches!(category, CatCategory::Numeric) {
         return Err(cat_err("cat: gpuArray concatenation requires numeric data"));
     }
-    if let Some(target) = leftmost_integer_target(&gathered_values) {
+    if let Some(target) = leftmost_integer_target(gathered_values.view()) {
         let tensor = build_integer_cat_tensor(target, dim_zero, gathered_values)?;
         return finalize_numeric_output_with_provider(tensor, &output_like, Some(provider));
     }
 
     let mut tensors = Vec::with_capacity(gathered_values.len());
-    for value in gathered_values {
+    for value in gathered_values.iter().cloned() {
         tensors.push(tensor::value_into_tensor_for("cat", value).map_err(cat_err)?);
     }
     let tensor = concat_floating_tensors(dim_zero, tensors)?;
@@ -1335,7 +1333,7 @@ fn value_into_string_array(value: Value) -> BuiltinResult<StringArray> {
                 for row in 0..chars.rows {
                     let start = page_offset + row * chars.cols;
                     let end = start + chars.cols;
-                    let text: String = chars.data[start..end].iter().collect();
+                    let text: String = chars.data()[start..end].iter().collect();
                     data.push(text);
                 }
             }
@@ -1436,7 +1434,11 @@ pub(crate) mod tests {
     use futures::executor::block_on;
 
     fn cat_builtin(dim: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-        block_on(super::cat_builtin(None, dim, rest))
+        block_on(super::cat_builtin(
+            None,
+            dim,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::{
@@ -1445,9 +1447,9 @@ pub(crate) mod tests {
     use runmat_value::{IntValue, IntegerStorage, StructArray, StructValue, Tensor};
 
     fn test_structure(value: f64) -> StructValue {
-        let mut structure = StructValue::new();
+        let mut structure = runmat_value::UnboundedStructValueBuilder::new();
         structure.insert("payload", Value::Num(value));
-        structure
+        structure.finish()
     }
 
     #[test]
@@ -1471,14 +1473,18 @@ pub(crate) mod tests {
         };
         assert_eq!(result.shape(), [2, 1]);
         assert_eq!(
-            result.field_names().cloned().collect::<Vec<_>>(),
+            result
+                .field_names()
+                .map(ToOwned::to_owned)
+                .collect::<Vec<_>>(),
             ["payload"]
         );
     }
 
     #[test]
     fn cat_integer_capability_and_extension_metadata_is_explicit() {
-        let builtin = runmat_builtins::builtin_function_by_name("cat").expect("registered cat");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name("cat").expect("catalogued cat");
         assert_eq!(builtin.integer_capabilities.len(), 4);
         assert_eq!(builtin.extensions.len(), 2);
         assert_eq!(
@@ -1743,7 +1749,7 @@ pub(crate) mod tests {
             Value::CharArray(arr) => {
                 assert_eq!(arr.rows, 1);
                 assert_eq!(arr.cols, 6);
-                let text: String = arr.data.iter().collect();
+                let text: String = arr.data().iter().collect();
                 assert_eq!(text, "RunMat");
             }
             other => panic!("expected char array, got {other:?}"),
@@ -1769,7 +1775,7 @@ pub(crate) mod tests {
             Value::StringArray(arr) => {
                 assert_eq!(arr.shape, vec![1, 3]);
                 assert_eq!(
-                    arr.data,
+                    arr.data(),
                     vec!["wn = ".to_string(), "6".to_string(), " rad/s".to_string()]
                 );
             }
@@ -1801,7 +1807,7 @@ pub(crate) mod tests {
         };
         assert_eq!(output.shape, vec![1, 4]);
         assert_eq!(
-            output.data,
+            output.data(),
             vec![
                 "id".to_string(),
                 "9007199254740993".to_string(),
@@ -1826,8 +1832,8 @@ pub(crate) mod tests {
             panic!("expected cell array");
         };
         assert_eq!(output.shape, vec![1, 2]);
-        assert_eq!(output.data[0], Value::String("head".into()));
-        assert_eq!(output.data[1], Value::Tensor(matrix));
+        assert_eq!(output.data()[0], Value::String("head".into()));
+        assert_eq!(output.data()[1], Value::Tensor(matrix));
     }
 
     #[test]
@@ -1864,7 +1870,7 @@ pub(crate) mod tests {
             panic!("expected char array");
         };
         assert_eq!(chars.shape, vec![1, 2, 4]);
-        assert_eq!(chars.data.iter().collect::<String>(), "abcdefgh");
+        assert_eq!(chars.data().iter().collect::<String>(), "abcdefgh");
 
         let left_cells = CellArray::new_with_shape(
             vec![Value::Int(IntValue::I8(1)), Value::Int(IntValue::I8(2))],
@@ -1886,7 +1892,7 @@ pub(crate) mod tests {
         };
         assert_eq!(cells.shape, vec![1, 1, 4]);
         assert_eq!(
-            cells.data,
+            cells.data(),
             vec![
                 Value::Int(IntValue::I8(1)),
                 Value::Int(IntValue::I8(2)),

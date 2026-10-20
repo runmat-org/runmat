@@ -5003,7 +5003,7 @@ fn fused_reduction_scalar_report_tail_matches_expected() {
             .iter()
             .filter_map(|value| match value {
                 Value::CharArray(chars) => {
-                    chars.data.iter().collect::<String>().trim().parse().ok()
+                    chars.data().iter().collect::<String>().trim().parse().ok()
                 }
                 _ => None,
             })
@@ -5053,7 +5053,7 @@ fn fused_reduction_scalar_single_report_tail_matches_expected() {
             .iter()
             .filter_map(|value| match value {
                 Value::CharArray(chars) => {
-                    chars.data.iter().collect::<String>().trim().parse().ok()
+                    chars.data().iter().collect::<String>().trim().parse().ok()
                 }
                 _ => None,
             })
@@ -5112,7 +5112,7 @@ fn fused_reduction_scalar_branch_report_tail_matches_expected() {
         let s_index = stores.pop().expect("store index for s");
 
         let rendered = match vars.get(s_index).expect("value for s") {
-            Value::CharArray(chars) => chars.data.iter().collect::<String>(),
+            Value::CharArray(chars) => chars.data().iter().collect::<String>(),
             other => panic!("expected char array report, got {other:?}"),
         };
         let rendered_value: f64 = rendered.trim().parse().expect("parse rendered scalar");

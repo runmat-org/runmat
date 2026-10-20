@@ -17,7 +17,7 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 )]
 pub(in crate::builtins::io::repl_fs) async fn getpref_builtin(
     runtime: Option<RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &GETPREF_DESCRIPTOR,
@@ -52,12 +52,15 @@ pub(in crate::builtins::io::repl_fs) async fn getpref_builtin(
                 values.unwrap_or_default(),
             )))
         }
-        2 | 3 => named(runtime, &args).await,
+        2 | 3 => named(runtime, args.view()).await,
         _ => Err(error("getpref", "getpref: too many input arguments")),
     }
 }
 
-async fn named(runtime: Option<RuntimeContext>, args: &[Value]) -> BuiltinResult<Value> {
+async fn named(
+    runtime: Option<RuntimeContext>,
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Value> {
     let group = scalar_text(&args[0], "getpref", "group")?;
     let preferences = preference_names(&args[1], "getpref")?;
     if args
@@ -78,9 +81,7 @@ async fn named(runtime: Option<RuntimeContext>, args: &[Value]) -> BuiltinResult
         PreferenceNames::Array { names, shape } => {
             let defaults = match args.get(2) {
                 None => None,
-                Some(Value::Cell(cell)) if cell.shape == shape => {
-                    Some(cell.data.iter().cloned().collect())
-                }
+                Some(Value::Cell(cell)) if cell.shape == shape => Some(cell.data().to_vec()),
                 Some(_) => {
                     return Err(error(
                         "getpref",

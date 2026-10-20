@@ -105,7 +105,10 @@ fn interpolation_uploads_retire_on_pending_drop_failure_unsupported_and_alias_re
             Value::GpuTensor(input.handle.clone()),
             Value::Tensor(Tensor::new(vec![1.5, 2.5], vec![2, 1]).unwrap()),
         ];
-        let mut future = Box::pin(try_interp1_gpu(&args, None));
+        let mut future = Box::pin(try_interp1_gpu(
+            crate::call::FunctionArgumentView::from_slice(&args),
+            None,
+        ));
         let waker = futures::task::noop_waker();
         match (mode, future.as_mut().poll(&mut Context::from_waker(&waker))) {
             (Mode::Pending, Poll::Pending) | (Mode::Unsupported, Poll::Ready(Ok(None))) => {}

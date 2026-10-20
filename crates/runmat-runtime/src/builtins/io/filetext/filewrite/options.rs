@@ -22,7 +22,9 @@ impl Default for FilewriteOptions {
         }
     }
 }
-pub(super) fn parse_options(args: &[Value]) -> BuiltinResult<FilewriteOptions> {
+pub(super) fn parse_options(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<FilewriteOptions> {
     if args.is_empty() {
         return Ok(FilewriteOptions::default());
     }
@@ -95,12 +97,12 @@ fn is_keyword(value: &Value) -> BuiltinResult<bool> {
 fn keyword_name(value: &Value) -> BuiltinResult<String> {
     match value {
         Value::String(s) => Ok(s.as_str().to_owned()),
-        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
+        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data().iter().collect()),
         Value::CharArray(_) => Err(filewrite_error_with_detail(
             &FILEWRITE_ERROR_INVALID_OPTION,
             "keyword names must be 1-by-N character vectors",
         )),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].as_str().to_owned()),
+        Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].as_str().to_owned()),
         Value::StringArray(_) => Err(filewrite_error_with_detail(
             &FILEWRITE_ERROR_INVALID_OPTION,
             "keyword inputs must be scalar string arrays",
@@ -149,14 +151,14 @@ pub(super) fn resolve_path(value: &Value) -> BuiltinResult<PathBuf> {
     match value {
         Value::String(s) => normalize_path(s),
         Value::CharArray(ca) if ca.rows == 1 => {
-            let path: String = ca.data.iter().collect();
+            let path: String = ca.data().iter().collect();
             normalize_path(&path)
         }
         Value::CharArray(_) => Err(filewrite_error_with_detail(
             &FILEWRITE_ERROR_INVALID_INPUT,
             "filename must be a 1-by-N character vector",
         )),
-        Value::StringArray(sa) if sa.data.len() == 1 => normalize_path(&sa.data[0]),
+        Value::StringArray(sa) if sa.data().len() == 1 => normalize_path(&sa.data()[0]),
         Value::StringArray(_) => Err(filewrite_error_with_detail(
             &FILEWRITE_ERROR_INVALID_INPUT,
             "string array filename inputs must be scalar",

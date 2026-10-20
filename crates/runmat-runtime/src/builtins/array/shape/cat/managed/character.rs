@@ -37,7 +37,7 @@ fn source_extent(value: &Value, axis: usize) -> BuiltinResult<usize> {
 
 fn source_count(value: &Value) -> BuiltinResult<usize> {
     match value {
-        Value::CharArray(chars) => Ok(chars.data.len()),
+        Value::CharArray(chars) => Ok(chars.data().len()),
         Value::Tensor(tensor) => Ok(tensor.len()),
         Value::Num(_) | Value::Int(_) => Ok(1),
         _ => Err(cat_err(
@@ -59,7 +59,7 @@ fn active(value: &Value, rank: usize, has_nonempty: bool) -> BuiltinResult<bool>
 }
 
 fn output_extent(
-    values: &[Value],
+    values: FunctionArgumentView<'_>,
     axis: usize,
     dim: usize,
     rank: usize,
@@ -116,7 +116,7 @@ fn source_char(value: &Value, index: usize) -> BuiltinResult<char> {
                 .and_then(|base| base.checked_add(col))
                 .ok_or_else(|| cat_err("cat: character source index overflow"))?;
             chars
-                .data
+                .data()
                 .get(physical)
                 .copied()
                 .ok_or_else(|| cat_err("cat: character source geometry changed"))
@@ -134,7 +134,7 @@ fn source_char(value: &Value, index: usize) -> BuiltinResult<char> {
 pub(in super::super) fn character(
     context: &RuntimeContext,
     dim: usize,
-    values: &[Value],
+    values: FunctionArgumentView<'_>,
 ) -> BuiltinResult<Value> {
     if values.is_empty() {
         return Err(cat_err("cat: no inputs to concatenate"));

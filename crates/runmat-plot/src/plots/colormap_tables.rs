@@ -362,7 +362,11 @@ pub(crate) const PARULA: [[f32; 3]; 10] = [
 /// Linear interpolation through an evenly spaced table, `t` in [0, 1].
 pub(crate) fn sample(table: &[[f32; 3]], t: f32) -> [f32; 3] {
     let last = table.len() - 1;
-    let x = if t.is_finite() { t.clamp(0.0, 1.0) } else { 0.0 } * last as f32;
+    let x = if t.is_finite() {
+        t.clamp(0.0, 1.0)
+    } else {
+        0.0
+    } * last as f32;
     let i = (x.floor() as usize).min(last.saturating_sub(1));
     let f = x - i as f32;
     let (a, b) = (table[i], table[(i + 1).min(last)]);

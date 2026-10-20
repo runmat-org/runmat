@@ -6,9 +6,9 @@ use super::{ensure_vector, text_atom, GroupingInput, KeyOrder};
 use crate::builtins::array::grouping::grp2idx::error;
 
 pub(super) fn strings(value: StringArray) -> BuiltinResult<GroupingInput> {
-    let len = value.data.len();
-    let rows = value.data.iter().map(|value| text_atom(value)).collect();
-    let value = StringArray::from_shared_storage(value.data, vec![len, 1].into())
+    let len = value.data().len();
+    let rows = value.data().iter().map(|value| text_atom(value)).collect();
+    let value = StringArray::from_shared_storage(value.into_parts().0, vec![len, 1].into())
         .map_err(error::invalid)?;
     Ok(GroupingInput::new(
         Value::StringArray(value),
@@ -24,11 +24,11 @@ pub(super) fn scalar(value: Utf8Text) -> GroupingInput {
 
 pub(super) fn cellstr(value: CellArray) -> BuiltinResult<GroupingInput> {
     ensure_vector(&[value.rows, value.cols], "cell array")?;
-    let len = value.data.len();
+    let len = value.data().len();
     let mut rows = Vec::with_capacity(len);
-    for item in &value.data {
+    for item in value.data() {
         let text: String = match item {
-            Value::CharArray(chars) if chars.rows <= 1 => chars.data.iter().collect(),
+            Value::CharArray(chars) if chars.rows <= 1 => chars.data().iter().collect(),
             _ => {
                 return Err(error::invalid(
                     "grp2idx: cell input must contain character vectors",
@@ -37,8 +37,8 @@ pub(super) fn cellstr(value: CellArray) -> BuiltinResult<GroupingInput> {
         };
         rows.push(text_atom(&text));
     }
-    let value =
-        CellArray::from_shared_storage(value.data, vec![len, 1].into()).map_err(error::invalid)?;
+    let value = CellArray::from_shared_storage(value.into_parts().0, vec![len, 1].into())
+        .map_err(error::invalid)?;
     Ok(GroupingInput::new(
         Value::Cell(value),
         rows,
@@ -55,7 +55,7 @@ pub(super) fn characters(value: CharArray) -> BuiltinResult<GroupingInput> {
     let rows = (0..value.rows)
         .map(|row| {
             let start = row * value.cols;
-            let text = value.data[start..start + value.cols]
+            let text = value.data()[start..start + value.cols]
                 .iter()
                 .collect::<String>();
             text_atom(text.trim_end())

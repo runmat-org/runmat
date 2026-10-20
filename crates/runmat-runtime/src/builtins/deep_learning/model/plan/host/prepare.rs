@@ -40,8 +40,8 @@ fn fail(function: &'static str, detail: impl std::fmt::Display) -> crate::Runtim
 
 fn data(value: &Value) -> &Value {
     match value {
-        Value::Object(object) if object.class_name.is(DLARRAY_CLASS) => object
-            .properties
+        Value::Object(object) if object.class_name().is(DLARRAY_CLASS) => object
+            .properties()
             .get(runmat_builtins::DLARRAY_DATA_PROPERTY)
             .unwrap_or(value),
         _ => value,

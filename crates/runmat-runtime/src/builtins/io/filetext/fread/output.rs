@@ -208,7 +208,7 @@ pub(super) fn convert_to_logical_value(data: Value) -> Result<Value, String> {
             for c in 0..ca.cols {
                 for r in 0..ca.rows {
                     let idx = r * ca.cols + c;
-                    let ch = ca.data[idx];
+                    let ch = ca.data()[idx];
                     bits.push(if ch != '\0' { 1 } else { 0 });
                 }
             }

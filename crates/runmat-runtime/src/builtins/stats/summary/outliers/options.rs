@@ -6,7 +6,10 @@ pub(super) struct DecodedOptions {
 }
 
 impl DecodedOptions {
-    pub(super) fn new(operation: OutlierOperation, rest: &[Value]) -> Self {
+    pub(super) fn new(
+        operation: OutlierOperation,
+        rest: crate::call::FunctionArgumentView<'_>,
+    ) -> Self {
         let tokens = rest
             .iter()
             .enumerate()
@@ -36,7 +39,7 @@ impl DecodedOptions {
 
 pub(super) async fn preflight_host_options(
     operation: OutlierOperation,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     decoded: &DecodedOptions,
 ) -> BuiltinResult<()> {
     let builtin = operation.name();
@@ -203,11 +206,20 @@ fn threshold_factor_value(builtin: &'static str, value: &Value) -> BuiltinResult
 
 pub(super) async fn parse_detection_options(
     operation: OutlierOperation,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
+    decoded: Vec<Option<OutlierOption>>,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<DetectionOptions> {
+    let rest = gather_values(rest, runtime).await?;
+    parse_gathered_detection_options(operation, rest.view(), decoded)
+}
+
+pub(super) fn parse_gathered_detection_options(
+    operation: OutlierOperation,
+    rest: crate::call::FunctionArgumentView<'_>,
     decoded: Vec<Option<OutlierOption>>,
 ) -> BuiltinResult<DetectionOptions> {
     let builtin = operation.name();
-    let rest = gather_values(rest).await?;
     let mut options = DetectionOptions::default();
     let mut idx = 0usize;
     while idx < rest.len() {
@@ -333,12 +345,11 @@ pub(super) async fn parse_detection_options(
     Ok(options)
 }
 
-pub(super) fn parse_fill_method(rest: &mut Vec<Value>) -> BuiltinResult<FillMethod> {
-    let value = rest.remove(0);
-    if let Some(number) = scalar_number(&value) {
+pub(super) fn parse_fill_method(value: &Value) -> BuiltinResult<FillMethod> {
+    if let Some(number) = scalar_number(value) {
         return Ok(FillMethod::Constant(number));
     }
-    let Some(keyword) = keyword_of(&value) else {
+    let Some(keyword) = keyword_of(value) else {
         return Err(invalid_argument(
             FILLOUTLIERS_NAME,
             "filloutliers: fill method must be text or numeric scalar",

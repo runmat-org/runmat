@@ -1,6 +1,6 @@
 use runmat_value::Value;
 
-pub(super) async fn run(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub(super) async fn run(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     let request = super::input::decode(args).await?;
     let requested_outputs = request.requested_outputs;
     Ok(evaluate(request).await?.value(requested_outputs))

@@ -15,7 +15,7 @@ use runmat_builtins::{
     TCPSERVER_ZERO_PORT_EXTENSION as ZERO_PORT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{ForeignRef, IntValue, ObjectInstance, StructValue, Tensor, Value};
+use runmat_value::{ForeignRef, IntValue, Tensor, Value};
 
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 use thiserror::Error;
@@ -66,8 +66,8 @@ pub(crate) async fn tcpserver_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     address: Value,
     port: Value,
-    rest: Vec<Value>,
-) -> crate::BuiltinResult<Value> {
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     if std::iter::once(&address)
         .chain(std::iter::once(&port))
         .chain(rest.iter())
@@ -84,7 +84,7 @@ pub(crate) async fn tcpserver_builtin(
             BUILTIN_NAME,
         )?;
     }
-    let prepared_options = preflight_name_value_extensions(&rest).await?;
+    let prepared_options = preflight_name_value_extensions(rest.view()).await?;
     let known_address = if matches!(&address, Value::GpuTensor(_)) {
         None
     } else {
@@ -153,12 +153,13 @@ pub(crate) async fn tcpserver_builtin(
             )
         })?;
     work.completed(0).await?;
-    Ok(build_tcpserver_object(
+    build_tcpserver_object(
+        runtime.as_ref(),
         endpoint.authority,
         &host,
         endpoint.local_addr,
         &options,
-    ))
+    )
 }
 
 fn parse_address(address: &Value) -> BuiltinResult<String> {
@@ -188,7 +189,7 @@ fn parse_endpoint_port(port: &Value) -> BuiltinResult<u16> {
 }
 
 async fn preflight_name_value_extensions(
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<Vec<Option<NetConstructorOption>>> {
     if !rest.len().is_multiple_of(2) {
         return Err(tcpserver_flow(
@@ -317,7 +318,7 @@ impl Default for ParsedOptions {
 }
 
 async fn parse_name_value_pairs(
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
     prepared: Vec<Option<NetConstructorOption>>,
 ) -> BuiltinResult<ParsedOptions> {
     if rest.is_empty() {
@@ -430,13 +431,12 @@ async fn parse_name_value_pairs(
 }
 
 fn build_tcpserver_object(
+    runtime: Option<&crate::context::RuntimeContext>,
     authority: ForeignRef,
     requested_address: &str,
     local_addr: SocketAddr,
     options: &ParsedOptions,
-) -> Value {
-    let mut st = StructValue::new();
-
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     let server_address = local_addr.ip().to_string();
     let server_port = local_addr.port();
     let name = options
@@ -444,65 +444,42 @@ fn build_tcpserver_object(
         .clone()
         .unwrap_or_else(|| format!("tcpserver:{server_address}:{server_port}"));
 
-    st.fields
-        .insert("Type".to_string(), Value::string("tcpserver".to_string()));
-    st.fields.insert("Name".to_string(), Value::string(name));
-    st.fields.insert(
-        "ServerAddress".to_string(),
-        Value::string(server_address.clone()),
-    );
-    st.fields
-        .insert("ServerPort".to_string(), Value::Num(f64::from(server_port)));
-    st.fields
-        .insert("Port".to_string(), Value::Num(f64::from(server_port)));
-    st.fields.insert(
-        "RequestedAddress".to_string(),
-        Value::string(requested_address.to_string()),
-    );
-    st.fields
-        .insert("Connected".to_string(), Value::Bool(false));
-    st.fields
-        .insert("ClientAddress".to_string(), Value::string(String::new()));
-    st.fields.insert(
-        "ClientPort".to_string(),
-        Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).expect("empty client port")),
-    );
-    st.fields.insert(
-        "NumBytesAvailable".to_string(),
-        Value::Int(IntValue::I32(0)),
-    );
-    st.fields
-        .insert("BytesAvailableFcn".to_string(), default_user_data());
-    st.fields.insert(
-        "BytesAvailableFcnMode".to_string(),
-        Value::string("byte".to_string()),
-    );
-    st.fields.insert(
-        "BytesAvailableFcnCount".to_string(),
-        Value::Int(IntValue::I32(1)),
-    );
-    st.fields
-        .insert("ConnectionChangedFcn".to_string(), default_user_data());
-    st.fields.insert(
-        "ByteOrder".to_string(),
-        Value::string(options.byte_order.clone()),
-    );
-    st.fields
-        .insert("EnableBroadcast".to_string(), Value::Bool(false));
-    st.fields
-        .insert("EnableMulticast".to_string(), Value::Bool(false));
-    st.fields
-        .insert("EnableReuseAddress".to_string(), Value::Bool(false));
-    st.fields
-        .insert("KeepAlive".to_string(), Value::Bool(false));
-    st.fields
-        .insert("Timeout".to_string(), Value::Num(options.timeout));
-    st.fields
-        .insert("UserData".to_string(), options.user_data.clone());
+    let properties = [
+        ("Type", Value::string("tcpserver".to_string())),
+        ("Name", Value::string(name)),
+        ("ServerAddress", Value::string(server_address.clone())),
+        ("ServerPort", Value::Num(f64::from(server_port))),
+        ("Port", Value::Num(f64::from(server_port))),
+        (
+            "RequestedAddress",
+            Value::string(requested_address.to_string()),
+        ),
+        ("Connected", Value::Bool(false)),
+        ("ClientAddress", Value::string(String::new())),
+        (
+            "ClientPort",
+            Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).expect("empty client port")),
+        ),
+        ("NumBytesAvailable", Value::Int(IntValue::I32(0))),
+        ("BytesAvailableFcn", default_user_data()),
+        ("BytesAvailableFcnMode", Value::string("byte".to_string())),
+        ("BytesAvailableFcnCount", Value::Int(IntValue::I32(1))),
+        ("ConnectionChangedFcn", default_user_data()),
+        ("ByteOrder", Value::string(options.byte_order.clone())),
+        ("EnableBroadcast", Value::Bool(false)),
+        ("EnableMulticast", Value::Bool(false)),
+        ("EnableReuseAddress", Value::Bool(false)),
+        ("KeepAlive", Value::Bool(false)),
+        ("Timeout", Value::Num(options.timeout)),
+        ("UserData", options.user_data.clone()),
+    ];
 
-    let mut object = ObjectInstance::new(runmat_builtins::TCPSERVER_CLASS);
-    object.properties = st.fields.into_iter().collect();
-    Value::Object(object.with_tcp_authority(authority))
+    crate::execution::object::construct_object_from_fields_with_native(
+        runtime,
+        runmat_builtins::TCPSERVER_CLASS.display_name(),
+        properties.iter().map(|(name, value)| (*name, value)),
+        Some(crate::execution::object::ObjectNativeInitialization::TcpAuthority(authority)),
+    )
 }
 
 #[derive(Debug, Error)]
@@ -554,7 +531,7 @@ pub(crate) mod tests {
     fn struct_field<'a>(value: &'a Value, name: &str) -> &'a Value {
         match value {
             Value::Object(object) => object
-                .properties
+                .properties()
                 .get(name)
                 .unwrap_or_else(|| panic!("missing field {name}")),
             _ => panic!("expected TCP server object"),
@@ -562,7 +539,7 @@ pub(crate) mod tests {
     }
 
     struct TestServer {
-        value: Value,
+        value: crate::execution::RootedValue,
         _runtime: RuntimeContext,
         _driver: tokio::runtime::Runtime,
     }
@@ -599,7 +576,7 @@ pub(crate) mod tests {
             Some(runtime.clone()),
             address,
             port,
-            rest,
+            crate::builtins::common::test_support::builtin_arguments(rest),
         ))?;
         Ok(TestServer {
             value,
@@ -895,11 +872,11 @@ pub(crate) mod tests {
         let _guard = net_guard();
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
 
-        let mut user_struct_value = StructValue::new();
+        let mut user_struct_value = runmat_value::UnboundedStructValueBuilder::new();
         user_struct_value
             .fields
             .insert("tag".to_string(), Value::from("demo"));
-        let user_struct = Value::Struct(user_struct_value);
+        let user_struct = Value::Struct(user_struct_value.finish());
 
         let result = run_tcpserver(
             Value::from("127.0.0.1"),

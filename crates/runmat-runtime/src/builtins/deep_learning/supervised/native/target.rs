@@ -4,6 +4,8 @@
 //! formatted dlarray instead supplies its own semantic axes. Both paths lower
 //! through the same checked AxisPlan before loss evaluation.
 
+#[cfg(test)]
+use crate::builtins::deep_learning::arguments::DeepLearningObjectEdit as _;
 use runmat_accelerate_api::{handle_is_explicit, GpuTensorStorage, ProviderPrecision};
 use runmat_builtins::{DeepLearningAxisLabel, DeepLearningAxisLayout};
 use runmat_value::{NumericDType, Tensor, Value};
@@ -38,16 +40,16 @@ impl<'a> NumericTargetPlan<'a> {
         function: &'static str,
     ) -> BuiltinResult<Self> {
         let (data, format) = match target {
-            Value::Object(object) if object.class_name.is(DLARRAY_CLASS) => {
+            Value::Object(object) if object.class_name().is(DLARRAY_CLASS) => {
                 let data = object
-                    .properties
+                    .properties()
                     .get("Data")
                     .ok_or_else(|| fail(function, "target dlarray is missing Data"))?;
-                let format = match object.properties.get("Format") {
+                let format = match object.properties().get("Format") {
                     Some(Value::String(text)) => text.as_str(),
                     _ => return Err(fail(function, "target dlarray Format must be text")),
                 };
-                match object.properties.get("Labels") {
+                match object.properties().get("Labels") {
                     Some(Value::String(labels)) if labels == format => {}
                     _ => return Err(fail(function, "target dlarray Format and Labels conflict")),
                 }
@@ -217,16 +219,18 @@ mod tests {
         assert_eq!(prepared.as_f32_slice(), Some(&[1., 4., 2., 5., 3., 6.][..]));
 
         let mut object = runmat_value::ObjectInstance::new(DLARRAY_CLASS.owned());
-        object.properties.insert(
-            "Data".into(),
-            Value::Tensor(Tensor::new(vec![1., 4., 2., 5., 3., 6.], vec![2, 3]).unwrap()),
-        );
         object
-            .properties
-            .insert("Format".into(), Value::String("CB".into()));
+            .replace_dl_property(
+                "Data",
+                Value::Tensor(Tensor::new(vec![1., 4., 2., 5., 3., 6.], vec![2, 3]).unwrap()),
+            )
+            .expect("fixture property");
         object
-            .properties
-            .insert("Labels".into(), Value::String("CB".into()));
+            .replace_dl_property("Format", Value::String("CB".into()))
+            .expect("fixture property");
+        object
+            .replace_dl_property("Labels", Value::String("CB".into()))
+            .expect("fixture property");
         let formatted = Value::Object(object);
         let planned = NumericTargetPlan::admit(&formatted, &output, "test").unwrap();
         let prepared = futures::executor::block_on(planned.prepare(NumericDType::F64)).unwrap();
@@ -239,16 +243,18 @@ mod tests {
         let wrong = Value::Tensor(Tensor::new(vec![0.; 2 * 4 * 3], vec![2, 4, 3]).unwrap());
         assert!(NumericTargetPlan::admit(&wrong, &output, "test").is_err());
         let mut object = runmat_value::ObjectInstance::new(DLARRAY_CLASS.owned());
-        object.properties.insert(
-            "Data".into(),
-            Value::Tensor(Tensor::new(vec![0.; 24], vec![2, 3, 4]).unwrap()),
-        );
         object
-            .properties
-            .insert("Format".into(), Value::String("CBT".into()));
+            .replace_dl_property(
+                "Data",
+                Value::Tensor(Tensor::new(vec![0.; 24], vec![2, 3, 4]).unwrap()),
+            )
+            .expect("fixture property");
         object
-            .properties
-            .insert("Labels".into(), Value::String("BCT".into()));
+            .replace_dl_property("Format", Value::String("CBT".into()))
+            .expect("fixture property");
+        object
+            .replace_dl_property("Labels", Value::String("BCT".into()))
+            .expect("fixture property");
         assert!(NumericTargetPlan::admit(&Value::Object(object), &output, "test").is_err());
     }
 

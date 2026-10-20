@@ -120,8 +120,8 @@ pub(super) fn bool_scalar(value: &Value, label: &str) -> BuiltinResult<bool> {
 pub(super) fn text_from_value(value: &Value) -> Option<String> {
     match value {
         Value::String(s) => Some(s.as_str().to_owned()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].as_str().to_owned()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
+        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].as_str().to_owned()),
+        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data().iter().collect()),
         _ => None,
     }
 }

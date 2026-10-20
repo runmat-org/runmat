@@ -4,7 +4,7 @@ use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorView, NumericElementType,
     ThreadProviderGuard,
 };
-use runmat_value::{CellArray, LogicalArray, StringArray, StructValue};
+use runmat_value::{CellArray, LogicalArray, StringArray};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 struct RejectingDownloadProvider {
@@ -31,7 +31,7 @@ async fn discarded_classify_admits_before_provider_access() {
         Value::GpuTensor(resident.handle.clone()),
         training.clone(),
         group.clone(),
-        vec![Value::from("bogus")],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("bogus")]),
     )
     .await
     .expect_err("discarding outputs must not bypass type admission");
@@ -42,10 +42,10 @@ async fn discarded_classify_admits_before_provider_access() {
         Value::GpuTensor(resident.handle.clone()),
         training.clone(),
         group.clone(),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("linear"),
             tensor(vec![f64::NAN, 1.0], vec![1, 2]),
-        ],
+        ]),
     )
     .await
     .expect_err("discarding outputs must not bypass host prior admission");
@@ -56,7 +56,7 @@ async fn discarded_classify_admits_before_provider_access() {
         Value::GpuTensor(resident.handle.clone()),
         training,
         group,
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     )
     .await
     .expect("valid discarded call needs no download or prediction buffers");
@@ -104,13 +104,16 @@ async fn classify_preflight_and_gather_error_preserve_provider_contract() {
         .allocate_zeroed(vec![2, 1], NumericElementType::F64, GpuTensorStorage::Real)
         .unwrap();
     let (_, training, group) = valid_floating_inputs();
-    let mut prior = StructValue::new();
+    let mut prior = runmat_value::UnboundedStructValueBuilder::new();
     prior.insert("group", group.clone());
     let err = classify_builtin(
         Value::GpuTensor(resident.handle.clone()),
         training.clone(),
         group.clone(),
-        vec![Value::from("linear"), Value::Struct(prior)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("linear"),
+            Value::Struct(prior.finish()),
+        ]),
     )
     .await
     .expect_err("missing prior probability must reject before download");
@@ -136,7 +139,7 @@ async fn classify_preflight_and_gather_error_preserve_provider_contract() {
         Value::GpuTensor(resident.handle.clone()),
         training.clone(),
         invalid_group,
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     )
     .await
     .expect_err("host cell labels must reject before resident sample download");
@@ -152,7 +155,10 @@ async fn classify_preflight_and_gather_error_preserve_provider_contract() {
             Value::GpuTensor(resident.handle.clone()),
             training.clone(),
             group.clone(),
-            vec![Value::from("linear"), probabilities],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("linear"),
+                probabilities,
+            ]),
         )
         .await
         .expect_err("invalid host prior must reject before resident sample download");
@@ -160,14 +166,17 @@ async fn classify_preflight_and_gather_error_preserve_provider_contract() {
         assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
     }
 
-    let mut mismatched = StructValue::new();
+    let mut mismatched = runmat_value::UnboundedStructValueBuilder::new();
     mismatched.insert("group", tensor(vec![1.0, 2.0], vec![1, 2]));
     mismatched.insert("prob", tensor(vec![1.0], vec![1, 1]));
     let err = classify_builtin(
         Value::GpuTensor(resident.handle.clone()),
         training.clone(),
         group.clone(),
-        vec![Value::from("linear"), Value::Struct(mismatched)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("linear"),
+            Value::Struct(mismatched.finish()),
+        ]),
     )
     .await
     .expect_err("known prior group/prob length mismatch must reject before download");
@@ -205,7 +214,7 @@ async fn classify_preflight_and_gather_error_preserve_provider_contract() {
             Value::GpuTensor(resident.handle.clone()),
             training.clone(),
             invalid_group,
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         )
         .await
         .expect_err("matrix-shaped group must reject before sample download");
@@ -234,7 +243,7 @@ async fn classify_preflight_and_gather_error_preserve_provider_contract() {
             Value::GpuTensor(resident.handle.clone()),
             training.clone(),
             group.clone(),
-            control,
+            crate::builtins::common::test_support::builtin_arguments(control),
         )
         .await
         .expect_err("nonscalar text control must reject before sample download");
@@ -250,7 +259,7 @@ async fn classify_preflight_and_gather_error_preserve_provider_contract() {
             invalid_sample,
             Value::GpuTensor(resident_training.handle.clone()),
             group.clone(),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         )
         .await
         .expect_err("known-invalid sample must reject before resident training download");
@@ -265,7 +274,7 @@ async fn classify_preflight_and_gather_error_preserve_provider_contract() {
             Value::GpuTensor(resident.handle.clone()),
             invalid_training,
             group.clone(),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         )
         .await
         .expect_err("known-invalid training must reject before resident sample download");
@@ -275,7 +284,7 @@ async fn classify_preflight_and_gather_error_preserve_provider_contract() {
         Value::GpuTensor(resident.handle.clone()),
         training.clone(),
         tensor(vec![1.0; 4], vec![4, 1]),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     )
     .await
     .expect_err("one known class must reject before resident sample download");
@@ -287,7 +296,10 @@ async fn classify_preflight_and_gather_error_preserve_provider_contract() {
         Value::GpuTensor(resident.handle.clone()),
         training.clone(),
         group.clone(),
-        vec![Value::from("linear"), valid_prior],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("linear"),
+            valid_prior,
+        ]),
     )
     .await
     .expect_err("valid host prior must not mask the deferred sample provider error");
@@ -298,7 +310,7 @@ async fn classify_preflight_and_gather_error_preserve_provider_contract() {
         Value::GpuTensor(resident.handle.clone()),
         training.clone(),
         group.clone(),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     )
     .await
     .expect_err("provider must reject resident sample download");
@@ -320,7 +332,7 @@ async fn classify_preflight_and_gather_error_preserve_provider_contract() {
         Value::GpuTensor(complex.handle.clone()),
         training,
         group,
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     )
     .await
     .expect_err("complex predictors must reject before download");

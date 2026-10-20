@@ -134,8 +134,11 @@ fn token_to_limit(token: &ArgToken) -> crate::BuiltinResult<usize> {
     binding_variant = "default",
     builtin_path = "crate::builtins::array::indexing::find"
 )]
-async fn find_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let eval = evaluate(value, &rest).await?;
+async fn find_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    let eval = evaluate(value, rest.view()).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Value::output_list(Vec::new()));
@@ -156,7 +159,10 @@ async fn find_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
 }
 
 /// Evaluate `find` and return an object that can materialise the various outputs.
-pub async fn evaluate(value: Value, args: &[Value]) -> crate::BuiltinResult<FindEval> {
+pub async fn evaluate(
+    value: Value,
+    args: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<FindEval> {
     if args.len() == 1
         && matches!(
             crate::builtins::common::arg_tokens::tokens_from_values(args).first(),
@@ -511,7 +517,9 @@ impl FindEval {
     }
 }
 
-async fn parse_options(args: &[Value]) -> crate::BuiltinResult<FindOptions> {
+async fn parse_options(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<FindOptions> {
     parse_find_tokens(&crate::builtins::common::arg_tokens::tokens_from_values(
         args,
     ))
@@ -615,10 +623,10 @@ async fn materialize_input(value: Value) -> crate::BuiltinResult<(DataStorage, b
         }
         Value::ComplexTensor(tensor) => Ok((DataStorage::Complex(tensor), false)),
         Value::CharArray(chars) => {
-            let mut data = Vec::with_capacity(chars.data.len());
+            let mut data = Vec::with_capacity(chars.data().len());
             for c in 0..chars.cols {
                 for r in 0..chars.rows {
-                    let ch = chars.data[r * chars.cols + c] as u32;
+                    let ch = chars.data()[r * chars.cols + c] as u32;
                     data.push(ch as f64);
                 }
             }
@@ -1458,11 +1466,17 @@ pub(crate) mod tests {
     }
 
     fn find_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-        block_on(super::find_builtin(value, rest))
+        block_on(super::find_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     fn evaluate(value: Value, rest: &[Value]) -> crate::BuiltinResult<FindEval> {
-        block_on(super::evaluate(value, rest))
+        block_on(super::evaluate(
+            value,
+            crate::call::FunctionArgumentView::from_slice(rest),
+        ))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

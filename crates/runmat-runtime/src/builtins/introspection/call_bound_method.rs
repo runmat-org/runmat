@@ -7,14 +7,30 @@ use runmat_value::Value;
 
 #[runtime_builtin(
     name = "__runmat_call_bound_method__",
+    context = true,
     binding_variant = "default",
     builtin_path = "crate::builtins::introspection::call_bound_method"
 )]
 pub async fn call_bound_method_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     base: Value,
-    method: String,
+    method: runmat_value::Utf8Text,
     scope: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<RootedValue> {
+    let invoke = call_bound_method_retained(runtime.as_ref(), base, method, scope, rest);
+    match runtime.as_ref() {
+        Some(runtime) => runtime.scope(invoke).await,
+        None => invoke.await,
+    }
+}
+
+async fn call_bound_method_retained(
+    runtime: Option<&crate::context::RuntimeContext>,
+    base: Value,
+    method: runmat_value::Utf8Text,
+    scope: Value,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<RootedValue> {
     let scope_class = match scope {
         Value::String(text) => {
@@ -46,7 +62,7 @@ pub async fn call_bound_method_builtin(
             &CALL_METHOD_ERROR_RECEIVER_INVALID,
         )
     })?;
-    let method = method.trim().to_string();
+    let method = method.trim();
     if method.is_empty() {
         return Err(crate::runtime_descriptor_error(
             "__runmat_call_bound_method__",
@@ -54,7 +70,7 @@ pub async fn call_bound_method_builtin(
         ));
     }
     let requested_outputs = crate::current_requested_outputs();
-    let method_identity = runmat_types::MethodName::from(method.as_str());
+    let method_identity = runmat_types::MethodName::from(method);
     if let Some((bound, binding)) =
         crate::class_registry::lookup_bound_method(&class_name, &method_identity).and_then(
             |bound| {
@@ -85,26 +101,56 @@ pub async fn call_bound_method_builtin(
                 "bound method is inaccessible on this receiver",
             ));
         }
-        let mut args = Vec::with_capacity(1 + rest.len());
-        args.push(base);
-        args.extend(rest);
-        let descriptor = crate::call::descriptor::CallableDescriptor::bound(
+        let args = prepend_receiver(base, &rest, runtime).await?;
+        let result = crate::call::descriptor::execute_retained_bound_in_context(
+            runtime,
             binding,
             args,
             requested_outputs,
             crate::call::descriptor::CallableCallKind::Direct,
-        );
-        let result = crate::call::descriptor::execute_callable_descriptor(descriptor).await?;
+        )
+        .await?;
         return crate::call::arguments::project_rooted_legacy_builtin_value_abi(result);
     }
-    let mut args = Vec::with_capacity(1 + rest.len());
-    args.push(base);
-    args.extend(rest);
-    if let Some((_resolved, owner)) =
-        crate::class_registry::lookup_method(&class_name, &method_identity)
-    {
-        return crate::dispatch_object_external_member(owner, &method, args, requested_outputs)
-            .await;
-    }
-    crate::dispatch_object_external_member(class_name, &method, args, requested_outputs).await
+    let args = prepend_receiver(base, &rest, runtime).await?;
+    let owner = crate::class_registry::lookup_method(&class_name, &method_identity)
+        .map_or(class_name, |(_, owner)| owner);
+    crate::dispatch_retained_callable_with_policy_in_context(
+        runtime,
+        crate::class_member_identity(&owner, method),
+        runmat_types::CallableFallbackPolicy::ExternalBoundary,
+        args,
+        requested_outputs,
+    )
+    .await
+}
+async fn prepend_receiver(
+    base: Value,
+    rest: &crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> crate::BuiltinResult<crate::call::BuiltinArguments> {
+    let rooted = match runtime {
+        Some(runtime) => RootedValue::in_context(base, runtime)?,
+        None => {
+            use crate::context::host_allocation::{
+                host_allocation_runtime_error, HostAllocationError, HostAllocationPolicy,
+                HostAllocationReceipt,
+            };
+            let error = |source| {
+                host_allocation_runtime_error(
+                    None,
+                    "RunMat:Call:Arguments",
+                    "bound receiver policy unavailable",
+                    source,
+                )
+            };
+            if HostAllocationReceipt::policy(None).map_err(error)?
+                != HostAllocationPolicy::Unbounded
+            {
+                return Err(error(HostAllocationError::MissingManagedOwner));
+            }
+            RootedValue::new(base).map_err(|e| e.into_runtime_error())?
+        }
+    };
+    crate::builtins::common::mapped_callable::prepend_rooted_argument(rest, rooted, runtime).await
 }

@@ -35,20 +35,10 @@ pub fn is_duration_object(value: &Value) -> bool {
     matches!(value, Value::Object(obj) if obj.is_class(DURATION_CLASS))
 }
 
-pub(super) async fn gather_args(args: &[Value]) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(args.len());
-    for arg in args {
-        out.push(gather_if_needed_async(arg).await.map_err(|err| {
-            duration_error_from(DurationErrorKind::InvalidArgument, "duration: ", err)
-        })?);
-    }
-    Ok(out)
-}
-
 pub(super) fn validate_duration_operand(value: &Value, numeric_allowed: bool) -> BuiltinResult<()> {
     match value {
         Value::Object(object) if object.is_class(DURATION_CLASS) => {
-            match object.properties.get(DAYS_FIELD) {
+            match object.properties().get(DAYS_FIELD) {
                 Some(Value::Num(_) | Value::Tensor(_)) => Ok(()),
                 Some(Value::GpuTensor(handle))
                     if handle.physical().storage()
@@ -91,7 +81,7 @@ pub(super) fn validate_duration_operand(value: &Value, numeric_allowed: bool) ->
 fn operand_shape(value: &Value) -> BuiltinResult<Vec<usize>> {
     match value {
         Value::Object(object) if object.is_class(DURATION_CLASS) => {
-            match object.properties.get(DAYS_FIELD) {
+            match object.properties().get(DAYS_FIELD) {
                 Some(Value::Tensor(tensor)) => Ok(tensor.shape().to_vec()),
                 Some(Value::Num(_)) => Ok(vec![1, 1]),
                 Some(Value::GpuTensor(handle)) => Ok(handle.shape().to_vec()),
@@ -134,7 +124,7 @@ pub(super) async fn duration_days_operand(
     match value {
         Value::Object(object) if object.is_class(DURATION_CLASS) => {
             let days = object
-                .properties
+                .properties()
                 .get(DAYS_FIELD)
                 .expect("validated duration day storage");
             if matches!(days, Value::GpuTensor(_)) {
@@ -186,8 +176,10 @@ pub(super) fn broadcast_duration_days(
 pub(super) fn scalar_text(value: &Value, context: &str) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.as_str().to_owned()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].as_str().to_owned()),
-        Value::CharArray(array) if array.rows == 1 => Ok(array.data.iter().collect()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(array.data()[0].as_str().to_owned())
+        }
+        Value::CharArray(array) if array.rows == 1 => Ok(array.data().iter().collect()),
         _ => Err(duration_error(
             DurationErrorKind::InvalidArgument,
             format!("duration: {context} must be a string scalar or character vector"),
@@ -206,7 +198,9 @@ pub(super) fn validate_duration_format(format: &str) -> BuiltinResult<()> {
     }
 }
 
-pub(super) fn parse_trailing_format(args: &[Value]) -> BuiltinResult<(usize, Option<String>)> {
+pub(super) fn parse_trailing_format(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<(usize, Option<String>)> {
     let mut positional_end = args.len();
     let mut format = None;
 
@@ -249,12 +243,12 @@ pub(super) fn component_tensor(value: Value, context: &str) -> BuiltinResult<Ten
 }
 
 pub(super) fn format_for_object(obj: &ObjectInstance) -> String {
-    match obj.properties.get(FORMAT_FIELD) {
+    match obj.properties().get(FORMAT_FIELD) {
         Some(Value::String(text)) => text.as_str().to_owned(),
-        Some(Value::StringArray(array)) if array.data.len() == 1 => {
-            array.data[0].as_str().to_owned()
+        Some(Value::StringArray(array)) if array.data().len() == 1 => {
+            array.data()[0].as_str().to_owned()
         }
-        Some(Value::CharArray(array)) if array.rows == 1 => array.data.iter().collect(),
+        Some(Value::CharArray(array)) if array.rows == 1 => array.data().iter().collect(),
         _ => DEFAULT_DURATION_FORMAT.to_string(),
     }
 }
@@ -262,7 +256,7 @@ pub(super) fn format_for_object(obj: &ObjectInstance) -> String {
 pub(crate) fn duration_tensor_from_duration_value(value: &Value) -> BuiltinResult<Tensor> {
     match value {
         Value::Object(obj) if obj.is_class(DURATION_CLASS) => {
-            match obj.properties.get(DAYS_FIELD) {
+            match obj.properties().get(DAYS_FIELD) {
                 Some(Value::Tensor(tensor)) => Ok(tensor.clone()),
                 Some(Value::Num(value)) => Tensor::new(vec![*value], vec![1, 1]).map_err(|err| {
                     duration_error(DurationErrorKind::Internal, format!("duration: {err}"))
@@ -292,28 +286,32 @@ pub(crate) fn duration_format_from_value(value: &Value) -> String {
 }
 
 pub(crate) fn duration_object_from_days_tensor(
+    runtime: Option<&crate::context::RuntimeContext>,
     days: Tensor,
     format: impl Into<String>,
 ) -> BuiltinResult<Value> {
     ensure_duration_class_registered();
-    let mut object = ObjectInstance::new(DURATION_CLASS.to_string());
-    object
-        .properties
-        .insert(DAYS_FIELD.to_string(), Value::Tensor(days));
-    object
-        .properties
-        .insert(FORMAT_FIELD.to_string(), Value::string(format.into()));
-    Ok(Value::Object(object))
+    let fields = [
+        (DAYS_FIELD, Value::Tensor(days)),
+        (FORMAT_FIELD, Value::string(format.into())),
+    ];
+    let object = crate::execution::object::construct_object_from_borrowed_fields(
+        runtime,
+        DURATION_CLASS.display_name(),
+        fields.iter().map(|(name, value)| (*name, value)),
+    )?;
+    Ok(object.into_value_and_lease().0)
 }
 
 pub(super) fn duration_object_from_days(
+    runtime: Option<&crate::context::RuntimeContext>,
     days: Vec<f64>,
     shape: Vec<usize>,
     format: impl Into<String>,
 ) -> BuiltinResult<Value> {
     let tensor = Tensor::new(days, shape)
         .map_err(|err| duration_error(DurationErrorKind::Internal, format!("duration: {err}")))?;
-    duration_object_from_days_tensor(tensor, format)
+    duration_object_from_days_tensor(runtime, tensor, format)
 }
 
 pub(super) async fn duration_unit_value(
@@ -355,7 +353,7 @@ pub(super) async fn duration_unit_value(
             }
         })
         .collect::<BuiltinResult<Vec<_>>>()?;
-    duration_object_from_days(days, shape, DEFAULT_DURATION_FORMAT)
+    duration_object_from_days(None, days, shape, DEFAULT_DURATION_FORMAT)
 }
 
 pub(super) fn broadcast_component_data(
@@ -407,7 +405,8 @@ pub(super) fn broadcast_component_data(
 }
 
 pub(super) fn build_from_components(
-    args: Vec<Value>,
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
     format: Option<String>,
 ) -> BuiltinResult<Value> {
     let labels = ["hours", "minutes", "seconds", "milliseconds"];
@@ -431,6 +430,7 @@ pub(super) fn build_from_components(
     }
 
     duration_object_from_days(
+        runtime,
         days,
         shape,
         format.unwrap_or_else(|| DEFAULT_DURATION_FORMAT.to_string()),
@@ -457,7 +457,11 @@ pub(super) fn is_numeric_duration_input(value: &Value) -> bool {
     ) || matches!(value, Value::GpuTensor(handle) if handle.physical().storage() == runmat_accelerate_api::GpuTensorStorage::Real)
 }
 
-pub(super) fn build_from_matrix(value: Value, format: Option<String>) -> BuiltinResult<Value> {
+pub(super) fn build_from_matrix(
+    runtime: Option<&crate::context::RuntimeContext>,
+    value: Value,
+    format: Option<String>,
+) -> BuiltinResult<Value> {
     let matrix = component_tensor(value, "X")?;
     if matrix.shape().len() > 2 || matrix.cols() != 3 {
         return Err(duration_error(
@@ -476,8 +480,23 @@ pub(super) fn build_from_matrix(value: Value, format: Option<String>) -> Builtin
         days.push(total_seconds / SECONDS_PER_DAY);
     }
     duration_object_from_days(
+        runtime,
         days,
         vec![rows, 1],
         format.unwrap_or_else(|| DEFAULT_DURATION_FORMAT.to_string()),
     )
+}
+pub(super) async fn gather_retained_args(
+    args: crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    args.try_map_preserving_roots_async(args.len(), runtime, async |index| {
+        let gather = gather_if_needed_async(&args[index]);
+        match runtime {
+            Some(runtime) => runtime.scope(gather).await,
+            None => gather.await,
+        }
+        .map_err(|err| duration_error_from(DurationErrorKind::InvalidArgument, "duration: ", err))
+    })
+    .await
 }

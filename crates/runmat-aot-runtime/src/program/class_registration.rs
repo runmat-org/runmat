@@ -86,7 +86,7 @@ fn visit<'a>(
                     Value::Bool(*value)
                 }
                 runmat_native_codegen::NativeClassDefaultLiteral::String(value) => {
-                    Value::String(value.clone())
+                    Value::String(value.clone().into())
                 }
             });
         let attributes = &property.attributes;

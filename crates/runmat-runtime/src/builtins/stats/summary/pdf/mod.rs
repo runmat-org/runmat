@@ -10,7 +10,7 @@ use runmat_value::Value;
 pub(crate) async fn pdf_builtin(
     distribution: Value,
     x: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     super::fitted_distribution::evaluate_pdf_entry(distribution, x, rest).await
 }

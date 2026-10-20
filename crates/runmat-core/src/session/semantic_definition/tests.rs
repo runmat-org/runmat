@@ -457,9 +457,9 @@ fn function_file_localfunctions_excludes_primary_at_public_call_boundary() {
         let Some(runmat_value::Value::Cell(handles)) = variables.get("selected_handles") else {
             panic!("localfunctions must return a cell");
         };
-        assert_eq!(handles.data.len(), 1);
+        assert_eq!(handles.data().len(), 1);
         assert!(matches!(
-            &handles.data[0],
+            &handles.data()[0],
             runmat_value::Value::BoundFunctionHandle(handle)
                 if handle.name == "child_local"
                     && handle.source_role == runmat_types::FunctionSourceRole::Local

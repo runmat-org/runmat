@@ -58,7 +58,7 @@ where
 async fn importdata_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     filename: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     if matches!(crate::output_count::current_output_count(), Some(n) if n > 3) {
         return Err(importdata_error_with(

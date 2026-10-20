@@ -32,7 +32,7 @@ fn registered_fminbnd_preserves_invocation_cancellation_before_solver_effects() 
         Value::FunctionHandle("sin".into()),
         Value::Num(0.0),
         Value::Num(1.0),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect_err("cancelled invocation must not call objective");
     assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
@@ -72,7 +72,7 @@ fn excessive_requested_outputs_fail_before_callback_evaluation() {
         )),
         Value::Num(0.0),
         Value::Num(5.0),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect_err("five outputs are not part of the public contract");
     assert_eq!(error.identifier(), Some("RunMat:fminbnd:TooManyOutputs"));
@@ -115,7 +115,7 @@ fn run_default(handle: &str, lo: f64, hi: f64) -> Value {
         V::FunctionHandle(handle.into()),
         V::Num(lo),
         V::Num(hi),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("fminbnd")
 }
@@ -125,7 +125,7 @@ fn run_with(handle: &str, lo: f64, hi: f64, extra: Vec<Value>) -> Value {
         V::FunctionHandle(handle.into()),
         V::Num(lo),
         V::Num(hi),
-        extra,
+        crate::builtins::common::test_support::builtin_arguments(extra),
     ))
     .expect("fminbnd")
 }
@@ -218,7 +218,7 @@ fn reports_inconsistent_reversed_bounds() {
         V::FunctionHandle("__fminbnd_quad_minus_two".into()),
         V::Num(5.0),
         V::Num(0.0),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("fminbnd");
     match result {
@@ -274,13 +274,13 @@ fn finds_local_minimum_in_multi_modal_function() {
 
 #[test]
 fn options_struct_overrides_default_tolerance() {
-    let mut opts = StructValue::new();
+    let mut opts = runmat_value::UnboundedStructValueBuilder::new();
     opts.insert("TolX", Value::Num(1.0e-12));
     let result = run_with(
         "__fminbnd_quad_minus_two",
         0.0,
         5.0,
-        vec![Value::Struct(opts)],
+        vec![Value::Struct(opts.finish())],
     );
     match result {
         V::Num(x) => assert!((x - 2.0).abs() < 1.0e-6, "x = {x}"),
@@ -301,8 +301,9 @@ fn logical_numeric_options_are_not_accepted_as_floating_controls() {
             }),
         ),
     ] {
-        let mut options = StructValue::new();
+        let mut options = runmat_value::UnboundedStructValueBuilder::new();
         options.insert(field, value);
+        let options = options.finish();
         let error = FminbndOptions::from_struct(Some(&options))
             .expect_err("logical numeric option must reject");
         assert_eq!(error.identifier(), Some("RunMat:fminbnd:InvalidArgument"));
@@ -317,13 +318,15 @@ fn bounds_and_options_read_typed_integer_tensor_storage_exactly() {
     let max_iter =
         Tensor::new_integer(IntegerStorage::U16(vec![1000]), vec![1, 1]).expect("MaxIter");
 
-    let mut opts = StructValue::new();
+    let mut opts = runmat_value::UnboundedStructValueBuilder::new();
     opts.insert("MaxIter", Value::Tensor(max_iter));
     let result = block_on(fminbnd_builtin(
         V::FunctionHandle("__fminbnd_quad_minus_two".into()),
         V::Tensor(lower),
         V::Tensor(upper),
-        vec![Value::Struct(opts)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Struct(
+            opts.finish(),
+        )]),
     ))
     .expect("fminbnd");
     match result {
@@ -336,8 +339,9 @@ fn bounds_and_options_read_typed_integer_tensor_storage_exactly() {
 fn options_reject_nonpositive_typed_integer_storage_exactly() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let max_iter = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1]).expect("MaxIter");
-    let mut opts = StructValue::new();
+    let mut opts = runmat_value::UnboundedStructValueBuilder::new();
     opts.insert("MaxIter", Value::Tensor(max_iter));
+    let opts = opts.finish();
 
     assert!(FminbndOptions::from_struct(Some(&opts)).is_err());
 }
@@ -349,16 +353,18 @@ fn options_reject_unrepresentable_double_integer_boundary() {
     } else {
         (usize::MAX as f64) + 1.0
     };
-    let mut opts = StructValue::new();
+    let mut opts = runmat_value::UnboundedStructValueBuilder::new();
     opts.insert("MaxIter", Value::Num(boundary));
+    let opts = opts.finish();
 
     assert!(FminbndOptions::from_struct(Some(&opts)).is_err());
 }
 
 #[test]
 fn max_fun_evals_default_is_independent_of_max_iter() {
-    let mut opts = StructValue::new();
+    let mut opts = runmat_value::UnboundedStructValueBuilder::new();
     opts.insert("MaxIter", Value::Num(1000.0));
+    let opts = opts.finish();
     let parsed = FminbndOptions::from_struct(Some(&opts)).unwrap();
     assert_eq!(parsed.max_iter, 1000);
     assert_eq!(parsed.max_fun_evals, DEFAULT_MAX_FUN_EVALS);
@@ -370,7 +376,7 @@ fn rejects_nonfinite_bounds() {
         V::FunctionHandle("__fminbnd_quad_minus_two".into()),
         V::Num(f64::NAN),
         V::Num(5.0),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap_err();
     assert!(err.message().to_ascii_lowercase().contains("finite"));
@@ -382,7 +388,7 @@ fn rejects_invalid_options_type() {
         V::FunctionHandle("__fminbnd_quad_minus_two".into()),
         V::Num(0.0),
         V::Num(5.0),
-        vec![Value::Num(1.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
     ))
     .unwrap_err();
     assert!(err.message().to_ascii_lowercase().contains("options"));
@@ -390,13 +396,15 @@ fn rejects_invalid_options_type() {
 
 #[test]
 fn rejects_nonpositive_tol_x() {
-    let mut opts = StructValue::new();
+    let mut opts = runmat_value::UnboundedStructValueBuilder::new();
     opts.insert("TolX", Value::Num(0.0));
     let err = block_on(fminbnd_builtin(
         V::FunctionHandle("__fminbnd_quad_minus_two".into()),
         V::Num(0.0),
         V::Num(5.0),
-        vec![Value::Struct(opts)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Struct(
+            opts.finish(),
+        )]),
     ))
     .unwrap_err();
     assert!(err.message().to_lowercase().contains("tolx"));
@@ -404,13 +412,15 @@ fn rejects_nonpositive_tol_x() {
 
 #[test]
 fn rejects_unknown_display_value() {
-    let mut opts = StructValue::new();
+    let mut opts = runmat_value::UnboundedStructValueBuilder::new();
     opts.insert("Display", Value::from("loud"));
     let err = block_on(fminbnd_builtin(
         V::FunctionHandle("__fminbnd_quad_minus_two".into()),
         V::Num(0.0),
         V::Num(5.0),
-        vec![Value::Struct(opts)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Struct(
+            opts.finish(),
+        )]),
     ))
     .unwrap_err();
     assert!(err.message().to_lowercase().contains("display"));
@@ -423,7 +433,7 @@ fn multi_output_two_returns_x_and_fval() {
         V::FunctionHandle("__fminbnd_quad_minus_two".into()),
         V::Num(0.0),
         V::Num(5.0),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("fminbnd");
     match result {
@@ -448,7 +458,7 @@ fn multi_output_three_includes_exitflag() {
         V::FunctionHandle("__fminbnd_quad_minus_two".into()),
         V::Num(0.0),
         V::Num(5.0),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("fminbnd");
     match result {
@@ -470,7 +480,7 @@ fn multi_output_four_includes_output_struct() {
         V::FunctionHandle("__fminbnd_quad_minus_two".into()),
         V::Num(0.0),
         V::Num(5.0),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("fminbnd");
     match result {
@@ -495,7 +505,7 @@ fn multi_output_four_includes_output_struct() {
 
 #[test]
 fn reports_zero_exitflag_when_max_iter_exhausted() {
-    let mut opts = StructValue::new();
+    let mut opts = runmat_value::UnboundedStructValueBuilder::new();
     opts.insert("MaxIter", Value::Num(1.0));
     opts.insert("MaxFunEvals", Value::Num(2.0));
     opts.insert("Display", Value::from("off"));
@@ -504,7 +514,9 @@ fn reports_zero_exitflag_when_max_iter_exhausted() {
         V::FunctionHandle("__fminbnd_quad_minus_two".into()),
         V::Num(0.0),
         V::Num(5.0),
-        vec![Value::Struct(opts)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Struct(
+            opts.finish(),
+        )]),
     ))
     .expect("fminbnd");
     match result {
@@ -560,10 +572,10 @@ fn fminbnd_too_many_args_uses_stable_identifier() {
         V::FunctionHandle("__fminbnd_quad_minus_two".into()),
         V::Num(0.0),
         V::Num(5.0),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::Struct(StructValue::new()),
             Value::Struct(StructValue::new()),
-        ],
+        ]),
     ))
     .unwrap_err();
     assert_eq!(err.identifier(), Some("RunMat:fminbnd:InvalidArgument"));

@@ -13,11 +13,11 @@ pub(super) fn text_list(value: &Value) -> BuiltinResult<Vec<String>> {
     }
     match value {
         Value::StringArray(values) => Ok(values
-            .data
+            .data()
             .iter()
             .map(|text| text.as_str().to_owned())
             .collect()),
-        Value::Cell(values) => values.data.iter().map(scalar_text).collect(),
+        Value::Cell(values) => values.data().iter().map(scalar_text).collect(),
         _ => Err(invalid(
             "import options: expected a text scalar, string array, or cellstr",
         )),

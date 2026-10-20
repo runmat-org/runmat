@@ -164,7 +164,7 @@ pub enum AwaitAction {
     /// to use an efficient blocking completion primitive.
     Pending(Value),
     ExecuteFuture {
-        handle: FutureHandle,
+        handle: super::FutureExecutionHandle,
         call: Box<DeferredCall>,
     },
     Completed(super::RootedValueSequence),
@@ -236,7 +236,7 @@ pub trait RuntimeExecutionServices {
     ) -> Result<ExecutionHandleSnapshot, ExecutionServiceError>;
     fn claim_next_task_result(
         &self,
-        tasks: &[TaskHandle],
+        tasks: &[runmat_value::SharedTaskHandle],
     ) -> Result<TaskResultClaim, ExecutionServiceError>;
     fn mark_task_result_read(&self, task: &TaskHandle) -> Result<(), ExecutionServiceError>;
     fn spawn_on(
@@ -267,7 +267,10 @@ pub trait RuntimeExecutionServices {
             "durable jobs are unavailable in this execution backend".into(),
         ))
     }
-    fn await_job(&self, _job: &JobHandle) -> Result<Value, ExecutionServiceError> {
+    fn await_job(
+        &self,
+        _job: &runmat_value::SharedJobHandle,
+    ) -> Result<Value, ExecutionServiceError> {
         Err(ExecutionServiceError::Failed(
             "durable jobs are unavailable in this execution backend".into(),
         ))
@@ -285,7 +288,7 @@ pub trait RuntimeExecutionServices {
     }
     fn complete_future(
         &self,
-        future: &FutureHandle,
+        future: super::FutureCompletionRef<'_>,
         result: Result<super::RootedValueSequence, ExecutionServiceError>,
     ) -> Result<(), ExecutionServiceError>;
     fn cancel(
@@ -547,7 +550,7 @@ impl RuntimeExecutionServices for RuntimeExecutionService {
 
     fn claim_next_task_result(
         &self,
-        tasks: &[TaskHandle],
+        tasks: &[runmat_value::SharedTaskHandle],
     ) -> Result<TaskResultClaim, ExecutionServiceError> {
         let mut state = self.state.lock().expect("execution service state poisoned");
         let mut selected: Option<(u64, usize, TaskId)> = None;
@@ -615,7 +618,7 @@ impl RuntimeExecutionServices for RuntimeExecutionService {
             )?));
         }
         let future = match value {
-            Value::Future(handle) => handle,
+            Value::Future(handle) => super::FutureExecutionHandle::from(handle),
             Value::Task(task) => {
                 self.validate_scope(task.scope_id)?;
                 let state = self.state.lock().expect("execution service state poisoned");
@@ -629,11 +632,7 @@ impl RuntimeExecutionServices for RuntimeExecutionService {
                 if record.cancelled {
                     return Err(ExecutionServiceError::Cancelled);
                 }
-                FutureHandle {
-                    id: record.future_id,
-                    scope_id: self.scope_id,
-                    outputs: task.outputs,
-                }
+                super::FutureExecutionHandle::from_task(task, record.future_id)
             }
             value => return Ok(AwaitAction::Passthrough(value)),
         };
@@ -667,7 +666,7 @@ impl RuntimeExecutionServices for RuntimeExecutionService {
 
     fn complete_future(
         &self,
-        future: &FutureHandle,
+        future: super::FutureCompletionRef<'_>,
         result: Result<super::RootedValueSequence, ExecutionServiceError>,
     ) -> Result<(), ExecutionServiceError> {
         self.validate_scope(future.scope_id)?;
@@ -923,14 +922,16 @@ mod tests {
                 Value::String("callable".into())
             ])
         );
-        let action = service.begin_await(Value::Future(future.clone())).unwrap();
+        let action = service
+            .begin_await(Value::Future(future.clone().into()))
+            .unwrap();
         let AwaitAction::ExecuteFuture { call, .. } = action else {
             panic!("execute deferred call")
         };
         assert_eq!(call.invocation.retained_values().len(), 2);
         service
             .complete_future(
-                &future,
+                (&future).into(),
                 Ok(RootedValueSequence::new(
                     runmat_value::ValueSequence::single(Value::String("output".into())).unwrap(),
                 )
@@ -942,7 +943,7 @@ mod tests {
             Some(vec![Value::String("output".into())])
         );
         service
-            .cancel(&Value::Future(future), CancellationReason::User)
+            .cancel(&Value::Future(future.into()), CancellationReason::User)
             .unwrap();
         assert_eq!(service.retained_values(), Some(vec![]));
     }
@@ -972,11 +973,13 @@ mod tests {
             .create_future(deferred_call(7, vec![Value::Num(3.0)]))
             .unwrap();
         let task = service.spawn(&future).unwrap();
-        let action = service.begin_await(Value::Task(task.clone())).unwrap();
+        let action = service
+            .begin_await(Value::Task(task.clone().into()))
+            .unwrap();
         let AwaitAction::ExecuteFuture { handle, call } = action else {
             panic!("expected deferred execution");
         };
-        assert_eq!(handle, future);
+        assert_eq!(handle.completion_ref(), (&future).into());
         let DeferredInvocation::Callable(descriptor) = call.invocation else {
             panic!("expected callable deferred invocation")
         };
@@ -994,7 +997,7 @@ mod tests {
         ));
         service
             .complete_future(
-                &future,
+                (&future).into(),
                 Ok(RootedValueSequence::new(
                     runmat_value::ValueSequence::single(Value::Num(9.0)).unwrap(),
                 )
@@ -1002,7 +1005,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            service.begin_await(Value::Task(task)),
+            service.begin_await(Value::Task(task.into())),
             Ok(AwaitAction::Completed(
                 RootedValueSequence::new(
                     runmat_value::ValueSequence::single(Value::Num(9.0)).unwrap()
@@ -1022,17 +1025,21 @@ mod tests {
         let mut call = deferred_call(7, vec![Value::Num(3.0)]);
         call.environment = environment;
         let future = service.create_future(call).unwrap();
-        let AwaitAction::ExecuteFuture { handle, call } =
-            service.begin_await(Value::Future(future.clone())).unwrap()
+        let AwaitAction::ExecuteFuture { handle, call } = service
+            .begin_await(Value::Future(future.clone().into()))
+            .unwrap()
         else {
             panic!("original future did not enter execution")
         };
-        assert_eq!(handle, future);
+        assert_eq!(
+            handle.completion_ref(),
+            crate::execution::FutureCompletionRef::from(&future)
+        );
         assert_eq!(
             call.environment.entries()[0].1.as_ptr(),
             environment_pointer
         );
-        assert!(service.begin_await(Value::Future(future)).is_err());
+        assert!(service.begin_await(Value::Future(future.into())).is_err());
     }
 
     #[test]
@@ -1047,12 +1054,12 @@ mod tests {
                 .create_future(deferred_call(1, Vec::new()))
                 .expect("create future");
             let action = service
-                .begin_await(Value::Future(future.clone()))
+                .begin_await(Value::Future(future.clone().into()))
                 .expect("start future");
             assert!(matches!(action, AwaitAction::ExecuteFuture { .. }));
             service
                 .complete_future(
-                    &future,
+                    (&future).into(),
                     Ok(RootedValueSequence::new(
                         runmat_value::ValueSequence::comma_separated(values.clone()).unwrap(),
                     )
@@ -1060,7 +1067,7 @@ mod tests {
                 )
                 .expect("complete future");
             let AwaitAction::Completed(sequence) = service
-                .begin_await(Value::Future(future))
+                .begin_await(Value::Future(future.into()))
                 .expect("consume completion")
             else {
                 panic!("expected completed future");
@@ -1078,7 +1085,7 @@ mod tests {
                 .expect("create future");
             assert!(matches!(
                 service
-                    .begin_await(Value::Future(future.clone()))
+                    .begin_await(Value::Future(future.clone().into()))
                     .expect("start future"),
                 AwaitAction::ExecuteFuture { .. }
             ));
@@ -1093,7 +1100,7 @@ mod tests {
             });
             service
                 .complete_future(
-                    &future,
+                    (&future).into(),
                     Ok(RootedValueSequence::new(
                         runmat_value::ValueSequence::single(output).expect("valid output"),
                     )
@@ -1127,7 +1134,7 @@ mod tests {
                 .create_future(deferred_call(1, Vec::new()))
                 .expect("create future");
             assert!(matches!(
-                service.begin_await(Value::Future(future.clone())),
+                service.begin_await(Value::Future(future.clone().into())),
                 Ok(AwaitAction::ExecuteFuture { .. })
             ));
             let initial = runmat_gc::gc_allocate_rooted(Value::String("awaited".into()))
@@ -1143,12 +1150,12 @@ mod tests {
             )
             .expect("root result");
             service
-                .complete_future(&future, Ok(result))
+                .complete_future((&future).into(), Ok(result))
                 .expect("publish completion");
             initial.unroot().expect("transfer initial root");
 
             let AwaitAction::Completed(claimed) = service
-                .begin_await(Value::Future(future.clone()))
+                .begin_await(Value::Future(future.clone().into()))
                 .expect("claim completed result")
             else {
                 panic!("expected completed result")
@@ -1182,7 +1189,7 @@ mod tests {
                 }))
                 .expect("register collecting observer");
             service
-                .cancel(&Value::Future(future), CancellationReason::User)
+                .cancel(&Value::Future(future.into()), CancellationReason::User)
                 .expect("retire service state");
             control.unroot().expect("trigger collecting observer");
             assert!(observed.load(std::sync::atomic::Ordering::SeqCst));
@@ -1224,7 +1231,7 @@ mod tests {
         let future = service.create_future(deferred_call(1, vec![])).unwrap();
         service.drain_scope(CancellationReason::Shutdown);
         assert_eq!(
-            service.begin_await(Value::Future(future)),
+            service.begin_await(Value::Future(future.into())),
             Err(ExecutionServiceError::Cancelled)
         );
     }

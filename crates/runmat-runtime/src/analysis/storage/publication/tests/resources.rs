@@ -172,7 +172,7 @@ fn source_workspace_exhaustion_preserves_preparation_and_allows_an_admitted_retr
     let logical = Digest::sha256(b"source-workspace-original");
     let context = Digest::sha256(b"source-workspace-authority");
     let mut reference = ValueRef {
-        schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1,
+        schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION,
         id: artifact_object_value_id(logical, context, "source-workspace"),
         logical_digest: logical,
         encoded_length: 16384,

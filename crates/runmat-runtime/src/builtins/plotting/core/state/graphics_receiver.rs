@@ -589,7 +589,13 @@ mod tests {
         .expect("object getter retains lease through registry read");
         assert_eq!(
             selected_get,
-            Value::String(clone_figure(figure).unwrap().name.unwrap_or_default())
+            Value::String(
+                clone_figure(figure)
+                    .unwrap()
+                    .name
+                    .unwrap_or_default()
+                    .into()
+            )
         );
         let selected_dot = futures::executor::block_on(crate::object::resolve::load_member(
             value.clone(),

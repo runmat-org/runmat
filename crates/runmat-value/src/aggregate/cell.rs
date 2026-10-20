@@ -4,7 +4,7 @@ use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CellArray {
-    pub data: OutputListStorage,
+    pub(crate) data: OutputListStorage,
     /// Full MATLAB-visible shape vector. Cell payloads retain their historical
     /// row-major layout within each 2-D page.
     pub shape: SharedShape,
@@ -53,7 +53,7 @@ impl CellArray {
     fn from_validated_storage(data: OutputListStorage, shape: SharedShape) -> Self {
         let (rows, cols) = shape_rows_cols(&shape);
         Self {
-            data,
+            data: shared_original(data),
             shape,
             rows,
             cols,
@@ -76,6 +76,25 @@ impl CellArray {
 
     pub fn data(&self) -> &[Value] {
         self.data.as_slice()
+    }
+    /// Borrow the immutable original physical owner, not a mutable Vec facade.
+    pub fn data_owner(&self) -> &OutputListStorage {
+        &self.data
+    }
+    /// Move the existing owners without dropping their retained claims or
+    /// silently repairing deliberately malformed legacy cached dimensions.
+    pub fn into_parts(self) -> (OutputListStorage, SharedShape, usize, usize) {
+        (self.data, self.shape, self.rows, self.cols)
+    }
+    /// Explicit ordinary alias separation. Publish the new original shared
+    /// owner before returning; subsequent Cell clones never clone slot Vecs.
+    pub fn make_data_unique_unbounded(&mut self) -> Result<(), crate::ExactArrayMutationError> {
+        if self.data.is_unique() {
+            return Ok(());
+        }
+        self.data.make_unique_unbounded()?;
+        self.data = shared_original(std::mem::take(&mut self.data));
+        Ok(())
     }
 
     pub fn shape(&self) -> &[usize] {
@@ -129,6 +148,7 @@ impl CellArray {
         self.data
             .try_push_unbounded(value)
             .map_err(|_| "Cell row growth requires ordinary storage".to_string())?;
+        self.data = shared_original(std::mem::take(&mut self.data));
         self.shape = next_shape;
         self.cols = next_count;
         Ok(())
@@ -241,6 +261,22 @@ impl CellArray {
     }
 }
 
+fn shared_original(data: OutputListStorage) -> OutputListStorage {
+    if data.is_shallow_clone() {
+        return data;
+    }
+    let values = data
+        .try_into_owned()
+        .expect("unpublished Cell slots are unique")
+        .try_into_unbounded_vec()
+        .expect("unpublished Cell slots have no physical claim");
+    if values.capacity() == 0 {
+        OutputListStorage::empty()
+    } else {
+        OutputListStorage::shared_unbounded(values)
+    }
+}
+
 pub(crate) fn total_len(shape: &[usize]) -> Option<usize> {
     if shape.is_empty() {
         return Some(0);
@@ -321,6 +357,25 @@ mod tests {
         row.shape = SharedShape::new_unmanaged(vec![1, 1]);
         assert!(row.push_row_element(Value::Num(3.0)).is_err());
         assert_eq!(row.data.len(), 2);
+    }
+
+    #[test]
+    fn every_ordinary_publication_retains_original_shared_slots() {
+        let values = vec![Value::Num(1.)];
+        let pointer = values.as_ptr();
+        let mut cell = CellArray::from_shared_storage(
+            OutputListStorage::unbounded(values),
+            SharedShape::new_unmanaged(vec![1, 1]),
+        )
+        .unwrap();
+        assert_eq!(cell.data().as_ptr(), pointer);
+        let alias = cell.clone();
+        assert_eq!(alias.data().as_ptr(), pointer);
+        cell.push_row_element(Value::Num(2.)).unwrap();
+        assert_eq!(alias.data(), [Value::Num(1.)]);
+        let next = cell.clone();
+        assert_eq!(cell.data().as_ptr(), next.data().as_ptr());
+        assert_eq!(cell.data(), [Value::Num(1.), Value::Num(2.)]);
     }
 
     #[test]

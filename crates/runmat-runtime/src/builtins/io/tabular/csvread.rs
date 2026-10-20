@@ -77,7 +77,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 async fn csvread_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     path: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     let mut cooperation = TabularCooperation::new(runtime.as_ref(), BUILTIN_NAME);
     if matches!(path, Value::GpuTensor(_)) || rest.iter().any(|v| matches!(v, Value::GpuTensor(_)))
@@ -87,7 +87,7 @@ async fn csvread_builtin(
             BUILTIN_NAME,
         )?;
     }
-    preflight_host_controls(&rest)?;
+    preflight_host_controls(rest.view())?;
     let known_path = if matches!(path, Value::GpuTensor(_)) {
         None
     } else {
@@ -108,7 +108,12 @@ async fn csvread_builtin(
     .await?
     .map_err(map_control_flow)?;
     cooperation.completed(0).await?;
-    let options = await_io(runtime.as_ref(), BUILTIN_NAME, parse_arguments(&rest)).await??;
+    let options = await_io(
+        runtime.as_ref(),
+        BUILTIN_NAME,
+        parse_arguments(runtime.as_ref(), &rest),
+    )
+    .await??;
     cooperation.completed(0).await?;
     let resolved = resolve_path(&gathered_path)?;
     let selected = owner.path(resolved).map_err(|source| {
@@ -165,7 +170,7 @@ async fn csvread_builtin(
     Ok(value)
 }
 
-fn preflight_host_controls(rest: &[Value]) -> BuiltinResult<()> {
+fn preflight_host_controls(rest: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<()> {
     if !matches!(rest.len(), 0 | 2 | 3) {
         return Err(csvread_error_with(
             &CSVREAD_ERROR_ARG_CONFIG,
@@ -194,15 +199,17 @@ struct CsvReadOptions {
     range: Option<RangeSpec>,
 }
 
-async fn parse_arguments(args: &[Value]) -> BuiltinResult<CsvReadOptions> {
-    let mut gathered = Vec::with_capacity(args.len());
-    for value in args {
-        gathered.push(
-            gather_if_needed_async(value)
+async fn parse_arguments(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: &crate::call::BuiltinArguments,
+) -> BuiltinResult<CsvReadOptions> {
+    let gathered = args
+        .try_map_preserving_roots_async(args.len(), runtime, async |index| {
+            gather_if_needed_async(&args[index])
                 .await
-                .map_err(map_control_flow)?,
-        );
-    }
+                .map_err(map_control_flow)
+        })
+        .await?;
     match gathered.len() {
         0 => Ok(CsvReadOptions::default()),
         2 => {

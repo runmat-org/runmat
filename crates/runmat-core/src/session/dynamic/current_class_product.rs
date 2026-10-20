@@ -9,7 +9,7 @@ use runmat_value::{BoundFunctionBinding, Value};
 
 use super::DynamicFunctionEnvironment;
 
-pub(super) async fn resolve(
+pub(in crate::session) async fn resolve(
     runtime: RuntimeContext,
     class: ClassIdentity,
     environment: DynamicFunctionEnvironment,

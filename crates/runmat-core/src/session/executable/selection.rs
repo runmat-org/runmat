@@ -8,11 +8,10 @@ use runmat_runtime::execution::{
     admit_executable_sequence, RootedValueSequence, RuntimeContinuationFuture,
 };
 use runmat_runtime::RuntimeError;
-use runmat_value::Value;
 
 #[cfg(not(target_arch = "wasm32"))]
 use super::NativeProcedureTarget;
-use super::{runtime_error, RunError, RunMatSession};
+use super::{runtime_error, ProcedureCall, RunError, RunMatSession};
 
 type SelectedInvocation<'a> =
     Result<RuntimeContinuationFuture<'a, RootedValueSequence>, RuntimeError>;
@@ -28,15 +27,14 @@ struct ResolvedProcedure {
     function: runmat_hir::FunctionId,
     #[cfg(not(target_arch = "wasm32"))]
     name: String,
-    arguments: Vec<Value>,
-    requested_outputs: usize,
+    call: ProcedureCall,
 }
 
 impl RunMatSession {
     pub(super) fn select_executable_continuation<'a>(
         &'a mut self,
         unit: &'a crate::ExecutableUnit,
-        invocation: crate::ProcedureInvocation,
+        invocation: crate::executable::AdmittedProcedureInvocation,
         runtime: &'a RuntimeContext,
         bytecode: &'a runmat_vm::Bytecode,
         #[cfg(not(target_arch = "wasm32"))] backend: crate::ExecutableBackendPolicy,
@@ -112,8 +110,11 @@ impl RunMatSession {
                         function,
                         #[cfg(not(target_arch = "wasm32"))]
                         name,
-                        arguments: invocation.arguments,
-                        requested_outputs: invocation.requested_outputs,
+                        call: ProcedureCall {
+                            arguments: invocation.arguments,
+                            requested_outputs: invocation.requested_outputs,
+                            lexical_environment: None,
+                        },
                     },
                     #[cfg(not(target_arch = "wasm32"))]
                     backend,
@@ -132,8 +133,57 @@ impl RunMatSession {
                         function,
                         #[cfg(not(target_arch = "wasm32"))]
                         name,
-                        arguments: invocation.arguments,
-                        requested_outputs: invocation.requested_outputs,
+                        call: ProcedureCall {
+                            arguments: invocation.arguments,
+                            requested_outputs: invocation.requested_outputs,
+                            lexical_environment: None,
+                        },
+                    },
+                    #[cfg(not(target_arch = "wasm32"))]
+                    backend,
+                )
+            }
+            crate::ProcedureTarget::RetainedCallable(callback) => {
+                let (selected, function) = crate::executable::callback::select_owned(
+                    unit,
+                    runtime,
+                    &bytecode.function_registry,
+                    callback,
+                )
+                .map_err(RunError::Runtime)?;
+                let lexical_environment = match selected.selected_target() {
+                    runmat_runtime::call::descriptor::CallableTarget::BoundLexical {
+                        closure,
+                        ..
+                    } => closure.as_closure().lexical_environment.clone(),
+                    _ => None,
+                };
+                let arguments = selected
+                    .prepare_arguments(Some(runtime), invocation.arguments)
+                    .map_err(RunError::Runtime)?;
+                #[cfg(not(target_arch = "wasm32"))]
+                let name = bytecode
+                    .function_registry
+                    .get(function)
+                    .ok_or_else(|| {
+                        runtime_error(
+                            "RunMat:UndefinedExecutableProcedure",
+                            "selected callable definition is absent",
+                        )
+                    })?
+                    .display_name
+                    .clone();
+                self.select_procedure(
+                    context,
+                    ResolvedProcedure {
+                        function,
+                        #[cfg(not(target_arch = "wasm32"))]
+                        name,
+                        call: ProcedureCall {
+                            arguments: runmat_runtime::call::BuiltinArguments::new(arguments),
+                            requested_outputs: invocation.requested_outputs,
+                            lexical_environment,
+                        },
                     },
                     #[cfg(not(target_arch = "wasm32"))]
                     backend,
@@ -168,6 +218,19 @@ impl RunMatSession {
     ) -> SelectedInvocation<'a> {
         #[cfg(not(target_arch = "wasm32"))]
         {
+            // The native cache's public entry lookup is name-based. Never
+            // let that lookup select a different body from the authenticated
+            // semantic target (for example a shadowed lexical name).
+            if context.unit.native_function_id(&target.name) != Some(target.function) {
+                if backend == crate::ExecutableBackendPolicy::ForcedGenericNative {
+                    return Err(runmat_runtime::build_runtime_error(
+                        "semantic function does not identify this native compiler entry",
+                    )
+                    .with_identifier("RunMat:ExecutableBackend")
+                    .build());
+                }
+                return self.construct_interpreted_procedure(context, target);
+            }
             if backend == crate::ExecutableBackendPolicy::ForcedGenericNative {
                 return self.construct_generic_procedure(context, target);
             }
@@ -200,8 +263,7 @@ impl RunMatSession {
                 context.runtime,
                 context.bytecode,
                 target.function,
-                target.arguments,
-                target.requested_outputs,
+                target.call,
             ),
         )
     }
@@ -218,8 +280,14 @@ impl RunMatSession {
                 context.runtime,
                 &context.bytecode.function_registry,
                 None,
-                Vec::new(),
-                0,
+                ProcedureCall {
+                    arguments: runmat_runtime::call::BuiltinArguments::from_borrowed(
+                        &[],
+                        Some(context.runtime),
+                    )?,
+                    requested_outputs: 0,
+                    lexical_environment: None,
+                },
             ),
         )
     }
@@ -247,8 +315,7 @@ impl RunMatSession {
                 context.runtime,
                 &context.bytecode.function_registry,
                 Some(&target.name),
-                target.arguments,
-                target.requested_outputs,
+                target.call,
             )
             .await
         })
@@ -269,8 +336,7 @@ impl RunMatSession {
                     function: target.function,
                     name: &target.name,
                 },
-                target.arguments,
-                target.requested_outputs,
+                target.call,
             )
             .await
         })

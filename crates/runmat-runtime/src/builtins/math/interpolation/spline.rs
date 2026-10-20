@@ -82,7 +82,7 @@ async fn spline_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
     x: Value,
     y: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
         &x,
@@ -163,7 +163,13 @@ async fn spline_builtin_registered(
 
 #[cfg(test)]
 async fn spline_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    spline_builtin_registered(None, x, y, rest).await
+    spline_builtin_registered(
+        None,
+        x,
+        y,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    )
+    .await
 }
 
 #[cfg(test)]

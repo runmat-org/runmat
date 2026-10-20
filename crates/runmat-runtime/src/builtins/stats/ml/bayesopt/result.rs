@@ -10,10 +10,11 @@ pub(super) struct BayesoptOutcome {
 }
 
 pub(super) fn finalize(
+    runtime: Option<&crate::context::RuntimeContext>,
     outcome: BayesoptOutcome,
     requested_outputs: Option<usize>,
 ) -> BuiltinResult<Value> {
-    let result = result_object(outcome)?;
+    let result = result_object(runtime, outcome)?;
     match requested_outputs {
         None => Ok(result),
         Some(0) => Ok(Value::output_list(Vec::new())),
@@ -25,7 +26,10 @@ pub(super) fn finalize(
     }
 }
 
-fn result_object(outcome: BayesoptOutcome) -> BuiltinResult<Value> {
+fn result_object(
+    runtime: Option<&crate::context::RuntimeContext>,
+    outcome: BayesoptOutcome,
+) -> BuiltinResult<Value> {
     let best_index = best_observation_index(&outcome.observations).ok_or_else(|| {
         bayesopt_error(
             "bayesopt: no finite objective observations were recorded",
@@ -62,7 +66,7 @@ fn result_object(outcome: BayesoptOutcome) -> BuiltinResult<Value> {
     )?;
     let optimization_trace = optimization_trace_table(&outcome.observations)?;
 
-    let mut output = StructValue::new();
+    let mut output = runmat_value::UnboundedStructValueBuilder::new();
     output.insert("iterations", Value::Num(outcome.observations.len() as f64));
     output.insert("funcCount", Value::Num(outcome.observations.len() as f64));
     output.insert(
@@ -81,71 +85,48 @@ fn result_object(outcome: BayesoptOutcome) -> BuiltinResult<Value> {
         ),
     );
 
-    let mut surrogate = StructValue::new();
+    let mut surrogate = runmat_value::UnboundedStructValueBuilder::new();
     surrogate.insert("Kernel", Value::String("squared-exponential".into()));
     surrogate.insert("LengthScale", Value::Num(outcome.surrogate.length_scale));
     surrogate.insert("Noise", Value::Num(outcome.surrogate.noise));
 
-    let mut object = ObjectInstance::new(RESULT_CLASS);
-    object.properties.insert("XTrace".into(), x_trace);
-    object
-        .properties
-        .insert("ObjectiveTrace".into(), objective_trace);
-    object
-        .properties
-        .insert("ObjectiveMinimumTrace".into(), objective_minimum_trace);
-    object
-        .properties
-        .insert("ObjectiveEvaluationTimeTrace".into(), objective_time_trace);
-    object
-        .properties
-        .insert("FeasibilityTrace".into(), feasibility_trace);
-    object
-        .properties
-        .insert("OptimizationTrace".into(), optimization_trace);
-    object.properties.insert("XAtMinObjective".into(), x_at_min);
-    object
-        .properties
-        .insert("MinObjective".into(), Value::Num(best.objective));
-    object.properties.insert(
-        "IndexOfMinimumTrace".into(),
-        Value::Num((best_index + 1) as f64),
-    );
-    object.properties.insert(
-        "NumObjectiveEvaluations".into(),
-        Value::Num(outcome.observations.len() as f64),
-    );
-    object
-        .properties
-        .insert("TotalElapsedTime".into(), Value::Num(outcome.total_time));
-    object
-        .properties
-        .insert("Options".into(), Value::Struct(outcome.options.raw_options));
-    object
-        .properties
-        .insert("SurrogateModel".into(), Value::Struct(surrogate));
-    object.properties.insert(
-        "VariableDescriptions".into(),
-        variable_descriptions(&outcome.variables)?,
-    );
-    object
-        .properties
-        .insert("Output".into(), Value::Struct(output));
-    object.properties.insert("ExitFlag".into(), Value::Num(1.0));
-    object
-        .properties
-        .insert("BestPoint".into(), best.point.to_table(&outcome.variables)?);
-    object
-        .properties
-        .insert("BestObjective".into(), Value::Num(best.objective));
-    object.properties.insert(
-        "IsObjectiveDeterministic".into(),
-        Value::Bool(outcome.options.deterministic),
-    );
-    object
-        .properties
-        .insert("Verbose".into(), Value::Bool(outcome.options.verbose));
-    Ok(Value::Object(object))
+    let fields = [
+        ("XTrace", x_trace),
+        ("ObjectiveTrace", objective_trace),
+        ("ObjectiveMinimumTrace", objective_minimum_trace),
+        ("ObjectiveEvaluationTimeTrace", objective_time_trace),
+        ("FeasibilityTrace", feasibility_trace),
+        ("OptimizationTrace", optimization_trace),
+        ("XAtMinObjective", x_at_min),
+        ("MinObjective", Value::Num(best.objective)),
+        ("IndexOfMinimumTrace", Value::Num((best_index + 1) as f64)),
+        (
+            "NumObjectiveEvaluations",
+            Value::Num(outcome.observations.len() as f64),
+        ),
+        ("TotalElapsedTime", Value::Num(outcome.total_time)),
+        ("Options", Value::Struct(outcome.options.raw_options)),
+        ("SurrogateModel", Value::Struct(surrogate.finish())),
+        (
+            "VariableDescriptions",
+            variable_descriptions(runtime, &outcome.variables)?,
+        ),
+        ("Output", Value::Struct(output.finish())),
+        ("ExitFlag", Value::Num(1.0)),
+        ("BestPoint", best.point.to_table(&outcome.variables)?),
+        ("BestObjective", Value::Num(best.objective)),
+        (
+            "IsObjectiveDeterministic",
+            Value::Bool(outcome.options.deterministic),
+        ),
+        ("Verbose", Value::Bool(outcome.options.verbose)),
+    ];
+    let object = crate::execution::object::construct_object_from_borrowed_fields(
+        runtime,
+        RESULT_CLASS.display_name(),
+        fields.iter().map(|(name, value)| (*name, value)),
+    )?;
+    Ok(object.into_value_and_lease().0)
 }
 
 fn best_observation_index(observations: &[Observation]) -> Option<usize> {
@@ -272,37 +253,40 @@ fn optimization_trace_table(observations: &[Observation]) -> BuiltinResult<Value
     })
 }
 
-fn variable_descriptions(variables: &[Variable]) -> BuiltinResult<Value> {
+fn variable_descriptions(
+    runtime: Option<&crate::context::RuntimeContext>,
+    variables: &[Variable],
+) -> BuiltinResult<Value> {
     let values = variables
         .iter()
         .map(|var| {
-            let mut object = ObjectInstance::new(OPTIMIZABLE_VARIABLE_CLASS);
-            object
-                .properties
-                .insert("Name".into(), Value::string(var.name.clone()));
-            object.properties.insert(
-                "Type".into(),
-                Value::String(
-                    match &var.kind {
-                        VariableKind::Real { .. } => VariableType::Real,
-                        VariableKind::Integer { .. } => VariableType::Integer,
-                        VariableKind::Categorical { .. } => VariableType::Categorical,
-                    }
-                    .public_name()
-                    .into(),
+            let fields = [
+                ("Name", Value::string(var.name.clone())),
+                (
+                    "Type",
+                    Value::String(
+                        match &var.kind {
+                            VariableKind::Real { .. } => VariableType::Real,
+                            VariableKind::Integer { .. } => VariableType::Integer,
+                            VariableKind::Categorical { .. } => VariableType::Categorical,
+                        }
+                        .public_name()
+                        .into(),
+                    ),
                 ),
-            );
-            object.properties.insert(
-                "Transform".into(),
-                Value::String(var.transform.public_name().into()),
-            );
-            object
-                .properties
-                .insert("Optimize".into(), Value::Bool(var.optimize));
-            object
-                .properties
-                .insert("Range".into(), variable_range_value(var)?);
-            Ok(Value::Object(object))
+                (
+                    "Transform",
+                    Value::String(var.transform.public_name().into()),
+                ),
+                ("Optimize", Value::Bool(var.optimize)),
+                ("Range", variable_range_value(var)?),
+            ];
+            let object = crate::execution::object::construct_object_from_borrowed_fields(
+                runtime,
+                OPTIMIZABLE_VARIABLE_CLASS.display_name(),
+                fields.iter().map(|(name, value)| (*name, value)),
+            )?;
+            Ok(object.into_value_and_lease().0)
         })
         .collect::<BuiltinResult<Vec<_>>>()?;
     CellArray::new(values, variables.len(), 1)

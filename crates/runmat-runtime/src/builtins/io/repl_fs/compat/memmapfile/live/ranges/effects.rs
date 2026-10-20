@@ -193,7 +193,7 @@ pub(in crate::builtins::io::repl_fs::compat::memmapfile::live) async fn write(
                     "memmapfile: assigned record shape does not match selected indices",
                 ));
             }
-            let names = array.field_names().cloned().collect();
+            let names = array.field_names().map(ToOwned::to_owned).collect();
             runmat_value::StructArray::normalize(
                 names,
                 array.elements().map(|element| element.to_owned()).collect(),

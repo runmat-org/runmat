@@ -14,9 +14,9 @@ use runmat_value::Value;
 pub fn apply_color_limits(
     runtime: Option<&crate::context::RuntimeContext>,
     builtin: &'static str,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
-    let (target, controls) = prepare_limit_controls(runtime, builtin, &args)?;
+    let (target, controls) = prepare_limit_controls(runtime, builtin, args.view())?;
     validate_limit_control_count(builtin, controls)?;
     if let Some(Value::Tensor(tensor)) = controls.first() {
         if matches!(

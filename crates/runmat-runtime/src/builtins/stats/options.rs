@@ -16,7 +16,7 @@ use runmat_builtins::{
     STATSET_ERROR_INVALID_STATFUN, STATSET_INTEGER_OPTION_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{CellArray, CharArray, StringArray, StructValue, Tensor, Value};
+use runmat_value::{CellArray, StructValue, Tensor, Value};
 
 use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::tensor;
@@ -28,23 +28,29 @@ const MAX_OPTION_INTEGER: usize = 1_000_000_000;
 
 #[runtime_builtin(
     name = "statset",
+    context = true,
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::options"
 )]
-async fn statset_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn statset_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     ensure_statset_output()?;
-    preflight_statset(&rest)?;
-    if statset_contains_native_integer_option_value(&rest) {
+    preflight_statset(rest.view())?;
+    if statset_contains_native_integer_option_value(rest.view()) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &STATSET_INTEGER_OPTION_EXTENSION,
             STATSET,
         )?;
     }
-    let args = gather_all(rest).await?;
-    Ok(Value::Struct(parse_statset(args)?))
+    let args = gather_all(rest, runtime.as_ref()).await?;
+    Ok(Value::Struct(parse_statset(runtime.as_ref(), args)?))
 }
 
-fn statset_contains_native_integer_option_value(args: &[Value]) -> bool {
+fn statset_contains_native_integer_option_value(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> bool {
     if args.is_empty() {
         return false;
     }
@@ -86,7 +92,11 @@ fn statset_contains_native_integer_option_value(args: &[Value]) -> bool {
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::options"
 )]
-async fn statget_builtin(options: Value, field: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn statget_builtin(
+    options: Value,
+    field: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     ensure_statget_output()?;
     if rest.len() > 1 {
         return Err(statget_error(
@@ -148,7 +158,7 @@ fn ensure_statget_output() -> BuiltinResult<()> {
     Ok(())
 }
 
-fn preflight_statset(args: &[Value]) -> BuiltinResult<()> {
+fn preflight_statset(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<()> {
     let Some(first) = args.first() else {
         return Ok(());
     };
@@ -165,7 +175,7 @@ fn preflight_statset(args: &[Value]) -> BuiltinResult<()> {
         first if looks_like_option_name(first) => 0,
         _ => 1,
     };
-    let rest = &args[start..];
+    let rest = args.range(start..)?;
     if !rest.len().is_multiple_of(2) {
         return Err(statset_error(
             &STATSET_ERROR_INVALID_ARGUMENT,
@@ -186,37 +196,41 @@ fn preflight_option_names(options: &StructValue) -> BuiltinResult<()> {
     Ok(())
 }
 
-async fn gather_all(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(values.len());
-    for value in values {
-        out.push(
-            gather_if_needed_async(&value)
+async fn gather_all(
+    values: crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    values
+        .try_map_preserving_roots_async(values.len(), runtime, async |index| {
+            gather_if_needed_async(&values[index])
                 .await
-                .map_err(statset_materialization_error)?,
-        );
-    }
-    Ok(out)
+                .map_err(statset_materialization_error)
+        })
+        .await
 }
 
-fn parse_statset(args: Vec<Value>) -> BuiltinResult<StructValue> {
+fn parse_statset(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<StructValue> {
     if args.is_empty() {
-        return Ok(empty_options());
+        return empty_options(runtime);
     }
     let mut index = 0usize;
     let mut options;
     match &args[0] {
         Value::Struct(existing) => {
-            options = canonicalize_options(existing)?;
+            options = canonicalize_options(runtime, existing)?;
             index = 1;
             if index < args.len() {
                 if let Value::Struct(newopts) = &args[index] {
-                    merge_old_into_new(&mut options, newopts)?;
+                    options = merge_old_into_new(runtime, &options, newopts)?;
                     index += 1;
                 }
             }
         }
         first if looks_like_option_name(first) => {
-            options = empty_options();
+            options = empty_options(runtime)?;
         }
         first => {
             let statfun = text_scalar(first).map_err(|err| {
@@ -225,11 +239,11 @@ fn parse_statset(args: Vec<Value>) -> BuiltinResult<StructValue> {
                     format!("statset: {}", err.message()),
                 )
             })?;
-            options = defaults_for_statfun(&statfun)?;
+            options = defaults_for_statfun(runtime, &statfun)?;
             index = 1;
         }
     }
-    let remaining = &args[index..];
+    let remaining = args.view().range(index..)?;
     if !remaining.is_empty() {
         if !remaining.len().is_multiple_of(2) {
             return Err(statset_error(
@@ -237,7 +251,7 @@ fn parse_statset(args: Vec<Value>) -> BuiltinResult<StructValue> {
                 "statset: expected option name-value pairs",
             ));
         }
-        for pair in remaining.chunks(2) {
+        for pair in remaining.chunks_exact(2) {
             let name = text_scalar(&pair[0]).map_err(|err| {
                 statset_error(
                     &STATSET_ERROR_INVALID_OPTION,
@@ -245,10 +259,12 @@ fn parse_statset(args: Vec<Value>) -> BuiltinResult<StructValue> {
                 )
             })?;
             let canonical = canonical_option_name(&name)?;
-            options.insert(
-                canonical.name(),
+            options = replace_option(
+                runtime,
+                &options,
+                canonical,
                 validate_option_value(canonical, &pair[1])?,
-            );
+            )?;
         }
     }
     Ok(options)
@@ -259,9 +275,9 @@ fn text_scalar(value: &Value) -> BuiltinResult<String> {
         return Ok(text);
     }
     match value {
-        Value::CharArray(CharArray { data, rows: 1, .. }) => Ok(data.iter().collect()),
-        Value::StringArray(StringArray { data, .. }) if data.len() == 1 => {
-            Ok(data[0].as_str().to_owned())
+        Value::CharArray(array) if array.rows == 1 => Ok(array.data().iter().collect()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(array.data()[0].as_str().to_owned())
         }
         other => Err(statset_error(
             &STATSET_ERROR_INVALID_OPTION,
@@ -289,9 +305,9 @@ fn is_empty_value(value: &Value) -> bool {
     match value {
         Value::Tensor(tensor) => tensor::tensor_element_len(tensor) == 0,
         Value::LogicalArray(array) => array.data.is_empty(),
-        Value::Cell(cell) => cell.data.is_empty(),
-        Value::StringArray(array) => array.data.is_empty(),
-        Value::CharArray(array) => array.data.is_empty(),
+        Value::Cell(cell) => cell.data().is_empty(),
+        Value::StringArray(array) => array.data().is_empty(),
+        Value::CharArray(array) => array.data().is_empty(),
         _ => false,
     }
 }

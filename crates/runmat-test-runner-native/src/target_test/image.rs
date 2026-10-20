@@ -24,6 +24,15 @@ impl PendingImage {
         header: &NativePairedProductHeader,
         limits: NativeTargetTestRunLimits,
     ) -> NativeRunnerResult<Self> {
+        Self::prepare_role(linked, header, NativePairedProductRole::Test, limits)
+    }
+
+    pub(super) fn prepare_role(
+        linked: &LinkedProgram,
+        header: &NativePairedProductHeader,
+        role: NativePairedProductRole,
+        limits: NativeTargetTestRunLimits,
+    ) -> NativeRunnerResult<Self> {
         if limits.max_image_bytes == 0 || limits.max_stderr_bytes == 0 {
             return Err(configuration("native test host limits must be nonzero"));
         }
@@ -33,7 +42,7 @@ impl PendingImage {
             .map_err(configuration)?
             .ok_or_else(|| configuration("native target tests require a selected-image receipt"))?;
         let receipt = image.canonical_plan();
-        if header.role != NativePairedProductRole::Test
+        if header.role != role
             || linked.product.selected() != Some(&header.binding.selected_product)
             || receipt.record().product != header.binding.selected_product
             || receipt.record().inputs != linked.inputs

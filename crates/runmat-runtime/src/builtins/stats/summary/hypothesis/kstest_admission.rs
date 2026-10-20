@@ -9,8 +9,8 @@ pub(super) fn is_kstest_typed_integer(value: &Value) -> bool {
 
 pub(super) fn kstest_cdf_contains_typed_integer(value: &Value) -> bool {
     match value {
-        Value::Cell(cell) if cell.data.len() == 1 => {
-            kstest_cdf_contains_typed_integer(&cell.data[0])
+        Value::Cell(cell) if cell.data().len() == 1 => {
+            kstest_cdf_contains_typed_integer(&cell.data()[0])
         }
         _ => is_kstest_typed_integer(value),
     }
@@ -38,7 +38,7 @@ pub(super) fn validate_kstest_cdf_role(value: &Value) -> BuiltinResult<()> {
             }
             Ok(())
         }
-        Value::Cell(cell) if cell.data.len() == 1 => validate_kstest_cdf_role(&cell.data[0]),
+        Value::Cell(cell) if cell.data().len() == 1 => validate_kstest_cdf_role(&cell.data()[0]),
         other => Err(kstest_invalid_argument(format!(
             "kstest: CDF must be a two-column numeric matrix or normcdf handle; probability distribution objects are not supported yet, got {other:?}"
         ))),
@@ -111,7 +111,9 @@ pub(super) fn ensure_kstest_sample_extension(x: &Value) -> BuiltinResult<()> {
 
 #[cfg(test)]
 pub(super) fn ensure_kstest_extensions(x: &Value, rest: &[Value]) -> BuiltinResult<()> {
-    let plan = KstestOptionPlan::admit(rest.to_vec())?;
+    let plan = KstestOptionPlan::admit(crate::builtins::common::test_support::builtin_arguments(
+        rest.to_vec(),
+    ))?;
     ensure_kstest_sample_extension(x)?;
     plan.ensure_extensions(x)?;
     plan.preflight_known().map(|_| ())
@@ -165,11 +167,11 @@ pub(super) fn kstest_scalar_text<'a>(
 ) -> BuiltinResult<Cow<'a, str>> {
     match value {
         Value::String(text) => Ok(Cow::Borrowed(text.as_str())),
-        Value::CharArray(array) if array.rows == 1 => Ok(Cow::Owned(array.data.iter().collect())),
-        Value::StringArray(array) if array.data.len() == 1 => {
-            Ok(Cow::Borrowed(array.data[0].as_str()))
+        Value::CharArray(array) if array.rows == 1 => Ok(Cow::Owned(array.data().iter().collect())),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(Cow::Borrowed(array.data()[0].as_str()))
         }
-        Value::Cell(cell) if cell.data.len() == 1 => kstest_scalar_text(&cell.data[0], context),
+        Value::Cell(cell) if cell.data().len() == 1 => kstest_scalar_text(&cell.data()[0], context),
         other => Err(kstest_invalid_argument(format!(
             "kstest: {context} must be a string scalar, got {other:?}"
         ))),

@@ -2,10 +2,10 @@
 use super::*;
 use runmat_execution::identity::ArtifactId;
 use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
-use runmat_execution::{Digest, OutputContract, TaskId};
+use runmat_execution::{OutputContract, TaskId};
 use runmat_execution_artifact::{
     ExecutableForm, ProgramArtifact, ProgramBuildRecipe, ProgramExecutionRequest, ProgramTarget,
-    PROGRAM_BUILD_RECIPE_SCHEMA_VERSION, PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+    PROGRAM_BUILD_RECIPE_SCHEMA_VERSION, PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
 };
 use runmat_execution_runner::{DriverSnapshot, TaskSubmission};
 use runmat_execution_runner_native::NativeProgramSession;
@@ -24,12 +24,16 @@ async fn request(text: &str, selected: Option<&str>, outputs: u16) -> ProgramExe
     let recipe = ProgramBuildRecipe {
         schema_version: PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
         program_revision: envelope.manifest.identity.program.clone(),
-        entrypoint: envelope.manifest.identity.entrypoint_function.0.to_string(),
+        entrypoint: envelope.manifest.identity.entrypoint.clone(),
         outputs: OutputContract {
             requested_outputs: outputs,
+            owned_work: None,
         },
         execution_mode: "interpreter".into(),
         target: ProgramTarget::portable("original-session-worker"),
+        interop: envelope.manifest.interop.clone(),
+        accelerators: vec![],
+        foreign_policy: None,
         features: Default::default(),
         compile_options: Default::default(),
         source_objects: vec![],
@@ -38,8 +42,18 @@ async fn request(text: &str, selected: Option<&str>, outputs: u16) -> ProgramExe
     ProgramExecutionRequest {
         console: None,
         environment: runmat_execution::EnvironmentSnapshot::default(),
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
-        function: envelope.manifest.identity.entrypoint_function.0 as usize,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
+        callable: runmat_execution::ProgramCallable::semantic(
+            envelope
+                .manifest
+                .identity
+                .entrypoint_function
+                .expect("selected semantic entrypoint"),
+            None,
+        ),
+        context: runmat_execution::ProgramInvocationContext::Direct,
+        assignment: None,
+        job_id: None,
         artifact: ProgramArtifact::materialize(
             &recipe,
             ExecutableForm::ExecutableUnitV4,
@@ -66,17 +80,26 @@ async fn execute(
             request,
             TaskSubmission {
                 request: TaskRequest {
+                    schema_version: runmat_execution::task::TASK_REQUEST_SCHEMA_VERSION,
                     console: None,
                     environment: original.environment.clone(),
                     id: task_id,
                     scope_id: session.scope_id(),
                     pool_id: session.pool_id(),
-                    program_artifact_id: ArtifactId::derive(&[original.artifact.id.0.bytes()]),
-                    callable: Callable {
-                        owner_identity: "original-portable-worker".into(),
-                        qualified_name: original.recipe.entrypoint.clone(),
-                        entrypoint_digest: Digest::sha256(original.function.to_be_bytes()),
-                    },
+                    executable: runmat_execution::task::TaskExecutableIdentity::ProgramArtifact(
+                        ArtifactId::derive(&[original.artifact.id.0.bytes()]),
+                    ),
+                    callable: Callable::for_program("original-portable-worker", &original.callable),
+                    host: original
+                        .artifact
+                        .execution_host_requirement(
+                            &original.recipe,
+                            BTreeSet::from([
+                                runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
+                            ]),
+                        )
+                        .unwrap(),
+                    invocation_context: original.context.clone(),
                     inputs: original.arguments.clone(),
                     outputs: original.recipe.outputs.clone(),
                     resources: ResourceRequest {
@@ -111,7 +134,9 @@ async fn execute(
     let result = completion.delivery_result().unwrap();
     assert_eq!(
         result
-            .outputs
+            .values()
+            .expect("portable value result")
+            .0
             .iter()
             .map(
                 |value| runmat_runtime::execution::value_codec::decode_inline_value(value).unwrap()
@@ -131,8 +156,16 @@ async fn execute(
         original.recipe.outputs
     );
     assert_eq!(
-        evidence.task.committed.as_ref().unwrap().outputs,
-        result.outputs
+        evidence
+            .task
+            .committed
+            .as_ref()
+            .unwrap()
+            .result
+            .values()
+            .expect("committed value result")
+            .0,
+        result.values().expect("portable value result").0
     );
     let root = config.store_root.join(session.scope_id().to_string());
     let cold: DriverSnapshot =
@@ -180,6 +213,7 @@ async fn transitive_request() -> ProgramExecutionRequest {
         &envelope,
         OutputContract {
             requested_outputs: 1,
+            owned_work: None,
         },
         ProgramTarget::portable("original-session-worker"),
     )
@@ -187,8 +221,18 @@ async fn transitive_request() -> ProgramExecutionRequest {
     ProgramExecutionRequest {
         console: None,
         environment: runmat_execution::EnvironmentSnapshot::default(),
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
-        function: envelope.manifest.identity.entrypoint_function.0 as usize,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
+        callable: runmat_execution::ProgramCallable::semantic(
+            envelope
+                .manifest
+                .identity
+                .entrypoint_function
+                .expect("selected semantic entrypoint"),
+            None,
+        ),
+        context: runmat_execution::ProgramInvocationContext::Direct,
+        assignment: None,
+        job_id: None,
         arguments: vec![
             runmat_runtime::execution::value_codec::encode_inline_value(&Value::Num(5.0)).unwrap(),
         ],
@@ -235,7 +279,14 @@ pub(super) async fn verify(config: &NativeExecutionConfig) {
             outputs,
         )
         .await;
-        assert_ne!(original.function, 0);
+        assert_ne!(
+            original
+                .callable
+                .semantic_function()
+                .expect("selected semantic function")
+                .0,
+            0
+        );
         original.arguments =
             vec![
                 runmat_runtime::execution::value_codec::encode_inline_value(&Value::Num(10.0))

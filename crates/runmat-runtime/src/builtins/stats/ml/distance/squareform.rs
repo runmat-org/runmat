@@ -2,7 +2,9 @@ use super::*;
 use runmat_builtins::{condensed_length, matrix_size_for_condensed_length, SquareformDirection};
 use runmat_value::{LogicalArray, NumericDType, NumericScalar, NumericStorage};
 
-pub(super) fn parse_squareform_force(args: Vec<Value>) -> BuiltinResult<SquareformDirection> {
+pub(super) fn parse_squareform_force(
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<SquareformDirection> {
     if args.is_empty() {
         return Ok(SquareformDirection::Auto);
     }

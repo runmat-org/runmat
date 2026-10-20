@@ -76,8 +76,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::randn"
 )]
-async fn randn_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let parsed = ParsedRandn::parse(&rest).await?;
+async fn randn_builtin(rest: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
+    let parsed = ParsedRandn::parse(rest.view()).await?;
     build_output(parsed).await
 }
 
@@ -133,7 +133,7 @@ enum RandnTemplate {
 }
 
 impl ParsedRandn {
-    async fn parse(args: &[Value]) -> crate::BuiltinResult<Self> {
+    async fn parse(args: crate::call::FunctionArgumentView<'_>) -> crate::BuiltinResult<Self> {
         let mut dims: Vec<usize> = Vec::new();
         let mut saw_dims_arg = false;
         let mut template: Option<RandnTemplate> = None;
@@ -565,7 +565,10 @@ pub(crate) mod tests {
     fn randn_default_scalar() {
         let _guard = random::test_guard();
         let _guard = reset_rng_clean();
-        let result = block_on(randn_builtin(Vec::new())).expect("randn");
+        let result = block_on(randn_builtin(
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect("randn");
         let expected = random::expected_normal_sequence(1)[0];
         match result {
             Value::Num(v) => assert!((v - expected).abs() < 1e-12),
@@ -594,7 +597,10 @@ pub(crate) mod tests {
         let _guard = random::test_guard();
         let _guard = reset_rng_clean();
         let args = vec![Value::Num(2.0)];
-        let result = block_on(randn_builtin(args)).expect("randn");
+        let result = block_on(randn_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect("randn");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape(), &[2, 2]);
@@ -613,7 +619,10 @@ pub(crate) mod tests {
         let _guard = random::test_guard();
         let _guard = reset_rng_clean();
         let size_vec = Tensor::new(vec![2.0, 3.0, 4.0], vec![1, 3]).unwrap();
-        let result = block_on(randn_builtin(vec![Value::Tensor(size_vec)])).expect("randn");
+        let result = block_on(randn_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(size_vec)]),
+        ))
+        .expect("randn");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape(), &[2, 3, 4]);
@@ -638,16 +647,20 @@ pub(crate) mod tests {
             )
         };
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let Value::Tensor(output) =
-            block_on(randn_builtin(vec![column()])).expect("RunMat column size")
-        else {
+        let Value::Tensor(output) = block_on(randn_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![column()]),
+        ))
+        .expect("RunMat column size") else {
             panic!("expected tensor");
         };
         assert_eq!(output.shape(), &[2, 3]);
         drop(_runmat);
 
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let error = block_on(randn_builtin(vec![column()])).expect_err("strict column size");
+        let error = block_on(randn_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![column()]),
+        ))
+        .expect_err("strict column size");
         assert_eq!(
             error.identifier(),
             RANDN_COLUMN_SIZE_VECTOR_EXTENSION.error_identifier
@@ -661,8 +674,12 @@ pub(crate) mod tests {
             )
             .expect("genuine unregistered allocation")
             .handle;
-        let error = block_on(randn_builtin(vec![Value::GpuTensor(handle.clone())]))
-            .expect_err("strict resident size");
+        let error = block_on(randn_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(
+                handle.clone(),
+            )]),
+        ))
+        .expect_err("strict resident size");
         assert_eq!(
             error.identifier(),
             RANDN_RESIDENT_SIZE_EXTENSION.error_identifier
@@ -675,7 +692,10 @@ pub(crate) mod tests {
     fn randn_zero_dimension_returns_empty() {
         let _guard = random::test_guard();
         let _guard = reset_rng_clean();
-        let result = block_on(randn_builtin(vec![Value::Num(0.0)])).expect("randn");
+        let result = block_on(randn_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(0.0)]),
+        ))
+        .expect("randn");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape(), &[0, 0]);
@@ -690,7 +710,10 @@ pub(crate) mod tests {
     fn randn_single_precision_produces_f32() {
         let _guard = random::test_guard();
         let _guard = reset_rng_clean();
-        let result = block_on(randn_builtin(vec![Value::from("single")])).expect("randn single");
+        let result = block_on(randn_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from("single")]),
+        ))
+        .expect("randn single");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.numeric_dtype(), NumericDType::F32);
@@ -710,10 +733,16 @@ pub(crate) mod tests {
         let _guard = reset_rng_clean();
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let args = vec![Value::from("like"), Value::Tensor(tensor.clone())];
-        let result = block_on(randn_builtin(args)).expect("randn");
+        let result = block_on(randn_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect("randn");
         assert!(matches!(result, Value::Num(value) if value.is_finite()));
 
-        let error = block_on(randn_builtin(vec![Value::Tensor(tensor)])).unwrap_err();
+        let error = block_on(randn_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(tensor)]),
+        ))
+        .unwrap_err();
         assert!(error.message().contains("unsupported dimension or option"));
     }
 
@@ -733,29 +762,35 @@ pub(crate) mod tests {
 
         for storage in storages {
             let prototype = Tensor::new_integer(storage, vec![1, 1]).expect("prototype");
-            let error = block_on(randn_builtin(vec![
-                Value::Num(1.0),
-                Value::Num(2.0),
-                Value::from("like"),
-                Value::Tensor(prototype),
-            ]))
+            let error = block_on(randn_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(1.0),
+                    Value::Num(2.0),
+                    Value::from("like"),
+                    Value::Tensor(prototype),
+                ]),
+            ))
             .unwrap_err();
             assert!(error.message().contains("must be single or double"));
         }
 
-        let scalar = block_on(randn_builtin(vec![
-            Value::Num(2.0),
-            Value::from("like"),
-            Value::Int(IntValue::I64(i64::MAX)),
-        ]))
+        let scalar = block_on(randn_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(2.0),
+                Value::from("like"),
+                Value::Int(IntValue::I64(i64::MAX)),
+            ]),
+        ))
         .unwrap_err();
         assert!(scalar.message().contains("must be single or double"));
 
-        let logical = block_on(randn_builtin(vec![
-            Value::Num(2.0),
-            Value::from("like"),
-            Value::Bool(true),
-        ]))
+        let logical = block_on(randn_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(2.0),
+                Value::from("like"),
+                Value::Bool(true),
+            ]),
+        ))
         .unwrap_err();
         assert!(logical.message().contains("must be single or double"));
 
@@ -765,11 +800,13 @@ pub(crate) mod tests {
             vec![1, 1],
         )
         .unwrap();
-        let complex_integer = block_on(randn_builtin(vec![
-            Value::Num(2.0),
-            Value::from("like"),
-            Value::ComplexTensor(complex_integer),
-        ]))
+        let complex_integer = block_on(randn_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(2.0),
+                Value::from("like"),
+                Value::ComplexTensor(complex_integer),
+            ]),
+        ))
         .unwrap_err();
         assert!(complex_integer
             .message()
@@ -794,12 +831,14 @@ pub(crate) mod tests {
             ),
         ] {
             let _rng = reset_rng_clean();
-            let result = block_on(randn_builtin(vec![
-                Value::Num(2.0),
-                Value::Num(1.0),
-                Value::from("like"),
-                prototype,
-            ]))
+            let result = block_on(randn_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(2.0),
+                    Value::Num(1.0),
+                    Value::from("like"),
+                    prototype,
+                ]),
+            ))
             .expect("randn");
             let Value::ComplexTensor(tensor) = result else {
                 panic!("expected complex tensor, got {result:?}")
@@ -834,7 +873,10 @@ pub(crate) mod tests {
         let _guard = reset_rng_clean();
         test_support::with_test_provider(|_| {
             let args = vec![Value::Num(3.0), Value::Num(4.0), Value::from("gpuArray")];
-            let result = block_on(randn_builtin(args)).expect("randn gpuArray");
+            let result = block_on(randn_builtin(
+                crate::builtins::common::test_support::builtin_arguments(args),
+            ))
+            .expect("randn gpuArray");
             match result {
                 Value::GpuTensor(h) => {
                     assert_eq!(h.shape(), vec![3, 4]);
@@ -860,11 +902,16 @@ pub(crate) mod tests {
 
     #[test]
     fn randn_parser_records_explicit_residency_in_its_typed_template() {
-        let parsed =
-            block_on(ParsedRandn::parse(&[Value::from("gpuArray")])).expect("gpuArray form");
+        let parsed = block_on(ParsedRandn::parse(
+            crate::call::FunctionArgumentView::from_slice(&[Value::from("gpuArray")]),
+        ))
+        .expect("gpuArray form");
         assert!(matches!(parsed.template, RandnTemplate::GpuArray));
 
-        let parsed = block_on(ParsedRandn::parse(&[])).expect("default form");
+        let parsed = block_on(ParsedRandn::parse(
+            crate::call::FunctionArgumentView::from_slice(&[]),
+        ))
+        .expect("default form");
         assert!(matches!(parsed.template, RandnTemplate::Double));
     }
 
@@ -914,7 +961,10 @@ pub(crate) mod tests {
                 Value::from("like"),
                 Value::GpuTensor(handle),
             ];
-            let result = block_on(randn_builtin(args)).expect("randn");
+            let result = block_on(randn_builtin(
+                crate::builtins::common::test_support::builtin_arguments(args),
+            ))
+            .expect("randn");
             match result {
                 Value::GpuTensor(gpu) => {
                     assert_eq!(gpu.shape(), vec![2, 2]);
@@ -941,14 +991,21 @@ pub(crate) mod tests {
                 .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
                 .expect("automatic prototype");
             let child_before = random::gpu::snapshot().expect("child before");
-            let expected = block_on(randn_builtin(vec![Value::Num(2.0), Value::from("single")]))
-                .expect("host single normal");
+            let expected = block_on(randn_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(2.0),
+                    Value::from("single"),
+                ]),
+            ))
+            .expect("host single normal");
             random::reset_rng();
-            let actual = block_on(randn_builtin(vec![
-                Value::Num(2.0),
-                Value::from("like"),
-                Value::GpuTensor(source),
-            ]))
+            let actual = block_on(randn_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(2.0),
+                    Value::from("like"),
+                    Value::GpuTensor(source),
+                ]),
+            ))
             .expect("automatic normal");
             assert_eq!(actual, expected);
             assert_eq!(random::gpu::snapshot().expect("child after"), child_before);
@@ -972,18 +1029,22 @@ pub(crate) mod tests {
                 .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
                 .expect("automatic prototype");
             let child_before = random::gpu::snapshot().expect("child before");
-            let expected = block_on(randn_builtin(vec![
-                Value::Num(2.0),
-                Value::from("like"),
-                Value::ComplexTensor(prototype),
-            ]))
+            let expected = block_on(randn_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(2.0),
+                    Value::from("like"),
+                    Value::ComplexTensor(prototype),
+                ]),
+            ))
             .expect("host complex normal");
             random::reset_rng();
-            let actual = block_on(randn_builtin(vec![
-                Value::Num(2.0),
-                Value::from("like"),
-                Value::GpuTensor(source),
-            ]))
+            let actual = block_on(randn_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(2.0),
+                    Value::from("like"),
+                    Value::GpuTensor(source),
+                ]),
+            ))
             .expect("automatic complex normal");
             assert_eq!(actual, expected);
             assert_eq!(random::gpu::snapshot().expect("child after"), child_before);
@@ -1009,11 +1070,13 @@ pub(crate) mod tests {
                 .expect("upload integer gpu prototype")
                 .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
                 .expect("explicit gpuArray prototype");
-            let error = block_on(randn_builtin(vec![
-                Value::Num(2.0),
-                Value::from("like"),
-                Value::GpuTensor(handle),
-            ]))
+            let error = block_on(randn_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(2.0),
+                    Value::from("like"),
+                    Value::GpuTensor(handle),
+                ]),
+            ))
             .unwrap_err();
             assert!(error.message().contains("single or double underlying type"));
         });

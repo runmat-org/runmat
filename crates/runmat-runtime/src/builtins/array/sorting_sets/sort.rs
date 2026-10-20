@@ -1203,12 +1203,12 @@ impl SortArgs {
                         let raw = &rest[i];
                         let value = match raw {
                             Value::String(s) => std::borrow::Cow::Borrowed(s.as_str()),
-                            Value::StringArray(sa) if sa.data.len() == 1 => {
-                                std::borrow::Cow::Borrowed(sa.data[0].as_str())
+                            Value::StringArray(sa) if sa.data().len() == 1 => {
+                                std::borrow::Cow::Borrowed(sa.data()[0].as_str())
                             }
-                            Value::CharArray(ca) if ca.rows == 1 => {
-                                std::borrow::Cow::Owned(ca.data.iter().copied().collect::<String>())
-                            }
+                            Value::CharArray(ca) if ca.rows == 1 => std::borrow::Cow::Owned(
+                                ca.data().iter().copied().collect::<String>(),
+                            ),
                             _ => {
                                 return Err(sort_error(
                                     &SORT_ERROR_COMPARISON_METHOD_REQUIRES_STRING,

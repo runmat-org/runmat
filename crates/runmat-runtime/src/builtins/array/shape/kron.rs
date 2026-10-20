@@ -81,7 +81,11 @@ enum KronInput {
     binding_variant = "default",
     builtin_path = "crate::builtins::array::shape::kron"
 )]
-async fn kron_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn kron_builtin(
+    a: Value,
+    b: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &KRON_DESCRIPTOR,
         &KRON_ERROR_UNSUPPORTED_INPUT,
@@ -736,7 +740,7 @@ fn value_into_kron_input(value: Value) -> crate::BuiltinResult<KronInput> {
 }
 
 fn char_array_to_tensor(chars: &CharArray) -> crate::BuiltinResult<Tensor> {
-    let data: Vec<f64> = chars.data.iter().map(|&ch| ch as u32 as f64).collect();
+    let data: Vec<f64> = chars.data().iter().map(|&ch| ch as u32 as f64).collect();
     Tensor::new(data, vec![chars.rows, chars.cols])
         .map_err(|e| kron_error_with_message(format!("kron: {e}"), &KRON_ERROR_INTERNAL))
 }
@@ -982,7 +986,11 @@ pub(crate) mod tests {
     use futures::executor::block_on;
 
     fn kron_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-        block_on(super::kron_builtin(a, b, rest))
+        block_on(super::kron_builtin(
+            a,
+            b,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
     use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]
@@ -1420,7 +1428,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn kron_rejects_unsupported_input_with_stable_identifier() {
-        let a = Value::String("bad".to_string());
+        let a = Value::String("bad".to_string().into());
         let b = Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap());
         let err = kron_builtin(a, b, Vec::new()).unwrap_err();
         assert_eq!(err.identifier(), KRON_ERROR_UNSUPPORTED_INPUT.identifier);

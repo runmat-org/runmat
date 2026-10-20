@@ -1138,7 +1138,7 @@ mod tests {
 
     #[test]
     fn unsupported_inputs_error() {
-        let err = call_isdiag(Value::String("x".to_string())).unwrap_err();
+        let err = call_isdiag(Value::String("x".to_string().into())).unwrap_err();
         assert!(err.message.contains("isdiag: invalid input"));
     }
 }

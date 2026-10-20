@@ -38,8 +38,8 @@ pub use self::object::{
     table_replace_variables_like, table_variable_names_from_object, table_variables, table_width,
 };
 pub(crate) use self::object::{
-    parse_variable_selector_for_object, select_rows, selected_row_names, table_from_columns_like,
-    table_variables_ref, value_row_count,
+    parse_variable_selector_for_object, select_rows, select_rows_in_context, selected_row_names,
+    table_from_columns_like, table_variables_ref, value_row_count,
 };
 pub use self::prelude::{TABLE_CLASS, TIMETABLE_CLASS};
 pub use self::registry::ensure_table_class_registered;

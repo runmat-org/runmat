@@ -1,6 +1,7 @@
 use super::*;
+use crate::builtins::deep_learning::tests::fully_connected_layer_builtin;
 use crate::builtins::deep_learning::{
-    layers::{feature_input_layer_builtin, fully_connected_layer_builtin},
+    layers::feature_input_layer_builtin,
     model::execution::host::numeric::Real,
     model::{dlnetwork_builtin, parameters::ParameterRole},
     supervised::{
@@ -135,8 +136,13 @@ fn native_single_sgdm_and_adam_follow_independent_nonzero_oracles() {
 
 #[test]
 fn rejected_later_gradient_does_not_advance_earlier_private_slots() {
-    let input = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
+    let input = block_on(feature_input_layer_builtin(
+        Value::Num(2.0),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap();
     let dense = block_on(fully_connected_layer_builtin(
+        None,
         Value::Num(2.0),
         vec![
             Value::String("Weights".into()),
@@ -153,10 +159,10 @@ fn rejected_later_gradient_does_not_advance_earlier_private_slots() {
     let Value::Object(network) = network.value() else {
         panic!("network object")
     };
-    let Value::Cell(layers) = network.properties.get("Layers").unwrap() else {
+    let Value::Cell(layers) = network.properties().get("Layers").unwrap() else {
         panic!("canonical Layers")
     };
-    let factors = FactorPlan::admit(&layers.data, "test").unwrap();
+    let factors = FactorPlan::admit(layers.data(), "test").unwrap();
     let rows = parameters::view(network, "test").unwrap();
     let prepared = rows
         .iter()

@@ -16,11 +16,12 @@ impl Callable {
     }
     pub(super) async fn call(
         &self,
+        runtime: Option<&crate::context::RuntimeContext>,
         arguments: &[Value],
         outputs: usize,
     ) -> Result<RootedValue, CallbackFailure> {
         self.0
-            .invoke_with_outputs(arguments, outputs)
+            .invoke_with_outputs_in_context(runtime, arguments, outputs)
             .await
             .map_err(CallbackFailure::from)
     }
@@ -32,7 +33,7 @@ pub(super) enum CallbackFailure {
         identity: runmat_types::CallableIdentity,
     },
     SemanticUnavailable {
-        function_name: String,
+        function_name: runmat_value::Utf8Text,
         function: String,
     },
 }
@@ -67,7 +68,16 @@ impl CallbackFailure {
 
     pub(super) fn into_runtime_error(self) -> crate::RuntimeError {
         match self {
-            Self::Runtime(error) => error::function(error.message()),
+            Self::Runtime(error) => {
+                // Semantic callback failures keep structfun's established
+                // presentation. Operation cancellation/admission failures are
+                // control flow, not errors an ErrorHandler may relabel.
+                if is_control_failure(&error) {
+                    error
+                } else {
+                    error::function_with_source(error)
+                }
+            }
             Self::UndefinedExternal { identity } => error::undefined(format!(
                 "Undefined function for callable identity {identity:?}"
             )),
@@ -79,6 +89,19 @@ impl CallbackFailure {
             )),
         }
     }
+}
+
+pub(super) fn is_control_failure(error: &crate::RuntimeError) -> bool {
+    let mut source = std::error::Error::source(error);
+    while let Some(cause) = source {
+        if cause.is::<crate::execution::ExecutionServiceError>()
+            || cause.is::<crate::context::host_allocation::HostAllocationError>()
+        {
+            return true;
+        }
+        source = cause.source();
+    }
+    false
 }
 
 impl From<CallableCallError> for CallbackFailure {
@@ -101,6 +124,7 @@ impl From<CallableCallError> for CallbackFailure {
 
 fn parse_error(value: CallableParseError) -> crate::RuntimeError {
     match value {
+        CallableParseError::Runtime(error) => error,
         CallableParseError::EmptyText | CallableParseError::EmptyHandle => {
             error::invalid("structfun: function name must not be empty")
         }

@@ -219,6 +219,31 @@ fn callable_generation_retires_before_aliased_capture_claim() {
     assert!(capture_alias.is_exact());
     drop(capture_alias);
     assert_eq!(live.load(Ordering::SeqCst), 0);
+
+    // A decoder can prepare the original child owners first, then fund only
+    // the new immutable header. Neither construction nor alias extraction
+    // may detach those children or quietly allocate a second text owner.
+    let name = Utf8Text::new("decoded_owner".into());
+    let pointer = name.as_ptr();
+    let named = crate::NamedFunctionHandle::from_text_owner(name.clone());
+    assert_eq!(named.name().as_ptr(), pointer);
+    let data = crate::ClosureData {
+        function_name: name,
+        binding: None,
+        source_role: runmat_types::FunctionSourceRole::Anonymous,
+        source_file: None,
+        captures: OutputListStorage::empty(),
+        lexical_environment: None,
+    };
+    let header = crate::Closure::try_from_data_with_exact_header(data, &permit).unwrap();
+    assert_eq!(live.load(Ordering::SeqCst), data_bytes);
+    let alias = header.clone();
+    let detached = header.into_data();
+    assert_eq!(detached.function_name.as_ptr(), pointer);
+    assert_eq!(live.load(Ordering::SeqCst), data_bytes);
+    drop(alias);
+    assert_eq!(live.load(Ordering::SeqCst), 0);
+    assert_eq!(detached.function_name.as_ptr(), pointer);
 }
 
 #[test]
@@ -482,6 +507,16 @@ fn string_array_admission_retains_text_collection_and_shape_without_byte_copy() 
     assert_eq!(ordinary.shape, [1usize, 1].as_slice());
     assert_eq!(live.load(Ordering::SeqCst), text_bytes);
     assert!(!ordinary.data.is_exact());
+    let mut grown = ordinary.clone();
+    grown.grow_unbounded(vec![2, 1]).unwrap();
+    assert_eq!(grown.shape(), [2, 1]);
+    assert_eq!((grown.rows, grown.cols), (2, 1));
+    assert_eq!(grown.data()[0].as_str().as_ptr(), pointer);
+    assert_eq!(grown.data()[1].as_str(), "");
+    assert_eq!(ordinary.shape(), [1, 1]);
+    assert!(grown.grow_unbounded(vec![usize::MAX, 2]).is_err());
+    assert_eq!(grown.shape(), [2, 1]);
+    drop(grown);
     drop(ordinary);
     assert_eq!(live.load(Ordering::SeqCst), text_bytes);
     assert!(StringArray::from_texts_unbounded(Vec::new(), vec![]).is_err());
@@ -500,6 +535,11 @@ fn string_array_admission_retains_text_collection_and_shape_without_byte_copy() 
     assert_eq!(live.load(Ordering::SeqCst), permit.limit);
     drop(view);
     let alias = array.clone();
+    let mut rejected_growth = array.clone();
+    assert!(rejected_growth.grow_unbounded(vec![2, 1]).is_err());
+    assert_eq!(rejected_growth.data().as_ptr(), array.data().as_ptr());
+    assert_eq!(rejected_growth.shape(), [1, 1]);
+    drop(rejected_growth);
     drop(array);
     assert_eq!(live.load(Ordering::SeqCst), permit.limit);
     drop(alias);

@@ -6,7 +6,10 @@ fn classify_with_flag(flag: Value) -> crate::BuiltinResult<Value> {
         None,
         Value::String("A".into()),
         Value::String("alpha".into()),
-        vec![Value::String("ForceCellOutput".into()), flag],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::String("ForceCellOutput".into()),
+            flag,
+        ]),
     ))
 }
 
@@ -63,7 +66,7 @@ fn double_scalar_and_one_element_dense_carriers_join_catalog_and_runtime() {
         assert!(matches!(
             classify_with_flag(flag).expect("admitted Double flag"),
             Value::Cell(cell)
-                if cell.shape == vec![1, 1] && cell.data == vec![Value::Bool(true)]
+                if cell.shape == vec![1, 1] && cell.data() == vec![Value::Bool(true)]
         ));
     }
     for flag in [

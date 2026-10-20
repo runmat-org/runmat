@@ -116,7 +116,7 @@ async fn classify_builtin(
     sample: Value,
     training: Value,
     group: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let requested_outputs = crate::output_count::current_output_count();
     if matches!(requested_outputs, Some(count) if count > 5) {
@@ -127,8 +127,8 @@ async fn classify_builtin(
             "classify: accepts at most type and prior arguments",
         ));
     }
-    ensure_compatibility_extensions(&sample, &training, &group, &rest)?;
-    let admitted = header::admit(&sample, &training, group, &rest)?;
+    ensure_compatibility_extensions(&sample, &training, &group, rest.view())?;
+    let admitted = header::admit(&sample, &training, group, rest.view())?;
     if requested_outputs == Some(0) {
         return Ok(Value::output_list(Vec::new()));
     }
@@ -176,7 +176,7 @@ fn ensure_compatibility_extensions(
     sample: &Value,
     training: &Value,
     group: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<()> {
     for (value, extension) in [
         (sample, &CLASSIFY_INTEGER_SAMPLE_EXTENSION),

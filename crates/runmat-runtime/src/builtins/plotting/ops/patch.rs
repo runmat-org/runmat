@@ -6,25 +6,18 @@ use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{NumericPlotData, PatchEdgeColorMode, PatchFaceColorMode, PatchPlot};
 use runmat_value::{IntegerStorage, NumericStorage, StructValue, Tensor, Value};
 
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
 use crate::builtins::common::tensor as tensor_helpers;
 use crate::builtins::plotting::plotting_error;
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 use super::common::gather_tensor_from_gpu;
-use super::op_common::{apply_axes_target, split_leading_axes_handle};
+use super::op_common::{apply_axes_target, split_leading_axes_arguments};
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{parse_color_value, value_as_f64, value_as_string, LineStyleParseOptions};
 
 const BUILTIN_NAME: &str = "patch";
-pub use runmat_builtins::{
-    PATCH_DESCRIPTOR, PATCH_EXTENSIONS as EXTENSIONS,
-    PATCH_INTEGER_CAPABILITIES as INTEGER_CAPABILITIES,
-};
+#[cfg(test)]
+use runmat_builtins::PATCH_DESCRIPTOR;
 use runmat_builtins::{
     PATCH_ERROR_INTERNAL, PATCH_ERROR_INVALID_ARGUMENT, PATCH_INTEGER_AXES_EXTENSION,
 };
@@ -64,33 +57,6 @@ fn map_patch_internal(err: RuntimeError) -> RuntimeError {
 fn patch_invalid(detail: impl AsRef<str>) -> RuntimeError {
     patch_error_with_detail(&PATCH_ERROR_INVALID_ARGUMENT, detail)
 }
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::patch")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "patch",
-    op_kind: GpuOpKind::PlotRender,
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "patch is a plotting sink. Initial implementation gathers gpuArray coordinate inputs, triangulates on the host, then renders through the shared GPU renderer.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::plotting::patch")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "patch",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "patch performs rendering and terminates fusion graphs.",
-};
 
 #[derive(Clone, Debug)]
 struct PatchOptions {
@@ -141,22 +107,14 @@ impl Default for PatchOptions {
 
 #[runtime_builtin(
     name = "patch",
-    category = "plotting",
-    summary = "Create filled polygon patch graphics from coordinate or faces/vertices data.",
-    keywords = "patch,plotting,polygon,faces,vertices",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
-    descriptor(crate::builtins::plotting::patch::PATCH_DESCRIPTOR),
-    extensions(crate::builtins::plotting::patch::EXTENSIONS),
-    integer_capabilities(crate::builtins::plotting::patch::INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::plotting::patch"
 )]
-pub fn patch_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
-    gate_typed_integer_axes_alias(&args)?;
+pub fn patch_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<f64> {
+    gate_typed_integer_axes_alias(args.view())?;
     let (axes_target, args) =
-        split_leading_axes_handle(args, BUILTIN_NAME).map_err(map_patch_invalid)?;
-    let mut plot = Some(parse_patch_plot(args).map_err(map_patch_invalid)?);
+        split_leading_axes_arguments(args, BUILTIN_NAME).map_err(map_patch_invalid)?;
+    let mut plot = Some(parse_patch_plot_view(args.view()).map_err(map_patch_invalid)?);
     apply_axes_target(axes_target, BUILTIN_NAME).map_err(map_patch_invalid)?;
     let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
     let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
@@ -185,7 +143,7 @@ pub fn patch_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     Ok(handle)
 }
 
-fn gate_typed_integer_axes_alias(args: &[Value]) -> BuiltinResult<()> {
+fn gate_typed_integer_axes_alias(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<()> {
     let Some(first) = args.first() else {
         return Ok(());
     };
@@ -202,22 +160,26 @@ fn gate_typed_integer_axes_alias(args: &[Value]) -> BuiltinResult<()> {
 }
 
 pub(super) fn parse_patch_plot(args: Vec<Value>) -> BuiltinResult<PatchPlot> {
+    parse_patch_plot_view(crate::call::FunctionArgumentView::from_slice(&args))
+}
+
+fn parse_patch_plot_view(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<PatchPlot> {
     if args.is_empty() {
         return Err(patch_invalid("patch: expected input data"));
     }
     let mut opts = PatchOptions::default();
     let mut remaining = if let Some(Value::Struct(st)) = args.first() {
         apply_struct_options(&mut opts, st)?;
-        args[1..].to_vec()
+        args.range(1..).expect("validated patch argument suffix")
     } else {
         args
     };
 
     if remaining.first().and_then(value_as_string).is_some() {
-        apply_property_pairs(&mut opts, &remaining)?;
+        apply_property_pairs(&mut opts, remaining)?;
     } else {
         apply_positional_data(&mut opts, &mut remaining)?;
-        apply_property_pairs(&mut opts, &remaining)?;
+        apply_property_pairs(&mut opts, remaining)?;
     }
 
     if opts.c_data_kind == runmat_plot::plots::PatchColorSourceKind::CoordinateGrid
@@ -260,14 +222,20 @@ pub(super) fn parse_patch_plot(args: Vec<Value>) -> BuiltinResult<PatchPlot> {
     Ok(plot)
 }
 
-fn apply_positional_data(opts: &mut PatchOptions, args: &mut Vec<Value>) -> BuiltinResult<()> {
+fn apply_positional_data(
+    opts: &mut PatchOptions,
+    args: &mut crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     if args.len() < 2 {
-        apply_property_pairs(opts, args)?;
-        args.clear();
+        apply_property_pairs(opts, *args)?;
+        *args = args
+            .range(args.len()..)
+            .expect("bounded patch argument tail");
         return Ok(());
     }
-    opts.x_data = Some(tensor_from_value(args.remove(0))?);
-    opts.y_data = Some(tensor_from_value(args.remove(0))?);
+    opts.x_data = Some(tensor_from_value(args[0].clone())?);
+    opts.y_data = Some(tensor_from_value(args[1].clone())?);
+    *args = args.range(2..).expect("validated patch coordinate prefix");
     if args.first().is_none_or(is_property_name) {
         return Ok(());
     }
@@ -275,9 +243,11 @@ fn apply_positional_data(opts: &mut PatchOptions, args: &mut Vec<Value>) -> Buil
     // four-data form patch(X,Y,Z,C); a three-dimensional uncolored patch
     // uses the explicit XData/YData/ZData properties.
     if args.len() >= 2 && !is_property_name(&args[1]) {
-        opts.z_data = Some(tensor_from_value(args.remove(0))?);
+        opts.z_data = Some(tensor_from_value(args[0].clone())?);
+        *args = args.range(1..).expect("validated patch z-data prefix");
     }
-    apply_color_argument(opts, &args.remove(0))?;
+    apply_color_argument(opts, &args[0])?;
+    *args = args.range(1..).expect("validated patch color prefix");
     Ok(())
 }
 
@@ -299,7 +269,10 @@ fn apply_struct_options(opts: &mut PatchOptions, st: &StructValue) -> BuiltinRes
     Ok(())
 }
 
-fn apply_property_pairs(opts: &mut PatchOptions, args: &[Value]) -> BuiltinResult<()> {
+fn apply_property_pairs(
+    opts: &mut PatchOptions,
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     if args.is_empty() {
         return Ok(());
     }
@@ -1134,11 +1107,13 @@ mod tests {
             panic!("expected numeric axes handle");
         };
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let error = patch_builtin(vec![
-            Value::Int(runmat_value::IntValue::U64(axes as u64)),
-            tensor(3, 1, &[0.0, 1.0, 0.0]),
-            tensor(3, 1, &[0.0, 0.0, 1.0]),
-        ])
+        let error = patch_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![
+                Value::Int(runmat_value::IntValue::U64(axes as u64)),
+                tensor(3, 1, &[0.0, 1.0, 0.0]),
+                tensor(3, 1, &[0.0, 0.0, 1.0]),
+            ],
+        ))
         .expect_err("typed axes alias must be gated");
 
         assert_eq!(
@@ -1246,7 +1221,10 @@ mod tests {
 
     #[test]
     fn patch_missing_input_uses_stable_identifier() {
-        let err = patch_builtin(Vec::new()).expect_err("expected patch argument validation error");
+        let err = patch_builtin(crate::builtins::common::test_support::builtin_arguments(
+            Vec::new(),
+        ))
+        .expect_err("expected patch argument validation error");
         assert_eq!(err.identifier(), PATCH_ERROR_INVALID_ARGUMENT.identifier);
     }
 }

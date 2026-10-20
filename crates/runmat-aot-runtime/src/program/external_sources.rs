@@ -63,6 +63,9 @@ pub(super) fn install(
         let call_executor = Rc::clone(&executor);
         let call_program = Arc::clone(&retained_program);
         let call_function = function.id;
+        let call_origin =
+            FunctionBindingOrigin::from_revision(executor.program_revision(), function.portable_id)
+                .map_err(native_error)?;
         let invoke: Rc<user_functions::SelectedExternalInvocation> = Rc::new(
             move |runtime, arguments, requested_outputs, lexical_environment| {
                 let executor = Rc::clone(&call_executor);
@@ -96,7 +99,11 @@ pub(super) fn install(
             product,
             program.native_ir_digest,
             native_function,
-            invoke,
+            user_functions::LinkedNativeInvocation {
+                compiled_function: call_function,
+                origin: call_origin,
+                invoke,
+            },
         )
         .ok_or_else(|| native_error("linked source differs from its issued native function"))?;
         let scoped_binding = target

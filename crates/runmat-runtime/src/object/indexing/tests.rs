@@ -13,10 +13,7 @@ fn standard_substruct_path_is_an_ordered_typed_structure_array() {
         panic!("a multi-step subscript must remain a typed structure array");
     };
     assert_eq!(array.shape(), &[1, 2]);
-    assert_eq!(
-        array.field_names().map(String::as_str).collect::<Vec<_>>(),
-        ["type", "subs"]
-    );
+    assert_eq!(array.field_names().collect::<Vec<_>>(), ["type", "subs"]);
     assert_eq!(
         array.field_values("type").unwrap(),
         [Value::String(".".into()), Value::String("()".into())]

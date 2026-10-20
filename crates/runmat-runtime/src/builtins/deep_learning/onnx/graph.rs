@@ -46,7 +46,7 @@ pub(super) fn build_export_graph(
             ));
         };
         let layer_name = layer_names[idx].clone();
-        match ForwardLayerKind::from_identity(&layer.class_name) {
+        match ForwardLayerKind::from_identity(layer.class_name()) {
             Some(ForwardLayerKind::FeatureInput) => {
                 if idx != 0 {
                     return Err(deep_learning_error(
@@ -133,7 +133,7 @@ pub(super) fn build_export_graph(
             }
             Some(ForwardLayerKind::Elu) => {
                 let alpha = layer
-                    .properties
+                    .properties()
                     .get("Alpha")
                     .map(|value| super::numeric_scalar(value, EXPORT_ONNX, "Alpha"))
                     .transpose()?
@@ -178,7 +178,7 @@ pub(super) fn build_export_graph(
                     EXPORT_ONNX,
                     format!(
                         "exportONNXNetwork: layer type '{}' cannot be exported to ONNX",
-                        layer.class_name
+                        layer.class_name()
                     ),
                 ));
             }
@@ -231,7 +231,7 @@ fn feature_input_width_from_first_layer(layers: &[Value]) -> BuiltinResult<i64> 
             "exportONNXNetwork: network must start with a featureInputLayer",
         ));
     };
-    if !layer.class_name.is(super::FEATURE_INPUT_LAYER_CLASS) {
+    if !layer.class_name().is(super::FEATURE_INPUT_LAYER_CLASS) {
         return Err(deep_learning_error(
             EXPORT_ONNX,
             "exportONNXNetwork: network must start with a featureInputLayer",
@@ -257,13 +257,13 @@ pub(super) fn network_name(
     network: &ObjectInstance,
     property: &str,
 ) -> BuiltinResult<Option<String>> {
-    let Some(value) = network.properties.get(property) else {
+    let Some(value) = network.properties().get(property) else {
         return Ok(None);
     };
     match value {
-        Value::StringArray(array) if array.data.is_empty() => Ok(None),
-        Value::StringArray(array) if array.data.len() == 1 && !array.data[0].is_empty() => {
-            Ok(Some(array.data[0].to_string()))
+        Value::StringArray(array) if array.data().is_empty() => Ok(None),
+        Value::StringArray(array) if array.data().len() == 1 && !array.data()[0].is_empty() => {
+            Ok(Some(array.data()[0].to_string()))
         }
         Value::StringArray(_) => Err(deep_learning_error(
             EXPORT_ONNX,

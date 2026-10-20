@@ -410,7 +410,7 @@ fn rounding_characters_retain_pages_and_semantic_element_order() {
         let Value::Tensor(output) = result.value() else {
             panic!("{name}: numeric character output")
         };
-        assert_eq!(output.shape(), input.shape);
+        assert_eq!(output.shape(), &input.shape[..]);
         assert_eq!(
             output.as_f64_slice().unwrap(),
             input

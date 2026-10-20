@@ -6,7 +6,7 @@ use runmat_value::Value;
 
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::strings::common::{scalar_text_input, text_input_admission, TextInput};
-use crate::builtins::strings::core::compat::{compat_error, pattern_object};
+use crate::builtins::strings::core::compat::{compat_error, pattern_object_in_context};
 use crate::{gather_if_needed_async, BuiltinResult};
 
 #[runtime_builtin(
@@ -17,16 +17,16 @@ use crate::{gather_if_needed_async, BuiltinResult};
 )]
 pub(crate) async fn text_boundary_builtin(
     runtime: Option<crate::context::RuntimeContext>,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &TEXT_BOUNDARY_DESCRIPTOR,
         &TEXT_BOUNDARY_ERROR_TOO_MANY_OUTPUTS,
         "textBoundary",
     )?;
-    let boundary_owner = match rest.as_slice() {
-        [] => None,
-        [value] => Some(
+    let boundary_owner = match (rest.len(), rest.first()) {
+        (0, _) => None,
+        (1, Some(value)) => Some(
             gather_if_needed_async(value)
                 .await
                 .map_err(|err| map_control_flow_with_builtin(err, "textBoundary"))?,
@@ -61,5 +61,5 @@ pub(crate) async fn text_boundary_builtin(
             ),
         ));
     };
-    Ok(pattern_object(regex))
+    pattern_object_in_context(runtime.as_ref(), regex)
 }

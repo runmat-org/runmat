@@ -80,17 +80,21 @@ fn block(value: impl std::future::Future<Output = BuiltinResult<Value>>) -> Buil
 #[test]
 fn append_extract_insert_and_replace_work() {
     assert_eq!(
-        block(append_builtin(vec![
-            Value::String("run".into()),
-            Value::String("mat".into())
-        ]))
+        block(append_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("run".into()),
+                Value::String("mat".into())
+            ])
+        ))
         .unwrap(),
         Value::String("runmat".into())
     );
     assert_eq!(
         block(extract_before_builtin(
             Value::String("alpha.beta".into()),
-            vec![Value::String(".".into())],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                ".".into()
+            )]),
         ))
         .unwrap(),
         Value::String("alpha".into())
@@ -98,7 +102,10 @@ fn append_extract_insert_and_replace_work() {
     assert_eq!(
         block(insert_after_builtin(
             Value::String("run".into()),
-            vec![Value::Num(3.0), Value::String("mat".into())],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(3.0),
+                Value::String("mat".into())
+            ]),
         ))
         .unwrap(),
         Value::String("runmat".into())
@@ -106,7 +113,9 @@ fn append_extract_insert_and_replace_work() {
     assert_eq!(
         block(extract_after_builtin(
             Value::String("alpha.beta".into()),
-            vec![Value::String(".".into())],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                ".".into()
+            )]),
         ))
         .unwrap(),
         Value::String("beta".into())
@@ -114,7 +123,10 @@ fn append_extract_insert_and_replace_work() {
     assert_eq!(
         block(insert_before_builtin(
             Value::String("run".into()),
-            vec![Value::Num(1.0), Value::String("pre".into())],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(1.0),
+                Value::String("pre".into())
+            ]),
         ))
         .unwrap(),
         Value::String("prerun".into())
@@ -146,10 +158,12 @@ fn append_integer_audit_is_explicitly_inapplicable() {
 #[test]
 fn append_preserves_documented_text_output_precedence_and_whitespace() {
     assert_eq!(
-        block(append_builtin(vec![
-            Value::CharArray(CharArray::new_row("Hello ")),
-            Value::CharArray(CharArray::new_row("World")),
-        ]))
+        block(append_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::CharArray(CharArray::new_row("Hello ")),
+                Value::CharArray(CharArray::new_row("World")),
+            ])
+        ))
         .expect("all-char append"),
         Value::CharArray(CharArray::new_row("Hello World"))
     );
@@ -163,17 +177,19 @@ fn append_preserves_documented_text_output_precedence_and_whitespace() {
         2,
     )
     .expect("cellstr");
-    let result = block(append_builtin(vec![
-        Value::Cell(cell.clone()),
-        Value::CharArray(CharArray::new_row(" ")),
-    ]))
+    let result = block(append_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Cell(cell.clone()),
+            Value::CharArray(CharArray::new_row(" ")),
+        ]),
+    ))
     .expect("cell append");
     let Value::Cell(cell_result) = result else {
         panic!("expected cellstr output");
     };
     assert_eq!(cell_result.shape, vec![1, 2]);
     assert_eq!(
-        cell_result.data,
+        cell_result.data(),
         vec![
             Value::CharArray(CharArray::new_row("alpha ")),
             Value::CharArray(CharArray::new_row("beta ")),
@@ -181,17 +197,19 @@ fn append_preserves_documented_text_output_precedence_and_whitespace() {
     );
 
     let strings = StringArray::new(vec!["A".into(), "B".into()], vec![2, 1]).expect("strings");
-    let result = block(append_builtin(vec![
-        Value::StringArray(strings),
-        Value::Cell(cell),
-    ]))
+    let result = block(append_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::StringArray(strings),
+            Value::Cell(cell),
+        ]),
+    ))
     .expect("string-cell append");
     let Value::StringArray(string_result) = result else {
         panic!("expected string-array output");
     };
     assert_eq!(string_result.shape, vec![2, 2]);
     assert_eq!(
-        string_result.data,
+        string_result.data(),
         vec!["Aalpha", "Balpha", "Abeta", "Bbeta"]
     );
 }
@@ -233,10 +251,12 @@ fn append_rejects_every_integer_class_without_numeric_conversion() {
             Value::Int(scalar),
             Value::Tensor(Tensor::new_integer(storage, vec![1, 2]).expect("integer tensor")),
         ] {
-            let error = block(append_builtin(vec![
-                value,
-                Value::CharArray(CharArray::new_row("suffix")),
-            ]))
+            let error = block(append_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    value,
+                    Value::CharArray(CharArray::new_row("suffix")),
+                ]),
+            ))
             .expect_err("numeric append input must reject");
             assert!(
                 error.message().contains(
@@ -248,18 +268,22 @@ fn append_rejects_every_integer_class_without_numeric_conversion() {
     }
 
     for value in [Value::Num(1.0), Value::Bool(true)] {
-        let error = block(append_builtin(vec![
-            value,
-            Value::CharArray(CharArray::new_row("suffix")),
-        ]))
+        let error = block(append_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                value,
+                Value::CharArray(CharArray::new_row("suffix")),
+            ]),
+        ))
         .expect_err("nontext append input must reject");
         assert!(error.message().contains("expected string"), "{error}");
     }
 
     let invalid_cell =
         CellArray::new(vec![Value::String("not a character vector".into())], 1, 1).expect("cell");
-    let error = block(append_builtin(vec![Value::Cell(invalid_cell)]))
-        .expect_err("non-cellstr input must reject");
+    let error = block(append_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Cell(invalid_cell)]),
+    ))
+    .expect_err("non-cellstr input must reject");
     assert!(
         error
             .message()
@@ -287,10 +311,12 @@ fn append_rejects_resident_integer_handles_before_provider_gather() {
                 runmat_accelerate_api::GpuTensorStorage::Real,
             )
             .unwrap();
-        let result = block(append_builtin(vec![
-            Value::GpuTensor(allocation.handle.clone()),
-            Value::String("suffix".into()),
-        ]));
+        let result = block(append_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::GpuTensor(allocation.handle.clone()),
+                Value::String("suffix".into()),
+            ]),
+        ));
         let error = result.expect_err("resident numeric append input must reject");
         assert!(error.message().contains("expected string"), "{error}");
         allocation
@@ -309,7 +335,10 @@ fn text_boundary_positions_read_typed_integer_storage_exactly() {
     assert_eq!(
         block(insert_after_builtin(
             Value::String("run".into()),
-            vec![Value::Tensor(boundary), Value::String("mat".into())],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Tensor(boundary),
+                Value::String("mat".into())
+            ]),
         ))
         .unwrap(),
         Value::String("runmat".into())
@@ -338,10 +367,10 @@ fn numeric_boundary_positions_preserve_rank_zero_and_rank_one_shapes() {
     assert_eq!(
         block(insert_after_builtin(
             Value::String("ab".into()),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::Tensor(Tensor::new(vec![1.0], vec![]).unwrap()),
                 Value::String("X".into()),
-            ],
+            ]),
         ))
         .expect("rank-zero scalar boundary"),
         Value::String("aXb".into())
@@ -351,17 +380,17 @@ fn numeric_boundary_positions_preserve_rank_zero_and_rank_one_shapes() {
         Value::StringArray(StringArray::new(vec!["ab".into(), "cd".into()], vec![2]).unwrap());
     let value = block(insert_after_builtin(
         text,
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2]).unwrap()),
             Value::String("X".into()),
-        ],
+        ]),
     ))
     .expect("rank-one matching boundaries");
     let Value::StringArray(output) = value else {
         panic!("expected string array")
     };
     assert_eq!(output.shape, vec![2]);
-    assert_eq!(output.data, vec!["aXb", "cdX"]);
+    assert_eq!(output.data(), vec!["aXb", "cdX"]);
 }
 
 #[test]
@@ -406,7 +435,7 @@ fn replace_between_accepts_all_integer_position_classes_and_same_size_arrays() {
     .expect("same-size positions") else {
         panic!("string array")
     };
-    assert_eq!(output.data, vec!["aXe", "vwQ"]);
+    assert_eq!(output.data(), vec!["aXe", "vwQ"]);
 }
 
 #[test]
@@ -414,13 +443,19 @@ fn text_boundary_positions_reject_invalid_integer_and_double_values() {
     let zero = Tensor::new_integer(IntegerStorage::U16(vec![0]), vec![1, 1]).expect("boundary");
     assert!(block(insert_after_builtin(
         Value::String("run".into()),
-        vec![Value::Tensor(zero), Value::String("mat".into())],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Tensor(zero),
+            Value::String("mat".into())
+        ]),
     ))
     .is_err());
 
     assert!(block(insert_after_builtin(
         Value::String("run".into()),
-        vec![Value::Num(1.0e300), Value::String("mat".into())],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(1.0e300),
+            Value::String("mat".into())
+        ]),
     ))
     .is_err());
 }
@@ -440,7 +475,10 @@ fn insert_before_and_after_accept_all_integer_position_classes() {
         assert_eq!(
             block(insert_before_builtin(
                 Value::String("abc".into()),
-                vec![Value::Int(position.clone()), Value::String("X".into())],
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Int(position.clone()),
+                    Value::String("X".into())
+                ]),
             ))
             .unwrap(),
             Value::String("aXbc".into())
@@ -448,7 +486,10 @@ fn insert_before_and_after_accept_all_integer_position_classes() {
         assert_eq!(
             block(insert_after_builtin(
                 Value::String("abc".into()),
-                vec![Value::Int(position), Value::String("X".into())],
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Int(position),
+                    Value::String("X".into())
+                ]),
             ))
             .unwrap(),
             Value::String("abXc".into())
@@ -468,7 +509,10 @@ fn insert_before_and_after_accept_all_integer_position_classes() {
         assert_eq!(
             block(insert_after_builtin(
                 Value::String("abc".into()),
-                vec![position, Value::String("X".into())],
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    position,
+                    Value::String("X".into())
+                ]),
             ))
             .unwrap(),
             Value::String("abXc".into())
@@ -481,7 +525,10 @@ fn insert_before_and_after_accept_all_integer_position_classes() {
         assert_eq!(
             block(insert_before_builtin(
                 Value::String("abc".into()),
-                vec![position, Value::String("X".into())],
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    position,
+                    Value::String("X".into())
+                ]),
             ))
             .unwrap(),
             Value::String("aXbc".into())
@@ -489,7 +536,10 @@ fn insert_before_and_after_accept_all_integer_position_classes() {
     }
     assert!(block(insert_after_builtin(
         Value::String("abc".into()),
-        vec![Value::Bool(true), Value::String("X".into())],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Bool(true),
+            Value::String("X".into())
+        ]),
     ))
     .is_err());
 }
@@ -506,7 +556,7 @@ fn insertion_broadcasts_scalar_or_same_size_positions_and_new_text() {
     assert_eq!(
         block(insert_before_builtin(
             source.clone(),
-            vec![positions, replacements]
+            crate::builtins::common::test_support::builtin_arguments(vec![positions, replacements])
         ))
         .unwrap(),
         Value::StringArray(
@@ -516,7 +566,10 @@ fn insertion_broadcasts_scalar_or_same_size_positions_and_new_text() {
     assert_eq!(
         block(insert_after_builtin(
             source,
-            vec![Value::Num(1.0), Value::String("!".into())]
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(1.0),
+                Value::String("!".into())
+            ])
         ))
         .unwrap(),
         Value::StringArray(
@@ -530,7 +583,10 @@ fn insertion_applies_text_boundaries_at_every_occurrence() {
     assert_eq!(
         block(insert_before_builtin(
             Value::String("a-b-c".into()),
-            vec![Value::String("-".into()), Value::String("X".into())],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("-".into()),
+                Value::String("X".into())
+            ]),
         ))
         .unwrap(),
         Value::String("aX-bX-c".into())
@@ -538,7 +594,10 @@ fn insertion_applies_text_boundaries_at_every_occurrence() {
     assert_eq!(
         block(insert_after_builtin(
             Value::String("a-b-c".into()),
-            vec![Value::String("-".into()), Value::String("X".into())],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("-".into()),
+                Value::String("X".into())
+            ]),
         ))
         .unwrap(),
         Value::String("a-Xb-Xc".into())
@@ -549,11 +608,11 @@ fn insertion_applies_text_boundaries_at_every_occurrence() {
 fn insertion_requires_exact_arity_and_matching_array_shapes() {
     assert!(block(insert_before_builtin(
         Value::String("abc".into()),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::Num(1.0),
             Value::String("X".into()),
             Value::String("ignored".into()),
-        ],
+        ]),
     ))
     .is_err());
     let source =
@@ -561,7 +620,10 @@ fn insertion_requires_exact_arity_and_matching_array_shapes() {
     let positions = Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap());
     assert!(block(insert_after_builtin(
         source,
-        vec![positions, Value::String("X".into())]
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            positions,
+            Value::String("X".into())
+        ])
     ))
     .is_err());
 }
@@ -581,7 +643,10 @@ fn insertion_compatibility_gates_precede_resident_gather() {
     );
     let error = block(insert_after_builtin(
         Value::String("abc".into()),
-        vec![resident, Value::String("X".into())],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            resident,
+            Value::String("X".into()),
+        ]),
     ))
     .unwrap_err();
     assert_eq!(
@@ -593,7 +658,10 @@ fn insertion_compatibility_gates_precede_resident_gather() {
         Value::CharArray(CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).expect("character matrix"));
     let error = block(insert_before_builtin(
         matrix,
-        vec![Value::Num(1.0), Value::String("X".into())],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(1.0),
+            Value::String("X".into()),
+        ]),
     ))
     .unwrap_err();
     assert_eq!(
@@ -633,7 +701,7 @@ fn splitlines_reverse_deblank_and_matches_work() {
     assert_eq!(
         block(erase_punctuation_builtin(
             Value::String("it's one and/or two.".into()),
-            vec![]
+            crate::builtins::common::test_support::builtin_arguments(vec![])
         ))
         .unwrap(),
         Value::String("its one andor two".into())
@@ -641,7 +709,7 @@ fn splitlines_reverse_deblank_and_matches_work() {
     assert_eq!(
         block(erase_punctuation_builtin(
             Value::CharArray(CharArray::new_row("cost: $5.00!")),
-            vec![]
+            crate::builtins::common::test_support::builtin_arguments(vec![])
         ))
         .unwrap(),
         Value::CharArray(CharArray::new_row("cost 500"))
@@ -656,14 +724,19 @@ fn splitlines_reverse_deblank_and_matches_work() {
         2,
     )
     .unwrap();
-    match block(erase_punctuation_builtin(Value::Cell(cell), vec![])).unwrap() {
+    match block(erase_punctuation_builtin(
+        Value::Cell(cell),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap()
+    {
         Value::Cell(out) => {
             assert_eq!(out.shape, vec![1, 2]);
             assert_eq!(
-                out.data[0],
+                out.data()[0],
                 Value::CharArray(CharArray::new_row("alphabeta"))
             );
-            assert_eq!(out.data[1], Value::String("C and C".into()));
+            assert_eq!(out.data()[1], Value::String("C and C".into()));
         }
         other => panic!("expected cell array, got {other:?}"),
     }
@@ -671,7 +744,9 @@ fn splitlines_reverse_deblank_and_matches_work() {
         block(strjust_builtin(
             None,
             Value::CharArray(CharArray::new_row("  x")),
-            vec![Value::String("left".into())],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "left".into()
+            )]),
         ))
         .unwrap(),
         Value::CharArray(CharArray::new_row("x  "))
@@ -705,10 +780,18 @@ fn erase_text_builtins_reject_all_integer_classes_and_logical_values() {
         IntValue::U64(u64::MAX),
     ] {
         assert!(block(erase_urls_builtin(Value::Int(value.clone()))).is_err());
-        assert!(block(erase_punctuation_builtin(Value::Int(value), vec![])).is_err());
+        assert!(block(erase_punctuation_builtin(
+            Value::Int(value),
+            crate::builtins::common::test_support::builtin_arguments(vec![])
+        ))
+        .is_err());
     }
     assert!(block(erase_urls_builtin(Value::Bool(true))).is_err());
-    assert!(block(erase_punctuation_builtin(Value::Bool(true), vec![])).is_err());
+    assert!(block(erase_punctuation_builtin(
+        Value::Bool(true),
+        crate::builtins::common::test_support::builtin_arguments(vec![])
+    ))
+    .is_err());
 }
 
 #[test]
@@ -758,8 +841,11 @@ fn erase_text_broad_container_extensions_are_independently_gated() {
             "RunMat:compatibility:ErasePunctuationBroadCellExtension",
         ),
     ] {
-        let error = block(erase_punctuation_builtin(value, vec![]))
-            .expect_err("strict erasePunctuation gate");
+        let error = block(erase_punctuation_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .expect_err("strict erasePunctuation gate");
         assert_eq!(error.identifier(), Some(identifier));
     }
 }
@@ -782,7 +868,11 @@ fn erase_text_builtins_reject_resident_numeric_without_provider_access() {
         ERASE_URLS_ERROR_INVALID_INPUT.identifier
     );
     let nested = Value::Cell(CellArray::new(vec![resident], 1, 1).unwrap());
-    let punctuation_error = block(erase_punctuation_builtin(nested, vec![])).unwrap_err();
+    let punctuation_error = block(erase_punctuation_builtin(
+        nested,
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap_err();
     assert_eq!(
         punctuation_error.identifier(),
         ERASE_PUNCTUATION_ERROR_INVALID_INPUT.identifier
@@ -806,7 +896,9 @@ fn extract_before_and_after_accept_every_integer_scalar_class_exactly() {
         assert_eq!(
             block(extract_before_builtin(
                 Value::String("abcdef".into()),
-                vec![Value::Int(position.clone())],
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(
+                    position.clone()
+                )]),
             ))
             .expect("extractBefore"),
             Value::String("a".into())
@@ -814,7 +906,9 @@ fn extract_before_and_after_accept_every_integer_scalar_class_exactly() {
         assert_eq!(
             block(extract_after_builtin(
                 Value::String("abcdef".into()),
-                vec![Value::Int(position)],
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(
+                    position
+                )]),
             ))
             .expect("extractAfter"),
             Value::String("cdef".into())
@@ -841,7 +935,7 @@ fn extract_before_and_after_apply_same_size_native_integer_positions() {
         assert_eq!(
             block(extract_before_builtin(
                 text.clone(),
-                vec![positions.clone()]
+                crate::builtins::common::test_support::builtin_arguments(vec![positions.clone()])
             ))
             .unwrap(),
             Value::StringArray(
@@ -849,7 +943,11 @@ fn extract_before_and_after_apply_same_size_native_integer_positions() {
             )
         );
         assert_eq!(
-            block(extract_after_builtin(text.clone(), vec![positions])).unwrap(),
+            block(extract_after_builtin(
+                text.clone(),
+                crate::builtins::common::test_support::builtin_arguments(vec![positions])
+            ))
+            .unwrap(),
             Value::StringArray(
                 StringArray::new(vec!["cd".into(), "z".into()], vec![2, 1]).unwrap()
             )
@@ -864,7 +962,7 @@ fn extract_before_and_after_enforce_strict_extensions_before_gather() {
         Value::CharArray(CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).expect("character matrix"));
     let before = block(extract_before_builtin(
         matrix,
-        vec![Value::Int(IntValue::U8(1))],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(IntValue::U8(1))]),
     ))
     .expect_err("strict char matrix gate");
     assert_eq!(
@@ -883,7 +981,7 @@ fn extract_before_and_after_enforce_strict_extensions_before_gather() {
     );
     let after = block(extract_after_builtin(
         Value::String("abc".into()),
-        vec![resident],
+        crate::builtins::common::test_support::builtin_arguments(vec![resident]),
     ))
     .expect_err("strict resident gate");
     assert_eq!(
@@ -908,12 +1006,18 @@ fn extract_boundary_preserves_wide_u64_position_without_f64_conversion() {
 fn extract_before_and_after_reject_extra_arguments() {
     assert!(block(extract_before_builtin(
         Value::String("abc".into()),
-        vec![Value::Num(2.0), Value::Num(3.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(2.0),
+            Value::Num(3.0)
+        ]),
     ))
     .is_err());
     assert!(block(extract_after_builtin(
         Value::String("abc".into()),
-        vec![Value::Num(2.0), Value::Num(3.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(2.0),
+            Value::Num(3.0)
+        ]),
     ))
     .is_err());
 }
@@ -927,7 +1031,7 @@ fn extract_before_and_after_reject_zero_floating_positions() {
     ] {
         let before = block(extract_before_builtin(
             Value::String("abc".into()),
-            vec![position.clone()],
+            crate::builtins::common::test_support::builtin_arguments(vec![position.clone()]),
         ))
         .expect_err("zero extractBefore position must reject");
         assert_eq!(
@@ -936,7 +1040,7 @@ fn extract_before_and_after_reject_zero_floating_positions() {
         );
         let after = block(extract_after_builtin(
             Value::String("abc".into()),
-            vec![position],
+            crate::builtins::common::test_support::builtin_arguments(vec![position]),
         ))
         .expect_err("zero extractAfter position must reject");
         assert_eq!(
@@ -952,15 +1056,15 @@ fn extract_before_and_after_accept_empty_character_boundary_without_panicking() 
     assert_eq!(
         block(extract_before_builtin(
             Value::String("abc".into()),
-            vec![boundary.clone()],
+            crate::builtins::common::test_support::builtin_arguments(vec![boundary.clone()]),
         ))
         .expect("empty character boundary"),
-        Value::String(String::new())
+        Value::String(String::new().into())
     );
     assert_eq!(
         block(extract_after_builtin(
             Value::String("abc".into()),
-            vec![boundary],
+            crate::builtins::common::test_support::builtin_arguments(vec![boundary]),
         ))
         .expect("empty character boundary"),
         Value::String("abc".into())
@@ -974,7 +1078,7 @@ fn extract_before_and_after_classify_unsupported_text_cell_elements_as_invalid_i
     );
     let before = block(extract_before_builtin(
         text.clone(),
-        vec![Value::Int(IntValue::U8(1))],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(IntValue::U8(1))]),
     ))
     .expect_err("unsupported extractBefore text cell");
     assert_eq!(
@@ -983,7 +1087,7 @@ fn extract_before_and_after_classify_unsupported_text_cell_elements_as_invalid_i
     );
     let after = block(extract_after_builtin(
         text,
-        vec![Value::Int(IntValue::U8(1))],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(IntValue::U8(1))]),
     ))
     .expect_err("unsupported extractAfter text cell");
     assert_eq!(after.identifier(), Some("RunMat:extractAfter:InvalidInput"));
@@ -1005,7 +1109,7 @@ fn malformed_text_precedes_resident_position_access() {
         Value::Cell(CellArray::new(vec![Value::Int(IntValue::U8(7))], 1, 1).expect("cell"));
     let before = block(extract_before_builtin(
         invalid_text.clone(),
-        vec![resident.clone()],
+        crate::builtins::common::test_support::builtin_arguments(vec![resident.clone()]),
     ))
     .expect_err("malformed extraction input");
     assert_eq!(
@@ -1014,13 +1118,16 @@ fn malformed_text_precedes_resident_position_access() {
     );
     let after = block(extract_after_builtin(
         invalid_text.clone(),
-        vec![resident.clone()],
+        crate::builtins::common::test_support::builtin_arguments(vec![resident.clone()]),
     ))
     .expect_err("malformed extraction input");
     assert_eq!(after.identifier(), Some("RunMat:extractAfter:InvalidInput"));
     let insert_source = block(insert_before_builtin(
         invalid_text,
-        vec![resident.clone(), Value::String("x".into())],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            resident.clone(),
+            Value::String("x".into()),
+        ]),
     ))
     .expect_err("malformed insertion source");
     assert_eq!(
@@ -1029,7 +1136,10 @@ fn malformed_text_precedes_resident_position_access() {
     );
     let insert_replacement = block(insert_after_builtin(
         Value::String("abc".into()),
-        vec![resident, Value::Int(IntValue::U8(7))],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            resident,
+            Value::Int(IntValue::U8(7)),
+        ]),
     ))
     .expect_err("malformed inserted text");
     assert_eq!(
@@ -1046,19 +1156,15 @@ fn malformed_resident_boundary_forms_never_reach_provider() {
     let resident = resident_position(provider);
     let nested = Value::Cell(CellArray::new(vec![resident.clone()], 1, 1).unwrap());
     let mut malformed_pattern = ObjectInstance::new(runmat_types::standard::PATTERN);
-    malformed_pattern
-        .properties
-        .insert("Regex".into(), Value::String("b".into()));
-    malformed_pattern
-        .properties
-        .insert("Unexpected".into(), resident.clone());
+    malformed_pattern.replace_property_unbounded("Regex".into(), Value::String("b".into()));
+    malformed_pattern.replace_property_unbounded("Unexpected".into(), resident.clone());
 
     for extensions_enabled in [false, true] {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(extensions_enabled);
         for boundary in [nested.clone(), Value::Object(malformed_pattern.clone())] {
             let before = block(extract_before_builtin(
                 Value::String("abc".into()),
-                vec![boundary.clone()],
+                crate::builtins::common::test_support::builtin_arguments(vec![boundary.clone()]),
             ))
             .expect_err("malformed extractBefore boundary");
             assert_eq!(
@@ -1067,7 +1173,7 @@ fn malformed_resident_boundary_forms_never_reach_provider() {
             );
             let after = block(extract_after_builtin(
                 Value::String("abc".into()),
-                vec![boundary.clone()],
+                crate::builtins::common::test_support::builtin_arguments(vec![boundary.clone()]),
             ))
             .expect_err("malformed extractAfter boundary");
             assert_eq!(
@@ -1076,13 +1182,19 @@ fn malformed_resident_boundary_forms_never_reach_provider() {
             );
             let insert_before = block(insert_before_builtin(
                 Value::String("abc".into()),
-                vec![boundary.clone(), Value::String("x".into())],
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    boundary.clone(),
+                    Value::String("x".into()),
+                ]),
             ))
             .expect_err("malformed insertBefore boundary");
             assert_eq!(insert_before.identifier(), INSERT_ERRORS[1].identifier);
             let insert_after = block(insert_after_builtin(
                 Value::String("abc".into()),
-                vec![boundary, Value::String("x".into())],
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    boundary,
+                    Value::String("x".into()),
+                ]),
             ))
             .expect_err("malformed insertAfter boundary");
             assert_eq!(insert_after.identifier(), INSERT_ERRORS[1].identifier);
@@ -1102,7 +1214,7 @@ fn top_level_resident_position_obeys_compatibility_gate_and_gathers_once() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let before = block(extract_before_builtin(
             Value::String("abc".into()),
-            vec![resident.clone()],
+            crate::builtins::common::test_support::builtin_arguments(vec![resident.clone()]),
         ))
         .expect_err("strict extractBefore resident gate");
         assert_eq!(
@@ -1111,7 +1223,10 @@ fn top_level_resident_position_obeys_compatibility_gate_and_gathers_once() {
         );
         let inserted = block(insert_before_builtin(
             Value::String("abc".into()),
-            vec![resident.clone(), Value::String("x".into())],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                resident.clone(),
+                Value::String("x".into()),
+            ]),
         ))
         .expect_err("strict insertBefore resident gate");
         assert_eq!(
@@ -1125,7 +1240,7 @@ fn top_level_resident_position_obeys_compatibility_gate_and_gathers_once() {
     assert_eq!(
         block(extract_before_builtin(
             Value::String("abc".into()),
-            vec![resident.clone()],
+            crate::builtins::common::test_support::builtin_arguments(vec![resident.clone()]),
         ))
         .expect("resident extractBefore"),
         Value::String("a".into())
@@ -1134,7 +1249,10 @@ fn top_level_resident_position_obeys_compatibility_gate_and_gathers_once() {
     assert_eq!(
         block(insert_before_builtin(
             Value::String("abc".into()),
-            vec![resident, Value::String("x".into())],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                resident,
+                Value::String("x".into())
+            ]),
         ))
         .expect("resident insertBefore"),
         Value::String("axbc".into())

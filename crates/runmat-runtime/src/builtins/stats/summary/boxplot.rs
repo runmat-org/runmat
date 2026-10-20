@@ -15,7 +15,7 @@ use runmat_plot::plots::{LinePlot, MarkerStyle, PatchPlot, ScatterPlot};
 use runmat_value::{CellArray, CharArray, NumericScalar, Tensor, Value};
 
 use crate::builtins::common::{random_args::keyword_of, tensor};
-use crate::builtins::plotting::op_common::{apply_axes_target, split_leading_axes_handle};
+use crate::builtins::plotting::op_common::{apply_axes_target, split_leading_axes_arguments};
 use crate::builtins::plotting::state::{render_active_plot, PlotRenderOptions};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -275,33 +275,40 @@ async fn ensure_sample_group_extensions(
 )]
 pub(crate) async fn boxplot_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     boxplot_in_runtime(runtime.as_ref(), args).await
 }
 
 #[cfg(test)]
 pub(crate) async fn boxplot_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    boxplot_in_runtime(None, args).await
+    boxplot_in_runtime(
+        None,
+        crate::execution::RootedValues::new(args)
+            .map_err(|error| error.into_runtime_error())?
+            .into(),
+    )
+    .await
 }
 
 async fn boxplot_in_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let mut cooperation = cooperation::BoxplotCooperation::new(runtime);
-    let (axes_target, args) = split_leading_axes_handle(args, NAME).map_err(map_plot_error)?;
+    let (axes_target, args) = split_leading_axes_arguments(args, NAME).map_err(map_plot_error)?;
     if args.is_empty() {
         return Err(invalid("boxplot: expected numeric data"));
     }
+    let _argument_sources = args.fork();
     let mut args = args;
-    let x = args.remove(0);
+    let x = args.pop_front().expect("data input checked above");
     let first_option = args
         .first()
         .and_then(keyword_of)
         .and_then(|name| BoxplotOptionKind::parse(&name));
     let group = if !args.is_empty() && first_option.is_none() {
-        Some(args.remove(0))
+        Some(args.pop_front().expect("group input checked above"))
     } else {
         None
     };
@@ -313,13 +320,11 @@ async fn boxplot_in_runtime(
         .await?;
     option_plan.preflight_known_factor_count(admission::known_factor_count(group.as_ref()))?;
     cooperation.completed(0).await?;
-    let mut inputs = vec![x];
-    if let Some(group) = group {
-        inputs.push(group);
-    }
-    let mut inputs = gather_values(inputs).await?;
-    let x = inputs.remove(0);
-    let group = inputs.pop();
+    let x = gather_value(x).await?;
+    let group = match group {
+        Some(group) => Some(gather_value(group).await?),
+        None => None,
+    };
     let options = option_plan.evaluate().await?;
     let layout = groups::build_box_layout_cooperative(x, group, &options, &mut cooperation).await?;
 
@@ -339,20 +344,14 @@ async fn boxplot_in_runtime(
     }
 }
 
-async fn gather_values(args: Vec<Value>) -> BuiltinResult<Vec<Value>> {
-    let mut gathered = Vec::with_capacity(args.len());
-    for arg in args {
-        if value_contains_gpu(&arg)? {
-            gathered.push(
-                gather_if_needed_async(&arg)
-                    .await
-                    .map_err(|err| invalid_with_source(format!("boxplot: {err}"), err))?,
-            );
-        } else {
-            gathered.push(arg);
-        }
+async fn gather_value(arg: Value) -> BuiltinResult<Value> {
+    if value_contains_gpu(&arg)? {
+        gather_if_needed_async(&arg)
+            .await
+            .map_err(|err| invalid_with_source(format!("boxplot: {err}"), err))
+    } else {
+        Ok(arg)
     }
-    Ok(gathered)
 }
 
 mod plot;

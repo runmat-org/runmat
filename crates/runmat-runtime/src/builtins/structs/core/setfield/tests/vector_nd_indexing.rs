@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn setfield_vector_and_logical_assignment_preserve_typed_storage() {
-    let mut root = StructValue::new();
+    let mut root = runmat_value::UnboundedStructValueBuilder::new();
     root.fields.insert(
         "values".into(),
         Value::Tensor(
@@ -15,7 +15,7 @@ fn setfield_vector_and_logical_assignment_preserve_typed_storage() {
     let rhs =
         Tensor::new_integer(IntegerStorage::U64(vec![20, 40]), vec![1, 2]).expect("replacement");
     let updated = run_setfield(
-        Value::Struct(root),
+        Value::Struct(root.finish()),
         vec![
             Value::from("values"),
             Value::Cell(selector),
@@ -53,7 +53,7 @@ fn setfield_vector_and_logical_assignment_preserve_typed_storage() {
 
 #[test]
 fn setfield_nd_assignment_uses_column_major_coordinates() {
-    let mut root = StructValue::new();
+    let mut root = runmat_value::UnboundedStructValueBuilder::new();
     root.fields.insert(
         "values".into(),
         Value::Tensor(
@@ -71,7 +71,7 @@ fn setfield_nd_assignment_uses_column_major_coordinates() {
     )
     .expect("selector");
     let updated = run_setfield(
-        Value::Struct(root),
+        Value::Struct(root.finish()),
         vec![
             Value::from("values"),
             Value::Cell(selector),

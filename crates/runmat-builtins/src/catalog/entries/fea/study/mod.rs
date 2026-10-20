@@ -1,8 +1,10 @@
 use crate::fea_contract::{
-    catalog_entry::{self, ConstructorDocumentationDefinition, ConstructorEntryDefinition},
+    catalog_entry::{self, ConstructorDocumentationDefinition},
     constructor_inference::{infer_constructor, FeaConstructorKind},
     descriptors::FEA_STUDY_DESCRIPTOR,
+    example_fixtures::CLOSED_CUBE_STUDY,
     integer::FEA_STRUCTURAL_INTEGER_AUDIT,
+    operation_entry::{self, OperationEffectProfile, OperationEntryDefinition},
 };
 use crate::*;
 use runmat_types::{CallInference, CallRequest};
@@ -10,36 +12,60 @@ use runmat_types::{CallInference, CallRequest};
 fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer_constructor(request, entry, FeaConstructorKind::Study)
 }
-const FIXTURE: BuiltinExampleFixture = BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture {
-    id: BuiltinExampleFixtureId { local_name: "study-files" }, root: BuiltinFilesystemRoot::IsolatedWorkspace,
-    entries: &[
-        BuiltinFilesystemEntry::File { relative_path: "bracket.fea", content: BuiltinFixtureContent::Utf8("version: 1\nkind: study\nid: bracket_static\ngeometry:\n  path: part.stl\n  units: meter\nmodel:\n  profile: linear_static_structural\nrun:\n  backend: cpu\n") },
-        BuiltinFilesystemEntry::File { relative_path: "part.stl", content: BuiltinFixtureContent::Utf8("solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n") },
-    ],
-});
+const STUDY_PROGRAM: &str = concat!(
+    "geom = geometry.load('cube.stl');\n",
+    "steel = fea.material('steel', 'YoungsModulusPa', int64(200000000000), 'PoissonRatio', 0.3);\n",
+    "target = fea.PropertyRegionTarget.allSolids(geom);\n",
+    "assignment = fea.materialAssignment(target, steel);\n",
+    "region = geometry.region(geom, 'region_default');\n",
+    "fixed = fea.StructuralConstraint.fixed('fixed', region);\n",
+    "step = fea.StructuralStep.static('static');\n",
+    "model = fea.model('cube_model', geom, 'Materials', {steel}, 'MaterialAssignments', {assignment}, 'Constraints', {fixed}, 'Steps', {step});\n",
+    "study = fea.study('closed_cube_static', geom, model);\n",
+);
 const EXAMPLES: &[BuiltinExample] = &[
-    BuiltinExample { id: "construct-study", title: "Create a study from a geometry asset", program: "geom = geometry.load('part.stl');\nstudy = fea.study('bracket', geom, 'Profile', 'linear_static_structural', 'Backend', 'cpu');", display_output: None, compatibility: BuiltinExampleCompatibility::RunMat, harness: BuiltinExampleHarness::NativeFilesystem, fixture: FIXTURE, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(strcmp(class(study), 'fea.Study'));" } },
-    BuiltinExample { id: "load-study", title: "Load a study from a document", program: "study = fea.study('bracket.fea');", display_output: None, compatibility: BuiltinExampleCompatibility::RunMat, harness: BuiltinExampleHarness::NativeFilesystem, fixture: FIXTURE, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(strcmp(class(study), 'fea.Study'));" } },
+    BuiltinExample {
+        id: "construct-study",
+        title: "Create a study from a geometry asset",
+        program: STUDY_PROGRAM,
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::RunMat,
+        harness: BuiltinExampleHarness::NativeFilesystem,
+        fixture: CLOSED_CUBE_STUDY,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(strcmp(class(study), 'fea.Study'));",
+        },
+    },
+    BuiltinExample {
+        id: "explicit-model-study",
+        title: "Keep the explicit model and geometry identity",
+        program: STUDY_PROGRAM,
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::RunMat,
+        harness: BuiltinExampleHarness::NativeFilesystem,
+        fixture: CLOSED_CUBE_STUDY,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(strcmp(class(study), 'fea.Study')); assert(strcmp(study.model.model_id, model.model_id)); assert(isequal(study.geometry.revision, geom.revision));",
+        },
+    },
 ];
 const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(ConstructorDocumentationDefinition {
-    title: "fea.study", summary: "Create or load a typed RunMat FEA study.",
-    description: "`fea.study(path)` delegates to the `.fea` document loader and may return a `fea.Study` or `fea.Sweep`; `fea.study(id, geometry, Name, Value, ...)` assembles a typed `fea.Study`.",
-    keywords: &["fea", "study", "model", "geometry"], related: &["fea.load", "fea.model", "fea.runOptions"],
-    sections: &[BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
-        "The one-path form delegates to `fea.load`; its result class is determined by the document kind, including sweep. The constructor form requires a text id and `geometry.Asset`.",
-        "Constructor options are RunKind/Kind, Profile, Backend, ModelId, Model, Frame, Defaults, Materials, MaterialAssignments/Assignments, BoundaryConditions/BCs, Loads/LoadCases, Steps, Domains, Interfaces, and RunOptions/Options.",
-        "Profile is required; backend defaults to `cpu`, and defaults mode to `profile_scaffold`. Model id comes from an explicit model or sanitized `<study-id>_model`. Explicit run kind must agree with the profile-derived solver.",
-        "Direct integer inputs have no role. Nested typed components and run options retain exact structural and binary64 physics contracts; public revision and count properties stay exact typed integers.",
-        "Identity, option names, profile/run-kind agreement, and component classes are validated before construction. Existing STL/synthetic geometry needs no OCCT; topology CAD may require a configured importer.",
-    ] }], examples: EXAMPLES,
-    faqs: &[BuiltinDocumentationFaq { question: "Can numeric values stand in for profile or backend?", answer: "No. Structural identity fields are text or typed objects and are never numerically coerced." }],
-    links: &[BuiltinDocumentationLink { label: "Using FEA", target: BuiltinDocumentationLinkTarget::Documentation("/docs/fea/using-fea") }],
-    implementation: &[BuiltinDocumentationLink { label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/study.rs") }],
-    verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Study constructor and document", location: "crates/runmat-runtime/src/builtins/fea/tests/construction.rs" }, BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "FEA VM execution", location: "crates/runmat-vm/tests/integer_builtin_fea_execution_and_feedback_file_status.rs" }],
-    notes: &["An execution-owned distributed handle is not a local geometry asset or path; no prevalidated distributed constructor materialization is available."],
+    title: "fea.study", summary: "Create a typed FEA study.",
+    description: "`fea.study(id, geometry, model, Name, Value, ...)` requires an explicit geometry.Asset and fea.Model.",
+    keywords: &["fea", "study"], related: &["fea.model", "fea.sweep", "fea.run"],
+    sections: &[BuiltinDocumentationSection { heading: "Typed boundary", paragraphs: &[
+        "Mesh and Execution are the only options. Mesh is a jointly validated meshing output; Execution is a typed fea.ExecutionPlan validated against the model sequence. A one-path loader form is not supported.",
+        "Host structural identities, revisions, shapes, and counts remain exact. Physics conversions occur only at their explicit owning boundaries; resident inputs are not implicitly gathered.",
+    ] }], examples: EXAMPLES, faqs: &[],
+    links: &[BuiltinDocumentationLink { label: "FEA API", target: BuiltinDocumentationLinkTarget::Documentation("/docs/fea/using-fea") }],
+    implementation: &[BuiltinDocumentationLink { label: "Current implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/mod.rs") }],
+    verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Typed Runtime FEA contracts", location: "crates/runmat-runtime/src/builtins/fea/mod.rs::tests::typed_constructors_build_full_study_and_sweep_objects" }],
+    notes: &["Catalog examples require execution qualification; these declarations are not solver or numerical conformance receipts."],
 });
 pub const FEA_STUDY_CATALOG_ENTRY: BuiltinCatalogEntry =
-    catalog_entry::entry(ConstructorEntryDefinition {
+    operation_entry::entry(OperationEntryDefinition {
         provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
         name: "fea.study",
         documentation: DOCUMENTATION,
@@ -47,7 +73,8 @@ pub const FEA_STUDY_CATALOG_ENTRY: BuiltinCatalogEntry =
         inference: infer,
         integer_capabilities: &[],
         integer_audit: Some(&FEA_STRUCTURAL_INTEGER_AUDIT),
-        filesystem_read: true,
+        effects: OperationEffectProfile::ArtifactWrite,
+        accelerator: BuiltinAcceleratorPolicy::Forbidden,
         distributed: BuiltinDistributedPolicy::Unsupported,
     });
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&FEA_STUDY_CATALOG_ENTRY];

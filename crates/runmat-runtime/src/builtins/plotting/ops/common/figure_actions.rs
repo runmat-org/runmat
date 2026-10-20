@@ -51,7 +51,14 @@ pub fn parse_clf_action(args: &[Value]) -> BuiltinResult<(FigureAction, bool)> {
     }
 }
 
+#[cfg(test)]
 pub fn parse_close_action(args: &[Value]) -> BuiltinResult<FigureAction> {
+    parse_close_action_view(crate::call::FunctionArgumentView::from_slice(args))
+}
+
+pub fn parse_close_action_view(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<FigureAction> {
     if args.is_empty() {
         return Ok(FigureAction::Current);
     }

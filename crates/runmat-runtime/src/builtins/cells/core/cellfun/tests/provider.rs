@@ -46,7 +46,7 @@ fn nonuniform_output_preserves_callback_residency() {
         let Value::Cell(output) = result.value() else {
             panic!("expected cell")
         };
-        assert!(matches!(&output.data[0], Value::GpuTensor(_)));
+        assert!(matches!(&output.data()[0], Value::GpuTensor(_)));
         drop(handle);
     });
 }

@@ -15,8 +15,8 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_types::IntegerClass;
 use runmat_value::{
-    CharArray, IntValue, IntegerStorage, LogicalArray, ObjectInstance, StringArray, StructValue,
-    Tensor, Utf8Text, Value,
+    CharArray, IntValue, IntegerStorage, LogicalArray, ObjectInstance, StringArray, Tensor,
+    Utf8Text, Value,
 };
 
 use crate::builtins::common::tensor;
@@ -197,20 +197,25 @@ struct SplitCandidate {
 #[runtime_builtin(
     name = "fitctree",
     binding_variant = "default",
-    builtin_path = "crate::builtins::stats::ml::classification_tree"
+    builtin_path = "crate::builtins::stats::ml::classification_tree",
+    context = true
 )]
-async fn fitctree_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let inspection = HeaderInspection::inspect(&first, &rest);
-    ensure_fitctree_extensions(&first, &rest, &inspection)?;
+async fn fitctree_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    first: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let inspection = HeaderInspection::inspect(&first, rest.view());
+    ensure_fitctree_extensions(&first, rest.view(), &inspection)?;
     preflight_matrix_rank(&first)?;
     let arguments = inspection.validate(rest.len())?;
-    preflight_response_shape(&first, &rest, &arguments)?;
-    let arguments = arguments.preflight_values(&rest)?;
+    preflight_response_shape(&first, rest.view(), &arguments)?;
+    let arguments = arguments.preflight_values(rest.view())?;
     let first = gather(first).await?;
-    let rest = gather_all(rest, &arguments).await?;
-    let spec = build_fit_spec(first, rest, arguments)?;
+    let rest = gather_all(rest, &arguments, runtime.as_ref()).await?;
+    let spec = build_fit_spec(first, rest.view(), arguments)?;
     let fit = fit_tree(&spec)?;
-    model_object(spec, fit).map(Value::Object)
+    model_object(runtime.as_ref(), spec, fit)
 }
 
 fn enable_extension(extension: &BuiltinExtensionDescriptor) -> BuiltinResult<()> {
@@ -226,7 +231,7 @@ fn typed_integer_value(value: &Value) -> bool {
 
 fn ensure_fitctree_extensions(
     first: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     inspection: &HeaderInspection,
 ) -> BuiltinResult<()> {
     if crate::dispatcher::value_contains_gpu(first)
@@ -251,7 +256,7 @@ fn ensure_fitctree_extensions(
 
 fn ensure_table_integer_extensions(
     first: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     inspection: &HeaderInspection,
 ) -> BuiltinResult<()> {
     let Value::Object(object) = first else {
@@ -328,18 +333,23 @@ async fn gather(value: Value) -> BuiltinResult<Value> {
 }
 
 async fn gather_all(
-    values: Vec<Value>,
+    values: crate::call::BuiltinArguments,
     arguments: &FitctreeArguments,
-) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(values.len());
-    for (index, value) in values.into_iter().enumerate() {
-        if index >= arguments.option_start && (index - arguments.option_start).is_multiple_of(2) {
-            out.push(value);
-        } else {
-            out.push(gather(value).await?);
-        }
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    if !values.iter().any(crate::dispatcher::value_contains_gpu) {
+        return Ok(values);
     }
-    Ok(out)
+    values
+        .try_map_preserving_roots_async(values.len(), runtime, async |index| {
+            if index >= arguments.option_start && (index - arguments.option_start).is_multiple_of(2)
+            {
+                Ok(values[index].clone())
+            } else {
+                gather(values[index].clone()).await
+            }
+        })
+        .await
 }
 
 #[cfg(test)]

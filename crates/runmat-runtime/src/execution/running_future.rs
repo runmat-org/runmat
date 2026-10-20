@@ -1,6 +1,7 @@
 use crate::context::RuntimeContext;
 use crate::execution::{ExecutionServiceError, RootedValueSequence};
-use runmat_execution::{CancellationReason, FutureHandle};
+use runmat_execution::CancellationReason;
+#[cfg(test)]
 use runmat_value::Value;
 
 /// Owns exactly the service handle transitioned to Running by begin_await.
@@ -8,16 +9,16 @@ use runmat_value::Value;
 #[must_use]
 pub struct RunningFutureLease {
     runtime: RuntimeContext,
-    handle: FutureHandle,
+    handle: super::FutureExecutionHandle,
     complete: bool,
 }
 
 impl RunningFutureLease {
     /// Take ownership only after this service returns `AwaitAction::ExecuteFuture`.
-    pub fn new(runtime: RuntimeContext, handle: FutureHandle) -> Self {
+    pub fn new(runtime: RuntimeContext, handle: impl Into<super::FutureExecutionHandle>) -> Self {
         Self {
             runtime,
-            handle,
+            handle: handle.into(),
             complete: false,
         }
     }
@@ -28,7 +29,7 @@ impl RunningFutureLease {
     ) -> Result<(), ExecutionServiceError> {
         self.runtime
             .execution()
-            .complete_future(&self.handle, result)?;
+            .complete_future(self.handle.completion_ref(), result)?;
         self.complete = true;
         Ok(())
     }
@@ -49,7 +50,7 @@ impl Drop for RunningFutureLease {
             let _ = self
                 .runtime
                 .execution()
-                .cancel(&Value::Future(self.handle.clone()), reason);
+                .cancel(&self.handle.retained_value(), reason);
         }
     }
 }
@@ -87,20 +88,28 @@ mod tests {
     fn abandoned_running_handle_is_cancelled_without_draining_sibling() {
         let service = Rc::new(RuntimeExecutionService::new());
         let runtime = RuntimeContext::new(service.clone());
-        let owned = service.create_future(deferred()).unwrap();
+        let owned =
+            runmat_value::SharedFutureHandle::new(service.create_future(deferred()).unwrap());
         let sibling = service.create_future(deferred()).unwrap();
-        assert!(matches!(
-            service.begin_await(Value::Future(owned.clone())).unwrap(),
-            AwaitAction::ExecuteFuture { .. }
+        let AwaitAction::ExecuteFuture { handle, .. } =
+            service.begin_await(Value::Future(owned.clone())).unwrap()
+        else {
+            panic!("original future did not enter caller execution");
+        };
+        assert!(std::ptr::eq(
+            handle.completion_ref().outputs,
+            &owned.outputs
         ));
-        let running = RunningFutureLease::new(runtime.clone(), owned.clone());
+        let running = RunningFutureLease::new(runtime.clone(), handle);
         drop(running);
         assert!(matches!(
             service.begin_await(Value::Future(owned)),
             Err(ExecutionServiceError::Cancelled)
         ));
         assert!(matches!(
-            service.begin_await(Value::Future(sibling.clone())).unwrap(),
+            service
+                .begin_await(Value::Future(sibling.clone().into()))
+                .unwrap(),
             AwaitAction::ExecuteFuture { .. }
         ));
         let mut sibling = RunningFutureLease::new(runtime, sibling);
@@ -113,7 +122,7 @@ mod tests {
         let handle = sibling.handle.clone();
         drop(sibling);
         assert!(matches!(
-            service.begin_await(Value::Future(handle)).unwrap(),
+            service.begin_await(handle.retained_value()).unwrap(),
             AwaitAction::Completed(_)
         ));
     }
@@ -124,7 +133,9 @@ mod tests {
         let runtime = RuntimeContext::new(service.clone());
         let handle = service.create_future(deferred()).unwrap();
         assert!(matches!(
-            service.begin_await(Value::Future(handle.clone())).unwrap(),
+            service
+                .begin_await(Value::Future(handle.clone().into()))
+                .unwrap(),
             AwaitAction::ExecuteFuture { .. }
         ));
         let mut running = RunningFutureLease::new(runtime, handle.clone());
@@ -133,7 +144,7 @@ mod tests {
             .unwrap();
         drop(running);
         let Err(ExecutionServiceError::Failed(message)) =
-            service.begin_await(Value::Future(handle))
+            service.begin_await(Value::Future(handle.into()))
         else {
             panic!("completion must retain the language failure");
         };

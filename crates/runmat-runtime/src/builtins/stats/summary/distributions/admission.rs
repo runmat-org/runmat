@@ -46,7 +46,7 @@ pub(super) fn is_logical_value(value: &Value) -> bool {
 pub(super) fn ensure_normal_extensions(
     name: &str,
     first: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     integer_roles: [&BuiltinExtensionDescriptor; 3],
     logical: &BuiltinExtensionDescriptor,
 ) -> BuiltinResult<()> {
@@ -122,7 +122,11 @@ pub(super) struct NormalOutputPlan {
 }
 
 impl NormalOutputPlan {
-    pub(super) fn inspect(name: &str, first: &Value, rest: &[Value]) -> BuiltinResult<Self> {
+    pub(super) fn inspect(
+        name: &str,
+        first: &Value,
+        rest: crate::call::FunctionArgumentView<'_>,
+    ) -> BuiltinResult<Self> {
         let precision = if std::iter::once(first)
             .chain(rest.iter())
             .any(is_single_value)

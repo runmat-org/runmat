@@ -92,7 +92,7 @@ impl RuntimeExecutionServices for OutputTurnService {
 
     fn claim_next_task_result(
         &self,
-        _: &[TaskHandle],
+        _: &[runmat_value::SharedTaskHandle],
     ) -> Result<TaskResultClaim, ExecutionServiceError> {
         Err(ExecutionServiceError::UnknownHandle)
     }
@@ -107,7 +107,7 @@ impl RuntimeExecutionServices for OutputTurnService {
 
     fn complete_future(
         &self,
-        _: &FutureHandle,
+        _: crate::execution::FutureCompletionRef<'_>,
         _: Result<RootedValueSequence, ExecutionServiceError>,
     ) -> Result<(), ExecutionServiceError> {
         Err(ExecutionServiceError::UnknownHandle)
@@ -181,7 +181,7 @@ fn dropping_actual_textscan_during_output_restores_cursor_and_exclusivity() {
         Some(runtime.clone()),
         Value::Num(fid as f64),
         Value::from("%f"),
-        vec![Value::Num(1.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
     ));
     let mut cx = Context::from_waker(futures::task::noop_waker_ref());
     assert!(matches!(
@@ -220,7 +220,7 @@ fn dropping_actual_textscan_during_output_restores_cursor_and_exclusivity() {
         Some(runtime.clone()),
         Value::Num(fid as f64),
         Value::from("%f"),
-        vec![Value::Num(1.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
     ))
     .expect("subsequent invocation succeeds");
     assert_eq!(numeric_column(&output, 0), vec![10.0]);

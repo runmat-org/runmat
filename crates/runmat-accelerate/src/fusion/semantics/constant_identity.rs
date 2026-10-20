@@ -143,11 +143,11 @@ pub(crate) fn exact_constant_digest(value: &Value) -> Result<Digest> {
         Value::String(value) => ConstantPayload::String(value),
         Value::StringArray(array) => ConstantPayload::StringArray {
             shape: &array.shape,
-            data: StringScalars(array.data.as_slice()),
+            data: StringScalars(array.data()),
         },
         Value::CharArray(array) => ConstantPayload::CharArray {
             shape: &array.shape,
-            data: &array.data,
+            data: array.data(),
         },
         Value::LogicalArray(array) => ConstantPayload::LogicalArray {
             shape: &array.shape,
@@ -198,11 +198,9 @@ mod tests {
             shape: &shape,
             data: &strings,
         };
+        let expected = Digest::sha256(serde_json::to_vec(&legacy).unwrap());
         let value = Value::StringArray(StringArray::new(strings, shape).unwrap());
-        assert_eq!(
-            exact_constant_digest(&value).unwrap(),
-            Digest::sha256(serde_json::to_vec(&legacy).unwrap())
-        );
+        assert_eq!(exact_constant_digest(&value).unwrap(), expected);
     }
 
     #[derive(Serialize)]

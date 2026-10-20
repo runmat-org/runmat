@@ -1,17 +1,18 @@
 use super::*;
 
 pub(super) fn distribution_object(fit: &FittedDistribution) -> BuiltinResult<ObjectInstance> {
-    let mut object =
-        ObjectInstance::new(runmat_types::standard::PROBABILITY_DISTRIBUTION.to_string());
-    object.properties.insert(
+    let mut object = runmat_value::UnboundedObjectBuilder::new(
+        runmat_types::standard::PROBABILITY_DISTRIBUTION.to_string(),
+    );
+    object.insert(
         "DistributionName".to_string(),
         Value::string(fit.kind.canonical_name().to_string()),
     );
-    object.properties.insert(
+    object.insert(
         "DistName".to_string(),
         Value::string(fit.kind.canonical_name().to_string()),
     );
-    object.properties.insert(
+    object.insert(
         "ParameterNames".to_string(),
         Value::StringArray(string_row(
             fit.kind
@@ -21,32 +22,24 @@ pub(super) fn distribution_object(fit: &FittedDistribution) -> BuiltinResult<Obj
                 .collect(),
         )?),
     );
-    object.properties.insert(
+    object.insert(
         "ParameterValues".to_string(),
         Value::Tensor(
             Tensor::new(fit.parameters.clone(), vec![1, fit.parameters.len()])
                 .map_err(|err| internal(format!("fitdist: {err}")))?,
         ),
     );
-    object.properties.insert(
+    object.insert(
         "NumParameters".to_string(),
         Value::Num(fit.parameters.len() as f64),
     );
-    object
-        .properties
-        .insert("NumObservations".to_string(), Value::Num(fit.observations));
-    object
-        .properties
-        .insert("NLogL".to_string(), Value::Num(fit.nlogl));
-    object
-        .properties
-        .insert("IsTruncated".to_string(), Value::Bool(false));
+    object.insert("NumObservations".to_string(), Value::Num(fit.observations));
+    object.insert("NLogL".to_string(), Value::Num(fit.nlogl));
+    object.insert("IsTruncated".to_string(), Value::Bool(false));
     for (name, value) in fit.kind.parameter_names().iter().zip(fit.parameters.iter()) {
-        object
-            .properties
-            .insert((*name).to_string(), Value::Num(*value));
+        object.insert((*name).to_string(), Value::Num(*value));
     }
-    Ok(object)
+    Ok(object.finish())
 }
 
 pub(super) fn string_row(values: Vec<String>) -> BuiltinResult<StringArray> {
@@ -70,7 +63,7 @@ pub(super) fn distribution_from_value_for(
             builtin,
             format!(
                 "{builtin}: expected ProbabilityDistribution object, got {}",
-                object.class_name
+                object.class_name()
             ),
         ));
     }
@@ -98,9 +91,9 @@ pub(super) fn string_property(
     object: &ObjectInstance,
     name: &str,
 ) -> BuiltinResult<String> {
-    match object.properties.get(name) {
+    match object.properties().get(name) {
         Some(Value::String(value)) => Ok(value.as_str().to_owned()),
-        Some(Value::CharArray(chars)) if chars.rows == 1 => Ok(chars.data.iter().collect()),
+        Some(Value::CharArray(chars)) if chars.rows == 1 => Ok(chars.data().iter().collect()),
         _ => Err(invalid_for(
             builtin,
             format!("{builtin}: ProbabilityDistribution object is missing {name}"),
@@ -113,7 +106,7 @@ pub(super) fn numeric_vector_property(
     object: &ObjectInstance,
     name: &str,
 ) -> BuiltinResult<Vec<f64>> {
-    match object.properties.get(name) {
+    match object.properties().get(name) {
         Some(Value::Tensor(tensor)) => Ok(tensor::tensor_values_f64(tensor)),
         Some(Value::Num(value)) => Ok(vec![*value]),
         _ => Err(invalid_for(
@@ -124,7 +117,7 @@ pub(super) fn numeric_vector_property(
 }
 
 pub(super) fn numeric_scalar_property(object: &ObjectInstance, name: &str) -> Option<f64> {
-    match object.properties.get(name) {
+    match object.properties().get(name) {
         Some(Value::Num(value)) => Some(*value),
         _ => None,
     }

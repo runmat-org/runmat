@@ -1,7 +1,7 @@
 //! Supervised public entrypoints over the shared typed network executor.
 
 use runmat_macros::runtime_builtin;
-use runmat_value::{StructValue, Tensor, Value};
+use runmat_value::{Tensor, Value};
 
 use crate::BuiltinResult;
 
@@ -27,14 +27,14 @@ use targets::*;
 async fn train_network_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<crate::execution::RootedValue> {
     train_network_in_runtime(runtime.as_ref(), requested_outputs, args).await
 }
 
 #[cfg(test)]
 pub(super) async fn train_network_builtin(
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<crate::execution::RootedValue> {
     train_network_in_runtime(None, crate::output_count::current_output_count(), args).await
 }
@@ -42,7 +42,7 @@ pub(super) async fn train_network_builtin(
 async fn train_network_in_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<crate::execution::RootedValue> {
     admit_training_output_count("trainNetwork", requested_outputs)?;
     if args.len() != 4 {
@@ -75,7 +75,7 @@ async fn train_network_in_runtime(
 async fn trainnet_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<crate::execution::RootedValue> {
     trainnet_in_runtime(runtime.as_ref(), requested_outputs, args).await
 }
@@ -84,13 +84,18 @@ async fn trainnet_builtin_registered(
 pub(super) async fn trainnet_builtin(
     args: Vec<Value>,
 ) -> BuiltinResult<crate::execution::RootedValue> {
-    trainnet_in_runtime(None, crate::output_count::current_output_count(), args).await
+    trainnet_in_runtime(
+        None,
+        crate::output_count::current_output_count(),
+        crate::builtins::common::test_support::builtin_arguments(args),
+    )
+    .await
 }
 
 async fn trainnet_in_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<crate::execution::RootedValue> {
     admit_training_output_count("trainnet", requested_outputs)?;
     if args.len() != 5 {
@@ -141,7 +146,7 @@ fn training_info(
     iteration: usize,
     function: &'static str,
 ) -> BuiltinResult<Value> {
-    let mut info = StructValue::new();
+    let mut info = runmat_value::UnboundedStructValueBuilder::new();
     info.insert("SolverName", Value::String(config.solver.as_str().into()));
     info.insert("MaxEpochs", Value::Num(config.max_epochs as f64));
     info.insert("MiniBatchSize", Value::Num(config.mini_batch_size as f64));
@@ -160,5 +165,5 @@ fn training_info(
         "StopReason",
         Value::string("MaxEpochs completed".to_string()),
     );
-    Ok(Value::Struct(info))
+    Ok(Value::Struct(info.finish()))
 }

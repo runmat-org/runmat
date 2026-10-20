@@ -18,6 +18,20 @@ fn unknown() -> ValueFact {
 
 #[test]
 fn suite_and_results_retain_classes_but_not_a_fabricated_test_count() {
+    assert_eq!(
+        FUNCTIONTESTS_CATALOG_ENTRY.contract.purity,
+        BuiltinPurity::DeterministicReadOnly
+    );
+    assert_eq!(
+        FUNCTIONTESTS_CATALOG_ENTRY.contract.effects,
+        &[EffectKind::MayThrow]
+    );
+    assert_eq!(
+        FUNCTIONTESTS_CATALOG_ENTRY.contract.environment_effect,
+        None
+    );
+    assert_eq!(FUNCTIONTESTS_CATALOG_ENTRY.contract.workspace_effect, None);
+    assert!(FUNCTIONTESTS_CATALOG_ENTRY.contract.capabilities.is_empty());
     let suite = inference::functiontests(&call(vec![unknown()], 1), &FUNCTIONTESTS_CATALOG_ENTRY);
     assert!(suite.diagnostics.is_empty(), "{:#?}", suite.diagnostics);
     assert_eq!(suite.outputs[0].shape, ShapeFact::from(vec![Some(1), None]));

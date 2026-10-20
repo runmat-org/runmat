@@ -6,11 +6,15 @@ use runmat_builtins::{ISVARNAME_CATALOG_ENTRY, ISVARNAME_ERROR_OUTPUTS};
     binding_variant = "default",
     builtin_path = "crate::builtins::common::validation::isvarname"
 )]
-fn builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+fn builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     evaluate(args)
 }
 
-pub(super) fn evaluate(args: Vec<Value>) -> BuiltinResult<Value> {
-    super::admission::inputs(&ISVARNAME_CATALOG_ENTRY, &ISVARNAME_ERROR_OUTPUTS, &args)?;
+pub(super) fn evaluate(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    super::admission::inputs(
+        &ISVARNAME_CATALOG_ENTRY,
+        &ISVARNAME_ERROR_OUTPUTS,
+        args.view(),
+    )?;
     Ok(Value::Bool(super::isvarname_value(&args[0])))
 }

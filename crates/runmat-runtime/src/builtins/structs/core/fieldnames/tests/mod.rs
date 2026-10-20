@@ -13,14 +13,14 @@ pub(super) fn strings(value: Value) -> (Vec<String>, Vec<usize>) {
     let Value::Cell(cell) = value else {
         panic!("expected cell array result");
     };
-    (cell_strings(&cell), cell.shape)
+    (cell_strings(&cell), cell.shape.to_vec())
 }
 
 fn cell_strings(cell: &CellArray) -> Vec<String> {
-    cell.data
+    cell.data()
         .iter()
         .map(|value| match value {
-            Value::CharArray(array) => array.data.iter().collect(),
+            Value::CharArray(array) => array.data().iter().collect(),
             other => panic!("expected character array cell element, got {other:?}"),
         })
         .collect()

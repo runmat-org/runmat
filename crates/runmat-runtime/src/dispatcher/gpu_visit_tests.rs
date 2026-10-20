@@ -3,9 +3,7 @@ use super::*;
 #[test]
 fn gather_traversal_matches_recursive_materialization() {
     use crate::builtins::common::{gpu_helpers, test_support};
-    use runmat_value::{
-        CellArray, Closure, IntegerStorage, ObjectInstance, StructArray, StructValue, Tensor,
-    };
+    use runmat_value::{CellArray, Closure, IntegerStorage, ObjectInstance, StructArray, Tensor};
     test_support::with_test_provider(|provider| {
         let tensor = Tensor::new_integer(
             IntegerStorage::U64(vec![u64::MAX, 9_007_199_254_740_993]),
@@ -14,10 +12,11 @@ fn gather_traversal_matches_recursive_materialization() {
         .unwrap();
         let handle = gpu_helpers::upload_tensor(provider, &tensor).unwrap();
         let resident = Value::GpuTensor(handle.clone());
-        let mut structure = StructValue::new();
+        let mut structure = runmat_value::UnboundedStructValueBuilder::new();
         structure.insert("data", resident.clone());
         let mut object = ObjectInstance::new("GatherFixture");
-        object.properties.insert("data".into(), resident.clone());
+        object.replace_property_unbounded("data".into(), resident.clone());
+        let structure = structure.finish();
         let inputs = vec![
             Value::Cell(CellArray::new_with_shape(vec![resident.clone()], vec![1, 1]).unwrap()),
             Value::Struct(structure.clone()),
@@ -122,7 +121,7 @@ fn visits_object_arrays_and_cyclic_handle_properties_once() {
         let expected_id = allocation.handle.buffer_id();
         let device = Value::GpuTensor(allocation.handle);
         let mut object = runmat_value::ObjectInstance::new("TraversalFixture");
-        object.properties.insert("data".into(), device);
+        object.replace_property_unbounded("data".into(), device);
         let target = runmat_gc::gc_allocate(Value::Object(object)).unwrap();
         let handle = runmat_value::HandleRef {
             class_name: "TraversalFixture".into(),
@@ -133,9 +132,7 @@ fn visits_object_arrays_and_cyclic_handle_properties_once() {
             let Value::Object(object) = value else {
                 panic!("object")
             };
-            object
-                .properties
-                .insert("self".into(), Value::HandleObject(handle.clone()));
+            object.replace_property_unbounded("self".into(), Value::HandleObject(handle.clone()));
         })
         .unwrap();
         let value = Value::ObjectArray(

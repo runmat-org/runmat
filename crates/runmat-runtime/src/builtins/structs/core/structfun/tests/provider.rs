@@ -13,9 +13,14 @@ fn gathers_field_values_through_their_owner() {
                 shape: tensor.shape(),
             })
             .unwrap();
-        let mut structure = StructValue::new();
+        let mut structure = runmat_value::UnboundedStructValueBuilder::new();
         structure.insert("angle", Value::GpuTensor(handle));
-        let result = call(Value::FunctionHandle("sin".into()), structure, Vec::new()).unwrap();
+        let result = call(
+            Value::FunctionHandle("sin".into()),
+            structure.finish(),
+            Vec::new(),
+        )
+        .unwrap();
         let Value::Tensor(output) = result.value() else {
             panic!("expected tensor")
         };
@@ -42,9 +47,14 @@ fn gathers_field_values_from_an_actual_wgpu_provider() {
         .unwrap();
     let precision = runmat_accelerate_api::handle_precision(&handle).expect("floating upload");
     let retained_input = handle.clone();
-    let mut structure = StructValue::new();
+    let mut structure = runmat_value::UnboundedStructValueBuilder::new();
     structure.insert("angle", Value::GpuTensor(handle));
-    let result = call(Value::FunctionHandle("sin".into()), structure, Vec::new()).unwrap();
+    let result = call(
+        Value::FunctionHandle("sin".into()),
+        structure.finish(),
+        Vec::new(),
+    )
+    .unwrap();
     let Value::Tensor(output) = result.value() else {
         panic!("expected tensor")
     };

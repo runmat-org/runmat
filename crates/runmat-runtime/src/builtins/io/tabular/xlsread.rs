@@ -29,7 +29,7 @@ const BUILTIN_NAME: &str = "xlsread";
 async fn xlsread_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     path: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     let mut cooperation = TabularCooperation::new(runtime.as_ref(), BUILTIN_NAME);
     if crate::builtins::common::validation::value_contains_explicit_gpu(&path)
@@ -49,7 +49,7 @@ async fn xlsread_builtin(
         )?;
     }
     let outputs = XlsReadOutputs::requested()?;
-    preflight_host_arguments(&rest)?;
+    preflight_host_arguments(rest.view())?;
     let captured_home = home_directory();
     let known_path = if matches!(path, Value::GpuTensor(_)) {
         None
@@ -71,7 +71,12 @@ async fn xlsread_builtin(
     .await?
     .map_err(map_control_flow)?;
     cooperation.completed(0).await?;
-    let request = await_io(runtime.as_ref(), BUILTIN_NAME, parse_arguments(&rest)).await??;
+    let request = await_io(
+        runtime.as_ref(),
+        BUILTIN_NAME,
+        parse_arguments(runtime.as_ref(), &rest),
+    )
+    .await??;
     cooperation.completed(0).await?;
     let resolved = resolve_path(&path_value, captured_home.as_deref())?;
     let selected = owner.path(resolved).map_err(|source| {
@@ -171,17 +176,22 @@ enum SheetSelector {
     Index(usize),
 }
 
-async fn parse_arguments(args: &[Value]) -> BuiltinResult<XlsReadRequest> {
-    let gathered = gather_arguments(args).await?;
+async fn parse_arguments(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: &crate::call::BuiltinArguments,
+) -> BuiltinResult<XlsReadRequest> {
+    let gathered = gather_arguments(runtime, args).await?;
     let mut request = XlsReadRequest::default();
-    match gathered.as_slice() {
-        [] => {}
-        [single] => parse_single_selector(single, &mut request)?,
-        [sheet, range] => {
+    match gathered.len() {
+        0 => {}
+        1 => parse_single_selector(&gathered[0], &mut request)?,
+        2 => {
+            let (sheet, range) = (&gathered[0], &gathered[1]);
             request.sheet = Some(parse_sheet_selector(sheet)?);
             request.range = Some(parse_range(range)?);
         }
-        [sheet, range, mode] => {
+        3 => {
+            let (sheet, range, mode) = (&gathered[0], &gathered[1], &gathered[2]);
             request.sheet = Some(parse_sheet_selector(sheet)?);
             request.range = Some(parse_range(range)?);
             parse_basic_mode(mode)?;
@@ -196,7 +206,7 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<XlsReadRequest> {
     Ok(request)
 }
 
-fn preflight_host_arguments(args: &[Value]) -> BuiltinResult<()> {
+fn preflight_host_arguments(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<()> {
     if args.len() > 3 {
         return Err(xlsread_error_with(
             &XLSREAD_ERROR_INVALID_ARGUMENT,
@@ -204,11 +214,13 @@ fn preflight_host_arguments(args: &[Value]) -> BuiltinResult<()> {
         ));
     }
     let host = |value: &Value| !matches!(value, Value::GpuTensor(_));
-    match args {
-        [selector] if host(selector) => {
+    match args.len() {
+        1 if host(&args[0]) => {
+            let selector = &args[0];
             parse_single_selector(selector, &mut XlsReadRequest::default())?;
         }
-        [sheet, range] => {
+        2 => {
+            let (sheet, range) = (&args[0], &args[1]);
             if host(sheet) {
                 parse_sheet_selector(sheet)?;
             }
@@ -216,7 +228,8 @@ fn preflight_host_arguments(args: &[Value]) -> BuiltinResult<()> {
                 parse_range(range)?;
             }
         }
-        [sheet, range, mode] => {
+        3 => {
+            let (sheet, range, mode) = (&args[0], &args[1], &args[2]);
             if host(sheet) {
                 parse_sheet_selector(sheet)?;
             }
@@ -232,16 +245,16 @@ fn preflight_host_arguments(args: &[Value]) -> BuiltinResult<()> {
     Ok(())
 }
 
-async fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
-    let mut gathered = Vec::with_capacity(args.len());
-    for value in args {
-        gathered.push(
-            gather_if_needed_async(value)
-                .await
-                .map_err(map_control_flow)?,
-        );
-    }
-    Ok(gathered)
+async fn gather_arguments(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: &crate::call::BuiltinArguments,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    args.try_map_preserving_roots_async(args.len(), runtime, async |index| {
+        gather_if_needed_async(&args[index])
+            .await
+            .map_err(map_control_flow)
+    })
+    .await
 }
 
 fn parse_single_selector(value: &Value, request: &mut XlsReadRequest) -> BuiltinResult<()> {

@@ -22,13 +22,14 @@ pub(crate) fn selected_row_names(
 }
 
 pub(super) fn selected_row_times(
+    runtime: Option<&crate::context::RuntimeContext>,
     object: &ObjectInstance,
     rows: &[usize],
 ) -> BuiltinResult<Option<Value>> {
     let Some(row_times) = timetable_row_times(object)? else {
         return Ok(None);
     };
-    select_rows(&row_times, rows).map(Some)
+    select_rows_in_context(runtime, &row_times, rows).map(Some)
 }
 
 pub(crate) fn value_row_count(value: &Value) -> BuiltinResult<usize> {
@@ -49,7 +50,7 @@ pub(crate) fn value_row_count(value: &Value) -> BuiltinResult<usize> {
                 .map(|tensor| tensor.rows())
         }
         Value::Object(obj) if obj.is_class(CATEGORICAL_CLASS) => obj
-            .properties
+            .properties()
             .get("Codes")
             .map(value_row_count)
             .transpose()
@@ -60,6 +61,14 @@ pub(crate) fn value_row_count(value: &Value) -> BuiltinResult<usize> {
 }
 
 pub(crate) fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value> {
+    select_rows_in_context(None, value, rows)
+}
+
+pub(crate) fn select_rows_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    value: &Value,
+    rows: &[usize],
+) -> BuiltinResult<Value> {
     match value {
         Value::Tensor(tensor) => {
             let source_rows = tensor.shape().first().copied().unwrap_or(1);
@@ -180,7 +189,7 @@ pub(crate) fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value>
             for col in 0..cols {
                 for &row in rows {
                     let idx = row + col * array.rows();
-                    data.push(array.data.get(idx).cloned().ok_or_else(|| {
+                    data.push(array.data().get(idx).cloned().ok_or_else(|| {
                         invalid_index("table: string variable row index out of bounds")
                     })?);
                 }
@@ -198,7 +207,7 @@ pub(crate) fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value>
                     ));
                 }
                 let start = row * array.cols;
-                data.extend_from_slice(&array.data[start..start + array.cols]);
+                data.extend_from_slice(&array.data()[start..start + array.cols]);
             }
             CharArray::new(data, rows.len(), array.cols)
                 .map(Value::CharArray)
@@ -239,10 +248,11 @@ pub(crate) fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value>
         }
         Value::Object(obj) if obj.is_class(runmat_types::standard::DATETIME) => {
             let tensor = crate::builtins::datetime::serials_from_datetime_value(value)?;
-            let selected = select_rows(&Value::Tensor(tensor), rows)?;
+            let selected = select_rows_in_context(runtime, &Value::Tensor(tensor), rows)?;
             match selected {
                 Value::Tensor(tensor) => {
                     crate::builtins::datetime::datetime_object_from_serial_tensor(
+                        runtime,
                         tensor,
                         crate::builtins::datetime::datetime_format_from_value(value),
                     )
@@ -252,10 +262,11 @@ pub(crate) fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value>
         }
         Value::Object(obj) if obj.is_class(runmat_types::standard::DURATION) => {
             let tensor = crate::builtins::duration::duration_tensor_from_duration_value(value)?;
-            let selected = select_rows(&Value::Tensor(tensor), rows)?;
+            let selected = select_rows_in_context(runtime, &Value::Tensor(tensor), rows)?;
             match selected {
                 Value::Tensor(tensor) => {
                     crate::builtins::duration::duration_object_from_days_tensor(
+                        runtime,
                         tensor,
                         crate::builtins::duration::duration_format_from_value(value),
                     )
@@ -265,12 +276,23 @@ pub(crate) fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value>
         }
         Value::Object(obj) if obj.is_class(CATEGORICAL_CLASS) => {
             let codes = obj
-                .properties
+                .properties()
                 .get("Codes")
                 .ok_or_else(|| invalid_variable("categorical: missing Codes property"))?;
-            let selected_codes = select_rows(codes, rows)?;
+            let selected_codes = select_rows_in_context(runtime, codes, rows)?;
             let mut out = obj.clone();
-            out.properties.insert("Codes".to_string(), selected_codes);
+            crate::execution::object::replacement::replace_property(
+                runtime,
+                &mut out,
+                "Codes",
+                selected_codes,
+                |_, source| {
+                    invalid_variable(format!(
+                        "categorical: replacement admission failed: {source}"
+                    ))
+                },
+                invalid_variable,
+            )?;
             Ok(Value::Object(out))
         }
         _ if rows.len() == 1 && rows[0] == 0 => Ok(value.clone()),

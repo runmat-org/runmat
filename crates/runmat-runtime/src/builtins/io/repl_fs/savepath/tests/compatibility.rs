@@ -14,7 +14,7 @@ fn strict_mode_rejects_each_runmat_only_surface() {
 
     let directory_target = super::support::run(
         vec![Value::String(
-            directory.path().to_string_lossy().into_owned(),
+            directory.path().to_string_lossy().into_owned().into(),
         )],
         1,
         false,
@@ -92,7 +92,7 @@ fn strict_mode_does_not_create_a_missing_parent() {
     let directory = tempdir().expect("directory");
     let target = directory.path().join("missing").join("pathdef.m");
     let strict = super::support::run(
-        vec![Value::String(target.to_string_lossy().into_owned())],
+        vec![Value::String(target.to_string_lossy().into_owned().into())],
         1,
         false,
     )
@@ -101,7 +101,7 @@ fn strict_mode_does_not_create_a_missing_parent() {
     assert!(!target.exists());
 
     let runmat = super::support::run(
-        vec![Value::String(target.to_string_lossy().into_owned())],
+        vec![Value::String(target.to_string_lossy().into_owned().into())],
         1,
         true,
     )

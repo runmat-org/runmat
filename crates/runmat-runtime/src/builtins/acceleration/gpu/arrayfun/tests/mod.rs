@@ -21,6 +21,7 @@ use runmat_value::{
 use std::sync::Arc;
 
 fn call(func: Value, rest: Vec<Value>) -> crate::BuiltinResult<crate::execution::RootedValue> {
+    let rest = crate::call::BuiltinArguments::from_borrowed(&rest, None)?;
     block_on(arrayfun_builtin(None, func, rest))
 }
 

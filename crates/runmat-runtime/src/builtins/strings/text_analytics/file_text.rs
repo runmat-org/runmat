@@ -269,7 +269,7 @@ fn is_numeric_or_resident(value: &Value) -> bool {
 fn contains_numeric_or_resident(value: &Value) -> bool {
     match value {
         Value::Cell(cell) => cell
-            .data
+            .data()
             .iter()
             .any(|value| is_numeric_or_resident(value) || contains_numeric_or_resident(value)),
         Value::Struct(value) => value
@@ -286,7 +286,7 @@ fn contains_numeric_or_resident(value: &Value) -> bool {
 fn contains_resident(value: &Value) -> bool {
     match value {
         Value::GpuTensor(_) => true,
-        Value::Cell(cell) => cell.data.iter().any(contains_resident),
+        Value::Cell(cell) => cell.data().iter().any(contains_resident),
         Value::Struct(value) => value.fields.values().any(contains_resident),
         Value::StructArray(array) => array.any_value(contains_resident),
         _ => false,
@@ -295,8 +295,8 @@ fn contains_resident(value: &Value) -> bool {
 
 fn filename_cell_is_broad(value: &Value) -> bool {
     match value {
-        Value::Cell(cell) if cell.data.len() == 1 => !matches!(
-            cell.data.first(),
+        Value::Cell(cell) if cell.data().len() == 1 => !matches!(
+            cell.data().first(),
             Some(Value::CharArray(array)) if array.rows <= 1
         ),
         _ => false,
@@ -382,11 +382,11 @@ fn parse_args(args: Vec<Value>) -> BuiltinResult<(String, ExtractFileTextOptions
 fn scalar_file_input(value: &Value) -> BuiltinResult<String> {
     match value {
         Value::String(value) => nonempty_source(value),
-        Value::StringArray(array) if array.data.len() == 1 => nonempty_source(&array.data[0]),
+        Value::StringArray(array) if array.data().len() == 1 => nonempty_source(&array.data()[0]),
         Value::CharArray(array) if array.rows <= 1 => {
-            nonempty_source(&array.data.iter().collect::<String>())
+            nonempty_source(&array.data().iter().collect::<String>())
         }
-        Value::Cell(cell) if cell.data.len() == 1 => scalar_file_input(&cell.data[0]),
+        Value::Cell(cell) if cell.data().len() == 1 => scalar_file_input(&cell.data()[0]),
         other => Err(extract_error(
             &ERROR_INVALID_INPUT,
             format!("extractFileText: expected scalar filename or URL, got {other:?}"),
@@ -718,7 +718,7 @@ mod tests {
 
     fn string_value(value: Value) -> String {
         match value {
-            Value::String(text) => text,
+            Value::String(text) => text.to_string(),
             other => panic!("expected string, got {other:?}"),
         }
     }
@@ -806,9 +806,9 @@ mod tests {
         let path = unique_path("plain", "txt");
         test_support::fs::write(&path, b"caf\xe9").expect("write sample");
         let value = run(vec![
-            Value::String(path.to_string_lossy().to_string()),
-            Value::String("Encoding".to_string()),
-            Value::String("windows-1252".to_string()),
+            Value::String(path.to_string_lossy().to_string().into()),
+            Value::String("Encoding".to_string().into()),
+            Value::String("windows-1252".to_string().into()),
         ])
         .expect("extract");
         assert_eq!(string_value(value), "café");
@@ -825,9 +825,9 @@ mod tests {
         )
         .expect("write sample");
         let value = run(vec![
-            Value::String(path.to_string_lossy().to_string()),
-            Value::String("ExtractionMethod".to_string()),
-            Value::String("all-text".to_string()),
+            Value::String(path.to_string_lossy().to_string().into()),
+            Value::String("ExtractionMethod".to_string().into()),
+            Value::String("all-text".to_string().into()),
         ])
         .expect("extract");
         let text = string_value(value);
@@ -853,7 +853,10 @@ mod tests {
         .expect("write document");
         zip.finish().expect("finish docx");
 
-        let value = run(vec![Value::String(path.to_string_lossy().to_string())]).expect("extract");
+        let value = run(vec![Value::String(
+            path.to_string_lossy().to_string().into(),
+        )])
+        .expect("extract");
         assert_eq!(string_value(value), "Hello & welcome\nSecond");
         let _ = test_support::fs::remove_file(&path);
     }
@@ -862,29 +865,29 @@ mod tests {
     #[test]
     fn rejects_pdf_options_and_urls_as_tracked_gaps() {
         let err = run(vec![
-            Value::String("https://example.com".to_string()),
-            Value::String("ExtractionMethod".to_string()),
-            Value::String("tree".to_string()),
+            Value::String("https://example.com".to_string().into()),
+            Value::String("ExtractionMethod".to_string().into()),
+            Value::String("tree".to_string().into()),
         ])
         .expect_err("expected URL rejection");
         assert!(err.to_string().contains("URL extraction"));
 
         let err = run(vec![
-            Value::String("paper.pdf".to_string()),
-            Value::String("Pages".to_string()),
+            Value::String("paper.pdf".to_string().into()),
+            Value::String("Pages".to_string().into()),
             Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
         ])
         .expect_err("expected PDF option rejection");
         assert!(err.to_string().contains("PDF extraction"));
 
-        let err =
-            run(vec![Value::String("paper.pdf".to_string())]).expect_err("expected PDF rejection");
+        let err = run(vec![Value::String("paper.pdf".to_string().into())])
+            .expect_err("expected PDF rejection");
         assert!(err.to_string().contains("PDF extraction"));
 
         let err = run(vec![
-            Value::String("report.docx".to_string()),
-            Value::String("Encoding".to_string()),
-            Value::String("UTF-8".to_string()),
+            Value::String("report.docx".to_string().into()),
+            Value::String("Encoding".to_string().into()),
+            Value::String("UTF-8".to_string().into()),
         ])
         .expect_err("expected DOCX encoding rejection");
         assert!(err.to_string().contains("Encoding is supported"));

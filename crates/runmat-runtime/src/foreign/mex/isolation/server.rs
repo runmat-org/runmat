@@ -302,7 +302,7 @@ async fn shutdown<W: Write + 'static>(
     callback_waiters: CallbackWaiters,
     snapshots: Rc<SharedSnapshotStore>,
 ) -> ShutdownRetirement {
-    let loaded = values.keys().cloned().collect::<Vec<_>>();
+    let loaded = values.keys().map(ToOwned::to_owned).collect::<Vec<_>>();
     let mut first_error = None;
     let mut retained = false;
     for path in loaded {

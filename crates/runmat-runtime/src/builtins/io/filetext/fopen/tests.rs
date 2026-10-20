@@ -197,7 +197,7 @@ fn fopen_all_lists_handles() {
         .any(|v| (*v - fid).abs() < f64::EPSILON));
 
     if let Value::Cell(names) = &list.names {
-        assert_eq!(names.data.len(), list.handles.materialize_f64().len());
+        assert_eq!(names.data().len(), list.handles.materialize_f64().len());
         assert_eq!(names.rows, list.handles.materialize_f64().len());
         assert_eq!(names.cols, 1);
     } else {

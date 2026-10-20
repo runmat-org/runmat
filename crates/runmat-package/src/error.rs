@@ -95,6 +95,9 @@ pub enum LockError {
 
 impl From<runmat_types::RelativePathError> for IdentityError {
     fn from(error: runmat_types::RelativePathError) -> Self {
-        Self::InvalidRelativePath { value: error.value, reason: error.reason }
+        Self::InvalidRelativePath {
+            value: error.value,
+            reason: error.reason,
+        }
     }
 }

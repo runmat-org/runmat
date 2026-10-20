@@ -3,7 +3,6 @@
 use super::*;
 use crate::context::SessionSourceEvaluation;
 use runmat_async::RuntimeErrorOwner;
-use runmat_value::StructValue;
 use std::sync::Arc;
 
 /// An executable callback slot. Property lookup and event presentation derive
@@ -29,7 +28,8 @@ impl TimerCallback {
     }
 }
 
-pub(super) fn update_average_period(
+pub(super) fn update_period_properties(
+    runtime: &RuntimeContext,
     handle: &HandleRef,
     instant_period: f64,
     idx: usize,
@@ -40,7 +40,14 @@ pub(super) fn update_average_period(
     } else {
         instant_period
     };
-    set_property(handle, "AveragePeriod", Value::Num(average))
+    set_properties(
+        runtime,
+        handle,
+        &[
+            ("InstantPeriod", Value::Num(instant_period)),
+            ("AveragePeriod", Value::Num(average)),
+        ],
+    )
 }
 
 pub(super) async fn run_callback(
@@ -75,8 +82,8 @@ async fn run_callback_with_error(
                 .evaluate(runtime.clone())
                 .await?;
         }
-        Value::CharArray(chars) if !chars.data.is_empty() => {
-            let text: String = chars.data.iter().collect();
+        Value::CharArray(chars) if !chars.data().is_empty() => {
+            let text: String = chars.data().iter().collect();
             if !text.trim().is_empty() {
                 text_callback_request(runtime, handle, slot, &text)?
                     .evaluate(runtime.clone())
@@ -84,20 +91,22 @@ async fn run_callback_with_error(
             }
         }
         Value::Cell(cell) => {
-            let Some(function) = cell.data.first().cloned() else {
+            let Some(function) = cell.data().first().cloned() else {
                 return Ok(());
             };
-            let mut args = callback_base_args(runtime, handle, slot, error.as_ref());
-            args.extend(cell.data.iter().skip(1).cloned());
-            crate::call_feval_async_with_outputs_in_context(runtime, function, &args, 0).await?;
+            let args = callback_base_args(runtime, handle, slot, error.as_ref())?;
+            let mut values = args.values;
+            values.extend(cell.data().iter().skip(1).cloned());
+            crate::call_feval_async_with_outputs_in_context(runtime, function, &values, 0).await?;
         }
         function @ (Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle(_)
         | Value::Closure(_)) => {
-            let args = callback_base_args(runtime, handle, slot, error.as_ref());
-            crate::call_feval_async_with_outputs_in_context(runtime, function, &args, 0).await?;
+            let args = callback_base_args(runtime, handle, slot, error.as_ref())?;
+            crate::call_feval_async_with_outputs_in_context(runtime, function, &args.values, 0)
+                .await?;
         }
         _ => {}
     }
@@ -118,54 +127,63 @@ pub(super) fn text_callback_request(
     SessionSourceEvaluation::prepare(runtime, Arc::from(text), label, 0)
 }
 
+struct CallbackArguments {
+    values: Vec<Value>,
+    _event_roots: crate::execution::RootedValueLease,
+}
+
 fn callback_base_args(
     runtime: &RuntimeContext,
     handle: &HandleRef,
     callback: TimerCallback,
     error: Option<&RuntimeErrorOwner>,
-) -> Vec<Value> {
-    vec![
-        Value::HandleObject(handle.clone()),
-        timer_event(runtime, callback, error),
-    ]
+) -> BuiltinResult<CallbackArguments> {
+    let (event, roots) = timer_event(runtime, callback, error)?.into_value_and_lease();
+    Ok(CallbackArguments {
+        values: vec![Value::HandleObject(handle.clone()), event],
+        _event_roots: roots,
+    })
 }
 
 fn timer_event(
     runtime: &RuntimeContext,
     callback: TimerCallback,
     error: Option<&RuntimeErrorOwner>,
-) -> Value {
-    let mut data = StructValue::new();
-    data.insert(
-        "time",
-        Value::Num(
-            runtime
-                .service_ports()
-                .timing()
-                .wall_time_since_epoch()
-                .as_secs_f64(),
-        ),
+) -> BuiltinResult<crate::execution::RootedValue> {
+    let time = Value::Num(
+        runtime
+            .service_ports()
+            .timing()
+            .wall_time_since_epoch()
+            .as_secs_f64(),
     );
-    if let Some(error) = error {
-        data.insert(
-            "Error",
-            Value::MException(crate::runtime_error::exception_from_error(error.clone())),
-        );
-    }
-    let mut event = StructValue::new();
-    event.insert(
-        "Type",
-        Value::string(callback.property().name().to_string()),
-    );
-    event.insert("Data", Value::Struct(data));
-    Value::Struct(event)
+    let error_value = error
+        .map(|error| Value::MException(crate::runtime_error::exception_from_error(error.clone())));
+    let data_fields = [("time", &time)];
+    let data = match &error_value {
+        Some(error) => {
+            let fields = [("time", &time), ("Error", error)];
+            crate::execution::construct_struct_from_fields_in_context(runtime, fields.into_iter())?
+        }
+        None => crate::execution::construct_struct_from_fields_in_context(
+            runtime,
+            data_fields.into_iter(),
+        )?,
+    };
+    let event_type = Value::string(callback.property().name().to_string());
+    let (data, data_roots) = data.into_value_and_lease();
+    let fields = [("Type", &event_type), ("Data", &data)];
+    let event =
+        crate::execution::construct_struct_from_fields_in_context(runtime, fields.into_iter())?;
+    drop(data_roots);
+    Ok(event)
 }
 
 pub(super) fn callback_is_empty(value: &Value) -> bool {
     match value {
         Value::String(text) => text.trim().is_empty(),
-        Value::CharArray(chars) => chars.data.iter().collect::<String>().trim().is_empty(),
-        Value::Cell(cell) => cell.data.is_empty(),
+        Value::CharArray(chars) => chars.data().iter().collect::<String>().trim().is_empty(),
+        Value::Cell(cell) => cell.data().is_empty(),
         _ => false,
     }
 }
@@ -187,7 +205,8 @@ mod tests {
         ];
         for (slot, property) in TimerCallback::ALL.into_iter().zip(expected) {
             assert_eq!(slot.property(), property);
-            let Value::Struct(event) = timer_event(&runtime, slot, None) else {
+            let event_owner = timer_event(&runtime, slot, None).expect("admitted timer event");
+            let Value::Struct(event) = event_owner.value() else {
                 panic!("timer event must be a structure");
             };
             assert!(

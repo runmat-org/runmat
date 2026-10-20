@@ -8,7 +8,7 @@ fn catalog(bytes: &[u8]) -> PublishedObjectCatalog {
     let logical_digest = Digest::sha256(bytes);
     let context = Digest::sha256(b"assessment-source");
     let reference = ValueRef {
-        schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1,
+        schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION,
         id: artifact_object_value_id(logical_digest, context, "assessment-test"),
         logical_digest,
         encoded_length: bytes.len() as u64,

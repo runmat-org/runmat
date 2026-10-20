@@ -1,6 +1,9 @@
-use crate::workspace::{WorkspaceCaptureRequest, WorkspaceSnapshot, WorkspacePublicationRequest, WorkspacePublicationOutcome};
 use crate::data_contract::{
     DataChunkUploadRequest, DataChunkUploadTarget, DataManifestDescriptor, DataManifestRequest,
+};
+use crate::workspace::{
+    WorkspaceCaptureRequest, WorkspacePublicationOutcome, WorkspacePublicationRequest,
+    WorkspaceSnapshot,
 };
 use crate::{
     AtomicCreateResult, DirEntry, FileHandle, FsFileType, FsMetadata, FsProvider, OpenFlags,
@@ -109,9 +112,14 @@ impl RemoteFsProvider {
         })
     }
 
-    fn workspace_request<I: Serialize, O: serde::de::DeserializeOwned>(&self, route: &str, request: &I) -> io::Result<O> {
+    fn workspace_request<I: Serialize, O: serde::de::DeserializeOwned>(
+        &self,
+        route: &str,
+        request: &I,
+    ) -> io::Result<O> {
         let bytes = super::workspace_wire::encode(request)?;
-        let response = self.send_bytes("POST", route, &[], Some(&bytes), Some("application/cbor"))?;
+        let response =
+            self.send_bytes("POST", route, &[], Some(&bytes), Some("application/cbor"))?;
         super::workspace_wire::decode(&response)
     }
 
@@ -1023,15 +1031,24 @@ impl FsProvider for RemoteFsProvider {
         )
     }
 
-    async fn capture_workspace(&self, request: WorkspaceCaptureRequest) -> io::Result<WorkspaceSnapshot> {
+    async fn capture_workspace(
+        &self,
+        request: WorkspaceCaptureRequest,
+    ) -> io::Result<WorkspaceSnapshot> {
         self.workspace_request("/collaboration/workspace/capture", &request)
     }
 
-    async fn lookup_workspace_publication(&self, request: &WorkspacePublicationRequest) -> io::Result<Option<WorkspacePublicationOutcome>> {
+    async fn lookup_workspace_publication(
+        &self,
+        request: &WorkspacePublicationRequest,
+    ) -> io::Result<Option<WorkspacePublicationOutcome>> {
         self.workspace_request("/collaboration/workspace/lookup", request)
     }
 
-    async fn publish_workspace(&self, request: WorkspacePublicationRequest) -> io::Result<WorkspacePublicationOutcome> {
+    async fn publish_workspace(
+        &self,
+        request: WorkspacePublicationRequest,
+    ) -> io::Result<WorkspacePublicationOutcome> {
         self.workspace_request("/collaboration/workspace/publish", &request)
     }
 

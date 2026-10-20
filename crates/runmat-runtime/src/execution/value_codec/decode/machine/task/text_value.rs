@@ -10,33 +10,33 @@ use std::num::NonZeroUsize;
 pub(in crate::execution::value_codec::decode::machine) enum TextValueTask<'a> {
     String {
         text: TextCopy<'a>,
-        path: String,
+        path: ControlPath<'a>,
     },
     ManagedString {
         text: Option<Utf8TextExactCopy<'a>>,
         receipt: HostAllocationReceipt,
         runtime: &'a RuntimeContext,
-        path: String,
+        path: ControlPath<'a>,
     },
     Character {
         shape: ShapeCopy<'a>,
         source: &'a [u32],
         chars: Vec<char>,
-        path: String,
+        path: ControlPath<'a>,
     },
     StringArray {
         shape: ShapeCopy<'a>,
         source: &'a [String],
         values: Vec<String>,
         current: Option<TextCopy<'a>>,
-        path: String,
+        path: ControlPath<'a>,
     },
 }
 
 impl<'a> TextValueTask<'a> {
     pub(super) fn string(
         source: &'a str,
-        path: String,
+        path: ControlPath<'a>,
         runtime: Option<&'a RuntimeContext>,
     ) -> Result<Self, ValueCodecError> {
         let policy = HostAllocationReceipt::policy(runtime)
@@ -86,23 +86,31 @@ impl<'a> TextValueTask<'a> {
         })
     }
 
-    pub(super) fn character(shape: &'a [u64], source: &'a [u32], path: String) -> Self {
-        Self::Character {
-            shape: ShapeCopy::new(shape, path.clone()),
+    pub(super) fn character(
+        shape: &'a [u64],
+        source: &'a [u32],
+        path: ControlPath<'a>,
+    ) -> Result<Self, ValueCodecError> {
+        Ok(Self::Character {
+            shape: ShapeCopy::new(shape, path.try_clone()?),
             source,
             chars: Vec::with_capacity(source.len()),
             path,
-        }
+        })
     }
 
-    pub(super) fn string_array(shape: &'a [u64], source: &'a [String], path: String) -> Self {
-        Self::StringArray {
-            shape: ShapeCopy::new(shape, path.clone()),
+    pub(super) fn string_array(
+        shape: &'a [u64],
+        source: &'a [String],
+        path: ControlPath<'a>,
+    ) -> Result<Self, ValueCodecError> {
+        Ok(Self::StringArray {
+            shape: ShapeCopy::new(shape, path.try_clone()?),
             source,
             values: Vec::with_capacity(source.len()),
             current: None,
             path,
-        }
+        })
     }
 
     pub(super) fn advance(
@@ -164,7 +172,7 @@ impl<'a> TextValueTask<'a> {
                 if chars.len() != source.len() {
                     return Ok((count.max(1), None));
                 }
-                let shape = std::mem::replace(shape, ShapeCopy::new(&[], String::new())).finish();
+                let shape = shape.take_finished();
                 let chars = std::mem::take(chars);
                 let value = CharArray::new_with_shape(chars, shape)
                     .map(Value::CharArray)
@@ -183,8 +191,7 @@ impl<'a> TextValueTask<'a> {
                     return Ok((completed, None));
                 }
                 if values.len() == source.len() {
-                    let shape =
-                        std::mem::replace(shape, ShapeCopy::new(&[], String::new())).finish();
+                    let shape = shape.take_finished();
                     let values = std::mem::take(values);
                     let value = Value::StringArray(
                         StringArray::new(values, shape)
@@ -202,7 +209,7 @@ impl<'a> TextValueTask<'a> {
         }
     }
 
-    pub(super) fn path(&self) -> &str {
+    pub(super) fn path(&self) -> &ControlPath<'a> {
         match self {
             Self::String { path, .. }
             | Self::ManagedString { path, .. }

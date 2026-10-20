@@ -88,10 +88,10 @@ enum Construction {
     },
 }
 
-pub(super) fn prepare(args: Vec<Value>) -> BuiltinResult<PreparedSparse> {
+pub(super) fn prepare(args: crate::call::BuiltinArguments) -> BuiltinResult<PreparedSparse> {
     prepare_form(args).map(PreparedSparse)
 }
-fn prepare_form(args: Vec<Value>) -> BuiltinResult<Construction> {
+fn prepare_form(args: crate::call::BuiltinArguments) -> BuiltinResult<Construction> {
     let count = args.len();
     let typename = count == 3 && keyword_of(&args[2]).is_some();
     let form = SparseConstructionForm::for_arguments(count, typename);

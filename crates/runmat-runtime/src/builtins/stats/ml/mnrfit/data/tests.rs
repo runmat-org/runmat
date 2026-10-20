@@ -9,11 +9,11 @@ fn categorical_response_uses_table_owned_borrowed_code_decoding() {
     let first = format!("{prefix}a");
     let second = format!("{prefix}b");
     let mut object = ObjectInstance::new(runmat_types::standard::CATEGORICAL.to_string());
-    object.properties.insert(
+    object.replace_property_unbounded(
         "Codes".into(),
         Value::Tensor(Tensor::new_integer(IntegerStorage::U64(vec![2, 1, 2]), vec![3, 1]).unwrap()),
     );
-    object.properties.insert(
+    object.replace_property_unbounded(
         "Categories".into(),
         Value::StringArray(
             StringArray::new(vec![first.clone(), second.clone()], vec![1, 2]).unwrap(),

@@ -34,7 +34,7 @@ pub(super) fn pass() -> BuiltinResult<Value> {
 
 pub(super) fn require_arg_count(
     builtin: &str,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     min: usize,
     max: usize,
 ) -> BuiltinResult<()> {

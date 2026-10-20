@@ -2,7 +2,9 @@
 use super::*;
 use runmat_accelerate_api::GpuTensorStorage;
 
-pub(super) fn admit_data_compatibility(args: &[Value]) -> BuiltinResult<()> {
+pub(super) fn admit_data_compatibility(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     if args.iter().any(crate::value_contains_gpu) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &SCATTERHIST_GPU_INPUT_EXTENSION,
@@ -21,7 +23,9 @@ pub(super) fn admit_data_compatibility(args: &[Value]) -> BuiltinResult<()> {
     Ok(())
 }
 
-pub(super) fn admit_host_visible(args: &[Value]) -> BuiltinResult<usize> {
+pub(super) fn admit_host_visible(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<usize> {
     let mut lengths = [0usize; 2];
     for (index, value) in args.iter().take(2).enumerate() {
         let name = if index == 0 { "x" } else { "y" };
@@ -75,16 +79,18 @@ fn inexact_observation() -> RuntimeError {
     .build()
 }
 
-pub(super) async fn gather_values(args: Vec<Value>) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(args.len());
-    for value in args {
-        if !crate::value_contains_gpu(&value) {
-            out.push(value);
-            continue;
+pub(super) async fn gather_values(
+    args: crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    args.try_map_preserving_roots_async(args.len(), runtime, async |index| {
+        let value = &args[index];
+        if !crate::value_contains_gpu(value) {
+            return Ok(value.clone());
         }
-        let resident_integer = matches!(&value, Value::GpuTensor(_))
-            && crate::builtins::common::validation::value_has_native_integer_class(&value);
-        let gathered = gather_if_needed_async(&value)
+        let resident_integer = matches!(value, Value::GpuTensor(_))
+            && crate::builtins::common::validation::value_has_native_integer_class(value);
+        let gathered = gather_if_needed_async(value)
             .await
             .map_err(|err| invalid_with_source(format!("scatterhist: {err}"), err))?;
         if resident_integer
@@ -92,17 +98,16 @@ pub(super) async fn gather_values(args: Vec<Value>) -> BuiltinResult<Vec<Value>>
         {
             return Err(inexact_observation());
         }
-        out.push(gathered);
-    }
-    Ok(out)
+        Ok(gathered)
+    })
+    .await
 }
 
-pub(super) fn parse_xy_and_rest(
-    args: Vec<Value>,
-) -> BuiltinResult<(Vec<f64>, Vec<f64>, Vec<Value>)> {
-    let mut iter = args.into_iter();
-    let x = numeric_vector(iter.next().unwrap(), "x")?;
-    let y = numeric_vector(iter.next().unwrap(), "y")?;
+pub(super) fn parse_xy(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<(Vec<f64>, Vec<f64>)> {
+    let x = numeric_vector(args[0].clone(), "x")?;
+    let y = numeric_vector(args[1].clone(), "y")?;
     if x.len() != y.len() {
         return Err(invalid(
             "scatterhist: x and y must contain the same number of elements",
@@ -111,7 +116,7 @@ pub(super) fn parse_xy_and_rest(
     if x.is_empty() {
         return Err(invalid("scatterhist: x and y must not be empty"));
     }
-    Ok((x, y, iter.collect()))
+    Ok((x, y))
 }
 
 pub(super) fn numeric_vector(value: Value, name: &str) -> BuiltinResult<Vec<f64>> {

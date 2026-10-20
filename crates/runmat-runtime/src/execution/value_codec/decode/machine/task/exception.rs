@@ -1,9 +1,13 @@
 use super::super::*;
+use super::aggregate_output::{Admission, Array, Quote};
 use super::text::TextCopy;
+use crate::context::RuntimeContext;
+use crate::execution::value_codec::object_output::ObjectText;
 use runmat_async::RuntimeErrorOwner;
 use runmat_execution::value::{
     ExceptionFailureOrigin, ExceptionGpuGatherRetry, ExceptionRuntimeMetadata, ExceptionValue,
 };
+use runmat_value::{ExceptionStack, MExceptionParts, Utf8Text};
 
 enum Stage {
     Identifier,
@@ -17,7 +21,152 @@ enum Stage {
     Complete,
 }
 
-pub(in crate::execution::value_codec::decode::machine) struct ExceptionTask<'a> {
+pub(in crate::execution::value_codec::decode::machine) enum ExceptionTask<'a> {
+    Public(PublicExceptionTask<'a>),
+    Diagnostic(OrdinaryExceptionTask<'a>),
+}
+
+impl<'a> ExceptionTask<'a> {
+    pub(super) fn new(
+        source: &'a ExceptionValue,
+        path: ControlPath<'a>,
+        frame_sources: Option<
+            &'a dyn crate::execution::value_codec::decode::InlineFrameSourceAuthority,
+        >,
+        runtime: Option<&'a RuntimeContext>,
+    ) -> Result<Self, ValueCodecError> {
+        if !source.causes.is_empty() {
+            return Err(ValueCodecError::unsupported(
+                &path,
+                "nested exception causes are not represented by the current runtime MException",
+            ));
+        }
+        let mut quote = Quote::default();
+        quote.text(&source.identifier, &path)?;
+        quote.text(&source.message, &path)?;
+        for frame in &source.stack {
+            quote.text(frame, &path)?;
+        }
+        quote.array::<Utf8Text>(source.stack.len(), &path)?;
+        quote.add(MException::requested_header_bytes(), 1, &path)?;
+        let admission = Admission::new(quote, runtime, &path)?;
+        if !admission.is_managed() {
+            return Ok(Self::Diagnostic(OrdinaryExceptionTask::new(
+                source,
+                path,
+                frame_sources,
+            )));
+        }
+        // INTERIM physical-owner frontier: RuntimeErrorOwner is an opaque
+        // Arc/Rc and its mutable String/Vec diagnostics have no preallocation
+        // factory. A public exception header is not a certificate for them.
+        if source.runtime.is_some() {
+            return Err(ValueCodecError::unsupported(
+                &path,
+                "managed exception diagnostic reconstruction requires an admitted diagnostic owner",
+            ));
+        }
+        let stack = admission.array(source.stack.len(), &path)?;
+        Ok(Self::Public(PublicExceptionTask {
+            source,
+            copy: None,
+            identifier: None,
+            message: None,
+            stack: Some(stack),
+            stage: 0,
+            path,
+            admission,
+        }))
+    }
+
+    pub(super) fn advance(
+        &mut self,
+        work: usize,
+    ) -> Result<(usize, Option<Value>), ValueCodecError> {
+        match self {
+            Self::Public(task) => task.advance(work),
+            Self::Diagnostic(task) => task.advance(work),
+        }
+    }
+    pub(super) fn path(&self) -> &ControlPath<'a> {
+        match self {
+            Self::Public(task) => &task.path,
+            Self::Diagnostic(task) => task.path(),
+        }
+    }
+}
+
+pub(in crate::execution::value_codec::decode::machine) struct PublicExceptionTask<'a> {
+    source: &'a ExceptionValue,
+    copy: Option<ObjectText<'a>>,
+    identifier: Option<Utf8Text>,
+    message: Option<Utf8Text>,
+    stack: Option<Array<Utf8Text>>,
+    stage: usize,
+    path: ControlPath<'a>,
+    admission: Admission<'a>,
+}
+impl PublicExceptionTask<'_> {
+    fn advance(&mut self, work: usize) -> Result<(usize, Option<Value>), ValueCodecError> {
+        self.admission.checkpoint(&self.path)?;
+        if !self.source.causes.is_empty() {
+            return Err(ValueCodecError::unsupported(
+                &self.path,
+                "nested exception causes are not represented by the current runtime MException",
+            ));
+        }
+        let source = match self.stage {
+            0 => Some(self.source.identifier.as_str()),
+            1 => Some(self.source.message.as_str()),
+            index => self.source.stack.get(index - 2).map(String::as_str),
+        };
+        if let Some(source) = source {
+            if self.copy.is_none() {
+                self.copy = Some(self.admission.text(source, &self.path)?);
+            }
+            let copy = self.copy.as_mut().expect("active exception field");
+            let completed = copy.advance(work);
+            if copy.is_complete() {
+                let text = self.copy.take().expect("active exception field").finish();
+                match self.stage {
+                    0 => self.identifier = Some(text),
+                    1 => self.message = Some(text),
+                    _ => self
+                        .stack
+                        .as_mut()
+                        .expect("exception stack destination")
+                        .push(text),
+                }
+                self.stage += 1;
+            }
+            return Ok((completed, None));
+        }
+        let stack = self
+            .stack
+            .take()
+            .expect("exception stack destination")
+            .finish();
+        let stack = ExceptionStack::try_from_exact_storage(stack)
+            .expect("managed stack has its original exact backing");
+        let fields = MExceptionParts {
+            identifier: self.identifier.take().expect("decoded identifier"),
+            message: self.message.take().expect("decoded message"),
+            stack,
+            original: None,
+        };
+        let value = self.admission.construct(&self.path, |permit| {
+            let exception = MException::try_from_owned_fields_with_exact_header(
+                fields,
+                permit.expect("managed public exception"),
+            )
+            .map_err(|e| ValueCodecError::allocation(&self.path, e.into()))?;
+            Ok(Value::MException(exception))
+        })?;
+        Ok((1, Some(value)))
+    }
+}
+
+pub(in crate::execution::value_codec::decode::machine) struct OrdinaryExceptionTask<'a> {
     source: &'a ExceptionValue,
     stage: Stage,
     copy: Option<TextCopy<'a>>,
@@ -29,15 +178,15 @@ pub(in crate::execution::value_codec::decode::machine) struct ExceptionTask<'a> 
     frames: Vec<crate::CallFrame>,
     call_stack: Vec<String>,
     phase: Option<String>,
-    path: String,
+    path: ControlPath<'a>,
     frame_sources:
         Option<&'a dyn crate::execution::value_codec::decode::InlineFrameSourceAuthority>,
 }
 
-impl<'a> ExceptionTask<'a> {
+impl<'a> OrdinaryExceptionTask<'a> {
     pub(super) fn new(
         source: &'a ExceptionValue,
-        path: String,
+        path: ControlPath<'a>,
         frame_sources: Option<
             &'a dyn crate::execution::value_codec::decode::InlineFrameSourceAuthority,
         >,
@@ -248,14 +397,17 @@ impl<'a> ExceptionTask<'a> {
                 RuntimeErrorOwner::new(error),
             )
         } else {
-            let mut exception = MException::new(identifier, message);
-            exception.stack = stack;
-            exception
+            MException::from_owned_fields(
+                identifier.into(),
+                message.into(),
+                MException::stack_from_unbounded(stack),
+                None,
+            )
         };
         Ok(Value::MException(exception))
     }
 
-    pub(super) fn path(&self) -> &str {
+    pub(super) fn path(&self) -> &ControlPath<'a> {
         &self.path
     }
 }

@@ -27,8 +27,8 @@ async fn try_operator_method_with_outputs(
     caller_function_name: Option<&str>,
 ) -> Result<Option<RootedValueSequence>, RuntimeError> {
     let class_name = match receiver {
-        Value::Object(object) => object.class_name.clone(),
-        Value::HandleObject(handle) => handle.class_name.clone(),
+        Value::Object(object) => object.class_name().clone(),
+        Value::HandleObject(handle) => handle.class_name.as_identity().clone(),
         _ => {
             return Err(semantic_error(
                 "InvalidObjectDispatch",

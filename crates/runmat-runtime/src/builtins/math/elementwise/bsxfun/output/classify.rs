@@ -49,7 +49,7 @@ pub(in crate::builtins::math::elementwise::bsxfun) fn value(
             Ok(complex(real, imaginary))
         }
         Value::CharArray(array) if array.rows * array.cols == 1 => Ok(
-            ClassifiedValue::Character(array.data.first().copied().unwrap_or('\0')),
+            ClassifiedValue::Character(array.data().first().copied().unwrap_or('\0')),
         ),
         other => Err(super::super::error::detail(
             &BSXFUN_ERROR_FUNCTION_ERROR,

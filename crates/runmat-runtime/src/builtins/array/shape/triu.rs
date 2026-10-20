@@ -71,7 +71,10 @@ fn triu_error_with_message(
     binding_variant = "default",
     builtin_path = "crate::builtins::array::shape::triu"
 )]
-async fn triu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn triu_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &TRIU_DESCRIPTOR,
         &TRIU_ERROR_TOO_MANY_OUTPUTS,
@@ -86,7 +89,7 @@ async fn triu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
             BUILTIN_NAME,
         )?;
     }
-    let offset = parse_diagonal_offset(&rest).await?;
+    let offset = parse_diagonal_offset(rest.view()).await?;
     match value {
         Value::GpuTensor(handle) => triu_gpu(handle, offset).await,
         value => triu_host_value(value, offset),
@@ -170,7 +173,9 @@ fn triu_value_is_paged(value: &Value) -> bool {
     }
 }
 
-async fn parse_diagonal_offset(args: &[Value]) -> crate::BuiltinResult<isize> {
+async fn parse_diagonal_offset(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<isize> {
     if args.is_empty() {
         return Ok(0);
     }
@@ -484,7 +489,10 @@ pub(crate) mod tests {
     use futures::executor::block_on;
 
     fn triu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-        block_on(super::triu_builtin(value, rest))
+        block_on(super::triu_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::{
@@ -607,23 +615,17 @@ pub(crate) mod tests {
         };
         assert_eq!(result.rows, 2);
         assert_eq!(result.cols, 2);
-        assert_eq!(result.data, vec!['a', 'b', '\0', 'd']);
+        assert_eq!(result.data(), vec!['a', 'b', '\0', 'd']);
 
         let pages = CharArray::new_with_shape("abcdefgh".chars().collect(), vec![2, 2, 2]).unwrap();
         let original = pages.clone();
         let masked = triu_char_array(pages, 0).unwrap();
         assert_eq!(masked.shape.as_slice(), &[2, 2, 2]);
-        assert_eq!(
-            masked.data.as_slice(),
-            &['a', 'b', '\0', 'd', 'e', 'f', '\0', 'h']
-        );
-        assert_eq!(
-            original.data.as_slice(),
-            &['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']
-        );
-        let pointer = masked.data.as_ptr();
+        assert_eq!(masked.data(), &['a', 'b', '\0', 'd', 'e', 'f', '\0', 'h']);
+        assert_eq!(original.data(), &['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']);
+        let pointer = masked.data().as_ptr();
         let reused = triu_char_array(masked, isize::MIN).unwrap();
-        assert_eq!(reused.data.as_ptr(), pointer);
+        assert_eq!(reused.data().as_ptr(), pointer);
         let mut invalid = original;
         invalid.rows = 0;
         assert!(triu_char_array(invalid, 0).is_err());
@@ -665,10 +667,7 @@ pub(crate) mod tests {
             panic!("expected character output")
         };
         assert_eq!(output.shape.as_slice(), &[2, 2, 2]);
-        assert_eq!(
-            output.data.as_slice(),
-            &['a', 'b', '\0', 'd', 'e', 'f', '\0', 'h']
-        );
+        assert_eq!(output.data(), &['a', 'b', '\0', 'd', 'e', 'f', '\0', 'h']);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

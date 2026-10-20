@@ -20,7 +20,7 @@ pub(super) struct ActiveDeviceMetadata {
 
 impl ActiveDeviceMetadata {
     pub(super) fn into_struct(self) -> StructValue {
-        let mut result = StructValue::new();
+        let mut result = runmat_value::UnboundedStructValueBuilder::new();
         result.insert("device_id", Value::Int(IntValue::U32(self.info.device_id)));
         result.insert("index", Value::Int(IntValue::U32(GPU_DEVICE_ACTIVE_INDEX)));
         result.insert("name", Value::string(self.info.name));
@@ -45,6 +45,6 @@ impl ActiveDeviceMetadata {
             "supports_double",
             Value::Bool(matches!(self.precision, ProviderPrecision::F64)),
         );
-        result
+        result.finish()
     }
 }

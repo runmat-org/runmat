@@ -116,9 +116,9 @@ enum NullMode {
     binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::solve::null"
 )]
-async fn null_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn null_builtin(value: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     ensure_null_input_compatibility(&value)?;
-    let mode = parse_null_mode(&rest).await?;
+    let mode = parse_null_mode(rest.view()).await?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, NAME)?;
     if crate::builtins::common::validation::value_contains_native_integer_class(&value)
         && !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(&value)
@@ -160,7 +160,9 @@ fn ensure_null_input_compatibility(value: &Value) -> BuiltinResult<()> {
     Ok(())
 }
 
-async fn parse_null_mode(args: &[Value]) -> Result<NullMode, RuntimeError> {
+async fn parse_null_mode(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> Result<NullMode, RuntimeError> {
     match args.len() {
         0 => Ok(NullMode::Orthonormal { tolerance: None }),
         1 => {
@@ -190,7 +192,12 @@ async fn parse_null_mode(args: &[Value]) -> Result<NullMode, RuntimeError> {
                 )));
             }
             let gathered = crate::dispatcher::gather_if_needed_async(&args[0]).await?;
-            let tolerance = parse_tolerance_arg(NAME, &[gathered]).map_err(argument_error)?;
+            let gathered = [gathered];
+            let tolerance = parse_tolerance_arg(
+                NAME,
+                crate::call::FunctionArgumentView::from_slice(&gathered),
+            )
+            .map_err(argument_error)?;
             Ok(NullMode::Orthonormal { tolerance })
         }
         _ => Err(argument_error(format!("{NAME}: too many input arguments"))),
@@ -1248,6 +1255,9 @@ pub(crate) mod tests {
     }
 
     fn null_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::null_builtin(value, rest))
+        block_on(super::null_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 }

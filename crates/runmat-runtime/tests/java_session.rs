@@ -85,15 +85,22 @@ fn invoke(
         .require_foreign(symbol)
         .expect("foreign service")
         .clone();
-    let sequence = futures::executor::block_on(context.scope(service.invoke(
-        context.clone(),
-        ForeignCall {
-            adapter: JAVA_ADAPTER_ID.into(),
-            symbol: symbol.into(),
-            arguments,
-            requested_outputs: 1,
-        },
-    )))
+    let sequence = futures::executor::block_on(
+        context.scope(
+            service.invoke(
+                context.clone(),
+                ForeignCall {
+                    adapter: JAVA_ADAPTER_ID.into(),
+                    symbol: symbol.into(),
+                    arguments: runmat_runtime::call::RootedFunctionArguments::ordinary(
+                        runmat_runtime::execution::RootedValues::in_context(arguments, context)
+                            .map_err(Box::new)?,
+                    ),
+                    requested_outputs: 1,
+                },
+            ),
+        ),
+    )
     .into_invoked_result()
     .map_err(Box::new)?;
     sequence.try_map_owned(
@@ -205,7 +212,7 @@ fn wide_unsigned_values_and_java_arrays_cross_the_runtime_boundary_exactly() {
             ],
         )
         .expect("convert exact uint64 through BigInteger"),
-        Value::String(u64::MAX.to_string())
+        Value::String(u64::MAX.to_string().into())
     );
 
     let array = invoke(
@@ -308,7 +315,7 @@ fn typed_vectors_and_reference_collections_use_reviewed_java_copies() {
     let Value::StringArray(split) = split.value() else {
         panic!("Java String[] must return a RunMat string array");
     };
-    assert_eq!(split.data, vec!["left", "right"]);
+    assert_eq!(split.data(), &["left", "right"]);
 }
 
 #[test]
@@ -336,7 +343,8 @@ fn java_environment_configuration_and_desktop_capability_are_session_owned() {
                 std::env::var_os("RUNMAT_TEST_JAVA_HOME")
                     .expect("live Java home")
                     .to_string_lossy()
-                    .into_owned(),
+                    .into_owned()
+                    .into(),
             ),
         ],
     )
@@ -345,11 +353,11 @@ fn java_environment_configuration_and_desktop_capability_are_session_owned() {
         panic!("jenv configuration must return a JavaEnvironment object");
     };
     assert_eq!(
-        status.class_name.display_name(),
+        status.class_name().display_name(),
         "matlab.javaclient.JavaEnvironment"
     );
     assert_eq!(
-        status.properties.get("Status"),
+        status.properties().get("Status"),
         Some(&Value::String("notloaded".into()))
     );
 }

@@ -25,7 +25,7 @@ fn bounded_three_subscript_string_store_uses_full_selector_rank() {
     };
     assert_eq!(updated.shape, vec![1, 1, 3]);
     assert_eq!(
-        updated.data,
+        updated.data(),
         vec![String::new(), "mat".into(), String::new()]
     );
 }
@@ -144,7 +144,7 @@ fn repeated_scalar_reads_preserve_runtime_family_and_shape() {
         matches!(read_with_plan(Value::Bool(true), &plan).unwrap(), Value::LogicalArray(v) if *v.data == [1, 1, 1])
     );
     assert!(
-        matches!(read_with_plan(Value::String("entry".into()), &plan).unwrap(), Value::StringArray(v) if v.data == ["entry", "entry", "entry"])
+        matches!(read_with_plan(Value::String("entry".into()), &plan).unwrap(), Value::StringArray(v) if v.data() == ["entry", "entry", "entry"])
     );
 }
 

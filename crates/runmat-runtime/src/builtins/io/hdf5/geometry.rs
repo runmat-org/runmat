@@ -257,7 +257,7 @@ pub(super) enum SelectionControls {
 }
 
 pub(super) fn parse_selection_controls(
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     builtin: &'static str,
 ) -> BuiltinResult<SelectionControls> {
     match rest.len() {
@@ -285,7 +285,7 @@ pub(super) fn parse_selection_controls(
 }
 
 pub(super) fn prepare_host_selection_controls(
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     builtin: &'static str,
 ) -> BuiltinResult<Option<SelectionControls>> {
     if !matches!(rest.len(), 0 | 2 | 3) {

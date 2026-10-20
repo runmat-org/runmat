@@ -1,6 +1,11 @@
 //! Incremental ownership of GC roots retained by decoded values.
 
-use std::rc::Rc;
+use runmat_execution::resource::ExactShared;
+
+#[path = "roots/children.rs"]
+mod children;
+use children::RootChunk;
+pub(crate) use children::RootedValueChildren;
 
 use runmat_gc::{GcError, PreparedRootLease, PreparedRootPlan, RootTraceFailure, Trace, Tracer};
 use runmat_value::{ExactHostNumericAllocationError, Value, ValueTraceWorkspace};
@@ -41,15 +46,43 @@ pub(crate) struct RootedValueMember {
 }
 
 impl RootedValueMember {
+    /// Transfer an existing registration rather than retracing callback output.
+    pub(crate) fn from_rooted(value: super::RootedValue) -> Self {
+        let super::RootedResult { value, _roots } = value;
+        Self {
+            value,
+            roots: RetainedValueRoots::direct(_roots),
+        }
+    }
+    /// Root under the selected invocation without using the compatibility
+    /// planner's unbounded traversal/reference storage.
+    pub(crate) fn root_in_context(
+        value: Value,
+        runtime: &RuntimeContext,
+    ) -> Result<Self, RootedValueAdmissionError> {
+        let roots =
+            RetainedValueRoots::direct(RootedValueHandles::for_value_in_context(&value, runtime)?);
+        Ok(Self { value, roots })
+    }
+
     pub(crate) fn root(value: Value) -> Result<Self, GcError> {
         let roots = RetainedValueRoots::direct(RootedValueHandles::for_traced(&value)?);
         Ok(Self { value, roots })
     }
 
-    pub(crate) fn aggregate(value: Value, children: RootedValueChildren) -> Self {
-        Self {
-            value,
-            roots: children.finish(),
+    pub(crate) fn aggregate(
+        value: Value,
+        mut children: RootedValueChildren<'_>,
+    ) -> Result<Self, HostAllocationError> {
+        match children.try_finish() {
+            Ok(roots) => Ok(Self { value, roots }),
+            Err(error) => {
+                // Root retirement can trigger collection. Retire the physical
+                // aggregate before its only construction roots on failure.
+                drop(value);
+                drop(children);
+                Err(error)
+            }
         }
     }
 
@@ -67,10 +100,19 @@ impl RootedValueMember {
         Ok(rooted)
     }
 
-    pub(crate) fn into_child(self, children: &mut RootedValueChildren) -> Value {
+    pub(crate) fn into_child(
+        self,
+        children: &mut RootedValueChildren<'_>,
+    ) -> Result<Value, HostAllocationError> {
         let Self { value, roots } = self;
-        children.push(roots);
-        value
+        match children.try_push(roots) {
+            Ok(()) => Ok(value),
+            Err((roots, error)) => {
+                drop(value);
+                drop(roots);
+                Err(error)
+            }
+        }
     }
 
     pub(super) fn into_parts(self) -> (Value, RetainedValueRoots) {
@@ -78,13 +120,46 @@ impl RootedValueMember {
     }
 }
 
-const ROOT_CHUNK_CAPACITY: usize = 64;
-
 #[derive(Clone, Debug)]
 pub(super) enum RetainedValueRoots {
     Empty,
     Direct { _roots: RootedValueHandles },
-    Aggregate { _root: Rc<RootChunk> },
+    Aggregate { _root: ExactShared<RootChunk> },
+}
+
+impl RootedValueChildren<'_> {
+    /// Retain an existing registration, never retrace its Value generation.
+    pub(crate) fn try_retain_handles(
+        &mut self,
+        handles: RootedValueHandles,
+    ) -> Result<(), HostAllocationError> {
+        self.try_push(RetainedValueRoots::direct(handles))
+            .map_err(|(_roots, error)| error)
+    }
+
+    pub(crate) fn try_publish_values(
+        mut self,
+        values: runmat_value::OutputListStorage,
+    ) -> Result<super::RootedValues, HostAllocationError> {
+        match self.try_finish() {
+            Ok(_roots) => Ok(super::RootedValues { values, _roots }),
+            Err(error) => {
+                drop(values);
+                Err(error)
+            }
+        }
+    }
+}
+
+impl super::RootedValues {
+    pub(crate) fn retain_existing_roots(
+        &self,
+        children: &mut RootedValueChildren<'_>,
+    ) -> Result<(), HostAllocationError> {
+        children
+            .try_push(self._roots.clone())
+            .map_err(|(_roots, error)| error)
+    }
 }
 
 impl RetainedValueRoots {
@@ -98,79 +173,6 @@ impl RetainedValueRoots {
 
     fn is_empty(&self) -> bool {
         matches!(self, Self::Empty)
-    }
-}
-
-/// Incremental root owner for aggregate children. Fixed-size linked chunks
-/// make each transfer bounded without flattening descendant roots at every
-/// ancestor. The final-drop path iteratively retires unique sibling chunks;
-/// nested aggregate depth remains bounded by `ValueLimits::max_depth`.
-#[derive(Debug, Default)]
-pub(crate) struct RootedValueChildren {
-    sealed: Option<Rc<RootChunk>>,
-    current: Vec<RetainedValueRoots>,
-}
-
-impl RootedValueChildren {
-    pub(crate) fn new() -> Self {
-        Self {
-            sealed: None,
-            current: Vec::new(),
-        }
-    }
-
-    pub(super) fn push(&mut self, roots: RetainedValueRoots) {
-        if roots.is_empty() {
-            return;
-        }
-        if self.current.len() == ROOT_CHUNK_CAPACITY {
-            let node = RootChunk {
-                _roots: std::mem::replace(
-                    &mut self.current,
-                    Vec::with_capacity(ROOT_CHUNK_CAPACITY),
-                ),
-                previous: self.sealed.take(),
-            };
-            self.sealed = Some(Rc::new(node));
-        }
-        self.current.push(roots);
-    }
-
-    pub(super) fn finish(mut self) -> RetainedValueRoots {
-        if self.current.is_empty() {
-            return self
-                .sealed
-                .take()
-                .map_or(RetainedValueRoots::Empty, |root| {
-                    RetainedValueRoots::Aggregate { _root: root }
-                });
-        }
-        RetainedValueRoots::Aggregate {
-            _root: Rc::new(RootChunk {
-                _roots: std::mem::take(&mut self.current),
-                previous: self.sealed.take(),
-            }),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub(super) struct RootChunk {
-    _roots: Vec<RetainedValueRoots>,
-    previous: Option<Rc<RootChunk>>,
-}
-
-impl Drop for RootChunk {
-    fn drop(&mut self) {
-        let mut previous = self.previous.take();
-        while let Some(node) = previous {
-            let Ok(mut node) = Rc::try_unwrap(node) else {
-                break;
-            };
-            previous = node.previous.take();
-            // `node` now owns no sibling link. Its bounded root chunk drops
-            // here; nested aggregates are independently depth-limited.
-        }
     }
 }
 
@@ -209,15 +211,27 @@ impl RootedValueHandles {
         slices: &[&[Value]],
         runtime: &RuntimeContext,
     ) -> Result<Self, RootedValueAdmissionError> {
+        Self::for_values_iterator_in_context(
+            slices.iter().flat_map(|values| values.iter()),
+            runtime,
+        )
+    }
+
+    /// Replay original borrowed owners without constructing a reference or
+    /// payload collection. The iterator must enumerate the same stable Values
+    /// during planning and registration.
+    pub(crate) fn for_values_iterator_in_context<'a>(
+        values: impl Iterator<Item = &'a Value> + Clone,
+        runtime: &RuntimeContext,
+    ) -> Result<Self, RootedValueAdmissionError> {
         let Some(scratch) = HostAllocationReceipt::dynamic_trace_scratch(runtime)? else {
-            return Self::for_traced(&ValuesSlices(slices)).map_err(RootedValueAdmissionError::Gc);
+            return Self::for_traced(&ValuesIterator(values))
+                .map_err(RootedValueAdmissionError::Gc);
         };
         let mut workspace = ValueTraceWorkspace::admitted(&scratch);
         let mut trace = |tracer: &mut dyn Tracer| {
-            for values in slices {
-                for value in *values {
-                    workspace.try_trace(value, tracer)?;
-                }
+            for value in values.clone() {
+                workspace.try_trace(value, tracer)?;
             }
             Ok(())
         };
@@ -266,6 +280,12 @@ impl RootedValueHandles {
         Self::for_traced(&BorrowedValues(&values))
     }
 
+    pub(crate) fn for_values_iterator_unbounded<'a>(
+        values: impl Iterator<Item = &'a Value> + Clone,
+    ) -> Result<Self, GcError> {
+        Self::for_traced(&ValuesIterator(values))
+    }
+
     pub(crate) fn for_traced(value: &impl Trace) -> Result<Self, GcError> {
         let plan = PreparedRootPlan::for_traced(value).map_err(root_admission_error)?;
         let roots = plan
@@ -279,14 +299,12 @@ impl RootedValueHandles {
     }
 }
 
-struct ValuesSlices<'s, 'v>(&'s [&'v [Value]]);
+struct ValuesIterator<I>(I);
 
-impl Trace for ValuesSlices<'_, '_> {
+impl<'a, I: Iterator<Item = &'a Value> + Clone> Trace for ValuesIterator<I> {
     fn trace(&self, tracer: &mut dyn Tracer) {
-        for values in self.0 {
-            for value in *values {
-                value.trace(tracer);
-            }
+        for value in self.0.clone() {
+            value.trace(tracer);
         }
     }
 }

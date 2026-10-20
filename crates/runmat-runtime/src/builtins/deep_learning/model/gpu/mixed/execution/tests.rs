@@ -88,7 +88,8 @@ fn cancellation_after_awaited_stage_stops_later_stages_without_publication() {
     let network = object(
         "dlnetwork",
         vec![("Layers", Value::Cell(CellArray::new(vec![], 0, 1).unwrap()))],
-    );
+    )
+    .expect("fixture object");
     let Value::Object(network) = network else {
         unreachable!()
     };
@@ -153,7 +154,8 @@ fn provider_failure_remains_operational_when_cancellation_races_it() {
     let network = object(
         "dlnetwork",
         vec![("Layers", Value::Cell(CellArray::new(vec![], 0, 1).unwrap()))],
-    );
+    )
+    .expect("fixture object");
     let Value::Object(network) = network else {
         unreachable!()
     };

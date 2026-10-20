@@ -20,7 +20,9 @@ pub(super) struct LinkageMetric {
     pub(super) parameters: Vec<Value>,
 }
 
-pub(super) fn parse_options(args: &[Value]) -> BuiltinResult<LinkageOptions> {
+pub(super) fn parse_options(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<LinkageOptions> {
     let mut method = LinkageMethod::Single;
     let mut metric_args = Vec::new();
     let mut savememory = None;
@@ -60,7 +62,7 @@ pub(super) fn parse_options(args: &[Value]) -> BuiltinResult<LinkageOptions> {
                     "linkage: pdist input cell must be the complete distance metric argument",
                 ));
             }
-            metric_args.extend(cell.data.iter().cloned());
+            metric_args.extend(cell.data().iter().cloned());
         } else {
             metric_args.push(args[idx].clone());
         }

@@ -173,29 +173,31 @@ fn restore_mat_array<'a>(
                         )?,
                     );
                 }
-                let values: Vec<Value> = restored
-                    .into_iter()
-                    .map(|value| value.with_owned(std::convert::identity))
-                    .collect();
-                let value = if count == 1 && dims == [1, 1] {
-                    values.into_iter().next().expect("one object element")
+                let result = if count == 1 && dims == [1, 1] {
+                    restored.pop().expect("one object element")
                 } else {
-                    let array =
-                        runmat_value::ObjectArray::new(class, values, dims).map_err(load_error)?;
-                    let array = match &product {
-                        crate::context::CurrentClassProductResolution::Selected(facts) => array
-                            .with_selected_provenance([std::rc::Rc::clone(facts)])
-                            .map_err(load_error)?,
-                        crate::context::CurrentClassProductResolution::RegisteredBuiltin(_) => {
-                            array.with_unselected_provenance()
+                    let provenance = match &product {
+                        crate::context::CurrentClassProductResolution::Selected(facts) => {
+                            Some(facts)
                         }
+                        crate::context::CurrentClassProductResolution::RegisteredBuiltin(_) => None,
                     };
-                    Value::ObjectArray(array)
+                    let mut output = crate::execution::object_array::ObjectArrayConstruction::new(
+                        runtime,
+                        crate::execution::object_array::Class::Name(class.display_name()),
+                        count,
+                        &dims,
+                        provenance.into_iter(),
+                        provenance.is_none(),
+                    )?;
+                    for child in &restored {
+                        output.push(child.value().clone())?;
+                    }
+                    output.finish()?
                 };
                 crate::builtins::introspection::object_serialization::validate_mat_object_product_current(
-                    &product, runtime,
-                )?;
-                RootedValue::new(value).map_err(|error| error.into_runtime_error())
+                    &product,runtime)?;
+                Ok(result)
             }
             MatData::Cell { elements } => {
                 let mut restored = Vec::with_capacity(elements.len());

@@ -49,20 +49,20 @@ fn invalid_nan_arity_and_outputs_never_reach_preparation() {
     assert!(block_on(super::super::logical_builtin(
         Some(context.clone()),
         Value::Tensor(Tensor::new(vec![f64::NAN], vec![1, 1]).unwrap()),
-        vec![]
+        crate::builtins::common::test_support::builtin_arguments(vec![])
     ))
     .is_err());
     assert!(block_on(super::super::logical_builtin(
         Some(context.clone()),
         tensor(),
-        vec![Value::Num(1.0)]
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)])
     ))
     .is_err());
     let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     assert!(block_on(super::super::logical_builtin(
         Some(context),
         tensor(),
-        vec![]
+        crate::builtins::common::test_support::builtin_arguments(vec![])
     ))
     .is_err());
     assert_eq!(calls.get(), 0);
@@ -76,7 +76,7 @@ fn admitted_dense_shape_and_zero_output_effect_are_preserved() {
     let result = block_on(super::super::logical_builtin(
         Some(context),
         Value::Tensor(Tensor::new(vec![0.0, 2.0, -1.0, 0.0], vec![2, 2]).unwrap()),
-        vec![],
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
     ))
     .unwrap();
     let Value::LogicalArray(array) = result.value() else {

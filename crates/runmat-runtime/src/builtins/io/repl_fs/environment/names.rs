@@ -58,7 +58,7 @@ impl EnvironmentNames {
             Value::String(value) => Ok(Self::StringScalar(value.as_str().to_owned())),
             Value::StringArray(array) => Ok(Self::Strings {
                 names: array
-                    .data
+                    .data()
                     .iter()
                     .map(|text| text.as_str().to_owned())
                     .collect(),
@@ -70,8 +70,8 @@ impl EnvironmentNames {
     }
 
     fn decode_cells(array: &CellArray) -> Result<Self, NameError> {
-        let mut names = Vec::with_capacity(array.data.len());
-        let mut kinds = Vec::with_capacity(array.data.len());
+        let mut names = Vec::with_capacity(array.data().len());
+        let mut kinds = Vec::with_capacity(array.data().len());
         for value in array.iter_column_major() {
             match value {
                 Value::CharArray(chars)
@@ -132,7 +132,7 @@ impl EnvironmentNames {
 
 fn character_row(array: &CharArray, row: usize) -> String {
     let start = row * array.cols;
-    let mut text: String = array.data[start..start + array.cols].iter().collect();
+    let mut text: String = array.data()[start..start + array.cols].iter().collect();
     while text.ends_with(' ') {
         text.pop();
     }

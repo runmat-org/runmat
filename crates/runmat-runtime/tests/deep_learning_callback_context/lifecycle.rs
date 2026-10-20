@@ -98,7 +98,7 @@ fn suspended_callback(invocation: RuntimeBuiltinInvocation<'_>) -> RuntimeBuilti
     });
     let input = invocation
         .args
-        .first()
+        .get(0)
         .cloned()
         .map(runmat_runtime::execution::RootedValue::new)
         .transpose();

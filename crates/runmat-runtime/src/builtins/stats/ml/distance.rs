@@ -13,7 +13,7 @@ use runmat_builtins::{
     SQUAREFORM_EXPLICIT_GPU_EXTENSION, SQUAREFORM_INTEGER_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{CellArray, Tensor, Value};
+use runmat_value::{Tensor, Value};
 
 use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::tensor;
@@ -112,21 +112,40 @@ struct KnnOptions {
     include_ties: bool,
 }
 
+#[cfg(test)]
+async fn pdist_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let rest =
+        crate::execution::RootedValues::new(rest).map_err(|error| error.into_runtime_error())?;
+    pdist_builtin_registered(None, x, rest.into()).await
+}
+
+#[cfg(test)]
+async fn pdist2_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    let rest =
+        crate::execution::RootedValues::new(rest).map_err(|error| error.into_runtime_error())?;
+    pdist2_builtin_registered(None, x, y, rest.into()).await
+}
+
 #[runtime_builtin(
     name = "pdist",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::stats::ml::distance"
 )]
-async fn pdist_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    ensure_pdist_integer_boundaries(PairwiseDistanceBuiltin::Pdist, &x, None, &rest).await?;
-    let metric_args = strip_cache_size_option(MetricCaller::Pdist, rest).await?;
-    let kind = parse_metric_name(MetricCaller::Pdist, &metric_args)?;
+async fn pdist_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    x: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    ensure_pdist_integer_boundaries(PairwiseDistanceBuiltin::Pdist, &x, None, rest.view()).await?;
+    let metric_args = strip_cache_size_option(MetricCaller::Pdist, rest, runtime.as_ref()).await?;
+    let kind = parse_metric_name(MetricCaller::Pdist, metric_args.view())?;
     let x = value_to_matrix(PDIST_NAME, x).await?;
     let metric = parse_metric_kind(
         MetricCaller::Pdist,
         &x,
         kind,
-        metric_args.into_iter().skip(1).collect(),
+        metric_args.view().range(metric_args.len().min(1)..)?,
     )
     .await?;
     let distances = condensed_distances(MetricCaller::Pdist, &x, &metric)?;
@@ -136,13 +155,21 @@ async fn pdist_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
 #[runtime_builtin(
     name = "pdist2",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::stats::ml::distance"
 )]
-async fn pdist2_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    ensure_pdist_integer_boundaries(PairwiseDistanceBuiltin::Pdist2, &x, Some(&y), &rest).await?;
-    let (metric_args, selection) = split_pdist2_options(rest)?;
-    let metric_args = strip_cache_size_option(MetricCaller::Pdist2, metric_args).await?;
-    let kind = parse_metric_name(MetricCaller::Pdist2, &metric_args)?;
+async fn pdist2_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    x: Value,
+    y: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    ensure_pdist_integer_boundaries(PairwiseDistanceBuiltin::Pdist2, &x, Some(&y), rest.view())
+        .await?;
+    let (metric_args, selection) = split_pdist2_options(rest, runtime.as_ref()).await?;
+    let metric_args =
+        strip_cache_size_option(MetricCaller::Pdist2, metric_args, runtime.as_ref()).await?;
+    let kind = parse_metric_name(MetricCaller::Pdist2, metric_args.view())?;
     if selection.is_none()
         && matches!(crate::output_count::current_output_count(), Some(count) if count > 1)
     {
@@ -163,7 +190,7 @@ async fn pdist2_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<V
         MetricCaller::Pdist2,
         &x,
         kind,
-        metric_args.into_iter().skip(1).collect(),
+        metric_args.view().range(metric_args.len().min(1)..)?,
     )
     .await?;
     let distances = distance_matrix(MetricCaller::Pdist2, &x, &y, &metric)?;
@@ -182,10 +209,11 @@ async fn pdist2_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<V
 
 async fn strip_cache_size_option(
     caller: MetricCaller,
-    args: Vec<Value>,
-) -> BuiltinResult<Vec<Value>> {
+    args: crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
     let name = caller.name();
-    let mut metric_args = Vec::with_capacity(args.len());
+    let mut count = 0usize;
     let mut index = 0usize;
     while index < args.len() {
         if keyword_of(&args[index])
@@ -217,9 +245,27 @@ async fn strip_cache_size_option(
             index += 2;
             continue;
         }
-        metric_args.push(args[index].clone());
+        count += 1;
         index += 1;
     }
+    if count == args.len() {
+        return Ok(args);
+    }
+    let mut cursor = 0usize;
+    let metric_args = args
+        .try_map_preserving_roots_async(count, runtime, |_| {
+            while keyword_of(&args[cursor])
+                .as_deref()
+                .and_then(DistanceControlKind::from_keyword)
+                .is_some()
+            {
+                cursor += 2;
+            }
+            let value = args[cursor].clone();
+            cursor += 1;
+            std::future::ready(Ok(value))
+        })
+        .await?;
     Ok(metric_args)
 }
 
@@ -227,7 +273,7 @@ async fn ensure_pdist_integer_boundaries(
     builtin: PairwiseDistanceBuiltin,
     x: &Value,
     y: Option<&Value>,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<()> {
     let name = builtin.name();
     for (value, role) in std::iter::once((x, "X")).chain(y.map(|value| (value, "Y"))) {
@@ -277,20 +323,24 @@ async fn ensure_distance_exact_f64(
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::ml::distance"
 )]
-async fn knnsearch_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let parsed = parse_knnsearch_options(&rest)?;
+async fn knnsearch_builtin(
+    x: Value,
+    y: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let parsed = parse_knnsearch_options(rest.view())?;
     let columns = preflight_knnsearch_geometry(&x, &y, parsed.options.k)?;
     preflight_knn_metric_parameter(
         parsed.metric.kind,
         parsed.metric_parameter.as_ref(),
         columns,
     )?;
-    ensure_knnsearch_extensions(&x, &y, &rest)?;
+    ensure_knnsearch_extensions(&x, &y, rest.view())?;
     let output_source = crate::builtins::common::gpu_helpers::select_resident_output_source(
         [&x, &y].into_iter().filter_map(knn_gpu_source),
         KNNSEARCH_NAME,
     )?;
-    ensure_knnsearch_exact_boundaries(&x, &y, &rest).await?;
+    ensure_knnsearch_exact_boundaries(&x, &y, rest.view()).await?;
     validate_numeric_cache_sizes(parsed.numeric_cache_sizes).await?;
     let x = value_to_matrix(KNNSEARCH_NAME, x).await?;
     let y = value_to_matrix(KNNSEARCH_NAME, y).await?;
@@ -310,7 +360,7 @@ async fn knnsearch_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResul
         MetricCaller::Knnsearch,
         &x,
         parsed.metric.kind,
-        parsed.metric_parameter.into_iter().collect(),
+        crate::call::FunctionArgumentView::from_slice(parsed.metric_parameter.as_slice()),
     )
     .await?;
     let value = knnsearch_outputs(&x, &y, &metric, parsed.options)?;
@@ -419,12 +469,11 @@ fn restore_knnsearch_value_protecting(
             Ok(restored)
         }
         Value::Cell(mut cell) => {
-            if !cell.data.is_unique() {
-                cell.data
-                    .make_unique_unbounded()
+            if !cell.data_owner().is_unique() {
+                cell.make_data_unique_unbounded()
                     .map_err(|error| distance_error(KNNSEARCH_NAME, error.to_string()))?;
             }
-            let slots = cell.data.try_as_mut_slice_unique().ok_or_else(|| {
+            let slots = cell.try_data_mut_unique().ok_or_else(|| {
                 distance_error(
                     KNNSEARCH_NAME,
                     "shared admitted Cell output requires an admitted replacement",
@@ -437,9 +486,7 @@ fn restore_knnsearch_value_protecting(
                     protected_outputs,
                 )?;
             }
-            CellArray::from_shared_storage(cell.data, cell.shape)
-                .map(Value::Cell)
-                .map_err(|error| distance_error(KNNSEARCH_NAME, error))
+            Ok(Value::Cell(cell))
         }
         Value::OutputList(values) => runmat_value::ValueSequence::from_output_storage(values)
             .map_err(crate::sequence::sequence_error_to_runtime)?
@@ -460,7 +507,11 @@ fn explicit_knn_gpu(value: &Value) -> bool {
     matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle))
 }
 
-fn ensure_knnsearch_extensions(x: &Value, y: &Value, rest: &[Value]) -> BuiltinResult<()> {
+fn ensure_knnsearch_extensions(
+    x: &Value,
+    y: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     if knn_typed_integer(x) || knn_typed_integer(y) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &KNN_INTEGER_DATA_EXTENSION,
@@ -565,7 +616,7 @@ fn logical_scalar_is(value: &Value, expected: bool) -> bool {
 async fn ensure_knnsearch_exact_boundaries(
     x: &Value,
     y: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<()> {
     for (value, role) in [(x, "X"), (y, "Y")] {
         ensure_knn_exact_f64(value, role).await?;
@@ -607,7 +658,10 @@ async fn ensure_knn_exact_f64(value: &Value, role: &str) -> BuiltinResult<()> {
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::ml::distance"
 )]
-async fn squareform_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn squareform_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if crate::builtins::common::validation::value_has_native_integer_class(&value) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &SQUAREFORM_INTEGER_INPUT_EXTENSION,

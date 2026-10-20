@@ -36,7 +36,9 @@ fn setting_survives_a_later_context_and_restoration_uses_captured_layers() {
     let first_context = context(first_path.clone(), settings.clone());
     let value = futures::executor::block_on(run(
         Some(first_context),
-        vec![super::super::char_value("relative/MiXeD")],
+        crate::builtins::common::test_support::builtin_arguments(vec![super::super::char_value(
+            "relative/MiXeD",
+        )]),
     ))
     .expect("commit setting");
     assert_eq!(text(&value), "relative/MiXeD");
@@ -52,8 +54,11 @@ fn setting_survives_a_later_context_and_restoration_uses_captured_layers() {
     fs::set_current_dir(second).expect("select second virtual current directory");
     let later_path = Arc::new(SearchPath::new(String::new()));
     let later_context = context(later_path.clone(), settings);
-    let query = futures::executor::block_on(run(Some(later_context.clone()), vec![]))
-        .expect("later context reads application setting");
+    let query = futures::executor::block_on(run(
+        Some(later_context.clone()),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .expect("later context reads application setting");
     assert_eq!(text(&query), "relative/MiXeD");
     let later_segment = std::path::Path::new(second)
         .join("relative/MiXeD")
@@ -74,7 +79,11 @@ fn setting_survives_a_later_context_and_restoration_uses_captured_layers() {
         "manual".into(),
         crate::builtins::common::path_state::PathOrigin::Manual,
     )]);
-    let restored = restore(Some(later_context), vec![]).expect("restore captured layers");
+    let restored = restore(
+        Some(later_context),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    )
+    .expect("restore captured layers");
     assert_eq!(
         text(&restored),
         format!(
@@ -159,7 +168,9 @@ fn uncertain_commit_invalidates_source_search_until_rehydration() {
         );
     let error = futures::executor::block_on(run(
         Some(runtime.clone()),
-        vec![super::super::char_value(changed)],
+        crate::builtins::common::test_support::builtin_arguments(vec![super::super::char_value(
+            changed,
+        )]),
     ))
     .expect_err("indeterminate storage outcome");
     assert_eq!(error.identifier(), Some("RunMat:userpath:Storage"));
@@ -179,8 +190,13 @@ fn known_invalid_path_list_rejects_before_context_or_provider_capture() {
         "first{}second",
         crate::builtins::common::path_state::PATH_LIST_SEPARATOR
     );
-    let error = futures::executor::block_on(run(None, vec![super::super::char_value(&invalid)]))
-        .expect_err("one user path cannot contain path-list separators");
+    let error = futures::executor::block_on(run(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![super::super::char_value(
+            &invalid,
+        )]),
+    ))
+    .expect_err("one user path cannot contain path-list separators");
     assert_eq!(error.identifier(), Some("RunMat:userpath:InvalidPath"));
 }
 
@@ -212,7 +228,9 @@ fn definitive_rejection_preserves_current_user_path_authority() {
         .with_service_ports(RuntimeServicePorts::default().with_user_path(Rc::new(RejectedCommit)));
     let error = futures::executor::block_on(run(
         Some(runtime.clone()),
-        vec![super::super::char_value(changed)],
+        crate::builtins::common::test_support::builtin_arguments(vec![super::super::char_value(
+            changed,
+        )]),
     ))
     .expect_err("definitive rejection");
     assert_eq!(error.identifier(), Some("RunMat:userpath:Storage"));
@@ -228,7 +246,9 @@ fn partial_path_is_gated_before_filesystem_or_application_settings() {
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
     let rejected = futures::executor::block_on(run(
         None,
-        vec![super::super::char_value("relative/toolbox")],
+        crate::builtins::common::test_support::builtin_arguments(vec![super::super::char_value(
+            "relative/toolbox",
+        )]),
     ))
     .expect_err("R2026a rejects a partial path before context capture");
     assert_eq!(
@@ -239,9 +259,13 @@ fn partial_path_is_gated_before_filesystem_or_application_settings() {
     let absolute = "C:\\installed\\toolbox";
     #[cfg(not(windows))]
     let absolute = "/installed/toolbox";
-    let absolute_result =
-        futures::executor::block_on(run(None, vec![super::super::char_value(absolute)]))
-            .expect_err("absolute paths reach the missing service");
+    let absolute_result = futures::executor::block_on(run(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![super::super::char_value(
+            absolute,
+        )]),
+    ))
+    .expect_err("absolute paths reach the missing service");
     assert_eq!(
         absolute_result.identifier(),
         Some("RunMat:RuntimeContext:CapabilityUnavailable")
@@ -250,7 +274,9 @@ fn partial_path_is_gated_before_filesystem_or_application_settings() {
     let _extension = crate::compatibility::push_runmat_extensions_enabled(true);
     let admitted = futures::executor::block_on(run(
         None,
-        vec![super::super::char_value("relative/toolbox")],
+        crate::builtins::common::test_support::builtin_arguments(vec![super::super::char_value(
+            "relative/toolbox",
+        )]),
     ))
     .expect_err("RunMat mode admits the control before service lookup");
     assert_eq!(
@@ -272,8 +298,11 @@ fn restore_return_is_extension_but_statement_is_admitted_before_mutation() {
         .with_search_path(search.clone());
     {
         let _output = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
-        let rejected = restore(Some(runtime.clone()), vec![])
-            .expect_err("MATLAB-compatible form has no requested result");
+        let rejected = restore(
+            Some(runtime.clone()),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        )
+        .expect_err("MATLAB-compatible form has no requested result");
         assert_eq!(
             rejected.identifier(),
             RESTOREDEFAULTPATH_RETURN_EXTENSION.error_identifier
@@ -282,8 +311,11 @@ fn restore_return_is_extension_but_statement_is_admitted_before_mutation() {
     }
     {
         let _output = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
-        let rejected = restore(Some(runtime.clone()), vec![])
-            .expect_err("a statement cannot restore an uncaptured user-path factory");
+        let rejected = restore(
+            Some(runtime.clone()),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        )
+        .expect_err("a statement cannot restore an uncaptured user-path factory");
         assert_eq!(
             rejected.identifier(),
             Some("RunMat:restoredefaultpath:StaleUserPath")
@@ -306,13 +338,20 @@ fn restore_return_is_extension_but_statement_is_admitted_before_mutation() {
     )]);
     {
         let _output = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
-        restore(Some(runtime.clone()), vec![]).expect("statement restores the path");
+        restore(
+            Some(runtime.clone()),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        )
+        .expect("statement restores the path");
         assert_eq!(search.current_string(), "factory");
     }
     drop(_strict);
     let _extension = crate::compatibility::push_runmat_extensions_enabled(true);
     let _output = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
-    let restored =
-        restore(Some(runtime), vec![]).expect("RunMat mode may request the restored path");
+    let restored = restore(
+        Some(runtime),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    )
+    .expect("RunMat mode may request the restored path");
     assert_eq!(text(&restored), "factory");
 }

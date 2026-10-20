@@ -98,7 +98,7 @@ async fn sinpi_builtin(value: Value) -> BuiltinResult<Value> {
 }
 
 fn sinpi_char_array(array: CharArray) -> BuiltinResult<Value> {
-    let tensor = Tensor::new(vec![0.0; array.data.len()], array.shape)
+    let tensor = Tensor::new(vec![0.0; array.data().len()], array.shape)
         .map_err(|err| sinpi_error_with_detail(&SINPI_ERROR_INTERNAL, err))?;
     Ok(tensor::tensor_into_value(tensor))
 }
@@ -386,7 +386,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[cfg_attr(not(target_arch = "wasm32"), test)]
     fn strings_are_rejected() {
-        let err = call(Value::String("0.5".to_string())).unwrap_err();
+        let err = call(Value::String("0.5".to_string().into())).unwrap_err();
         assert_eq!(err.identifier.as_deref(), Some("RunMat:sinpi:InvalidInput"));
     }
 }

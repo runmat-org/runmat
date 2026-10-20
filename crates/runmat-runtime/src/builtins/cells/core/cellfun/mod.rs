@@ -21,14 +21,16 @@ pub(super) const BUILTIN_NAME: &str = "cellfun";
 
 #[runtime_builtin(
     name = "cellfun",
+    context = true,
     binding_variant = "default",
     builtin_path = "crate::builtins::cells::core::cellfun"
 )]
 async fn cellfun_builtin(
+    context: Option<crate::context::RuntimeContext>,
     func: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<crate::execution::RootedValue> {
-    execution::execute(func, rest).await
+    execution::execute(context.as_ref(), func, rest).await
 }
 
 #[cfg(test)]

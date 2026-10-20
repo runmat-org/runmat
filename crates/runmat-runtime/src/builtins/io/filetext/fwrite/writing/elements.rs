@@ -93,7 +93,7 @@ impl<'a> Iterator for BorrowedElements<'a> {
                 index,
                 page_len,
             } => {
-                if *page_len == 0 || *index >= array.data.len() {
+                if *page_len == 0 || *index >= array.data().len() {
                     return None;
                 }
                 let page = *index / *page_len;
@@ -103,7 +103,7 @@ impl<'a> Iterator for BorrowedElements<'a> {
                 let source = page * *page_len + row * array.cols + column;
                 *index += 1;
                 array
-                    .data
+                    .data()
                     .get(source)
                     .map(|ch| WriteElement::Floating(*ch as u32 as f64))
             }
@@ -122,7 +122,7 @@ impl<'a> Iterator for BorrowedElements<'a> {
                     *chars = None;
                 }
                 let owner: &'a runmat_value::StringArray = array;
-                let text: &'a str = owner.data.get(*index)?.as_str();
+                let text: &'a str = owner.data().get(*index)?.as_str();
                 let separate = *index > 0;
                 *index += 1;
                 *chars = Some(text.chars());

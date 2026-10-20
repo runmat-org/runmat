@@ -61,25 +61,17 @@ impl ResourceRequest {
                 "governed capability is absent from the reservation",
             ));
         }
-        for required in &self.accelerators {
-            let Some(available) = reservation
-                .accelerators
-                .iter()
-                .find(|item| item.class == required.class)
-            else {
-                return Err(ContractError::invalid(
-                    "accelerator reservation",
-                    "governed accelerator class is absent",
-                ));
-            };
-            if required.count > available.count
-                || required.minimum_allocation_bytes > available.minimum_allocation_bytes
-            {
-                return Err(ContractError::invalid(
-                    "accelerator reservation",
-                    "governed accelerator capacity exceeds the reservation",
-                ));
-            }
+        // Each reserved slot may cover only one required slot, including
+        // overlapping class/provider/feature requirements. A class-name lookup
+        // could spend the same capacity repeatedly and discard constraints.
+        if !super::accelerator_requests_satisfy_requirements(
+            &reservation.accelerators,
+            &self.accelerators,
+        ) {
+            return Err(ContractError::invalid(
+                "accelerator reservation",
+                "governed accelerator requirements exceed the reservation",
+            ));
         }
         Ok(())
     }

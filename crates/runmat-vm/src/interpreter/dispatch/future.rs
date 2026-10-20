@@ -411,7 +411,9 @@ async fn dispatch_name_handle(meta: DispatchMeta<'_>, state: DispatchState<'_>) 
             };
             let selected = runmat_runtime::user_functions::try_load_and_call_dynamic_function(
                 name.clone(),
-                Vec::new(),
+                runmat_runtime::call::RootedFunctionArguments::ordinary(
+                    runmat_runtime::execution::RootedValues::in_context(Vec::new(), &runtime)?,
+                ),
                 1,
                 phase,
                 None,

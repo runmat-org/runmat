@@ -13,13 +13,13 @@ fn linkaxes_output_admission_preserves_existing_link_and_empty_arrays_are_noop()
     let second = subplot(1., 2., 2.);
     let handles = tensor(vec![first, second], vec![1, 1, 2]);
     assert_eq!(
-        linkaxes_builtin(vec![handles.clone()]).unwrap(),
+        linkaxes_builtin_source(vec![handles.clone()]).unwrap(),
         Value::output_list(vec![])
     );
     {
         let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         assert_eq!(
-            linkaxes_builtin(vec![handles, Value::from("off")])
+            linkaxes_builtin_source(vec![handles, Value::from("off")])
                 .unwrap_err()
                 .identifier(),
             Some("RunMat:linkaxes:TooManyOutputs")
@@ -28,11 +28,13 @@ fn linkaxes_output_admission_preserves_existing_link_and_empty_arrays_are_noop()
     set_limits(first, "XLim", [2., 7.]);
     assert_eq!(get_limits(second, "XLim"), vec![2., 7.]);
     assert_eq!(
-        linkaxes_builtin(vec![tensor(vec![], vec![0, 0])]).unwrap(),
+        linkaxes_builtin_source(vec![tensor(vec![], vec![0, 0])]).unwrap(),
         Value::output_list(vec![])
     );
-    assert!(linkaxes_builtin(vec![Value::Int(runmat_value::IntValue::U64(u64::MAX))]).is_err());
-    assert!(linkaxes_builtin(vec![
+    assert!(
+        linkaxes_builtin_source(vec![Value::Int(runmat_value::IntValue::U64(u64::MAX))]).is_err()
+    );
+    assert!(linkaxes_builtin_source(vec![
         tensor(vec![first, second], vec![1, 2]),
         Value::from("z")
     ])
@@ -114,19 +116,19 @@ fn linkaxes_propagates_selected_axis_limits_and_unlinks() {
     let ax2 = subplot(2.0, 1.0, 2.0);
     let handles = tensor(vec![ax1, ax2], vec![1, 2]);
 
-    linkaxes_builtin(vec![handles.clone(), Value::String("x".into())]).expect("link x");
+    linkaxes_builtin_source(vec![handles.clone(), Value::String("x".into())]).expect("link x");
     set_limits(ax1, "XLim", [0.0, 10.0]);
     set_limits(ax2, "YLim", [5.0, 9.0]);
 
     assert_eq!(get_limits(ax2, "XLim"), vec![0.0, 10.0]);
     assert_ne!(get_limits(ax1, "YLim"), vec![5.0, 9.0]);
 
-    linkaxes_builtin(vec![handles.clone(), Value::String("xy".into())]).expect("link xy");
+    linkaxes_builtin_source(vec![handles.clone(), Value::String("xy".into())]).expect("link xy");
     set_limits(ax2, "YLim", [2.0, 4.0]);
     assert_eq!(get_limits(ax1, "YLim"), vec![2.0, 4.0]);
 
     let x_before_off = get_limits(ax2, "XLim");
-    linkaxes_builtin(vec![handles, Value::String("off".into())]).expect("unlink");
+    linkaxes_builtin_source(vec![handles, Value::String("off".into())]).expect("unlink");
     set_limits(ax1, "XLim", [20.0, 30.0]);
     assert_eq!(get_limits(ax2, "XLim"), x_before_off);
 }
@@ -139,7 +141,7 @@ fn linkaxes_initial_sync_uses_union_of_current_limits() {
     set_limits(ax1, "XLim", [0.0, 2.0]);
     set_limits(ax2, "XLim", [5.0, 9.0]);
 
-    linkaxes_builtin(vec![
+    linkaxes_builtin_source(vec![
         tensor(vec![ax1, ax2], vec![1, 2]),
         Value::String("x".into()),
     ])
@@ -156,12 +158,12 @@ fn linkaxes_preserves_overlapping_axis_specific_groups() {
     let ax2 = subplot(3.0, 1.0, 2.0);
     let ax3 = subplot(3.0, 1.0, 3.0);
 
-    linkaxes_builtin(vec![
+    linkaxes_builtin_source(vec![
         tensor(vec![ax1, ax2], vec![1, 2]),
         Value::String("x".into()),
     ])
     .expect("link x group");
-    linkaxes_builtin(vec![
+    linkaxes_builtin_source(vec![
         tensor(vec![ax1, ax3], vec![1, 2]),
         Value::String("y".into()),
     ])
@@ -181,7 +183,7 @@ fn linkaxes_clear_figure_removes_stale_groups() {
     let _guard = setup();
     let ax1 = subplot(2.0, 1.0, 1.0);
     let ax2 = subplot(2.0, 1.0, 2.0);
-    linkaxes_builtin(vec![
+    linkaxes_builtin_source(vec![
         tensor(vec![ax1, ax2], vec![1, 2]),
         Value::String("x".into()),
     ])

@@ -32,7 +32,7 @@ pub(super) fn strings(
     _runtime: Option<&crate::context::RuntimeContext>,
 ) -> crate::BuiltinResult<Value> {
     let plan = PartitionPlan::new(&array.shape, dimensions)?;
-    let values = match array.data.try_into_owned() {
+    let values = match array.into_parts().0.try_into_owned() {
         Ok(values) => values.into_iter().collect::<Vec<_>>(),
         Err(shared) => shared.iter().cloned().collect(),
     };
@@ -57,7 +57,7 @@ pub(super) fn strings(
 
 pub(super) fn symbolic(array: SymbolicArray, dimensions: &[usize]) -> crate::BuiltinResult<Value> {
     let plan = PartitionPlan::new(&array.shape, dimensions)?;
-    let mut values = options(array.data);
+    let mut values = array.data().iter().cloned().map(Some).collect::<Vec<_>>();
     let cells = plan
         .groups()
         .map(|indices| {

@@ -3,6 +3,7 @@
 //! `_State` is the single serialized state store. Layer HiddenState/CellState
 //! properties describe initial conditions, not a mutable second state store.
 use super::*;
+use crate::builtins::deep_learning::arguments::DeepLearningObjectEdit as _;
 
 mod schema;
 mod table;
@@ -33,7 +34,7 @@ pub(in crate::builtins::deep_learning::model) fn admit_initial(
         let Value::Object(layer) = &layers[key.layer_index] else {
             unreachable!("state schema admitted layer objects")
         };
-        if let Some(value) = layer.properties.get(key.role.name()) {
+        if let Some(value) = layer.properties().get(key.role.name()) {
             schema::validate_value(value, &key, function)?;
             if let Some(current) = schema::batch_size(value, function)? {
                 if batch.is_some_and(|prior| prior != current) {
@@ -65,7 +66,7 @@ pub(in crate::builtins::deep_learning) fn planned_initial_shapes(
             let Value::Object(layer) = &layers[key.layer_index] else {
                 unreachable!("canonical state schema admitted layer objects")
             };
-            let shape = match layer.properties.get(key.role.name()) {
+            let shape = match layer.properties().get(key.role.name()) {
                 Some(value) => {
                     let shape =
                         parameters::numeric_payload_shape(value, key.role.name(), function)?;
@@ -102,7 +103,7 @@ pub(in crate::builtins::deep_learning) fn supplied_initial_values<'a>(
                 unreachable!("State schema admitted layer objects")
             };
             layer
-                .properties
+                .properties()
                 .get(key.role.name())
                 .map(|value| StateView { key, value })
         })
@@ -119,44 +120,44 @@ pub(in crate::builtins::deep_learning) fn view<'a>(
             format!("{function}: expected network object"),
         ));
     }
-    let Some(Value::Cell(layers)) = network.properties.get("Layers") else {
+    let Some(Value::Cell(layers)) = network.properties().get("Layers") else {
         return Err(deep_learning_error(
             function,
             format!("{function}: network is missing Layers"),
         ));
     };
-    let stored = network.properties.get(STORAGE_PROPERTY).ok_or_else(|| {
+    let stored = network.properties().get(STORAGE_PROPERTY).ok_or_else(|| {
         deep_learning_error(
             function,
             format!("{function}: network is missing canonical State"),
         )
     })?;
-    table::validate_canonical(&layers.data, stored, function)?;
+    table::validate_canonical(layers.data(), stored, function)?;
     let Value::Object(table) = stored else {
         unreachable!("validated State table")
     };
     let values = super::table_rows::values(table, "State", function)?;
-    Ok(schema::keys(&layers.data, function)?
+    Ok(schema::keys(layers.data(), function)?
         .into_iter()
-        .zip(&values.data)
+        .zip(values.data())
         .map(|(key, value)| StateView { key, value })
         .collect())
 }
 
 pub(super) fn all_filled(network: &ObjectInstance, function: &'static str) -> BuiltinResult<bool> {
-    let Some(Value::Cell(layers)) = network.properties.get("Layers") else {
+    let Some(Value::Cell(layers)) = network.properties().get("Layers") else {
         return Err(deep_learning_error(
             function,
             format!("{function}: network is missing Layers"),
         ));
     };
-    let stored = network.properties.get(STORAGE_PROPERTY).ok_or_else(|| {
+    let stored = network.properties().get(STORAGE_PROPERTY).ok_or_else(|| {
         deep_learning_error(
             function,
             format!("{function}: network is missing canonical State"),
         )
     })?;
-    table::all_filled(&layers.data, stored, function)
+    table::all_filled(layers.data(), stored, function)
 }
 
 /// Fill only missing canonical recurrent State rows after layer learnables have
@@ -167,48 +168,42 @@ pub(in crate::builtins::deep_learning) fn initialize_missing(
     network: &mut ObjectInstance,
     function: &'static str,
 ) -> BuiltinResult<()> {
-    let Some(Value::Cell(layers)) = network.properties.get("Layers") else {
+    let Some(Value::Cell(layers)) = network.properties().get("Layers") else {
         return Err(deep_learning_error(
             function,
             format!("{function}: network is missing Layers"),
         ));
     };
-    let keys = schema::keys(&layers.data, function)?;
+    let keys = schema::keys(layers.data(), function)?;
     let current = view(network, function)?;
     if current.iter().all(|row| {
         parameters::numeric_payload_shape(row.value, row.key.role.name(), function)
             .is_ok_and(|shape| !shape.contains(&0))
     }) {
         let initialized = parameters::all_filled(network, function)?;
-        network
-            .properties
-            .insert("Initialized".into(), Value::Bool(initialized));
+        network.replace_dl_property("Initialized", Value::Bool(initialized))?;
         return Ok(());
     }
-    let defaults = table::initial_with_defaults(&layers.data, true, function)?;
+    let defaults = table::initial_with_defaults(layers.data(), true, function)?;
     let Value::Object(default_table) = &defaults else {
         unreachable!("State owner constructs a table")
     };
     let default_values = super::table_rows::values(default_table, "State", function)?;
     let mut values = Vec::with_capacity(keys.len());
-    for (row, default) in current.iter().zip(&default_values.data) {
+    for (row, default) in current.iter().zip(default_values.data()) {
         let shape = parameters::numeric_payload_shape(row.value, row.key.role.name(), function)?;
         values.push(if shape.contains(&0) {
             default.clone()
         } else {
-            parameters::public_value(Some(row.value))
+            parameters::public_value(Some(row.value))?
         });
     }
     let replacement = table::table(&keys, values, function)?;
-    table::validate_canonical(&layers.data, &replacement, function)?;
+    table::validate_canonical(layers.data(), &replacement, function)?;
     let initialized = parameters::all_filled(network, function)?
-        && table::all_filled(&layers.data, &replacement, function)?;
-    network
-        .properties
-        .insert(STORAGE_PROPERTY.into(), replacement);
-    network
-        .properties
-        .insert("Initialized".into(), Value::Bool(initialized));
+        && table::all_filled(layers.data(), &replacement, function)?;
+    network.replace_dl_property(STORAGE_PROPERTY, replacement)?;
+    network.replace_dl_property("Initialized", Value::Bool(initialized))?;
     Ok(())
 }
 
@@ -230,7 +225,7 @@ pub(in crate::builtins) fn apply(
             format!("{function}: expected network object"),
         ));
     }
-    let Value::Cell(layers) = network.properties.get("Layers").ok_or_else(|| {
+    let Value::Cell(layers) = network.properties().get("Layers").ok_or_else(|| {
         deep_learning_error(function, format!("{function}: network is missing Layers"))
     })?
     else {
@@ -239,13 +234,11 @@ pub(in crate::builtins) fn apply(
             format!("{function}: Layers must be a cell array"),
         ));
     };
-    let admitted = table::validated_replacement(&layers.data, replacement, function)?;
-    network.properties.insert(STORAGE_PROPERTY.into(), admitted);
+    let admitted = table::validated_replacement(layers.data(), replacement, function)?;
+    network.replace_dl_property(STORAGE_PROPERTY, admitted)?;
     let initialized =
         super::parameters::all_filled(&network, function)? && all_filled(&network, function)?;
-    network
-        .properties
-        .insert("Initialized".into(), Value::Bool(initialized));
+    network.replace_dl_property("Initialized", Value::Bool(initialized))?;
     Ok(Value::Object(network))
 }
 
@@ -256,19 +249,20 @@ mod tests {
     pub(super) fn recurrent_network() -> ObjectInstance {
         let mut layer = ObjectInstance::new(runmat_builtins::LSTM_LAYER_CLASS.owned());
         layer
-            .properties
-            .insert("Name".into(), Value::String("memory".into()));
+            .replace_dl_property("Name", Value::String("memory".into()))
+            .expect("fixture property");
         layer
-            .properties
-            .insert("NumHiddenUnits".into(), Value::Num(3.0));
+            .replace_dl_property("NumHiddenUnits", Value::Num(3.0))
+            .expect("fixture property");
         let layers = vec![Value::Object(layer)];
         let state = initial(&layers, "get.State").unwrap();
         let mut network = ObjectInstance::new(DLNETWORK_CLASS.owned());
-        network.properties.insert(
-            "Layers".into(),
-            Value::Cell(CellArray::new(layers, 1, 1).unwrap()),
-        );
-        network.properties.insert(STORAGE_PROPERTY.into(), state);
+        network
+            .replace_dl_property("Layers", Value::Cell(CellArray::new(layers, 1, 1).unwrap()))
+            .expect("fixture property");
+        network
+            .replace_dl_property(STORAGE_PROPERTY, state)
+            .expect("fixture property");
         network
     }
 
@@ -279,22 +273,22 @@ mod tests {
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].key.role, StateRole::HiddenState);
         assert_eq!(rows[1].key.role, StateRole::CellState);
-        let Value::Object(stored) = network.properties.get(STORAGE_PROPERTY).unwrap() else {
+        let Value::Object(stored) = network.properties().get(STORAGE_PROPERTY).unwrap() else {
             panic!("stored State table expected");
         };
         let stored_values = super::super::table_rows::values(stored, "State", "forward").unwrap();
-        assert!(std::ptr::eq(rows[0].value, &stored_values.data[0]));
-        assert!(std::ptr::eq(rows[1].value, &stored_values.data[1]));
+        assert!(std::ptr::eq(rows[0].value, &stored_values.data()[0]));
+        assert!(std::ptr::eq(rows[1].value, &stored_values.data()[1]));
         super::super::super::class_registration::ensure_network_class_registered(DLNETWORK_CLASS);
         let public = crate::class_registry::lookup_property(
-            &network.class_name,
+            network.class_name(),
             &runmat_types::MemberName::from("State"),
         )
         .expect("public State property")
         .0;
         assert!(public.is_dependent);
         let private = crate::class_registry::lookup_property(
-            &network.class_name,
+            network.class_name(),
             &runmat_types::MemberName::from(STORAGE_PROPERTY),
         )
         .expect("private state backing")
@@ -308,18 +302,22 @@ mod tests {
         let Value::StringArray(roles) = variables.fields.get("Parameter").unwrap() else {
             panic!("expected string roles")
         };
-        assert_eq!(roles.data, ["HiddenState", "CellState"]);
+        assert_eq!(roles.data(), ["HiddenState", "CellState"]);
         let Value::Cell(values) = variables.fields.get("Value").unwrap() else {
             panic!("expected values")
         };
         assert_eq!(values.shape, [2, 1]);
-        assert!(!network.properties.contains_key("State"));
+        assert!(!network.properties().contains_key("State"));
 
         let mut variables = variables;
-        let Value::Cell(values) = variables.fields.get_mut("Value").unwrap() else {
+        let Value::Cell(values) =
+            crate::builtins::deep_learning::tests::fixture_field_mut(&mut variables, "Value")
+                .unwrap()
+        else {
             panic!("expected values")
         };
-        values.data[0] = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap());
+        crate::builtins::deep_learning::tests::fixture_array_mut(values)[0] =
+            Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap());
         let updated =
             crate::builtins::table::table_replace_variables_like(&table, variables).unwrap();
         let Value::Object(network) = apply(network, updated, "set.State").unwrap() else {
@@ -333,14 +331,18 @@ mod tests {
             panic!("expected values")
         };
         assert!(
-            matches!(&values.data[0], Value::Object(object) if object.class_name.is(DLARRAY_CLASS))
+            matches!(&values.data()[0], Value::Object(object) if object.class_name().is(DLARRAY_CLASS))
         );
 
         let mut variables = variables;
-        let Value::Cell(values) = variables.fields.get_mut("Value").unwrap() else {
+        let Value::Cell(values) =
+            crate::builtins::deep_learning::tests::fixture_field_mut(&mut variables, "Value")
+                .unwrap()
+        else {
             panic!("expected values")
         };
-        values.data[1] = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap());
+        crate::builtins::deep_learning::tests::fixture_array_mut(values)[1] =
+            Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap());
         let invalid =
             crate::builtins::table::table_replace_variables_like(&projected, variables).unwrap();
         assert!(apply(network.clone(), invalid, "set.State").is_err());
@@ -363,27 +365,29 @@ mod tests {
     #[test]
     fn missing_state_initialization_preserves_filled_canonical_rows() {
         let mut network = recurrent_network();
-        let Value::Cell(layers) = network.properties.get("Layers").unwrap() else {
+        let Value::Cell(layers) = network.properties().get("Layers").unwrap() else {
             panic!("Layers expected")
         };
-        let keys = schema::keys(&layers.data, "trainnet").unwrap();
+        let keys = schema::keys(layers.data(), "trainnet").unwrap();
         let supplied = Value::Tensor(Tensor::from_f32(vec![4., 5., 6.], vec![3, 1]).unwrap());
         let empty = Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap());
         let partial = table::table(&keys, vec![supplied.clone(), empty], "trainnet").unwrap();
-        network.properties.insert(STORAGE_PROPERTY.into(), partial);
+        network
+            .replace_dl_property(STORAGE_PROPERTY, partial)
+            .expect("fixture property");
 
         initialize_missing(&mut network, "trainnet").unwrap();
         let rows = view(&network, "trainnet").unwrap();
         let supplied_data = match rows[0].value {
-            Value::Object(wrapper) if wrapper.class_name.is(DLARRAY_CLASS) => {
-                wrapper.properties.get("Data").unwrap()
+            Value::Object(wrapper) if wrapper.class_name().is(DLARRAY_CLASS) => {
+                wrapper.properties().get("Data").unwrap()
             }
             value => value,
         };
         assert_eq!(supplied_data, &supplied);
         let default_data = match rows[1].value {
-            Value::Object(wrapper) if wrapper.class_name.is(DLARRAY_CLASS) => {
-                wrapper.properties.get("Data").unwrap()
+            Value::Object(wrapper) if wrapper.class_name().is(DLARRAY_CLASS) => {
+                wrapper.properties().get("Data").unwrap()
             }
             value => value,
         };
@@ -395,7 +399,7 @@ mod tests {
         // Learnables are still unfilled, so filling State must not claim the
         // entire network has been initialized.
         assert_eq!(
-            network.properties.get("Initialized"),
+            network.properties().get("Initialized"),
             Some(&Value::Bool(false))
         );
     }
@@ -403,17 +407,23 @@ mod tests {
     #[test]
     fn malformed_partial_state_does_not_mutate_network() {
         let mut network = recurrent_network();
-        let Value::Object(stored) = network.properties.get(STORAGE_PROPERTY).unwrap() else {
+        let Value::Object(stored) = network.properties().get(STORAGE_PROPERTY).unwrap() else {
             panic!("State table expected")
         };
         let mut variables = crate::builtins::table::table_variables(stored).unwrap();
-        let Value::Cell(values) = variables.fields.get_mut("Value").unwrap() else {
+        let Value::Cell(values) =
+            crate::builtins::deep_learning::tests::fixture_field_mut(&mut variables, "Value")
+                .unwrap()
+        else {
             panic!("State values expected")
         };
-        values.data[0] = Value::Tensor(Tensor::new(vec![1., 2.], vec![2, 1]).unwrap());
+        crate::builtins::deep_learning::tests::fixture_array_mut(values)[0] =
+            Value::Tensor(Tensor::new(vec![1., 2.], vec![2, 1]).unwrap());
         let invalid =
             crate::builtins::table::table_replace_variables_like(stored, variables).unwrap();
-        network.properties.insert(STORAGE_PROPERTY.into(), invalid);
+        network
+            .replace_dl_property(STORAGE_PROPERTY, invalid)
+            .expect("fixture property");
         let original = network.clone();
         assert!(initialize_missing(&mut network, "trainnet").is_err());
         assert_eq!(network, original);

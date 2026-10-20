@@ -67,7 +67,7 @@ pub(super) fn convert(
         Value::Cell(_) => Err(conversion_error("cell")),
         Value::Struct(_) | Value::StructArray(_) => Err(conversion_error("struct")),
         Value::ObjectArray(value) => Err(conversion_error(value.class_name().display_name())),
-        Value::Object(value) => Err(conversion_error(value.class_name.display_name())),
+        Value::Object(value) => Err(conversion_error(value.class_name().display_name())),
         Value::HandleObject(value) => Err(conversion_error(value.class_name.display_name())),
         Value::Listener(_) => Err(conversion_error("event.listener")),
         Value::FunctionHandle(_)
@@ -113,14 +113,14 @@ pub(super) fn single_from_tensor(tensor: Tensor) -> BuiltinResult<Value> {
 }
 
 pub(super) fn single_from_symbolic_array(array: SymbolicArray) -> BuiltinResult<Value> {
-    let mut data = Vec::with_capacity(array.data.len());
-    for expr in array.data {
+    let mut data = Vec::with_capacity(array.data().len());
+    for expr in array.data() {
         let value = expr
             .numeric_constant_value()
             .ok_or_else(|| conversion_error("sym"))?;
         data.push(value as f32);
     }
-    Tensor::from_numeric_storage(NumericStorage::F32(data), array.shape)
+    Tensor::from_numeric_storage(NumericStorage::F32(data), array.shape.to_vec())
         .map(Value::Tensor)
         .map_err(|e| single_error_with_detail(&SINGLE_ERROR_INTERNAL, e))
 }

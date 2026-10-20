@@ -5,14 +5,15 @@ fn fitctree_matrix_predicts_numeric_labels_and_scores() {
     let x = tensor_value(vec![0.0, 1.0, 2.0, 3.0], 4, 1);
     let y = tensor_value(vec![0.0, 0.0, 1.0, 1.0], 4, 1);
     let model = block_on(fitctree_builtin(
+        None,
         x,
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             y,
             Value::from("MaxNumSplits"),
             Value::Num(1.0),
             Value::from("MinParentSize"),
             Value::Num(2.0),
-        ],
+        ]),
     ))
     .unwrap();
     let output_count = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
@@ -36,8 +37,9 @@ fn fitctree_matrix_predicts_numeric_labels_and_scores() {
 fn fitctree_and_predict_read_typed_integer_storage_exactly() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     let model = block_on(fitctree_builtin(
+        None,
         poisoned_int_tensor(IntegerStorage::I16(vec![0, 1, 2, 3]), 4, 1),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             poisoned_int_tensor(IntegerStorage::U8(vec![0, 0, 1, 1]), 4, 1),
             Value::from("ClassNames"),
             poisoned_int_tensor(IntegerStorage::U8(vec![0, 1]), 2, 1),
@@ -49,7 +51,7 @@ fn fitctree_and_predict_read_typed_integer_storage_exactly() {
             poisoned_int_tensor(IntegerStorage::U8(vec![1]), 1, 1),
             Value::from("MinParentSize"),
             poisoned_int_tensor(IntegerStorage::U8(vec![2]), 1, 1),
-        ],
+        ]),
     ))
     .unwrap();
     let predicted = block_on(crate::builtins::stats::ml::linear_model::predict_builtin(
@@ -92,8 +94,9 @@ fn fitctree_preserves_adjacent_wide_uint64_classes() {
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
     let base = 9_007_199_254_740_992_u64;
     let model = block_on(fitctree_builtin(
+        None,
         tensor_value(vec![0.0, 1.0, 2.0, 3.0], 4, 1),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             poisoned_int_tensor(
                 IntegerStorage::U64(vec![base, base, base + 1, base + 1]),
                 4,
@@ -103,7 +106,7 @@ fn fitctree_preserves_adjacent_wide_uint64_classes() {
             Value::Num(1.0),
             Value::from("MinParentSize"),
             Value::Num(2.0),
-        ],
+        ]),
     ))
     .unwrap();
     let Value::Object(model_object) = &model else {
@@ -111,7 +114,7 @@ fn fitctree_preserves_adjacent_wide_uint64_classes() {
     };
     assert_eq!(
         model_object
-            .properties
+            .properties()
             .get("ClassNames")
             .and_then(|value| match value {
                 Value::Tensor(tensor) => tensor.integer_storage(),

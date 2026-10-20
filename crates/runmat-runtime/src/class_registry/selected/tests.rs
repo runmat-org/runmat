@@ -80,7 +80,7 @@ fn suspended_sibling_constructors_keep_distinct_selected_defaults() {
             let Value::Object(object) = value else {
                 panic!("selected value class must be an object");
             };
-            object.properties.get("seed").cloned()
+            object.property("seed").cloned()
         })
     };
     let (old_seed, new_seed) =

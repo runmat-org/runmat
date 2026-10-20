@@ -44,11 +44,11 @@ pub fn load_static_member(
         let source_file = binding
             .as_ref()
             .and_then(|binding| crate::user_functions::source_file_for(binding.function))
-            .map(String::into_boxed_str);
+            .map(Into::into);
         Ok(Value::Closure(Closure::from_data(
             runmat_value::ClosureData {
                 lexical_environment: None,
-                function_name: m.function_name,
+                function_name: m.function_name.into(),
                 binding,
                 source_role: runmat_types::FunctionSourceRole::Method,
                 source_file,
@@ -56,12 +56,12 @@ pub fn load_static_member(
             },
         )))
     } else if crate::class_registry::class_has_enumeration_member(cls, field) {
-        let mut value = runmat_value::ObjectInstance::new(cls.clone());
-        value.properties.insert(
+        let mut value = runmat_value::UnboundedObjectBuilder::new(cls.clone());
+        value.insert(
             "__enum_member__".to_string(),
             Value::string(field.to_string()),
         );
-        Ok(Value::Object(value))
+        Ok(Value::Object(value.finish()))
     } else {
         let qualified = external_qualified_display_name(cls.display_name(), field);
         if runmat_builtins::builtin_functions()
@@ -71,7 +71,7 @@ pub fn load_static_member(
             Ok(Value::Closure(Closure::from_data(
                 runmat_value::ClosureData {
                     lexical_environment: None,
-                    function_name: qualified,
+                    function_name: qualified.into(),
                     binding: None,
                     source_role: runmat_types::FunctionSourceRole::Method,
                     source_file: None,

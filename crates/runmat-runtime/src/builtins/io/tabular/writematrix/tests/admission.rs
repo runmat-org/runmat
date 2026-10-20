@@ -17,7 +17,9 @@ fn paged_filename_and_option_name_fail_before_file_creation() {
     let path_error = block_on(super::super::writematrix_builtin(
         None,
         Value::Num(1.0),
-        vec![Value::CharArray(paged_path)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::CharArray(
+            paged_path,
+        )]),
     ))
     .expect_err("paged filename");
     assert!(path_error.message().contains("character vector"));
@@ -29,11 +31,11 @@ fn paged_filename_and_option_name_fail_before_file_creation() {
     let option_error = block_on(super::super::writematrix_builtin(
         None,
         Value::Num(1.0),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("out.csv"),
             Value::CharArray(paged_name),
             Value::from(";"),
-        ],
+        ]),
     ))
     .expect_err("paged option");
     assert!(option_error.message().contains("option name"));
@@ -54,7 +56,7 @@ fn singleton_page_char_filename_remains_admitted() {
     let returned = block_on(super::super::writematrix_builtin(
         None,
         Value::Num(3.0),
-        vec![Value::CharArray(path)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::CharArray(path)]),
     ))
     .expect("valid character path");
     assert!(matches!(returned, Value::Num(2.0)));
@@ -82,7 +84,7 @@ fn large_text_cell_quotes_across_chunk_boundary_without_payload_mirror() {
     block_on(super::super::writematrix_builtin(
         None,
         Value::StringArray(matrix),
-        vec![Value::from("large.csv")],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("large.csv")]),
     ))
     .expect("chunked text write");
     let expected = format!("\"{left}\"\"{right}\"\n");

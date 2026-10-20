@@ -1,4 +1,18 @@
 use super::*;
+async fn webread_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    url: Value,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
+    super::webread_builtin(
+        runtime,
+        url,
+        crate::execution::RootedValues::new(args)
+            .map_err(|error| error.into_runtime_error())?
+            .into(),
+    )
+    .await
+}
 use runmat_builtins::WEBREAD_DESCRIPTOR;
 
 #[test]
@@ -66,7 +80,7 @@ fn webread_rejects_invalid_known_key_name_before_resident_key_value_readback() {
             runmat_accelerate_api::GpuTensorStorage::Real,
         )
         .expect("resident key value");
-    let mut options = StructValue::new();
+    let mut options = runmat_value::UnboundedStructValueBuilder::new();
     options
         .fields
         .insert("KeyName".into(), Value::from("bad\nname"));
@@ -77,7 +91,7 @@ fn webread_rejects_invalid_known_key_name_before_resident_key_value_readback() {
     let error = futures::executor::block_on(webread_builtin(
         None,
         Value::from("https://example.test"),
-        vec![Value::Struct(options)],
+        vec![Value::Struct(options.finish())],
     ))
     .expect_err("invalid header");
     assert_eq!(
@@ -111,7 +125,9 @@ fn request_names_are_prepared_once_across_option_and_query_overloads() {
         Value::from("KeyName"),
         Value::from("ordinary-query"),
     ];
-    let prepared = preflight_host_arguments(&args, None).unwrap();
+    let prepared =
+        preflight_host_arguments(crate::call::FunctionArgumentView::from_slice(&args), None)
+            .unwrap();
     assert_eq!(
         prepared.pair_fields,
         vec![
@@ -119,7 +135,10 @@ fn request_names_are_prepared_once_across_option_and_query_overloads() {
             Some(RequestOptionName::Query("KeyName".into())),
         ]
     );
-    let (_, query) = parse_arguments(args.to_vec(), None, &prepared).unwrap();
+    let mut owned = crate::execution::RootedValues::new(args.to_vec())
+        .unwrap()
+        .into();
+    let (_, query) = parse_arguments(&mut owned, None, &prepared).unwrap();
     assert_eq!(query, vec![("KeyName".into(), "ordinary-query".into())]);
 }
 use std::io::{Read, Write};
@@ -280,7 +299,7 @@ fn webread_fetches_json_response() {
             let value = struct_value.fields.get("value").expect("value field");
             match message {
                 Value::CharArray(ca) => {
-                    let text: String = ca.data.iter().collect();
+                    let text: String = ca.data().iter().collect();
                     assert_eq!(text, "hello");
                 }
                 other => panic!("expected char array, got {other:?}"),
@@ -307,7 +326,7 @@ fn webread_fetches_text_response() {
 
     match result {
         Value::CharArray(ca) => {
-            let text: String = ca.data.iter().collect();
+            let text: String = ca.data().iter().collect();
             assert_eq!(text, "RunMat webread test");
         }
         other => panic!("expected char array, got {other:?}"),
@@ -398,14 +417,17 @@ fn webread_struct_argument_supports_options_and_query() {
         respond_with(stream, "application/json", br#"{"value":123}"#);
     });
 
-    let mut fields = StructValue::new();
+    let mut fields = runmat_value::UnboundedStructValueBuilder::new();
     fields
         .fields
         .insert("ContentType".to_string(), Value::from("json"));
     fields.fields.insert("limit".to_string(), Value::Num(5.0));
 
-    let result = run_webread(Value::from(url.clone()), vec![Value::Struct(fields)])
-        .expect("webread struct arg");
+    let result = run_webread(
+        Value::from(url.clone()),
+        vec![Value::Struct(fields.finish())],
+    )
+    .expect("webread struct arg");
 
     let request = rx.recv().expect("request log");
     assert!(
@@ -432,14 +454,14 @@ fn webread_headerfields_struct_applies_custom_headers() {
         respond_with(stream, "application/json", br#"{"ok":true}"#);
     });
 
-    let mut headers = StructValue::new();
+    let mut headers = runmat_value::UnboundedStructValueBuilder::new();
     headers
         .fields
         .insert("X-Test".to_string(), Value::from("RunMat"));
 
     let args = vec![
         Value::from("HeaderFields"),
-        Value::Struct(headers),
+        Value::Struct(headers.finish()),
         Value::from("ContentType"),
         Value::from("json"),
     ];
@@ -464,12 +486,12 @@ fn webread_queryparameters_option_struct() {
         respond_with(stream, "application/json", br#"{"ok":true}"#);
     });
 
-    let mut params = StructValue::new();
+    let mut params = runmat_value::UnboundedStructValueBuilder::new();
     params.fields.insert("page".to_string(), Value::Num(2.0));
 
     let args = vec![
         Value::from("QueryParameters"),
-        Value::Struct(params),
+        Value::Struct(params.finish()),
         Value::from("ContentType"),
         Value::from("json"),
     ];

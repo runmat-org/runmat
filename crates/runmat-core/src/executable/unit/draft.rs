@@ -114,6 +114,7 @@ impl ExecutableUnitDraft {
             layout: Rc::new(layout),
             functions,
             portable_selection: None,
+            direct_code_cache: Default::default(),
             original_dependencies: Default::default(),
             imported_contract: None,
             #[cfg(not(target_arch = "wasm32"))]

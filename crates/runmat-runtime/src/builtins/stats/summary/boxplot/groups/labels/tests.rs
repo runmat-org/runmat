@@ -88,7 +88,7 @@ fn scalar_cell_precedes_multifactor_and_late_fallback_preserves_error() {
 
 #[test]
 fn long_single_text_label_yields_before_it_is_published() {
-    let group = Value::String("💠".repeat(2048));
+    let group = Value::String("💠".repeat(2048).into());
     let source = Rc::new(CancellationSource::new());
     let cancel_on_turn = source.clone();
     let budget = CpuCooperationBudget::with_test_turn(
@@ -152,11 +152,11 @@ fn character_and_categorical_labels_keep_sync_async_policy_and_errors() {
     assert!(matches!(actual[1].as_deref(), Some([KeyAtom::Text(text)]) if text == "B2"));
 
     let mut categorical = ObjectInstance::new(runmat_types::standard::CATEGORICAL.to_string());
-    categorical.properties.insert(
+    categorical.replace_property_unbounded(
         "Categories".into(),
         Value::StringArray(StringArray::new(vec!["one".into(), "two".into()], vec![2, 1]).unwrap()),
     );
-    categorical.properties.insert(
+    categorical.replace_property_unbounded(
         "Codes".into(),
         Value::Tensor(Tensor::new(vec![f64::NAN, 2.0, 3.0], vec![3, 1]).unwrap()),
     );

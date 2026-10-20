@@ -20,6 +20,9 @@ use crate::{
     AotError, AotResult, NativeObjectOptions,
 };
 
+pub mod admission;
+mod operator_pair;
+pub use operator_pair::compile_operator_selected_pair;
 mod paired;
 pub use paired::{
     compile_selected_target_pack_pair, CompiledSelectedNativePair, NativePairArtifactRecipes,

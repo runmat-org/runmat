@@ -121,13 +121,13 @@ pub fn value_is_all_keyword(value: &Value) -> bool {
         Value::String(s) => s.eq_ignore_ascii_case("all"),
         Value::CharArray(ca) => {
             if ca.rows == 1 {
-                let candidate: String = ca.data.iter().collect();
+                let candidate: String = ca.data().iter().collect();
                 candidate.trim().eq_ignore_ascii_case("all")
             } else {
                 false
             }
         }
-        Value::StringArray(sa) => sa.data.len() == 1 && sa.data[0].eq_ignore_ascii_case("all"),
+        Value::StringArray(sa) => sa.data().len() == 1 && sa.data()[0].eq_ignore_ascii_case("all"),
         _ => false,
     }
 }

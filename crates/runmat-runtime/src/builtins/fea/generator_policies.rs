@@ -457,8 +457,8 @@ pub(super) fn ensure_generator_policy_classes_registered() {
 }
 
 fn validate_policy_object(object: &ObjectInstance) -> Result<(), String> {
-    if object.properties.len() != 1 {
-        return Err(format!("{} has malformed policy data", object.class_name));
+    if object.properties().len() != 1 {
+        return Err(format!("{} has malformed policy data", object.class_name()));
     }
     Ok(())
 }

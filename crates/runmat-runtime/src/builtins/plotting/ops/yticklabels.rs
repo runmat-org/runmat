@@ -15,19 +15,22 @@ use super::axis_ticks::TickAxis;
 )]
 pub fn yticklabels_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     yticklabels_with_runtime(runtime.as_ref(), args)
 }
 
 #[cfg(test)]
 pub fn yticklabels_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    yticklabels_with_runtime(None, args)
+    yticklabels_with_runtime(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(args),
+    )
 }
 
 fn yticklabels_with_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &YTICKLABELS_DESCRIPTOR,

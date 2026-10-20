@@ -2,7 +2,12 @@ use super::controls::parse_sheet;
 use super::*;
 
 async fn writecell_builtin(data: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    super::writecell_builtin(None, data, rest).await
+    super::writecell_builtin(
+        None,
+        data,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    )
+    .await
 }
 use calamine::{open_workbook_auto, Data, Reader};
 use futures::executor::block_on;

@@ -11,9 +11,7 @@ use runmat_builtins::{
     OPTIMIZABLE_VARIABLE_INTEGER_RANGE_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{
-    CellArray, CharArray, LogicalArray, ObjectInstance, StringArray, Tensor, Value,
-};
+use runmat_value::{CellArray, CharArray, LogicalArray, StringArray, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -76,13 +74,16 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "optimizableVariable",
     binding_variant = "default",
-    builtin_path = "crate::builtins::stats::ml::optimizable_variable"
+    builtin_path = "crate::builtins::stats::ml::optimizable_variable",
+    context = true
 )]
 async fn optimizable_variable_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     name: Value,
     range: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
+    let _control_sources = rest.fork();
     let headers = Options::headers(rest)?;
     let variable_name = parse_text_scalar(&name, "Name", &ERROR_INVALID_ARGUMENT)?;
     if variable_name.trim().is_empty() {
@@ -130,25 +131,22 @@ async fn optimizable_variable_builtin(
     let var_type = options.var_type.unwrap_or(range.inferred_type());
     range.validate_for(var_type, options.transform)?;
 
-    let mut object = ObjectInstance::new(CLASS_IDENTITY);
-    object
-        .properties
-        .insert("Name".to_string(), Value::string(variable_name));
-    object
-        .properties
-        .insert("Range".to_string(), range.into_value());
-    object.properties.insert(
-        "Type".to_string(),
-        Value::string(var_type.public_name().to_string()),
-    );
-    object.properties.insert(
-        "Transform".to_string(),
-        Value::string(options.transform.public_name().to_string()),
-    );
-    object
-        .properties
-        .insert("Optimize".to_string(), Value::Bool(options.optimize));
-    Ok(Value::Object(object))
+    let fields = [
+        ("Name", Value::string(variable_name)),
+        ("Range", range.into_value()),
+        ("Type", Value::string(var_type.public_name().to_string())),
+        (
+            "Transform",
+            Value::string(options.transform.public_name().to_string()),
+        ),
+        ("Optimize", Value::Bool(options.optimize)),
+    ];
+    let object = crate::execution::object::construct_object_from_borrowed_fields(
+        runtime.as_ref(),
+        CLASS_IDENTITY.display_name(),
+        fields.iter().map(|(name, value)| (*name, value)),
+    )?;
+    Ok(object.into_value_and_lease().0)
 }
 
 fn parse_text_scalar(
@@ -161,7 +159,7 @@ fn parse_text_scalar(
         Value::CharArray(chars) if chars.rows == 1 => {
             char_row_to_string(chars, label, descriptor).map(Into::into)
         }
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::StringArray(array) if array.data().len() == 1 => Ok(array.data()[0].clone()),
         other => Err(error(
             format!("optimizableVariable: {label} must be a text scalar, got {other:?}"),
             descriptor,
@@ -180,7 +178,7 @@ fn char_row_to_string(
             descriptor,
         ));
     }
-    Ok(chars.data.iter().collect())
+    Ok(chars.data().iter().collect())
 }
 
 fn parse_bool(value: &Value, label: &str) -> BuiltinResult<bool> {

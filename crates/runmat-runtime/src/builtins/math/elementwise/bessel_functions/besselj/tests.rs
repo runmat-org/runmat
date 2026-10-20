@@ -5,7 +5,12 @@ use runmat_builtins::BESSELJ_ERROR_INVALID_INPUT;
 use runmat_value::{ComplexTensor, NumericDType, Tensor};
 
 fn call(order: Value, argument: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    block_on(besselj_builtin(None, order, argument, rest))
+    block_on(besselj_builtin(
+        None,
+        order,
+        argument,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    ))
 }
 
 fn close(actual: f64, expected: f64, tolerance: f64) {

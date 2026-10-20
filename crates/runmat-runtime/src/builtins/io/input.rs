@@ -57,7 +57,7 @@ fn input_error_with_source(
     binding_variant = "default",
     builtin_path = "crate::builtins::io::input"
 )]
-async fn input_builtin(args: Vec<Value>) -> BuiltinResult<RootedValue> {
+async fn input_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<RootedValue> {
     if matches!(crate::output_count::current_output_count(), Some(n) if n > 1) {
         return Err(input_error(&INPUT_ERROR_TOO_MANY_OUTPUTS));
     }

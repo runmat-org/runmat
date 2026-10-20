@@ -64,18 +64,19 @@ fn map_plot_internal(err: RuntimeError) -> RuntimeError {
 )]
 pub async fn plot_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<f64> {
     plot_builtin_with_runtime(runtime.as_ref(), args).await
 }
 
 pub async fn plot_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+    let args = crate::call::BuiltinArguments::from_borrowed(&args, None)?;
     plot_builtin_with_runtime(None, args).await
 }
 
 async fn plot_builtin_with_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<f64> {
     crate::output_count::validate_fixed_outputs(
         &PLOT_DESCRIPTOR,
@@ -83,10 +84,10 @@ async fn plot_builtin_with_runtime(
         BUILTIN_NAME,
     )?;
     let (prepared, _) =
-        super::op_common::axes_target::prepare_axes_call(runtime, BUILTIN_NAME, &args)?;
+        super::op_common::axes_target::prepare_axes_call(runtime, BUILTIN_NAME, args.view())?;
     let explicit = prepared.is_explicit();
     let args = if explicit {
-        args.into_iter().skip(1).collect::<Vec<_>>()
+        args.into_range(1..)?
     } else {
         args
     };
@@ -304,7 +305,7 @@ pub(super) fn build_line_plot_from_numeric_data_for_builtin(
 }
 
 fn parse_series_specs(
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<(Vec<SeriesRenderPlan>, Option<Vec<LineStyle>>)> {
     if args.is_empty() {
         return Err(plot_err("expected at least one data series"));
@@ -432,7 +433,7 @@ fn split_matrix_series(x: Value, y: Value, implicit_x: bool) -> BuiltinResult<Ve
         let n = data.len();
         Tensor::new(data, vec![n, 1])
             .map(Value::Tensor)
-            .map_err(|e| plot_err(format!("{e}")))
+            .map_err(plot_err)
     };
     let mismatch = || plot_err("X and Y inputs must have the same number of elements");
     let mut pairs = Vec::new();
@@ -826,7 +827,10 @@ pub(crate) mod tests {
             Value::Tensor(tensor_from(&[3.0, 4.0])),
             Value::String("--".into()),
         ];
-        let (plans, order) = parse_series_specs(args).expect("series parsed");
+        let (plans, order) = parse_series_specs(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        )
+        .expect("series parsed");
         assert_eq!(plans.len(), 2);
         assert!(order.is_none());
         assert_eq!(plans[1].appearance.line_style, LineStyle::Dashed);
@@ -956,7 +960,10 @@ pub(crate) mod tests {
             Value::String("r".into()),
             Value::String("b".into()),
         ];
-        let err = parse_series_specs(args).expect_err("duplicate LineSpec tokens should fail");
+        let err = parse_series_specs(crate::builtins::common::test_support::builtin_arguments(
+            args,
+        ))
+        .expect_err("duplicate LineSpec tokens should fail");
         assert!(err.to_string().contains("only one LineSpec"));
     }
 
@@ -968,7 +975,10 @@ pub(crate) mod tests {
             Value::Tensor(tensor_from(&[0.0, 1.0])),
             Value::String("linewidth".into()),
         ];
-        let err = parse_series_specs(args).unwrap_err();
+        let err = parse_series_specs(crate::builtins::common::test_support::builtin_arguments(
+            args,
+        ))
+        .unwrap_err();
         assert!(err
             .to_string()
             .contains("name-value arguments must come in pairs"));
@@ -979,7 +989,10 @@ pub(crate) mod tests {
     fn parse_series_specs_rejects_style_before_data() {
         let _guard = setup_plot_tests();
         let args = vec![Value::String("linewidth".into()), Value::Num(2.0)];
-        let err = parse_series_specs(args).unwrap_err();
+        let err = parse_series_specs(crate::builtins::common::test_support::builtin_arguments(
+            args,
+        ))
+        .unwrap_err();
         assert!(err.to_string().contains("expected numeric X data"));
     }
 
@@ -995,7 +1008,10 @@ pub(crate) mod tests {
                 runmat_value::StringArray::new(vec!["--".into(), ":".into()], vec![1, 2]).unwrap(),
             ),
         ];
-        let (mut plans, order) = parse_series_specs(args).expect("parsed");
+        let (mut plans, order) = parse_series_specs(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        )
+        .expect("parsed");
         assert!(plans.len() == 1);
         assert!(order.is_some());
         apply_line_style_order(&mut plans, order.as_ref().unwrap());
@@ -1006,26 +1022,49 @@ pub(crate) mod tests {
     fn parse_series_specs_splits_matrix_y_into_one_series_per_column_or_row() {
         let x = Value::Tensor(tensor_with_shape(&[1.0, 2.0, 3.0], vec![1, 3]));
         // 3x2: columns match x
-        let cols = Value::Tensor(tensor_with_shape(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![3, 2]));
-        let (plans, _) = parse_series_specs(vec![x.clone(), cols.clone()]).expect("columns");
+        let cols = Value::Tensor(tensor_with_shape(
+            &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            vec![3, 2],
+        ));
+        let (plans, _) = parse_series_specs(
+            crate::builtins::common::test_support::builtin_arguments(vec![x.clone(), cols.clone()]),
+        )
+        .expect("columns");
         assert_eq!(plans.len(), 2);
         // 2x3: rows match x
-        let rows = Value::Tensor(tensor_with_shape(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]));
-        let (plans, _) = parse_series_specs(vec![x.clone(), rows]).expect("rows");
+        let rows = Value::Tensor(tensor_with_shape(
+            &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            vec![2, 3],
+        ));
+        let (plans, _) = parse_series_specs(
+            crate::builtins::common::test_support::builtin_arguments(vec![x.clone(), rows]),
+        )
+        .expect("rows");
         assert_eq!(plans.len(), 2);
         // plot(Y): one line per column, not one flattened line
-        let (plans, _) = parse_series_specs(vec![cols]).expect("implicit x");
+        let (plans, _) = parse_series_specs(
+            crate::builtins::common::test_support::builtin_arguments(vec![cols]),
+        )
+        .expect("implicit x");
         assert_eq!(plans.len(), 2);
         // a length that matches neither side is an error
         let bad = Value::Tensor(tensor_with_shape(&[0.0; 8], vec![2, 4]));
-        assert!(parse_series_specs(vec![x, bad]).is_err());
+        assert!(
+            parse_series_specs(crate::builtins::common::test_support::builtin_arguments(
+                vec![x, bad]
+            ))
+            .is_err()
+        );
     }
 
     #[test]
     fn parse_series_specs_supports_plot_y_shorthand() {
         let _guard = setup_plot_tests();
         let args = vec![Value::Tensor(tensor_from(&[10.0, 20.0, 30.0]))];
-        let (plans, order) = parse_series_specs(args).expect("parsed");
+        let (plans, order) = parse_series_specs(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        )
+        .expect("parsed");
         assert!(order.is_none());
         assert_eq!(plans.len(), 1);
         let (x_tensor, y_tensor) = futures::executor::block_on(
@@ -1048,7 +1087,10 @@ pub(crate) mod tests {
             Value::Tensor(tensor_from(&[1.0, 2.0])),
             Value::String("r--".into()),
         ];
-        let (plans, order) = parse_series_specs(args).expect("parsed");
+        let (plans, order) = parse_series_specs(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        )
+        .expect("parsed");
         assert!(order.is_none());
         assert_eq!(plans.len(), 1);
         assert_eq!(plans[0].appearance.line_style, LineStyle::Dashed);
@@ -1062,7 +1104,10 @@ pub(crate) mod tests {
             Value::Tensor(tensor_from(&[1.0, 2.0])),
             Value::String("x".into()),
         ];
-        let (plans, order) = parse_series_specs(args).expect("parsed");
+        let (plans, order) = parse_series_specs(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        )
+        .expect("parsed");
         assert!(order.is_none());
         assert_eq!(plans.len(), 1);
         assert_eq!(plans[0].appearance.line_style, LineStyle::None);
@@ -1193,12 +1238,24 @@ pub(crate) mod tests {
         assert_eq!(x, vec![1.0, 2.0, 3.0]);
         assert_eq!(y, vec![5.0, 6.0, 7.0]);
 
-        crate::builtins::plotting::title::title_builtin(vec![Value::String("Measured".into())])
-            .unwrap();
-        crate::builtins::plotting::xlabel::xlabel_builtin(vec![Value::String("Time".into())])
-            .unwrap();
-        crate::builtins::plotting::ylabel::ylabel_builtin(vec![Value::String("Signal".into())])
-            .unwrap();
+        crate::builtins::plotting::title::title_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "Measured".into(),
+            )]),
+        )
+        .unwrap();
+        crate::builtins::plotting::xlabel::xlabel_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "Time".into(),
+            )]),
+        )
+        .unwrap();
+        crate::builtins::plotting::ylabel::ylabel_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "Signal".into(),
+            )]),
+        )
+        .unwrap();
         set_hold(HoldMode::On);
         block_on(plot_builtin(vec![Value::Tensor(tensor_from(&[
             8.0, 9.0, 10.0,

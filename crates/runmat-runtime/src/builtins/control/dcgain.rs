@@ -57,15 +57,11 @@ mod tests {
 
     fn raw_tf(numerator: Value, denominator: Value) -> ObjectInstance {
         let mut model = ObjectInstance::new(TF_CLASS.to_string());
-        model.properties.insert("Numerator".into(), numerator);
-        model.properties.insert("Denominator".into(), denominator);
-        model.properties.insert("Ts".into(), Value::Num(0.0));
-        model
-            .properties
-            .insert("InputDelay".into(), Value::Num(0.0));
-        model
-            .properties
-            .insert("OutputDelay".into(), Value::Num(0.0));
+        model.replace_property_unbounded("Numerator".into(), numerator);
+        model.replace_property_unbounded("Denominator".into(), denominator);
+        model.replace_property_unbounded("Ts".into(), Value::Num(0.0));
+        model.replace_property_unbounded("InputDelay".into(), Value::Num(0.0));
+        model.replace_property_unbounded("OutputDelay".into(), Value::Num(0.0));
         model
     }
 
@@ -87,9 +83,10 @@ mod tests {
             assert!(provider.telemetry_snapshot().download_bytes > 0);
 
             let mut unsupported = ObjectInstance::new(SS_CLASS.to_string());
-            unsupported
-                .properties
-                .insert("Denominator".into(), Value::GpuTensor(resident.clone()));
+            unsupported.replace_property_unbounded(
+                "Denominator".into(),
+                Value::GpuTensor(resident.clone()),
+            );
             provider.reset_telemetry();
             let error = block_on(dcgain_builtin(Value::Object(unsupported)))
                 .expect_err("unsupported model");
@@ -97,7 +94,10 @@ mod tests {
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
 
             let mut incomplete = raw_tf(Value::Num(2.0), Value::GpuTensor(resident));
-            incomplete.properties.remove("Ts");
+            crate::builtins::common::test_support::remove_object_property_unbounded(
+                &mut incomplete,
+                "Ts",
+            );
             provider.reset_telemetry();
             let error =
                 block_on(dcgain_builtin(Value::Object(incomplete))).expect_err("missing property");
@@ -113,9 +113,7 @@ mod tests {
             let resident = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
                 .expect("upload");
             let mut model = raw_tf(Value::Num(2.0), Value::Num(3.0));
-            model
-                .properties
-                .insert("Unrelated".into(), Value::GpuTensor(resident));
+            model.replace_property_unbounded("Unrelated".into(), Value::GpuTensor(resident));
             provider.reset_telemetry();
             let Value::Num(gain) = block_on(dcgain_builtin(Value::Object(model))).expect("gain")
             else {

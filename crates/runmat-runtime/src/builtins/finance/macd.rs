@@ -25,9 +25,13 @@ const SIGNAL_ALPHA: f64 = 0.20;
 #[runtime_builtin(
     name = "macd",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::finance::macd"
 )]
-async fn macd_builtin(data: Value) -> BuiltinResult<Value> {
+async fn macd_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    data: Value,
+) -> BuiltinResult<Value> {
     let output_count = crate::output_count::current_output_count();
     match output_count {
         Some(0) => return Ok(Value::output_list(Vec::new())),
@@ -42,7 +46,7 @@ async fn macd_builtin(data: Value) -> BuiltinResult<Value> {
 
     let input = MacdInput::from_value(data).await?;
     let include_signal = output_count == Some(2);
-    let eval = input.evaluate(include_signal)?;
+    let eval = input.evaluate(runtime.as_ref(), include_signal)?;
     match output_count {
         Some(1) => Ok(Value::output_list(vec![eval.macd])),
         Some(2) => Ok(Value::output_list(vec![
@@ -169,7 +173,11 @@ impl MacdInput {
         }
     }
 
-    fn evaluate(self, include_signal: bool) -> BuiltinResult<MacdEval> {
+    fn evaluate(
+        self,
+        runtime: Option<&crate::context::RuntimeContext>,
+        include_signal: bool,
+    ) -> BuiltinResult<MacdEval> {
         match self {
             MacdInput::Matrix { close } => {
                 let (macd, signal) = compute_macd(&close, include_signal)?;
@@ -183,6 +191,7 @@ impl MacdInput {
                 let rows = (0..close.rows()).collect::<Vec<_>>();
                 let row_names = selected_row_names(&source, &rows)?;
                 let macd = table_from_columns_like(
+                    runtime,
                     &source,
                     vec!["Close".to_string()],
                     vec![Value::Tensor(macd)],
@@ -192,6 +201,7 @@ impl MacdInput {
                 let signal = signal
                     .map(|signal| {
                         table_from_columns_like(
+                            runtime,
                             &source,
                             vec!["Close".to_string()],
                             vec![Value::Tensor(signal)],

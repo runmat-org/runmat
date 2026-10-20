@@ -29,15 +29,15 @@ mod managed;
 )]
 async fn blkdiag_builtin(
     context: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    ensure_integer_extensions_enabled(&args)?;
+    ensure_integer_extensions_enabled(args.view())?;
     let has_gpu = args
         .iter()
         .any(|value| matches!(value, Value::GpuTensor(_)));
     if has_gpu {
-        validate_blocks_before_provider(&args)?;
-        return blkdiag_gpu(args).await;
+        validate_blocks_before_provider(args.view())?;
+        return blkdiag_gpu(context.as_ref(), args).await;
     }
     if let Some(context) = context.as_ref() {
         if HostAllocationReceipt::policy(Some(context))
@@ -49,16 +49,16 @@ async fn blkdiag_builtin(
                     .iter()
                     .all(|value| matches!(value, Value::CharArray(_)))
             {
-                return managed::character(context, &args);
+                return managed::character(context, args.view());
             }
             if args
                 .iter()
                 .any(|value| matches!(value, Value::SparseTensor(_)))
             {
-                if managed::has_nonreal_dense_complex(context, &args)? {
-                    return managed::dense(context, &args);
+                if managed::has_nonreal_dense_complex(context, args.view())? {
+                    return managed::dense(context, args.view());
                 }
-                return managed::sparse(context, &args);
+                return managed::sparse(context, args.view());
             }
             if args.iter().all(|value| {
                 matches!(
@@ -72,14 +72,16 @@ async fn blkdiag_builtin(
                         | Value::Complex(_, _)
                 )
             }) {
-                return managed::dense(context, &args);
+                return managed::dense(context, args.view());
             }
         }
     }
     blkdiag_host(args)
 }
 
-fn validate_blocks_before_provider(args: &[Value]) -> BuiltinResult<()> {
+fn validate_blocks_before_provider(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     let mut rows = 0usize;
     let mut cols = 0usize;
     let has_char = args
@@ -133,7 +135,9 @@ fn validate_blocks_before_provider(args: &[Value]) -> BuiltinResult<()> {
     Ok(())
 }
 
-fn ensure_integer_extensions_enabled(args: &[Value]) -> BuiltinResult<()> {
+fn ensure_integer_extensions_enabled(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     if args.iter().any(
         |value| matches!(value, Value::SparseTensor(sparse) if sparse.integer_storage().is_some()),
     ) {
@@ -153,7 +157,10 @@ fn ensure_integer_extensions_enabled(args: &[Value]) -> BuiltinResult<()> {
     Ok(())
 }
 
-async fn blkdiag_gpu(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn blkdiag_gpu(
+    context: Option<&crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     let provider = args
         .iter()
         .find_map(|value| match value {
@@ -163,41 +170,42 @@ async fn blkdiag_gpu(args: Vec<Value>) -> BuiltinResult<Value> {
         .ok_or_else(|| {
             error_with_detail(&BLKDIAG_ERROR_GPU, "no acceleration provider is registered")
         })?;
-    let mut gathered = Vec::with_capacity(args.len());
-    for value in args {
-        let gathered_value = gpu_helpers::gather_value_async(&value)
-            .await
-            .map_err(|err| {
-                build_runtime_error(format!("blkdiag: gpuArray gather failed: {err}"))
-                    .with_builtin(BUILTIN_NAME)
-                    .with_identifier(
-                        BLKDIAG_ERROR_GPU
-                            .identifier
-                            .expect("declared GPU identifier"),
-                    )
-                    .with_source(err)
-                    .build()
-            })?;
-        gathered.push(gathered_value);
-    }
+    let gathered = args
+        .try_map_preserving_roots_async(args.len(), context, |index| {
+            let value = &args[index];
+            async move {
+                gpu_helpers::gather_value_async(value).await.map_err(|err| {
+                    build_runtime_error(format!("blkdiag: gpuArray gather failed: {err}"))
+                        .with_builtin(BUILTIN_NAME)
+                        .with_identifier(
+                            BLKDIAG_ERROR_GPU
+                                .identifier
+                                .expect("declared GPU identifier"),
+                        )
+                        .with_source(err)
+                        .build()
+                })
+            }
+        })
+        .await?;
     let host = blkdiag_host(gathered)?;
     upload_gpu_result(provider, host)
 }
 
-fn blkdiag_host(args: Vec<Value>) -> BuiltinResult<Value> {
+fn blkdiag_host(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     if args.is_empty() {
         let tensor = Tensor::new(Vec::new(), vec![0, 0])
             .map_err(|detail| error_with_detail(&BLKDIAG_ERROR_INVALID_INPUT, detail))?;
         return Ok(Value::Tensor(tensor));
     }
 
-    if let Some(result) = assemble_typed_complex_integer_blocks(&args) {
+    if let Some(result) = assemble_typed_complex_integer_blocks(args.view()) {
         return result;
     }
-    if let Some(result) = assemble_typed_integer_sparse_blocks(&args) {
+    if let Some(result) = assemble_typed_integer_sparse_blocks(args.view()) {
         return result;
     }
-    if let Some(result) = assemble_typed_integer_blocks(&args) {
+    if let Some(result) = assemble_typed_integer_blocks(args.view()) {
         return result;
     }
 
@@ -211,7 +219,9 @@ fn blkdiag_host(args: Vec<Value>) -> BuiltinResult<Value> {
 /// Assemble typed integer sparse blocks without reconstructing their stored values through f64.
 ///
 /// Once a typed sparse input selects sparse output, every block must retain the same integer class until mixed-class sparse promotion has a MATLAB-validated policy.
-fn assemble_typed_integer_sparse_blocks(args: &[Value]) -> Option<BuiltinResult<Value>> {
+fn assemble_typed_integer_sparse_blocks(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> Option<BuiltinResult<Value>> {
     if !args.iter().any(
         |value| matches!(value, Value::SparseTensor(sparse) if sparse.integer_storage().is_some()),
     ) {
@@ -351,7 +361,9 @@ fn assemble_typed_integer_sparse_blocks(args: &[Value]) -> Option<BuiltinResult<
 /// MATLAB's public matrix-combination rules make the first integer class dominant over
 /// unlike integers, floating classes, and logical values. Integer sources remain exact and
 /// all other values use destination-class assignment conversion.
-fn assemble_typed_integer_blocks(args: &[Value]) -> Option<BuiltinResult<Value>> {
+fn assemble_typed_integer_blocks(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> Option<BuiltinResult<Value>> {
     if args.iter().any(|value| {
         matches!(
             value,
@@ -472,7 +484,9 @@ fn assemble_typed_integer_blocks(args: &[Value]) -> Option<BuiltinResult<Value>>
 /// however, so same-class typed-complex inputs retain their paired integer components and the
 /// off-diagonal elements are class-correct zeroes. Mixed representations need their own
 /// conversion policy and are rejected before the legacy floating-point assembly path.
-fn assemble_typed_complex_integer_blocks(args: &[Value]) -> Option<BuiltinResult<Value>> {
+fn assemble_typed_complex_integer_blocks(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> Option<BuiltinResult<Value>> {
     let has_typed_complex_integer = args.iter().any(
         |value| matches!(value, Value::ComplexTensor(tensor) if tensor.integer_storage().is_some()),
     );
@@ -1020,7 +1034,7 @@ fn assemble_char(blocks: Vec<Block>) -> BuiltinResult<Value> {
             for col in 0..chars.cols {
                 let src = row * chars.cols + col;
                 let dst = (row_offset + row) * cols + (col_offset + col);
-                data[dst] = chars.data[src];
+                data[dst] = chars.data()[src];
             }
         }
         row_offset += block.rows();
@@ -1280,13 +1294,14 @@ fn error_with_detail(
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::builtin_function_by_name;
     use runmat_value::IntValue;
 
     use crate::builtins::common::test_support;
 
     fn call(args: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(blkdiag_builtin(None, args))
+        let args = crate::execution::RootedValues::new(args)
+            .map_err(crate::execution::ExecutionServiceError::into_runtime_error)?;
+        block_on(blkdiag_builtin(None, args.into()))
     }
 
     #[test]
@@ -1322,7 +1337,8 @@ mod tests {
 
     #[test]
     fn blkdiag_descriptor_declares_integer_forms_and_extensions() {
-        let builtin = builtin_function_by_name("blkdiag").expect("registered blkdiag");
+        let builtin =
+            runmat_builtins::builtin_catalog_entry_by_name("blkdiag").expect("catalogued blkdiag");
         assert_eq!(builtin.extensions, &BLKDIAG_EXTENSIONS);
         assert_eq!(builtin.integer_capabilities.len(), 3);
         assert_eq!(
@@ -1831,7 +1847,7 @@ mod tests {
             Value::CharArray(out) => {
                 assert_eq!(out.rows, 3);
                 assert_eq!(out.cols, 3);
-                let text: String = out.data.iter().collect();
+                let text: String = out.data().iter().collect();
                 assert_eq!(text, "ab   c  d");
             }
             other => panic!("expected char array, got {other:?}"),

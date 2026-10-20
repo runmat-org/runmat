@@ -21,7 +21,7 @@ pub(crate) async fn dlgradient_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
     loss: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     dlgradient_in_runtime(runtime.as_ref(), requested_outputs, loss, rest).await
 }
@@ -29,7 +29,7 @@ pub(crate) async fn dlgradient_builtin(
 #[cfg(test)]
 pub(in crate::builtins::deep_learning) async fn dlgradient_direct(
     loss: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     dlgradient_in_runtime(
         None,
@@ -44,7 +44,7 @@ async fn dlgradient_in_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
     loss: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     if rest.is_empty() {
         return Err(deep_learning_error(
@@ -130,8 +130,9 @@ fn gradient_tree_for_target_impl(
     target: &Value,
     gradients: &GradientSource<'_>,
 ) -> BuiltinResult<Value> {
+    let context = crate::context::legacy::active();
     match target {
-        Value::Object(object) if object.class_name == DLARRAY_CLASS => {
+        Value::Object(object) if object.class_name().is(DLARRAY_CLASS) => {
             validate_tape_dlarray_data(target)?;
             let Some(id) = dlarray_node_id(target) else {
                 return Err(deep_learning_error(
@@ -167,7 +168,7 @@ fn gradient_tree_for_target_impl(
                     ("Format", format),
                     ("Labels", labels),
                 ],
-            ))
+            )?)
         }
         Value::Object(object) if model::is_deep_learning_network_object(object) => {
             let Value::Object(table) = model::project_learnables(object, "dlgradient")? else {
@@ -181,41 +182,54 @@ fn gradient_tree_for_target_impl(
             }
             let variables = crate::builtins::table::table_variables(object)
                 .map_err(|err| deep_learning_error("dlgradient", err.to_string()))?;
-            let mut updated = StructValue::new();
-            for (name, value) in variables.fields {
-                updated.insert(name, gradient_tree_for_target_impl(&value, gradients)?);
+let prepared_updated = crate::execution::structure::replacement::record(&variables, context.as_ref())?;
+            let _roots = prepared_updated.1;
+            let mut updated = prepared_updated.0;
+            for value in updated.fields.try_values_mut_unique().expect("private destination") {
+                *value = gradient_tree_for_target_impl(value, gradients)?;
             }
             crate::builtins::table::table_replace_variables_like(object, updated)
                 .map_err(|err| deep_learning_error("dlgradient", err.to_string()))
         }
         Value::Struct(st) => {
             if is_learnables_struct(st) {
-                let mut out = st.clone();
+let prepared_out = crate::execution::structure::replacement::record(st, context.as_ref())?;
+                let _roots = prepared_out.1;
+                let mut out = prepared_out.0;
                 let value = st.fields.get(Column::Value.name()).ok_or_else(|| {
                     deep_learning_error("dlgradient", "dlgradient: learnables tree is missing Value")
                 })?;
-                out.insert(Column::Value.name(), gradient_tree_for_target_impl(value, gradients)?);
+                out.try_replace_unique(Column::Value.name(), gradient_tree_for_target_impl(value, gradients)?)
+                    .expect("learnables schema contains Value");
                 return Ok(Value::Struct(out));
             }
-            let mut out = StructValue::new();
-            for (name, value) in &st.fields {
-                out.insert(name.clone(), gradient_tree_for_target_impl(value, gradients)?);
+let prepared_out = crate::execution::structure::replacement::record(st, context.as_ref())?;
+            let _roots = prepared_out.1;
+            let mut out = prepared_out.0;
+            for value in out.fields.try_values_mut_unique().expect("private destination") {
+                *value = gradient_tree_for_target_impl(value, gradients)?;
             }
             Ok(Value::Struct(out))
         }
-        Value::StructArray(array) => array
-            .clone()
-            .try_map_values(|value| gradient_tree_for_target_impl(&value, gradients))
-            .map(Value::StructArray),
+        Value::StructArray(array) => {
+let prepared_out = crate::execution::structure::replacement::array(array, context.as_ref())?;
+            let _roots = prepared_out.1;
+            let mut out = prepared_out.0;
+            for name in array.field_names() {
+                for value in out.try_column_mut_unique(name).expect("private destination") {
+                    *value = gradient_tree_for_target_impl(value, gradients)?;
+                }
+            }
+            Ok(Value::StructArray(out))
+        }
         Value::Cell(cell) => {
-            let data = cell
-                .data
-                .iter()
-                .map(|value| gradient_tree_for_target_impl(value, gradients))
-                .collect::<BuiltinResult<Vec<_>>>()?;
-            CellArray::new_with_shape(data, cell.shape.as_slice().to_vec())
-                .map(Value::Cell)
-                .map_err(|err| deep_learning_error("dlgradient", err))
+let prepared_out = crate::execution::structure::replacement::cell(cell, context.as_ref())?;
+            let _roots = prepared_out.1;
+            let mut out = prepared_out.0;
+            for value in out.try_data_mut_unique().expect("private destination") {
+                *value = gradient_tree_for_target_impl(value, gradients)?;
+            }
+            Ok(Value::Cell(out))
         }
         other => Err(deep_learning_error(
             "dlgradient",
@@ -229,20 +243,18 @@ fn gradient_network_table(
     gradients: &GradientSource<'_>,
 ) -> BuiltinResult<Value> {
     let values = parameter_table::values(table, "dlgradient")?.expect("parameter table schema");
-    let gradients = values
-        .data
-        .iter()
-        .map(|value| gradient_tree_for_target_impl(value, gradients))
-        .collect::<BuiltinResult<Vec<_>>>()?;
-    let mut variables = crate::builtins::table::table_variables(table)
+    let gradients = gradient_tree_for_target_impl(&Value::Cell(values.clone()), gradients)?;
+    let variables = crate::builtins::table::table_variables(table)
         .map_err(|error| deep_learning_error("dlgradient", error.to_string()))?;
-    variables.insert(
-        "Value",
-        Value::Cell(
-            CellArray::new_with_shape(gradients, values.shape.as_slice().to_vec())
-                .map_err(|error| deep_learning_error("dlgradient", error))?,
-        ),
-    );
+    let context = crate::context::legacy::active();
+    let gradients = crate::execution::structure::replacement::root(gradients, context.as_ref())?;
+    let prepared_variables =
+        crate::execution::structure::replacement::record(&variables, context.as_ref())?;
+    let _roots = prepared_variables.1;
+    let mut variables = prepared_variables.0;
+    variables
+        .try_replace_unique("Value", gradients.value().clone())
+        .expect("learnables schema contains Value");
     crate::builtins::table::table_replace_variables_like(table, variables)
         .map_err(|error| deep_learning_error("dlgradient", error.to_string()))
 }
@@ -251,7 +263,7 @@ fn zero_for_unconnected_resident_target(target: &Value) -> BuiltinResult<Value> 
     let Value::Object(object) = target else {
         unreachable!("gradient target admission requires a dlarray")
     };
-    match object.properties.get("Data") {
+    match object.properties().get("Data") {
         Some(Value::GpuTensor(handle)) => {
             let provider = crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle)
                 .ok_or_else(|| {
@@ -322,8 +334,8 @@ fn validate_tape_dlarray_data(value: &Value) -> BuiltinResult<()> {
     let Value::Object(object) = value else {
         return Ok(());
     };
-    if object.class_name == DLARRAY_CLASS {
-        match object.properties.get("Data") {
+    if object.class_name().is(DLARRAY_CLASS) {
+        match object.properties().get("Data") {
             Some(Value::GpuTensor(handle))
                 if runmat_accelerate_api::handle_storage(handle)
                     == runmat_accelerate_api::GpuTensorStorage::Real

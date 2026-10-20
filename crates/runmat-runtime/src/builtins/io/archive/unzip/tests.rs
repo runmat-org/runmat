@@ -10,7 +10,6 @@ use runmat_accelerate_api::{
 };
 use runmat_execution::cancellation::CancellationSource;
 use runmat_execution::CancellationReason;
-use runmat_value::CellArray;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -49,10 +48,10 @@ fn finite_budget_without_host_effect_evidence_rejects_before_filesystem_effects(
         );
     let error = block_on(unzip_builtin(
         Some(runtime),
-        vec![
-            Value::String(archive.to_string_lossy().into_owned()),
-            Value::String(destination.to_string_lossy().into_owned()),
-        ],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::String(archive.to_string_lossy().into_owned().into()),
+            Value::String(destination.to_string_lossy().into_owned().into()),
+        ]),
     ))
     .unwrap_err();
     assert_eq!(
@@ -128,7 +127,10 @@ fn run_unzip(args: Vec<Value>, outputs: Option<usize>) -> BuiltinResult<Value> {
     let _guard = outputs
         .map(|count| crate::output_count::push_output_count(Some(count)))
         .expect("output-count scope");
-    block_on(unzip_builtin(None, args))
+    block_on(unzip_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(args),
+    ))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -142,25 +144,26 @@ fn run_unzip_http(args: Vec<Value>) -> BuiltinResult<Value> {
             RuntimeServicePorts::default()
                 .with_http(Rc::new(NativeHttpService::new(driver.handle().clone()))),
         );
-    block_on(unzip_builtin(Some(runtime), args))
+    block_on(unzip_builtin(
+        Some(runtime),
+        crate::builtins::common::test_support::builtin_arguments(args),
+    ))
 }
 
 fn cell_strings(value: Value) -> Vec<String> {
-    let Value::Cell(CellArray {
-        data, rows, cols, ..
-    }) = value
-    else {
+    let Value::Cell(cell) = value else {
         panic!("expected cell array");
     };
-    assert_eq!(cols, 1);
-    assert_eq!(rows, data.len());
-    data.into_iter()
+    assert_eq!(cell.cols, 1);
+    assert_eq!(cell.rows, cell.data().len());
+    cell.data()
+        .iter()
         .map(|value| {
-            let Value::CharArray(chars) = &value else {
+            let Value::CharArray(chars) = value else {
                 panic!("unzip paths must be character rows")
             };
             assert_eq!(chars.rows, 1);
-            String::try_from(&value).expect("cell character path")
+            String::try_from(value).expect("cell character path")
         })
         .collect()
 }
@@ -316,10 +319,10 @@ fn numeric_resident_path_is_rejected_without_provider_download_or_filesystem_eff
     let destination = root.path().join("never-created");
     let error = block_on(unzip_builtin(
         None,
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::GpuTensor(resident),
-            Value::String(destination.to_string_lossy().into_owned()),
-        ],
+            Value::String(destination.to_string_lossy().into_owned().into()),
+        ]),
     ))
     .expect_err("numeric gpuArray cannot be a ZIP source");
     assert_eq!(error.identifier(), UNZIP_ERROR_FILENAME.identifier);
@@ -338,7 +341,7 @@ fn paged_character_controls_reject_at_public_dispatch_before_effects() {
     let source_error = run_unzip(
         vec![
             paged.clone(),
-            Value::String(destination.to_string_lossy().into_owned()),
+            Value::String(destination.to_string_lossy().into_owned().into()),
         ],
         Some(1),
     )
@@ -372,15 +375,16 @@ fn cancelled_runtime_context_stops_before_destination_creation() {
     );
     let error = block_on(unzip_builtin(
         Some(runtime),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::String(
                 root.path()
                     .join("missing.zip")
                     .to_string_lossy()
-                    .into_owned(),
+                    .into_owned()
+                    .into(),
             ),
-            Value::String(destination.to_string_lossy().into_owned()),
-        ],
+            Value::String(destination.to_string_lossy().into_owned().into()),
+        ]),
     ))
     .expect_err("cancelled call");
     assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
@@ -546,10 +550,10 @@ fn unpolled_url_invocation_does_not_create_destination() {
     let destination = out.path().join("not-created");
     let future = unzip_builtin(
         None,
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("http://127.0.0.1:1/archive.zip"),
             Value::from(destination.to_string_lossy().to_string()),
-        ],
+        ]),
     );
     drop(future);
     assert!(!destination.exists());

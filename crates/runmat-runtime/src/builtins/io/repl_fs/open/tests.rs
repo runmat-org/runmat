@@ -13,9 +13,12 @@ fn invalid_names_reject_without_host_or_provider_access() {
     );
     for value in [resident, pages, Value::Num(1.0)] {
         assert_eq!(
-            block_on(open_builtin(None, vec![value]))
-                .unwrap_err()
-                .identifier(),
+            block_on(open_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![value])
+            ))
+            .unwrap_err()
+            .identifier(),
             OPEN_ERROR_NAME.identifier
         );
     }
@@ -93,7 +96,11 @@ fn call(args: Vec<Value>) -> BuiltinResult<crate::execution::RootedValue> {
     let selected = context.clone();
     block_on(context.scope(async move {
         let _outputs = crate::output_count::push_output_count(outputs).expect("output-count scope");
-        open_builtin(Some(selected), args).await
+        open_builtin(
+            Some(selected),
+            crate::builtins::common::test_support::builtin_arguments(args),
+        )
+        .await
     }))
 }
 
@@ -102,9 +109,10 @@ fn selected_openfig(
 ) -> crate::builtin::RuntimeBuiltinFuture {
     assert_eq!(invocation.requested_outputs, Some(1));
     assert!(invocation.context.is_some());
-    let [Value::String(path)] = invocation.args else {
+    let Some(Value::String(path)) = invocation.args.get(0) else {
         panic!("openfig must receive one resolved path");
     };
+    assert_eq!(invocation.args.len(), 1);
     assert!(path.ends_with("selected.fig"));
     Box::pin(async {
         let sequence = runmat_value::ValueSequence::single(Value::Num(90_210.0))
@@ -151,7 +159,7 @@ fn figure_archive_uses_the_exact_selected_openfig_binding() {
     let result = block_on(crate::call_builtin_async_with_outputs_in_context(
         &runtime,
         "open",
-        &[Value::String(path.to_string_lossy().into_owned())],
+        &[Value::String(path.to_string_lossy().into_owned().into())],
         1,
     ))
     .expect("selected openfig binding");
@@ -165,8 +173,10 @@ fn corrupt_figure_archive_preserves_openfig_error_without_mat_fallthrough() {
     let path = directory.path().join("corrupt.fig");
     std::fs::write(&path, b"not a RunMat figure archive").expect("write fixture");
 
-    let error = call(vec![Value::String(path.to_string_lossy().into_owned())])
-        .expect_err("corrupt figure archive");
+    let error = call(vec![Value::String(
+        path.to_string_lossy().into_owned().into(),
+    )])
+    .expect_err("corrupt figure archive");
 
     assert_eq!(
         error.identifier(),
@@ -189,7 +199,10 @@ fn open_mat_file_returns_loaded_struct() {
     .expect("encode mat");
     std::fs::write(&path, bytes).expect("write mat");
 
-    let result = call(vec![Value::String(path.to_string_lossy().to_string())]).expect("open");
+    let result = call(vec![Value::String(
+        path.to_string_lossy().to_string().into(),
+    )])
+    .expect("open");
     match result.value() {
         Value::Struct(st) => {
             assert!(matches!(st.fields.get("A"), Some(Value::Tensor(_))));
@@ -207,7 +220,7 @@ fn open_variable_name_requests_host_editor() {
     let (context, recorder) = crate::context::document_test_support::recording_context();
     let result = block_on(context.scope(open_builtin(
         Some(context.clone()),
-        vec![Value::from("answer")],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("answer")]),
     )))
     .expect("open variable");
 
@@ -226,13 +239,21 @@ fn editor_file_requires_a_host_and_delivers_the_resolved_path() {
     let path = directory.path().join("editor.m");
     std::fs::write(&path, "value = 1;\n").unwrap();
     let args = vec![Value::from(path.to_string_lossy().into_owned())];
-    let error = block_on(open_builtin(None, args.clone())).unwrap_err();
+    let error = block_on(open_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(args.clone()),
+    ))
+    .unwrap_err();
     assert_eq!(
         error.identifier(),
         Some("RunMat:host:DocumentInteractionUnavailable")
     );
     let (context, recorder) = crate::context::document_test_support::recording_context();
-    block_on(context.scope(open_builtin(Some(context.clone()), args))).unwrap();
+    block_on(context.scope(open_builtin(
+        Some(context.clone()),
+        crate::builtins::common::test_support::builtin_arguments(args),
+    )))
+    .unwrap();
     assert_eq!(
         *recorder.requests.borrow(),
         vec![crate::context::HostDocumentRequest::OpenFile {
@@ -268,7 +289,9 @@ fn zero_output_extension_handler_is_handled_without_viewer_fallthrough() {
     assert_eq!(
         block_on(open_builtin(
             None,
-            vec![Value::from(path.to_string_lossy().into_owned())]
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from(
+                path.to_string_lossy().into_owned()
+            )])
         ))
         .unwrap(),
         empty_array()
@@ -311,19 +334,22 @@ fn open_calls_custom_extension_handler() {
             let Value::String(path) = &args[0] else {
                 panic!("expected handler path argument");
             };
-            *seen_for_resolver.lock().unwrap() = path.clone();
+            *seen_for_resolver.lock().unwrap() = path.to_string();
             Box::pin(async {
                 crate::user_functions::test_support::rooted_single_value_sequence(Value::String(
-                    "handled".to_string(),
+                    "handled".to_string().into(),
                 ))
             })
         },
     )))
     .expect("call-port scope");
 
-    let result = call(vec![Value::String(path.to_string_lossy().to_string())]).expect("open");
+    let result = call(vec![Value::String(
+        path.to_string_lossy().to_string().into(),
+    )])
+    .expect("open");
 
-    assert_eq!(result, Value::String("handled".to_string()));
+    assert_eq!(result, Value::String("handled".to_string().into()));
     assert!(seen.lock().unwrap().ends_with("events.log"));
 }
 
@@ -349,7 +375,7 @@ fn open_resolves_custom_extension_file_on_current_path() {
             assert!(path.ends_with("events.log"));
             Box::pin(async {
                 crate::user_functions::test_support::rooted_single_value_sequence(Value::String(
-                    "handled".to_string(),
+                    "handled".to_string().into(),
                 ))
             })
         },
@@ -358,7 +384,7 @@ fn open_resolves_custom_extension_file_on_current_path() {
 
     let result = call(vec![Value::from("events.log")]).expect("open");
 
-    assert_eq!(result, Value::String("handled".to_string()));
+    assert_eq!(result, Value::String("handled".to_string().into()));
 }
 
 #[test]
@@ -403,8 +429,10 @@ fn open_preserves_spaces_in_string_filename() {
     let path = dir.path().join(" spaced name.txt");
     std::fs::write(&path, "text").expect("write spaced filename");
 
-    let result = call(vec![Value::String(path.to_string_lossy().to_string())])
-        .expect("open spaced filename");
+    let result = call(vec![Value::String(
+        path.to_string_lossy().to_string().into(),
+    )])
+    .expect("open spaced filename");
 
     assert_eq!(result, empty_array());
 }
@@ -429,8 +457,10 @@ fn open_unsupported_file_type_errors() {
     let path = dir.path().join("payload.unknown");
     std::fs::write(&path, "payload").expect("write file");
 
-    let err =
-        call(vec![Value::String(path.to_string_lossy().to_string())]).expect_err("unsupported");
+    let err = call(vec![Value::String(
+        path.to_string_lossy().to_string().into(),
+    )])
+    .expect_err("unsupported");
 
     assert_eq!(err.identifier(), Some("RunMat:open:UnsupportedFileType"));
 }

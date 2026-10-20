@@ -500,7 +500,7 @@ fn exact_rational_is_minus_one(expr: &SymbolicExpr) -> bool {
         SymbolicExpr::Rational {
             numerator,
             denominator,
-        } => !denominator.is_zero() && numerator == &(-denominator.clone()),
+        } => !denominator.is_zero() && numerator.as_ref() == &(-denominator.as_ref()),
         _ => false,
     }
 }

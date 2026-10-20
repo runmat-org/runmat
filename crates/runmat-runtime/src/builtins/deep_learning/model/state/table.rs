@@ -59,7 +59,7 @@ pub(in crate::builtins::deep_learning::model) fn initial_with_defaults(
         let Value::Object(layer) = &layers[key.layer_index] else {
             unreachable!("validated layer")
         };
-        let value = layer.properties.get(key.role.name());
+        let value = layer.properties().get(key.role.name());
         if let Some(value) = value {
             schema::validate_value(value, key, function)?;
         }
@@ -95,7 +95,7 @@ pub(in crate::builtins::deep_learning::model) fn initial_with_defaults(
             .map_err(|error| deep_learning_error(function, error))?;
             values.push(value);
         } else {
-            values.push(super::super::parameters::public_value(value));
+            values.push(super::super::parameters::public_value(value)?);
         }
     }
     let state = table(&keys, values, function)?;
@@ -119,7 +119,7 @@ pub(super) fn validate_canonical(
     let roles = super::super::table_rows::text(table, "State", "Parameter", function)?;
     let values = super::super::table_rows::values(table, "State", function)?;
     let keys = schema::keys(layers, function)?;
-    if names.len() != keys.len() || roles.len() != keys.len() || values.data.len() != keys.len() {
+    if names.len() != keys.len() || roles.len() != keys.len() || values.data().len() != keys.len() {
         return Err(deep_learning_error(
             function,
             format!("{function}: canonical State row count differs from Layers"),
@@ -133,8 +133,8 @@ pub(super) fn validate_canonical(
                 format!("{function}: canonical State identity differs from Layers"),
             ));
         }
-        schema::validate_value(&values.data[row], key, function)?;
-        if let Some(current) = schema::batch_size(&values.data[row], function)? {
+        schema::validate_value(&values.data()[row], key, function)?;
+        if let Some(current) = schema::batch_size(&values.data()[row], function)? {
             if batch.is_some_and(|prior| prior != current) {
                 return Err(deep_learning_error(
                     function,
@@ -157,7 +157,7 @@ pub(super) fn all_filled(
         unreachable!("validated State table")
     };
     let values = super::super::table_rows::values(table, "State", function)?;
-    for value in &values.data {
+    for value in values.data() {
         if super::super::parameters::numeric_payload_shape(value, "State", function)?.contains(&0) {
             return Ok(false);
         }
@@ -181,7 +181,7 @@ pub(super) fn validated_replacement(
     let roles = super::super::table_rows::text(&input, "State", "Parameter", function)?;
     let values = super::super::table_rows::values(&input, "State", function)?;
     let keys = schema::keys(layers, function)?;
-    if names.len() != keys.len() || roles.len() != keys.len() || values.data.len() != keys.len() {
+    if names.len() != keys.len() || roles.len() != keys.len() || values.data().len() != keys.len() {
         return Err(deep_learning_error(
             function,
             format!("{function}: State rows do not match network state topology"),
@@ -214,7 +214,7 @@ pub(super) fn validated_replacement(
                     format!("{function}: State identity differs from Layers"),
                 )
             })?;
-        let value = &values.data[row];
+        let value = &values.data()[row];
         schema::validate_value(value, key, function)?;
         if let Some(current) = schema::batch_size(value, function)? {
             if batch.is_some_and(|prior| prior != current) {
@@ -225,7 +225,7 @@ pub(super) fn validated_replacement(
             }
             batch = Some(current);
         }
-        ordered.push(super::super::parameters::public_value(Some(value)));
+        ordered.push(super::super::parameters::public_value(Some(value))?);
     }
     table(&keys, ordered, function)
 }

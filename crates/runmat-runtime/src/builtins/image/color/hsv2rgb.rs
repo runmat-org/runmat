@@ -57,7 +57,7 @@ fn hsv2rgb_map_error(err: RuntimeError, fallback: &'static BuiltinErrorDescripto
 async fn hsv2rgb_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     hsv: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<crate::execution::RootedValue> {
     if !rest.is_empty() {
         return Err(hsv2rgb_error(&HSV2RGB_ERROR_TOO_MANY_INPUTS));
@@ -309,9 +309,13 @@ mod tests {
         hsv: Value,
         rest: Vec<Value>,
     ) -> BuiltinResult<Value> {
-        super::hsv2rgb_builtin(runtime, hsv, rest)
-            .await
-            .map(|owned| owned.with_owned(|value| value))
+        super::hsv2rgb_builtin(
+            runtime,
+            hsv,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        )
+        .await
+        .map(|owned| owned.with_owned(|value| value))
     }
     use crate::builtins::common::test_support;
     use futures::executor::block_on;

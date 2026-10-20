@@ -11,7 +11,7 @@ fn chi2cdf_integer_roles_are_gated_and_wide_values_do_not_round() {
         let _guard = crate::compatibility::push_runmat_extensions_enabled(false);
         let x_error = block_on(chi2cdf::chi2cdf_builtin(
             Value::Int(runmat_value::IntValue::I16(3)),
-            vec![Value::Num(5.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(5.0)]),
         ))
         .unwrap_err();
         assert_eq!(
@@ -20,7 +20,9 @@ fn chi2cdf_integer_roles_are_gated_and_wide_values_do_not_round() {
         );
         let nu_error = block_on(chi2cdf::chi2cdf_builtin(
             Value::Num(3.0),
-            vec![Value::Int(runmat_value::IntValue::U16(5))],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(
+                runmat_value::IntValue::U16(5),
+            )]),
         ))
         .unwrap_err();
         assert_eq!(
@@ -32,7 +34,7 @@ fn chi2cdf_integer_roles_are_gated_and_wide_values_do_not_round() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let wide_error = block_on(chi2cdf::chi2cdf_builtin(
         Value::Int(runmat_value::IntValue::U64((1_u64 << 53) + 1)),
-        vec![Value::Num(5.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(5.0)]),
     ))
     .unwrap_err();
     assert_eq!(
@@ -45,7 +47,7 @@ fn chi2cdf_integer_roles_are_gated_and_wide_values_do_not_round() {
 
     let signed_wide_error = block_on(chi2cdf::chi2cdf_builtin(
         Value::Int(runmat_value::IntValue::I64(i64::MIN + 1)),
-        vec![Value::Num(5.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(5.0)]),
     ))
     .unwrap_err();
     assert!(signed_wide_error
@@ -54,7 +56,7 @@ fn chi2cdf_integer_roles_are_gated_and_wide_values_do_not_round() {
 
     let signed_minimum = block_on(chi2cdf::chi2cdf_builtin(
         Value::Int(runmat_value::IntValue::I64(i64::MIN)),
-        vec![Value::Num(5.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(5.0)]),
     ))
     .expect("the signed minimum is exactly representable as double");
     assert!(matches!(signed_minimum, Value::Num(value) if value == 0.0));
@@ -69,9 +71,9 @@ fn chi2cdf_executes_every_integer_class_and_upper_tail() {
     {
         let out = block_on(chi2cdf::chi2cdf_builtin(
             Value::Tensor(Tensor::new_integer(x_storage, vec![1, 1]).unwrap()),
-            vec![Value::Tensor(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(
                 Tensor::new_integer(nu_storage, vec![1, 1]).unwrap(),
-            )],
+            )]),
         ))
         .unwrap();
         assert!(
@@ -80,10 +82,10 @@ fn chi2cdf_executes_every_integer_class_and_upper_tail() {
     }
     let upper = block_on(chi2cdf::chi2cdf_builtin(
         Value::Int(runmat_value::IntValue::U16(3)),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::Int(runmat_value::IntValue::U16(5)),
             Value::from("upper"),
-        ],
+        ]),
     ))
     .unwrap();
     assert!(matches!(upper, Value::Num(value) if (value - 0.699_985_835_878_628).abs() < 1.0e-12));
@@ -95,7 +97,7 @@ fn chi2cdf_logical_and_resident_integer_gates_precede_gather() {
         let _guard = crate::compatibility::push_runmat_extensions_enabled(false);
         let logical = block_on(chi2cdf::chi2cdf_builtin(
             Value::Bool(true),
-            vec![Value::Num(5.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(5.0)]),
         ))
         .unwrap_err();
         assert_eq!(
@@ -112,7 +114,7 @@ fn chi2cdf_logical_and_resident_integer_gates_precede_gather() {
             let _guard = crate::compatibility::push_runmat_extensions_enabled(false);
             let error = block_on(chi2cdf::chi2cdf_builtin(
                 Value::GpuTensor(handle.clone()),
-                vec![Value::Num(5.0)],
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(5.0)]),
             ))
             .unwrap_err();
             assert_eq!(
@@ -122,7 +124,7 @@ fn chi2cdf_logical_and_resident_integer_gates_precede_gather() {
         }
         let result = block_on(chi2cdf::chi2cdf_builtin(
             Value::GpuTensor(handle.clone()),
-            vec![Value::Num(5.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(5.0)]),
         ))
         .unwrap();
         assert!(matches!(result, Value::GpuTensor(_)));
@@ -144,7 +146,9 @@ fn chi2cdf_wgpu_integer_fallback_preserves_residency() {
     let handle = gpu_helpers::upload_tensor(provider, &input).expect("integer upload");
     let result = block_on(chi2cdf::chi2cdf_builtin(
         Value::GpuTensor(handle),
-        vec![Value::Int(runmat_value::IntValue::U16(5))],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(
+            runmat_value::IntValue::U16(5),
+        )]),
     ))
     .expect("chi2cdf");
     assert!(matches!(result, Value::GpuTensor(_)));
@@ -157,7 +161,7 @@ fn chi2cdf_preserves_single_and_uses_only_scalar_expansion() {
     let single = Tensor::from_f32(vec![3.0, 4.0], vec![1, 2]).unwrap();
     let out = block_on(chi2cdf::chi2cdf_builtin(
         Value::Tensor(single),
-        vec![Value::Num(5.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(5.0)]),
     ))
     .unwrap();
     let Value::Tensor(tensor) = out else {
@@ -168,9 +172,9 @@ fn chi2cdf_preserves_single_and_uses_only_scalar_expansion() {
 
     let err = block_on(chi2cdf::chi2cdf_builtin(
         Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
-        vec![Value::Tensor(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(
             Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap(),
-        )],
+        )]),
     ))
     .unwrap_err();
     assert!(err.message().contains("same size"));
@@ -182,7 +186,7 @@ fn chi2cdf_scalar_expansion_preserves_rank_one_output_shape() {
     let rank_one_nu = Tensor::new(vec![2.0, 4.0], vec![2]).unwrap();
     let Value::Tensor(output) = block_on(chi2cdf::chi2cdf_builtin(
         Value::Tensor(Tensor::new(vec![1.0], Vec::new()).unwrap()),
-        vec![Value::Tensor(rank_one_nu)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(rank_one_nu)]),
     ))
     .expect("rank-zero x expands across rank-one nu") else {
         panic!("expected tensor output");
@@ -192,7 +196,9 @@ fn chi2cdf_scalar_expansion_preserves_rank_one_output_shape() {
     let rank_one_x = Tensor::new(vec![1.0, 2.0], vec![2]).unwrap();
     let Value::Tensor(output) = block_on(chi2cdf::chi2cdf_builtin(
         Value::Tensor(rank_one_x),
-        vec![Value::Tensor(Tensor::new(vec![2.0], Vec::new()).unwrap())],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(
+            Tensor::new(vec![2.0], Vec::new()).unwrap(),
+        )]),
     ))
     .expect("rank-zero nu expands across rank-one x") else {
         panic!("expected tensor output");

@@ -250,8 +250,7 @@ impl AotProgramManifest {
                 .iter()
                 .find(|function| function.function == self.entrypoint)
                 .is_none_or(|function| {
-                    Some(function.portable_function)
-                        != self.executable.entrypoint_function
+                    Some(function.portable_function) != self.executable.entrypoint_function
                 })
             || self
                 .functions
@@ -729,10 +728,7 @@ pub(super) fn valid_data_symbol(symbol: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
 }
 
-pub(super) fn function_symbol(
-    function: FunctionId,
-    entrypoint: FunctionId,
-) -> String {
+pub(super) fn function_symbol(function: FunctionId, entrypoint: FunctionId) -> String {
     if function == entrypoint {
         AOT_ENTRY_SYMBOL.to_string()
     } else {

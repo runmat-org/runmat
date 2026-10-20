@@ -1,5 +1,5 @@
 use futures::executor::block_on;
-use runmat_value::{IntegerStorage, StructValue, Tensor};
+use runmat_value::{IntegerStorage, Tensor};
 
 use super::admission::is_empty_option_value;
 use super::*;
@@ -21,7 +21,7 @@ fn registered_kmeans_observes_its_invocation_cancellation_before_materialization
         Some(runtime),
         tensor(vec![1.0, 2.0], 2, 1),
         Value::Num(1.0),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect_err("cancelled invocation must not prepare observations");
     assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
@@ -498,7 +498,7 @@ fn kmeans_clusters_numeric_matrix_with_outputs() {
 #[test]
 fn kmeans_reads_typed_integer_inputs_start_and_options_exactly() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-    let mut statset = StructValue::new();
+    let mut statset = runmat_value::UnboundedStructValueBuilder::new();
     statset.insert(
         "MaxIter",
         cleared_int_tensor(IntegerStorage::U16(vec![20]), 1, 1),
@@ -522,7 +522,7 @@ fn kmeans_reads_typed_integer_inputs_start_and_options_exactly() {
             Value::from("Replicates"),
             poisoned_int_tensor(IntegerStorage::U8(vec![1]), 1, 1),
             Value::from("Options"),
-            Value::Struct(statset),
+            Value::Struct(statset.finish()),
         ],
     ))
     .unwrap();

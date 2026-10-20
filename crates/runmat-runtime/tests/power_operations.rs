@@ -168,7 +168,7 @@ fn test_elementwise_vs_matrix_power() {
 #[test]
 fn test_unsupported_power_combinations() {
     let matrix = Tensor::new_2d(vec![1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
-    let string_val = Value::String("test".to_string());
+    let string_val = Value::String("test".to_string().into());
 
     // String^matrix should fail
     let result = power(&string_val, &Value::Tensor(matrix.clone()));

@@ -6,14 +6,14 @@ use runmat_builtins::{MUST_BE_REAL_CATALOG_ENTRY, MUST_BE_REAL_ERROR_OUTPUTS};
     binding_variant = "default",
     builtin_path = "crate::builtins::common::validation::must_be_real"
 )]
-async fn builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     evaluate(args).await
 }
-pub(super) async fn evaluate(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn evaluate(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     super::admission::inputs(
         &MUST_BE_REAL_CATALOG_ENTRY,
         &MUST_BE_REAL_ERROR_OUTPUTS,
-        &args,
+        args.view(),
     )?;
     let passed = {
         super::validate_resident_metadata(&args[0])?;

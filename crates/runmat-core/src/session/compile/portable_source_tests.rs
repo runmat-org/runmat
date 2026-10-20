@@ -359,7 +359,7 @@ fn pending_source_lease_coexists_with_interpreted_and_native_unit_invocations() 
     .expect("unit");
     let invocation = crate::ProcedureInvocation {
         target: crate::ProcedureTarget::Function("answer".into()),
-        arguments: Vec::new(),
+        arguments: crate::ProcedureArguments::Source(Vec::new()),
         requested_outputs: 1,
     };
     let expected =
@@ -595,6 +595,8 @@ fn imported_unit_worker_projects_portable_source_before_builtin_dispatch() {
     )
     .expect("artifact");
     let request = ProgramExecutionRequest {
+        console: None,
+        environment: runmat_execution::EnvironmentSnapshot::default(),
         schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         recipe,
         artifact,

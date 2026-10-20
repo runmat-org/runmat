@@ -1,6 +1,7 @@
 use crate::fea_contract::{
     catalog_entry::{self, ConstructorDocumentationDefinition},
     descriptors::FEA_VALIDATE_DESCRIPTOR,
+    example_fixtures::CLOSED_CUBE_STUDY,
     integer::FEA_STRUCTURAL_INTEGER_AUDIT,
     operation_entry::{self, OperationEffectProfile, OperationEntryDefinition},
     operation_inference::{infer_evidence, FeaEvidenceKind},
@@ -11,40 +12,31 @@ use runmat_types::{CallInference, CallRequest};
 fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer_evidence(request, entry, FeaEvidenceKind::Validate)
 }
-const FIXTURE: BuiltinExampleFixture = BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture {
-    id: BuiltinExampleFixtureId { local_name: "validation-study" }, root: BuiltinFilesystemRoot::IsolatedWorkspace,
-    entries: &[
-        BuiltinFilesystemEntry::File { relative_path: "bracket.fea", content: BuiltinFixtureContent::Utf8("version: 1\nkind: study\nid: bracket_static\ngeometry:\n  path: part.stl\n  units: meter\nmodel:\n  profile: linear_static_structural\nrun:\n  backend: cpu\n") },
-        BuiltinFilesystemEntry::File { relative_path: "part.stl", content: BuiltinFixtureContent::Utf8("solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n") },
-    ],
-});
 const EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "validate-study",
     title: "Validate a study document",
-    program: "study = fea.load('bracket.fea');\nvalidation = fea.validate(study);",
+    program: "geom = geometry.load('cube.stl');\nsteel = fea.material('steel', 'YoungsModulusPa', int64(200000000000), 'PoissonRatio', 0.3);\ntarget = fea.PropertyRegionTarget.allSolids(geom);\nassignment = fea.materialAssignment(target, steel);\nregion = geometry.region(geom, 'region_default');\nfixed = fea.StructuralConstraint.fixed('fixed', region);\nstep = fea.StructuralStep.static('static');\nmodel = fea.model('cube_model', geom, 'Materials', {steel}, 'MaterialAssignments', {assignment}, 'Constraints', {fixed}, 'Steps', {step});\nstudy = fea.study('closed_cube_static', geom, model);\nvalidation = fea.validate(study);",
     display_output: None,
     compatibility: BuiltinExampleCompatibility::RunMat,
     harness: BuiltinExampleHarness::NativeFilesystem,
-    fixture: FIXTURE,
+    fixture: CLOSED_CUBE_STUDY,
     requirements: BuiltinExampleRequirements::NONE,
     verification: BuiltinExampleVerification::Assertions {
         source: "assert(strcmp(class(validation), 'fea.Validation'));\nassert(validation.valid);",
     },
 }];
 const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(ConstructorDocumentationDefinition {
-    title: "fea.validate", summary: "Validate a typed FEA study or sweep without solving.",
-    description: "`fea.validate(studyOrSweepOrPath)` validates one typed study, sweep, or `.fea` document and records validation evidence.",
-    keywords: &["fea", "validate", "study", "sweep"], related: &["fea.load", "fea.plan", "fea.run"],
-    sections: &[BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
-        "Exactly one host `.fea` path, `fea.Study`, or `fea.Sweep` is required. Direct integer and resident numeric operands are not accepted.",
-        "The `fea.Validation` object reports validity, issue codes and details, and an evidence path; sweep validation additionally reports per-study entries. These public fields are logical or text, not physical numeric measurements.",
-        "Validation reads geometry and writes evidence but does not plan or solve. STL-backed and already resolved geometry need no OCCT; topology-bearing CAD may require the configured importer during path resolution.",
-    ] }], examples: EXAMPLES,
-    faqs: &[BuiltinDocumentationFaq { question: "Does validation allocate solver results?", answer: "No. It checks the study or sweep and persists validation evidence without solving." }],
-    links: &[BuiltinDocumentationLink { label: "FEA validation", target: BuiltinDocumentationLinkTarget::Documentation("/docs/fea/validation") }],
-    implementation: &[BuiltinDocumentationLink { label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/entrypoints.rs") }],
-    verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Document validation", location: "crates/runmat-runtime/src/builtins/fea/tests/construction.rs::fea_load_validate_and_plan_document_workflow" }],
-    notes: &["Filesystem admission is required for path resolution and evidence persistence. FEA object/path operands are not distributed numeric partitions."],
+    title: "fea.validate", summary: "Validate a typed FEA study or sweep.",
+    description: "`fea.validate(studyOrSweep)` accepts exactly one typed host fea.Study or fea.Sweep, not a document path.",
+    keywords: &["fea", "validate"], related: &["fea.model", "fea.study", "fea.results"],
+    sections: &[BuiltinDocumentationSection { heading: "Typed boundary", paragraphs: &[
+        "Returns fea.Validation for a study or fea.SweepValidation for a sweep and persists validation evidence without solving.",
+        "Host structural identities, revisions, shapes, and counts remain exact. Physics conversions occur only at their explicit owning boundaries; resident inputs are not implicitly gathered.",
+    ] }], examples: EXAMPLES, faqs: &[],
+    links: &[BuiltinDocumentationLink { label: "FEA API", target: BuiltinDocumentationLinkTarget::Documentation("/docs/fea/using-fea") }],
+    implementation: &[BuiltinDocumentationLink { label: "Current implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/mod.rs") }],
+    verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Typed Runtime FEA contracts", location: "crates/runmat-runtime/src/builtins/fea/mod.rs::tests::typed_constructors_build_full_study_and_sweep_objects" }],
+    notes: &["Catalog examples require execution qualification; these declarations are not solver or numerical conformance receipts."],
 });
 pub const FEA_VALIDATE_CATALOG_ENTRY: BuiltinCatalogEntry =
     operation_entry::entry(OperationEntryDefinition {

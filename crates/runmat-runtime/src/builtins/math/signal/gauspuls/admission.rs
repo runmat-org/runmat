@@ -22,7 +22,9 @@ pub(super) fn ensure_gauspuls_time_extensions(value: &Value) -> BuiltinResult<()
     Ok(())
 }
 
-pub(super) fn ensure_gauspuls_control_extensions(values: &[Value]) -> BuiltinResult<()> {
+pub(super) fn ensure_gauspuls_control_extensions(
+    values: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     for value in values {
         if is_typed_integer_value(value) {
             crate::compatibility::ensure_builtin_extension_enabled(

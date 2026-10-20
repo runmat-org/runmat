@@ -1,3 +1,4 @@
+use super::test_arguments::{h5read_builtin, h5write_builtin};
 use std::sync::Arc;
 
 use futures::executor::block_on;
@@ -15,7 +16,8 @@ fn virtual_filesystem_cannot_fall_through_to_ambient_native_hdf5_file() {
     let _provider = replace_provider(Arc::new(MemoryFsProvider::with_current_dir("/virtual")));
 
     let write = block_on(h5write_builtin(
-        Value::String(path.display().to_string()),
+        None,
+        Value::String(path.display().to_string().into()),
         Value::String("/data".into()),
         Value::Num(1.0),
         Vec::new(),
@@ -25,7 +27,8 @@ fn virtual_filesystem_cannot_fall_through_to_ambient_native_hdf5_file() {
     assert!(!path.exists());
 
     let read = block_on(h5read_builtin(
-        Value::String(path.display().to_string()),
+        None,
+        Value::String(path.display().to_string().into()),
         Value::String("/data".into()),
         Vec::new(),
     ))

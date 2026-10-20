@@ -6,6 +6,9 @@ mod graph;
 mod immutable_class;
 mod outputs;
 mod owned_prepare;
+mod object_output;
+mod text_copy;
+mod shape_copy;
 mod path;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -26,13 +29,13 @@ pub use graph::{
     GraphSourceIssuer, GraphSourceUnitFacts, PreparedPayloadGraph,
 };
 pub use graph::{GraphCallableProof, GraphCaptureProof, GraphNestedZeroCopy};
-pub use owned_prepare::OwnedInlineTransportPlan;
 pub use immutable_class::{
     register_immutable_value_class, ImmutableValueClassSchema, ImmutableValueClassValidator,
 };
 pub use outputs::{
     decode_inline_outputs, encode_inline_outputs, encode_inline_sequence, validate_output_arity,
 };
+pub use owned_prepare::OwnedInlineTransportPlan;
 
 #[cfg(test)]
 mod tests {
@@ -41,7 +44,7 @@ mod tests {
         CellArray, CharArray, ComplexTensor, DynamicPropertyDef, ForeignAffinity, ForeignLifetime,
         ForeignOwnership, ForeignRef, ForeignResourceKey, ForeignTypeIdentity, IntValue,
         IntegerComplexStorage, IntegerStorage, MException, ObjectArray, ObjectInstance,
-        SparseTensor, StringArray, StructValue, Tensor, Value,
+        SparseTensor, StringArray, Tensor, Value,
     };
     use std::sync::Once;
 
@@ -59,7 +62,7 @@ mod tests {
     };
 
     fn validate_test_object(object: &ObjectInstance) -> Result<(), String> {
-        match object.properties.get("id") {
+        match object.properties().get("id") {
             Some(Value::String(id)) if !id.is_empty() => Ok(()),
             Some(_) => Err("portable test object's `id` must be a string".into()),
             None => Err("portable test object is missing `id`".into()),
@@ -84,9 +87,7 @@ mod tests {
     fn test_object(id: &str) -> ObjectInstance {
         ensure_test_class_registered();
         let mut object = ObjectInstance::new(TEST_CLASS);
-        object
-            .properties
-            .insert("id".into(), Value::String(id.into()));
+        object.replace_property_unbounded("id".into(), Value::String(id.into()));
         object
     }
 
@@ -157,10 +158,8 @@ mod tests {
     #[test]
     fn preference_aggregates_are_durable_only_and_keep_plain_object_bits() {
         let mut object = runmat_value::ObjectInstance::new("PreferencePayload");
-        object
-            .properties
-            .insert("revision".into(), Value::Int(IntValue::U64(u64::MAX)));
-        object.properties.insert(
+        object.replace_property_unbounded("revision".into(), Value::Int(IntValue::U64(u64::MAX)));
+        object.replace_property_unbounded(
             "nan".into(),
             Value::Num(f64::from_bits(0x7ff8_0000_0000_0042)),
         );
@@ -177,12 +176,12 @@ mod tests {
         let Value::Object(decoded) = decode_durable_value(&payload).unwrap() else {
             panic!("plain object")
         };
-        assert_eq!(decoded.class_name, object.class_name);
+        assert_eq!(decoded.class_name(), object.class_name());
         assert_eq!(
-            decoded.properties["revision"],
+            decoded.properties()["revision"],
             Value::Int(IntValue::U64(u64::MAX))
         );
-        let Value::Num(nan) = decoded.properties["nan"] else {
+        let Value::Num(nan) = decoded.properties()["nan"] else {
             panic!("NaN")
         };
         assert_eq!(nan.to_bits(), 0x7ff8_0000_0000_0042);
@@ -209,13 +208,13 @@ mod tests {
         let Value::Object(decoded_object) = &decoded_array.data()[0] else {
             panic!("plain object element")
         };
-        assert_eq!(&decoded_object.class_name, decoded_array.class_name());
-        assert_eq!(decoded_object.properties.len(), 2);
+        assert_eq!(decoded_object.class_name(), decoded_array.class_name());
+        assert_eq!(decoded_object.properties().len(), 2);
         assert_eq!(
-            decoded_object.properties["revision"],
+            decoded_object.properties()["revision"],
             Value::Int(IntValue::U64(u64::MAX))
         );
-        let Value::Num(nan) = decoded_object.properties["nan"] else {
+        let Value::Num(nan) = decoded_object.properties()["nan"] else {
             panic!("NaN")
         };
         assert_eq!(nan.to_bits(), 0x7ff8_0000_0000_0042);
@@ -235,10 +234,7 @@ mod tests {
             panic!("structure array")
         };
         assert_eq!(
-            decoded
-                .field_names()
-                .map(String::as_str)
-                .collect::<Vec<_>>(),
+            decoded.field_names().collect::<Vec<_>>(),
             vec!["zeta", "alpha"]
         );
         assert_eq!(decoded.shape(), &[0, 2, 1]);
@@ -246,37 +242,32 @@ mod tests {
 
     #[test]
     fn durable_nested_scalar_structure_keeps_insertion_order_without_changing_v2() {
-        let mut structure = StructValue::new();
+        let mut structure = runmat_value::UnboundedStructValueBuilder::new();
         structure.insert("zeta", Value::Int(IntValue::U64(u64::MAX)));
         structure.insert("alpha", Value::Num(1.0));
-        let nested = Value::Cell(CellArray::new(vec![Value::Struct(structure)], 1, 1).unwrap());
+        let nested =
+            Value::Cell(CellArray::new(vec![Value::Struct(structure.finish())], 1, 1).unwrap());
         let durable = encode_durable_value(&nested).unwrap();
         assert!(decode_inline_value(&durable).is_err());
         let Value::Cell(decoded) = decode_durable_value(&durable).unwrap() else {
             panic!("cell")
         };
-        let Value::Struct(ordered) = &decoded.data[0] else {
+        let Value::Struct(ordered) = &decoded.data()[0] else {
             panic!("structure")
         };
         assert_eq!(
-            ordered
-                .field_names()
-                .map(String::as_str)
-                .collect::<Vec<_>>(),
+            ordered.field_names().collect::<Vec<_>>(),
             vec!["zeta", "alpha"]
         );
         let v2 = encode_inline_value(&nested).unwrap();
         let Value::Cell(v2_decoded) = decode_inline_value(&v2).unwrap() else {
             panic!("V2 cell")
         };
-        let Value::Struct(v2_struct) = &v2_decoded.data[0] else {
+        let Value::Struct(v2_struct) = &v2_decoded.data()[0] else {
             panic!("V2 structure")
         };
         assert_eq!(
-            v2_struct
-                .field_names()
-                .map(String::as_str)
-                .collect::<Vec<_>>(),
+            v2_struct.field_names().collect::<Vec<_>>(),
             vec!["alpha", "zeta"]
         );
     }
@@ -298,11 +289,11 @@ mod tests {
         let Value::Cell(decoded) = decode_inline_value(&payload).unwrap() else {
             panic!("expected decoded cell");
         };
-        let Value::Num(number) = decoded.data[0] else {
+        let Value::Num(number) = decoded.data()[0] else {
             panic!("expected decoded number");
         };
         assert_eq!(number.to_bits(), 0x7ff8_0000_0000_0042);
-        assert_eq!(decoded.data[1], Value::Int(IntValue::U64(u64::MAX)));
+        assert_eq!(decoded.data()[1], Value::Int(IntValue::U64(u64::MAX)));
         assert_eq!(decoded.shape, vec![1, 2]);
     }
 
@@ -357,7 +348,7 @@ mod tests {
 
     #[test]
     fn stable_immutable_runtime_forms_round_trip_exactly() {
-        let mut structure = StructValue::new();
+        let mut structure = runmat_value::UnboundedStructValueBuilder::new();
         structure.insert(
             "tensor",
             Value::Tensor(
@@ -375,12 +366,15 @@ mod tests {
         structure.insert(
             "error",
             Value::MException({
-                let mut error = MException::new("RunMat:test".into(), "failure".into());
-                error.stack = vec!["main:1".into()];
-                error
+                MException::from_owned_fields(
+                    "RunMat:test".into(),
+                    "failure".into(),
+                    MException::stack_from_unbounded(vec!["main:1".into()]),
+                    None,
+                )
             }),
         );
-        let value = Value::Struct(structure);
+        let value = Value::Struct(structure.finish());
         let payload = encode_inline_value(&value).unwrap();
         let decoded = decode_inline_value(&payload).unwrap();
         assert_eq!(decoded, value);
@@ -641,21 +635,24 @@ mod tests {
             "independent inline reconstructions mint independent local instances"
         );
 
-        let mut structure = StructValue::new();
+        let mut structure = runmat_value::UnboundedStructValueBuilder::new();
         let service = super::super::RuntimeExecutionService::new();
         structure.insert(
             "bad",
-            Value::Future(runmat_execution::FutureHandle {
-                id: runmat_execution::FutureId::derive(&[b"future"]),
-                scope_id: service.scope_id(),
-                outputs: runmat_execution::OutputContract {
-                    requested_outputs: 1,
-                    owned_work: None,
-                },
-            }),
+            Value::Future(
+                runmat_execution::FutureHandle {
+                    id: runmat_execution::FutureId::derive(&[b"future"]),
+                    scope_id: service.scope_id(),
+                    outputs: runmat_execution::OutputContract {
+                        requested_outputs: 1,
+                        owned_work: None,
+                    },
+                }
+                .into(),
+            ),
         );
         let error = encode_inline_value(&Value::Cell(
-            CellArray::new(vec![Value::Struct(structure)], 1, 1).unwrap(),
+            CellArray::new(vec![Value::Struct(structure.finish())], 1, 1).unwrap(),
         ))
         .unwrap_err();
         assert!(error.to_string().contains("$[0].bad"));
@@ -672,7 +669,7 @@ mod tests {
                 owned_work: None,
             },
         };
-        assert!(encode_inline_value(&Value::Future(future)).is_err());
+        assert!(encode_inline_value(&Value::Future(future.into())).is_err());
     }
 
     #[test]
@@ -732,8 +729,8 @@ mod tests {
             value: fact,
         };
         for value in [
-            Value::Distributed(Box::new(distributed)),
-            Value::Composite(Box::new(composite)),
+            Value::Distributed(Box::new(distributed).into()),
+            Value::Composite(Box::new(composite).into()),
         ] {
             let payload = encode_inline_value(&value).unwrap();
             assert_eq!(decode_inline_value(&payload).unwrap(), value);
@@ -742,23 +739,25 @@ mod tests {
 
     #[test]
     fn immutable_codistributor_value_classes_round_trip_with_exact_properties() {
-        let value = crate::parallel::codistributor::one_dimensional(&[
-            Value::Int(runmat_value::IntValue::U64(2)),
-            Value::Tensor(
-                runmat_value::Tensor::new_integer(
-                    runmat_value::IntegerStorage::U64(vec![1, 2, 3]),
-                    vec![1, 3],
-                )
-                .unwrap(),
-            ),
-            Value::Tensor(
-                runmat_value::Tensor::new_integer(
-                    runmat_value::IntegerStorage::U64(vec![4, 6]),
-                    vec![1, 2],
-                )
-                .unwrap(),
-            ),
-        ])
+        let value = crate::parallel::codistributor::one_dimensional(
+            crate::call::FunctionArgumentView::from_slice(&[
+                Value::Int(runmat_value::IntValue::U64(2)),
+                Value::Tensor(
+                    runmat_value::Tensor::new_integer(
+                        runmat_value::IntegerStorage::U64(vec![1, 2, 3]),
+                        vec![1, 3],
+                    )
+                    .unwrap(),
+                ),
+                Value::Tensor(
+                    runmat_value::Tensor::new_integer(
+                        runmat_value::IntegerStorage::U64(vec![4, 6]),
+                        vec![1, 2],
+                    )
+                    .unwrap(),
+                ),
+            ]),
+        )
         .unwrap();
         let payload = encode_inline_value(&value).unwrap();
         assert_eq!(decode_inline_value(&payload).unwrap(), value);
@@ -801,7 +800,14 @@ mod tests {
         assert_eq!(original.context.call_frames[0].source_id, None);
         assert_eq!(original.context.phase.as_deref(), Some("execution"));
         assert_eq!(original.gpu_gather_retry, crate::GpuGatherRetry::Never);
-        assert_eq!(decoded.stack, ["origin"]);
+        assert_eq!(
+            decoded
+                .stack
+                .iter()
+                .map(|frame| frame.as_str())
+                .collect::<Vec<_>>(),
+            ["origin"]
+        );
 
         let retained = decoded.clone();
         let reraised = crate::runtime_error::error_from_exception(decoded);
@@ -895,7 +901,7 @@ mod tests {
         let Value::Cell(decoded) = decode_inline_value(&payload).unwrap() else {
             panic!("cell");
         };
-        let Value::MException(decoded) = &decoded.data[0] else {
+        let Value::MException(decoded) = &decoded.data()[0] else {
             panic!("exception");
         };
         assert_eq!(
@@ -906,7 +912,14 @@ mod tests {
             decoded.original().unwrap().context.call_stack,
             ["remote_spmd @ remote_spmd.m:1:1"]
         );
-        assert_eq!(decoded.stack, ["remote_spmd"]);
+        assert_eq!(
+            decoded
+                .stack
+                .iter()
+                .map(|frame| frame.as_str())
+                .collect::<Vec<_>>(),
+            ["remote_spmd"]
+        );
 
         let selected = runtime
             .call_frame_source_owner_for_program_source(runmat_types::ProgramSourceId(0))
@@ -974,11 +987,9 @@ mod tests {
     #[test]
     fn registered_immutable_value_class_round_trips_nested_values() {
         let mut child = test_object("child");
-        child
-            .properties
-            .insert("count".into(), Value::Int(IntValue::U64(u64::MAX)));
+        child.replace_property_unbounded("count".into(), Value::Int(IntValue::U64(u64::MAX)));
 
-        let mut details = StructValue::new();
+        let mut details = runmat_value::UnboundedStructValueBuilder::new();
         details.insert(
             "samples",
             Value::Tensor(Tensor::from_f32(vec![1.25, -2.5], vec![2, 1]).unwrap()),
@@ -986,9 +997,9 @@ mod tests {
         details.insert("child", Value::Object(child));
 
         let mut object = test_object("root");
-        object.properties.insert(
+        object.replace_property_unbounded(
             "nested".into(),
-            Value::Cell(CellArray::new(vec![Value::Struct(details)], 1, 1).unwrap()),
+            Value::Cell(CellArray::new(vec![Value::Struct(details.finish())], 1, 1).unwrap()),
         );
         let value = Value::Object(object);
         let payload = encode_inline_value(&value).unwrap();
@@ -1011,20 +1022,12 @@ mod tests {
     fn immutable_class_encoding_and_identity_ignore_property_insertion_order() {
         ensure_test_class_registered();
         let mut first = ObjectInstance::new(TEST_CLASS);
-        first
-            .properties
-            .insert("id".into(), Value::String("stable".into()));
-        first
-            .properties
-            .insert("count".into(), Value::Int(IntValue::U32(7)));
+        first.replace_property_unbounded("id".into(), Value::String("stable".into()));
+        first.replace_property_unbounded("count".into(), Value::Int(IntValue::U32(7)));
 
         let mut second = ObjectInstance::new(TEST_CLASS);
-        second
-            .properties
-            .insert("count".into(), Value::Int(IntValue::U32(7)));
-        second
-            .properties
-            .insert("id".into(), Value::String("stable".into()));
+        second.replace_property_unbounded("count".into(), Value::Int(IntValue::U32(7)));
+        second.replace_property_unbounded("id".into(), Value::String("stable".into()));
 
         let first = encode_inline_value(&Value::Object(first)).unwrap();
         let second = encode_inline_value(&Value::Object(second)).unwrap();
@@ -1052,27 +1055,27 @@ mod tests {
             .contains("missing required field `id`"));
 
         let mut unknown_field = test_object("unknown-field");
-        unknown_field
-            .properties
-            .insert("other".into(), Value::Bool(true));
+        unknown_field.replace_property_unbounded("other".into(), Value::Bool(true));
         assert!(encode_inline_value(&Value::Object(unknown_field))
             .unwrap_err()
             .to_string()
             .contains("unknown field `other`"));
 
         let mut invalid = test_object("invalid");
-        invalid.properties.insert("id".into(), Value::Num(4.0));
+        invalid.replace_property_unbounded("id".into(), Value::Num(4.0));
         assert!(encode_inline_value(&Value::Object(invalid))
             .unwrap_err()
             .to_string()
             .contains("`id` must be a string"));
 
-        let mut dynamic = test_object("dynamic");
-        dynamic.insert_dynamic_property(
+        let mut dynamic = test_object("dynamic")
+            .into_unbounded_builder()
+            .expect("ordinary fixture");
+        dynamic.insert_dynamic(
             "runtime".into(),
-            DynamicPropertyDef::new("runtime".into(), TEST_CLASS.into()),
+            DynamicPropertyDef::new("runtime".into(), TEST_CLASS),
         );
-        assert!(encode_inline_value(&Value::Object(dynamic))
+        assert!(encode_inline_value(&Value::Object(dynamic.finish()))
             .unwrap_err()
             .to_string()
             .contains("cannot have dynamic properties"));

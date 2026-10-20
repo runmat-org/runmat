@@ -192,20 +192,20 @@ fn pwelch_error_with_message(
 async fn pwelch_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     x: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    evaluate_in_runtime(runtime.as_ref(), x, &rest).await
+    evaluate_in_runtime(runtime.as_ref(), x, rest.view()).await
 }
 
 #[cfg(test)]
 async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
-    evaluate_in_runtime(None, x, rest).await
+    evaluate_in_runtime(None, x, crate::call::FunctionArgumentView::from_slice(rest)).await
 }
 
 async fn evaluate_in_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
     x: Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<Value> {
     let mut cooperation = SignalCooperation::new(runtime, BUILTIN_NAME);
     evaluate_with_cooperation(x, rest, &mut cooperation).await
@@ -213,7 +213,7 @@ async fn evaluate_in_runtime(
 
 async fn evaluate_with_cooperation(
     x: Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<Value> {
     cooperation.completed(0).await?;

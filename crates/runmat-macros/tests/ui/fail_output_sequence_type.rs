@@ -24,30 +24,28 @@ mod builtin {
         pub context: Option<()>,
     }
 
-    impl BuiltinContinuationInput {
-        pub fn new(
-            args: crate::execution::RootedValues,
-            invocation: RuntimeBuiltinInvocation<'_>,
-        ) -> Self {
-            Self {
-                args,
-                context: invocation.context,
-            }
+    impl RuntimeBuiltinInvocation<'_> {
+        pub fn into_continuation_input(self) -> Result<BuiltinContinuationInput, String> {
+            Ok(BuiltinContinuationInput {
+                args: crate::execution::RootedValues::new(self.args.to_vec())
+                    .map_err(|error| error.into_runtime_error())?,
+                context: self.context,
+            })
         }
     }
 
     pub type RuntimeBuiltinFuture =
         Pin<Box<dyn Future<Output = Result<ValueSequence, String>> + 'static>>;
 
-    pub fn admitted_builtin_future<F>(
-        _context: Option<&()>,
+    pub fn admitted_builtin_future_with<F>(
+        context: Option<()>,
         _name: &'static str,
-        future: F,
+        make_future: impl FnOnce(Option<()>) -> F,
     ) -> RuntimeBuiltinFuture
     where
         F: Future<Output = Result<ValueSequence, String>> + 'static,
     {
-        Box::pin(future)
+        Box::pin(make_future(context))
     }
 
     pub fn continuation_layout_for<F>(_: fn(BuiltinContinuationInput) -> F) -> Result<u64, String>
@@ -115,6 +113,10 @@ mod execution {
     }
 
     impl RootedValues {
+        pub fn fork(&self) -> Self {
+            Self(self.0.clone())
+        }
+
         pub fn new(values: Vec<Value>) -> Result<Self, RootError> {
             Ok(Self(values))
         }

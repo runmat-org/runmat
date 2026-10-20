@@ -33,15 +33,24 @@ unsafe impl Sync for JsFsProvider {}
 
 #[async_trait(?Send)]
 impl FsProvider for JsFsProvider {
-    async fn capture_workspace(&self, request: runmat_filesystem::workspace::WorkspaceCaptureRequest) -> io::Result<runmat_filesystem::workspace::WorkspaceSnapshot> {
+    async fn capture_workspace(
+        &self,
+        request: runmat_filesystem::workspace::WorkspaceCaptureRequest,
+    ) -> io::Result<runmat_filesystem::workspace::WorkspaceSnapshot> {
         self.funcs.capture_workspace(&request).await
     }
 
-    async fn lookup_workspace_publication(&self, request: &runmat_filesystem::workspace::WorkspacePublicationRequest) -> io::Result<Option<runmat_filesystem::workspace::WorkspacePublicationOutcome>> {
+    async fn lookup_workspace_publication(
+        &self,
+        request: &runmat_filesystem::workspace::WorkspacePublicationRequest,
+    ) -> io::Result<Option<runmat_filesystem::workspace::WorkspacePublicationOutcome>> {
         self.funcs.lookup_workspace_publication(request).await
     }
 
-    async fn publish_workspace(&self, request: runmat_filesystem::workspace::WorkspacePublicationRequest) -> io::Result<runmat_filesystem::workspace::WorkspacePublicationOutcome> {
+    async fn publish_workspace(
+        &self,
+        request: runmat_filesystem::workspace::WorkspacePublicationRequest,
+    ) -> io::Result<runmat_filesystem::workspace::WorkspacePublicationOutcome> {
         self.funcs.publish_workspace(&request).await
     }
     fn supports_read(&self) -> bool {

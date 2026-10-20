@@ -14,7 +14,7 @@ pub(super) struct AdamUpdateArgs {
 }
 
 impl AdamUpdateArgs {
-    pub(super) fn parse(args: Vec<Value>) -> BuiltinResult<Self> {
+    pub(super) fn parse(args: crate::call::BuiltinArguments) -> BuiltinResult<Self> {
         if !(5..=9).contains(&args.len()) {
             return Err(deep_learning_error(
                 "adamupdate",
@@ -43,10 +43,15 @@ impl AdamUpdateArgs {
             average_grad,
             average_sq_grad,
             iteration,
-            learn_rate: optional_positive_scalar(&args, 5, 0.001, "learnRate")?,
-            gradient_decay_factor: optional_unit_scalar(&args, 6, 0.9, "gradDecay")?,
-            squared_gradient_decay_factor: optional_unit_scalar(&args, 7, 0.999, "sqGradDecay")?,
-            epsilon: optional_positive_scalar(&args, 8, 1.0e-8, "epsilon")?,
+            learn_rate: optional_positive_scalar(args.view(), 5, 0.001, "learnRate")?,
+            gradient_decay_factor: optional_unit_scalar(args.view(), 6, 0.9, "gradDecay")?,
+            squared_gradient_decay_factor: optional_unit_scalar(
+                args.view(),
+                7,
+                0.999,
+                "sqGradDecay",
+            )?,
+            epsilon: optional_positive_scalar(args.view(), 8, 1.0e-8, "epsilon")?,
         })
     }
 }
@@ -101,8 +106,8 @@ impl NumericPayload {
                     },
                 }
             }
-            Value::Object(object) if object.class_name.is(super::super::super::DLARRAY_CLASS) => {
-                let data = object.properties.get("Data").ok_or_else(|| {
+            Value::Object(object) if object.class_name().is(super::super::super::DLARRAY_CLASS) => {
+                let data = object.properties().get("Data").ok_or_else(|| {
                     deep_learning_error("adamupdate", "adamupdate: dlarray is missing Data")
                 })?;
                 let inner = Self::parse(data, label, reject_empty)?;
@@ -113,14 +118,14 @@ impl NumericPayload {
                         inner: Box::new(inner.repr),
                         format: Box::new(
                             object
-                                .properties
+                                .properties()
                                 .get("Format")
                                 .cloned()
                                 .unwrap_or_else(|| Value::string(String::new())),
                         ),
                         labels: Box::new(
                             object
-                                .properties
+                                .properties()
                                 .get("Labels")
                                 .cloned()
                                 .unwrap_or_else(|| Value::string(String::new())),
@@ -205,7 +210,7 @@ impl NumericRepr {
                     ("Format", format.as_ref().clone()),
                     ("Labels", labels.as_ref().clone()),
                 ],
-            )),
+            )?),
         }
     }
 }
@@ -247,7 +252,7 @@ pub(super) fn positive_iteration(value: &Value) -> BuiltinResult<usize> {
 }
 
 fn optional_finite_scalar(
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     index: usize,
     default: f64,
     label: &'static str,
@@ -277,7 +282,7 @@ fn optional_finite_scalar(
 }
 
 pub(super) fn optional_positive_scalar(
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     index: usize,
     default: f64,
     label: &'static str,
@@ -293,7 +298,7 @@ pub(super) fn optional_positive_scalar(
 }
 
 pub(super) fn optional_unit_scalar(
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     index: usize,
     default: f64,
     label: &'static str,

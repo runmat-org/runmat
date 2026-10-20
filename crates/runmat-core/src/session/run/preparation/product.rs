@@ -183,18 +183,22 @@ impl RunMatSession {
                     .build(),
             )
         })?;
-        let execution_runtime =
-            interactive_unit
-                .bind_runtime_sources(self.runtime_context.clone().with_program_revision(Some(
-                    interactive_unit.revision().program_revision.clone(),
-                )))
-                .map_err(|error| {
-                    RunError::Runtime(
-                        build_runtime_error(error)
-                            .with_identifier("RunMat:ExecutableSourceIdentity")
-                            .build(),
-                    )
-                })?;
+        let execution_runtime = interactive_unit
+            .bind_runtime_sources(
+                self.runtime_context
+                    .clone()
+                    .with_cancellation_token(self.runtime_context.cancellation())
+                    .with_program_revision(Some(
+                        interactive_unit.revision().program_revision.clone(),
+                    )),
+            )
+            .map_err(|error| {
+                RunError::Runtime(
+                    build_runtime_error(error)
+                        .with_identifier("RunMat:ExecutableSourceIdentity")
+                        .build(),
+                )
+            })?;
         let mut bytecode = interactive_unit
             .runtime_bytecode_with_selected_prior(
                 &execution_runtime,
@@ -392,7 +396,9 @@ impl RunMatSession {
                 crate::session::source_evaluation::SelectedGraphSource {
                     unit: Rc::clone(&interactive_unit),
                     primary_source: lowering.assembly.primary_source,
-                    already_published: callable_artifact.clone(),
+                    code: callable_artifact.clone()
+                        .map(crate::session::source_evaluation::SelectedGraphCodeSource::PublishedBytes)
+                        .unwrap_or(crate::session::source_evaluation::SelectedGraphCodeSource::Unpublished),
                 },
                 &execution_runtime,
                 bytecode.function_registry.clone(),

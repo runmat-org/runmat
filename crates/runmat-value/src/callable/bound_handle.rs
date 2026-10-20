@@ -47,6 +47,22 @@ impl BoundFunctionHandle {
         self.data.into_inner()
     }
 
+    pub fn requested_header_bytes() -> usize {
+        crate::immutable_metadata::ImmutableMetadata::<BoundFunctionHandleData>::requested_header_bytes()
+    }
+
+    /// Admits only the original header; child text and authority retain their
+    /// own existing owners and claims.
+    pub fn try_from_data_with_exact_header(
+        data: BoundFunctionHandleData,
+        permit: &dyn crate::ExactHostAllocationPermit,
+    ) -> Result<Self, crate::ExactHostNumericAllocationError> {
+        Ok(Self {
+            data: crate::immutable_metadata::ImmutableMetadata::try_new_exact(data, permit)?,
+            instance: CallableInstanceId::mint(),
+        })
+    }
+
     pub fn instance_id(&self) -> CallableInstanceId {
         self.instance
     }

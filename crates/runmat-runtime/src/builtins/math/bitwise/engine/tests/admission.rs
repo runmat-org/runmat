@@ -224,15 +224,34 @@ fn rank_zero_and_rank_one_controls_preserve_exact_bitwise_array_outputs() {
         let control = |value| Value::Tensor(Tensor::new(vec![value], shape.clone()).unwrap());
         let results = [
             (
-                block_on(bitand_builtin(vec![input(), control(3.0)])).unwrap(),
+                block_on(bitand_builtin(
+                    crate::builtins::common::test_support::builtin_arguments(vec![
+                        input(),
+                        control(3.0),
+                    ]),
+                ))
+                .unwrap(),
                 vec![1, 3],
             ),
             (
-                block_on(bitshift_builtin(vec![input(), control(1.0)])).unwrap(),
+                block_on(bitshift_builtin(
+                    crate::builtins::common::test_support::builtin_arguments(vec![
+                        input(),
+                        control(1.0),
+                    ]),
+                ))
+                .unwrap(),
                 vec![2, 6],
             ),
             (
-                block_on(bitset_builtin(vec![input(), control(1.0), control(0.0)])).unwrap(),
+                block_on(bitset_builtin(
+                    crate::builtins::common::test_support::builtin_arguments(vec![
+                        input(),
+                        control(1.0),
+                        control(0.0),
+                    ]),
+                ))
+                .unwrap(),
                 vec![0, 2],
             ),
         ];

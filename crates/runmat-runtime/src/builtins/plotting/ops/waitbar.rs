@@ -8,7 +8,7 @@ use runmat_macros::runtime_builtin;
 use runmat_value::IntValue;
 use runmat_value::Value;
 
-use super::properties::{set_properties, PlotHandle};
+use super::properties::{set_properties_with_runtime, PlotHandle};
 use super::state::{
     current_or_any_waitbar_handle, figure_handle_exists, new_figure_handle, set_figure_name,
     set_figure_number_title, set_waitbar_state, waitbar_state_snapshot, FigureHandle,
@@ -22,7 +22,8 @@ struct WaitbarRequest {
     progress: f64,
     target: Option<FigureHandle>,
     message: Option<String>,
-    figure_properties: Vec<Value>,
+    figure_properties: crate::call::BuiltinArguments,
+    has_figure_properties: bool,
 }
 
 fn invalid(detail: impl AsRef<str>) -> RuntimeError {
@@ -43,7 +44,7 @@ fn invalid(detail: impl AsRef<str>) -> RuntimeError {
     binding_variant = "default",
     builtin_path = "crate::builtins::plotting::waitbar"
 )]
-pub fn waitbar_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
+pub fn waitbar_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<f64> {
     if args.first().is_some_and(is_typed_integer) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &WAITBAR_INTEGER_PROGRESS_EXTENSION,
@@ -56,10 +57,9 @@ pub fn waitbar_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
             BUILTIN_NAME,
         )?;
     }
-    let request = parse_request(&args)?;
-    let should_update_existing_waitbar = request.target.is_none()
-        && request.message.is_none()
-        && request.figure_properties.is_empty();
+    let request = parse_request(args)?;
+    let should_update_existing_waitbar =
+        request.target.is_none() && request.message.is_none() && !request.has_figure_properties;
     let mut created_new_waitbar = false;
     let handle = match request.target {
         Some(handle) => {
@@ -96,18 +96,19 @@ pub fn waitbar_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
         set_figure_name(handle, "Waitbar".to_string()).map_err(|err| invalid(err.to_string()))?;
     }
 
-    if !request.figure_properties.is_empty() {
-        set_properties(
-            PlotHandle::Figure(handle),
-            &request.figure_properties,
-            BUILTIN_NAME,
-        )?;
+    if request.has_figure_properties {
+        for pair in request.figure_properties.chunks_exact(2) {
+            let name = text_value(&pair[0]).expect("validated waitbar property name");
+            if is_waitbar_or_figure_property(&name) {
+                set_properties_with_runtime(None, PlotHandle::Figure(handle), pair, BUILTIN_NAME)?;
+            }
+        }
     }
 
     Ok(handle.as_u32() as f64)
 }
 
-fn parse_request(args: &[Value]) -> BuiltinResult<WaitbarRequest> {
+fn parse_request(args: crate::call::BuiltinArguments) -> BuiltinResult<WaitbarRequest> {
     let Some(first) = args.first() else {
         return Err(invalid("expected progress fraction"));
     };
@@ -125,7 +126,11 @@ fn parse_request(args: &[Value]) -> BuiltinResult<WaitbarRequest> {
             idx += 1;
             if let Some(value) = args.get(idx) {
                 if let Some(text) = message_text(value) {
-                    if !looks_like_property_pair(&args[idx..]) {
+                    if !looks_like_property_pair(
+                        args.view()
+                            .range(idx..)
+                            .expect("bounded waitbar option tail"),
+                    ) {
                         message = Some(text);
                         idx += 1;
                     }
@@ -134,12 +139,20 @@ fn parse_request(args: &[Value]) -> BuiltinResult<WaitbarRequest> {
         }
     }
 
-    let figure_properties = parse_property_tail(&args[idx..])?;
+    let has_figure_properties = parse_property_tail(
+        args.view()
+            .range(idx..)
+            .expect("bounded waitbar property tail"),
+    )?;
+    let figure_properties = args
+        .into_range(idx..)
+        .expect("bounded waitbar property tail");
     Ok(WaitbarRequest {
         progress,
         target,
         message,
         figure_properties,
+        has_figure_properties,
     })
 }
 
@@ -200,10 +213,10 @@ fn figure_handle(value: &Value) -> Option<FigureHandle> {
 fn message_text(value: &Value) -> Option<String> {
     match value {
         Value::String(_) | Value::CharArray(_) => text_value(value),
-        Value::StringArray(array) => Some(array.data.join("\n")),
+        Value::StringArray(array) => Some(array.data().join("\n")),
         Value::Cell(cell) => {
-            let mut parts = Vec::with_capacity(cell.data.len());
-            for item in &cell.data {
+            let mut parts = Vec::with_capacity(cell.data().len());
+            for item in cell.data() {
                 parts.push(message_text(item)?);
             }
             Some(parts.join("\n"))
@@ -216,7 +229,7 @@ fn text_value(value: &Value) -> Option<String> {
     super::style::value_as_string(value)
 }
 
-fn looks_like_property_pair(tail: &[Value]) -> bool {
+fn looks_like_property_pair(tail: crate::call::FunctionArgumentView<'_>) -> bool {
     tail.len() >= 2
         && tail.len().is_multiple_of(2)
         && tail
@@ -226,28 +239,25 @@ fn looks_like_property_pair(tail: &[Value]) -> bool {
             .unwrap_or(false)
 }
 
-fn parse_property_tail(tail: &[Value]) -> BuiltinResult<Vec<Value>> {
+fn parse_property_tail(tail: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<bool> {
     if tail.is_empty() {
-        return Ok(Vec::new());
+        return Ok(false);
     }
     if !tail.len().is_multiple_of(2) {
         return Err(invalid("property arguments must be name/value pairs"));
     }
-    let mut out = Vec::with_capacity(tail.len());
+    let mut has_figure_properties = false;
     for pair in tail.chunks_exact(2) {
         let name = text_value(&pair[0]).ok_or_else(|| invalid("property names must be text"))?;
         match name.trim().to_ascii_lowercase().as_str() {
             "createcancelbtn" | "cancelbutton" | "units" | "windowstyle" => {}
-            _ if is_waitbar_or_figure_property(&name) => {
-                out.push(pair[0].clone());
-                out.push(pair[1].clone());
-            }
+            _ if is_waitbar_or_figure_property(&name) => has_figure_properties = true,
             _ => {
                 return Err(invalid(format!("unsupported waitbar property '{name}'")));
             }
         }
     }
-    Ok(out)
+    Ok(has_figure_properties)
 }
 
 fn is_waitbar_or_figure_property(name: &str) -> bool {
@@ -264,6 +274,10 @@ mod tests {
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, reset_hold_state_for_run};
     use runmat_value::{CellArray, StringArray, Tensor};
+
+    fn waitbar_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
+        super::waitbar_builtin(crate::call::BuiltinArguments::from_borrowed(&args, None)?)
+    }
 
     fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
         let guard = lock_plot_registry();

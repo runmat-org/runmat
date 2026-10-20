@@ -134,7 +134,9 @@ fn parse_mesh_options(args: &[Value]) -> BuiltinResult<(bool, bool)> {
 
 /// `geometry.load(path, 'Units', unit)`: the only option is the source unit
 /// used when a file declares none.
-pub(super) fn parse_load_options(args: &[Value]) -> BuiltinResult<GeometryImportOptions> {
+pub(super) fn parse_load_options(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<GeometryImportOptions> {
     if !args.len().is_multiple_of(2) {
         return Err(builtin_error(
             GEOMETRY_LOAD_NAME,
@@ -144,7 +146,7 @@ pub(super) fn parse_load_options(args: &[Value]) -> BuiltinResult<GeometryImport
     }
     let mut options = GeometryImportOptions::default();
     let mut units_seen = false;
-    for pair in args.chunks(2) {
+    for pair in args.chunks_exact(2) {
         let key = option_text(&pair[0], GEOMETRY_LOAD_NAME)?
             .chars()
             .filter(|character| character.is_ascii_alphanumeric())

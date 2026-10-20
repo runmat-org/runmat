@@ -80,6 +80,7 @@ async fn authored_named_spatial_input_retains_deferred_authority_until_actual_me
     .unwrap();
     session
         .install_project_handoff(runmat_package::FrozenProjectHandoff::new(project))
+        .await
         .unwrap();
     let checked = session
         .load_and_check_fea_source_path(&study_path.canonicalize().unwrap())

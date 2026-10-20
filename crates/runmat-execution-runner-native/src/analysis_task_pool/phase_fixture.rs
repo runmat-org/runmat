@@ -21,7 +21,12 @@ pub(crate) fn successful_phase(
         cpu_millicores: resources.cpu_millicores,
         memory_bytes: resources.memory_bytes,
         scratch_bytes: resources.scratch_bytes.max(1),
-        accelerators: resources.accelerators.clone(),
+        accelerators: runmat_accelerate_api::registered_providers()
+            .into_iter()
+            .map(|provider| provider.execution_accelerator_device(1))
+            .filter_map(Result::transpose)
+            .collect::<Result<Vec<_>, _>>()
+            .expect("actual registered phase fixture devices"),
         capabilities: resources.required_capabilities.clone(),
     };
     let mut driver = Driver::new(DriverConfig::default(), fence).unwrap();
@@ -48,6 +53,7 @@ pub(crate) fn successful_phase(
         .unwrap();
     driver
         .handle(DriverCommand::RegisterWorker(WorkerSpec {
+            host: crate::test_support::host_inventory(),
             id: worker,
             pool_id: pool,
             resources: inventory,

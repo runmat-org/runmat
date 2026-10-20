@@ -168,7 +168,7 @@ fn reset(session: &mut RunMatSession, unit: &crate::ExecutableUnit) {
         unit,
         ProcedureInvocation {
             target: ProcedureTarget::Function("engineResetCount".into()),
-            arguments: Vec::new(),
+            arguments: crate::ProcedureArguments::Source(Vec::new()),
             requested_outputs: 0,
         },
         &InvocationControl::default().force_generic_native(),
@@ -181,7 +181,7 @@ fn count(session: &mut RunMatSession, unit: &crate::ExecutableUnit) -> Value {
         unit,
         ProcedureInvocation {
             target: ProcedureTarget::Function("engineGetCount".into()),
-            arguments: Vec::new(),
+            arguments: crate::ProcedureArguments::Source(Vec::new()),
             requested_outputs: 1,
         },
         &InvocationControl::default().force_generic_native(),

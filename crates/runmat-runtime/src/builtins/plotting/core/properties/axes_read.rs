@@ -53,7 +53,7 @@ fn render(
     let displayed_z = || -> BuiltinResult<Value> { Ok(limit_value(z_limits.or(Some((0.0, 1.0))))) };
     let result = match property.map(canonical_property_name).as_deref() {
         None => {
-            let mut st = StructValue::new();
+            let mut st = runmat_value::UnboundedStructValueBuilder::new();
             st.insert(
                 "Handle",
                 Value::Num(super::super::state::encode_axes_handle(handle, axes_index)),
@@ -265,7 +265,7 @@ fn render(
             );
             st.insert("YAxisLocation", Value::string(meta.y_axis_location.clone()));
             st.insert("YDir", Value::String(meta.y_direction.as_str().into()));
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("title") => Ok(Value::Num(super::super::state::encode_plot_object_handle(
             handle,

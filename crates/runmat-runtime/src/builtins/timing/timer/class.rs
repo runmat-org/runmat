@@ -104,15 +104,12 @@ pub(super) fn ensure_timer_class_registered() {
     );
 }
 
-pub(super) fn default_timer_object(name: String) -> ObjectInstance {
-    let mut object = ObjectInstance::new(TIMER_CLASS.to_string());
-    for callback in TimerCallback::ALL {
-        object.properties.insert(
-            callback.property().name().to_string(),
-            Value::string(String::new()),
-        );
-    }
-    for (property, value) in [
+fn default_timer_fields(name: String) -> [(&'static str, Value); 19] {
+    [
+        ("TimerFcn", Value::string(String::new())),
+        ("StartFcn", Value::string(String::new())),
+        ("StopFcn", Value::string(String::new())),
+        ("ErrorFcn", Value::string(String::new())),
         ("Period", Value::Num(1.0)),
         ("StartDelay", Value::Num(0.0)),
         ("TasksToExecute", Value::Num(1.0)),
@@ -128,8 +125,38 @@ pub(super) fn default_timer_object(name: String) -> ObjectInstance {
         ("TasksExecuted", Value::Num(0.0)),
         ("Type", Value::string(TIMER_CLASS.to_string())),
         (crate::HANDLE_VALID_FLAG_PROPERTY, Value::Bool(true)),
-    ] {
-        object.properties.insert(property.to_string(), value);
+    ]
+}
+
+#[cfg(test)]
+pub(super) fn default_timer_object(name: String) -> ObjectInstance {
+    let fields = default_timer_fields(name);
+    let mut builder = runmat_value::UnboundedObjectBuilder::with_property_capacity(
+        TIMER_CLASS.to_string(),
+        fields.len(),
+    );
+    for (property, value) in fields {
+        builder.insert(property.to_owned(), value);
     }
-    object
+    builder.finish()
+}
+
+pub(super) fn prepare_default_timer_object(
+    runtime: &RuntimeContext,
+    name: String,
+    overrides: &[PreparedTimerPair],
+) -> BuiltinResult<crate::execution::RootedValue> {
+    let mut fields = default_timer_fields(name);
+    for pair in overrides {
+        let (_, value) = fields
+            .iter_mut()
+            .find(|(property, _)| *property == pair.property.name())
+            .expect("every writable timer property has a default slot");
+        *value = pair.value.clone();
+    }
+    crate::execution::object::construct_object_from_borrowed_fields(
+        Some(runtime),
+        TIMER_CLASS.display_name(),
+        fields.iter().map(|(name, value)| (*name, value)),
+    )
 }

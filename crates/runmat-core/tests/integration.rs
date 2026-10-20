@@ -255,7 +255,7 @@ fn test_randi_wide_integer_outputs_follow_session_compatibility_mode() {
         assert!(runmat.error.is_none(), "{:?}", runmat.error);
         assert_eq!(
             runmat.value,
-            Some(runmat_value::Value::String("int64".to_string()))
+            Some(runmat_value::Value::String("int64".to_string().into()))
         );
     });
 }
@@ -420,7 +420,7 @@ fn test_macd_nondouble_matrix_extension_follows_session_compatibility_mode() {
         assert!(runmat.error.is_none(), "{:?}", runmat.error);
         assert_eq!(
             runmat.value,
-            Some(runmat_value::Value::String("double".to_string()))
+            Some(runmat_value::Value::String("double".to_string().into()))
         );
     });
 }
@@ -456,7 +456,7 @@ fn test_fread_like_extension_follows_session_compatibility_mode() {
         assert!(runmat.error.is_none(), "{:?}", runmat.error);
         assert_eq!(
             runmat.value,
-            Some(runmat_value::Value::String("uint8".to_string()))
+            Some(runmat_value::Value::String("uint8".to_string().into()))
         );
     });
 }
@@ -841,7 +841,7 @@ fn test_sparse_integer_outputs_follow_session_compatibility_mode() {
         assert!(runmat.error.is_none(), "{:?}", runmat.error);
         assert_eq!(
             runmat.value,
-            Some(runmat_value::Value::String("uint64".to_string()))
+            Some(runmat_value::Value::String("uint64".to_string().into()))
         );
     });
 }

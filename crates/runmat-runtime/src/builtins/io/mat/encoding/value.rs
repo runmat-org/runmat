@@ -180,16 +180,16 @@ pub(in crate::builtins::io::mat) fn convert_value_with_cooperation<'a, 'b>(
                 })
             }
             Value::StringArray(sa) => {
-                if sa.data.len() == 1 {
+                if sa.data().len() == 1 {
                     return convert_value_with_cooperation(
-                        Value::String(sa.data[0].clone()),
+                        Value::String(sa.data()[0].clone()),
                         owner,
                         cooperation.as_deref_mut(),
                     )
                     .await;
                 }
-                let mut elements = Vec::with_capacity(sa.data.len());
-                for text in &sa.data {
+                let mut elements = Vec::with_capacity(sa.data().len());
+                for text in sa.data() {
                     let data = text_to_utf16_cooperative(text, owner, &mut cooperation).await?;
                     elements.push(MatArray {
                         class: MatClass::Char,
@@ -204,7 +204,7 @@ pub(in crate::builtins::io::mat) fn convert_value_with_cooperation<'a, 'b>(
                 })
             }
             Value::Cell(cell) => {
-                let mut elements = Vec::with_capacity(cell.data.len());
+                let mut elements = Vec::with_capacity(cell.data().len());
                 for element in cell.iter_column_major() {
                     completed(&mut cooperation, 1).await?;
                     let gathered = gather_with_cooperation(element, &mut cooperation).await?;
@@ -221,7 +221,8 @@ pub(in crate::builtins::io::mat) fn convert_value_with_cooperation<'a, 'b>(
                 })
             }
             Value::Struct(struct_value) => {
-                let field_names: Vec<String> = struct_value.fields.keys().cloned().collect();
+                let field_names: Vec<String> =
+                    struct_value.fields.keys().map(ToOwned::to_owned).collect();
                 let mut field_values = Vec::with_capacity(field_names.len());
                 for field in &field_names {
                     completed(&mut cooperation, field.len()).await?;
@@ -248,7 +249,10 @@ pub(in crate::builtins::io::mat) fn convert_value_with_cooperation<'a, 'b>(
                 })
             }
             Value::StructArray(array) => {
-                let field_names = array.field_names().cloned().collect::<Vec<_>>();
+                let field_names = array
+                    .field_names()
+                    .map(ToOwned::to_owned)
+                    .collect::<Vec<_>>();
                 let capacity = array.len().checked_mul(field_names.len()).ok_or_else(|| {
                     owner.error(
                         MatEncodingFailure::Selection,
@@ -288,7 +292,7 @@ pub(in crate::builtins::io::mat) fn convert_value_with_cooperation<'a, 'b>(
                 })
             }
             Value::Object(object) => {
-                let class_name = object.class_name.display_name().to_owned();
+                let class_name = object.class_name().display_name().to_owned();
                 let saved = prepare_object_element(Value::Object(object), &mut cooperation).await?;
                 let payload = saved
                     .with_owned_async(|value| {
@@ -333,10 +337,10 @@ pub(in crate::builtins::io::mat) fn convert_value_with_cooperation<'a, 'b>(
             Value::ObjectArray(array) => {
                 let class_name = array.class_name().display_name().to_owned();
                 let dims = canonical_dims(array.shape());
-                let data = array.into_data();
+                let data = array.data();
                 let mut kinds = Vec::with_capacity(data.len());
                 let mut payloads = Vec::with_capacity(data.len());
-                for element in data {
+                for element in data.iter().cloned() {
                     completed(&mut cooperation, 1).await?;
                     let is_handle = matches!(element, Value::HandleObject(_));
                     kinds.push(object_kind(is_handle));

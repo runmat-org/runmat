@@ -201,8 +201,10 @@ impl TextOperand {
     }
 
     fn from_string_array(array: StringArray) -> Self {
-        let missing_flags: Vec<bool> = array.data.iter().map(|s| is_missing_string(s)).collect();
-        let values: Vec<_> = match array.data.try_into_owned() {
+        let missing_flags: Vec<bool> = array.data().iter().map(|s| is_missing_string(s)).collect();
+        let shape = array.shape().to_vec();
+        let (owner, _shape, _rows, _cols) = array.into_parts();
+        let values: Vec<_> = match owner.try_into_owned() {
             Ok(values) => values.into_iter().collect(),
             Err(data) => data.iter().cloned().collect(),
         };
@@ -211,7 +213,6 @@ impl TextOperand {
             .zip(missing_flags)
             .map(|(text, missing)| TextElement { text, missing })
             .collect();
-        let shape = array.shape.to_vec();
         let strides = compute_strides(&shape);
         Self {
             data,
@@ -226,7 +227,7 @@ impl TextOperand {
         let cols = array.cols;
         let mut elements = Vec::with_capacity(rows);
         for row in 0..rows {
-            let text = char_row_to_string_slice(&array.data, cols, row);
+            let text = char_row_to_string_slice(array.data(), cols, row);
             let trimmed = trim_trailing_spaces(&text);
             elements.push(TextElement {
                 text: trimmed.into(),
@@ -244,9 +245,9 @@ impl TextOperand {
     }
 
     fn from_cell_array(array: &CellArray) -> BuiltinResult<Self> {
-        let total = array.data.len();
+        let total = array.data().len();
         let mut elements = Vec::with_capacity(total);
-        for handle in &array.data {
+        for handle in array.data() {
             let text_element = cell_element_to_text(handle)?;
             elements.push(text_element);
         }
@@ -335,8 +336,8 @@ fn cell_element_to_text(value: &Value) -> BuiltinResult<TextElement> {
             text: s.clone(),
             missing: is_missing_string(s),
         }),
-        Value::StringArray(sa) if sa.data.len() == 1 => {
-            let text = sa.data[0].clone();
+        Value::StringArray(sa) if sa.data().len() == 1 => {
+            let text = sa.data()[0].clone();
             Ok(TextElement {
                 missing: is_missing_string(&text),
                 text,
@@ -346,7 +347,7 @@ fn cell_element_to_text(value: &Value) -> BuiltinResult<TextElement> {
             let text = if ca.rows == 0 {
                 String::new()
             } else {
-                char_row_to_string_slice(&ca.data, ca.cols, 0)
+                char_row_to_string_slice(ca.data(), ca.cols, 0)
             };
             Ok(TextElement {
                 text: trim_trailing_spaces(&text).into(),
@@ -536,7 +537,7 @@ pub(crate) mod tests {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![1, 2]);
                 assert_eq!(
-                    sa.data,
+                    sa.data(),
                     vec![String::from("runmat-core"), String::from("runmat-runtime")]
                 );
             }
@@ -556,7 +557,7 @@ pub(crate) mod tests {
                 assert_eq!(ca.rows, 2);
                 assert_eq!(ca.cols, 3);
                 let expected: Vec<char> = vec!['A', 'X', 'Y', 'B', 'C', 'Z'];
-                assert_eq!(ca.data, expected);
+                assert_eq!(ca.data(), expected);
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -574,7 +575,7 @@ pub(crate) mod tests {
                 assert_eq!(ca.rows, 1);
                 assert_eq!(ca.cols, 9);
                 let expected: Vec<char> = "GPU Accel".chars().collect();
-                assert_eq!(ca.data, expected);
+                assert_eq!(ca.data(), expected);
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -595,7 +596,7 @@ pub(crate) mod tests {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![2, 2]);
                 assert_eq!(
-                    sa.data,
+                    sa.data(),
                     vec![
                         "Acore".to_string(),
                         "Bcore".to_string(),
@@ -624,12 +625,12 @@ pub(crate) mod tests {
         match result {
             Value::Cell(ca) => {
                 assert_eq!(ca.shape, vec![1, 2]);
-                let first: &Value = &ca.data[0];
-                let second: &Value = &ca.data[1];
+                let first: &Value = &ca.data()[0];
+                let second: &Value = &ca.data()[1];
                 match (first, second) {
                     (Value::CharArray(a), Value::CharArray(b)) => {
-                        assert_eq!(a.data, "RunCore".chars().collect::<Vec<char>>());
-                        assert_eq!(b.data, "MatCore".chars().collect::<Vec<char>>());
+                        assert_eq!(a.data(), "RunCore".chars().collect::<Vec<char>>());
+                        assert_eq!(b.data(), "MatCore".chars().collect::<Vec<char>>());
                     }
                     other => panic!("unexpected cell contents {other:?}"),
                 }
@@ -667,10 +668,10 @@ pub(crate) mod tests {
                         Value::CharArray(c),
                         Value::CharArray(d),
                     ) => {
-                        assert_eq!(a.data, "TopX".chars().collect::<Vec<char>>());
-                        assert_eq!(b.data, "RightX".chars().collect::<Vec<char>>());
-                        assert_eq!(c.data, "BottomX".chars().collect::<Vec<char>>());
-                        assert_eq!(d.data, "LastX".chars().collect::<Vec<char>>());
+                        assert_eq!(a.data(), "TopX".chars().collect::<Vec<char>>());
+                        assert_eq!(b.data(), "RightX".chars().collect::<Vec<char>>());
+                        assert_eq!(c.data(), "BottomX".chars().collect::<Vec<char>>());
+                        assert_eq!(d.data(), "LastX".chars().collect::<Vec<char>>());
                     }
                     other => panic!("unexpected cell contents {other:?}"),
                 }
@@ -694,8 +695,8 @@ pub(crate) mod tests {
         .expect("strcat");
         match result {
             Value::StringArray(sa) => {
-                assert_eq!(sa.data[0], "<missing>");
-                assert_eq!(sa.data[1], "job-ready");
+                assert_eq!(sa.data()[0], "<missing>");
+                assert_eq!(sa.data()[1], "job-ready");
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -713,7 +714,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![0, 2]);
-                assert!(sa.data.is_empty());
+                assert!(sa.data().is_empty());
             }
             other => panic!("expected empty string array, got {other:?}"),
         }

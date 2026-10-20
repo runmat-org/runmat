@@ -404,8 +404,8 @@ fn cell_string_element(value: &Value) -> Result<CellStringElement<'_>, RuntimeEr
             "InvalidSliceAssignmentRhs",
             "rhs cell character arrays must be row vectors",
         )),
-        Value::StringArray(strings) if strings.data.len() == 1 => {
-            Ok(CellStringElement::Text(&strings.data[0]))
+        Value::StringArray(strings) if strings.data().len() == 1 => {
+            Ok(CellStringElement::Text(strings.data()[0].as_str()))
         }
         other => Err(mex(
             "InvalidSliceAssignmentRhs",
@@ -427,16 +427,16 @@ pub fn validate_string_rhs_for_plan(
         )),
         Value::StringArray(strings) => rhs_shape::validate_empty_selection_rhs_shape(
             &strings.shape,
-            strings.data.len(),
+            strings.data().len(),
             selection_lengths,
         ),
         Value::Cell(cell) => {
-            for value in &cell.data {
+            for value in cell.data() {
                 cell_string_element(value)?;
             }
             rhs_shape::validate_empty_selection_rhs_shape(
                 &cell.shape,
-                cell.data.len(),
+                cell.data().len(),
                 selection_lengths,
             )
         }
@@ -471,7 +471,7 @@ pub fn build_string_rhs_view(
     }
     if let Value::StringArray(rt) = rhs {
         let dims = selection_lengths.len();
-        let shape = validated_assignment_rhs_shape(&rt.shape, rt.data.len(), selection_lengths)?;
+        let shape = validated_assignment_rhs_shape(&rt.shape, rt.data().len(), selection_lengths)?;
         let mut rstrides = vec![0usize; dims];
         let mut racc = 1usize;
         for d in 0..dims {
@@ -479,15 +479,15 @@ pub fn build_string_rhs_view(
             racc *= shape[d];
         }
         return Ok(StringRhsView::Tensor {
-            data: rt.data.clone(),
+            data: rt.data_owner().clone(),
             shape,
             strides: rstrides,
         });
     }
     if let Value::Cell(cell) = rhs {
         let dims = selection_lengths.len();
-        let mut data = Vec::with_capacity(cell.data.len());
-        for value in &cell.data {
+        let mut data = Vec::with_capacity(cell.data().len());
+        for value in cell.data() {
             match cell_string_element(value)? {
                 CellStringElement::Text(text) => data.push(runmat_value::Utf8Text::from(text)),
                 CellStringElement::Chars(chars) => data.push(
@@ -504,7 +504,7 @@ pub fn build_string_rhs_view(
             }
         }
         let shape =
-            validated_assignment_rhs_shape(&cell.shape, cell.data.len(), selection_lengths)?;
+            validated_assignment_rhs_shape(&cell.shape, cell.data().len(), selection_lengths)?;
         let mut rstrides = vec![0usize; dims];
         let mut racc = 1usize;
         for d in 0..dims {
@@ -538,8 +538,8 @@ pub fn scatter_string_with_plan(
     } else {
         plan.selection_lengths.clone()
     };
-    if !sa.data.is_exact() {
-        sa.data.make_unique_unbounded().map_err(|error| {
+    if !sa.data_owner().is_exact() {
+        sa.make_data_unique_unbounded().map_err(|error| {
             mex(
                 "StringSliceOwner",
                 format!("string assignment owner unavailable: {error}"),
@@ -2491,7 +2491,7 @@ mod tests {
 
     #[test]
     fn complex_rhs_view_invalid_rhs_type_reports_identifier() {
-        let rhs = Value::String("x".to_string());
+        let rhs = Value::String("x".to_string().into());
         let err = match build_complex_rhs_view(&rhs, &[1]) {
             Ok(_) => panic!("non-numeric rhs should be rejected"),
             Err(err) => err,
@@ -2553,14 +2553,13 @@ mod tests {
     fn string_cell_rhs_view_rejects_shape_data_length_mismatch() {
         let data = ["a", "b", "c"]
             .into_iter()
-            .map(|text| Value::String(text.to_string()))
-            .collect();
-        let rhs = Value::Cell(CellArray {
-            data,
-            shape: vec![2, 2],
-            rows: 2,
-            cols: 2,
-        });
+            .map(|text| Value::String(text.to_string().into()))
+            .collect::<Vec<_>>();
+        let mut cell = CellArray::new(data, 1, 3).expect("valid original payload");
+        cell.shape = vec![2, 2].into();
+        cell.rows = 2;
+        cell.cols = 2;
+        let rhs = Value::Cell(cell);
         let err = match build_string_rhs_view(&rhs, &[2, 2]) {
             Ok(_) => panic!("cell shape/data mismatch should fail"),
             Err(err) => err,
@@ -2570,15 +2569,17 @@ mod tests {
 
     #[test]
     fn string_cell_rhs_uses_character_contents_not_display_layout() {
-        let rhs = Value::Cell(CellArray {
-            data: vec![
-                Value::CharArray(runmat_value::CharArray::new_row("AvgOrders")),
-                Value::CharArray(runmat_value::CharArray::new_row("AvgRevenue")),
-            ],
-            shape: vec![1, 2],
-            rows: 1,
-            cols: 2,
-        });
+        let rhs = Value::Cell(
+            CellArray::new(
+                vec![
+                    Value::CharArray(runmat_value::CharArray::new_row("AvgOrders")),
+                    Value::CharArray(runmat_value::CharArray::new_row("AvgRevenue")),
+                ],
+                1,
+                2,
+            )
+            .expect("character cell row"),
+        );
         let view = build_string_rhs_view(&rhs, &[2]).expect("build string RHS view");
         let StringRhsView::Tensor { data, .. } = view else {
             panic!("cellstr RHS should materialize as a string tensor");

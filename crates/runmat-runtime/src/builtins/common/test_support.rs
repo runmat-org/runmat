@@ -5,6 +5,97 @@ use std::cell::Cell;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
+/// Admit one ordinary source vector into the canonical rooted builtin carrier.
+///
+/// Direct builtin unit tests are genuine source boundaries: the temporary
+/// vector is not a runtime compatibility representation and is admitted once
+/// here before the builtin receives it.
+#[cfg(test)]
+pub(crate) fn builtin_arguments(values: Vec<Value>) -> crate::call::BuiltinArguments {
+    crate::call::BuiltinArguments::from_borrowed(&values, None).expect("ordinary test arguments")
+}
+
+#[cfg(test)]
+pub(crate) fn remove_object_property_unbounded(
+    object: &mut runmat_value::ObjectInstance,
+    name: &str,
+) -> Option<Value> {
+    let mut builder = object
+        .clone()
+        .into_unbounded_builder()
+        .expect("ordinary fixture object generation");
+    let removed = builder.remove(name);
+    *object = builder.finish();
+    removed
+}
+
+#[cfg(test)]
+pub(crate) fn reclassify_object_unbounded(
+    object: &runmat_value::ObjectInstance,
+    class_name: &str,
+) -> runmat_value::ObjectInstance {
+    let mut builder = runmat_value::UnboundedObjectBuilder::with_property_capacity(
+        class_name,
+        object.properties().len(),
+    );
+    for entry in object.properties().entries() {
+        builder.insert_text(entry.key().clone(), entry.value().clone());
+    }
+    builder.finish()
+}
+
+#[cfg(test)]
+pub(crate) fn replace_struct_field_unbounded(
+    structure: &mut runmat_value::StructValue,
+    name: &str,
+    value: Value,
+) -> Option<Value> {
+    let original = std::mem::take(structure);
+    let mut previous = None;
+    let mut replacement = Some(value);
+    let mut fields = original
+        .into_fields_unbounded()
+        .map(|(field, current)| {
+            if field == name {
+                previous = Some(current);
+                (
+                    field,
+                    replacement.take().expect("one matching structure field"),
+                )
+            } else {
+                (field, current)
+            }
+        })
+        .collect::<Vec<_>>();
+    if let Some(value) = replacement {
+        fields.push((name.to_owned(), value));
+    }
+    *structure = runmat_value::StructValue::from_fields_unbounded(fields);
+    previous
+}
+
+#[cfg(test)]
+pub(crate) fn remove_struct_field_unbounded(
+    structure: &mut runmat_value::StructValue,
+    name: &str,
+) -> Option<Value> {
+    let original = std::mem::take(structure);
+    let mut removed = None;
+    *structure = runmat_value::StructValue::from_fields_unbounded(
+        original
+            .into_fields_unbounded()
+            .filter_map(|(field, value)| {
+                if field == name {
+                    removed = Some(value);
+                    None
+                } else {
+                    Some((field, value))
+                }
+            }),
+    );
+    removed
+}
+
 #[cfg(test)]
 #[path = "test_support/owning_tests.rs"]
 mod owning_tests;

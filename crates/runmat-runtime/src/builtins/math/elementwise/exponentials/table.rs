@@ -1,4 +1,4 @@
-use runmat_value::{ObjectInstance, StructValue, Value};
+use runmat_value::{ObjectInstance, Value};
 
 use crate::BuiltinResult;
 
@@ -14,8 +14,8 @@ pub(super) async fn evaluate(
     let nested = runtime.map(|runtime| runtime.clone().without_vm_fusion_host_route());
     let variables = crate::builtins::table::table_variables(&object)
         .map_err(|error| super::errors::invalid(operation, error.message))?;
-    let mut output = StructValue::new();
-    for (name, value) in variables.fields {
+    let mut output = runmat_value::UnboundedStructValueBuilder::new();
+    for (name, value) in variables.into_fields_unbounded() {
         super::extensions::ensure(operation, &value)?;
         if matches!(value, Value::Object(_)) {
             return Err(super::errors::invalid(
@@ -31,6 +31,7 @@ pub(super) async fn evaluate(
             super::engine::execute_non_table(nested.as_ref(), operation, value).await?,
         );
     }
+    let output = output.finish();
     crate::builtins::table::table_replace_variables_like(&object, output)
         .map_err(|error| super::errors::internal(operation, error.message))
 }

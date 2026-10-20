@@ -327,6 +327,10 @@ fn managed_queue_reuses_one_exact_task_slot_across_sequential_children() {
                     })?
                     .await?;
                 assert_eq!(scoped, 64);
+                assert!(
+                    handle.owner()?.borrow().tasks.capacity() <= 2,
+                    "one pending child plus sequential children reuse two exact slots"
+                );
                 let unpolled_constructed = Rc::new(Cell::new(false));
                 let constructed_in_unpolled = Rc::clone(&unpolled_constructed);
                 let unpolled_dropped = Rc::new(Cell::new(false));
@@ -390,7 +394,10 @@ fn managed_queue_reuses_one_exact_task_slot_across_sequential_children() {
             .expect("admit managed root"),
     )
     .expect("all sequential children complete");
-    assert!(owner.owner.state().borrow().tasks.capacity() <= 2);
+    // The cancellation probe above temporarily retains the pending child,
+    // canceled unpolled entry, and its sibling concurrently. Geometric growth
+    // admits four slots for that three-entry peak, not one slot per child.
+    assert!(owner.owner.state().borrow().tasks.capacity() <= 4);
     assert!(ledger.snapshot().live_claimed_bytes > 0);
     drop(owner);
     assert_eq!(ledger.snapshot().live_claimed_bytes, 0);

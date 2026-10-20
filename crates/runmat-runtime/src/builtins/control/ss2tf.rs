@@ -27,7 +27,7 @@ async fn ss2tf_builtin(
     b: Value,
     c: Value,
     d: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let requested = crate::output_count::current_output_count().unwrap_or(1);
     if requested > 2 || rest.len() > 1 {

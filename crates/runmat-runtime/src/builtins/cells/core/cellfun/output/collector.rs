@@ -4,7 +4,7 @@ use crate::{gather_if_needed_async, BuiltinResult};
 use runmat_value::{CellArray, Value};
 
 pub(in crate::builtins::cells::core::cellfun) enum Collector {
-    Uniform(UniformScalarCollector),
+    Uniform(UniformScalarCollector<'static>),
     Cell(RootedValuesBuilder),
 }
 impl Collector {

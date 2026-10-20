@@ -4,7 +4,9 @@ use crate::builtins::common::path_state::{current_path_string, set_path_string};
 use crate::BuiltinResult;
 
 pub(super) fn call(args: Vec<Value>) -> BuiltinResult<Value> {
-    futures::executor::block_on(super::super::path_builtin(args))
+    futures::executor::block_on(super::super::path_builtin(
+        crate::builtins::common::test_support::builtin_arguments(args),
+    ))
 }
 
 pub(super) struct PathGuard {

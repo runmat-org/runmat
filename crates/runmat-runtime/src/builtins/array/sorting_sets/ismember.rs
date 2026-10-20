@@ -858,7 +858,7 @@ fn ismember_char_elements(a: CharArray, b: CharArray) -> crate::BuiltinResult<Is
     for col in 0..cols_b {
         for row in 0..rows_b {
             let data_idx = row * cols_b + col;
-            let ch = b.data[data_idx];
+            let ch = b.data()[data_idx];
             let linear_idx = row + col * rows_b;
             map.entry(ch).or_insert(linear_idx + 1);
         }
@@ -872,7 +872,7 @@ fn ismember_char_elements(a: CharArray, b: CharArray) -> crate::BuiltinResult<Is
     for col in 0..cols_a {
         for row in 0..rows_a {
             let data_idx = row * cols_a + col;
-            let ch = a.data[data_idx];
+            let ch = a.data()[data_idx];
             let linear_idx = row + col * rows_a;
             if let Some(&pos) = map.get(&ch) {
                 mask_data[linear_idx] = 1;
@@ -902,7 +902,7 @@ fn ismember_char_rows(a: CharArray, b: CharArray) -> crate::BuiltinResult<IsMemb
         let mut row_values = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r * cols + c;
-            row_values.push(b.data[idx]);
+            row_values.push(b.data()[idx]);
         }
         let key = RowCharKey::from_slice(&row_values);
         map.entry(key).or_insert(r + 1);
@@ -916,7 +916,7 @@ fn ismember_char_rows(a: CharArray, b: CharArray) -> crate::BuiltinResult<IsMemb
         let mut row_values = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r * cols + c;
-            row_values.push(a.data[idx]);
+            row_values.push(a.data()[idx]);
         }
         let key = RowCharKey::from_slice(&row_values);
         if let Some(&pos) = map.get(&key) {
@@ -950,14 +950,14 @@ fn ismember_string_elements(
     b: StringArray,
 ) -> crate::BuiltinResult<IsMemberEvaluation> {
     let mut map: HashMap<&str, usize> = HashMap::new();
-    for (idx, value) in b.data.iter().enumerate() {
+    for (idx, value) in b.data().iter().enumerate() {
         map.entry(value.as_str()).or_insert(idx + 1);
     }
 
-    let mut mask_data = Vec::<u8>::with_capacity(a.data.len());
-    let mut loc_data = Vec::<f64>::with_capacity(a.data.len());
+    let mut mask_data = Vec::<u8>::with_capacity(a.data().len());
+    let mut loc_data = Vec::<f64>::with_capacity(a.data().len());
 
-    for value in &a.data {
+    for value in a.data() {
         if let Some(&pos) = map.get(value.as_str()) {
             mask_data.push(1);
             loc_data.push(pos as f64);
@@ -996,7 +996,7 @@ fn ismember_string_rows(
         let mut row_values = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows_b;
-            row_values.push(&b.data[idx]);
+            row_values.push(&b.data()[idx]);
         }
         let key = RowStringKey(row_values);
         map.entry(key).or_insert(r + 1);
@@ -1009,7 +1009,7 @@ fn ismember_string_rows(
         let mut row_values = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows_a;
-            row_values.push(&a.data[idx]);
+            row_values.push(&a.data()[idx]);
         }
         let key = RowStringKey(row_values);
         if let Some(&pos) = map.get(&key) {

@@ -7,7 +7,7 @@ pub(super) fn scalar(text: String) -> crate::BuiltinResult<Value> {
 }
 
 pub(super) fn array(array: StringArray) -> crate::BuiltinResult<Value> {
-    let values = array.data.iter().map(|text| character(text)).collect();
+    let values = array.data().iter().map(|text| character(text)).collect();
     CellArray::from_column_major(values, array.shape.as_slice().to_vec())
         .map(Value::Cell)
         .map_err(super::super::error::internal)

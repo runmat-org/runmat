@@ -317,20 +317,23 @@ enum MeanAxes {
     binding_variant = "default",
     builtin_path = "crate::builtins::math::reduction::mean"
 )]
-pub(crate) async fn mean_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub(crate) async fn mean_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     mean_with_nan_policy(value, rest, None).await
 }
 
 pub(crate) async fn mean_with_nan_policy(
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
     imposed_nan_mode: Option<ReductionNaN>,
 ) -> crate::BuiltinResult<Value> {
     // Normalise argument order defensively:
     // If the primary 'value' is not data-like (e.g., 'all'), but a data-like
     // argument exists in 'rest', swap them so we interpret calls like
     // mean('all', X) as mean(X, 'all').
-    let (value, rest) = normalise_mean_call_args(value, rest);
+    let (value, rest) = normalise_mean_call_args(value, rest)?;
 
     if crate::builtins::common::validation::is_typed_complex_integer(&value) {
         return Err(mean_invalid_input(
@@ -339,7 +342,7 @@ pub(crate) async fn mean_with_nan_policy(
     }
 
     let input_meta = InputMeta::from_value(&value);
-    let mut parsed = parse_arguments(&rest).await?;
+    let mut parsed = parse_arguments(rest.view()).await?;
     // Legacy NaN aliases impose omission after parsing the owning reduction's
     // public controls. This retains their previous behavior even if a caller
     // also supplied an explicit inclusion flag, without fabricating an option.
@@ -414,21 +417,38 @@ fn resolve_native_dims(shape: &[usize], axes: &MeanAxes) -> BuiltinResult<Vec<us
     Ok(dims)
 }
 
-fn normalise_mean_call_args(value: Value, rest: Vec<Value>) -> (Value, Vec<Value>) {
+enum NormalizedMeanArguments {
+    Retained(crate::call::BuiltinArguments),
+    Legacy(Vec<Value>),
+}
+
+impl NormalizedMeanArguments {
+    fn view(&self) -> crate::call::FunctionArgumentView<'_> {
+        match self {
+            Self::Retained(args) => args.view(),
+            Self::Legacy(args) => crate::call::FunctionArgumentView::from_slice(args),
+        }
+    }
+}
+
+fn normalise_mean_call_args(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<(Value, NormalizedMeanArguments)> {
     if is_data_like(&value) {
-        return (value, rest);
+        return Ok((value, NormalizedMeanArguments::Retained(rest)));
     }
     if let Some(idx) = rest.iter().position(is_data_like) {
-        let mut rest_mut = rest;
+        let mut rest_mut = rest.materialize_legacy_contiguous(None)?;
         let new_value = rest_mut.remove(idx);
         let mut new_rest = Vec::with_capacity(rest_mut.len() + 1);
         // Keep the original non-data 'value' (e.g., 'all') in rest so it can be parsed as a keyword
         new_rest.push(value);
         // Append the remaining rest args
         new_rest.extend(rest_mut);
-        return (new_value, new_rest);
+        return Ok((new_value, NormalizedMeanArguments::Legacy(new_rest)));
     }
-    (value, rest)
+    Ok((value, NormalizedMeanArguments::Retained(rest)))
 }
 
 fn is_data_like(v: &Value) -> bool {
@@ -445,7 +465,9 @@ fn is_data_like(v: &Value) -> bool {
     )
 }
 
-async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
+async fn parse_arguments(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<ParsedArguments> {
     let mut axes = MeanAxes::Default;
     let mut axes_set = false;
     let mut nan_mode = ReductionNaN::Include;
@@ -2024,7 +2046,10 @@ pub(crate) mod tests {
     use runmat_value::{IntValue, IntegerStorage};
 
     fn mean_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::mean_builtin(value, rest))
+        block_on(super::mean_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     fn values(tensor: &Tensor) -> Vec<f64> {

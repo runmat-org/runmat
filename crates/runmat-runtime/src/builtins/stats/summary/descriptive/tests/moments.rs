@@ -193,29 +193,32 @@ fn remaining_descriptive_integer_extensions_follow_compatibility_mode() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
 
     assert_extension_error(
-        block_on(geomean::geomean_builtin(integer_data(), Vec::new())),
+        block_on(geomean::geomean_builtin_source(integer_data(), Vec::new())),
         "RunMat:compatibility:GeomeanIntegerDataExtension",
     );
     assert_extension_error(
-        block_on(geomean::geomean_builtin(
+        block_on(geomean::geomean_builtin_source(
             floating_data(),
             vec![integer_dim()],
         )),
         "RunMat:compatibility:GeomeanTypedIntegerControlExtension",
     );
     assert_extension_error(
-        block_on(harmmean::harmmean_builtin(integer_data(), Vec::new())),
+        block_on(harmmean::harmmean_builtin_source(
+            integer_data(),
+            Vec::new(),
+        )),
         "RunMat:compatibility:HarmmeanIntegerDataExtension",
     );
     assert_extension_error(
-        block_on(harmmean::harmmean_builtin(
+        block_on(harmmean::harmmean_builtin_source(
             floating_data(),
             vec![integer_dim()],
         )),
         "RunMat:compatibility:HarmmeanTypedIntegerControlExtension",
     );
     assert_extension_error(
-        block_on(rms::rms_builtin(integer_data(), Vec::new())),
+        block_on(rms::rms_builtin_source(integer_data(), Vec::new())),
         "RunMat:compatibility:RmsIntegerDataExtension",
     );
     assert_extension_error(
@@ -241,7 +244,7 @@ fn remaining_descriptive_integer_extensions_follow_compatibility_mode() {
         "RunMat:compatibility:KurtosisTypedIntegerControlExtension",
     );
     assert_extension_error(
-        block_on(rmse::rmse_builtin(
+        block_on(rmse::rmse_builtin_source(
             integer_data(),
             floating_data(),
             Vec::new(),
@@ -249,7 +252,7 @@ fn remaining_descriptive_integer_extensions_follow_compatibility_mode() {
         "RunMat:compatibility:RmseIntegerDataExtension",
     );
     assert_extension_error(
-        block_on(rmse::rmse_builtin(
+        block_on(rmse::rmse_builtin_source(
             floating_data(),
             floating_data(),
             vec![Value::from("Weights"), integer_data()],

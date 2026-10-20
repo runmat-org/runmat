@@ -4,10 +4,11 @@ use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, ObjectInstance, StringArray, Tensor, Value};
 
 use crate::builtins::common::tensor as tensor_utils;
-use crate::builtins::strings::text_analytics::details::add_sentence_details_builtin;
+use crate::builtins::strings::text_analytics::details::add_sentence_details_to_object;
 use crate::builtins::strings::text_analytics::documents::{
     document_token_type_with_options, documents_from_object, options_from_document_object,
-    text_analytics_error, tokenized_document_language, DocumentTokenType, TOKENIZED_DOCUMENT_CLASS,
+    replace_document_properties, text_analytics_error, tokenized_document_language,
+    DocumentTokenType, TOKENIZED_DOCUMENT_CLASS,
 };
 use crate::builtins::strings::text_analytics::pos::{part_of_speech_for_token, PosLanguage};
 use crate::{gather_if_needed_async, BuiltinResult};
@@ -32,17 +33,17 @@ fn dependency_row_vector(tensor: &Tensor) -> bool {
 )]
 async fn add_dependency_details_builtin(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    let gathered = gather_args(args).await?;
-    let documents = parse_args(gathered)?;
+    let gathered = gather_args(args, runtime.as_ref()).await?;
+    let documents = parse_args(gathered.view())?;
     let mut object = tokenized_document_object(documents)?;
     let language = PosLanguage::from_document_for(
         &tokenized_document_language(&object),
         "addDependencyDetails",
     )?;
 
-    if !object.properties.contains_key("SentenceNumbers") {
+    if !object.properties().contains_key("SentenceNumbers") {
         object = add_sentence_details_for_dependencies(runtime.as_ref(), object).await?;
     }
 
@@ -55,29 +56,38 @@ async fn add_dependency_details_builtin(
         language,
         &document_options,
     )?;
-    object
-        .properties
-        .insert(HEAD_DETAILS_PROPERTY.to_string(), heads);
-    object
-        .properties
-        .insert(DEPENDENCY_DETAILS_PROPERTY.to_string(), dependencies);
+    let updates = [
+        (HEAD_DETAILS_PROPERTY, heads),
+        (DEPENDENCY_DETAILS_PROPERTY, dependencies),
+    ];
+    replace_document_properties(
+        runtime.as_ref(),
+        &mut object,
+        updates.iter().map(|(name, value)| (*name, value)),
+        "addDependencyDetails",
+    )?;
     Ok(Value::Object(object))
 }
 
-async fn gather_args(args: Vec<Value>) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(args.len());
-    for arg in args {
-        out.push(gather_if_needed_async(&arg).await.map_err(|err| {
+async fn gather_args(
+    args: crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    if !args.iter().any(crate::dispatcher::value_contains_gpu) {
+        return Ok(args);
+    }
+    args.try_map_preserving_roots_async(args.len(), runtime, async |index| {
+        gather_if_needed_async(&args[index]).await.map_err(|err| {
             text_analytics_error(
                 "addDependencyDetails",
                 format!("addDependencyDetails: failed to gather input: {err}"),
             )
-        })?);
-    }
-    Ok(out)
+        })
+    })
+    .await
 }
 
-fn parse_args(args: Vec<Value>) -> BuiltinResult<Value> {
+fn parse_args(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<Value> {
     if args.is_empty() {
         return Err(text_analytics_error(
             "addDependencyDetails",
@@ -100,7 +110,7 @@ fn tokenized_document_object(value: Value) -> BuiltinResult<ObjectInstance> {
             "addDependencyDetails",
             format!(
                 "addDependencyDetails: expected tokenizedDocument object, got {}",
-                object.class_name
+                object.class_name()
             ),
         )),
         other => Err(text_analytics_error(
@@ -114,15 +124,7 @@ async fn add_sentence_details_for_dependencies(
     runtime: Option<&crate::context::RuntimeContext>,
     object: ObjectInstance,
 ) -> BuiltinResult<ObjectInstance> {
-    let Value::Object(object) =
-        add_sentence_details_builtin(runtime.cloned(), vec![Value::Object(object)]).await?
-    else {
-        return Err(text_analytics_error(
-            "addDependencyDetails",
-            "addDependencyDetails: addSentenceDetails did not return tokenizedDocument",
-        ));
-    };
-    Ok(object)
+    add_sentence_details_to_object(runtime, object, None)
 }
 
 fn dependency_details_for_documents(
@@ -384,7 +386,7 @@ pub(in crate::builtins::strings::text_analytics) fn dependency_heads_from_object
     object: &ObjectInstance,
     fn_name: &str,
 ) -> BuiltinResult<Option<Vec<Vec<f64>>>> {
-    let Some(value) = object.properties.get(HEAD_DETAILS_PROPERTY) else {
+    let Some(value) = object.properties().get(HEAD_DETAILS_PROPERTY) else {
         return Ok(None);
     };
     let Value::Cell(cell) = value else {
@@ -399,8 +401,8 @@ pub(in crate::builtins::strings::text_analytics) fn dependency_heads_from_object
             format!("{fn_name}: tokenizedDocument object has invalid HeadDetails shape"),
         ));
     }
-    let mut out = Vec::with_capacity(cell.data.len());
-    for item in &cell.data {
+    let mut out = Vec::with_capacity(cell.data().len());
+    for item in cell.data() {
         let Value::Tensor(tensor) = item else {
             return Err(text_analytics_error(
                 fn_name,
@@ -422,7 +424,7 @@ pub(in crate::builtins::strings::text_analytics) fn dependency_details_from_obje
     object: &ObjectInstance,
     fn_name: &str,
 ) -> BuiltinResult<Option<Vec<Vec<String>>>> {
-    let Some(value) = object.properties.get(DEPENDENCY_DETAILS_PROPERTY) else {
+    let Some(value) = object.properties().get(DEPENDENCY_DETAILS_PROPERTY) else {
         return Ok(None);
     };
     let Value::Cell(cell) = value else {
@@ -437,8 +439,8 @@ pub(in crate::builtins::strings::text_analytics) fn dependency_details_from_obje
             format!("{fn_name}: tokenizedDocument object has invalid DependencyDetails shape"),
         ));
     }
-    let mut out = Vec::with_capacity(cell.data.len());
-    for item in &cell.data {
+    let mut out = Vec::with_capacity(cell.data().len());
+    for item in cell.data() {
         let Value::StringArray(array) = item else {
             return Err(text_analytics_error(
                 fn_name,
@@ -455,7 +457,7 @@ pub(in crate::builtins::strings::text_analytics) fn dependency_details_from_obje
         }
         out.push(
             array
-                .data
+                .data()
                 .iter()
                 .map(|text| text.as_str().to_owned())
                 .collect(),
@@ -468,7 +470,7 @@ fn sentence_numbers_from_object(
     object: &ObjectInstance,
     fn_name: &str,
 ) -> BuiltinResult<Option<Vec<Vec<f64>>>> {
-    let Some(value) = object.properties.get("SentenceNumbers") else {
+    let Some(value) = object.properties().get("SentenceNumbers") else {
         return Ok(None);
     };
     let Value::Cell(cell) = value else {
@@ -483,8 +485,8 @@ fn sentence_numbers_from_object(
             format!("{fn_name}: tokenizedDocument object has invalid SentenceNumbers shape"),
         ));
     }
-    let mut out = Vec::with_capacity(cell.data.len());
-    for item in &cell.data {
+    let mut out = Vec::with_capacity(cell.data().len());
+    for item in cell.data() {
         let Value::Tensor(tensor) = item else {
             return Err(text_analytics_error(
                 fn_name,
@@ -517,7 +519,10 @@ mod tests {
     }
 
     fn run_add_dependency(args: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(add_dependency_details_builtin(None, args))
+        futures::executor::block_on(add_dependency_details_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
 
     fn run_token_details(value: Value) -> BuiltinResult<Value> {
@@ -542,7 +547,7 @@ mod tests {
 
     fn string_column(table: &ObjectInstance, name: &str) -> Vec<String> {
         match table_column(table, name) {
-            Value::StringArray(array) => array.data,
+            Value::StringArray(array) => array.data().iter().map(ToString::to_string).collect(),
             other => panic!("expected string column {name}, got {other:?}"),
         }
     }
@@ -562,7 +567,7 @@ mod tests {
     #[test]
     fn dependency_numeric_properties_read_typed_integer_storage_exactly() {
         let mut object = ObjectInstance::new(TOKENIZED_DOCUMENT_CLASS.to_string());
-        object.properties.insert(
+        object.replace_property_unbounded(
             HEAD_DETAILS_PROPERTY.to_string(),
             Value::Cell(
                 CellArray::new(
@@ -573,7 +578,7 @@ mod tests {
                 .unwrap(),
             ),
         );
-        object.properties.insert(
+        object.replace_property_unbounded(
             "SentenceNumbers".to_string(),
             Value::Cell(
                 CellArray::new(
@@ -604,11 +609,11 @@ mod tests {
     fn dependency_numeric_properties_preserve_row_vector_projection() {
         let row = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2]).unwrap());
         let mut object = ObjectInstance::new(TOKENIZED_DOCUMENT_CLASS.to_string());
-        object.properties.insert(
+        object.replace_property_unbounded(
             HEAD_DETAILS_PROPERTY.to_string(),
             Value::Cell(CellArray::new(vec![row.clone()], 1, 1).unwrap()),
         );
-        object.properties.insert(
+        object.replace_property_unbounded(
             "SentenceNumbers".to_string(),
             Value::Cell(CellArray::new(vec![row], 1, 1).unwrap()),
         );
@@ -627,11 +632,11 @@ mod tests {
         );
 
         let scalar = Value::Tensor(Tensor::new(vec![1.0], vec![]).unwrap());
-        object.properties.insert(
+        object.replace_property_unbounded(
             HEAD_DETAILS_PROPERTY.to_string(),
             Value::Cell(CellArray::new(vec![scalar.clone()], 1, 1).unwrap()),
         );
-        object.properties.insert(
+        object.replace_property_unbounded(
             "SentenceNumbers".to_string(),
             Value::Cell(CellArray::new(vec![scalar], 1, 1).unwrap()),
         );
@@ -706,9 +711,7 @@ mod tests {
             .contains("name-value options are not supported"));
 
         let mut unsupported = object(docs);
-        unsupported
-            .properties
-            .insert("Language".into(), Value::String("fr".into()));
+        unsupported.replace_property_unbounded("Language".into(), Value::String("fr".into()));
         let err =
             run_add_dependency(vec![Value::Object(unsupported)]).expect_err("unsupported language");
         assert!(err.to_string().contains("unsupported document language"));
@@ -719,7 +722,7 @@ mod tests {
     fn add_dependency_details_rejects_malformed_sentence_numbers() {
         let docs = object(run_tokenized(vec![Value::String("dogs run".into())]).unwrap());
         let mut malformed = docs;
-        malformed.properties.insert(
+        malformed.replace_property_unbounded(
             "SentenceNumbers".to_string(),
             Value::Cell(
                 CellArray::new(
@@ -740,7 +743,7 @@ mod tests {
     fn token_details_rejects_malformed_dependency_details() {
         let docs = object(run_tokenized(vec![Value::String("dogs run".into())]).unwrap());
         let mut malformed = docs.clone();
-        malformed.properties.insert(
+        malformed.replace_property_unbounded(
             HEAD_DETAILS_PROPERTY.to_string(),
             Value::Cell(
                 CellArray::new(
@@ -751,7 +754,7 @@ mod tests {
                 .unwrap(),
             ),
         );
-        malformed.properties.insert(
+        malformed.replace_property_unbounded(
             DEPENDENCY_DETAILS_PROPERTY.to_string(),
             Value::Cell(
                 CellArray::new(
@@ -773,9 +776,7 @@ mod tests {
     fn add_dependency_details_accepts_german_language_metadata() {
         let docs = object(run_tokenized(vec![Value::String("Hunde laufen.".into())]).unwrap());
         let mut german = docs;
-        german
-            .properties
-            .insert("Language".into(), Value::String("de".into()));
+        german.replace_property_unbounded("Language".into(), Value::String("de".into()));
         let updated = run_add_dependency(vec![Value::Object(german)]).expect("german deps");
         let table = object(run_token_details(updated).expect("details"));
         assert!(string_column(&table, "Dependency").contains(&"root".to_string()));

@@ -8,8 +8,8 @@ use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, Value};
 
 use crate::builtins::common::format::{
-    decode_escape_sequences, extract_format_string, flatten_arguments, format_variadic_with_cursor,
-    ArgCursor,
+    decode_escape_sequences, extract_format_string, flatten_argument_elements,
+    format_variadic_with_cursor, ArgCursor,
 };
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
@@ -72,7 +72,10 @@ fn remap_sprintf_flow(err: RuntimeError) -> RuntimeError {
     binding_variant = "default",
     builtin_path = "crate::builtins::strings::core::sprintf"
 )]
-async fn sprintf_builtin(format_spec: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn sprintf_builtin(
+    format_spec: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &SPRINTF_DESCRIPTOR,
         &SPRINTF_ERROR_TOO_MANY_OUTPUTS,
@@ -88,7 +91,7 @@ async fn sprintf_builtin(format_spec: Value, rest: Vec<Value>) -> crate::Builtin
         extract_format_string(&gathered_spec, "sprintf").map_err(remap_sprintf_flow)?;
     let format_string =
         decode_escape_sequences("sprintf", &raw_format).map_err(remap_sprintf_flow)?;
-    let flattened_args = flatten_arguments(&rest, "sprintf")
+    let flattened_args = flatten_argument_elements(rest.view(), "sprintf")
         .await
         .map_err(remap_sprintf_flow)?;
     let mut cursor = ArgCursor::new(&flattened_args);
@@ -139,7 +142,10 @@ pub(crate) mod tests {
     };
 
     fn sprintf_builtin(format_spec: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(super::sprintf_builtin(format_spec, rest))
+        futures::executor::block_on(super::sprintf_builtin(
+            format_spec,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     fn error_message(err: crate::RuntimeError) -> String {
@@ -148,7 +154,7 @@ pub(crate) mod tests {
 
     fn char_value_to_string(value: Value) -> String {
         match value {
-            Value::CharArray(ca) => ca.data.into_char_iter().collect(),
+            Value::CharArray(ca) => ca.data().iter().copied().collect(),
             other => panic!("expected char output, got {other:?}"),
         }
     }
@@ -157,7 +163,7 @@ pub(crate) mod tests {
     #[test]
     fn sprintf_basic_integer() {
         let result = sprintf_builtin(
-            Value::String("Value: %d".to_string()),
+            Value::String("Value: %d".to_string().into()),
             vec![Value::Int(IntValue::I32(42))],
         )
         .expect("sprintf");
@@ -168,7 +174,7 @@ pub(crate) mod tests {
     #[test]
     fn sprintf_float_precision() {
         let result = sprintf_builtin(
-            Value::String("pi ~= %.3f".to_string()),
+            Value::String("pi ~= %.3f".to_string().into()),
             vec![Value::Num(std::f64::consts::PI)],
         )
         .expect("sprintf");
@@ -179,7 +185,7 @@ pub(crate) mod tests {
     #[test]
     fn sprintf_shared_scientific_and_general_conversions() {
         let result = sprintf_builtin(
-            Value::String("%.1e|%.3g|%d".to_string()),
+            Value::String("%.1e|%.3g|%d".to_string().into()),
             vec![Value::Num(8.8e8), Value::Num(0.000123456), Value::Num(2.5)],
         )
         .expect("sprintf");
@@ -194,7 +200,7 @@ pub(crate) mod tests {
     fn sprintf_array_repeat() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let result = sprintf_builtin(
-            Value::String("%d ".to_string()),
+            Value::String("%d ".to_string().into()),
             vec![Value::Tensor(tensor)],
         )
         .expect("sprintf");
@@ -209,15 +215,16 @@ pub(crate) mod tests {
             Value::Int(IntValue::I32(2)),
             Value::Num(12.345),
         ];
-        let result = sprintf_builtin(Value::String("%*.*f".to_string()), args).expect("sprintf");
+        let result =
+            sprintf_builtin(Value::String("%*.*f".to_string().into()), args).expect("sprintf");
         assert_eq!(char_value_to_string(result), " 12.35");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sprintf_literal_percent() {
-        let result =
-            sprintf_builtin(Value::String("%% complete".to_string()), Vec::new()).expect("sprintf");
+        let result = sprintf_builtin(Value::String("%% complete".to_string().into()), Vec::new())
+            .expect("sprintf");
         assert_eq!(char_value_to_string(result), "% complete");
     }
 
@@ -232,8 +239,8 @@ pub(crate) mod tests {
             };
             let handle = provider.upload(&view).expect("upload");
             let value = Value::GpuTensor(handle);
-            let result =
-                sprintf_builtin(Value::String("%0.1f,".to_string()), vec![value]).expect("sprintf");
+            let result = sprintf_builtin(Value::String("%0.1f,".to_string().into()), vec![value])
+                .expect("sprintf");
             assert_eq!(char_value_to_string(result), "1.0,2.0,");
         });
     }
@@ -243,7 +250,7 @@ pub(crate) mod tests {
     fn sprintf_matrix_column_major() {
         let tensor = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
         let result = sprintf_builtin(
-            Value::String("%0.0f ".to_string()),
+            Value::String("%0.0f ".to_string().into()),
             vec![Value::Tensor(tensor)],
         )
         .expect("sprintf");
@@ -255,7 +262,7 @@ pub(crate) mod tests {
     fn sprintf_not_enough_arguments_error() {
         let err = error_message(
             sprintf_builtin(
-                Value::String("%d %d".to_string()),
+                Value::String("%d %d".to_string().into()),
                 vec![Value::Int(IntValue::I32(1))],
             )
             .expect_err("sprintf should error"),
@@ -271,7 +278,7 @@ pub(crate) mod tests {
     fn sprintf_extra_arguments_error() {
         let err = error_message(
             sprintf_builtin(
-                Value::String("literal text".to_string()),
+                Value::String("literal text".to_string().into()),
                 vec![Value::Int(IntValue::I32(1))],
             )
             .expect_err("sprintf should error"),
@@ -298,8 +305,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sprintf_unsupported_specifier_reports_stable_identifier() {
-        let err = sprintf_builtin(Value::String("%q".to_string()), vec![Value::Num(1.0)])
-            .expect_err("sprintf should error");
+        let err = sprintf_builtin(
+            Value::String("%q".to_string().into()),
+            vec![Value::Num(1.0)],
+        )
+        .expect_err("sprintf should error");
         assert_eq!(
             err.identifier(),
             Some("RunMat:format:UnsupportedSpecifier"),
@@ -311,7 +321,7 @@ pub(crate) mod tests {
     #[test]
     fn sprintf_percent_c_from_numeric() {
         let result = sprintf_builtin(
-            Value::String("%c".to_string()),
+            Value::String("%c".to_string().into()),
             vec![Value::Int(IntValue::I32(65))],
         )
         .expect("sprintf");
@@ -324,15 +334,18 @@ pub(crate) mod tests {
         let cell = make_cell(
             vec![
                 Value::Num(1.0),
-                Value::String("two".to_string()),
+                Value::String("two".to_string().into()),
                 Value::Num(3.0),
             ],
             3,
             1,
         )
         .expect("cell");
-        let result = sprintf_builtin(Value::String("%0.0f %s %0.0f".to_string()), vec![cell])
-            .expect("sprintf");
+        let result = sprintf_builtin(
+            Value::String("%0.0f %s %0.0f".to_string().into()),
+            vec![cell],
+        )
+        .expect("sprintf");
         assert_eq!(char_value_to_string(result), "1 two 3");
     }
 
@@ -343,7 +356,7 @@ pub(crate) mod tests {
         let array =
             StringArray::new(data, vec![3, 1]).expect("string array construction must succeed");
         let result = sprintf_builtin(
-            Value::String("%s ".to_string()),
+            Value::String("%s ".to_string().into()),
             vec![Value::StringArray(array)],
         )
         .expect("sprintf");
@@ -354,7 +367,7 @@ pub(crate) mod tests {
     #[test]
     fn sprintf_complex_s_conversion() {
         let result = sprintf_builtin(
-            Value::String("%s".to_string()),
+            Value::String("%s".to_string().into()),
             vec![Value::Complex(1.5, -2.0)],
         )
         .expect("sprintf");
@@ -372,7 +385,7 @@ pub(crate) mod tests {
         let tensor = runmat_value::ComplexTensor::new_integer(storage, vec![1, 2])
             .expect("complex integer tensor");
         let result = sprintf_builtin(
-            Value::String("%s ".to_string()),
+            Value::String("%s ".to_string().into()),
             vec![Value::ComplexTensor(tensor)],
         )
         .expect("sprintf");
@@ -386,7 +399,7 @@ pub(crate) mod tests {
     #[test]
     fn sprintf_escape_sequences() {
         let result = sprintf_builtin(
-            Value::String("Line 1\\nLine 2\\t(tab)".to_string()),
+            Value::String("Line 1\\nLine 2\\t(tab)".to_string().into()),
             Vec::new(),
         )
         .expect("sprintf");
@@ -396,16 +409,16 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sprintf_hex_and_octal_escapes() {
-        let result =
-            sprintf_builtin(Value::String("\\x41\\101".to_string()), Vec::new()).expect("sprintf");
+        let result = sprintf_builtin(Value::String("\\x41\\101".to_string().into()), Vec::new())
+            .expect("sprintf");
         assert_eq!(char_value_to_string(result), "AA");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sprintf_unknown_escape_preserved() {
-        let result =
-            sprintf_builtin(Value::String("Value\\q".to_string()), Vec::new()).expect("sprintf");
+        let result = sprintf_builtin(Value::String("Value\\q".to_string().into()), Vec::new())
+            .expect("sprintf");
         assert_eq!(char_value_to_string(result), "Value\\q");
     }
 

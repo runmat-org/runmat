@@ -61,7 +61,10 @@ fn poisoned_int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
 fn exprnd_scalar_deterministic() {
     let _guard = random::test_guard();
     let _guard = reset();
-    let result = block_on(exprnd_builtin(vec![Value::Num(2.0)])).expect("exprnd");
+    let result = block_on(exprnd_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(2.0)]),
+    ))
+    .expect("exprnd");
     let expected = random::expected_exponential_sequence(2.0, 1)[0];
     match result {
         Value::Num(v) => {
@@ -77,7 +80,10 @@ fn exprnd_matrix_dims() {
     let _guard = random::test_guard();
     let _guard = reset();
     let args = vec![Value::Num(1.0), Value::Num(3.0), Value::Num(4.0)];
-    let result = block_on(exprnd_builtin(args)).expect("exprnd");
+    let result = block_on(exprnd_builtin(
+        crate::builtins::common::test_support::builtin_arguments(args),
+    ))
+    .expect("exprnd");
     match result {
         Value::Tensor(t) => {
             assert_eq!(t.shape(), &[3, 4]);
@@ -93,7 +99,10 @@ fn exprnd_size_vec() {
     let _guard = reset();
     let size = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
     let args = vec![Value::Num(1.0), Value::Tensor(size)];
-    let result = block_on(exprnd_builtin(args)).expect("exprnd");
+    let result = block_on(exprnd_builtin(
+        crate::builtins::common::test_support::builtin_arguments(args),
+    ))
+    .expect("exprnd");
     match result {
         Value::Tensor(t) => assert_eq!(t.shape(), &[3, 4]),
         other => panic!("expected tensor, got {other:?}"),
@@ -107,8 +116,13 @@ fn exprnd_reads_typed_integer_mu_and_size_exactly() {
     reset();
     let mu = poisoned_int_tensor(IntegerStorage::U16(vec![2]), vec![1, 1]);
     let size = poisoned_int_tensor(IntegerStorage::U64(vec![2, 3]), vec![1, 2]);
-    let result =
-        block_on(exprnd_builtin(vec![Value::Tensor(mu), Value::Tensor(size)])).expect("exprnd");
+    let result = block_on(exprnd_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Tensor(mu),
+            Value::Tensor(size),
+        ]),
+    ))
+    .expect("exprnd");
     match result {
         Value::Tensor(t) => {
             assert_eq!(t.shape(), &[2, 3]);
@@ -121,7 +135,10 @@ fn exprnd_reads_typed_integer_mu_and_size_exactly() {
 #[test]
 fn exprnd_rejects_negative_mu() {
     let args = vec![Value::Num(-1.0)];
-    let err = block_on(exprnd_builtin(args)).expect_err("negative mu should error");
+    let err = block_on(exprnd_builtin(
+        crate::builtins::common::test_support::builtin_arguments(args),
+    ))
+    .expect_err("negative mu should error");
     assert_eq!(
         err.identifier(),
         EXPRND_ERROR_MU_MUST_BE_POSITIVE.identifier
@@ -131,7 +148,10 @@ fn exprnd_rejects_negative_mu() {
 #[test]
 fn exprnd_rejects_zero_mu() {
     let args = vec![Value::Num(0.0)];
-    let err = block_on(exprnd_builtin(args)).expect_err("zero mu should error");
+    let err = block_on(exprnd_builtin(
+        crate::builtins::common::test_support::builtin_arguments(args),
+    ))
+    .expect_err("zero mu should error");
     assert_eq!(
         err.identifier(),
         EXPRND_ERROR_MU_MUST_BE_POSITIVE.identifier
@@ -145,7 +165,10 @@ fn exprnd_distribution_mean() {
     let mu = 3.0_f64;
     let n = 50_000_usize;
     let args = vec![Value::Num(mu), Value::Num(n as f64), Value::Num(1.0)];
-    let result = block_on(exprnd_builtin(args)).expect("exprnd");
+    let result = block_on(exprnd_builtin(
+        crate::builtins::common::test_support::builtin_arguments(args),
+    ))
+    .expect("exprnd");
     let data = match result {
         Value::Tensor(t) => t.materialize_f64(),
         other => panic!("expected tensor, got {other:?}"),
@@ -162,7 +185,10 @@ fn exprnd_array_mu_preserves_shape_and_native_single() {
     let _guard = random::test_guard();
     reset();
     let mu = Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-    let result = block_on(exprnd_builtin(vec![Value::Tensor(mu)])).expect("array mu");
+    let result = block_on(exprnd_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(mu)]),
+    ))
+    .expect("array mu");
     let Value::Tensor(tensor) = result else {
         panic!("expected tensor output");
     };
@@ -183,15 +209,19 @@ fn exprnd_normalizes_rank_zero_and_rank_one_mu_shapes() {
     let _guard = random::test_guard();
     reset();
 
-    let scalar = block_on(exprnd_builtin(vec![Value::Tensor(
-        Tensor::new(vec![1.0], Vec::new()).unwrap(),
-    )]))
+    let scalar = block_on(exprnd_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(
+            Tensor::new(vec![1.0], Vec::new()).unwrap(),
+        )]),
+    ))
     .expect("rank-zero mu");
     assert!(matches!(scalar, Value::Num(value) if value >= 0.0));
 
-    let vector = block_on(exprnd_builtin(vec![Value::Tensor(
-        Tensor::new(vec![1.0, 2.0], vec![2]).unwrap(),
-    )]))
+    let vector = block_on(exprnd_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(
+            Tensor::new(vec![1.0, 2.0], vec![2]).unwrap(),
+        )]),
+    ))
     .expect("rank-one mu");
     let Value::Tensor(vector) = vector else {
         panic!("rank-one output");
@@ -202,11 +232,13 @@ fn exprnd_normalizes_rank_zero_and_rank_one_mu_shapes() {
 #[test]
 fn exprnd_array_mu_requires_matching_explicit_size() {
     let mu = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
-    let error = block_on(exprnd_builtin(vec![
-        Value::Tensor(mu),
-        Value::Num(3.0),
-        Value::Num(1.0),
-    ]))
+    let error = block_on(exprnd_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Tensor(mu),
+            Value::Num(3.0),
+            Value::Num(1.0),
+        ]),
+    ))
     .expect_err("shape mismatch");
     assert_eq!(error.identifier(), EXPRND_ERROR_INVALID_ARGUMENT.identifier);
 }
@@ -216,11 +248,13 @@ fn exprnd_normalizes_empty_and_trailing_singleton_sizes() {
     let _guard = random::test_guard();
     reset();
     let before = random::snapshot().unwrap();
-    let empty = block_on(exprnd_builtin(vec![
-        Value::Num(1.0),
-        Value::Num(-2.0),
-        Value::Num(3.0),
-    ]))
+    let empty = block_on(exprnd_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(1.0),
+            Value::Num(-2.0),
+            Value::Num(3.0),
+        ]),
+    ))
     .expect("negative size produces empty");
     let Value::Tensor(empty) = empty else {
         panic!("expected empty tensor");
@@ -228,12 +262,14 @@ fn exprnd_normalizes_empty_and_trailing_singleton_sizes() {
     assert_eq!(empty.shape(), &[0, 3]);
     assert_eq!(before.state, random::snapshot().unwrap().state);
 
-    let output = block_on(exprnd_builtin(vec![
-        Value::Num(1.0),
-        Value::Num(3.0),
-        Value::Num(1.0),
-        Value::Num(1.0),
-    ]))
+    let output = block_on(exprnd_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(1.0),
+            Value::Num(3.0),
+            Value::Num(1.0),
+            Value::Num(1.0),
+        ]),
+    ))
     .expect("trailing singleton dimensions");
     let Value::Tensor(output) = output else {
         panic!("expected tensor");
@@ -247,13 +283,19 @@ fn exprnd_rejects_logical_complex_and_excess_outputs_before_rng() {
     reset();
     for value in [Value::Bool(true), Value::Complex(1.0, 0.0)] {
         let before = random::snapshot().unwrap();
-        let error = block_on(exprnd_builtin(vec![value])).expect_err("invalid class");
+        let error = block_on(exprnd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![value]),
+        ))
+        .expect_err("invalid class");
         assert_eq!(error.identifier(), EXPRND_ERROR_INVALID_ARGUMENT.identifier);
         assert_eq!(before.state, random::snapshot().unwrap().state);
     }
     let before = random::snapshot().unwrap();
     let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
-    let error = block_on(exprnd_builtin(vec![Value::Num(1.0)])).expect_err("excess outputs");
+    let error = block_on(exprnd_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
+    ))
+    .expect_err("excess outputs");
     assert_eq!(error.identifier(), EXPRND_ERROR_INVALID_ARGUMENT.identifier);
     assert_eq!(before.state, random::snapshot().unwrap().state);
 }
@@ -264,7 +306,10 @@ fn exprnd_zero_output_evaluation_still_advances_rng_once() {
     reset();
     let before = random::snapshot().unwrap().state;
     let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
-    let _ = block_on(exprnd_builtin(vec![Value::Num(1.0)])).expect("zero-output call");
+    let _ = block_on(exprnd_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
+    ))
+    .expect("zero-output call");
     assert_ne!(before, random::snapshot().unwrap().state);
 }
 
@@ -280,11 +325,13 @@ fn exprnd_uses_host_stream_even_when_provider_has_random_hook() {
         }));
     let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
     let before = random::snapshot().expect("rng snapshot").state;
-    let value = block_on(exprnd_builtin(vec![
-        Value::Num(1.0),
-        Value::Num(2.0),
-        Value::Num(2.0),
-    ]))
+    let value = block_on(exprnd_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(1.0),
+            Value::Num(2.0),
+            Value::Num(2.0),
+        ]),
+    ))
     .expect("host stream result");
     assert!(matches!(value, Value::Tensor(_)));
     assert_ne!(before, random::snapshot().expect("rng snapshot").state);
@@ -296,10 +343,12 @@ fn resident_size_controls_are_protected_without_selecting_output_owner() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
         let dimensions = Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap();
         let handle = gpu_helpers::upload_tensor(provider, &dimensions).unwrap();
-        let parsed = block_on(parse_args(vec![
-            Value::Num(1.0),
-            Value::GpuTensor(handle.clone()),
-        ]))
+        let parsed = block_on(parse_args(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(1.0),
+                Value::GpuTensor(handle.clone()),
+            ]),
+        ))
         .unwrap();
         assert!(parsed.gpu_source.is_none());
         assert_eq!(parsed.shape, vec![2, 3]);
@@ -328,10 +377,12 @@ fn borrowed_size_handle_does_not_select_provider_random_stream() {
     }));
     let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
     let before = random::snapshot().unwrap().state;
-    let output = block_on(exprnd_builtin(vec![
-        Value::Num(1.0),
-        Value::GpuTensor(handle.clone()),
-    ]))
+    let output = block_on(exprnd_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(1.0),
+            Value::GpuTensor(handle.clone()),
+        ]),
+    ))
     .expect("host session random draw");
     assert!(matches!(output, Value::Tensor(_)));
     assert_ne!(before, random::snapshot().unwrap().state);
@@ -344,18 +395,22 @@ fn exprnd_integer_extensions_follow_compatibility_mode() {
     let _guard = random::test_guard();
     reset();
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-    let error = block_on(exprnd_builtin(vec![Value::Int(
-        runmat_value::IntValue::U16(2),
-    )]))
+    let error = block_on(exprnd_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(
+            runmat_value::IntValue::U16(2),
+        )]),
+    ))
     .expect_err("integer mu is gated");
     assert_eq!(
         error.identifier(),
         Some("RunMat:compatibility:ExprndIntegerMeanExtension")
     );
-    let error = block_on(exprnd_builtin(vec![
-        Value::Num(1.0),
-        Value::Int(runmat_value::IntValue::U16(2)),
-    ]))
+    let error = block_on(exprnd_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(1.0),
+            Value::Int(runmat_value::IntValue::U16(2)),
+        ]),
+    ))
     .expect_err("integer size is gated");
     assert_eq!(
         error.identifier(),
@@ -380,8 +435,10 @@ fn exprnd_runmat_extension_accepts_all_integer_mean_classes() {
     for storage in storages {
         reset();
         let mu = poisoned_int_tensor(storage, vec![1, 1]);
-        let sample =
-            block_on(exprnd_builtin(vec![Value::Tensor(mu)])).expect("integer mean extension");
+        let sample = block_on(exprnd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(mu)]),
+        ))
+        .expect("integer mean extension");
         assert!(matches!(sample, Value::Num(value) if value > 0.0));
     }
 }
@@ -393,8 +450,10 @@ fn exprnd_resident_single_mean_stays_host_when_owner_is_physically_f64() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
         let mu = Tensor::from_f32(vec![2.0, 3.0], vec![2, 1]).expect("single mu");
         let input = gpu_helpers::upload_tensor(provider, &mu).expect("upload single mu");
-        let output =
-            block_on(exprnd_builtin(vec![Value::GpuTensor(input)])).expect("resident exprnd");
+        let output = block_on(exprnd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(input)]),
+        ))
+        .expect("resident exprnd");
         let Value::Tensor(output) = output else {
             panic!("expected host single output");
         };
@@ -408,11 +467,13 @@ fn exprnd_resident_single_mean_stays_host_when_owner_is_physically_f64() {
 fn allocation_overflow_fails_before_sampling() {
     let _guard = reset();
     let before = random::snapshot().unwrap().state;
-    let error = block_on(exprnd_builtin(vec![
-        Value::Num(1.0),
-        Value::Num(4294967296.0),
-        Value::Num(4294967296.0),
-    ]))
+    let error = block_on(exprnd_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(1.0),
+            Value::Num(4294967296.0),
+            Value::Num(4294967296.0),
+        ]),
+    ))
     .expect_err("overflow");
     assert_eq!(error.identifier(), EXPRND_ERROR_INVALID_ARGUMENT.identifier);
     assert_eq!(before, random::snapshot().unwrap().state);
@@ -425,9 +486,11 @@ fn nonfinite_means_fail_before_sampling() {
     let before = random::snapshot().unwrap().state;
     for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         assert_eq!(
-            block_on(exprnd_builtin(vec![Value::Num(value)]))
-                .unwrap_err()
-                .identifier(),
+            block_on(exprnd_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(value)])
+            ))
+            .unwrap_err()
+            .identifier(),
             EXPRND_ERROR_MU_MUST_BE_POSITIVE.identifier
         );
     }
@@ -439,7 +502,13 @@ fn multidimensional_size_tensor_is_not_a_vector() {
     let _guard = reset();
     let size = Tensor::new(vec![2.0; 4], vec![1, 2, 2]).unwrap();
     let before = random::snapshot().unwrap().state;
-    assert!(block_on(exprnd_builtin(vec![Value::Num(1.0), Value::Tensor(size)])).is_err());
+    assert!(block_on(exprnd_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(1.0),
+            Value::Tensor(size)
+        ])
+    ))
+    .is_err());
     assert_eq!(before, random::snapshot().unwrap().state);
 }
 
@@ -453,7 +522,12 @@ fn explicit_single_owner_mismatch_fails_before_sampling() {
             .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
             .expect("validated explicit view");
         let before = random::snapshot().unwrap().state;
-        let error = block_on(exprnd_builtin(vec![Value::GpuTensor(handle.clone())])).unwrap_err();
+        let error = block_on(exprnd_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(
+                handle.clone(),
+            )]),
+        ))
+        .unwrap_err();
         assert!(error.message().contains("explicit gpuArray"));
         assert_eq!(before, random::snapshot().unwrap().state);
         assert!(block_on(provider.download(&handle)).is_ok());

@@ -44,16 +44,20 @@ pub(super) fn labels_from_value(value: Value, name: &str) -> BuiltinResult<Label
             labels: char_rows(&array).into_iter().map(|text| ClassLabel::Text(text.into())).collect(),
             kind: LabelKind::Text,
         }),
-        Value::StringArray(array) => Ok(LabelVector {
-            labels: match array.data.try_into_owned() {
+        Value::StringArray(array) => {
+            let (data, _shape, _rows, _cols) = array.into_parts();
+            let labels = match data.try_into_owned() {
                 Ok(values) => values.into_iter().map(ClassLabel::Text).collect(),
                 Err(values) => values.iter().cloned().map(ClassLabel::Text).collect(),
-            },
-            kind: LabelKind::Text,
-        }),
+            };
+            Ok(LabelVector {
+                labels,
+                kind: LabelKind::Text,
+            })
+        },
         Value::Cell(cell) => {
-            let mut labels = Vec::with_capacity(cell.data.len());
-            for item in cell.data.iter() {
+            let mut labels = Vec::with_capacity(cell.data().len());
+            for item in cell.data().iter() {
                 labels.push(ClassLabel::Text(
                     scalar_text(item).ok_or_else(|| {
                         predict_invalid(format!("predict: {name} cell entries must be text"))
@@ -338,7 +342,7 @@ pub(super) fn predicted_labels_value(
 }
 
 pub(super) fn class_kind_property(object: &ObjectInstance) -> BuiltinResult<LabelKind> {
-    match object.properties.get("__RunMatTreeClassKind") {
+    match object.properties().get("__RunMatTreeClassKind") {
         Some(Value::String(text)) if text == "numeric" => Ok(LabelKind::Numeric),
         Some(Value::String(text)) if integer_class_from_name(text).is_some() => Ok(
             LabelKind::Integer(integer_class_from_name(text).expect("checked above")),

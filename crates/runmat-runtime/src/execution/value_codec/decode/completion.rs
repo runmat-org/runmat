@@ -1,5 +1,5 @@
-//! Final decoded argument collection only. Child payloads, task stacks and
-//! construction-root metadata have separate, still-open admission owners.
+//! Final decoded argument collection and its construction-root owner. Child
+//! payloads and private decoder control blocks have independent admission.
 
 use runmat_value::{OutputListStorage, OutputListStorageBuilder};
 
@@ -11,14 +11,16 @@ use crate::execution::{RootedValueChildren, RootedValueMember, RootedValues, Roo
 
 use super::{CooperativeValueCodecError, ValueCodecError};
 
-pub(super) enum DecodedCollection<'a> {
+pub(super) struct DecodedCollection<'a> {
+    values: DecodedValues,
+    children: RootedValueChildren<'a>,
+    receipt: Option<HostAllocationReceipt>,
+    runtime: Option<&'a RuntimeContext>,
+}
+
+enum DecodedValues {
     Unbounded(RootedValuesBuilder),
-    Managed {
-        values: OutputListStorageBuilder,
-        children: RootedValueChildren,
-        receipt: HostAllocationReceipt,
-        runtime: &'a RuntimeContext,
-    },
+    Managed(OutputListStorageBuilder),
 }
 
 impl<'a> DecodedCollection<'a> {
@@ -27,7 +29,7 @@ impl<'a> DecodedCollection<'a> {
         runtime: Option<&'a RuntimeContext>,
     ) -> Result<Self, CooperativeValueCodecError> {
         let Some(runtime) = runtime else {
-            return Ok(Self::Unbounded(RootedValuesBuilder::with_capacity(count)));
+            return Ok(Self::unbounded(count));
         };
         let raw = OutputListStorage::requested_bytes(count)
             .map_err(|source| allocation(HostAllocationError::Numeric(source)))?;
@@ -39,7 +41,7 @@ impl<'a> DecodedCollection<'a> {
         let Some(receipt) =
             HostAllocationReceipt::admit(Some(runtime), plan).map_err(allocation)?
         else {
-            return Ok(Self::Unbounded(RootedValuesBuilder::with_capacity(count)));
+            return Ok(Self::unbounded(count));
         };
         let permit = receipt.output_permit(runtime).map_err(allocation)?;
         let values = OutputListStorage::try_begin(count, &permit).map_err(|source| {
@@ -51,26 +53,33 @@ impl<'a> DecodedCollection<'a> {
             )
         })?;
         receipt.checkpoint(runtime).map_err(allocation)?;
-        Ok(Self::Managed {
-            values,
-            children: RootedValueChildren::new(),
-            receipt,
-            runtime,
+        Ok(Self {
+            values: DecodedValues::Managed(values),
+            children: RootedValueChildren::in_context(runtime).map_err(allocation)?,
+            receipt: Some(receipt),
+            runtime: Some(runtime),
         })
+    }
+
+    fn unbounded(count: usize) -> Self {
+        Self {
+            values: DecodedValues::Unbounded(RootedValuesBuilder::with_capacity(count)),
+            children: RootedValueChildren::new(),
+            receipt: None,
+            runtime: None,
+        }
     }
 
     pub(super) fn push(
         &mut self,
         member: RootedValueMember,
     ) -> Result<(), CooperativeValueCodecError> {
-        match self {
-            Self::Unbounded(values) => values.push_rooted(member),
-            Self::Managed {
-                values, children, ..
-            } => {
+        match &mut self.values {
+            DecodedValues::Unbounded(values) => values.push_rooted(member),
+            DecodedValues::Managed(values) => {
                 // Keep each construction root through final root publication.
                 // The admitted Value moves into its final backing exactly once.
-                let value = member.into_child(children);
+                let value = member.into_child(&mut self.children).map_err(allocation)?;
                 values
                     .try_push(value)
                     .map_err(|_| allocation(HostAllocationError::Overflow))?;
@@ -80,10 +89,7 @@ impl<'a> DecodedCollection<'a> {
     }
 
     pub(super) fn checkpoint(&self) -> Result<(), CooperativeValueCodecError> {
-        if let Self::Managed {
-            receipt, runtime, ..
-        } = self
-        {
+        if let (Some(receipt), Some(runtime)) = (&self.receipt, self.runtime) {
             receipt.checkpoint(runtime).map_err(allocation)?;
         }
         Ok(())
@@ -93,19 +99,23 @@ impl<'a> DecodedCollection<'a> {
         // Keep the intact carrier's field drop order on checkpoint failure:
         // admitted Values retire before their construction roots.
         self.checkpoint()?;
-        match self {
-            Self::Unbounded(values) => Ok(values.finish()?),
-            Self::Managed {
-                values,
-                children,
-                receipt: _receipt,
-                runtime,
-            } => {
+        let Self {
+            values,
+            children,
+            receipt: _receipt,
+            runtime,
+        } = self;
+        match values {
+            DecodedValues::Unbounded(values) => Ok(values.finish()?),
+            DecodedValues::Managed(values) => {
                 let values = values
                     .try_finish()
                     .map_err(|_| allocation(HostAllocationError::Overflow))?;
-                let result = RootedValues::from_output_storage_in_context(values, runtime)
-                    .map_err(publication)?;
+                let result = RootedValues::from_output_storage_in_context(
+                    values,
+                    runtime.expect("managed collection retains its runtime"),
+                )
+                .map_err(publication)?;
                 drop(children);
                 Ok(result)
             }

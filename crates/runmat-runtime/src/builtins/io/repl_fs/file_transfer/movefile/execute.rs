@@ -2,7 +2,6 @@ use runmat_builtins::{
     MOVEFILE_ERROR_DEST_ARG, MOVEFILE_ERROR_FLAG_ARG, MOVEFILE_ERROR_NOT_ENOUGH_INPUTS,
     MOVEFILE_ERROR_SOURCE_ARG, MOVEFILE_ERROR_TOO_MANY_INPUTS,
 };
-use runmat_value::Value;
 
 use crate::builtins::common::fs::{contains_wildcards, expand_user_path};
 use crate::context::RuntimeContext;
@@ -13,7 +12,7 @@ use super::super::outcome::TransferOutcome;
 const BUILTIN: &str = "movefile";
 
 pub(in crate::builtins::io::repl_fs::file_transfer) async fn evaluate(
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     runtime: Option<&RuntimeContext>,
 ) -> BuiltinResult<TransferOutcome> {
     let mut cooperation = super::super::cooperation::TransferCooperation::new(

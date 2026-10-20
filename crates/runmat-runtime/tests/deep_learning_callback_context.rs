@@ -4,7 +4,7 @@ use runmat_runtime::{
     call_builtin_async, call_builtin_async_with_outputs_in_context,
     context::{RuntimeBuiltinService, RuntimeContext, RuntimeServicePorts},
 };
-use runmat_value::{CellArray, StructArray, StructValue, Tensor, Value, ValueSequence};
+use runmat_value::{CellArray, StructArray, Tensor, Value, ValueSequence};
 use std::{cell::RefCell, rc::Rc};
 
 #[path = "deep_learning_callback_context/lifecycle.rs"]
@@ -22,7 +22,7 @@ fn selected_callback(invocation: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltin
     let outputs = invocation.requested_outputs;
     let first = invocation
         .args
-        .first()
+        .get(0)
         .cloned()
         .map(runmat_runtime::execution::RootedValue::new)
         .transpose();
@@ -199,17 +199,19 @@ fn dlupdate_leaf_callback_uses_invoking_runtime_once() {
 fn dlupdate_nested_containers_reuse_one_scoped_runtime() {
     CALLBACKS.with(|calls| calls.borrow_mut().clear());
     let runtime = runtime();
-    let mut first = StructValue::new();
+    let mut first = runmat_value::UnboundedStructValueBuilder::new();
     first.insert("Data", Value::Num(1.0));
-    let mut second = StructValue::new();
+    let mut second = runmat_value::UnboundedStructValueBuilder::new();
     second.insert("Data", Value::Num(2.0));
-    let mut structure = StructValue::new();
+    let mut structure = runmat_value::UnboundedStructValueBuilder::new();
     structure.insert(
         "Array",
-        Value::StructArray(StructArray::new(vec![first, second], vec![1, 2]).unwrap()),
+        Value::StructArray(
+            StructArray::new(vec![first.finish(), second.finish()], vec![1, 2]).unwrap(),
+        ),
     );
     structure.insert("Scalar", Value::Num(3.0));
-    let tree = Value::Cell(CellArray::new(vec![Value::Struct(structure)], 1, 1).unwrap());
+    let tree = Value::Cell(CellArray::new(vec![Value::Struct(structure.finish())], 1, 1).unwrap());
     let output = block_on(call_builtin_async_with_outputs_in_context(
         &runtime,
         "dlupdate",
@@ -220,7 +222,7 @@ fn dlupdate_nested_containers_reuse_one_scoped_runtime() {
     let Value::Cell(cell) = output.value() else {
         panic!("expected cell tree");
     };
-    let Value::Struct(structure) = &cell.data[0] else {
+    let Value::Struct(structure) = &cell.data()[0] else {
         panic!("expected nested structure");
     };
     assert_eq!(structure.fields.get("Scalar"), Some(&Value::Num(23.0)));

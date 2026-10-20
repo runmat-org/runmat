@@ -59,7 +59,7 @@ fn nonuniform_output_preserves_each_callback_value() {
     };
     assert_eq!(output.shape, vec![1, 2]);
     assert_eq!(
-        output.data,
+        output.data(),
         vec![Value::String("ADA".into()), Value::String("LINUS".into())]
     );
 }
@@ -91,7 +91,7 @@ fn empty_inputs_preserve_shape_in_both_output_modes() {
         panic!("expected an empty cell array")
     };
     assert_eq!(nonuniform.shape, vec![0, 3]);
-    assert!(nonuniform.data.is_empty());
+    assert!(nonuniform.data().is_empty());
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

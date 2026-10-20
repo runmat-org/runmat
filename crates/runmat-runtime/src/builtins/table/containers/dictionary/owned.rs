@@ -21,15 +21,22 @@ fn admission(runtime: &RuntimeContext, cause: HostAllocationError) -> crate::Run
 }
 
 fn take_cell(
+    runtime: Option<&RuntimeContext>,
     object: &mut ObjectInstance,
     name: &'static str,
 ) -> BuiltinResult<(String, CellArray)> {
-    let (key, value) = object
-        .properties
-        .remove_entry(name)
-        .ok_or_else(|| invalid_variable(format!("dictionary: missing {name} storage")))?;
+    let value = crate::execution::object::replacement::remove_property(
+        runtime,
+        object,
+        name,
+        |message, cause| match runtime {
+            Some(runtime) => admission(runtime, cause),
+            None => invalid_variable(format!("dictionary: {message}: {cause}")),
+        },
+        |message| invalid_variable(format!("dictionary: {message}")),
+    )?;
     match value {
-        Value::Cell(cell) => Ok((key, cell)),
+        Value::Cell(cell) => Ok((name.to_owned(), cell)),
         other => Err(invalid_variable(format!(
             "dictionary: {name} storage must be a cell array, got {other:?}"
         ))),
@@ -38,8 +45,7 @@ fn take_cell(
 
 fn move_values(mut cell: CellArray, managed: bool) -> BuiltinResult<OwnedExactArrayValues<Value>> {
     if !managed {
-        cell.data
-            .make_unique_unbounded()
+        cell.make_data_unique_unbounded()
             .map_err(|error| invalid_variable(error.to_string()))?;
     }
     cell.into_owned_data().map_err(|_| {
@@ -78,26 +84,26 @@ pub(super) fn assign(
     let (query_keys, query_shape) = dictionary_selector_values(payload)?;
     dictionary_cells(&object, "Keys")?;
     dictionary_cells(&object, "Values")?;
-    let (keys_name, keys) = take_cell(&mut object, "Keys")?;
-    let (values_name, values) = take_cell(&mut object, "Values")?;
+    let (keys_name, keys) = take_cell(runtime, &mut object, "Keys")?;
+    let (values_name, values) = take_cell(runtime, &mut object, "Values")?;
     let query_keys = convert_queries_to_key_class(&keys, query_keys)?;
     let policy = HostAllocationReceipt::policy(runtime).map_err(|cause| match runtime {
         Some(runtime) => admission(runtime, cause),
         None => invalid_variable(format!("dictionary: allocation policy failed: {cause}")),
     })?;
     let managed = policy == HostAllocationPolicy::Managed;
-    let keys_capacity = if keys.data.is_unique() {
-        keys.data.capacity()
+    let keys_capacity = if keys.data_owner().is_unique() {
+        keys.data_owner().capacity()
     } else {
-        keys.data.len()
+        keys.data().len()
     };
-    let values_capacity = if values.data.is_unique() {
-        values.data.capacity()
+    let values_capacity = if values.data_owner().is_unique() {
+        values.data_owner().capacity()
     } else {
-        values.data.len()
+        values.data().len()
     };
-    let keys_exact = keys.data.is_exact();
-    let values_exact = values.data.is_exact();
+    let keys_exact = keys.data_owner().is_exact();
+    let values_exact = values.data_owner().is_exact();
     let mut keys = move_values(keys, managed)?;
     let mut values = move_values(values, managed)?;
     let mut append_keys = Vec::new();
@@ -245,10 +251,28 @@ pub(super) fn assign(
         CellArray::from_shared_storage(values_data, shape)
     }
     .map_err(invalid_variable)?;
-    object.properties.insert(keys_name, Value::Cell(keys_cell));
-    object
-        .properties
-        .insert(values_name, Value::Cell(values_cell));
+    crate::execution::object::replacement::replace_property(
+        runtime,
+        &mut object,
+        &keys_name,
+        Value::Cell(keys_cell),
+        |message, cause| match runtime {
+            Some(runtime) => admission(runtime, cause),
+            None => invalid_variable(format!("dictionary: {message}: {cause}")),
+        },
+        |message| invalid_variable(format!("dictionary: {message}")),
+    )?;
+    crate::execution::object::replacement::replace_property(
+        runtime,
+        &mut object,
+        &values_name,
+        Value::Cell(values_cell),
+        |message, cause| match runtime {
+            Some(runtime) => admission(runtime, cause),
+            None => invalid_variable(format!("dictionary: {message}: {cause}")),
+        },
+        |message| invalid_variable(format!("dictionary: {message}")),
+    )?;
     if let (Some(runtime), Some(receipt)) = (runtime, publication_receipt.as_ref()) {
         receipt
             .checkpoint(runtime)

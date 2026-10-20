@@ -107,12 +107,21 @@ fn normalize_symbolic_concat_shape(shape: &[usize]) -> Vec<usize> {
 
 #[derive(Clone)]
 struct SymbolicConcatBlock {
-    data: Vec<SymbolicExpr>,
+    data: runmat_value::ExactArrayStorage<SymbolicExpr>,
     shape: Vec<usize>,
 }
 
 impl SymbolicConcatBlock {
     fn new(data: Vec<SymbolicExpr>, shape: Vec<usize>) -> BuiltinResult<Self> {
+        Self::from_shared(
+            runmat_value::ExactArrayStorage::shared_unbounded(data),
+            shape,
+        )
+    }
+    fn from_shared(
+        data: runmat_value::ExactArrayStorage<SymbolicExpr>,
+        shape: Vec<usize>,
+    ) -> BuiltinResult<Self> {
         let expected_len = checked_shape_len(&shape)?;
         if data.len() != expected_len {
             return Err(concat_error(format!(
@@ -152,7 +161,7 @@ fn symbolic_block_from_value(value: &Value) -> BuiltinResult<Option<SymbolicConc
             if shape[0] == 0 && shape[1] == 0 {
                 return Ok(None);
             }
-            SymbolicConcatBlock::new(array.data.clone(), shape).map(Some)
+            SymbolicConcatBlock::from_shared(array.data_owner().clone(), shape).map(Some)
         }
         Value::Tensor(tensor) => {
             let shape = normalize_symbolic_concat_shape(tensor.shape());
@@ -623,7 +632,7 @@ pub fn hcat_values(values: &[Value]) -> BuiltinResult<Value> {
                     for r in 0..ca.rows {
                         let mut s = String::with_capacity(ca.cols);
                         for c in 0..ca.cols {
-                            s.push(ca.data[r * ca.cols + c]);
+                            s.push(ca.data()[r * ca.cols + c]);
                         }
                         out.push(s);
                     }
@@ -689,7 +698,7 @@ pub fn hcat_values(values: &[Value]) -> BuiltinResult<Value> {
             for c in 0..block.cols() {
                 for r in 0..rows {
                     let idx = r + c * rows;
-                    data.push(block.data[idx].clone());
+                    data.push(block.data()[idx].clone());
                 }
             }
         }
@@ -758,7 +767,7 @@ pub fn hcat_values(values: &[Value]) -> BuiltinResult<Value> {
         for r in 0..rows {
             for block in &blocks {
                 for c in 0..block.cols {
-                    data.push(block.data[r * block.cols + c]);
+                    data.push(block.data()[r * block.cols + c]);
                 }
             }
         }
@@ -903,7 +912,7 @@ pub fn vcat_values(values: &[Value]) -> BuiltinResult<Value> {
                     if ca.cols == 0 {
                         continue;
                     }
-                    let out: String = ca.data.iter().collect();
+                    let out: String = ca.data().iter().collect();
                     let sa = runmat_value::StringArray::new(vec![out], vec![1, 1]).unwrap();
                     rows_total += 1;
                     if cols.is_none() {
@@ -963,7 +972,7 @@ pub fn vcat_values(values: &[Value]) -> BuiltinResult<Value> {
             for block in &blocks {
                 for r in 0..block.rows() {
                     let idx = r + c * block.rows();
-                    data.push(block.data[idx].clone());
+                    data.push(block.data()[idx].clone());
                 }
             }
         }
@@ -1032,7 +1041,7 @@ pub fn vcat_values(values: &[Value]) -> BuiltinResult<Value> {
         for block in &blocks {
             for r in 0..block.rows {
                 for c in 0..cols {
-                    data.push(block.data[r * block.cols + c]);
+                    data.push(block.data()[r * block.cols + c]);
                 }
             }
         }
@@ -1414,7 +1423,7 @@ mod tests {
             assert_eq!(array.shape, vec![1, 3]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
@@ -1448,7 +1457,7 @@ mod tests {
             assert_eq!(array.shape, vec![2, 3]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
@@ -1473,7 +1482,7 @@ mod tests {
             assert_eq!(array.shape, vec![1, 2]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
@@ -1498,7 +1507,7 @@ mod tests {
             assert_eq!(array.shape, vec![1, 3]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
@@ -1523,7 +1532,7 @@ mod tests {
             assert_eq!(array.shape, vec![1, 1]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
@@ -1552,7 +1561,7 @@ mod tests {
             assert_eq!(array.shape, vec![1, 3]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
@@ -1577,7 +1586,7 @@ mod tests {
             assert_eq!(array.shape, vec![1, 1]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
@@ -1608,7 +1617,7 @@ mod tests {
             assert_eq!(array.shape, vec![1, 2, 2]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
@@ -1649,7 +1658,7 @@ mod tests {
             assert_eq!(array.shape, vec![2, 2, 2]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
@@ -1710,7 +1719,7 @@ mod tests {
             assert_eq!(array.shape, vec![3, 1]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
@@ -1778,7 +1787,7 @@ mod tests {
             assert_eq!(array.shape, vec![2, 1, 2]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
@@ -1856,7 +1865,7 @@ mod tests {
             assert_eq!(array.shape, vec![2, 2, 2]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
@@ -1947,7 +1956,7 @@ mod tests {
             panic!("expected string array");
         };
         assert_eq!(horizontal.shape, vec![1, 2]);
-        assert_eq!(horizontal.data, vec!["id", "18446744073709551615"]);
+        assert_eq!(horizontal.data(), vec!["id", "18446744073709551615"]);
 
         let Value::StringArray(vertical) =
             vcat_values(&[Value::string("id".to_string()), maximum]).expect("vcat")
@@ -1955,7 +1964,7 @@ mod tests {
             panic!("expected string array");
         };
         assert_eq!(vertical.shape, vec![2, 1]);
-        assert_eq!(vertical.data, vec!["id", "18446744073709551615"]);
+        assert_eq!(vertical.data(), vec!["id", "18446744073709551615"]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1979,7 +1988,7 @@ mod tests {
         assert_eq!(output.shape.as_slice(), &[4, 2]);
         assert_eq!(
             output
-                .data
+                .data()
                 .iter()
                 .map(|text| text.as_str())
                 .collect::<Vec<_>>(),

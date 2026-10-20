@@ -165,8 +165,13 @@ fn classify_rank_zero_and_rank_one_inputs_preserve_existing_late_geometry_reject
         tensor(vec![0.2], Vec::new()),
         tensor(vec![0.2, 2.2], vec![2]),
     ] {
-        let error = block_on(classify_builtin(sample, training(), groups(), Vec::new()))
-            .expect_err("header and numerical matrix projections remain distinct");
+        let error = block_on(classify_builtin(
+            sample,
+            training(),
+            groups(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect_err("header and numerical matrix projections remain distinct");
         assert!(error
             .message()
             .contains("sample and training must have the same number of columns"));

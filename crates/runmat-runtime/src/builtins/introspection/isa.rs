@@ -22,8 +22,8 @@ fn parse_type_name(value: &Value) -> BuiltinResult<Option<IsaTypeDesignator>> {
     match value {
         Value::String(s) => Ok(IsaTypeDesignator::parse(s)),
         Value::StringArray(sa) => {
-            if sa.rows == 1 && sa.cols == 1 && !sa.data.is_empty() {
-                Ok(IsaTypeDesignator::parse(&sa.data[0]))
+            if sa.rows == 1 && sa.cols == 1 && !sa.data().is_empty() {
+                Ok(IsaTypeDesignator::parse(&sa.data()[0]))
             } else {
                 Err(isa_error(&ISA_ERROR_TYPE_NAME_INVALID).into())
             }
@@ -31,7 +31,7 @@ fn parse_type_name(value: &Value) -> BuiltinResult<Option<IsaTypeDesignator>> {
         Value::CharArray(ca) => {
             if ca.rows == 1 {
                 Ok(IsaTypeDesignator::parse(
-                    &ca.data.iter().collect::<String>(),
+                    &ca.data().iter().collect::<String>(),
                 ))
             } else {
                 Err(isa_error(&ISA_ERROR_TYPE_NAME_INVALID).into())
@@ -86,7 +86,7 @@ fn value_is_a(value: &Value, requested: &Option<IsaTypeDesignator>) -> bool {
             }
             match value {
                 Value::ObjectArray(array) => class_inherits(array.class_name(), class),
-                Value::Object(obj) => class_inherits(&obj.class_name, class),
+                Value::Object(obj) => class_inherits(obj.class_name(), class),
                 Value::HandleObject(handle) => class_inherits(&handle.class_name, class),
                 _ => false,
             }
@@ -147,7 +147,7 @@ fn is_handle_like(value: &Value) -> bool {
             class_inherits(array.class_name(), &runmat_types::standard::HANDLE.owned())
         }
         Value::Object(obj) => {
-            class_inherits(&obj.class_name, &runmat_types::standard::HANDLE.owned())
+            class_inherits(obj.class_name(), &runmat_types::standard::HANDLE.owned())
         }
         _ => false,
     }
@@ -182,8 +182,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView, HostTensorView};
     use runmat_value::{
         CellArray, CharArray, ComplexTensor, HandleRef, IntValue, IntegerComplexStorage,
-        IntegerStorage, Listener, LogicalArray, ObjectInstance, SparseTensor, StringArray,
-        StructValue, Tensor,
+        IntegerStorage, Listener, LogicalArray, ObjectInstance, SparseTensor, StringArray, Tensor,
     };
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -348,10 +347,10 @@ pub(crate) mod tests {
             Value::Bool(true)
         );
 
-        let mut st = StructValue::new();
+        let mut st = runmat_value::UnboundedStructValueBuilder::new();
         st.fields.insert("field".into(), Value::Num(1.0));
         assert_eq!(
-            isa_builtin(Value::Struct(st), Value::from("struct")).expect("isa"),
+            isa_builtin(Value::Struct(st.finish()), Value::from("struct")).expect("isa"),
             Value::Bool(true)
         );
     }

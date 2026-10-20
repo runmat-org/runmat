@@ -76,7 +76,7 @@ impl PublicationDescriptor {
             identity: self.identity()?,
             definition: self.definition,
             manifest_digest: self.manifest_digest,
-            run_ids: self.records.keys().cloned().collect(),
+            run_ids: self.records.keys().map(ToOwned::to_owned).collect(),
             manifest_artifact_path: path,
         })
     }
@@ -395,7 +395,7 @@ impl AnalysisPublicationBuilder {
                 return Err("publication repeats a run identity".into());
             }
         }
-        if declared != runs.keys().cloned().collect() {
+        if declared != runs.keys().map(ToOwned::to_owned).collect() {
             return Err("publication does not exactly cover staged records".into());
         }
         let records = runs
@@ -500,7 +500,8 @@ fn validate_manifest(
             return Err("publication repeats a run identity".into());
         }
     }
-    if declared.is_empty() || declared != descriptor.records.keys().cloned().collect() {
+    if declared.is_empty() || declared != descriptor.records.keys().map(ToOwned::to_owned).collect()
+    {
         return Err("manifest does not cover committed records".into());
     }
     Ok(())

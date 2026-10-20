@@ -6,11 +6,11 @@ use runmat_value::{CellArray, ObjectInstance, StringArray, Value};
 use crate::builtins::strings::common::{scalar_text_input, text_input_admission};
 use crate::builtins::strings::text_analytics::documents::{
     document_token_type_with_options, documents_from_object, options_from_document_object,
-    replace_tokenized_document_documents, text_analytics_error, tokenized_document_language,
-    DocumentTokenType, TOKENIZED_DOCUMENT_CLASS,
+    remove_document_properties, replace_document_properties, replace_tokenized_document_documents,
+    text_analytics_error, tokenized_document_language, DocumentTokenType, TOKENIZED_DOCUMENT_CLASS,
 };
 use crate::builtins::strings::text_analytics::pos::{
-    add_part_of_speech_details_builtin, part_of_speech_details_from_object, POS_DETAILS_PROPERTY,
+    add_pos_details_without_retokenizing, part_of_speech_details_from_object, POS_DETAILS_PROPERTY,
 };
 use crate::{gather_if_needed_async, BuiltinResult};
 
@@ -25,10 +25,10 @@ pub(in crate::builtins::strings::text_analytics) const ENTITY_DETAILS_PROPERTY: 
 )]
 async fn add_entity_details_builtin(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    let gathered = gather_args(args).await?;
-    let (documents, options) = parse_args(runtime.as_ref(), gathered)?;
+    let gathered = gather_args(args, runtime.as_ref()).await?;
+    let (documents, options) = parse_args(runtime.as_ref(), gathered.view())?;
     let mut object = tokenized_document_object(documents)?;
     let language = EntityLanguage::from_document(&tokenized_document_language(&object))?;
 
@@ -39,13 +39,18 @@ async fn add_entity_details_builtin(
             .map(|doc| retokenize_for_entities(doc, language))
             .collect::<Vec<_>>();
         if retokenized != documents {
-            replace_tokenized_document_documents(&mut object, retokenized, "addEntityDetails")?;
-            clear_token_aligned_details(&mut object);
+            replace_tokenized_document_documents(
+                runtime.as_ref(),
+                &mut object,
+                retokenized,
+                "addEntityDetails",
+            )?;
+            clear_token_aligned_details(runtime.as_ref(), &mut object)?;
         }
     }
 
-    if !object.properties.contains_key(POS_DETAILS_PROPERTY)
-        || !object.properties.contains_key("SentenceNumbers")
+    if !object.properties().contains_key(POS_DETAILS_PROPERTY)
+        || !object.properties().contains_key("SentenceNumbers")
     {
         object = add_part_of_speech_details_for_entities(runtime.as_ref(), object).await?;
     }
@@ -64,24 +69,33 @@ async fn add_entity_details_builtin(
         &document_options,
         options.discard_known_values,
     )?;
-    object
-        .properties
-        .insert(ENTITY_DETAILS_PROPERTY.to_string(), entity_tags);
-    mark_entity_pos_as_proper_nouns(&mut object)?;
+    let updates = [(ENTITY_DETAILS_PROPERTY, entity_tags)];
+    replace_document_properties(
+        runtime.as_ref(),
+        &mut object,
+        updates.iter().map(|(name, value)| (*name, value)),
+        "addEntityDetails",
+    )?;
+    mark_entity_pos_as_proper_nouns(runtime.as_ref(), &mut object)?;
     Ok(Value::Object(object))
 }
 
-async fn gather_args(args: Vec<Value>) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(args.len());
-    for arg in args {
-        out.push(gather_if_needed_async(&arg).await.map_err(|err| {
+async fn gather_args(
+    args: crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    if !args.iter().any(crate::dispatcher::value_contains_gpu) {
+        return Ok(args);
+    }
+    args.try_map_preserving_roots_async(args.len(), runtime, async |index| {
+        gather_if_needed_async(&args[index]).await.map_err(|err| {
             text_analytics_error(
                 "addEntityDetails",
                 format!("addEntityDetails: failed to gather input: {err}"),
             )
-        })?);
-    }
-    Ok(out)
+        })
+    })
+    .await
 }
 
 #[derive(Clone, Debug)]
@@ -146,7 +160,7 @@ impl EntityLanguage {
 
 fn parse_args(
     runtime: Option<&crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<(Value, AddEntityOptions)> {
     if args.is_empty() {
         return Err(text_analytics_error(
@@ -216,7 +230,7 @@ fn tokenized_document_object(value: Value) -> BuiltinResult<ObjectInstance> {
             "addEntityDetails",
             format!(
                 "addEntityDetails: expected tokenizedDocument object, got {}",
-                object.class_name
+                object.class_name()
             ),
         )),
         other => Err(text_analytics_error(
@@ -226,40 +240,31 @@ fn tokenized_document_object(value: Value) -> BuiltinResult<ObjectInstance> {
     }
 }
 
-fn clear_token_aligned_details(object: &mut ObjectInstance) {
-    for property in [
-        "TypeDetails",
-        "SentenceNumbers",
-        "LemmaDetails",
-        POS_DETAILS_PROPERTY,
-        ENTITY_DETAILS_PROPERTY,
-        "HeadDetails",
-        "DependencyDetails",
-    ] {
-        object.properties.remove(property);
-    }
+fn clear_token_aligned_details(
+    runtime: Option<&crate::context::RuntimeContext>,
+    object: &mut ObjectInstance,
+) -> BuiltinResult<()> {
+    remove_document_properties(
+        runtime,
+        object,
+        [
+            "TypeDetails",
+            "SentenceNumbers",
+            "LemmaDetails",
+            POS_DETAILS_PROPERTY,
+            ENTITY_DETAILS_PROPERTY,
+            "HeadDetails",
+            "DependencyDetails",
+        ],
+        "addEntityDetails",
+    )
 }
 
 async fn add_part_of_speech_details_for_entities(
     runtime: Option<&crate::context::RuntimeContext>,
     object: ObjectInstance,
 ) -> BuiltinResult<ObjectInstance> {
-    let Value::Object(object) = add_part_of_speech_details_builtin(
-        runtime.cloned(),
-        vec![
-            Value::Object(object),
-            Value::string("RetokenizeMethod".to_string()),
-            Value::string("none".to_string()),
-        ],
-    )
-    .await?
-    else {
-        return Err(text_analytics_error(
-            "addEntityDetails",
-            "addEntityDetails: addPartOfSpeechDetails did not return tokenizedDocument",
-        ));
-    };
-    Ok(object)
+    add_pos_details_without_retokenizing(runtime, object).await
 }
 
 fn entity_details_for_documents(
@@ -492,7 +497,10 @@ fn looks_like_entity_word(token: &str, language: EntityLanguage) -> bool {
     }
 }
 
-fn mark_entity_pos_as_proper_nouns(object: &mut ObjectInstance) -> BuiltinResult<()> {
+fn mark_entity_pos_as_proper_nouns(
+    runtime: Option<&crate::context::RuntimeContext>,
+    object: &mut ObjectInstance,
+) -> BuiltinResult<()> {
     let Some(entities) = entity_details_from_object(object, "addEntityDetails")? else {
         return Ok(());
     };
@@ -518,14 +526,17 @@ fn mark_entity_pos_as_proper_nouns(object: &mut ObjectInstance) -> BuiltinResult
                 .map_err(|err| text_analytics_error("addEntityDetails", err))
         })
         .collect::<BuiltinResult<Vec<_>>>()?;
-    object.properties.insert(
-        POS_DETAILS_PROPERTY.to_string(),
-        Value::Cell(
-            CellArray::new(values, pos.len(), 1)
-                .map_err(|err| text_analytics_error("addEntityDetails", err))?,
-        ),
+    let value = Value::Cell(
+        CellArray::new(values, pos.len(), 1)
+            .map_err(|err| text_analytics_error("addEntityDetails", err))?,
     );
-    Ok(())
+    let updates = [(POS_DETAILS_PROPERTY, value)];
+    replace_document_properties(
+        runtime,
+        object,
+        updates.iter().map(|(name, value)| (*name, value)),
+        "addEntityDetails",
+    )
 }
 
 fn is_known_entity(value: &str) -> bool {
@@ -539,7 +550,7 @@ pub(in crate::builtins::strings::text_analytics) fn entity_details_from_object<'
     object: &'a ObjectInstance,
     fn_name: &str,
 ) -> BuiltinResult<Option<Vec<Vec<&'a str>>>> {
-    let Some(value) = object.properties.get(ENTITY_DETAILS_PROPERTY) else {
+    let Some(value) = object.properties().get(ENTITY_DETAILS_PROPERTY) else {
         return Ok(None);
     };
     let Value::Cell(cell) = value else {
@@ -554,8 +565,8 @@ pub(in crate::builtins::strings::text_analytics) fn entity_details_from_object<'
             format!("{fn_name}: tokenizedDocument object has invalid EntityDetails shape"),
         ));
     }
-    let mut out = Vec::with_capacity(cell.data.len());
-    for item in &cell.data {
+    let mut out = Vec::with_capacity(cell.data().len());
+    for item in cell.data() {
         let Value::StringArray(array) = item else {
             return Err(text_analytics_error(
                 fn_name,
@@ -570,7 +581,7 @@ pub(in crate::builtins::strings::text_analytics) fn entity_details_from_object<'
                 ),
             ));
         }
-        out.push(array.data.iter().map(|text| text.as_str()).collect());
+        out.push(array.data().iter().map(|text| text.as_str()).collect());
     }
     Ok(Some(out))
 }
@@ -601,7 +612,10 @@ mod tests {
     }
 
     fn run_add_entity(args: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(add_entity_details_builtin(None, args))
+        futures::executor::block_on(add_entity_details_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
 
     fn run_token_details(value: Value) -> BuiltinResult<Value> {
@@ -626,7 +640,7 @@ mod tests {
 
     fn string_column(table: &ObjectInstance, name: &str) -> Vec<String> {
         match table_column(table, name) {
-            Value::StringArray(array) => array.data,
+            Value::StringArray(array) => array.data().iter().map(ToString::to_string).collect(),
             other => panic!("expected string column {name}, got {other:?}"),
         }
     }
@@ -727,7 +741,7 @@ mod tests {
             .expect("tokenized"),
         );
         let mut stale = docs.clone();
-        stale.properties.insert(
+        stale.replace_property_unbounded(
             ENTITY_DETAILS_PROPERTY.to_string(),
             Value::Cell(
                 CellArray::new(
@@ -782,7 +796,7 @@ mod tests {
             .expect("tokenized"),
         );
         let mut with_pos = docs;
-        with_pos.properties.insert(
+        with_pos.replace_property_unbounded(
             POS_DETAILS_PROPERTY.to_string(),
             Value::Cell(
                 CellArray::new(
@@ -833,9 +847,7 @@ mod tests {
         assert!(err.to_string().contains("only Model value"));
 
         let mut unsupported = object(docs);
-        unsupported
-            .properties
-            .insert("Language".into(), Value::String("fr".into()));
+        unsupported.replace_property_unbounded("Language".into(), Value::String("fr".into()));
         let err =
             run_add_entity(vec![Value::Object(unsupported)]).expect_err("unsupported language");
         assert!(err.to_string().contains("unsupported document language"));
@@ -846,7 +858,7 @@ mod tests {
     fn token_details_rejects_malformed_entity_details() {
         let docs = object(run_tokenized(vec![Value::String("Mary runs".into())]).unwrap());
         let mut malformed = docs.clone();
-        malformed.properties.insert(
+        malformed.replace_property_unbounded(
             ENTITY_DETAILS_PROPERTY.to_string(),
             Value::Cell(
                 CellArray::new(
@@ -868,7 +880,7 @@ mod tests {
     fn add_entity_details_discard_known_values_ignores_malformed_stored_tags() {
         let docs = object(run_tokenized(vec![Value::String("Mary runs".into())]).unwrap());
         let mut malformed = docs.clone();
-        malformed.properties.insert(
+        malformed.replace_property_unbounded(
             ENTITY_DETAILS_PROPERTY.to_string(),
             Value::String("bad".into()),
         );
@@ -892,9 +904,7 @@ mod tests {
             run_tokenized(vec![Value::String("Volkswagen ist in Wolfsburg.".into())]).unwrap(),
         );
         let mut german = docs;
-        german
-            .properties
-            .insert("Language".into(), Value::String("de".into()));
+        german.replace_property_unbounded("Language".into(), Value::String("de".into()));
         let updated = run_add_entity(vec![Value::Object(german)]).expect("german entities");
         let table = object(run_token_details(updated).expect("details"));
         assert_eq!(

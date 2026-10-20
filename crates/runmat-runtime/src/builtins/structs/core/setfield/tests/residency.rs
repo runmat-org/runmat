@@ -36,7 +36,7 @@ fn setfield_direct_resident_replacement_preserves_handle_without_provider_access
 #[test]
 fn setfield_strict_indexed_resident_field_rejects_before_provider_access() {
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-    let mut root = StructValue::new();
+    let mut root = runmat_value::UnboundedStructValueBuilder::new();
     root.fields.insert(
         "values".to_string(),
         Value::GpuTensor(unregistered_resident_handle()),
@@ -44,7 +44,7 @@ fn setfield_strict_indexed_resident_field_rejects_before_provider_access() {
     let selector = CellArray::new_with_shape(vec![Value::Int(IntValue::I32(1))], vec![1, 1])
         .expect("selector");
     let error = run_setfield(
-        Value::Struct(root),
+        Value::Struct(root.finish()),
         vec![
             Value::from("values"),
             Value::Cell(selector),
@@ -81,7 +81,7 @@ fn setfield_gpu_tensor_indexing_gathers_to_host() {
     };
     let handle = provider.upload(&view).expect("upload");
 
-    let mut root = StructValue::new();
+    let mut root = runmat_value::UnboundedStructValueBuilder::new();
     root.fields
         .insert("values".to_string(), Value::GpuTensor(handle));
 
@@ -92,7 +92,7 @@ fn setfield_gpu_tensor_indexing_gathers_to_host() {
     .unwrap();
 
     let updated = run_setfield(
-        Value::Struct(root),
+        Value::Struct(root.finish()),
         vec![
             Value::from("values"),
             Value::Cell(index_cell),

@@ -1,5 +1,5 @@
 use runmat_execution::identity::ValueId;
-use runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1;
+use runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION;
 use runmat_execution::value::{ValueRef, ValueRefKind};
 use runmat_execution::Digest;
 
@@ -7,7 +7,7 @@ use super::validate_declared_roots;
 
 fn reference(identity: &[u8]) -> ValueRef {
     ValueRef {
-        schema_version: VALUE_PAYLOAD_SCHEMA_V1,
+        schema_version: VALUE_PAYLOAD_SCHEMA_VERSION,
         id: ValueId::derive(&[b"exact-study-publication-root", identity]),
         logical_digest: Digest::sha256(identity),
         encoded_length: identity.len() as u64,

@@ -6,8 +6,11 @@ use crate::{gather_if_needed_async, BuiltinResult};
 
 use super::{error, extensions, input::FindGroupsInput, output};
 
-pub(super) async fn apply(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    extensions::validate(&first, &rest)?;
+pub(super) async fn apply(
+    first: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    extensions::validate(&first, rest.view())?;
     let mut values = Vec::with_capacity(rest.len() + 1);
     values.push(gather_if_needed_async(&first).await?);
     for value in rest {

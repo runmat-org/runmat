@@ -512,11 +512,11 @@ impl<'a> Input<'a> {
 
     fn cell_children(self) -> Vec<Self> {
         match self {
-            Self::Borrowed(Value::Cell(cell)) => cell.data.iter().map(Self::Borrowed).collect(),
+            Self::Borrowed(Value::Cell(cell)) => cell.data().iter().map(Self::Borrowed).collect(),
             Self::Owned(Value::Cell(cell)) => match cell.into_owned_data() {
                 Ok(values) => values.into_iter().map(Self::Owned).collect(),
                 Err(cell) => {
-                    let owner = cell.data;
+                    let owner = cell.data_owner();
                     (0..owner.len())
                         .map(|index| {
                             Self::SharedCellChild(
@@ -530,12 +530,12 @@ impl<'a> Input<'a> {
                 let Value::Cell(cell) = parent.value() else {
                     unreachable!("selected cell input")
                 };
-                (0..cell.data.len())
+                (0..cell.data().len())
                     .map(|index| {
                         Self::SharedCellChild(
                             parent
                                 .project(|value| match value {
-                                    Value::Cell(cell) => cell.data.get(index),
+                                    Value::Cell(cell) => cell.data().get(index),
                                     _ => None,
                                 })
                                 .expect("retained cell child"),
@@ -553,7 +553,7 @@ impl<'a> Input<'a> {
                 array.data().iter().map(Self::Borrowed).collect()
             }
             Self::Owned(Value::ObjectArray(array)) => {
-                array.into_data().into_iter().map(Self::Owned).collect()
+                array.data().iter().cloned().map(Self::Owned).collect()
             }
             Self::SharedCellChild(parent) => {
                 let Value::ObjectArray(array) = parent.value() else {
@@ -581,22 +581,22 @@ impl<'a> Input<'a> {
             Self::Borrowed(Value::Struct(value)) => value
                 .fields
                 .iter()
-                .map(|(name, value)| (name.clone(), Self::Borrowed(value)))
+                .map(|(name, value)| (name.to_owned(), Self::Borrowed(value)))
                 .collect(),
             Self::Owned(Value::Struct(value)) => value
                 .fields
-                .into_iter()
-                .map(|(name, value)| (name, Self::Owned(value)))
+                .iter()
+                .map(|(name, value)| (name.to_owned(), Self::Owned(value.clone())))
                 .collect(),
             Self::Borrowed(Value::Object(value)) => value
-                .properties
+                .properties()
                 .iter()
-                .map(|(name, value)| (name.clone(), Self::Borrowed(value)))
+                .map(|(name, value)| (name.to_owned(), Self::Borrowed(value)))
                 .collect(),
             Self::Owned(Value::Object(value)) => value
-                .properties
-                .into_iter()
-                .map(|(name, value)| (name, Self::Owned(value)))
+                .properties()
+                .iter()
+                .map(|(name, value)| (name.to_owned(), Self::Owned(value.clone())))
                 .collect(),
             Self::SharedCellChild(parent) => match parent.value() {
                 Value::Struct(value) => value
@@ -604,7 +604,7 @@ impl<'a> Input<'a> {
                     .iter()
                     .map(|(name, _)| {
                         (
-                            name.clone(),
+                            name.to_owned(),
                             Self::SharedCellChild(
                                 parent
                                     .project(|value| match value {
@@ -617,15 +617,15 @@ impl<'a> Input<'a> {
                     })
                     .collect(),
                 Value::Object(value) => value
-                    .properties
+                    .properties()
                     .keys()
                     .map(|name| {
                         (
-                            name.clone(),
+                            name.to_owned(),
                             Self::SharedCellChild(
                                 parent
                                     .project(|value| match value {
-                                        Value::Object(value) => value.properties.get(name),
+                                        Value::Object(value) => value.properties().get(name),
                                         _ => None,
                                     })
                                     .expect("retained object child"),

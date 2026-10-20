@@ -39,7 +39,7 @@ pub(super) async fn execute(
     let layouts = match value {
         Value::Distributed(handle) => {
             runmat_runtime::parallel::lease::validate_distributed(&execution.runtime, &handle)?;
-            service.inspect(*handle).await?.partitions
+            service.inspect(handle).await?.partitions
         }
         codistributor
             if runmat_runtime::parallel::codistributor::is_codistributor(&codistributor) =>

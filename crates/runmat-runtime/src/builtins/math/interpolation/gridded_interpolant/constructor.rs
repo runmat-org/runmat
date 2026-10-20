@@ -1,6 +1,8 @@
 use super::*;
 
-pub(super) fn parse_constructor(mut args: Vec<Value>) -> BuiltinResult<InterpolantSpec> {
+pub(super) fn parse_constructor(
+    mut args: crate::call::BuiltinArguments,
+) -> BuiltinResult<InterpolantSpec> {
     let (method, extrapolation) = parse_trailing_methods(&mut args)?;
     match args.len() {
         0 => Ok(InterpolantSpec {
@@ -10,7 +12,10 @@ pub(super) fn parse_constructor(mut args: Vec<Value>) -> BuiltinResult<Interpola
             extrapolation,
         }),
         1 => {
-            let values = normalize_default_values(numeric_tensor(args.remove(0), "V")?)?;
+            let values = normalize_default_values(numeric_tensor(
+                args.pop_front().expect("one value"),
+                "V",
+            )?)?;
             let grid_vectors = default_grid_vectors(&values);
             validate_grid_value_shape(&grid_vectors, &values, method, extrapolation)?;
             Ok(InterpolantSpec {
@@ -150,10 +155,10 @@ pub(super) fn is_vector_shape(shape: &[usize]) -> bool {
 }
 
 pub(super) fn grid_vectors_from_cell(cell: CellArray) -> BuiltinResult<Vec<Vec<f64>>> {
-    if cell.data.is_empty() {
+    if cell.data().is_empty() {
         return Err(invalid("gridVecs must contain at least one grid vector"));
     }
-    cell.data
+    cell.data()
         .iter()
         .enumerate()
         .map(|(idx, value)| numeric_vector(value, &format!("gridVecs{{{}}}", idx + 1)))
@@ -180,7 +185,7 @@ pub(super) fn effective_grid_rank(shape: &[usize]) -> usize {
 }
 
 pub(super) fn full_grid_vectors(
-    grids: Vec<Value>,
+    grids: crate::call::BuiltinArguments,
     values: &Tensor,
 ) -> BuiltinResult<Vec<Vec<f64>>> {
     if grids.is_empty() {

@@ -1,6 +1,6 @@
 use super::*;
 use runmat_value::IntValue;
-use runmat_value::{ComplexTensor, IntegerComplexStorage};
+use runmat_value::{ComplexTensor, IntegerComplexStorage, StructValue};
 
 #[path = "tests/handle_receipt.rs"]
 mod handle_receipt;
@@ -294,9 +294,9 @@ fn data_create_uses_exact_all_class_schema_controls_and_integer_payloads() {
             .join(format!("schema-{dtype}.data"))
             .to_string_lossy()
             .to_string();
-        let mut meta = StructValue::new();
+        let mut meta = runmat_value::UnboundedStructValueBuilder::new();
         meta.fields
-            .insert("dtype".to_string(), Value::String(dtype.to_string()));
+            .insert("dtype".to_string(), Value::String(dtype.to_string().into()));
         meta.fields.insert(
             "shape".to_string(),
             Value::Tensor(Tensor::new_integer(shape, vec![1, 2]).expect("shape")),
@@ -305,22 +305,25 @@ fn data_create_uses_exact_all_class_schema_controls_and_integer_payloads() {
             "chunk".to_string(),
             Value::Tensor(Tensor::new_integer(chunk, vec![1, 2]).expect("chunk")),
         );
-        let mut arrays = StructValue::new();
+        let mut arrays = runmat_value::UnboundedStructValueBuilder::new();
         arrays
             .fields
-            .insert("samples".to_string(), Value::Struct(meta));
-        let mut schema = StructValue::new();
+            .insert("samples".to_string(), Value::Struct(meta.finish()));
+        let mut schema = runmat_value::UnboundedStructValueBuilder::new();
         schema
             .fields
-            .insert("arrays".to_string(), Value::Struct(arrays));
+            .insert("arrays".to_string(), Value::Struct(arrays.finish()));
 
-        let dataset = call_builtin("data.create", &[Value::String(path), Value::Struct(schema)])
-            .unwrap_or_else(|error| panic!("{dtype}: create failed: {error}"));
+        let dataset = call_builtin(
+            "data.create",
+            &[Value::String(path.into()), Value::Struct(schema.finish())],
+        )
+        .unwrap_or_else(|error| panic!("{dtype}: create failed: {error}"));
         let array = call_builtin(
             "Dataset.array",
             &[
                 dataset.value().clone(),
-                Value::String("samples".to_string()),
+                Value::String("samples".to_string().into()),
             ],
         )
         .expect("array handle");
@@ -360,41 +363,41 @@ fn data_namespace_lifecycle_rejects_integer_arguments_and_unsupported_extras() {
             ("data.list", vec![value.clone()]),
             (
                 "data.copy",
-                vec![value.clone(), Value::String("to.data".to_string())],
+                vec![value.clone(), Value::String("to.data".to_string().into())],
             ),
             (
                 "data.copy",
-                vec![Value::String("from.data".to_string()), value.clone()],
+                vec![Value::String("from.data".to_string().into()), value.clone()],
             ),
             (
                 "data.move",
-                vec![value.clone(), Value::String("to.data".to_string())],
+                vec![value.clone(), Value::String("to.data".to_string().into())],
             ),
             (
                 "data.move",
-                vec![Value::String("from.data".to_string()), value.clone()],
+                vec![Value::String("from.data".to_string().into()), value.clone()],
             ),
             (
                 "data.import",
                 vec![
                     value.clone(),
-                    Value::String("data".to_string()),
-                    Value::String("source.data".to_string()),
+                    Value::String("data".to_string().into()),
+                    Value::String("source.data".to_string().into()),
                 ],
             ),
             (
                 "data.import",
                 vec![
-                    Value::String("path.data".to_string()),
+                    Value::String("path.data".to_string().into()),
                     value.clone(),
-                    Value::String("source.data".to_string()),
+                    Value::String("source.data".to_string().into()),
                 ],
             ),
             (
                 "data.import",
                 vec![
-                    Value::String("path.data".to_string()),
-                    Value::String("data".to_string()),
+                    Value::String("path.data".to_string().into()),
+                    Value::String("data".to_string().into()),
                     value.clone(),
                 ],
             ),
@@ -402,23 +405,23 @@ fn data_namespace_lifecycle_rejects_integer_arguments_and_unsupported_extras() {
                 "data.export",
                 vec![
                     value.clone(),
-                    Value::String("data".to_string()),
-                    Value::String("target.data".to_string()),
+                    Value::String("data".to_string().into()),
+                    Value::String("target.data".to_string().into()),
                 ],
             ),
             (
                 "data.export",
                 vec![
-                    Value::String("path.data".to_string()),
+                    Value::String("path.data".to_string().into()),
                     value.clone(),
-                    Value::String("target.data".to_string()),
+                    Value::String("target.data".to_string().into()),
                 ],
             ),
             (
                 "data.export",
                 vec![
-                    Value::String("path.data".to_string()),
-                    Value::String("data".to_string()),
+                    Value::String("path.data".to_string().into()),
+                    Value::String("data".to_string().into()),
                     value.clone(),
                 ],
             ),
@@ -432,7 +435,7 @@ fn data_namespace_lifecycle_rejects_integer_arguments_and_unsupported_extras() {
     let error = call_builtin(
         "data.exists",
         &[
-            Value::String("missing.data".to_string()),
+            Value::String("missing.data".to_string().into()),
             Value::Int(IntValue::U8(1)),
         ],
     )
@@ -461,19 +464,22 @@ fn data_namespace_lifecycle_rejects_integer_arguments_and_unsupported_extras() {
 #[test]
 fn dataset_nonattribute_methods_reject_integer_receivers() {
     for (name, extra) in [
-        ("Dataset.array", Some(Value::String("samples".to_string()))),
+        (
+            "Dataset.array",
+            Some(Value::String("samples".to_string().into())),
+        ),
         ("Dataset.arrays", None),
         ("Dataset.begin", None),
         (
             "Dataset.has_array",
-            Some(Value::String("samples".to_string())),
+            Some(Value::String("samples".to_string().into())),
         ),
         ("Dataset.id", None),
         ("Dataset.path", None),
         ("Dataset.refresh", None),
         (
             "Dataset.snapshot",
-            Some(Value::String("checkpoint".to_string())),
+            Some(Value::String("checkpoint".to_string().into())),
         ),
         ("Dataset.version", None),
     ] {
@@ -497,24 +503,27 @@ fn dataset_attributes_keep_exact_integer_values_and_documented_class_boundaries(
         .join("integer-attrs.data")
         .to_string_lossy()
         .to_string();
-    let mut array_meta = StructValue::new();
+    let mut array_meta = runmat_value::UnboundedStructValueBuilder::new();
     array_meta
         .fields
-        .insert("dtype".to_string(), Value::String("f64".to_string()));
+        .insert("dtype".to_string(), Value::String("f64".to_string().into()));
     array_meta.fields.insert(
         "shape".to_string(),
         Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).expect("shape")),
     );
-    let mut arrays = StructValue::new();
+    let mut arrays = runmat_value::UnboundedStructValueBuilder::new();
     arrays
         .fields
-        .insert("base".to_string(), Value::Struct(array_meta));
-    let mut schema = StructValue::new();
+        .insert("base".to_string(), Value::Struct(array_meta.finish()));
+    let mut schema = runmat_value::UnboundedStructValueBuilder::new();
     schema
         .fields
-        .insert("arrays".to_string(), Value::Struct(arrays));
-    let ds = call_builtin("data.create", &[Value::String(path), Value::Struct(schema)])
-        .expect("create dataset");
+        .insert("arrays".to_string(), Value::Struct(arrays.finish()));
+    let ds = call_builtin(
+        "data.create",
+        &[Value::String(path.into()), Value::Struct(schema.finish())],
+    )
+    .expect("create dataset");
     let cases = [
         ("int8", IntValue::I8(i8::MIN), IntValue::I64(i8::MIN as i64)),
         (
@@ -546,13 +555,13 @@ fn dataset_attributes_keep_exact_integer_values_and_documented_class_boundaries(
         ("uint64", IntValue::U64(u64::MAX), IntValue::U64(u64::MAX)),
     ];
 
-    let mut bulk = StructValue::new();
+    let mut bulk = runmat_value::UnboundedStructValueBuilder::new();
     for (name, source, _) in &cases {
         call_builtin(
             "Dataset.set_attr",
             &[
                 ds.value().clone(),
-                Value::String(format!("direct_{name}")),
+                Value::String(format!("direct_{name}").into()),
                 Value::Int(source.clone()),
             ],
         )
@@ -562,7 +571,7 @@ fn dataset_attributes_keep_exact_integer_values_and_documented_class_boundaries(
     }
     call_builtin(
         "Dataset.set_attrs",
-        &[ds.value().clone(), Value::Struct(bulk)],
+        &[ds.value().clone(), Value::Struct(bulk.finish())],
     )
     .expect("set integer attributes");
 
@@ -576,7 +585,10 @@ fn dataset_attributes_keep_exact_integer_values_and_documented_class_boundaries(
         assert_eq!(
             call_builtin(
                 "Dataset.get_attr",
-                &[ds.value().clone(), Value::String(format!("direct_{name}"))],
+                &[
+                    ds.value().clone(),
+                    Value::String(format!("direct_{name}").into())
+                ],
             )
             .expect("get integer attribute"),
             expected,
@@ -592,7 +604,7 @@ fn dataset_attributes_keep_exact_integer_values_and_documented_class_boundaries(
                 "Dataset.get_attr",
                 &[
                     ds.value().clone(),
-                    Value::String(format!("missing_{name}")),
+                    Value::String(format!("missing_{name}").into()),
                     Value::Int(source.clone()),
                 ],
             )
@@ -610,7 +622,7 @@ fn data_transaction_lifecycle_methods_reject_integer_receivers() {
         ("DataTransaction.commit", None),
         (
             "DataTransaction.delete_array",
-            Some(Value::String("samples".to_string())),
+            Some(Value::String("samples".to_string().into())),
         ),
         ("DataTransaction.id", None),
         ("DataTransaction.status", None),
@@ -1018,7 +1030,7 @@ fn data_create_retains_selected_provider_and_relative_cwd_after_first_write() {
     let _guard = runmat_filesystem::replace_provider(selected);
     runmat_filesystem::set_current_dir(dir.path()).expect("selected fixture directory");
 
-    let mut array = StructValue::new();
+    let mut array = runmat_value::UnboundedStructValueBuilder::new();
     array
         .fields
         .insert("dtype".into(), Value::String("uint64".into()));
@@ -1029,14 +1041,21 @@ fn data_create_retains_selected_provider_and_relative_cwd_after_first_write() {
                 .expect("shape"),
         ),
     );
-    let mut arrays = StructValue::new();
-    arrays.fields.insert("sample".into(), Value::Struct(array));
-    let mut schema = StructValue::new();
-    schema.fields.insert("arrays".into(), Value::Struct(arrays));
+    let mut arrays = runmat_value::UnboundedStructValueBuilder::new();
+    arrays
+        .fields
+        .insert("sample".into(), Value::Struct(array.finish()));
+    let mut schema = runmat_value::UnboundedStructValueBuilder::new();
+    schema
+        .fields
+        .insert("arrays".into(), Value::Struct(arrays.finish()));
 
     let result = call_builtin(
         "data.create",
-        &[Value::String("pinned.data".into()), Value::Struct(schema)],
+        &[
+            Value::String("pinned.data".into()),
+            Value::Struct(schema.finish()),
+        ],
     )
     .expect("create finishes on original authority after ambient swap");
     assert!(matches!(result.value(), Value::Object(_)));
@@ -1074,7 +1093,7 @@ fn data_create_retains_selected_provider_and_relative_cwd_after_first_write() {
     let Value::Cell(arrays) = arrays.value() else {
         panic!("Dataset.arrays must return a cell");
     };
-    assert_eq!(arrays.data, vec![Value::String("sample".into())]);
+    assert_eq!(arrays.data(), vec![Value::String("sample".into())]);
     let array = call_builtin(
         "Dataset.array",
         &[result.value().clone(), Value::String("sample".into())],
@@ -1215,7 +1234,7 @@ fn data_create_retains_selected_provider_and_relative_cwd_after_first_write() {
     let Value::String(snapshot) = snapshot.value() else {
         panic!("Dataset.snapshot must return a path");
     };
-    assert!(std::path::Path::new(&snapshot).is_file());
+    assert!(std::path::Path::new(snapshot.as_str()).is_file());
     assert_eq!(*suspensions.lock().expect("suspension count"), 1);
     let root = dir.path().join("pinned.data");
     assert!(root.join("manifest.json").is_file());
@@ -1236,32 +1255,39 @@ fn create_open_write_read_dataset() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("sample.data").to_string_lossy().to_string();
 
-    let mut array_meta = StructValue::new();
+    let mut array_meta = runmat_value::UnboundedStructValueBuilder::new();
     array_meta
         .fields
-        .insert("dtype".to_string(), Value::String("f64".to_string()));
+        .insert("dtype".to_string(), Value::String("f64".to_string().into()));
     array_meta.fields.insert(
         "shape".to_string(),
         Value::Tensor(Tensor::new(vec![2.0, 2.0], vec![1, 2]).expect("shape tensor")),
     );
-    let mut arrays = StructValue::new();
-    arrays
-        .fields
-        .insert("temperature".to_string(), Value::Struct(array_meta));
-    let mut schema = StructValue::new();
+    let mut arrays = runmat_value::UnboundedStructValueBuilder::new();
+    arrays.fields.insert(
+        "temperature".to_string(),
+        Value::Struct(array_meta.finish()),
+    );
+    let mut schema = runmat_value::UnboundedStructValueBuilder::new();
     schema
         .fields
-        .insert("arrays".to_string(), Value::Struct(arrays));
+        .insert("arrays".to_string(), Value::Struct(arrays.finish()));
 
     let ds = call_builtin(
         "data.create",
-        &[Value::String(path.clone()), Value::Struct(schema)],
+        &[
+            Value::String(path.clone().into()),
+            Value::Struct(schema.finish()),
+        ],
     )
     .expect("create dataset");
 
     let arr = call_builtin(
         "Dataset.array",
-        &[ds.value().clone(), Value::String("temperature".to_string())],
+        &[
+            ds.value().clone(),
+            Value::String("temperature".to_string().into()),
+        ],
     )
     .expect("dataset array");
     let write_tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("write tensor");
@@ -1287,31 +1313,38 @@ fn write_and_read_slice_payload() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("slice.data").to_string_lossy().to_string();
 
-    let mut array_meta = StructValue::new();
+    let mut array_meta = runmat_value::UnboundedStructValueBuilder::new();
     array_meta
         .fields
-        .insert("dtype".to_string(), Value::String("f64".to_string()));
+        .insert("dtype".to_string(), Value::String("f64".to_string().into()));
     array_meta.fields.insert(
         "shape".to_string(),
         Value::Tensor(Tensor::new(vec![3.0, 3.0], vec![1, 2]).expect("shape tensor")),
     );
-    let mut arrays = StructValue::new();
-    arrays
-        .fields
-        .insert("temperature".to_string(), Value::Struct(array_meta));
-    let mut schema = StructValue::new();
+    let mut arrays = runmat_value::UnboundedStructValueBuilder::new();
+    arrays.fields.insert(
+        "temperature".to_string(),
+        Value::Struct(array_meta.finish()),
+    );
+    let mut schema = runmat_value::UnboundedStructValueBuilder::new();
     schema
         .fields
-        .insert("arrays".to_string(), Value::Struct(arrays));
+        .insert("arrays".to_string(), Value::Struct(arrays.finish()));
 
     let ds = call_builtin(
         "data.create",
-        &[Value::String(path.clone()), Value::Struct(schema)],
+        &[
+            Value::String(path.clone().into()),
+            Value::Struct(schema.finish()),
+        ],
     )
     .expect("create dataset");
     let arr = call_builtin(
         "Dataset.array",
-        &[ds.value().clone(), Value::String("temperature".to_string())],
+        &[
+            ds.value().clone(),
+            Value::String("temperature".to_string().into()),
+        ],
     )
     .expect("dataset array");
 
@@ -1319,7 +1352,7 @@ fn write_and_read_slice_payload() {
         CellArray::new(
             vec![
                 Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("range")),
-                Value::String(":".to_string()),
+                Value::String(":".to_string().into()),
             ],
             1,
             2,
@@ -1355,10 +1388,10 @@ fn slice_write_updates_only_touched_chunks() {
         .to_string_lossy()
         .to_string();
 
-    let mut array_meta = StructValue::new();
+    let mut array_meta = runmat_value::UnboundedStructValueBuilder::new();
     array_meta
         .fields
-        .insert("dtype".to_string(), Value::String("f64".to_string()));
+        .insert("dtype".to_string(), Value::String("f64".to_string().into()));
     array_meta.fields.insert(
         "shape".to_string(),
         Value::Tensor(Tensor::new(vec![4.0, 4.0], vec![1, 2]).expect("shape tensor")),
@@ -1367,23 +1400,30 @@ fn slice_write_updates_only_touched_chunks() {
         "chunk".to_string(),
         Value::Tensor(Tensor::new(vec![2.0, 2.0], vec![1, 2]).expect("chunk tensor")),
     );
-    let mut arrays = StructValue::new();
-    arrays
-        .fields
-        .insert("temperature".to_string(), Value::Struct(array_meta));
-    let mut schema = StructValue::new();
+    let mut arrays = runmat_value::UnboundedStructValueBuilder::new();
+    arrays.fields.insert(
+        "temperature".to_string(),
+        Value::Struct(array_meta.finish()),
+    );
+    let mut schema = runmat_value::UnboundedStructValueBuilder::new();
     schema
         .fields
-        .insert("arrays".to_string(), Value::Struct(arrays));
+        .insert("arrays".to_string(), Value::Struct(arrays.finish()));
 
     let ds = call_builtin(
         "data.create",
-        &[Value::String(path.clone()), Value::Struct(schema)],
+        &[
+            Value::String(path.clone().into()),
+            Value::Struct(schema.finish()),
+        ],
     )
     .expect("create dataset");
     let arr = call_builtin(
         "Dataset.array",
-        &[ds.value().clone(), Value::String("temperature".to_string())],
+        &[
+            ds.value().clone(),
+            Value::String("temperature".to_string().into()),
+        ],
     )
     .expect("dataset array");
 
@@ -1438,10 +1478,10 @@ fn slice_write_uploads_only_touched_chunk_targets() {
         .to_string_lossy()
         .to_string();
 
-    let mut array_meta = StructValue::new();
+    let mut array_meta = runmat_value::UnboundedStructValueBuilder::new();
     array_meta
         .fields
-        .insert("dtype".to_string(), Value::String("f64".to_string()));
+        .insert("dtype".to_string(), Value::String("f64".to_string().into()));
     array_meta.fields.insert(
         "shape".to_string(),
         Value::Tensor(Tensor::new(vec![4.0, 4.0], vec![1, 2]).expect("shape tensor")),
@@ -1450,23 +1490,30 @@ fn slice_write_uploads_only_touched_chunk_targets() {
         "chunk".to_string(),
         Value::Tensor(Tensor::new(vec![2.0, 2.0], vec![1, 2]).expect("chunk tensor")),
     );
-    let mut arrays = StructValue::new();
-    arrays
-        .fields
-        .insert("temperature".to_string(), Value::Struct(array_meta));
-    let mut schema = StructValue::new();
+    let mut arrays = runmat_value::UnboundedStructValueBuilder::new();
+    arrays.fields.insert(
+        "temperature".to_string(),
+        Value::Struct(array_meta.finish()),
+    );
+    let mut schema = runmat_value::UnboundedStructValueBuilder::new();
     schema
         .fields
-        .insert("arrays".to_string(), Value::Struct(arrays));
+        .insert("arrays".to_string(), Value::Struct(arrays.finish()));
 
     let ds = call_builtin(
         "data.create",
-        &[Value::String(path.clone()), Value::Struct(schema)],
+        &[
+            Value::String(path.clone().into()),
+            Value::Struct(schema.finish()),
+        ],
     )
     .expect("create dataset");
     let arr = call_builtin(
         "Dataset.array",
-        &[ds.value().clone(), Value::String("temperature".to_string())],
+        &[
+            ds.value().clone(),
+            Value::String("temperature".to_string().into()),
+        ],
     )
     .expect("dataset array");
 
@@ -1531,10 +1578,10 @@ fn slice_write_uploads_expected_cross_boundary_chunk_targets() {
         .to_string_lossy()
         .to_string();
 
-    let mut array_meta = StructValue::new();
+    let mut array_meta = runmat_value::UnboundedStructValueBuilder::new();
     array_meta
         .fields
-        .insert("dtype".to_string(), Value::String("f64".to_string()));
+        .insert("dtype".to_string(), Value::String("f64".to_string().into()));
     array_meta.fields.insert(
         "shape".to_string(),
         Value::Tensor(Tensor::new(vec![4.0, 4.0], vec![1, 2]).expect("shape tensor")),
@@ -1543,23 +1590,30 @@ fn slice_write_uploads_expected_cross_boundary_chunk_targets() {
         "chunk".to_string(),
         Value::Tensor(Tensor::new(vec![2.0, 2.0], vec![1, 2]).expect("chunk tensor")),
     );
-    let mut arrays = StructValue::new();
-    arrays
-        .fields
-        .insert("temperature".to_string(), Value::Struct(array_meta));
-    let mut schema = StructValue::new();
+    let mut arrays = runmat_value::UnboundedStructValueBuilder::new();
+    arrays.fields.insert(
+        "temperature".to_string(),
+        Value::Struct(array_meta.finish()),
+    );
+    let mut schema = runmat_value::UnboundedStructValueBuilder::new();
     schema
         .fields
-        .insert("arrays".to_string(), Value::Struct(arrays));
+        .insert("arrays".to_string(), Value::Struct(arrays.finish()));
 
     let ds = call_builtin(
         "data.create",
-        &[Value::String(path.clone()), Value::Struct(schema)],
+        &[
+            Value::String(path.clone().into()),
+            Value::Struct(schema.finish()),
+        ],
     )
     .expect("create dataset");
     let arr = call_builtin(
         "Dataset.array",
-        &[ds.value().clone(), Value::String("temperature".to_string())],
+        &[
+            ds.value().clone(),
+            Value::String("temperature".to_string().into()),
+        ],
     )
     .expect("dataset array");
 
@@ -1621,10 +1675,10 @@ fn slice_write_hits_http_server_data_endpoints_with_expected_keys() {
         .to_string_lossy()
         .to_string();
 
-    let mut array_meta = StructValue::new();
+    let mut array_meta = runmat_value::UnboundedStructValueBuilder::new();
     array_meta
         .fields
-        .insert("dtype".to_string(), Value::String("f64".to_string()));
+        .insert("dtype".to_string(), Value::String("f64".to_string().into()));
     array_meta.fields.insert(
         "shape".to_string(),
         Value::Tensor(Tensor::new(vec![4.0, 4.0], vec![1, 2]).expect("shape tensor")),
@@ -1633,23 +1687,30 @@ fn slice_write_hits_http_server_data_endpoints_with_expected_keys() {
         "chunk".to_string(),
         Value::Tensor(Tensor::new(vec![2.0, 2.0], vec![1, 2]).expect("chunk tensor")),
     );
-    let mut arrays = StructValue::new();
-    arrays
-        .fields
-        .insert("temperature".to_string(), Value::Struct(array_meta));
-    let mut schema = StructValue::new();
+    let mut arrays = runmat_value::UnboundedStructValueBuilder::new();
+    arrays.fields.insert(
+        "temperature".to_string(),
+        Value::Struct(array_meta.finish()),
+    );
+    let mut schema = runmat_value::UnboundedStructValueBuilder::new();
     schema
         .fields
-        .insert("arrays".to_string(), Value::Struct(arrays));
+        .insert("arrays".to_string(), Value::Struct(arrays.finish()));
 
     let ds = call_builtin(
         "data.create",
-        &[Value::String(path.clone()), Value::Struct(schema)],
+        &[
+            Value::String(path.clone().into()),
+            Value::Struct(schema.finish()),
+        ],
     )
     .expect("create dataset");
     let arr = call_builtin(
         "Dataset.array",
-        &[ds.value().clone(), Value::String("temperature".to_string())],
+        &[
+            ds.value().clone(),
+            Value::String("temperature".to_string().into()),
+        ],
     )
     .expect("dataset array");
 
@@ -1708,34 +1769,37 @@ fn tx_create_resize_fill_and_delete_array() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("tx-ops.data").to_string_lossy().to_string();
 
-    let mut arrays = StructValue::new();
-    let mut array_meta = StructValue::new();
+    let mut arrays = runmat_value::UnboundedStructValueBuilder::new();
+    let mut array_meta = runmat_value::UnboundedStructValueBuilder::new();
     array_meta
         .fields
-        .insert("dtype".to_string(), Value::String("f64".to_string()));
+        .insert("dtype".to_string(), Value::String("f64".to_string().into()));
     array_meta.fields.insert(
         "shape".to_string(),
         Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).expect("shape tensor")),
     );
     arrays
         .fields
-        .insert("base".to_string(), Value::Struct(array_meta));
-    let mut schema = StructValue::new();
+        .insert("base".to_string(), Value::Struct(array_meta.finish()));
+    let mut schema = runmat_value::UnboundedStructValueBuilder::new();
     schema
         .fields
-        .insert("arrays".to_string(), Value::Struct(arrays));
+        .insert("arrays".to_string(), Value::Struct(arrays.finish()));
 
     let ds = call_builtin(
         "data.create",
-        &[Value::String(path.clone()), Value::Struct(schema)],
+        &[
+            Value::String(path.clone().into()),
+            Value::Struct(schema.finish()),
+        ],
     )
     .expect("create dataset");
 
     let tx = call_builtin("Dataset.begin", std::slice::from_ref(ds.value())).expect("begin tx");
-    let mut new_meta = StructValue::new();
+    let mut new_meta = runmat_value::UnboundedStructValueBuilder::new();
     new_meta
         .fields
-        .insert("dtype".to_string(), Value::String("f64".to_string()));
+        .insert("dtype".to_string(), Value::String("f64".to_string().into()));
     new_meta.fields.insert(
         "shape".to_string(),
         Value::Tensor(Tensor::new(vec![2.0, 2.0], vec![1, 2]).expect("shape tensor")),
@@ -1744,8 +1808,8 @@ fn tx_create_resize_fill_and_delete_array() {
         "DataTransaction.create_array",
         &[
             tx.value().clone(),
-            Value::String("new_array".to_string()),
-            Value::Struct(new_meta),
+            Value::String("new_array".to_string().into()),
+            Value::Struct(new_meta.finish()),
         ],
     )
     .expect("create array in tx");
@@ -1753,7 +1817,7 @@ fn tx_create_resize_fill_and_delete_array() {
         "DataTransaction.resize",
         &[
             tx.value().clone(),
-            Value::String("new_array".to_string()),
+            Value::String("new_array".to_string().into()),
             Value::Tensor(Tensor::new(vec![3.0, 1.0], vec![1, 2]).expect("shape tensor")),
         ],
     )
@@ -1762,14 +1826,14 @@ fn tx_create_resize_fill_and_delete_array() {
         "DataTransaction.fill",
         &[
             tx.value().clone(),
-            Value::String("new_array".to_string()),
+            Value::String("new_array".to_string().into()),
             Value::Num(7.0),
         ],
     )
     .expect("fill array in tx");
     call_builtin(
         "DataTransaction.delete_array",
-        &[tx.value().clone(), Value::String("base".to_string())],
+        &[tx.value().clone(), Value::String("base".to_string().into())],
     )
     .expect("delete array in tx");
     call_builtin(
@@ -1778,16 +1842,19 @@ fn tx_create_resize_fill_and_delete_array() {
     )
     .expect("commit tx through alias options form");
 
-    let ds = call_builtin("data.open", &[Value::String(path)]).expect("open dataset");
+    let ds = call_builtin("data.open", &[Value::String(path.into())]).expect("open dataset");
     let has_base = call_builtin(
         "Dataset.has_array",
-        &[ds.value().clone(), Value::String("base".to_string())],
+        &[ds.value().clone(), Value::String("base".to_string().into())],
     )
     .expect("has base");
     assert_eq!(has_base, Value::Bool(false));
     let arr = call_builtin(
         "Dataset.array",
-        &[ds.value().clone(), Value::String("new_array".to_string())],
+        &[
+            ds.value().clone(),
+            Value::String("new_array".to_string().into()),
+        ],
     )
     .expect("new array");
     let read_back =
@@ -1885,30 +1952,33 @@ fn data_transactions_preserve_every_integer_class_and_typed_controls() {
             .join(format!("tx-{dtype}.data"))
             .to_string_lossy()
             .to_string();
-        let mut base_meta = StructValue::new();
+        let mut base_meta = runmat_value::UnboundedStructValueBuilder::new();
         base_meta
             .fields
-            .insert("dtype".to_string(), Value::String("f64".to_string()));
+            .insert("dtype".to_string(), Value::String("f64".to_string().into()));
         base_meta.fields.insert(
             "shape".to_string(),
             Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).expect("base shape")),
         );
-        let mut arrays = StructValue::new();
+        let mut arrays = runmat_value::UnboundedStructValueBuilder::new();
         arrays
             .fields
-            .insert("base".to_string(), Value::Struct(base_meta));
-        let mut schema = StructValue::new();
+            .insert("base".to_string(), Value::Struct(base_meta.finish()));
+        let mut schema = runmat_value::UnboundedStructValueBuilder::new();
         schema
             .fields
-            .insert("arrays".to_string(), Value::Struct(arrays));
-        let ds = call_builtin("data.create", &[Value::String(path), Value::Struct(schema)])
-            .expect("create dataset");
+            .insert("arrays".to_string(), Value::Struct(arrays.finish()));
+        let ds = call_builtin(
+            "data.create",
+            &[Value::String(path.into()), Value::Struct(schema.finish())],
+        )
+        .expect("create dataset");
         let tx = call_builtin("Dataset.begin", std::slice::from_ref(ds.value()))
             .expect("begin transaction");
 
-        let mut meta = StructValue::new();
+        let mut meta = runmat_value::UnboundedStructValueBuilder::new();
         meta.fields
-            .insert("dtype".to_string(), Value::String(dtype.to_string()));
+            .insert("dtype".to_string(), Value::String(dtype.to_string().into()));
         meta.fields.insert(
             "shape".to_string(),
             Value::Tensor(Tensor::new_integer(shape.clone(), vec![1, 2]).expect("shape")),
@@ -1921,8 +1991,8 @@ fn data_transactions_preserve_every_integer_class_and_typed_controls() {
             "DataTransaction.create_array",
             &[
                 tx.value().clone(),
-                Value::String("typed".to_string()),
-                Value::Struct(meta),
+                Value::String("typed".to_string().into()),
+                Value::Struct(meta.finish()),
             ],
         )
         .expect("queue create");
@@ -1930,7 +2000,7 @@ fn data_transactions_preserve_every_integer_class_and_typed_controls() {
             "DataTransaction.resize",
             &[
                 tx.value().clone(),
-                Value::String("typed".to_string()),
+                Value::String("typed".to_string().into()),
                 Value::Tensor(Tensor::new_integer(shape, vec![1, 2]).expect("resize shape")),
             ],
         )
@@ -1939,7 +2009,7 @@ fn data_transactions_preserve_every_integer_class_and_typed_controls() {
             "DataTransaction.fill",
             &[
                 tx.value().clone(),
-                Value::String("typed".to_string()),
+                Value::String("typed".to_string().into()),
                 Value::Int(attribute.clone()),
             ],
         )
@@ -1959,7 +2029,7 @@ fn data_transactions_preserve_every_integer_class_and_typed_controls() {
             "DataTransaction.write",
             &[
                 tx.value().clone(),
-                Value::String("typed".to_string()),
+                Value::String("typed".to_string().into()),
                 slice,
                 Value::Tensor(Tensor::new_integer(values.clone(), vec![2, 1]).expect("values")),
             ],
@@ -1969,18 +2039,18 @@ fn data_transactions_preserve_every_integer_class_and_typed_controls() {
             "DataTransaction.set_attr",
             &[
                 tx.value().clone(),
-                Value::String(format!("{dtype}_one")),
+                Value::String(format!("{dtype}_one").into()),
                 Value::Int(attribute.clone()),
             ],
         )
         .expect("queue attribute");
-        let mut attrs = StructValue::new();
+        let mut attrs = runmat_value::UnboundedStructValueBuilder::new();
         attrs
             .fields
             .insert(format!("{dtype}_many"), Value::Int(attribute));
         call_builtin(
             "DataTransaction.set_attrs",
-            &[tx.value().clone(), Value::Struct(attrs)],
+            &[tx.value().clone(), Value::Struct(attrs.finish())],
         )
         .expect("queue attributes");
         call_builtin("DataTransaction.commit", std::slice::from_ref(tx.value()))
@@ -1988,7 +2058,10 @@ fn data_transactions_preserve_every_integer_class_and_typed_controls() {
 
         let arr = call_builtin(
             "Dataset.array",
-            &[ds.value().clone(), Value::String("typed".to_string())],
+            &[
+                ds.value().clone(),
+                Value::String("typed".to_string().into()),
+            ],
         )
         .expect("open typed array");
         let read = call_builtin("DataArray.read", std::slice::from_ref(arr.value()))
@@ -2062,10 +2135,10 @@ fn data_arrays_preserve_every_integer_class_through_chunked_write_and_read() {
             .join(format!("{dtype}.data"))
             .to_string_lossy()
             .to_string();
-        let mut array_meta = StructValue::new();
+        let mut array_meta = runmat_value::UnboundedStructValueBuilder::new();
         array_meta
             .fields
-            .insert("dtype".to_string(), Value::String(dtype.to_string()));
+            .insert("dtype".to_string(), Value::String(dtype.to_string().into()));
         array_meta.fields.insert(
             "shape".to_string(),
             Value::Tensor(Tensor::new(vec![2.0, 1.0], vec![1, 2]).expect("shape")),
@@ -2074,20 +2147,26 @@ fn data_arrays_preserve_every_integer_class_through_chunked_write_and_read() {
             "chunk".to_string(),
             Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).expect("chunk")),
         );
-        let mut arrays = StructValue::new();
+        let mut arrays = runmat_value::UnboundedStructValueBuilder::new();
         arrays
             .fields
-            .insert("samples".to_string(), Value::Struct(array_meta));
-        let mut schema = StructValue::new();
+            .insert("samples".to_string(), Value::Struct(array_meta.finish()));
+        let mut schema = runmat_value::UnboundedStructValueBuilder::new();
         schema
             .fields
-            .insert("arrays".to_string(), Value::Struct(arrays));
+            .insert("arrays".to_string(), Value::Struct(arrays.finish()));
 
-        let ds = call_builtin("data.create", &[Value::String(path), Value::Struct(schema)])
-            .expect("create dataset");
+        let ds = call_builtin(
+            "data.create",
+            &[Value::String(path.into()), Value::Struct(schema.finish())],
+        )
+        .expect("create dataset");
         let arr = call_builtin(
             "Dataset.array",
-            &[ds.value().clone(), Value::String("samples".to_string())],
+            &[
+                ds.value().clone(),
+                Value::String("samples".to_string().into()),
+            ],
         )
         .expect("array");
         let input = Tensor::new_integer(storage.clone(), vec![2, 1]).expect("integer tensor");
@@ -2124,10 +2203,11 @@ fn uint64_data_array_slice_fill_and_transaction_paths_remain_exact() {
     let _provider = native_provider_guard();
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("uint64.data").to_string_lossy().to_string();
-    let mut array_meta = StructValue::new();
-    array_meta
-        .fields
-        .insert("dtype".to_string(), Value::String("uint64".to_string()));
+    let mut array_meta = runmat_value::UnboundedStructValueBuilder::new();
+    array_meta.fields.insert(
+        "dtype".to_string(),
+        Value::String("uint64".to_string().into()),
+    );
     array_meta.fields.insert(
         "shape".to_string(),
         Value::Tensor(Tensor::new(vec![2.0, 2.0], vec![1, 2]).expect("shape")),
@@ -2136,19 +2216,25 @@ fn uint64_data_array_slice_fill_and_transaction_paths_remain_exact() {
         "chunk".to_string(),
         Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).expect("chunk")),
     );
-    let mut arrays = StructValue::new();
+    let mut arrays = runmat_value::UnboundedStructValueBuilder::new();
     arrays
         .fields
-        .insert("samples".to_string(), Value::Struct(array_meta));
-    let mut schema = StructValue::new();
+        .insert("samples".to_string(), Value::Struct(array_meta.finish()));
+    let mut schema = runmat_value::UnboundedStructValueBuilder::new();
     schema
         .fields
-        .insert("arrays".to_string(), Value::Struct(arrays));
-    let ds = call_builtin("data.create", &[Value::String(path), Value::Struct(schema)])
-        .expect("create dataset");
+        .insert("arrays".to_string(), Value::Struct(arrays.finish()));
+    let ds = call_builtin(
+        "data.create",
+        &[Value::String(path.into()), Value::Struct(schema.finish())],
+    )
+    .expect("create dataset");
     let arr = call_builtin(
         "Dataset.array",
-        &[ds.value().clone(), Value::String("samples".to_string())],
+        &[
+            ds.value().clone(),
+            Value::String("samples".to_string().into()),
+        ],
     )
     .expect("array");
 
@@ -2164,7 +2250,7 @@ fn uint64_data_array_slice_fill_and_transaction_paths_remain_exact() {
         CellArray::new(
             vec![
                 Value::Int(runmat_value::IntValue::I32(1)),
-                Value::String(":".to_string()),
+                Value::String(":".to_string().into()),
             ],
             1,
             2,
@@ -2188,7 +2274,7 @@ fn uint64_data_array_slice_fill_and_transaction_paths_remain_exact() {
         "DataTransaction.fill",
         &[
             tx.value().clone(),
-            Value::String("samples".to_string()),
+            Value::String("samples".to_string().into()),
             Value::Int(runmat_value::IntValue::U64(1_u64 << 63)),
         ],
     )
@@ -2216,10 +2302,11 @@ fn paired_complex_uint64_data_array_chunk_and_slice_paths_remain_exact() {
         .join("complex-uint64.data")
         .to_string_lossy()
         .to_string();
-    let mut array_meta = StructValue::new();
-    array_meta
-        .fields
-        .insert("dtype".to_string(), Value::String("uint64".to_string()));
+    let mut array_meta = runmat_value::UnboundedStructValueBuilder::new();
+    array_meta.fields.insert(
+        "dtype".to_string(),
+        Value::String("uint64".to_string().into()),
+    );
     array_meta.fields.insert(
         "shape".to_string(),
         Value::Tensor(Tensor::new(vec![2.0, 2.0], vec![1, 2]).expect("shape")),
@@ -2228,19 +2315,25 @@ fn paired_complex_uint64_data_array_chunk_and_slice_paths_remain_exact() {
         "chunk".to_string(),
         Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).expect("chunk")),
     );
-    let mut arrays = StructValue::new();
+    let mut arrays = runmat_value::UnboundedStructValueBuilder::new();
     arrays
         .fields
-        .insert("samples".to_string(), Value::Struct(array_meta));
-    let mut schema = StructValue::new();
+        .insert("samples".to_string(), Value::Struct(array_meta.finish()));
+    let mut schema = runmat_value::UnboundedStructValueBuilder::new();
     schema
         .fields
-        .insert("arrays".to_string(), Value::Struct(arrays));
-    let ds = call_builtin("data.create", &[Value::String(path), Value::Struct(schema)])
-        .expect("create dataset");
+        .insert("arrays".to_string(), Value::Struct(arrays.finish()));
+    let ds = call_builtin(
+        "data.create",
+        &[Value::String(path.into()), Value::Struct(schema.finish())],
+    )
+    .expect("create dataset");
     let arr = call_builtin(
         "Dataset.array",
-        &[ds.value().clone(), Value::String("samples".to_string())],
+        &[
+            ds.value().clone(),
+            Value::String("samples".to_string().into()),
+        ],
     )
     .expect("array");
     let wide = (1_u64 << 53) + 1;
@@ -2266,7 +2359,10 @@ fn paired_complex_uint64_data_array_chunk_and_slice_paths_remain_exact() {
 
     let slice = Value::Cell(
         CellArray::new(
-            vec![Value::Int(IntValue::I32(1)), Value::String(":".to_string())],
+            vec![
+                Value::Int(IntValue::I32(1)),
+                Value::String(":".to_string().into()),
+            ],
             1,
             2,
         )

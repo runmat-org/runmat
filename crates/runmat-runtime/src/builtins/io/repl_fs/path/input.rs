@@ -13,14 +13,14 @@ pub(super) enum AdmittedText {
 pub(super) fn admit(value: Value) -> BuiltinResult<AdmittedText> {
     match value {
         Value::String(text) => Ok(AdmittedText::Text(text.into_string_unbounded())),
-        Value::StringArray(array) if array.data.len() == 1 => {
-            Ok(AdmittedText::Text(array.data[0].as_str().to_owned()))
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(AdmittedText::Text(array.data()[0].as_str().to_owned()))
         }
         Value::CharArray(chars)
             if chars.rows == 1
                 && crate::builtins::common::shape::effective_rank(&chars.shape) <= 2 =>
         {
-            Ok(AdmittedText::Text(chars.data.iter().collect()))
+            Ok(AdmittedText::Text(chars.data().iter().collect()))
         }
         Value::Tensor(tensor) => numeric_text(tensor).map(AdmittedText::Text),
         Value::GpuTensor(ref handle) if numeric_row(handle.shape()) => {

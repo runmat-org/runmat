@@ -103,7 +103,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::solve::rank"
 )]
-async fn rank_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn rank_builtin(value: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     if crate::builtins::common::validation::value_has_native_integer_class(&value) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &RANK_INTEGER_INPUT_EXTENSION,
@@ -139,7 +139,7 @@ async fn rank_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
             )?;
         }
     }
-    let tol = parse_tolerance_arg(NAME, &rest).map_err(argument_error)?;
+    let tol = parse_tolerance_arg(NAME, rest.view()).map_err(argument_error)?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, NAME)?;
     if crate::builtins::common::validation::value_has_native_integer_class(&value)
         && !crate::builtins::common::validation::native_integer_value_is_exact_f64_async(&value)
@@ -560,6 +560,9 @@ pub(crate) mod tests {
     }
 
     fn rank_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::rank_builtin(value, rest))
+        block_on(super::rank_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 }

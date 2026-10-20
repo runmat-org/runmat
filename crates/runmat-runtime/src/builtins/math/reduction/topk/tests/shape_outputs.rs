@@ -7,9 +7,13 @@ async fn zero_k_on_trailing_dimension_creates_an_empty_axis() {
             tensor(vec![1., 2.], vec![2, 1]),
             Value::ComplexTensor(ComplexTensor::new(vec![(1., 2.), (3., 4.)], vec![2, 1]).unwrap()),
         ] {
-            let result = evaluate_topk(kind, input, &[Value::Num(0.), Value::Num(3.)])
-                .await
-                .unwrap();
+            let result = evaluate_topk(
+                kind,
+                input,
+                crate::call::FunctionArgumentView::from_slice(&[Value::Num(0.), Value::Num(3.)]),
+            )
+            .await
+            .unwrap();
             match result.values {
                 Value::Tensor(value) => assert_eq!(value.shape(), &[2, 1, 0]),
                 Value::ComplexTensor(value) => assert_eq!(value.shape(), &[2, 1, 0]),
@@ -38,23 +42,33 @@ async fn topk_output_and_argument_preflight_precedes_provider_lookup() {
         {
             let _outputs =
                 crate::output_count::push_output_count(Some(3)).expect("output-count scope");
-            let error = evaluate_topk(kind, providerless.clone(), &[Value::Num(1.)])
-                .await
-                .unwrap_err();
+            let error = evaluate_topk(
+                kind,
+                providerless.clone(),
+                crate::call::FunctionArgumentView::from_slice(&[Value::Num(1.)]),
+            )
+            .await
+            .unwrap_err();
             assert_eq!(error.identifier(), Some("RunMat:topk:InvalidArgument"));
             assert!(error.message().contains("maximum is 2"));
         }
-        let error = evaluate_topk(kind, providerless.clone(), &[Value::Num(-1.)])
-            .await
-            .unwrap_err();
+        let error = evaluate_topk(
+            kind,
+            providerless.clone(),
+            crate::call::FunctionArgumentView::from_slice(&[Value::Num(-1.)]),
+        )
+        .await
+        .unwrap_err();
         assert_eq!(error.identifier(), Some("RunMat:topk:InvalidArgument"));
         let _discarded =
             crate::output_count::push_output_count(Some(0)).expect("output-count scope");
-        assert!(
-            evaluate_topk(kind, providerless.clone(), &[Value::Num(-1.)])
-                .await
-                .is_err()
-        );
+        assert!(evaluate_topk(
+            kind,
+            providerless.clone(),
+            crate::call::FunctionArgumentView::from_slice(&[Value::Num(-1.)])
+        )
+        .await
+        .is_err());
         assert_eq!(allocation.probe.retirements(), 0);
         allocation
             .handle
@@ -70,9 +84,13 @@ async fn topk_output_and_argument_preflight_precedes_provider_lookup() {
 #[tokio::test]
 async fn maxk_defaults_to_first_nonsingleton_dimension() {
     let input = tensor(vec![1.0, 4.0, 3.0, 2.0, 6.0, 5.0], vec![3, 2]);
-    let eval = evaluate_topk(TopKKind::Max, input, &[Value::Num(2.0)])
-        .await
-        .unwrap();
+    let eval = evaluate_topk(
+        TopKKind::Max,
+        input,
+        crate::call::FunctionArgumentView::from_slice(&[Value::Num(2.0)]),
+    )
+    .await
+    .unwrap();
     let Value::Tensor(values) = eval.values else {
         panic!("expected tensor");
     };
@@ -87,9 +105,13 @@ async fn maxk_defaults_to_first_nonsingleton_dimension() {
 #[tokio::test]
 async fn mink_supports_explicit_row_dimension() {
     let input = tensor(vec![3.0, 4.0, 1.0, 2.0, 5.0, 6.0], vec![2, 3]);
-    let eval = evaluate_topk(TopKKind::Min, input, &[Value::Num(2.0), Value::Num(2.0)])
-        .await
-        .unwrap();
+    let eval = evaluate_topk(
+        TopKKind::Min,
+        input,
+        crate::call::FunctionArgumentView::from_slice(&[Value::Num(2.0), Value::Num(2.0)]),
+    )
+    .await
+    .unwrap();
     let Value::Tensor(values) = eval.values else {
         panic!("expected tensor");
     };
@@ -104,9 +126,13 @@ async fn mink_supports_explicit_row_dimension() {
 #[tokio::test]
 async fn maxk_clamps_k_to_dimension_length() {
     let input = tensor(vec![2.0, 1.0, 3.0], vec![3, 1]);
-    let eval = evaluate_topk(TopKKind::Max, input, &[Value::Num(10.0)])
-        .await
-        .unwrap();
+    let eval = evaluate_topk(
+        TopKKind::Max,
+        input,
+        crate::call::FunctionArgumentView::from_slice(&[Value::Num(10.0)]),
+    )
+    .await
+    .unwrap();
     let Value::Tensor(values) = eval.values else {
         panic!("expected tensor");
     };
@@ -117,9 +143,13 @@ async fn maxk_clamps_k_to_dimension_length() {
 #[tokio::test]
 async fn topk_dimension_greater_than_rank_returns_input_and_one_indices() {
     let input = tensor(vec![2.0, 1.0, 3.0], vec![3, 1]);
-    let eval = evaluate_topk(TopKKind::Max, input, &[Value::Num(2.0), Value::Num(5.0)])
-        .await
-        .unwrap();
+    let eval = evaluate_topk(
+        TopKKind::Max,
+        input,
+        crate::call::FunctionArgumentView::from_slice(&[Value::Num(2.0), Value::Num(5.0)]),
+    )
+    .await
+    .unwrap();
     let Value::Tensor(values) = eval.values else {
         panic!("expected tensor");
     };
@@ -134,18 +164,26 @@ async fn topk_dimension_greater_than_rank_returns_input_and_one_indices() {
 #[tokio::test]
 async fn topk_rejects_invalid_k() {
     let input = tensor(vec![1.0, 2.0], vec![2, 1]);
-    let err = evaluate_topk(TopKKind::Max, input, &[Value::Num(-1.0)])
-        .await
-        .unwrap_err();
+    let err = evaluate_topk(
+        TopKKind::Max,
+        input,
+        crate::call::FunctionArgumentView::from_slice(&[Value::Num(-1.0)]),
+    )
+    .await
+    .unwrap_err();
     assert!(err.message().contains("k must be nonnegative"));
 }
 
 #[tokio::test]
 async fn topk_allows_zero_k() {
     let input = tensor(vec![1.0, 2.0], vec![2, 1]);
-    let eval = evaluate_topk(TopKKind::Max, input, &[Value::Num(0.0)])
-        .await
-        .unwrap();
+    let eval = evaluate_topk(
+        TopKKind::Max,
+        input,
+        crate::call::FunctionArgumentView::from_slice(&[Value::Num(0.0)]),
+    )
+    .await
+    .unwrap();
     let Value::Tensor(values) = eval.values else {
         panic!("expected tensor");
     };

@@ -518,8 +518,8 @@ impl Camera {
         };
 
         // View space from current pose (independent of projection), after the axis scale.
-        let view =
-            Mat4::look_at_rh(self.position, self.target, self.up) * Mat4::from_scale(self.axis_scale);
+        let view = Mat4::look_at_rh(self.position, self.target, self.up)
+            * Mat4::from_scale(self.axis_scale);
         let corners = [
             Vec3::new(world_min.x, world_min.y, world_min.z),
             Vec3::new(world_max.x, world_min.y, world_min.z),
@@ -573,7 +573,8 @@ impl Camera {
 
         // Unproject to world coordinates
         let view_proj_inv =
-            (self.projection_matrix * self.view_matrix * Mat4::from_scale(self.axis_scale)).inverse();
+            (self.projection_matrix * self.view_matrix * Mat4::from_scale(self.axis_scale))
+                .inverse();
         let world_pos = view_proj_inv * ndc.extend(1.0);
 
         if world_pos.w != 0.0 {

@@ -24,7 +24,7 @@ impl FilterArgs {
         b: Value,
         a: Value,
         x: Value,
-        rest: &[Value],
+        rest: crate::call::FunctionArgumentView<'_>,
         cooperation: &mut SignalCooperation,
     ) -> BuiltinResult<Self> {
         let (zi_raw, dim_raw) = parse_optional_arguments(rest)?;
@@ -145,7 +145,9 @@ impl FilterArgs {
     }
 }
 
-fn parse_optional_arguments(rest: &[Value]) -> BuiltinResult<(Option<Value>, Option<Value>)> {
+fn parse_optional_arguments(
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<(Option<Value>, Option<Value>)> {
     match rest.len() {
         0 => Ok((None, None)),
         1 => Ok((Some(rest[0].clone()), None)),
@@ -162,9 +164,9 @@ fn is_empty_placeholder(value: &Value) -> bool {
         Value::Tensor(t) => tensor::tensor_element_len(t) == 0,
         Value::ComplexTensor(t) => tensor::complex_tensor_element_len(t) == 0,
         Value::LogicalArray(l) => l.data.is_empty(),
-        Value::StringArray(sa) => sa.data.is_empty(),
-        Value::CharArray(ca) => ca.data.is_empty(),
-        Value::Cell(cell) => cell.data.is_empty(),
+        Value::StringArray(sa) => sa.data().is_empty(),
+        Value::CharArray(ca) => ca.data().is_empty(),
+        Value::Cell(cell) => cell.data().is_empty(),
         Value::String(s) => s.is_empty(),
         Value::Struct(st) => st.fields.is_empty(),
         _ => false,

@@ -2,8 +2,8 @@
 
 use runmat_mir::{MirCallee, MirExpressionStep, MirRvalue, MirStmtKind};
 use runmat_types::{
-    ClassIdentity, EventDeclaration, MemberAccess, MemberName, MethodAttributes, MethodName,
-    FunctionId, PropertyAttributes,
+    ClassIdentity, EventDeclaration, FunctionId, MemberAccess, MemberName, MethodAttributes,
+    MethodName, PropertyAttributes,
 };
 use serde::{Deserialize, Serialize};
 

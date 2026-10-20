@@ -12,7 +12,7 @@ fn string_element_count(shape: &[usize]) -> Option<usize> {
 /// UTF-8 payload have independent physical owners under finite admission.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StringArray {
-    pub data: ExactArrayStorage<Utf8Text>,
+    pub(crate) data: ExactArrayStorage<Utf8Text>,
     pub shape: SharedShape,
     pub rows: usize,
     pub cols: usize,
@@ -58,6 +58,20 @@ impl StringArray {
 
     fn from_validated_storage(data: ExactArrayStorage<Utf8Text>, shape: SharedShape) -> Self {
         let (rows, cols) = shape_rows_cols(&shape);
+        let data = if data.is_shallow_clone() {
+            data
+        } else {
+            let values = data
+                .try_into_owned()
+                .expect("unpublished string slots are unique")
+                .try_into_unbounded_vec()
+                .expect("unpublished string slots have no claim");
+            if values.capacity() == 0 {
+                ExactArrayStorage::empty()
+            } else {
+                ExactArrayStorage::shared_unbounded(values)
+            }
+        };
         Self {
             data,
             shape,
@@ -125,6 +139,40 @@ impl StringArray {
 
     pub fn data(&self) -> &[Utf8Text] {
         self.data.as_slice()
+    }
+    pub fn data_owner(&self) -> &ExactArrayStorage<Utf8Text> {
+        &self.data
+    }
+    pub fn into_parts(self) -> (ExactArrayStorage<Utf8Text>, SharedShape, usize, usize) {
+        (self.data, self.shape, self.rows, self.cols)
+    }
+    pub fn make_data_unique_unbounded(&mut self) -> Result<(), crate::ExactArrayMutationError> {
+        self.data.make_unique_unbounded()
+    }
+
+    /// Grow ordinary storage with empty strings, publishing collection and
+    /// shape together. Admitted arrays require a newly admitted destination.
+    pub fn grow_unbounded(&mut self, shape: Vec<usize>) -> Result<(), String> {
+        let count = string_element_count(&shape)
+            .ok_or_else(|| "StringArray shape exceeds platform limits".to_string())?;
+        if count < self.data.len() {
+            return Err("StringArray growth cannot remove elements".into());
+        }
+        if self.data.is_exact() || self.shape.is_admitted() {
+            return Err("StringArray growth requires a new admitted destination".into());
+        }
+        self.data
+            .make_unique_unbounded()
+            .map_err(|e| e.to_string())?;
+        let shape = SharedShape::new_unmanaged(shape);
+        while self.data.len() < count {
+            self.data
+                .try_push_unbounded(Utf8Text::default())
+                .map_err(|_| "StringArray growth requires unique ordinary storage".to_string())?;
+        }
+        let replacement = Self::from_validated_storage(std::mem::take(&mut self.data), shape);
+        *self = replacement;
+        Ok(())
     }
 
     pub fn shape(&self) -> &[usize] {

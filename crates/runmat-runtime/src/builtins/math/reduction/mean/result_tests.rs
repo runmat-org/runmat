@@ -390,7 +390,7 @@ fn default_dim_and_vec_one_element_means_publish_the_shared_public_shape() {
             arguments.push(Value::from("native"));
             let result = futures::executor::block_on(mean_builtin(
                 Value::GpuTensor(input.handle.clone()),
-                arguments.clone(),
+                crate::builtins::common::test_support::builtin_arguments(arguments.clone()),
             ))
             .unwrap();
             let Value::GpuTensor(result) = result else {
@@ -413,7 +413,11 @@ fn default_dim_and_vec_one_element_means_publish_the_shared_public_shape() {
                     Value::Tensor(Tensor::new(vec![3.0, 5.0], vec![1, 1, 2]).unwrap())
                 }
             };
-            let host = futures::executor::block_on(mean_builtin(host, arguments)).unwrap();
+            let host = futures::executor::block_on(mean_builtin(
+                host,
+                crate::builtins::common::test_support::builtin_arguments(arguments),
+            ))
+            .unwrap();
             match (precision, host) {
                 (ProviderPrecision::F32, Value::Tensor(tensor)) => {
                     assert_eq!(tensor.shape(), &[1, 1]);
@@ -436,8 +440,11 @@ fn empty_mean_keeps_non_scalar_shape_and_nan_publication() {
         } else {
             Value::Tensor(Tensor::new(Vec::new(), vec![1, 0, 2]).unwrap())
         };
-        let output =
-            futures::executor::block_on(mean_builtin(input, vec![Value::from("native")])).unwrap();
+        let output = futures::executor::block_on(mean_builtin(
+            input,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from("native")]),
+        ))
+        .unwrap();
         let Value::Tensor(output) = output else {
             panic!("empty-source mean with two output elements remains a tensor");
         };
@@ -576,7 +583,7 @@ fn omitnan_single_uses_double_reduction_then_restores_requested_class_resident()
             provider.reset_telemetry();
             let result = futures::executor::block_on(mean_builtin(
                 Value::GpuTensor(input.clone()),
-                controls,
+                crate::builtins::common::test_support::builtin_arguments(controls),
             ))
             .unwrap();
             let Value::GpuTensor(output) = result else {

@@ -142,7 +142,7 @@ fn forced_generic_native_deal_preserves_requested_discarded_and_zero_outputs() {
                 &unit,
                 ProcedureInvocation {
                     target: ProcedureTarget::Function(name.into()),
-                    arguments: vec![input.clone()],
+                    arguments: crate::ProcedureArguments::Source(vec![input.clone()]),
                     requested_outputs,
                 },
                 &control,
@@ -200,7 +200,7 @@ fn forced_generic_native_anonymous_body_forwards_requested_outputs() {
             &unit,
             ProcedureInvocation {
                 target: ProcedureTarget::Function("nativeAnonForward".into()),
-                arguments: vec![Value::Num(5.0)],
+                arguments: crate::ProcedureArguments::Source(vec![Value::Num(5.0)]),
                 requested_outputs: 2,
             },
             &control,
@@ -212,7 +212,7 @@ fn forced_generic_native_anonymous_body_forwards_requested_outputs() {
             &unit,
             ProcedureInvocation {
                 target: ProcedureTarget::Function("nativeAnonZero".into()),
-                arguments: vec![Value::Num(5.0)],
+                arguments: crate::ProcedureArguments::Source(vec![Value::Num(5.0)]),
                 requested_outputs: 0,
             },
             &control,
@@ -239,7 +239,7 @@ fn forced_generic_native_deal_count_error_does_not_duplicate_prior_effects() {
             &unit,
             ProcedureInvocation {
                 target: ProcedureTarget::Function("nativeDealNoReplay".into()),
-                arguments: Vec::new(),
+                arguments: crate::ProcedureArguments::Source(Vec::new()),
                 requested_outputs: 1,
             },
             &InvocationControl::default().force_generic_native(),
@@ -292,7 +292,7 @@ fn forced_generic_native_deal_count_error_keeps_its_identifier() {
             &unit,
             ProcedureInvocation {
                 target: ProcedureTarget::Function("nativeDealMismatch".into()),
-                arguments: vec![wide_tensor()],
+                arguments: crate::ProcedureArguments::Source(vec![wide_tensor()]),
                 requested_outputs: 3,
             },
             &InvocationControl::default().force_generic_native(),

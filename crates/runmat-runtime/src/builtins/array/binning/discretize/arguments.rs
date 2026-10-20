@@ -14,9 +14,9 @@ pub(super) struct Inputs {
 pub(super) async fn gather(
     x: Value,
     edges_or_count: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Inputs> {
-    super::admission::validate(&x, &edges_or_count, &rest)?;
+    super::admission::validate(&x, &edges_or_count, rest.view())?;
     let protected = [&x, &edges_or_count]
         .into_iter()
         .chain(rest.iter())
@@ -63,8 +63,8 @@ pub(super) fn scalar_text<'a>(value: &'a Value, context: &str) -> BuiltinResult<
     validate_scalar_text(value, context)?;
     match value {
         Value::String(value) => Ok(Cow::Borrowed(value.as_str())),
-        Value::StringArray(value) => Ok(Cow::Borrowed(value.data[0].as_str())),
-        Value::CharArray(value) => Ok(Cow::Owned(value.data.iter().collect())),
+        Value::StringArray(value) => Ok(Cow::Borrowed(value.data()[0].as_str())),
+        Value::CharArray(value) => Ok(Cow::Owned(value.data().iter().collect())),
         other => Err(error::invalid(format!(
             "discretize: {context} must be text, got {other:?}"
         ))),
@@ -74,7 +74,7 @@ pub(super) fn scalar_text<'a>(value: &'a Value, context: &str) -> BuiltinResult<
 pub(super) fn validate_scalar_text(value: &Value, context: &str) -> BuiltinResult<()> {
     match value {
         Value::String(_) => Ok(()),
-        Value::StringArray(value) if value.data.len() == 1 => Ok(()),
+        Value::StringArray(value) if value.data().len() == 1 => Ok(()),
         Value::CharArray(value)
             if value.rows <= 1
                 && crate::builtins::common::shape::effective_rank(&value.shape) <= 2 =>

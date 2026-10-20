@@ -96,7 +96,7 @@ fn fill_type(args: &[Type], ctx: &ResolveContext) -> Type {
     binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::fill"
 )]
-async fn create_array_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn create_array_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     let parsed = ParsedFill::parse_create_array(args).await?;
     build_output(parsed)
 }
@@ -193,13 +193,13 @@ impl FillScalar {
                 ))
             }
             Value::CharArray(ca) => {
-                if ca.data.len() != 1 {
+                if ca.data().len() != 1 {
                     return Err("fill: fill value must be a scalar".to_string());
                 }
-                Ok(FillScalar::Real(ca.data[0] as u32 as f64))
+                Ok(FillScalar::Real(ca.data()[0] as u32 as f64))
             }
-            Value::StringArray(sa) if sa.data.len() == 1 && sa.data[0].len() == 1 => {
-                let ch = sa.data[0].chars().next().unwrap();
+            Value::StringArray(sa) if sa.data().len() == 1 && sa.data()[0].len() == 1 => {
+                let ch = sa.data()[0].chars().next().unwrap();
                 Ok(FillScalar::Real(ch as u32 as f64))
             }
             Value::String(s) if s.len() == 1 => {
@@ -256,7 +256,7 @@ impl FillScalar {
 }
 
 impl ParsedFill {
-    async fn parse_create_array(args: Vec<Value>) -> Result<Self, String> {
+    async fn parse_create_array(args: crate::call::BuiltinArguments) -> Result<Self, String> {
         let mut dims = Vec::new();
         let mut class_name: Option<String> = None;
         let mut fill_value: Option<Value> = None;
@@ -1381,13 +1381,15 @@ pub(crate) mod tests {
             )
             .expect("paired fill value");
 
-            let result = block_on(create_array_builtin(vec![
-                Value::Num(2.0),
-                Value::from("Like"),
-                Value::GpuTensor(prototype.clone()),
-                Value::from("FillValue"),
-                Value::ComplexTensor(fill_value),
-            ]))
+            let result = block_on(create_array_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(2.0),
+                    Value::from("Like"),
+                    Value::GpuTensor(prototype.clone()),
+                    Value::from("FillValue"),
+                    Value::ComplexTensor(fill_value),
+                ]),
+            ))
             .expect("resident paired complex integer createArray");
             let Value::GpuTensor(output) = result else {
                 panic!("expected resident paired output");
@@ -1589,12 +1591,14 @@ pub(crate) mod tests {
 
     #[test]
     fn create_array_uses_dimensions_first_and_preserves_integer_fill_class() {
-        let result = block_on(create_array_builtin(vec![
-            Value::Int(IntValue::U16(2)),
-            Value::Int(IntValue::U32(3)),
-            Value::from("FillValue"),
-            Value::Int(IntValue::U64(9_007_199_254_740_993)),
-        ]))
+        let result = block_on(create_array_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Int(IntValue::U16(2)),
+                Value::Int(IntValue::U32(3)),
+                Value::from("FillValue"),
+                Value::Int(IntValue::U64(9_007_199_254_740_993)),
+            ]),
+        ))
         .expect("createArray integer FillValue");
         let Value::Tensor(tensor) = result else {
             panic!("expected tensor");
@@ -1630,11 +1634,13 @@ pub(crate) mod tests {
 
     #[test]
     fn create_array_negative_dimensions_normalize_to_zero() {
-        let result = block_on(create_array_builtin(vec![
-            Value::Int(IntValue::I16(-3)),
-            Value::Num(4.0),
-            Value::from("uint8"),
-        ]))
+        let result = block_on(create_array_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Int(IntValue::I16(-3)),
+                Value::Num(4.0),
+                Value::from("uint8"),
+            ]),
+        ))
         .expect("createArray negative dimension");
         let Value::Tensor(tensor) = result else {
             panic!("expected empty tensor");
@@ -1652,12 +1658,14 @@ pub(crate) mod tests {
                     shape: &[1, 1],
                 })
                 .expect("upload single FillValue");
-            let result = block_on(create_array_builtin(vec![
-                Value::Num(2.0),
-                Value::from("uint8"),
-                Value::from("FillValue"),
-                Value::GpuTensor(single_fill),
-            ]))
+            let result = block_on(create_array_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(2.0),
+                    Value::from("uint8"),
+                    Value::from("FillValue"),
+                    Value::GpuTensor(single_fill),
+                ]),
+            ))
             .expect("explicit uint8 with GPU single FillValue");
             let Value::GpuTensor(handle) = result else {
                 panic!("expected resident uint8 output");
@@ -1685,13 +1693,15 @@ pub(crate) mod tests {
                     shape: &[1, 1],
                 })
                 .expect("upload integer FillValue");
-            let result = block_on(create_array_builtin(vec![
-                Value::Num(1.0),
-                Value::Num(3.0),
-                Value::from("uint8"),
-                Value::from("FillValue"),
-                Value::GpuTensor(integer_fill),
-            ]))
+            let result = block_on(create_array_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(1.0),
+                    Value::Num(3.0),
+                    Value::from("uint8"),
+                    Value::from("FillValue"),
+                    Value::GpuTensor(integer_fill),
+                ]),
+            ))
             .expect("explicit uint8 with GPU integer FillValue");
             let Value::GpuTensor(handle) = result else {
                 panic!("expected resident uint8 output");
@@ -1718,25 +1728,29 @@ pub(crate) mod tests {
     #[test]
     fn create_array_rejects_classname_with_like() {
         let prototype = Tensor::new_integer(IntegerStorage::I32(vec![0]), vec![1, 1]).unwrap();
-        let result = block_on(create_array_builtin(vec![
-            Value::Num(2.0),
-            Value::from("int32"),
-            Value::from("Like"),
-            Value::Tensor(prototype),
-        ]));
+        let result = block_on(create_array_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(2.0),
+                Value::from("int32"),
+                Value::from("Like"),
+                Value::Tensor(prototype),
+            ]),
+        ));
         assert!(result.is_err());
     }
 
     #[test]
     fn create_array_complex_fillvalue_dominates_real_double_like() {
         let prototype = Tensor::new(vec![0.0], vec![1, 1]).expect("double prototype");
-        let result = block_on(create_array_builtin(vec![
-            Value::Num(2.0),
-            Value::from("Like"),
-            Value::Tensor(prototype),
-            Value::from("FillValue"),
-            Value::Complex(1.0, 2.0),
-        ]))
+        let result = block_on(create_array_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(2.0),
+                Value::from("Like"),
+                Value::Tensor(prototype),
+                Value::from("FillValue"),
+                Value::Complex(1.0, 2.0),
+            ]),
+        ))
         .expect("complex FillValue with real Like");
         let Value::ComplexTensor(tensor) = result else {
             panic!("expected complex double tensor");
@@ -1749,13 +1763,15 @@ pub(crate) mod tests {
     #[test]
     fn create_array_complex_fillvalue_preserves_real_single_like_precision() {
         let prototype = Tensor::from_f32(vec![0.0], vec![1, 1]).expect("single prototype");
-        let result = block_on(create_array_builtin(vec![
-            Value::Num(2.0),
-            Value::from("Like"),
-            Value::Tensor(prototype),
-            Value::from("FillValue"),
-            Value::Complex(1.25, -2.5),
-        ]))
+        let result = block_on(create_array_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(2.0),
+                Value::from("Like"),
+                Value::Tensor(prototype),
+                Value::from("FillValue"),
+                Value::Complex(1.25, -2.5),
+            ]),
+        ))
         .expect("complex FillValue with single Like");
         let Value::ComplexTensor(tensor) = result else {
             panic!("expected complex single tensor");
@@ -1773,11 +1789,13 @@ pub(crate) mod tests {
         )
         .and_then(|storage| ComplexTensor::new_integer(storage, vec![1, 1]))
         .expect("complex uint64 FillValue");
-        let result = block_on(create_array_builtin(vec![
-            Value::Num(2.0),
-            Value::from("FillValue"),
-            Value::ComplexTensor(fill_value),
-        ]))
+        let result = block_on(create_array_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(2.0),
+                Value::from("FillValue"),
+                Value::ComplexTensor(fill_value),
+            ]),
+        ))
         .expect("exact complex integer FillValue");
         let Value::ComplexTensor(tensor) = result else {
             panic!("expected complex integer tensor");
@@ -1793,11 +1811,13 @@ pub(crate) mod tests {
             IntegerComplexStorage::new(IntegerStorage::U64(vec![1]), IntegerStorage::U64(vec![2]))
                 .and_then(|storage| ComplexTensor::new_integer(storage, vec![1, 1]))
                 .expect("complex uint64 prototype");
-        let result = block_on(create_array_builtin(vec![
-            Value::Num(2.0),
-            Value::from("Like"),
-            Value::ComplexTensor(prototype),
-        ]))
+        let result = block_on(create_array_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(2.0),
+                Value::from("Like"),
+                Value::ComplexTensor(prototype),
+            ]),
+        ))
         .expect("createArray complex integer Like");
         let Value::ComplexTensor(tensor) = result else {
             panic!("expected complex integer tensor");

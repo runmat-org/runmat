@@ -15,8 +15,8 @@ struct TrainingOptionsView<'a> {
 
 impl<'a> TrainingOptionsView<'a> {
     fn parse(object: &'a ObjectInstance, function: &'static str) -> BuiltinResult<Self> {
-        let mut values = HashMap::with_capacity(object.properties.len());
-        for (name, value) in &object.properties {
+        let mut values = HashMap::with_capacity(object.properties().len());
+        for (name, value) in object.properties() {
             let key = O::from_name(name).ok_or_else(|| {
                 deep_learning_error(
                     function,
@@ -110,7 +110,7 @@ impl TrainingConfig {
                 format!("{function}: expected a trainingOptions object"),
             ));
         };
-        let solver = Solver::from_identity(&object.class_name).ok_or_else(|| {
+        let solver = Solver::from_identity(object.class_name()).ok_or_else(|| {
             deep_learning_error(
                 function,
                 format!("{function}: expected a trainingOptions object"),

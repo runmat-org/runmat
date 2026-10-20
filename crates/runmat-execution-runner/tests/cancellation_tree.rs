@@ -57,6 +57,7 @@ fn task_cancellation_retire_only_the_selected_active_or_queued_task() {
         .driver
         .handle(DriverCommand::CancelTask {
             task_id: queued_id,
+            reason: CancellationReason::User,
             now_millis: 10,
         })
         .unwrap();
@@ -74,6 +75,7 @@ fn task_cancellation_retire_only_the_selected_active_or_queued_task() {
         .driver
         .handle(DriverCommand::CancelTask {
             task_id: active_id,
+            reason: CancellationReason::User,
             now_millis: 11,
         })
         .unwrap();

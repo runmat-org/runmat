@@ -1,5 +1,5 @@
 use super::*;
-use runmat_value::{StringArray, StructValue, Tensor};
+use runmat_value::{StringArray, Tensor};
 
 #[cfg(test)]
 mod tests;
@@ -26,7 +26,7 @@ pub(super) async fn stats_value(
     cooperation: &mut FitCooperation,
 ) -> BuiltinResult<Value> {
     check()?;
-    let mut st = StructValue::new();
+    let mut st = runmat_value::UnboundedStructValueBuilder::new();
     let class_count = data.classes.len();
     let logits = data.outcomes.len();
     st.insert(
@@ -68,7 +68,7 @@ pub(super) async fn stats_value(
         class_names_value(&data.classes, class_count, check, cooperation).await?,
     );
     check()?;
-    Ok(Value::Struct(st))
+    Ok(Value::Struct(st.finish()))
 }
 
 async fn matrix_value(

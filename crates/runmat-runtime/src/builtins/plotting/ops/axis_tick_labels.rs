@@ -22,12 +22,12 @@ pub fn axis_tick_labels_builtin(
     runtime: Option<&crate::context::RuntimeContext>,
     builtin: &'static str,
     axis: TickAxis,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    let (target, args) = prepare_axes_call(runtime, builtin, &args)?;
-    match args {
-        [] => query_labels(builtin, axis, &target.resolve(builtin)?),
-        [value] => {
+    let (target, args) = prepare_axes_call(runtime, builtin, args.view())?;
+    match (args.len(), args.first()) {
+        (0, _) => query_labels(builtin, axis, &target.resolve(builtin)?),
+        (1, Some(value)) => {
             if let Some(text) = value_as_string(value) {
                 match text.trim().to_ascii_lowercase().as_str() {
                     "auto" => {
@@ -277,11 +277,11 @@ fn labels_padded_to_ticks(mut labels: Vec<String>, tick_count: usize) -> Vec<Str
 fn labels_from_value(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<String>> {
     match value {
         Value::String(s) => Ok(vec![s.as_str().to_owned()]),
-        Value::StringArray(strings) => Ok(strings.data.iter().map(|text| text.as_str().to_owned()).collect()),
+        Value::StringArray(strings) => Ok(strings.data().iter().map(|text| text.as_str().to_owned()).collect()),
         Value::CharArray(chars) => Ok(char_array_rows(chars)),
         Value::Cell(cell) => {
-            let mut labels = Vec::with_capacity(cell.data.len());
-            for entry in &cell.data {
+            let mut labels = Vec::with_capacity(cell.data().len());
+            for entry in cell.data() {
                 labels.extend(labels_from_value(entry, builtin)?);
             }
             Ok(labels)
@@ -302,7 +302,7 @@ fn char_array_rows(chars: &CharArray) -> Vec<String> {
         .map(|row| {
             let start = row * chars.cols;
             let end = start + chars.cols;
-            chars.data[start..end]
+            chars.data()[start..end]
                 .iter()
                 .collect::<String>()
                 .trim_end()
@@ -322,7 +322,7 @@ fn label_value(labels: Vec<String>) -> Value {
 fn value_as_string(value: &Value) -> Option<String> {
     match value {
         Value::String(s) => Some(s.as_str().to_owned()),
-        Value::CharArray(chars) if chars.rows == 1 => Some(chars.data.iter().collect()),
+        Value::CharArray(chars) if chars.rows == 1 => Some(chars.data().iter().collect()),
         _ => None,
     }
 }
@@ -332,10 +332,10 @@ pub(crate) fn label_cell_texts(value: &Value) -> Vec<String> {
     let Value::Cell(cell) = value else {
         panic!("expected cell labels, got {value:?}");
     };
-    cell.data
+    cell.data()
         .iter()
         .map(|entry| match entry {
-            Value::CharArray(chars) => chars.data.iter().collect(),
+            Value::CharArray(chars) => chars.data().iter().collect(),
             other => panic!("expected char label, got {other:?}"),
         })
         .collect()

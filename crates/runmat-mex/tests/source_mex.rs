@@ -376,7 +376,7 @@ fn fortran_container_api_uses_fortran_index_and_field_number_conventions() {
     let Value::Cell(cell) = &result.outputs[0] else {
         panic!("first Fortran output must be a cell array");
     };
-    assert_eq!(cell.data, vec![Value::Num(7.0)]);
+    assert_eq!(cell.data(), vec![Value::Num(7.0)]);
     let Value::Struct(structure) = &result.outputs[1] else {
         panic!("second Fortran output must be a structure");
     };
@@ -1060,23 +1060,22 @@ public:
     )
     .unwrap();
 
-    let mut object = runmat_value::ObjectInstance::new("FixtureObject");
-    object.properties.insert("Value".into(), Value::Num(4.0));
-    object
-        .properties
-        .insert("Untouched".into(), Value::String("shared".into()));
+    let mut object = runmat_value::UnboundedObjectBuilder::new("FixtureObject");
+    object.insert("Value".into(), Value::Num(4.0));
+    object.insert("Untouched".into(), Value::String("shared".into()));
+    let object = object.finish();
     let artifact = MexBuild::new(&source, directory.path()).compile().unwrap();
     let module = MexModule::load(&artifact.module).unwrap();
     let result = module
         .invoke(&[Value::Object(object.clone())], 2, module.api_mode())
         .unwrap();
-    assert_eq!(object.properties.get("Value"), Some(&Value::Num(4.0)));
+    assert_eq!(object.properties().get("Value"), Some(&Value::Num(4.0)));
     let Value::Object(changed) = &result.outputs[0] else {
         panic!("C++ object output must remain an object");
     };
-    assert_eq!(changed.properties.get("Value"), Some(&Value::Num(9.0)));
+    assert_eq!(changed.properties().get("Value"), Some(&Value::Num(9.0)));
     assert_eq!(
-        changed.properties.get("Untouched"),
+        changed.properties().get("Untouched"),
         Some(&Value::String("shared".into()))
     );
     let Value::ObjectArray(states) = &result.outputs[1] else {
@@ -1092,7 +1091,7 @@ public:
             let Value::Object(value) = value else {
                 panic!("enum element must remain an object");
             };
-            value.properties.get("__enum_member__").cloned()
+            value.properties().get("__enum_member__").cloned()
         })
         .collect::<Vec<_>>();
     assert_eq!(
@@ -1885,8 +1884,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
         let Value::Object(object) = &result.outputs[2] else {
             panic!("classed struct must become a RunMat object");
         };
-        assert_eq!(object.class_name.display_name(), "FixtureObject");
-        assert_eq!(object.properties.get("value"), Some(&Value::Num(9.0)));
+        assert_eq!(object.class_name().display_name(), "FixtureObject");
+        assert_eq!(object.properties().get("value"), Some(&Value::Num(9.0)));
         assert_eq!(result.outputs[3], Value::Complex(2.0, 5.0));
     }
 }
@@ -2174,7 +2173,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
     let Value::Cell(cell) = &result.outputs[0] else {
         panic!("first output must be a cell array");
     };
-    assert_eq!(cell.data, vec![Value::Num(7.0)]);
+    assert_eq!(cell.data(), vec![Value::Num(7.0)]);
     let Value::Struct(structure) = &result.outputs[1] else {
         panic!("second output must be a struct");
     };

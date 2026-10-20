@@ -108,7 +108,9 @@ mod test_session {
     use std::ops::Deref;
     use std::sync::{LazyLock, Mutex, MutexGuard};
 
-    use super::{WgpuProvider, WgpuProviderOptions};
+    use runmat_accelerate_api::ThreadProviderGuard;
+
+    use super::{register_wgpu_provider, WgpuProvider, WgpuProviderOptions};
 
     static TEST_PROVIDER_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
@@ -144,7 +146,44 @@ mod test_session {
             _guard: guard,
         })
     }
+
+    /// Tests of registered-owner semantics share the production singleton,
+    /// exclusively with both retained and independently scoped test devices.
+    pub(crate) struct RetainedWgpuTestSession {
+        provider: &'static WgpuProvider,
+        // Restore thread selection before releasing exclusive test access.
+        _selection: ThreadProviderGuard,
+        _guard: MutexGuard<'static, ()>,
+    }
+
+    impl RetainedWgpuTestSession {
+        pub(crate) fn provider(&self) -> &'static WgpuProvider {
+            self.provider
+        }
+    }
+
+    pub(crate) fn register_retained_test_wgpu_provider(
+        options: WgpuProviderOptions,
+    ) -> anyhow::Result<RetainedWgpuTestSession> {
+        let guard = TEST_PROVIDER_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // Registration selects its singleton on this thread, including under
+        // cfg(test). Capture the old selection first, also covering failures.
+        let selection = ThreadProviderGuard::set(None);
+        let provider = register_wgpu_provider(options)?;
+        // SAFETY: the production singleton retains this same physical owner
+        // for process lifetime. No scoped provider or borrowed façade is registered.
+        unsafe { runmat_accelerate_api::register_device_provider(provider) };
+        Ok(RetainedWgpuTestSession {
+            provider,
+            _selection: selection,
+            _guard: guard,
+        })
+    }
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
-pub(crate) use test_session::{register_test_wgpu_provider, WgpuTestSession};
+pub(crate) use test_session::{
+    register_retained_test_wgpu_provider, register_test_wgpu_provider, WgpuTestSession,
+};

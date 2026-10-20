@@ -3,7 +3,11 @@ use super::{edges, error, labels::Labels, numeric};
 use crate::{builtins::common::shape::effective_rank, BuiltinResult};
 use runmat_value::Value;
 
-pub(super) fn validate(x: &Value, edge_input: &Value, rest: &[Value]) -> BuiltinResult<()> {
+pub(super) fn validate(
+    x: &Value,
+    edge_input: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     let outputs = crate::output_count::current_output_count();
     if outputs.is_some_and(|count| count > 2) {
         return Err(error::invalid("discretize: too many output arguments"));

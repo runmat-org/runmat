@@ -12,7 +12,7 @@ use runmat_value::Value;
 )]
 pub async fn rethrow_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     match args.len() {
         0 => {
@@ -66,6 +66,18 @@ mod tests {
     use futures::executor::block_on;
     use runmat_value::MException;
     use std::rc::Rc;
+
+    async fn rethrow_builtin_registered(
+        runtime: Option<crate::context::RuntimeContext>,
+        values: Vec<Value>,
+    ) -> crate::BuiltinResult<Value> {
+        let values = match runtime.as_ref() {
+            Some(runtime) => crate::execution::RootedValues::in_context(values, runtime)?,
+            None => crate::execution::RootedValues::new(values)
+                .map_err(|error| error.into_runtime_error())?,
+        };
+        super::rethrow_builtin_registered(runtime, values.into()).await
+    }
 
     fn runtime() -> crate::context::RuntimeContext {
         crate::context::RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))

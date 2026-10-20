@@ -71,7 +71,9 @@ fn nested_resident_missingness_checks_content_and_preserves_aliases() {
                 assert_eq!(download.shape, vec![1, 1]);
                 let args = vec![value.clone()];
                 // Abandoning an actual callable future never adopts or frees a borrowed input.
-                drop(must_be_nonmissing::evaluate(args));
+                drop(must_be_nonmissing::evaluate(
+                    crate::builtins::common::validation::tests::retained_arguments(args),
+                ));
                 assert!(block_on(provider.download_numeric(&handle)).is_ok());
                 let weak = handle.downgrade();
                 drop(handle);
@@ -115,12 +117,14 @@ fn invalid_range_controls_and_comparison_shapes_precede_downloads() {
         let handle =
             crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor).unwrap();
         let value = Value::GpuTensor(handle.clone());
-        let error = block_on(must_be_in_range::evaluate(vec![
-            value.clone(),
-            Value::Num(0.0),
-            Value::Num(3.0),
-            Value::String("bad-option".into()),
-        ]))
+        let error = block_on(must_be_in_range::evaluate(
+            crate::builtins::common::validation::tests::retained_arguments(vec![
+                value.clone(),
+                Value::Num(0.0),
+                Value::Num(3.0),
+                Value::String("bad-option".into()),
+            ]),
+        ))
         .unwrap_err();
         assert_eq!(
             error.identifier(),

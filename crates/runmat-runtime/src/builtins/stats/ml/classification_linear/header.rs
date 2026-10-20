@@ -29,7 +29,7 @@ pub(super) struct NamedOption {
 }
 
 impl HeaderInspection {
-    pub fn inspect(first: &Value, rest: &[Value]) -> Self {
+    pub fn inspect(first: &Value, rest: crate::call::FunctionArgumentView<'_>) -> Self {
         let first_name = rest.first().and_then(scalar_text);
         let first_identity = first_name
             .as_deref()
@@ -117,7 +117,10 @@ impl HeaderInspection {
 }
 
 impl FitclinearArguments {
-    pub fn preflight_values(mut self, rest: &[Value]) -> BuiltinResult<Self> {
+    pub fn preflight_values(
+        mut self,
+        rest: crate::call::FunctionArgumentView<'_>,
+    ) -> BuiltinResult<Self> {
         for option in &mut self.options {
             if option.name.identity.ignored() {
                 option.predecoded = Some(FitclinearAction::Ignored);
@@ -152,7 +155,7 @@ pub(super) fn preflight_matrix_rank(first: &Value) -> BuiltinResult<()> {
 
 pub(super) fn preflight_response_shape(
     first: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     arguments: &FitclinearArguments,
 ) -> BuiltinResult<()> {
     let response = if is_table_value(first) {

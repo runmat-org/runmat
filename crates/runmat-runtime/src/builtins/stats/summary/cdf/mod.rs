@@ -10,7 +10,7 @@ use runmat_value::Value;
 pub(crate) async fn cdf_builtin(
     distribution: Value,
     x: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     super::fitted_distribution::evaluate_cdf_entry(distribution, x, rest).await
 }

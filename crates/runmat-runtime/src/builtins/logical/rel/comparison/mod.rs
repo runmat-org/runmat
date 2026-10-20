@@ -187,20 +187,20 @@ fn integer_operator(operator: RelationalOperator) -> IntegerComparisonOp {
 fn normalize_text(lhs: Value, rhs: Value) -> (Value, Value) {
     match (lhs, rhs) {
         (Value::CharArray(chars), Value::String(text)) => (
-            Value::string(chars.data.into_char_iter().collect::<String>()),
+            Value::string(chars.data().iter().copied().collect::<String>()),
             Value::String(text),
         ),
         (Value::String(text), Value::CharArray(chars)) => (
             Value::String(text),
-            Value::string(chars.data.into_char_iter().collect::<String>()),
+            Value::string(chars.data().iter().copied().collect::<String>()),
         ),
         (Value::CharArray(chars), Value::StringArray(text)) => (
-            Value::string(chars.data.into_char_iter().collect::<String>()),
+            Value::string(chars.data().iter().copied().collect::<String>()),
             Value::StringArray(text),
         ),
         (Value::StringArray(text), Value::CharArray(chars)) => (
             Value::StringArray(text),
-            Value::string(chars.data.into_char_iter().collect::<String>()),
+            Value::string(chars.data().iter().copied().collect::<String>()),
         ),
         values => values,
     }

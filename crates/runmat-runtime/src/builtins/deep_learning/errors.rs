@@ -6,12 +6,11 @@ pub(in crate::builtins) fn any_type(_args: &[Type], _ctx: &ResolveContext) -> Ty
     Type::Unknown
 }
 
-pub(in crate::builtins) async fn gather_args(args: Vec<Value>) -> BuiltinResult<Vec<Value>> {
-    let mut gathered = Vec::with_capacity(args.len());
-    for value in args {
-        gathered.push(gather_if_needed_async(&value).await?);
-    }
-    Ok(gathered)
+pub(in crate::builtins) async fn gather_args(
+    args: crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    crate::dispatcher::gather_builtin_arguments_async(args, runtime).await
 }
 
 pub(in crate::builtins) fn deep_learning_error(

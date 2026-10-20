@@ -239,7 +239,7 @@ mod tests {
                 .expect("resident callback capture")
                 .handle;
             let mut object = ObjectInstance::new("timer");
-            object.properties.insert(
+            object.replace_property_unbounded(
                 "TimerFcn".into(),
                 Value::Closure(Closure::from_data(runmat_value::ClosureData {
                     lexical_environment: None,

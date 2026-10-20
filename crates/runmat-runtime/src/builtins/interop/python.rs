@@ -2,7 +2,7 @@
 
 use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
-use runmat_value::{CellArray, ObjectInstance, Value};
+use runmat_value::Value;
 
 use crate::execution::RootedValue;
 use crate::{build_runtime_error, BuiltinResult};
@@ -37,7 +37,7 @@ pub use runmat_builtins::{
 async fn invoke_python(
     context: Option<crate::context::RuntimeContext>,
     operation: PythonBuiltinOperation,
-    arguments: Vec<Value>,
+    arguments: crate::call::BuiltinArguments,
 ) -> BuiltinResult<RootedValue> {
     #[cfg(target_arch = "wasm32")]
     {
@@ -62,14 +62,13 @@ async fn invoke_python(
             .require_foreign(symbol)
             .map_err(|error| error.into_runtime_error())?
             .clone();
-        let arguments = crate::execution::RootedValues::in_context(arguments, &context)?;
         let sequence = context
             .scope(service.invoke(
                 context.clone(),
                 crate::context::ForeignCall {
                     adapter: runmat_python::PYTHON_ADAPTER_ID.into(),
                     symbol: symbol.into(),
-                    arguments: crate::call::RootedFunctionArguments::ordinary(arguments),
+                    arguments: arguments.into_function_arguments(),
                     requested_outputs: crate::current_requested_outputs(),
                 },
             ))
@@ -94,7 +93,7 @@ async fn invoke_python(
 )]
 async fn pyenv_builtin(
     context: Option<crate::context::RuntimeContext>,
-    arguments: Vec<Value>,
+    arguments: crate::call::BuiltinArguments,
 ) -> BuiltinResult<RootedValue> {
     if arguments.is_empty() {
         invoke_python(context, PythonBuiltinOperation::Status, arguments).await
@@ -106,35 +105,95 @@ async fn pyenv_builtin(
 #[runtime_builtin(
     name = "pyargs",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::interop::python"
 )]
-fn pyargs_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
+fn pyargs_builtin(
+    context: Option<crate::context::RuntimeContext>,
+    arguments: crate::call::BuiltinArguments,
+) -> BuiltinResult<RootedValue> {
     if !arguments.len().is_multiple_of(2) {
         return Err(invalid_call("pyargs requires name-value pairs"));
     }
-    let mut names = Vec::with_capacity(arguments.len() / 2);
-    let mut values = Vec::with_capacity(arguments.len() / 2);
-    let mut arguments = arguments.into_iter();
-    while let Some(name) = arguments.next() {
-        let name = crate::builtins::common::validation::value_text_scalar_string(&name)
-            .ok_or_else(|| invalid_call("pyargs names must be text"))?;
-        if name.is_empty() {
+    for name in arguments.iter().step_by(2) {
+        if !crate::builtins::common::validation::value_is_text_scalar(name) {
+            return Err(invalid_call("pyargs names must be text"));
+        }
+        let empty = match name {
+            Value::String(text) => text.is_empty(),
+            Value::StringArray(array) => array.data()[0].is_empty(),
+            Value::CharArray(array) => array.data().is_empty(),
+            _ => unreachable!("validated text scalar"),
+        };
+        if empty {
             return Err(invalid_call("pyargs names must be non-empty"));
         }
-        names.push(Value::String(name.into()));
-        values.push(arguments.next().expect("even argument count"));
     }
-    let length = names.len();
-    let mut bundle = ObjectInstance::new(runmat_types::standard::PYTHON_ARGUMENTS);
-    bundle.properties.insert(
-        "Names".into(),
-        Value::Cell(CellArray::new(names, 1, length).map_err(invalid_call)?),
-    );
-    bundle.properties.insert(
-        "Values".into(),
-        Value::Cell(CellArray::new(values, 1, length).map_err(invalid_call)?),
-    );
-    Ok(Value::Object(bundle))
+    let count = arguments.len() / 2;
+    let (names, values) = match context.as_ref() {
+        Some(runtime) => {
+            let names = crate::execution::RootedValues::try_initialize_in_context(
+                count,
+                runtime,
+                |index| {
+                    pyargs_name(
+                        arguments
+                            .get(index * 2)
+                            .expect("validated pyargs name position"),
+                        Some(runtime),
+                    )
+                    .map(Value::String)
+                },
+            )?;
+            let names =
+                crate::execution::structure::cell::from_rooted_values(runtime, &[1, count], names)?;
+            let values = crate::execution::structure::cell::from_borrowed_values(
+                Some(runtime),
+                &[1, count],
+                arguments.iter().skip(1).step_by(2),
+            )?;
+            (names, values)
+        }
+        None => {
+            let names = arguments
+                .iter()
+                .step_by(2)
+                .map(|name| pyargs_name(name, None).map(Value::String))
+                .collect::<Result<Vec<_>, _>>()?;
+            (
+                RootedValue::new(Value::Cell(
+                    runmat_value::CellArray::new(names, 1, count).map_err(invalid_call)?,
+                ))
+                .map_err(|source| source.into_runtime_error())?,
+                crate::execution::structure::cell::from_borrowed_values(
+                    None,
+                    &[1, count],
+                    arguments.iter().skip(1).step_by(2),
+                )?,
+            )
+        }
+    };
+    let fields = [
+        ("Names", names.value().clone()),
+        ("Values", values.value().clone()),
+    ];
+    crate::execution::object::construct_object_from_borrowed_fields(
+        context.as_ref(),
+        runmat_types::standard::PYTHON_ARGUMENTS.display_name(),
+        fields.iter().map(|(name, value)| (*name, value)),
+    )
+}
+
+fn pyargs_name(
+    value: &Value,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> Result<runmat_value::Utf8Text, crate::RuntimeError> {
+    match value {
+        // pyargs historically accepts character rows with trailing singleton
+        // dimensions. Validation above proves the effective row geometry.
+        Value::CharArray(array) => crate::call::argument_text::copy_chars(array.data(), runtime),
+        _ => crate::call::argument_text::convert(value, runtime),
+    }
 }
 
 #[runtime_builtin(
@@ -145,16 +204,13 @@ fn pyargs_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
 )]
 async fn pyrun_builtin(
     context: Option<crate::context::RuntimeContext>,
-    mut arguments: Vec<Value>,
+    arguments: crate::call::BuiltinArguments,
 ) -> BuiltinResult<RootedValue> {
     if arguments.is_empty() {
         return Err(invalid_call("pyrun requires Python source code"));
     }
-    let code = arguments.remove(0);
-    let outputs = requested_output_names(&mut arguments, "pyrun")?;
-    let mut call = vec![code, outputs];
-    call.extend(arguments);
-    invoke_python(context, PythonBuiltinOperation::Run, call).await
+    let arguments = run_arguments(arguments, context.as_ref(), "pyrun")?;
+    invoke_python(context, PythonBuiltinOperation::Run, arguments).await
 }
 
 #[runtime_builtin(
@@ -165,16 +221,13 @@ async fn pyrun_builtin(
 )]
 async fn pyrunfile_builtin(
     context: Option<crate::context::RuntimeContext>,
-    mut arguments: Vec<Value>,
+    arguments: crate::call::BuiltinArguments,
 ) -> BuiltinResult<RootedValue> {
     if arguments.is_empty() {
         return Err(invalid_call("pyrunfile requires a Python file"));
     }
-    let file = arguments.remove(0);
-    let outputs = requested_output_names(&mut arguments, "pyrunfile")?;
-    let mut call = vec![file, outputs];
-    call.extend(arguments);
-    invoke_python(context, PythonBuiltinOperation::RunFile, call).await
+    let arguments = run_arguments(arguments, context.as_ref(), "pyrunfile")?;
+    invoke_python(context, PythonBuiltinOperation::RunFile, arguments).await
 }
 
 #[runtime_builtin(
@@ -185,13 +238,13 @@ async fn pyrunfile_builtin(
 )]
 async fn terminate_builtin(
     context: Option<crate::context::RuntimeContext>,
-    arguments: Vec<Value>,
+    arguments: crate::call::BuiltinArguments,
 ) -> BuiltinResult<RootedValue> {
     if arguments.len() != 1
         || !matches!(
             arguments.first(),
             Some(Value::Object(environment))
-                if environment.class_name.is(PYTHON_ENVIRONMENT_CLASS)
+                if environment.class_name().is(PYTHON_ENVIRONMENT_CLASS)
         )
     {
         return Err(invalid_call(
@@ -203,19 +256,37 @@ async fn terminate_builtin(
     invoke_python(context, PythonBuiltinOperation::Terminate, arguments).await
 }
 
-fn requested_output_names(arguments: &mut Vec<Value>, builtin: &str) -> BuiltinResult<Value> {
+fn run_arguments(
+    arguments: crate::call::BuiltinArguments,
+    context: Option<&crate::context::RuntimeContext>,
+    builtin: &str,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
     let requested = crate::current_requested_outputs();
     if requested == 0 {
-        return CellArray::new(Vec::new(), 0, 0)
-            .map(Value::Cell)
-            .map_err(invalid_call);
+        let runtime = context.ok_or_else(|| {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                python_error(
+                    &PYTHON_ERROR_HOST_UNAVAILABLE,
+                    PYTHON_ERROR_HOST_UNAVAILABLE.message,
+                )
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                python_error(&PYTHON_ERROR_UNAVAILABLE, PYTHON_ERROR_UNAVAILABLE.message)
+            }
+        })?;
+        let outputs = crate::execution::structure::cell::from_values(Some(runtime), &[0, 0], &[])?;
+        return arguments.try_insert_in_context(1, outputs, runtime);
     }
-    if arguments.is_empty() {
+    if arguments.len() < 2 {
         return Err(invalid_call(format!(
             "{builtin} requires Python output names when outputs are requested"
         )));
     }
-    Ok(arguments.remove(0))
+    // Source, requested names, and remaining keyword pairs already have the
+    // adapter's exact order. Preserve their original segmented owner.
+    Ok(arguments)
 }
 
 fn invalid_call(message: impl Into<String>) -> crate::RuntimeError {

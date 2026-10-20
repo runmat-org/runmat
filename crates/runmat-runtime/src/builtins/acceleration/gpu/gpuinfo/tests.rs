@@ -8,7 +8,9 @@ use runmat_accelerate_api::{
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 fn call() -> crate::BuiltinResult<Value> {
-    block_on(gpu_info_builtin(Vec::new()))
+    block_on(gpu_info_builtin(
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
 }
 
 struct MetadataProbeProvider {
@@ -53,8 +55,10 @@ fn extra_argument_has_own_error_before_provider_metadata_access() {
     let _guard = test_support::accel_test_lock();
     METADATA_PROBE.reads.store(0, Ordering::SeqCst);
     let _selected = ThreadProviderGuard::set(Some(&METADATA_PROBE));
-    let error = block_on(gpu_info_builtin(vec![Value::Num(1.0)]))
-        .expect_err("gpuInfo accepts no input arguments");
+    let error = block_on(gpu_info_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
+    ))
+    .expect_err("gpuInfo accepts no input arguments");
     assert_eq!(
         error.identifier(),
         GPU_INFO_ERROR_TOO_MANY_INPUTS.identifier
@@ -106,7 +110,7 @@ fn gpu_info_placeholder_matches_expectation() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn gpu_info_format_summary_handles_core_value_types() {
-    let mut info = StructValue::new();
+    let mut info = runmat_value::UnboundedStructValueBuilder::new();
     info.insert("device_id", Value::Int(IntValue::U32(0)));
     info.insert("index", Value::Int(IntValue::U32(1)));
     info.insert("name", Value::String("Ada'GPU".into()));
@@ -116,6 +120,7 @@ fn gpu_info_format_summary_handles_core_value_types() {
     info.insert("precision", Value::String("double".into()));
     info.insert("supports_double", Value::Bool(true));
     info.insert("ignored", Value::Struct(StructValue::new()));
+    let info = info.finish();
 
     let summary = format_summary(Some(&info));
     assert!(

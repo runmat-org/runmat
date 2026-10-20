@@ -61,12 +61,13 @@ fn synchronous_and_never_yield_frontends_are_bit_exact() {
     let Value::Cell(expected) = expected else {
         panic!("synchronous result should preserve the cell");
     };
-    let (Value::Num(actual_nan), Value::Num(expected_nan)) = (&actual.data[0], &expected.data[0])
+    let (Value::Num(actual_nan), Value::Num(expected_nan)) =
+        (&actual.data()[0], &expected.data()[0])
     else {
         panic!("first cell member should preserve the NaN scalar");
     };
     assert_eq!(actual_nan.to_bits(), expected_nan.to_bits());
-    assert_eq!(actual.data[1], expected.data[1]);
+    assert_eq!(actual.data()[1], expected.data()[1]);
 }
 
 #[test]
@@ -209,7 +210,12 @@ fn complex_shape_admission_uses_selected_budget_and_retires_pending_turn() {
     let mut cooperation = Some(&mut budget);
     // Enter below canonical payload validation so validation work cannot be
     // mistaken for the two decoder turns asserted by this admission witness.
-    let mut future = Box::pin(decode_validated_values(&payloads, None, &mut cooperation));
+    let mut future = Box::pin(decode_validated_values(
+        &payloads,
+        None,
+        &mut cooperation,
+        None,
+    ));
     let waker = noop_waker();
     assert!(future
         .as_mut()
@@ -275,7 +281,12 @@ fn struct_array_admission_uses_selected_budget_and_retires_pending_turn() {
     // Enter below canonical payload validation. The first turn reaches the
     // durable task's shape copy; the second reaches StructArrayAdmission, so
     // the Pending turn cannot be attributed to validation work.
-    let mut future = Box::pin(decode_validated_values(&payloads, None, &mut cooperation));
+    let mut future = Box::pin(decode_validated_values(
+        &payloads,
+        None,
+        &mut cooperation,
+        None,
+    ));
     let waker = noop_waker();
     assert!(future
         .as_mut()

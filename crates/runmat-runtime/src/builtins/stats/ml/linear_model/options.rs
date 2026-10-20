@@ -37,7 +37,7 @@ pub(super) fn decode_fit_option(named: &NamedOption, value: &Value) -> BuiltinRe
 }
 
 pub(super) fn parse_fit_name_values(
-    values: &[Value],
+    values: crate::call::FunctionArgumentView<'_>,
     names: Vec<PreparedOption>,
     index_offset: usize,
     options: &mut FitOptions,
@@ -59,7 +59,9 @@ pub(super) fn parse_fit_name_values(
     Ok(())
 }
 
-pub(super) fn parse_predict_options(values: Vec<Value>) -> BuiltinResult<PredictOptions> {
+pub(super) fn parse_predict_options(
+    values: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<PredictOptions> {
     if !values.len().is_multiple_of(2) {
         return Err(predict_invalid(
             "predict: name-value options must be paired",

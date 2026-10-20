@@ -17,7 +17,9 @@ fn operand_shape(value: &Value) -> Option<&[usize]> {
     }
 }
 
-pub(super) fn shape(inputs: &[Value]) -> BuiltinResult<Option<Vec<usize>>> {
+pub(super) fn shape(
+    inputs: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Option<Vec<usize>>> {
     let Some(shapes) = inputs
         .iter()
         .map(|value| operand_shape(value).map(normalized_shape))
@@ -44,10 +46,15 @@ fn scalar(value: &Value) -> bool {
     operand_shape(value).is_some_and(|shape| !shape.contains(&0) && shape.iter().all(|&d| d == 1))
 }
 
-pub(super) fn equivalent(operation: ArrayfunGpuCallback, name: &str, inputs: &[Value]) -> bool {
-    match (operation, inputs) {
-        (ArrayfunGpuCallback::Unary(_), [_]) => true,
-        (ArrayfunGpuCallback::Binary(_), [left, right]) => {
+pub(super) fn equivalent(
+    operation: ArrayfunGpuCallback,
+    name: &str,
+    inputs: crate::call::FunctionArgumentView<'_>,
+) -> bool {
+    match (operation, inputs.len()) {
+        (ArrayfunGpuCallback::Unary(_), 1) => true,
+        (ArrayfunGpuCallback::Binary(_), 2) => {
+            let (left, right) = (&inputs[0], &inputs[1]);
             // Scalar callback admission and whole-array admission must both hold.
             // A varying double beside an integer is not a scalar double merely
             // because each mapped invocation receives a scalar.

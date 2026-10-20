@@ -34,8 +34,13 @@ fn descriptor_is_registered() {
 
 #[test]
 fn row_vectors_are_filter_coefficients() {
-    let data = block_on(parse_zero_pole_data(vec![row(&[1.0]), row(&[1.0, -0.8])]))
-        .expect("zero-pole data");
+    let data = block_on(parse_zero_pole_data(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            row(&[1.0]),
+            row(&[1.0, -0.8]),
+        ]),
+    ))
+    .expect("zero-pole data");
     assert!(data.zeros.is_empty());
     assert_eq!(data.poles.len(), 1);
     assert!((data.poles[0].re - 0.8).abs() < 1e-10);
@@ -44,8 +49,13 @@ fn row_vectors_are_filter_coefficients() {
 
 #[test]
 fn column_vectors_are_explicit_zero_pole_locations() {
-    let data = block_on(parse_zero_pole_data(vec![col(&[0.2, 0.4]), col(&[0.8])]))
-        .expect("zero-pole data");
+    let data = block_on(parse_zero_pole_data(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            col(&[0.2, 0.4]),
+            col(&[0.8]),
+        ]),
+    ))
+    .expect("zero-pole data");
     assert_eq!(data.zeros.len(), 2);
     assert_eq!(data.poles.len(), 1);
     assert!((data.zeros[0].re - 0.2).abs() < 1e-12);
@@ -55,7 +65,10 @@ fn column_vectors_are_explicit_zero_pole_locations() {
 #[test]
 fn sos_rows_expand_to_zeros_and_poles() {
     let sos = Value::Tensor(Tensor::new(vec![1.0, 1.0, 0.0, 1.0, -0.8, 0.0], vec![1, 6]).unwrap());
-    let data = block_on(parse_zero_pole_data(vec![sos])).expect("sos");
+    let data = block_on(parse_zero_pole_data(
+        crate::builtins::common::test_support::builtin_arguments(vec![sos]),
+    ))
+    .expect("sos");
     assert_eq!(data.zeros.len(), 2);
     assert_eq!(data.poles.len(), 2);
     assert!(data.poles.iter().any(|z| (z.re - 0.8).abs() < 1e-10));
@@ -65,16 +78,19 @@ fn sos_rows_expand_to_zeros_and_poles() {
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn zplane_sos_dense_rank_zero_rejects_and_rank_one_is_a_row() {
     let rank_zero = Tensor::new(vec![1.0], vec![]).expect("rank-zero SOS");
-    let error = block_on(evaluate(vec![Value::Tensor(rank_zero)]))
-        .expect_err("rank-zero SOS has no valid matrix element count");
+    let error = block_on(evaluate(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(rank_zero)]),
+    ))
+    .expect_err("rank-zero SOS has no valid matrix element count");
     assert_eq!(error.identifier(), ZPLANE_ERROR_INVALID_ARGUMENT.identifier);
 
     let _plot_guard = crate::builtins::plotting::lock_plot_test_context();
     let rank_one =
         Tensor::new(vec![1.0, 1.0, 0.0, 1.0, -0.8, 0.0], vec![6]).expect("rank-one SOS row");
-    let Value::Tensor(handles) = block_on(evaluate(vec![Value::Tensor(rank_one)]))
-        .expect("rank-one SOS is a six-column row")
-    else {
+    let Value::Tensor(handles) = block_on(evaluate(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(rank_one)]),
+    ))
+    .expect("rank-one SOS is a six-column row") else {
         panic!("expected graphics handle tensor");
     };
     // Three guide lines plus both nonempty zero and pole scatter plots.
@@ -86,7 +102,10 @@ fn sos_reads_typed_integer_storage_exactly() {
     let tensor = Tensor::new_integer(IntegerStorage::I16(vec![1, 1, 0, 1, -1, 0]), vec![1, 6])
         .expect("integer sos");
 
-    let data = block_on(parse_zero_pole_data(vec![Value::Tensor(tensor)])).expect("sos");
+    let data = block_on(parse_zero_pole_data(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(tensor)]),
+    ))
+    .expect("sos");
 
     assert_eq!(data.zeros.len(), 2);
     assert_eq!(data.poles.len(), 2);
@@ -100,7 +119,10 @@ fn sos_reads_typed_integer_storage_exactly() {
 fn sos_rejects_rank_greater_than_two() {
     let sos =
         Value::ComplexTensor(ComplexTensor::new(vec![(1.0, 0.0); 12], vec![1, 6, 2]).unwrap());
-    let err = block_on(parse_zero_pole_data(vec![sos])).expect_err("rank-3 sos rejected");
+    let err = block_on(parse_zero_pole_data(
+        crate::builtins::common::test_support::builtin_arguments(vec![sos]),
+    ))
+    .expect_err("rank-3 sos rejected");
     assert!(err.message().contains("2-D matrix"));
 }
 
@@ -134,7 +156,10 @@ fn malformed_resident_sos_gain_and_vector_metadata_precede_download() {
             vec![Value::GpuTensor(bad_vector.clone()), row(&[1.0, -0.8])],
         ] {
             provider.reset_telemetry();
-            let error = block_on(evaluate(args)).expect_err("known-invalid resident metadata");
+            let error = block_on(evaluate(
+                crate::builtins::common::test_support::builtin_arguments(args),
+            ))
+            .expect_err("known-invalid resident metadata");
             assert_eq!(error.identifier(), ZPLANE_ERROR_INVALID_ARGUMENT.identifier);
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
         }
@@ -181,7 +206,10 @@ fn leading_resident_complex_integer_rejects_before_exactness_readback() {
             ],
         ] {
             provider.reset_telemetry();
-            let error = block_on(evaluate(args)).expect_err("unsupported complex integer");
+            let error = block_on(evaluate(
+                crate::builtins::common::test_support::builtin_arguments(args),
+            ))
+            .expect_err("unsupported complex integer");
             assert_eq!(error.identifier(), ZPLANE_ERROR_INVALID_ARGUMENT.identifier);
             assert!(error.message().contains("complex integer"));
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
@@ -195,11 +223,13 @@ fn leading_resident_complex_integer_rejects_before_exactness_readback() {
 
 #[test]
 fn explicit_zpk_accepts_complex_scalar_gain() {
-    let data = block_on(parse_zero_pole_data(vec![
-        col(&[0.2, 0.4]),
-        col(&[0.8]),
-        Value::Complex(1.0, 0.25),
-    ]))
+    let data = block_on(parse_zero_pole_data(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            col(&[0.2, 0.4]),
+            col(&[0.8]),
+            Value::Complex(1.0, 0.25),
+        ]),
+    ))
     .expect("complex gain accepted");
     assert_eq!(data.zeros.len(), 2);
     assert_eq!(data.poles.len(), 1);
@@ -209,11 +239,13 @@ fn explicit_zpk_accepts_complex_scalar_gain() {
 fn explicit_zpk_gain_reads_typed_integer_storage_exactly() {
     let gain = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("integer gain");
 
-    let data = block_on(parse_zero_pole_data(vec![
-        col(&[0.2, 0.4]),
-        col(&[0.8]),
-        Value::Tensor(gain),
-    ]))
+    let data = block_on(parse_zero_pole_data(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            col(&[0.2, 0.4]),
+            col(&[0.8]),
+            Value::Tensor(gain),
+        ]),
+    ))
     .expect("integer gain accepted");
 
     assert_eq!(data.zeros.len(), 2);
@@ -234,7 +266,13 @@ fn zplane_limits_include_unit_circle_and_points() {
 #[test]
 fn evaluate_returns_graphics_handles_without_interactive_backend() {
     let _plot_guard = crate::builtins::plotting::lock_plot_test_context();
-    let value = block_on(evaluate(vec![row(&[1.0]), row(&[1.0, -0.8])])).expect("zplane render");
+    let value = block_on(evaluate(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            row(&[1.0]),
+            row(&[1.0, -0.8]),
+        ]),
+    ))
+    .expect("zplane render");
     let Value::Tensor(handles) = value else {
         panic!("expected handle tensor");
     };
@@ -256,7 +294,10 @@ fn evaluate_accepts_leading_axes_for_coefficient_and_sos_forms() {
     ] {
         let mut args = vec![Value::Num(axes)];
         args.extend(data);
-        let result = block_on(evaluate(args)).expect("targeted zplane");
+        let result = block_on(evaluate(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect("targeted zplane");
         let Value::Tensor(handles) = result else {
             panic!("assigned targeted plot returns handles");
         };
@@ -269,7 +310,13 @@ fn evaluate_accepts_leading_axes_for_coefficient_and_sos_forms() {
 fn evaluate_honors_zero_requested_outputs() {
     let _plot_guard = crate::builtins::plotting::lock_plot_test_context();
     let _out_guard = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
-    let value = block_on(evaluate(vec![row(&[1.0]), row(&[1.0, -0.8])])).expect("zplane render");
+    let value = block_on(evaluate(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            row(&[1.0]),
+            row(&[1.0, -0.8]),
+        ]),
+    ))
+    .expect("zplane render");
     let Value::OutputList(values) = value else {
         panic!("expected output list");
     };
@@ -280,7 +327,13 @@ fn evaluate_honors_zero_requested_outputs() {
 fn evaluate_preserves_first_handle_output_and_pads_later_requested_slots() {
     let _plot_guard = crate::builtins::plotting::lock_plot_test_context();
     let _out_guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
-    let value = block_on(evaluate(vec![row(&[1.0]), row(&[1.0, -0.8])])).expect("zplane render");
+    let value = block_on(evaluate(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            row(&[1.0]),
+            row(&[1.0, -0.8]),
+        ]),
+    ))
+    .expect("zplane render");
     let Value::OutputList(values) = value else {
         panic!("expected two requested outputs");
     };
@@ -298,7 +351,13 @@ fn zplane_integer_extension_rejects_before_plot_state() {
     let coefficients = Value::Tensor(
         Tensor::new_integer(IntegerStorage::I16(vec![1, 2]), vec![1, 2]).expect("coefficients"),
     );
-    let error = block_on(evaluate(vec![coefficients, row(&[1.0, -0.8])])).expect_err("strict gate");
+    let error = block_on(evaluate(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            coefficients,
+            row(&[1.0, -0.8]),
+        ]),
+    ))
+    .expect_err("strict gate");
     assert_eq!(
         error.identifier(),
         Some("RunMat:compatibility:ZplaneNonfloatingInputExtension")
@@ -321,7 +380,10 @@ fn wide_integer_vector_and_sos_reject_before_lossy_root_conversion() {
                 .expect("SOS integer tensor"),
         )],
     ] {
-        let error = block_on(evaluate(args)).expect_err("inexact integer rejected");
+        let error = block_on(evaluate(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect_err("inexact integer rejected");
         assert_eq!(error.identifier(), ZPLANE_ERROR_INVALID_ARGUMENT.identifier);
         assert!(error.message().contains("exactly representable"));
     }
@@ -341,10 +403,12 @@ fn wide_resident_integer_rejects_with_original_allocation_live() {
                 shape: &[1, 1],
             })
             .expect("resident integer");
-        let error = block_on(evaluate(vec![
-            Value::GpuTensor(input.clone()),
-            row(&[1.0, -0.8]),
-        ]))
+        let error = block_on(evaluate(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::GpuTensor(input.clone()),
+                row(&[1.0, -0.8]),
+            ]),
+        ))
         .expect_err("inexact resident integer rejected");
         assert_eq!(error.identifier(), ZPLANE_ERROR_INVALID_ARGUMENT.identifier);
         assert!(input.allocation_lease().validate_live().is_ok());
@@ -354,8 +418,11 @@ fn wide_resident_integer_rejects_with_original_allocation_live() {
 
 #[test]
 fn vector_validation_wraps_and_retains_shared_cause() {
-    let error = block_on(vector_input("numerator", Value::String("bad".to_string())))
-        .expect_err("invalid coefficient");
+    let error = block_on(vector_input(
+        "numerator",
+        Value::String("bad".to_string().into()),
+    ))
+    .expect_err("invalid coefficient");
     assert_eq!(error.identifier(), ZPLANE_ERROR_INVALID_ARGUMENT.identifier);
     assert!(std::error::Error::source(&error).is_some());
 }
@@ -381,11 +448,13 @@ fn resident_zpk_gain_is_admitted_and_source_remains_live() {
     test_support::with_test_provider(|provider| {
         let gain = Tensor::new(vec![2.0], vec![1, 1]).expect("gain");
         let handle = gpu_helpers::upload_tensor(provider, &gain).expect("resident gain");
-        let data = block_on(parse_zero_pole_data(vec![
-            col(&[0.2]),
-            col(&[0.8]),
-            Value::GpuTensor(handle.clone()),
-        ]))
+        let data = block_on(parse_zero_pole_data(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                col(&[0.2]),
+                col(&[0.8]),
+                Value::GpuTensor(handle.clone()),
+            ]),
+        ))
         .expect("resident ZPK gain");
         assert_eq!(data.zeros.len(), 1);
         assert_eq!(data.poles.len(), 1);
@@ -408,11 +477,13 @@ fn inexact_resident_zpk_gain_is_rejected_before_materialization() {
                 shape: &[1, 1],
             })
             .expect("resident integer gain");
-        let error = block_on(evaluate(vec![
-            col(&[0.2, 0.4]),
-            col(&[0.8]),
-            Value::GpuTensor(handle.clone()),
-        ]))
+        let error = block_on(evaluate(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                col(&[0.2, 0.4]),
+                col(&[0.8]),
+                Value::GpuTensor(handle.clone()),
+            ]),
+        ))
         .expect_err("inexact gain rejected before plot");
         assert_eq!(error.identifier(), ZPLANE_ERROR_INVALID_ARGUMENT.identifier);
         assert!(error.message().contains("exactly representable"));

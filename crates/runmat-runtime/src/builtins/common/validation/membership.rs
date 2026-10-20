@@ -131,13 +131,13 @@ pub fn atoms(value: &Value) -> Result<Vec<ValidationAtom>, RuntimeError> {
             .map(|v| ValidationAtom::Bool(*v != 0))
             .collect()),
         Value::StringArray(s) => Ok(s
-            .data
+            .data()
             .iter()
             .map(|text| ValidationAtom::Text(text.as_str().to_owned()))
             .collect()),
         Value::Cell(c) => {
             let mut out = Vec::new();
-            for entry in &c.data {
+            for entry in c.data() {
                 out.extend(atoms(entry)?);
             }
             Ok(out)

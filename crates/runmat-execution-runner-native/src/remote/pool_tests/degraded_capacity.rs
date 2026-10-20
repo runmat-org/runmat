@@ -28,6 +28,7 @@ async fn loss_below_provisioning_floor_retries_on_healthy_capacity_and_retains_p
     for id in worker_ids {
         pool.add_worker(Arc::new(FailingRouteWorker {
             spec: WorkerSpec {
+                host: crate::test_support::host_inventory(),
                 id,
                 pool_id,
                 resources: inventory(1_000),
@@ -63,8 +64,8 @@ async fn loss_below_provisioning_floor_retries_on_healthy_capacity_and_retains_p
     );
     assert_ne!(evidence.attempts[1].request.worker_id, failed_id);
     assert_eq!(
-        evidence.task.committed.as_ref().unwrap().resources,
-        success.resources
+        evidence.task.committed.as_ref().unwrap().result.resources(),
+        success.resources()
     );
     let snapshot = pool.snapshot();
     assert_eq!(snapshot.pools[&pool_id].state, PoolState::Ready);

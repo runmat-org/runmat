@@ -15,49 +15,60 @@ use std::rc::Rc;
 #[path = "machine/task.rs"]
 mod task;
 use task::Task;
+#[path = "machine/control.rs"]
+mod control;
+use control::{ControlBox, ControlIntoIter, ControlOwner, ControlPath, ControlVec};
 
 const TASK_CHUNK_CAPACITY: usize = 64;
 
 struct TaskStack<'a> {
-    current: Vec<Task<'a>>,
-    previous: Option<Box<TaskChunk<'a>>>,
+    current: ControlVec<'a, Task<'a>>,
+    previous: Option<ControlBox<TaskChunk<'a>>>,
+    owner: ControlOwner<'a>,
 }
 
 struct TaskChunk<'a> {
-    tasks: Vec<Task<'a>>,
-    previous: Option<Box<TaskChunk<'a>>>,
+    tasks: ControlVec<'a, Task<'a>>,
+    previous: Option<ControlBox<TaskChunk<'a>>>,
 }
 
 impl<'a> TaskStack<'a> {
-    fn new(task: Task<'a>) -> Self {
-        let mut current = Vec::with_capacity(TASK_CHUNK_CAPACITY);
-        current.push(task);
-        Self {
+    fn new(task: Task<'a>, owner: ControlOwner<'a>) -> Result<Self, ValueCodecError> {
+        let mut current = owner.vector(TASK_CHUNK_CAPACITY, "$")?;
+        current.push(task, "$")?;
+        Ok(Self {
             current,
             previous: None,
-        }
+            owner,
+        })
     }
 
     #[cfg(test)]
-    fn empty() -> Self {
-        Self {
-            current: Vec::new(),
+    fn empty(owner: ControlOwner<'a>) -> Result<Self, ValueCodecError> {
+        Ok(Self {
+            current: owner.vector(0, "$")?,
             previous: None,
-        }
+            owner,
+        })
     }
 
-    pub(super) fn push(&mut self, task: Task<'a>) {
+    pub(super) fn push(&mut self, task: Task<'a>) -> Result<(), ValueCodecError> {
         if self.current.len() == TASK_CHUNK_CAPACITY {
-            let chunk = TaskChunk {
-                tasks: std::mem::replace(
-                    &mut self.current,
-                    Vec::with_capacity(TASK_CHUNK_CAPACITY),
-                ),
-                previous: self.previous.take(),
-            };
-            self.previous = Some(Box::new(chunk));
+            // Complete both fallible allocations before moving the linked
+            // chain. Failure must still retire a deep stack iteratively.
+            let current = self.owner.vector(TASK_CHUNK_CAPACITY, "$")?;
+            let mut chunk = self.owner.boxed(
+                TaskChunk {
+                    tasks: self.owner.vector(0, "$")?,
+                    previous: None,
+                },
+                "$",
+            )?;
+            chunk.tasks = std::mem::replace(&mut self.current, current);
+            chunk.previous = self.previous.take();
+            self.previous = Some(chunk);
         }
-        self.current.push(task);
+        self.current.push(task, "$")
     }
 
     fn pop(&mut self) -> Option<Task<'a>> {
@@ -65,7 +76,7 @@ impl<'a> TaskStack<'a> {
             return Some(task);
         }
         let chunk = self.previous.take()?;
-        let TaskChunk { tasks, previous } = *chunk;
+        let TaskChunk { tasks, previous } = allocator_api2::boxed::Box::into_inner(chunk);
         self.current = tasks;
         self.previous = previous;
         self.current.pop()
@@ -95,85 +106,98 @@ pub(super) type PartialValue = RootedValueMember;
 /// Child values removed from the machine while an aggregate is assembled.
 /// Their explicit roots remain alive until the completed parent has itself
 /// taken ownership of those same roots through `push_aggregate`.
-pub(super) struct TakenValues {
-    values: std::vec::IntoIter<PartialValue>,
-    roots: RootedValueChildren,
+pub(super) struct TakenValues<'a> {
+    values: Option<ControlIntoIter<PartialValue>>,
+    roots: RootedValueChildren<'a>,
 }
 
-impl TakenValues {
-    pub(super) fn from_partials(partials: Vec<PartialValue>) -> Self {
-        Self {
-            values: partials.into_iter(),
-            roots: RootedValueChildren::new(),
-        }
+impl<'a> TakenValues<'a> {
+    fn from_partials(
+        partials: ControlVec<'a, PartialValue>,
+        runtime: Option<&'a crate::context::RuntimeContext>,
+    ) -> Result<Self, ValueCodecError> {
+        let roots = match runtime {
+            Some(runtime) => RootedValueChildren::in_context(runtime)
+                .map_err(|source| ValueCodecError::allocation("$", source))?,
+            None => RootedValueChildren::new(),
+        };
+        Ok(Self {
+            values: Some(partials.into_iter()),
+            roots,
+        })
     }
-    pub(super) fn next(&mut self) -> Option<Value> {
-        let partial = self.values.next()?;
-        Some(partial.into_child(&mut self.roots))
+    pub(super) fn next(&mut self) -> Result<Option<Value>, ValueCodecError> {
+        let Some(partial) = self.values.as_mut().and_then(Iterator::next) else {
+            return Ok(None);
+        };
+        partial
+            .into_child(&mut self.roots)
+            .map(Some)
+            .map_err(|source| ValueCodecError::allocation("$", source))
     }
 
     pub(super) fn remaining(&self) -> usize {
-        self.values.len()
+        self.values.as_ref().map_or(0, ExactSizeIterator::len)
     }
 
-    pub(super) fn take_roots(&mut self) -> RootedValueChildren {
-        assert_eq!(
-            self.values.len(),
-            0,
-            "all child values must be materialized"
-        );
+    pub(super) fn take_roots(&mut self) -> RootedValueChildren<'a> {
+        assert_eq!(self.remaining(), 0, "all child values must be materialized");
         std::mem::take(&mut self.roots)
     }
 }
 
 pub(super) struct DecodeMachine<'a> {
     tasks: TaskStack<'a>,
-    values: Vec<PartialValue>,
+    values: ControlVec<'a, PartialValue>,
+    control: ControlOwner<'a>,
     source_resolver: Option<Rc<crate::user_functions::ExecutionSourceResolver>>,
     frame_sources: Option<&'a dyn super::InlineFrameSourceAuthority>,
     runtime: Option<&'a crate::context::RuntimeContext>,
 }
 
 impl<'a> DecodeMachine<'a> {
-    pub(super) fn empty_taken_values() -> TakenValues {
+    pub(super) fn empty_taken_values() -> TakenValues<'a> {
         TakenValues {
-            values: Vec::new().into_iter(),
+            values: None,
             roots: RootedValueChildren::new(),
         }
     }
 
-    pub(super) fn new(
-        payload: &'a ValuePayload,
-        path: String,
-        source_resolver: Option<Rc<crate::user_functions::ExecutionSourceResolver>>,
-    ) -> Self {
-        Self::new_with_frame_sources(payload, path, source_resolver, None)
-    }
-
     pub(super) fn new_with_runtime(
         payload: &'a ValuePayload,
-        path: String,
+        path: &str,
         source_resolver: Option<Rc<crate::user_functions::ExecutionSourceResolver>>,
         runtime: Option<&'a crate::context::RuntimeContext>,
-    ) -> Self {
-        let mut machine = Self::new(payload, path, source_resolver);
-        machine.runtime = runtime;
-        machine
+    ) -> Result<Self, ValueCodecError> {
+        Self::construct(payload, path, source_resolver, None, runtime)
     }
 
     pub(super) fn new_with_frame_sources(
         payload: &'a ValuePayload,
-        path: String,
+        path: &str,
         source_resolver: Option<Rc<crate::user_functions::ExecutionSourceResolver>>,
         frame_sources: Option<&'a dyn super::InlineFrameSourceAuthority>,
-    ) -> Self {
-        Self {
-            tasks: TaskStack::new(Task::Decode { payload, path }),
-            values: Vec::new(),
+    ) -> Result<Self, ValueCodecError> {
+        Self::construct(payload, path, source_resolver, frame_sources, None)
+    }
+
+    fn construct(
+        payload: &'a ValuePayload,
+        path: &str,
+        source_resolver: Option<Rc<crate::user_functions::ExecutionSourceResolver>>,
+        frame_sources: Option<&'a dyn super::InlineFrameSourceAuthority>,
+        runtime: Option<&'a crate::context::RuntimeContext>,
+    ) -> Result<Self, ValueCodecError> {
+        let control = ControlOwner::new(runtime)?;
+        let path = control.path(path)?;
+        Ok(Self {
+            tasks: TaskStack::new(Task::Decode { payload, path }, control.clone())?,
+            values: control.vector(0, "$")?,
+            control,
             source_resolver,
             frame_sources,
-            runtime: None,
-        }
+            runtime,
+        })
     }
 
     pub(super) fn frame_sources(&self) -> Option<&'a dyn super::InlineFrameSourceAuthority> {
@@ -182,6 +206,10 @@ impl<'a> DecodeMachine<'a> {
 
     pub(super) fn runtime(&self) -> Option<&'a crate::context::RuntimeContext> {
         self.runtime
+    }
+
+    pub(super) fn boxed<T>(&self, value: T) -> Result<ControlBox<T>, ValueCodecError> {
+        self.control.boxed(value, "$")
     }
 
     pub(super) fn source_resolver(
@@ -225,16 +253,33 @@ impl<'a> DecodeMachine<'a> {
     }
 
     pub(super) fn push_value(&mut self, value: Value, path: &str) -> Result<(), ValueCodecError> {
-        let value = RootedValueMember::root(value).map_err(|error| {
-            ValueCodecError::invalid(path, format!("could not root decoded value: {error}"))
-        })?;
-        self.values.push(value);
+        let value = if let Some(runtime) = self.runtime {
+            RootedValueMember::root_in_context(value, runtime).map_err(|error| match error {
+                crate::execution::RootedValueAdmissionError::Host(source) => {
+                    ValueCodecError::allocation(path, source)
+                }
+                crate::execution::RootedValueAdmissionError::Gc(source) => {
+                    ValueCodecError::root_registration(path, source)
+                }
+            })?
+        } else {
+            RootedValueMember::root(value)
+                .map_err(|source| ValueCodecError::root_registration(path, source))?
+        };
+        self.values.push(value, path)?;
         Ok(())
     }
 
-    pub(super) fn push_aggregate(&mut self, value: Value, mut retained: TakenValues) {
-        self.values
-            .push(RootedValueMember::aggregate(value, retained.take_roots()));
+    pub(super) fn push_aggregate(
+        &mut self,
+        value: Value,
+        mut retained: TakenValues<'a>,
+    ) -> Result<(), ValueCodecError> {
+        self.values.push(
+            RootedValueMember::aggregate(value, retained.take_roots())
+                .map_err(|source| ValueCodecError::allocation("$", source))?,
+            "$",
+        )
     }
 
     pub(super) fn pop_partial(&mut self) -> PartialValue {
@@ -261,24 +306,28 @@ mod tests {
             let child = RootedValueMember::root(child).expect("root decoded child");
             initial.unroot().expect("transfer initial root");
 
-            let mut children = TakenValues::from_partials(vec![child]);
+            let control = ControlOwner::new(None).expect("unbounded decoder controls");
+            let mut partials = control.vector(1, "$").unwrap();
+            partials.push(child, "$").unwrap();
+            let mut children = TakenValues::from_partials(partials, None).unwrap();
             runmat_gc::gc_collect_major().expect("collect with partial aggregate");
             assert!(runmat_gc::gc_clone_value(&handle).is_ok());
             let cell = Value::Cell(
                 CellArray::new_with_shape(
-                    vec![children.next().expect("decoded child")],
+                    vec![children.next().unwrap().expect("decoded child")],
                     vec![1, 1],
                 )
                 .expect("valid cell"),
             );
             let mut machine = DecodeMachine {
-                tasks: TaskStack::empty(),
-                values: Vec::new(),
+                tasks: TaskStack::empty(control.clone()).unwrap(),
+                values: control.vector(0, "$").unwrap(),
+                control,
                 source_resolver: None,
                 frame_sources: None,
                 runtime: None,
             };
-            machine.push_aggregate(cell, children);
+            machine.push_aggregate(cell, children).unwrap();
             let DecodeProgress::Complete { .. } = machine
                 .advance(NonZeroUsize::new(1).unwrap())
                 .expect("complete aggregate")

@@ -104,7 +104,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 async fn tan_builtin(
     runtime: Option<RuntimeContext>,
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<RootedValue> {
     let _inputs = RootedValueLease::for_values(std::iter::once(&value).chain(rest.iter()))
         .map_err(|cause| cause.into_runtime_error())?;
@@ -113,9 +113,9 @@ async fn tan_builtin(
         &runmat_builtins::TAN_ERROR_TOO_MANY_OUTPUTS,
         "tan",
     )?;
-    let template = parse_output_template(&rest)?;
+    let template = parse_output_template(rest.view())?;
     let template = admit_output_template(template)?;
-    ensure_tan_extensions(&value, &rest).await?;
+    ensure_tan_extensions(&value, rest.view()).await?;
     if let Some(symbolic) = symbolic_function(&value, SymbolicFunction::Tan) {
         let symbolic = RootedValue::new(symbolic).map_err(|cause| cause.into_runtime_error())?;
         let output = apply_output_template(symbolic.value().clone(), &template, &[]).await?;
@@ -174,7 +174,10 @@ async fn tan_admitted(value: Value, protected: Vec<GpuTensorHandle>) -> BuiltinR
     RootedValue::new(base).map_err(|cause| cause.into_runtime_error())
 }
 
-async fn ensure_tan_extensions(value: &Value, rest: &[Value]) -> BuiltinResult<()> {
+async fn ensure_tan_extensions(
+    value: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     crate::builtins::common::validation::ensure_runmat_real_integer_f64_boundary(
         value,
         &TAN_INTEGER_INPUT_EXTENSION,
@@ -330,7 +333,7 @@ fn tan_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
 
 fn tan_char_array(array: CharArray) -> BuiltinResult<Value> {
     let data = array
-        .data
+        .data()
         .iter()
         .map(|&ch| (ch as u32 as f64).tan())
         .collect::<Vec<_>>();
@@ -385,7 +388,7 @@ pub(crate) mod tests {
         let err = block_on(super::tan_builtin(
             None,
             Value::Int(IntValue::I8(1)),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .map(|owned| owned.value().clone())
         .expect_err("strict mode rejects integer extension");
@@ -406,33 +409,37 @@ pub(crate) mod tests {
             IntValue::U32(1),
             IntValue::U64(1),
         ] {
-            assert!(
-                block_on(super::tan_builtin(None, Value::Int(value), Vec::new()))
-                    .map(|owned| owned.value().clone())
-                    .is_ok()
-            );
+            assert!(block_on(super::tan_builtin(
+                None,
+                Value::Int(value),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new())
+            ))
+            .map(|owned| owned.value().clone())
+            .is_ok());
         }
         assert!(block_on(super::tan_builtin(
             None,
             Value::Int(IntValue::U64((1_u64 << 53) + 1)),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .map(|owned| owned.value().clone())
         .is_err());
         assert!(block_on(super::tan_builtin(
             None,
             Value::Int(IntValue::U64(1_u64 << 54)),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .map(|owned| owned.value().clone())
         .is_ok());
 
         let single = Tensor::from_f32(vec![0.0, 1.0], vec![2, 1]).unwrap();
-        let Value::Tensor(single_out) =
-            block_on(super::tan_builtin(None, Value::Tensor(single), Vec::new()))
-                .map(|owned| owned.value().clone())
-                .unwrap()
-        else {
+        let Value::Tensor(single_out) = block_on(super::tan_builtin(
+            None,
+            Value::Tensor(single),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .map(|owned| owned.value().clone())
+        .unwrap() else {
             panic!("expected single tensor")
         };
         assert_eq!(single_out.numeric_dtype(), NumericDType::F32);
@@ -440,7 +447,7 @@ pub(crate) mod tests {
         let Value::ComplexTensor(complex_out) = block_on(super::tan_builtin(
             None,
             Value::ComplexTensor(complex),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .map(|owned| owned.value().clone())
         .unwrap() else {
@@ -451,7 +458,12 @@ pub(crate) mod tests {
 
     fn tan_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        block_on(super::tan_builtin(None, value, rest)).map(|owned| owned.value().clone())
+        block_on(super::tan_builtin(
+            None,
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
+        .map(|owned| owned.value().clone())
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -643,7 +655,7 @@ pub(crate) mod tests {
             let result = block_on(super::tan_builtin(
                 None,
                 Value::GpuTensor(source),
-                Vec::new(),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
             ))
             .map(|owned| owned.value().clone())
             .expect("tan fallback");

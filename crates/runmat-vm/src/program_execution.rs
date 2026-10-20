@@ -606,19 +606,29 @@ async fn execute_spmd_region_request(
             message: "SPMD task output count differs from its compiler-bound region".into(),
         };
     }
-    let arguments = match request
-        .arguments
-        .iter()
-        .map(runmat_runtime::execution::value_codec::decode_inline_value)
-        .collect::<Result<Vec<_>, _>>()
-    {
-        Ok(arguments) => arguments,
-        Err(error) => {
-            return ProgramExecutionResponse::Failure {
-                message: format!("worker rejected an invalid SPMD capture: {error}"),
+    let mut cooperation = runtime.cpu_cooperation();
+    let arguments =
+        match runmat_runtime::execution::value_codec::decode_inline_values_cooperatively_in_context(
+            &request.arguments,
+            runmat_execution::value::ValueLimits::default(),
+            None,
+            Some(&mut cooperation),
+            &runtime,
+        )
+        .await
+        {
+            Ok(arguments) => arguments,
+            Err(runmat_runtime::execution::value_codec::CooperativeValueCodecError::Execution(
+                error,
+            )) => {
+                return runtime_failure_response(error.into_runtime_error(), &runtime);
             }
-        }
-    };
+            Err(error) => {
+                return ProgramExecutionResponse::Failure {
+                    message: format!("worker rejected an invalid SPMD capture: {error}"),
+                }
+            }
+        };
     if arguments.len() != executable.captures.len() {
         return ProgramExecutionResponse::Failure {
             message: format!(
@@ -628,12 +638,18 @@ async fn execute_spmd_region_request(
             ),
         };
     }
+    let mut arguments = match arguments.try_into_values() {
+        Ok(arguments) => arguments,
+        Err(error) => return runtime_failure_response(error, &runtime),
+    };
     let mut frame = crate::interpreter::vars::InterpreterVars::from_owned(vec![
         runmat_value::Value::Num(0.0);
         bytecode.var_count
     ]);
     let mut assigned_slots = HashSet::new();
-    for (capture, value) in executable.captures.iter().zip(arguments) {
+    // Borrow the consuming iterator so its original root lease remains live
+    // after the final capture moves into the frame, through VM publication.
+    for (capture, value) in executable.captures.iter().zip(&mut arguments) {
         if frame.get(capture.slot).is_none() {
             return ProgramExecutionResponse::Failure {
                 message: "SPMD capture lies outside its compiler-bound VM frame".into(),
@@ -736,19 +752,29 @@ async fn execute_parallel_region_request(
             }
         }
     };
-    let arguments = match request
-        .arguments
-        .iter()
-        .map(runmat_runtime::execution::value_codec::decode_inline_value)
-        .collect::<Result<Vec<_>, _>>()
-    {
-        Ok(arguments) => arguments,
-        Err(error) => {
-            return ProgramExecutionResponse::Failure {
-                message: format!("worker rejected an invalid parallel task input: {error}"),
+    let mut cooperation = runtime.cpu_cooperation();
+    let arguments =
+        match runmat_runtime::execution::value_codec::decode_inline_values_cooperatively_in_context(
+            &request.arguments,
+            runmat_execution::value::ValueLimits::default(),
+            None,
+            Some(&mut cooperation),
+            &runtime,
+        )
+        .await
+        {
+            Ok(arguments) => arguments,
+            Err(runmat_runtime::execution::value_codec::CooperativeValueCodecError::Execution(
+                error,
+            )) => {
+                return runtime_failure_response(error.into_runtime_error(), &runtime);
             }
-        }
-    };
+            Err(error) => {
+                return ProgramExecutionResponse::Failure {
+                    message: format!("worker rejected an invalid parallel task input: {error}"),
+                }
+            }
+        };
     match execute_parallel_region_values(
         &request.callable,
         &request.context,
@@ -791,7 +817,7 @@ async fn execute_parallel_region_values(
     recipe: &ProgramBuildRecipe,
     bytecode: &crate::Bytecode,
     runtime: &runmat_runtime::context::RuntimeContext,
-    mut arguments: Vec<Value>,
+    arguments: runmat_runtime::execution::RootedValues,
 ) -> Result<runmat_runtime::execution::RootedValue, ParallelRegionError> {
     let ProgramCallable::ParallelRegion { region } = callable else {
         return Err(ParallelRegionError::Contract(
@@ -844,53 +870,76 @@ async fn execute_parallel_region_values(
             ),
         }));
     }
-    let Value::Cell(iterations) = arguments.remove(0) else {
-        return Err(ParallelRegionError::Contract(
-            ProgramExecutionResponse::Failure {
-                message: "parallel task iteration input must be a cell vector".into(),
-            },
-        ));
-    };
-    if iterations.data.len() != task.chunk.len {
-        return Err(ParallelRegionError::Contract(
-            ProgramExecutionResponse::Failure {
-                message: "parallel task iteration payload differs from its declared chunk".into(),
-            },
-        ));
-    }
-    let callable_name = callable.display_name();
-    let result = crate::interpreter::runner::interpret_parfor_task_in_context(
-        crate::interpreter::runner::ParforTaskExecution {
-            bytecode_owner: None,
-            bytecode,
-            region: executable,
-            inputs: arguments,
-            iterations: iterations.data,
-            input_roots: None,
-            randomness: task.randomness.clone(),
-            mode: crate::interpreter::runner::ParforTaskMode::IndependentIterations,
-            current_function_name: &callable_name,
-            runtime: runtime.clone(),
-        },
-    )
-    .await
-    .and_then(|outputs| {
-        outputs.with_unbounded_values(|outputs| {
-            runmat_value::CellArray::new(outputs, 1, executable.output_variables().count())
-                .map(Value::Cell)
-                .map_err(|error| {
-                    runmat_runtime::runtime_error::semantic_error(
-                        "ParallelTaskOutput",
-                        error.to_string(),
+    arguments
+        .with_owned_output_storage_async(|storage| async move {
+            let mut arguments = storage.try_into_owned().map_err(|_| {
+                ParallelRegionError::Runtime(runmat_runtime::runtime_error::semantic_error(
+                    "ParallelTaskInput",
+                    "parallel arguments require their original unique collection owner",
+                ))
+            })?;
+            let Some(Value::Cell(iterations)) = arguments.try_remove(0) else {
+                return Err(ParallelRegionError::Contract(
+                    ProgramExecutionResponse::Failure {
+                        message: "parallel task iteration input must be a cell vector".into(),
+                    },
+                ));
+            };
+            let inputs = arguments.try_into_storage().map_err(|_| {
+                ParallelRegionError::Runtime(runmat_runtime::runtime_error::semantic_error(
+                    "ParallelTaskInput",
+                    "parallel arguments could not republish their original collection owner",
+                ))
+            })?;
+            if iterations.data().len() != task.chunk.len {
+                return Err(ParallelRegionError::Contract(
+                    ProgramExecutionResponse::Failure {
+                        message: "parallel task iteration payload differs from its declared chunk"
+                            .into(),
+                    },
+                ));
+            }
+            let callable_name = callable.display_name();
+            let result = crate::interpreter::runner::interpret_parfor_task_in_context(
+                crate::interpreter::runner::ParforTaskExecution {
+                    bytecode_owner: None,
+                    bytecode,
+                    region: executable,
+                    inputs,
+                    iterations: iterations.into_parts().0,
+                    input_roots: None,
+                    randomness: task.randomness.clone(),
+                    mode: crate::interpreter::runner::ParforTaskMode::IndependentIterations,
+                    current_function_name: &callable_name,
+                    runtime: runtime.clone(),
+                },
+            )
+            .await
+            .and_then(|outputs| {
+                outputs.with_owned_output_storage(|outputs| {
+                    runmat_value::CellArray::from_shared_storage(
+                        outputs,
+                        runmat_value::SharedShape::new_unmanaged(vec![
+                            1,
+                            executable.output_variables().count(),
+                        ]),
                     )
+                    .map(Value::Cell)
+                    .map_err(|error| {
+                        runmat_runtime::runtime_error::semantic_error(
+                            "ParallelTaskOutput",
+                            error.to_string(),
+                        )
+                    })
+                    .and_then(|value| {
+                        runmat_runtime::execution::RootedValue::new(value)
+                            .map_err(|error| error.into_runtime_error())
+                    })
                 })
-                .and_then(|value| {
-                    runmat_runtime::execution::RootedValue::new(value)
-                        .map_err(|error| error.into_runtime_error())
-                })
-        })?
-    });
-    result.map_err(ParallelRegionError::Runtime)
+            });
+            result.map_err(ParallelRegionError::Runtime)
+        })
+        .await
 }
 
 fn unsupported_executable_revisions(
@@ -1179,7 +1228,7 @@ mod tests {
             expected_artifact_id: None,
         };
         let artifact =
-            ProgramArtifact::materialize(&recipe, ExecutableForm::ExecutableUnitV3, bytes.to_vec())
+            ProgramArtifact::materialize(&recipe, ExecutableForm::ExecutableUnitV4, bytes.to_vec())
                 .unwrap();
         ProgramExecutionRequest {
             schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
@@ -1196,17 +1245,32 @@ mod tests {
         }
     }
 
+    fn dependency_free_frozen_envelope(frozen: &[u8]) -> runmat_execution::ExecutableUnitEnvelope {
+        // These historical fixtures predate selected dependency products. Lift
+        // only that absent transport shape, leaving compiler/component revisions
+        // and every opaque component byte unchanged for independent rejection.
+        let mut envelope: serde_json::Value =
+            serde_json::from_slice(frozen).expect("frozen envelope JSON");
+        let manifest = envelope["manifest"]
+            .as_object_mut()
+            .expect("frozen manifest");
+        assert!(!manifest.contains_key("dependencies"));
+        manifest.insert("dependencies".into(), serde_json::json!([]));
+        let envelope_object = envelope.as_object_mut().expect("frozen envelope");
+        assert!(!envelope_object.contains_key("dependency_products"));
+        envelope_object.insert("dependency_products".into(), serde_json::json!([]));
+        serde_json::from_value(envelope).expect("dependency-free frozen envelope shape")
+    }
+
     fn with_current_envelope_schema(frozen: &[u8]) -> Vec<u8> {
-        let mut envelope: runmat_execution::ExecutableUnitEnvelope =
-            serde_json::from_slice(frozen).expect("frozen envelope shape");
+        let mut envelope = dependency_free_frozen_envelope(frozen);
         envelope.schema_version = runmat_execution::EXECUTABLE_UNIT_SCHEMA_VERSION;
         envelope.manifest.schema_version = runmat_execution::EXECUTABLE_UNIT_SCHEMA_VERSION;
         envelope.canonical_bytes().expect("schema-lifted envelope")
     }
 
     fn with_stale_envelope_schema(frozen: &[u8]) -> Vec<u8> {
-        let mut envelope: runmat_execution::ExecutableUnitEnvelope =
-            serde_json::from_slice(frozen).expect("frozen envelope shape");
+        let mut envelope = dependency_free_frozen_envelope(frozen);
         let stale = runmat_execution::EXECUTABLE_UNIT_SCHEMA_VERSION
             .checked_sub(1)
             .expect("current envelope has a predecessor");

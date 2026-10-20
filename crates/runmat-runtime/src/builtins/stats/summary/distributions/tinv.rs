@@ -10,14 +10,21 @@ use runmat_builtins::{
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::summary::distributions::tinv"
 )]
-pub(crate) async fn tinv_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(crate) async fn tinv_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if rest.len() != 1 {
         return Err(super::normal_error("tinv", "tinv: expected p and nu"));
     }
     let nu_value = rest.into_iter().next().expect("one nu argument");
     ensure_extensions(&value, &nu_value)?;
     numeric_inputs("tinv", &[&value, &nu_value], NumericShapePolicy::Broadcast)?;
-    let output = NormalOutputPlan::inspect("tinv", &value, std::slice::from_ref(&nu_value))?;
+    let output = NormalOutputPlan::inspect(
+        "tinv",
+        &value,
+        crate::call::FunctionArgumentView::from_slice(std::slice::from_ref(&nu_value)),
+    )?;
     let p = super::normal_value_to_tensor("tinv", "p", value).await?;
     let nu = super::normal_value_to_tensor("tinv", "nu", nu_value).await?;
     let (p, nu, shape) = super::broadcast_pair("tinv", &p, &nu)?;

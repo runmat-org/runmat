@@ -8,7 +8,12 @@ fn call(
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<crate::execution::RootedValue> {
     let _compatibility = crate::compatibility::push_runmat_extensions_enabled(true);
-    block_on(structfun_builtin(function, Value::Struct(structure), rest))
+    block_on(structfun_builtin(
+        None,
+        function,
+        Value::Struct(structure),
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    ))
 }
 
 fn rooted_sequence(
@@ -18,10 +23,10 @@ fn rooted_sequence(
 }
 
 fn numbers() -> StructValue {
-    let mut structure = StructValue::new();
+    let mut structure = runmat_value::UnboundedStructValueBuilder::new();
     structure.insert("a", Value::Num(1.0));
     structure.insert("b", Value::Num(2.0));
-    structure
+    structure.finish()
 }
 
 mod callback;

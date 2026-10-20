@@ -151,21 +151,27 @@ pub(crate) async fn kmeans_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
     x: Value,
     k: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     kmeans_in_runtime(runtime.as_ref(), x, k, rest).await
 }
 
 #[cfg(test)]
 async fn kmeans_builtin(x: Value, k: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    kmeans_in_runtime(None, x, k, rest).await
+    kmeans_in_runtime(
+        None,
+        x,
+        k,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    )
+    .await
 }
 
 async fn kmeans_in_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
     x: Value,
     k: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let mut cooperation = cooperation::KmeansCooperation::new(runtime);
     cooperation.completed(0).await?;
@@ -212,7 +218,9 @@ async fn kmeans_in_runtime(
 
 #[cfg(test)]
 fn parse_option_headers(args: &[Value]) -> BuiltinResult<Vec<OptionHeader>> {
-    admission::parse_option_headers(args.to_vec())
+    admission::parse_option_headers(crate::builtins::common::test_support::builtin_arguments(
+        args.to_vec(),
+    ))
 }
 
 fn value_gpu_source(value: &Value) -> Option<runmat_accelerate_api::GpuTensorHandle> {

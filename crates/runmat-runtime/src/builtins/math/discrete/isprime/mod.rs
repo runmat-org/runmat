@@ -46,7 +46,10 @@ fn isprime_error(error: IsPrimeError, detail: impl std::fmt::Display) -> Runtime
     binding_variant = "default",
     builtin_path = "crate::builtins::math::discrete::isprime"
 )]
-async fn isprime_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn isprime_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if !rest.is_empty() {
         return Err(isprime_error(
             IsPrimeError::InvalidInput,

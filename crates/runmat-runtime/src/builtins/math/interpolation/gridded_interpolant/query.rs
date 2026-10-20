@@ -9,7 +9,7 @@ pub(super) use allocation::admit_spline2_from_object;
 
 pub(super) async fn evaluate_interpolant(
     spec: &InterpolantSpec,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
     runtime: Option<&crate::context::RuntimeContext>,
     preceding_receipt: Option<&HostAllocationReceipt>,
 ) -> BuiltinResult<Value> {
@@ -22,7 +22,7 @@ pub(super) async fn evaluate_interpolant(
         spec.method,
         spec.extrapolation,
     )?;
-    ensure_query_integer_extensions(&args)?;
+    ensure_query_integer_extensions(args.view())?;
     let grid_rank = spec.grid_vectors.len();
     let grid_size = spec
         .grid_vectors
@@ -46,7 +46,7 @@ pub(super) async fn evaluate_interpolant(
     let allocation = if preceding_receipt.is_none() {
         admit_spline2_before_query(
             spec,
-            &args,
+            args.view(),
             grid_size,
             extra_count,
             extra_shape.len(),
@@ -318,7 +318,7 @@ pub(super) fn finish_interpolant_output(
 
 pub(super) fn parse_query_plan(
     grid_vectors: &[Vec<f64>],
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<QueryPlan> {
     let ndim = grid_vectors.len();
     if args.len() == 1 {

@@ -23,7 +23,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::tensor;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 use super::eig;
@@ -68,19 +68,32 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "eigs",
     binding_variant = "default",
-    builtin_path = "crate::builtins::math::linalg::factor::eigs"
+    builtin_path = "crate::builtins::math::linalg::factor::eigs",
+    context = true
 )]
-async fn eigs_builtin(a: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn eigs_builtin_context(
+    runtime: Option<crate::context::RuntimeContext>,
+    a: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if crate::value_contains_gpu(&a) || rest.iter().any(crate::value_contains_gpu) {
         crate::compatibility::ensure_builtin_extension_enabled(&EIGS_GPU_INPUT_EXTENSION, NAME)?;
     }
     ensure_eigs_coefficient_class_enabled(&a)?;
-    preflight_eigs_extensions(&rest)?;
+    preflight_eigs_extensions(rest.view())?;
     crate::builtins::common::validation::reject_typed_complex_integer(&a, "eigs")?;
     for value in &rest {
         crate::builtins::common::validation::reject_typed_complex_integer(value, "eigs")?;
     }
-    let request = Request::parse(a, rest).await?;
+    let a = crate::execution::RootedValue::in_optional_context(a, runtime.as_ref())?;
+    let args = crate::builtins::common::mapped_callable::prepend_rooted_argument(
+        &rest,
+        a,
+        runtime.as_ref(),
+    )
+    .await?;
+    let args = gather_eigs_arguments(args, runtime.as_ref()).await?;
+    let request = Request::parse(args).await?;
     let eval = compute_subset(request).await?;
 
     match crate::output_count::current_output_count() {
@@ -97,6 +110,30 @@ async fn eigs_builtin(a: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     }
 }
 
+async fn gather_eigs_arguments(
+    args: crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    let mut resident = false;
+    for value in &args {
+        crate::dispatcher::try_visit_gathered_gpu_handles(value, &mut |_| resident = true)?;
+    }
+    if !resident {
+        return Ok(args);
+    }
+    args.try_map_preserving_roots_async(args.len(), runtime, async |index| {
+        crate::dispatcher::gather_if_needed_async(&args[index])
+            .await
+            .map_err(with_context)
+    })
+    .await
+}
+
+#[cfg(test)]
+async fn eigs_builtin(a: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    eigs_builtin_context(None, a, rest).await
+}
+
 fn ensure_eigs_coefficient_class_enabled(value: &Value) -> BuiltinResult<()> {
     if is_nonfloating_supported_coefficient_matrix(value) {
         crate::compatibility::ensure_builtin_extension_enabled(
@@ -107,7 +144,7 @@ fn ensure_eigs_coefficient_class_enabled(value: &Value) -> BuiltinResult<()> {
     Ok(())
 }
 
-fn preflight_eigs_extensions(rest: &[Value]) -> BuiltinResult<()> {
+fn preflight_eigs_extensions(rest: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<()> {
     let mut cursor = 0usize;
     if let Some(candidate) = rest.first() {
         if is_empty_matrix(candidate) {
@@ -130,12 +167,14 @@ fn preflight_eigs_extensions(rest: &[Value]) -> BuiltinResult<()> {
         cursor += 1;
     }
     if cursor < rest.len() {
-        preflight_start_vector_extension(&rest[cursor..])?;
+        preflight_start_vector_extension(rest.range(cursor..).expect("bounded eigs option range"))?;
     }
     Ok(())
 }
 
-fn preflight_start_vector_extension(args: &[Value]) -> BuiltinResult<()> {
+fn preflight_start_vector_extension(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     if args.len() == 1 {
         if let Value::Struct(options) = &args[0] {
             for (name, value) in &options.fields {
@@ -255,7 +294,10 @@ struct SubsetEval {
 }
 
 impl Request {
-    async fn parse(a: Value, rest: Vec<Value>) -> BuiltinResult<Self> {
+    async fn parse(mut args: crate::call::BuiltinArguments) -> BuiltinResult<Self> {
+        let a = args.pop_front().ok_or_else(|| {
+            error_with_detail("eigs: missing coefficient matrix", &ERROR_INVALID_INPUT)
+        })?;
         if matches!(
             a,
             Value::FunctionHandle(_)
@@ -270,10 +312,9 @@ impl Request {
             ));
         }
 
-        let mut a = gather_matrix_value(a).await?;
+        let mut a = matrix_host_value(a)?;
         ensure_exact_eigs_integer_boundary(&a, "A")?;
         let n = matrix_order(&a)?;
-        let mut args = gather_args(rest).await?;
         let mut cursor = 0usize;
         let mut b = None;
         let mut k = DEFAULT_K.min(n);
@@ -285,7 +326,10 @@ impl Request {
                 cursor += 1;
             } else if is_generalized_b(candidate) {
                 ensure_eigs_coefficient_class_enabled(candidate)?;
-                let candidate = matrix_host_value(args.remove(0))?;
+                let candidate = matrix_host_value(
+                    args.pop_front()
+                        .expect("first generalized coefficient exists"),
+                )?;
                 ensure_exact_eigs_integer_boundary(&candidate, "B")?;
                 b = Some(candidate);
                 cursor = 0;
@@ -307,7 +351,11 @@ impl Request {
         }
 
         if cursor < args.len() {
-            parse_options(&args[cursor..], n, k, &mut options)?;
+            let option_args = args
+                .view()
+                .range(cursor..)
+                .expect("bounded eigs option range");
+            parse_options(option_args, n, k, &mut options)?;
         }
 
         validate_option_combination(sigma, &options)?;
@@ -335,25 +383,6 @@ impl Request {
 
         Ok(Self { a, b, k, sigma })
     }
-}
-
-async fn gather_args(args: Vec<Value>) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(args.len());
-    for arg in args {
-        out.push(
-            gpu_helpers::gather_value_async(&arg)
-                .await
-                .map_err(with_context)?,
-        );
-    }
-    Ok(out)
-}
-
-async fn gather_matrix_value(value: Value) -> BuiltinResult<Value> {
-    let value = gpu_helpers::gather_value_async(&value)
-        .await
-        .map_err(with_context)?;
-    matrix_host_value(value)
 }
 
 fn matrix_host_value(value: Value) -> BuiltinResult<Value> {
@@ -532,7 +561,7 @@ fn parse_sigma_text(text: &str) -> BuiltinResult<Sigma> {
 }
 
 fn parse_options(
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     n: usize,
     k: usize,
     options: &mut ParsedOptions,
@@ -706,9 +735,13 @@ async fn compute_subset(request: Request) -> BuiltinResult<SubsetEval> {
         eig_args.push(b);
     }
     eig_args.push(Value::string("vector".to_string()));
-    let eval = eig::evaluate(request.a, &eig_args, false)
-        .await
-        .map_err(with_context)?;
+    let eval = eig::evaluate(
+        request.a,
+        crate::call::FunctionArgumentView::from_slice(&eig_args),
+        false,
+    )
+    .await
+    .map_err(with_context)?;
     let output_dtype = floating_output_dtype(&eval.eigenvalues());
     let all_values = eigenvalue_list(&eval.eigenvalues())?;
     let selected = select_indices(&all_values, request.k, request.sigma);
@@ -1257,10 +1290,10 @@ fn numeric_vector_values(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
 fn text_value(value: &Value) -> Option<String> {
     match value {
         Value::String(text) => Some(text.as_str().to_owned()),
-        Value::StringArray(array) if array.data.len() == 1 => {
-            Some(array.data[0].as_str().to_owned())
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Some(array.data()[0].as_str().to_owned())
         }
-        Value::CharArray(chars) if chars.rows == 1 => Some(chars.data.iter().collect()),
+        Value::CharArray(chars) if chars.rows == 1 => Some(chars.data().iter().collect()),
         _ => None,
     }
 }
@@ -1393,8 +1426,11 @@ mod tests {
             vec![1, 1],
         )
         .expect("tensor");
-        let err = block_on(eigs_builtin(Value::ComplexTensor(tensor), Vec::new()))
-            .expect_err("typed complex integer input must reject");
+        let err = block_on(eigs_builtin(
+            Value::ComplexTensor(tensor),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect_err("typed complex integer input must reject");
         assert!(err.message().contains("complex numbers with integer types"));
     }
 
@@ -1441,6 +1477,7 @@ mod tests {
     }
 
     fn call(a: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let rest = crate::call::BuiltinArguments::from_borrowed(&rest, None)?;
         block_on(eigs_builtin(a, rest))
     }
 
@@ -1510,14 +1547,14 @@ mod tests {
             EIGS_INTEGER_SIGMA_EXTENSION.error_identifier
         );
 
-        let mut options = StructValue::new();
+        let mut options = runmat_value::UnboundedStructValueBuilder::new();
         options.insert(
             "StartVector",
             Value::Tensor(
                 Tensor::new_integer(IntegerStorage::U16(vec![1, 2]), vec![2, 1]).unwrap(),
             ),
         );
-        let error = call(a, vec![Value::Num(1.0), Value::Struct(options)])
+        let error = call(a, vec![Value::Num(1.0), Value::Struct(options.finish())])
             .expect_err("typed-integer StartVector must gate");
         assert_eq!(
             error.identifier(),
@@ -1529,7 +1566,7 @@ mod tests {
     fn eigs_nested_resident_start_vector_gates_before_recursive_gather() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let a = real_matrix(vec![1.0, 0.0, 0.0, 8.0], 2, 2);
-        let mut options = StructValue::new();
+        let mut options = runmat_value::UnboundedStructValueBuilder::new();
         options.insert(
             "StartVector",
             Value::GpuTensor(
@@ -1543,7 +1580,7 @@ mod tests {
                     .handle,
             ),
         );
-        let error = call(a, vec![Value::Num(1.0), Value::Struct(options)])
+        let error = call(a, vec![Value::Num(1.0), Value::Struct(options.finish())])
             .expect_err("nested resident StartVector must gate before gather");
         assert_eq!(
             error.identifier(),
@@ -1690,7 +1727,7 @@ mod tests {
 
     #[test]
     fn eigs_validates_options_without_affecting_exact_fallback() {
-        let mut opts = StructValue::new();
+        let mut opts = runmat_value::UnboundedStructValueBuilder::new();
         opts.insert("tol", Value::Num(1e-9));
         let maxit = Tensor::new_integer(IntegerStorage::U16(vec![100]), vec![1, 1]).unwrap();
         opts.insert("maxit", Value::Tensor(maxit));
@@ -1710,7 +1747,7 @@ mod tests {
                 vec![
                     Value::Num(1.0),
                     Value::String("lm".into()),
-                    Value::Struct(opts),
+                    Value::Struct(opts.finish()),
                 ],
             )
             .unwrap(),
@@ -1722,7 +1759,7 @@ mod tests {
     fn eigs_validates_generalized_option_sigma_constraints() {
         let a = real_matrix(vec![2.0, 0.0, 0.0, 9.0], 2, 2);
         let b = real_matrix(vec![1.0, 0.0, 0.0, 3.0], 2, 2);
-        let mut chol_opts = StructValue::new();
+        let mut chol_opts = runmat_value::UnboundedStructValueBuilder::new();
         chol_opts.insert("IsCholesky", Value::Bool(true));
         assert!(call(
             a.clone(),
@@ -1730,12 +1767,12 @@ mod tests {
                 b.clone(),
                 Value::Num(1.0),
                 Value::Num(2.0),
-                Value::Struct(chol_opts)
+                Value::Struct(chol_opts.finish())
             ],
         )
         .is_err());
 
-        let mut spd_opts = StructValue::new();
+        let mut spd_opts = runmat_value::UnboundedStructValueBuilder::new();
         spd_opts.insert("IsSymmetricDefinite", Value::Bool(true));
         assert!(call(
             a,
@@ -1743,7 +1780,7 @@ mod tests {
                 b,
                 Value::Num(1.0),
                 Value::CharArray(CharArray::new_row("largestabs")),
-                Value::Struct(spd_opts),
+                Value::Struct(spd_opts.finish()),
             ],
         )
         .is_err());
@@ -1752,14 +1789,14 @@ mod tests {
     #[test]
     fn eigs_rejects_too_small_subspace_dimension() {
         let a = real_matrix(vec![1.0, 0.0, 0.0, 3.0], 2, 2);
-        let mut opts = StructValue::new();
+        let mut opts = runmat_value::UnboundedStructValueBuilder::new();
         opts.insert("p", Value::Num(2.0));
         assert!(call(
             a,
             vec![
                 Value::Num(1.0),
                 Value::String("lm".into()),
-                Value::Struct(opts)
+                Value::Struct(opts.finish())
             ]
         )
         .is_err());
@@ -1793,7 +1830,7 @@ mod tests {
     fn eigs_accepts_cholesky_factor_for_generalized_b() {
         let a = real_matrix(vec![2.0, 0.0, 0.0, 9.0], 2, 2);
         let r = real_matrix(vec![1.0, 0.0, 0.0, 2.0], 2, 2);
-        let mut opts = StructValue::new();
+        let mut opts = runmat_value::UnboundedStructValueBuilder::new();
         opts.insert("IsCholesky", Value::Bool(true));
         let out = tensor(
             call(
@@ -1802,7 +1839,7 @@ mod tests {
                     r,
                     Value::Num(1.0),
                     Value::CharArray(CharArray::new_row("smallestreal")),
-                    Value::Struct(opts),
+                    Value::Struct(opts.finish()),
                 ],
             )
             .unwrap(),
@@ -1815,7 +1852,7 @@ mod tests {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let a = real_matrix(vec![2.0, 0.0, 0.0, 9.0], 2, 2);
         let r = Tensor::new_integer(IntegerStorage::U16(vec![1, 0, 0, 2]), vec![2, 2]).unwrap();
-        let mut opts = StructValue::new();
+        let mut opts = runmat_value::UnboundedStructValueBuilder::new();
         opts.insert("IsCholesky", Value::Bool(true));
 
         let out = tensor(
@@ -1825,7 +1862,7 @@ mod tests {
                     Value::Tensor(r),
                     Value::Num(1.0),
                     Value::CharArray(CharArray::new_row("smallestreal")),
-                    Value::Struct(opts),
+                    Value::Struct(opts.finish()),
                 ],
             )
             .unwrap(),
@@ -1839,10 +1876,10 @@ mod tests {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let a = real_matrix(vec![1.0, 0.0, 0.0, 3.0], 2, 2);
         let start = Tensor::new_integer(IntegerStorage::U16(vec![1, 2]), vec![2, 1]).unwrap();
-        let mut opts = StructValue::new();
+        let mut opts = runmat_value::UnboundedStructValueBuilder::new();
         opts.insert("StartVector", Value::Tensor(start));
 
-        let out = tensor(call(a, vec![Value::Num(1.0), Value::Struct(opts)]).unwrap());
+        let out = tensor(call(a, vec![Value::Num(1.0), Value::Struct(opts.finish())]).unwrap());
 
         assert_eq!(out.shape(), [1, 1]);
         assert_eq!(out.materialize_f64(), vec![3.0]);

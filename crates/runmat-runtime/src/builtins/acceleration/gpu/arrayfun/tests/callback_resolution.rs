@@ -27,7 +27,7 @@ fn arrayfun_single_segment_external_handle_uses_runtime_name_resolution() {
     let result = block_on(runtime.scope(arrayfun_builtin(
         Some(runtime.clone()),
         Value::ExternalFunctionHandle("callback".into()),
-        vec![Value::Tensor(tensor)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(tensor)]),
     )))
     .expect("single-segment external-handle arrayfun should resolve via runtime-name policy");
     match result.value() {

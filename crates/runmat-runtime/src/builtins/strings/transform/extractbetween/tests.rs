@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
 use super::*;
-use runmat_value::{CellArray, IntegerStorage, NumericStorage, StructArray, StructValue, Tensor};
+use runmat_value::{CellArray, IntegerStorage, NumericStorage, StructArray, Tensor};
 
 fn extract_between_builtin(
     text: Value,
@@ -9,7 +9,12 @@ fn extract_between_builtin(
     stop: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    futures::executor::block_on(super::extract_between_builtin(text, start, stop, rest))
+    futures::executor::block_on(super::extract_between_builtin(
+        text,
+        start,
+        stop,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    ))
 }
 
 #[test]
@@ -156,7 +161,7 @@ fn extractBetween_numeric_positions_start_past_length() {
         Vec::new(),
     )
     .expect("extractBetween");
-    assert_eq!(result, Value::String(String::new()));
+    assert_eq!(result, Value::String(String::new().into()));
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -176,7 +181,7 @@ fn extractBetween_string_array_broadcast() {
     .expect("extractBetween");
     match result {
         Value::StringArray(sa) => {
-            assert_eq!(sa.data, vec!["accel".to_string(), "gc".to_string()]);
+            assert_eq!(sa.data(), vec!["accel".to_string(), "gc".to_string()]);
             assert_eq!(sa.shape, vec![2, 1]);
         }
         other => panic!("expected string array, got {other:?}"),
@@ -202,10 +207,10 @@ fn extractBetween_character_vector_returns_scalar_cellstr() {
     match result {
         Value::Cell(out) => {
             assert_eq!(out.shape, vec![1, 1]);
-            let Value::CharArray(chars) = &out.data[0] else {
+            let Value::CharArray(chars) = &out.data()[0] else {
                 panic!("expected character vector element")
             };
-            let text: String = chars.data.iter().collect();
+            let text: String = chars.data().iter().collect();
             assert_eq!(text.trim_end(), "Accelerate");
         }
         other => panic!("expected scalar cellstr, got {other:?}"),
@@ -315,7 +320,7 @@ fn extractBetween_cell_array_preserves_types() {
             let first = out.get(0, 0).unwrap();
             let second = out.get(0, 1).unwrap();
             assert_eq!(first, Value::CharArray(CharArray::new_row("B")));
-            assert_eq!(second, Value::String(String::new()));
+            assert_eq!(second, Value::String(String::new().into()));
         }
         other => panic!("expected cell array, got {other:?}"),
     }
@@ -347,9 +352,10 @@ fn extractBetween_cell_and_structure_identity_does_not_depend_on_contents() {
         EXTRACT_BETWEEN_ERROR_INVALID_INPUT.identifier
     );
 
-    let mut structure = StructValue::new();
+    let mut structure = runmat_value::UnboundedStructValueBuilder::new();
     structure.insert("payload", Value::CharArray(CharArray::new_row("A<B>")));
-    let structure_cell = Value::Cell(CellArray::new(vec![Value::Struct(structure)], 1, 1).unwrap());
+    let structure_cell =
+        Value::Cell(CellArray::new(vec![Value::Struct(structure.finish())], 1, 1).unwrap());
     let error = extract_between_builtin(
         structure_cell.clone(),
         Value::String("<".into()),
@@ -441,7 +447,7 @@ fn extractBetween_numeric_tensor_broadcast() {
     .expect("extractBetween");
     match result {
         Value::StringArray(sa) => {
-            assert_eq!(sa.data, vec!["abc".to_string(), "xyz".to_string()]);
+            assert_eq!(sa.data(), vec!["abc".to_string(), "xyz".to_string()]);
             assert_eq!(sa.shape, vec![2, 1]);
         }
         other => panic!("expected string array, got {other:?}"),

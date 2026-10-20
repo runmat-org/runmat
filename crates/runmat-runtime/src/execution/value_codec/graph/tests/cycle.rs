@@ -130,7 +130,7 @@ fn closure_activation_cycle_and_argument_alias_round_trip_under_one_rooted_batch
         let Value::Cell(cell) = &decoded.values()[1] else {
             panic!("argument cell")
         };
-        let Value::Closure(aliased) = &cell.data[0] else {
+        let Value::Closure(aliased) = &cell.data()[0] else {
             panic!("argument closure")
         };
         assert_eq!(

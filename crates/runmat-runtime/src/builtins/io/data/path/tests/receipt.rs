@@ -174,11 +174,11 @@ fn selected_open_keeps_original_provider_and_cwd_through_await_and_publication()
         Value::String("same.data".into()),
     ))
     .expect("captured original provider is still authoritative");
-    let Value::Object(object) = value else {
+    let Value::Object(object) = value.value() else {
         panic!("data.open must return a Dataset object");
     };
     assert_eq!(
-        object.properties.get("__data_id"),
+        object.properties().get("__data_id"),
         Some(&Value::String("original".into()))
     );
     assert_eq!(evidence.seen.get(), 1);

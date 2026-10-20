@@ -32,6 +32,10 @@ mod waitbar;
 mod drawnow;
 mod axes_controls;
 mod line;
+mod data_tip_text_row;
+mod datacursormode;
+mod pan;
+mod zoom;
 
 pub use self::animatedline::*;
 pub use self::annotations::*;
@@ -43,6 +47,8 @@ pub use self::colorbar::*;
 pub use self::colormap::*;
 pub use self::cylinder::*;
 pub use self::daspect::*;
+pub use self::data_tip_text_row::*;
+pub use self::datacursormode::*;
 pub use self::drawnow::*;
 pub use self::figure_persistence::*;
 pub use self::findobj::*;
@@ -56,6 +62,7 @@ pub use self::legend::*;
 pub use self::line::*;
 pub use self::linkaxes::*;
 pub use self::palette_generators::*;
+pub use self::pan::*;
 pub use self::patch::*;
 pub use self::print::*;
 pub use self::r#box::*;
@@ -64,6 +71,7 @@ pub use self::shading::*;
 pub use self::surf::*;
 pub use self::view::*;
 pub use self::waitbar::*;
+pub use self::zoom::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(animatedline::ENTRIES.iter().copied());
@@ -97,4 +105,8 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(drawnow::ENTRIES.iter().copied());
     axes_controls::extend_entries(values);
     line::extend_entries(values);
+    values.extend(data_tip_text_row::ENTRIES.iter().copied());
+    values.extend(datacursormode::ENTRIES.iter().copied());
+    values.extend(pan::ENTRIES.iter().copied());
+    values.extend(zoom::ENTRIES.iter().copied());
 }

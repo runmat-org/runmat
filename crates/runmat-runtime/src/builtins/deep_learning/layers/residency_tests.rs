@@ -1,4 +1,5 @@
 use super::*;
+use crate::builtins::deep_learning::tests::fully_connected_layer_builtin;
 use futures::executor::block_on;
 use runmat_accelerate_api::{handle_is_explicit, GpuHandleProvenance, HostTensorView};
 
@@ -6,15 +7,55 @@ fn construct(kind: DeepLearningLayerKind, options: Vec<Value>) -> Value {
     use DeepLearningLayerKind as K;
     block_on(async {
         match kind {
-            K::FeatureInput => feature_input_layer_builtin(Value::Num(2.0), options).await,
-            K::ClassificationOutput => classification_layer_builtin(options).await,
-            K::FullyConnected => fully_connected_layer_builtin(Value::Num(2.0), options).await,
-            K::Lstm => lstm_layer_builtin(Value::Num(2.0), options).await,
-            K::Bilstm => bilstm_layer_builtin(Value::Num(2.0), options).await,
-            K::Convolution1D => {
-                convolution_1d_layer_builtin(Value::Num(3.0), Value::Num(2.0), options).await
+            K::FeatureInput => {
+                feature_input_layer_builtin(
+                    Value::Num(2.0),
+                    crate::builtins::common::test_support::builtin_arguments(options),
+                )
+                .await
             }
-            K::LayerNormalization => layer_normalization_layer_builtin(options).await,
+            K::ClassificationOutput => {
+                classification_layer_builtin(
+                    crate::builtins::common::test_support::builtin_arguments(options),
+                )
+                .await
+            }
+            K::FullyConnected => {
+                fully_connected_layer_builtin(
+                    None,
+                    Value::Num(2.0),
+                    crate::builtins::common::test_support::builtin_arguments(options),
+                )
+                .await
+            }
+            K::Lstm => {
+                lstm_layer_builtin(
+                    Value::Num(2.0),
+                    crate::builtins::common::test_support::builtin_arguments(options),
+                )
+                .await
+            }
+            K::Bilstm => {
+                bilstm_layer_builtin(
+                    Value::Num(2.0),
+                    crate::builtins::common::test_support::builtin_arguments(options),
+                )
+                .await
+            }
+            K::Convolution1D => {
+                convolution_1d_layer_builtin(
+                    Value::Num(3.0),
+                    Value::Num(2.0),
+                    crate::builtins::common::test_support::builtin_arguments(options),
+                )
+                .await
+            }
+            K::LayerNormalization => {
+                layer_normalization_layer_builtin(
+                    crate::builtins::common::test_support::builtin_arguments(options),
+                )
+                .await
+            }
             _ => unreachable!("only data-bearing layer constructors in this fixture"),
         }
     })
@@ -78,7 +119,8 @@ fn resident_learnables_and_recurrent_state_are_not_materialized_by_construction(
                 ) else {
                     panic!("layer object expected")
                 };
-                let Some(Value::GpuTensor(stored)) = layer.properties.get(option.canonical_name())
+                let Some(Value::GpuTensor(stored)) =
+                    layer.properties().get(option.canonical_name())
                 else {
                     panic!("{kind:?}/{option:?} lost resident storage")
                 };
@@ -129,7 +171,7 @@ fn initializer_closure_captures_keep_their_resident_lease_without_invocation() {
             panic!("layer expected")
         };
         let stored = layer
-            .properties
+            .properties()
             .get(DeepLearningLayerOption::WeightsInitializer.canonical_name())
             .unwrap();
         assert_eq!(stored, &callback);
@@ -155,16 +197,18 @@ fn downloaded_invalid_control_rejects_before_publishing_a_layer() {
             })
             .unwrap();
         provider.reset_telemetry();
-        let error = block_on(layer_normalization_layer_builtin(vec![
-            Value::String(DeepLearningLayerOption::Epsilon.canonical_name().into()),
-            Value::GpuTensor(epsilon.clone()),
-            Value::String(
-                DeepLearningLayerOption::ScaleLearnRateFactor
-                    .canonical_name()
-                    .into(),
-            ),
-            Value::GpuTensor(factor.clone()),
-        ]))
+        let error = block_on(layer_normalization_layer_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String(DeepLearningLayerOption::Epsilon.canonical_name().into()),
+                Value::GpuTensor(epsilon.clone()),
+                Value::String(
+                    DeepLearningLayerOption::ScaleLearnRateFactor
+                        .canonical_name()
+                        .into(),
+                ),
+                Value::GpuTensor(factor.clone()),
+            ]),
+        ))
         .unwrap_err();
         assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));
         assert!(provider.telemetry_snapshot().download_bytes > 0);
@@ -184,15 +228,17 @@ fn resident_structural_controls_still_materialize_at_the_control_boundary() {
             })
             .unwrap();
         provider.reset_telemetry();
-        let Value::Object(layer) = block_on(layer_normalization_layer_builtin(vec![
-            Value::String(DeepLearningLayerOption::Epsilon.canonical_name().into()),
-            Value::GpuTensor(epsilon.clone()),
-        ]))
+        let Value::Object(layer) = block_on(layer_normalization_layer_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String(DeepLearningLayerOption::Epsilon.canonical_name().into()),
+                Value::GpuTensor(epsilon.clone()),
+            ]),
+        ))
         .unwrap() else {
             panic!("normalization layer expected")
         };
         let control = layer
-            .properties
+            .properties()
             .get(DeepLearningLayerOption::Epsilon.canonical_name())
             .unwrap();
         assert!(!matches!(control, Value::GpuTensor(_)));

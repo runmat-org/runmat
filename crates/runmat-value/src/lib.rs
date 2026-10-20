@@ -37,16 +37,16 @@ pub use array::{
     HostAllocationProvenance, HostAllocationRelease, HostComplexBuffer, HostCopyMetrics,
     HostCopyReason, HostIndexBuffer, HostLogicalBuffer, HostNumericBuffer, HostShapeInput,
     IntegerComplexStorage, LogicalArray, NumericTensorAdmission, PreparedExactSparseTensor,
-    SharedShape, SharedShapeIntoIter, SparseCscValidation, SparseTensor, StringArray,
-    SymbolicArray, Tensor, ValidatedComplexTensorParts, ValidatedNumericTensorParts,
+    SharedShape, SharedShapeBuilder, SharedShapeIntoIter, SparseCscValidation, SparseTensor,
+    StringArray, SymbolicArray, Tensor, ValidatedComplexTensorParts, ValidatedNumericTensorParts,
     ValidatedSparseCscParts,
 };
 pub use callable::{
     BoundFunctionAuthority, BoundFunctionBinding, BoundFunctionHandle, BoundFunctionHandleData,
-    CallableInstanceId, CallableInstanceKey, Closure, ClosureData, FunctionDefinitionLease,
-    FunctionDefinitionOwner, LexicalEnvironment, LocalExport, NamedFunctionHandle,
-    SelectedNativeFunctionLease, SelectedReceiverDeclarationKey, SelectedReceiverDeclarationSeal,
-    SelectedStaticSiteBinding, StaticSiteDefinitionLease,
+    CallableInstanceId, CallableInstanceKey, Closure, ClosureData, ClosureHeaderError,
+    FunctionDefinitionLease, FunctionDefinitionOwner, LexicalEnvironment, LocalExport,
+    NamedFunctionHandle, SelectedNativeFunctionLease, SelectedReceiverDeclarationKey,
+    SelectedReceiverDeclarationSeal, SelectedStaticSiteBinding, StaticSiteDefinitionLease,
 };
 pub use display::{
     format_number, get_display_format, select_display_format_owner, set_display_format,
@@ -101,7 +101,7 @@ pub use shared_value_generation::{
     CallableGenerationInput, CallableGenerationPrepareError, CallableGenerationQuote,
     SharedValueGeneration,
 };
-pub use symbolic::{SymbolicExpr, SymbolicFunction};
+pub use symbolic::{SymbolicExpr, SymbolicFunction, SymbolicList};
 pub use trace::ValueTraceWorkspace;
 pub use transient::{validate_no_transient_sequence, TransientValueError};
 pub use utf8_text::{Utf8Text, Utf8TextAdmissionError, Utf8TextExactCopy};

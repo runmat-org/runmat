@@ -13,7 +13,7 @@ async fn assume_equal(
     receiver: Value,
     actual: Value,
     expected: Value,
-    diagnostics: Vec<Value>,
+    diagnostics: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     shared::qualify_binary(
         "assumeEqual",
@@ -35,7 +35,7 @@ async fn assume_equal(
 async fn assume_true(
     receiver: Value,
     actual: Value,
-    diagnostics: Vec<Value>,
+    diagnostics: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     shared::qualify_logical(
         "assumeTrue",

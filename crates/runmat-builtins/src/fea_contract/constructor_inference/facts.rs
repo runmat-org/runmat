@@ -1,8 +1,7 @@
 use super::super::identities::FEA_STUDY_CLASS;
 use super::FeaConstructorKind;
 use runmat_types::{
-    CertaintyFact, DimensionFact, DynamicReason, ObjectFact, ResidencyFact, ShapeFact,
-    StaticClassIdentity, StorageFact, ValueFact, ValueKindFact,
+    DimensionFact, ObjectFact, ResidencyFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
 };
 use std::collections::BTreeMap;
 
@@ -41,25 +40,16 @@ pub(super) fn possible_host_study(fact: &ValueFact) -> bool {
         }
 }
 
-pub(super) fn object_result(kind: FeaConstructorKind, dynamic_document: bool) -> ValueFact {
-    let mut fact = ValueFact::proven(
+pub(super) fn object_result(kind: FeaConstructorKind) -> ValueFact {
+    ValueFact::proven(
         ValueKindFact::Object(ObjectFact {
             class: None,
-            runtime_class: if dynamic_document {
-                None
-            } else {
-                kind.class().map(StaticClassIdentity::owned)
-            },
+            runtime_class: Some(kind.class().owned()),
             properties: BTreeMap::new(),
             properties_complete: false,
             handle_semantics: Some(false),
         }),
         ShapeFact::Scalar,
         StorageFact::Opaque,
-    );
-    if dynamic_document {
-        // The document may contain a Study or Sweep; path shape cannot tell.
-        fact.certainty = CertaintyFact::Dynamic(DynamicReason::RuntimeValue);
-    }
-    fact
+    )
 }

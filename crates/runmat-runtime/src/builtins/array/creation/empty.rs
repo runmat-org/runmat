@@ -59,7 +59,7 @@ fn empty_descriptor_error(
     binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::empty"
 )]
-async fn empty_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn empty_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     validate_outputs()?;
     crate::compatibility::ensure_builtin_extension_enabled(&EMPTY_GLOBAL_CALL_EXTENSION, LABEL)?;
     let (class, size_args, had_typename) = split_class_arg(args)?;
@@ -90,7 +90,7 @@ fn validate_outputs() -> BuiltinResult<()> {
     binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::empty"
 )]
-async fn int8_empty_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn int8_empty_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     validate_outputs()?;
     let shape = parse_shape(&args).await?;
     build_empty(EmptyClass::Int8, shape).await
@@ -100,7 +100,7 @@ async fn int8_empty_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::empty"
 )]
-async fn int16_empty_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn int16_empty_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     validate_outputs()?;
     let shape = parse_shape(&args).await?;
     build_empty(EmptyClass::Int16, shape).await
@@ -110,7 +110,7 @@ async fn int16_empty_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::empty"
 )]
-async fn int32_empty_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn int32_empty_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     validate_outputs()?;
     let shape = parse_shape(&args).await?;
     build_empty(EmptyClass::Int32, shape).await
@@ -120,7 +120,7 @@ async fn int32_empty_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::empty"
 )]
-async fn int64_empty_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn int64_empty_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     validate_outputs()?;
     let shape = parse_shape(&args).await?;
     build_empty(EmptyClass::Int64, shape).await
@@ -130,7 +130,7 @@ async fn int64_empty_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::empty"
 )]
-async fn uint8_empty_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn uint8_empty_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     validate_outputs()?;
     let shape = parse_shape(&args).await?;
     build_empty(EmptyClass::Uint8, shape).await
@@ -140,7 +140,7 @@ async fn uint8_empty_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::empty"
 )]
-async fn uint16_empty_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn uint16_empty_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     validate_outputs()?;
     let shape = parse_shape(&args).await?;
     build_empty(EmptyClass::Uint16, shape).await
@@ -150,7 +150,7 @@ async fn uint16_empty_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::empty"
 )]
-async fn uint32_empty_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn uint32_empty_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     validate_outputs()?;
     let shape = parse_shape(&args).await?;
     build_empty(EmptyClass::Uint32, shape).await
@@ -160,7 +160,7 @@ async fn uint32_empty_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::empty"
 )]
-async fn uint64_empty_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn uint64_empty_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     validate_outputs()?;
     let shape = parse_shape(&args).await?;
     build_empty(EmptyClass::Uint64, shape).await
@@ -187,7 +187,9 @@ fn class_from_keyword(keyword: &str) -> Option<EmptyClass> {
     })
 }
 
-fn split_class_arg(mut args: Vec<Value>) -> BuiltinResult<(EmptyClass, Vec<Value>, bool)> {
+fn split_class_arg(
+    mut args: crate::call::BuiltinArguments,
+) -> BuiltinResult<(EmptyClass, crate::call::BuiltinArguments, bool)> {
     if args.iter().any(|arg| {
         keyword_of(arg)
             .as_deref()
@@ -209,7 +211,7 @@ fn split_class_arg(mut args: Vec<Value>) -> BuiltinResult<(EmptyClass, Vec<Value
     Ok((EmptyClass::Double, args, false))
 }
 
-async fn parse_shape(args: &[Value]) -> BuiltinResult<Vec<usize>> {
+async fn parse_shape(args: &crate::call::BuiltinArguments) -> BuiltinResult<Vec<usize>> {
     let mut shape = if args.is_empty() {
         vec![0, 0]
     } else if args.len() == 1 {

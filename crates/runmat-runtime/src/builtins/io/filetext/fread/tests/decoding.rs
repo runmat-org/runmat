@@ -202,7 +202,7 @@ fn fread_char_output() {
         Value::CharArray(ca) => {
             assert_eq!(ca.rows, 3);
             assert_eq!(ca.cols, 1);
-            let collected: String = ca.data.iter().collect();
+            let collected: String = ca.data().iter().collect();
             assert_eq!(collected, "abc");
         }
         other => panic!("unexpected result {other:?}"),

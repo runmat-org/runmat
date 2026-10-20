@@ -3,8 +3,8 @@ use super::*;
 
 pub(super) fn dlarray_format(value: &Value) -> String {
     match value {
-        Value::Object(object) if object.class_name.is(super::DLARRAY_CLASS) => object
-            .properties
+        Value::Object(object) if object.class_name().is(super::DLARRAY_CLASS) => object
+            .properties()
             .get("Format")
             .and_then(|value| match value {
                 Value::String(text) => Some(text.to_string()),
@@ -17,7 +17,7 @@ pub(super) fn dlarray_format(value: &Value) -> String {
 
 pub(super) fn elu_alpha(layer: &ObjectInstance, function: &'static str) -> BuiltinResult<f64> {
     Ok(layer
-        .properties
+        .properties()
         .get("Alpha")
         .map(|value| super::super::numeric_scalar(value, function, "Alpha"))
         .transpose()?

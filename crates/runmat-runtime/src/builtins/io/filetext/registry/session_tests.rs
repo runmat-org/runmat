@@ -73,7 +73,7 @@ fn session_fids_do_not_cross_sessions_or_process_embedding() {
     let foreign = block_on(crate::builtins::io::filetext::fgetl::evaluate_in(
         Some(&second),
         &Value::Num(fid as f64),
-        &[],
+        crate::call::FunctionArgumentView::from_slice(&[]),
     ))
     .expect_err("foreign session cannot read the identifier");
     assert_eq!(foreign.identifier(), Some("RunMat:fgetl:InvalidIdentifier"));
@@ -153,20 +153,20 @@ fn fopen_and_fgetl_share_only_the_issuing_session() {
     let foreign = block_on(crate::builtins::io::filetext::fgetl::evaluate_in(
         Some(&second),
         &Value::Num(fid as f64),
-        &[],
+        crate::call::FunctionArgumentView::from_slice(&[]),
     ))
     .expect_err("foreign read");
     assert_eq!(foreign.identifier(), Some("RunMat:fgetl:InvalidIdentifier"));
     let first_line = block_on(crate::builtins::io::filetext::fgetl::evaluate_in(
         Some(&first),
         &Value::Num(fid as f64),
-        &[],
+        crate::call::FunctionArgumentView::from_slice(&[]),
     ))
     .expect("issuer read");
     let Value::CharArray(line) = first_line.first_output() else {
         panic!("expected character row")
     };
-    assert_eq!(line.data.iter().collect::<String>(), "first");
+    assert_eq!(line.data().iter().collect::<String>(), "first");
     assert!(block_on(close_async_in(fid, Some(&first)))
         .expect("issuer close")
         .is_some());

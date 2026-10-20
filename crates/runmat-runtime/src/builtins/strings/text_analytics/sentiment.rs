@@ -29,7 +29,7 @@ const NORMALIZATION_ALPHA: f64 = 15.0;
 )]
 async fn vader_sentiment_scores_builtin(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let (documents_object, options) = parse_args(runtime.as_ref(), args).await?;
     if !tokenized_document_language(&documents_object)
@@ -47,7 +47,7 @@ async fn vader_sentiment_scores_builtin(
 
 async fn parse_args(
     runtime: Option<&crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<(ObjectInstance, SentimentOptions)> {
     if args.is_empty() {
         return Err(sentiment_error(
@@ -65,7 +65,7 @@ async fn parse_args(
         Value::Object(object) => {
             return Err(sentiment_error(format!(
                 "vaderSentimentScores: expected tokenizedDocument object, got {}",
-                object.class_name
+                object.class_name()
             )));
         }
         other => {
@@ -414,7 +414,7 @@ async fn sentiment_lexicon_from_table(value: &Value) -> BuiltinResult<HashMap<St
         Value::Object(object) => {
             return Err(sentiment_error(format!(
                 "vaderSentimentScores: SentimentLexicon must be a table, got {}",
-                object.class_name
+                object.class_name()
             )));
         }
         other => {
@@ -489,7 +489,7 @@ fn numeric_vector(value: &Value, column_name: &str) -> BuiltinResult<Vec<f64>> {
             })
             .collect(),
         Value::Cell(cell) => cell
-            .data
+            .data()
             .iter()
             .map(|item| numeric_scalar(item, column_name))
             .collect(),
@@ -567,12 +567,12 @@ fn modifier_ngrams_from_value(value: &Value, option_name: &str) -> BuiltinResult
 }
 
 fn phrases_from_string_array(array: &StringArray) -> Vec<Vec<String>> {
-    if array.data.is_empty() {
+    if array.data().is_empty() {
         return Vec::new();
     }
     if array.rows <= 1 || array.cols <= 1 {
         return array
-            .data
+            .data()
             .iter()
             .map(|word| vec![word.as_str().to_owned()])
             .collect();
@@ -582,7 +582,7 @@ fn phrases_from_string_array(array: &StringArray) -> Vec<Vec<String>> {
         let mut phrase = Vec::new();
         for col in 0..array.cols {
             let idx = row + col * array.rows;
-            if let Some(token) = array.data.get(idx) {
+            if let Some(token) = array.data().get(idx) {
                 phrase.push(token.as_str().to_owned());
             }
         }
@@ -712,7 +712,7 @@ mod tests {
         AccelProvider, GpuTensorHandle, GpuTensorStorage, HostNumericDataOwned,
         HostNumericTensorOwned, HostTensorView,
     };
-    use runmat_value::{CellArray, IntegerStorage, StructValue};
+    use runmat_value::{CellArray, IntegerStorage};
     use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
     #[derive(Default)]
@@ -765,7 +765,10 @@ mod tests {
     }
 
     fn run(args: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(vader_sentiment_scores_builtin(None, args))
+        futures::executor::block_on(vader_sentiment_scores_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
 
     #[test]
@@ -830,20 +833,20 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let mut object = ObjectInstance::new(TOKENIZED_DOCUMENT_CLASS.to_string());
-        object.properties.insert(
+        object.replace_property_unbounded(
             "Documents".to_string(),
             Value::Cell(CellArray::new(values, docs.len(), 1).unwrap()),
         );
         object
-            .properties
-            .insert("NumDocuments".to_string(), Value::Num(docs.len() as f64));
-        object.properties.insert(
+            .replace_property_unbounded("NumDocuments".to_string(), Value::Num(docs.len() as f64));
+        object.replace_property_unbounded(
             "Shape".to_string(),
             Value::Tensor(Tensor::new(vec![docs.len() as f64, 1.0], vec![1, 2]).unwrap()),
         );
-        object
-            .properties
-            .insert("Language".to_string(), Value::String("en".to_string()));
+        object.replace_property_unbounded(
+            "Language".to_string(),
+            Value::String("en".to_string().into()),
+        );
         Value::Object(object)
     }
 
@@ -911,7 +914,7 @@ mod tests {
         let out = compound(
             run(vec![
                 documents(vec![vec!["innovative"], vec!["risk"]]),
-                Value::String("SentimentLexicon".to_string()),
+                Value::String("SentimentLexicon".to_string().into()),
                 table,
             ])
             .unwrap(),
@@ -975,13 +978,13 @@ mod tests {
                     vec!["kinda", "good"],
                     vec!["never", "good"],
                 ]),
-                Value::String("Boosters".to_string()),
+                Value::String("Boosters".to_string().into()),
                 Value::StringArray(
                     StringArray::new(vec!["exceptionally".into()], vec![1, 1]).unwrap(),
                 ),
-                Value::String("Dampeners".to_string()),
+                Value::String("Dampeners".to_string().into()),
                 Value::StringArray(StringArray::new(vec!["kinda".into()], vec![1, 1]).unwrap()),
-                Value::String("Negations".to_string()),
+                Value::String("Negations".to_string().into()),
                 Value::StringArray(StringArray::new(vec!["never".into()], vec![1, 1]).unwrap()),
             ])
             .unwrap(),
@@ -995,7 +998,7 @@ mod tests {
         let out = compound(
             run(vec![
                 documents(vec![vec!["kind", "of", "good"], vec!["good"]]),
-                Value::String("Dampeners".to_string()),
+                Value::String("Dampeners".to_string().into()),
                 Value::StringArray(
                     StringArray::new(
                         vec!["kind".into(), "unused".into(), "of".into(), "".into()],
@@ -1020,7 +1023,7 @@ mod tests {
         );
         let err = run(vec![
             documents(vec![vec!["strong"]]),
-            Value::String("SentimentLexicon".to_string()),
+            Value::String("SentimentLexicon".to_string().into()),
             table,
         ])
         .unwrap_err();
@@ -1031,7 +1034,7 @@ mod tests {
     fn vader_rejects_empty_custom_negations() {
         let err = run(vec![
             documents(vec![vec!["good"]]),
-            Value::String("Negations".to_string()),
+            Value::String("Negations".to_string().into()),
             Value::StringArray(StringArray::new(Vec::new(), vec![0, 1]).unwrap()),
         ])
         .unwrap_err();
@@ -1039,14 +1042,15 @@ mod tests {
     }
 
     fn table_value(names: Vec<String>, columns: Vec<Value>) -> Value {
-        let mut variables = StructValue::new();
+        let mut variables = runmat_value::UnboundedStructValueBuilder::new();
         for (name, column) in names.into_iter().zip(columns) {
             variables.insert(name, column);
         }
         let mut object = ObjectInstance::new(TABLE_CLASS.to_string());
-        object
-            .properties
-            .insert("__table_variables".to_string(), Value::Struct(variables));
+        object.replace_property_unbounded(
+            "__table_variables".to_string(),
+            Value::Struct(variables.finish()),
+        );
         Value::Object(object)
     }
 }

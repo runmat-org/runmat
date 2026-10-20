@@ -1,4 +1,44 @@
 use super::*;
+async fn websave_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
+    super::websave_builtin(
+        runtime,
+        crate::execution::RootedValues::new(args)
+            .map_err(|error| error.into_runtime_error())?
+            .into(),
+    )
+    .await
+}
+async fn sendmail_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
+    super::sendmail_builtin(
+        runtime,
+        crate::execution::RootedValues::new(args)
+            .map_err(|error| error.into_runtime_error())?
+            .into(),
+    )
+    .await
+}
+async fn urlencode_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    super::urlencode_builtin(
+        crate::execution::RootedValues::new(args)
+            .map_err(|error| error.into_runtime_error())?
+            .into(),
+    )
+    .await
+}
+async fn urldecode_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    super::urldecode_builtin(
+        crate::execution::RootedValues::new(args)
+            .map_err(|error| error.into_runtime_error())?
+            .into(),
+    )
+    .await
+}
 use runmat_builtins::{BuiltinIntegerAuditKind, URLDECODE_INTEGER_AUDIT, URLENCODE_INTEGER_AUDIT};
 use runmat_value::Tensor;
 
@@ -61,7 +101,10 @@ fn run(value: impl std::future::Future<Output = BuiltinResult<Value>>) -> Builti
 
 #[test]
 fn url_round_trip_uses_percent_encoding() {
-    let encoded = run(urlencode_builtin(vec![Value::String("a b/c".to_string())])).unwrap();
+    let encoded = run(urlencode_builtin(vec![Value::String(
+        "a b/c".to_string().into(),
+    )]))
+    .unwrap();
     assert_eq!(encoded, char_value("a%20b%2Fc"));
     let decoded = run(urldecode_builtin(vec![char_value("a%20b%2Fc")])).unwrap();
     assert_eq!(decoded, char_value("a b/c"));
@@ -205,23 +248,23 @@ fn websave_rest_applies_options_and_query_pairs() {
     let mut headers = Vec::new();
     let mut timeout = DEFAULT_TIMEOUT;
     let mut user_agent = USER_AGENT.to_string();
-    let mut options = runmat_value::StructValue::new();
+    let mut options = runmat_value::UnboundedStructValueBuilder::new();
     options.insert("Timeout", Value::Num(7.0));
-    options.insert("UserAgent", Value::String("agent".to_string()));
-    let mut header_struct = runmat_value::StructValue::new();
-    header_struct.insert("XRunMat", Value::String("yes".to_string()));
-    options.insert("HeaderFields", Value::Struct(header_struct));
+    options.insert("UserAgent", Value::String("agent".to_string().into()));
+    let mut header_struct = runmat_value::UnboundedStructValueBuilder::new();
+    header_struct.insert("XRunMat", Value::String("yes".to_string().into()));
+    options.insert("HeaderFields", Value::Struct(header_struct.finish()));
 
     parse_websave_rest(
         &mut url,
         &mut headers,
         &mut timeout,
         &mut user_agent,
-        &[
-            Value::Struct(options),
-            Value::String("q".to_string()),
-            Value::String("hello world".to_string()),
-        ],
+        crate::call::FunctionArgumentView::from_slice(&[
+            Value::Struct(options.finish()),
+            Value::String("q".to_string().into()),
+            Value::String("hello world".to_string().into()),
+        ]),
         None,
     )
     .unwrap();
@@ -234,22 +277,27 @@ fn websave_rest_applies_options_and_query_pairs() {
 
 #[test]
 fn websave_options_api_key_is_header_not_query_and_known_invalid_name_preflights() {
-    let mut source = runmat_value::StructValue::new();
+    let mut source = runmat_value::UnboundedStructValueBuilder::new();
     source.insert("KeyName", Value::from("X-API-Key"));
     source.insert("KeyValue", Value::from("secret"));
+    let source = source.finish();
     let prepared = super::super::api_key::PreparedApiKey::parse(&source);
     let mut url = Url::parse("https://example.test/data").unwrap();
     let mut headers = Vec::new();
     let mut timeout = DEFAULT_TIMEOUT;
     let mut user_agent = USER_AGENT.to_string();
     let args = [Value::Struct(source)];
-    preflight_websave_rest(&args, Some(&prepared)).unwrap();
+    preflight_websave_rest(
+        crate::call::FunctionArgumentView::from_slice(&args),
+        Some(&prepared),
+    )
+    .unwrap();
     parse_websave_rest(
         &mut url,
         &mut headers,
         &mut timeout,
         &mut user_agent,
-        &args,
+        crate::call::FunctionArgumentView::from_slice(&args),
         Some(&prepared),
     )
     .unwrap();
@@ -263,12 +311,16 @@ fn websave_options_api_key_is_header_not_query_and_known_invalid_name_preflights
             runmat_accelerate_api::GpuTensorStorage::Real,
         )
         .unwrap();
-    let mut invalid = runmat_value::StructValue::new();
+    let mut invalid = runmat_value::UnboundedStructValueBuilder::new();
     invalid.insert("KeyName", Value::from("bad\nname"));
     invalid.insert("KeyValue", Value::GpuTensor(allocation.handle.clone()));
+    let invalid = invalid.finish();
     let prepared = super::super::api_key::PreparedApiKey::parse(&invalid);
-    let error = preflight_websave_rest(&[Value::Struct(invalid)], Some(&prepared))
-        .expect_err("known malformed header must reject before a resident value is gathered");
+    let error = preflight_websave_rest(
+        crate::call::FunctionArgumentView::from_slice(&[Value::Struct(invalid)]),
+        Some(&prepared),
+    )
+    .expect_err("known malformed header must reject before a resident value is gathered");
     assert!(error.message().contains("KeyName"));
     assert_eq!(allocation.probe.retirements(), 0);
 }
@@ -314,8 +366,8 @@ fn sendmail_rejects_integer_payloads_before_transport() {
     let error = run(sendmail_builtin(
         None,
         vec![
-            Value::String("recipient@example.test".to_string()),
-            Value::String("subject".to_string()),
+            Value::String("recipient@example.test".to_string().into()),
+            Value::String("subject".to_string().into()),
             Value::Int(runmat_value::IntValue::U64(9_007_199_254_740_993)),
         ],
     ))
@@ -329,8 +381,8 @@ fn sendmail_rejects_integer_payloads_before_transport() {
         None,
         vec![
             Value::Cell(nested),
-            Value::String("subject".to_string()),
-            Value::String("message".to_string()),
+            Value::String("subject".to_string().into()),
+            Value::String("message".to_string().into()),
         ],
     ))
     .expect_err("nested integer recipient must reject before transport selection");
@@ -339,11 +391,12 @@ fn sendmail_rejects_integer_payloads_before_transport() {
 
 #[test]
 fn sendmail_two_argument_form_uses_an_empty_message() {
-    let (recipients, subject, message) = parse_sendmail_args(&[
-        Value::String("recipient@example.test".to_string()),
-        Value::String("subject".to_string()),
-    ])
-    .expect("two-argument sendmail form");
+    let (recipients, subject, message) =
+        parse_sendmail_args(crate::call::FunctionArgumentView::from_slice(&[
+            Value::String("recipient@example.test".to_string().into()),
+            Value::String("subject".to_string().into()),
+        ]))
+        .expect("two-argument sendmail form");
     assert_eq!(recipients, ["recipient@example.test"]);
     assert_eq!(subject, "subject");
     assert!(message.is_empty());

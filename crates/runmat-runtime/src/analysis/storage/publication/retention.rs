@@ -140,7 +140,7 @@ pub(in crate::analysis::storage) fn plan_inventory(
             .get(&digest_hex(*root))
             .ok_or("retention publication has no child inventory")?;
         if group.runs.iter().cloned().collect::<BTreeSet<_>>()
-            != descriptor.records.keys().cloned().collect()
+            != descriptor.records.keys().map(ToOwned::to_owned).collect()
         {
             return Err("retention publication has an incomplete child inventory".into());
         }

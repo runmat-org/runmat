@@ -97,7 +97,7 @@ fn selected_provider_failure_is_observed_once_without_host_replay() {
         Some(service.context()),
         Value::GpuTensor(signal.clone()),
         Value::GpuTensor(kernel.clone()),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect_err("selected operational failure must terminate");
     assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
@@ -135,7 +135,7 @@ fn actual_inprocess_vector_host_and_provider_routes_report_completed_work() {
             Some(service.context()),
             Value::GpuTensor(signal.clone()),
             Value::GpuTensor(kernel.clone()),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect("selected convolution route");
         let Value::GpuTensor(_) = &result else {
@@ -183,7 +183,7 @@ fn unpolled_vector_call_does_not_select_or_publish_feedback() {
         Some(service.context()),
         Value::GpuTensor(signal.clone()),
         Value::GpuTensor(kernel.clone()),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     );
     drop(call);
     assert_eq!(service.selections(), 0);
@@ -215,7 +215,7 @@ fn cancellation_after_actual_selection_cannot_train_success_or_failure() {
         Some(service.context()),
         Value::GpuTensor(signal.clone()),
         Value::GpuTensor(kernel.clone()),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ));
     service.drain_feedback();
     assert_eq!(
@@ -259,7 +259,7 @@ fn actual_wgpu_host_upload_feedback_waits_for_fence_completion() {
         Some(service.context()),
         Value::GpuTensor(signal),
         Value::GpuTensor(kernel),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("selected WGPU host/upload route");
     assert_eq!(service.selections(), 1);

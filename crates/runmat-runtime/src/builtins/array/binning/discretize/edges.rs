@@ -67,11 +67,14 @@ pub(super) fn validate_edges(edges: &[NumericScalar]) -> BuiltinResult<()> {
 }
 
 pub(super) fn parse_tail(rest: Vec<Value>) -> BuiltinResult<(Option<Labels>, bool)> {
-    let (labels, included_right) = tail_arguments(&rest)?;
+    let (labels, included_right) =
+        tail_arguments(crate::call::FunctionArgumentView::from_slice(&rest))?;
     Ok((labels.map(Labels::from_value).transpose()?, included_right))
 }
 
-pub(super) fn tail_arguments(rest: &[Value]) -> BuiltinResult<(Option<&Value>, bool)> {
+pub(super) fn tail_arguments(
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<(Option<&Value>, bool)> {
     let mut labels = None;
     let mut included_right = false;
     let mut index = 0;

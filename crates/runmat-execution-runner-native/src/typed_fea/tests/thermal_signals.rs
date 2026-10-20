@@ -103,6 +103,7 @@ async fn checked_named_thermal_inputs_match_tables_and_independent_source_bounda
     .unwrap();
     session
         .install_project_handoff(runmat_package::FrozenProjectHandoff::new(project))
+        .await
         .unwrap();
     let study_path = directory
         .path()
@@ -174,9 +175,14 @@ async fn checked_named_thermal_inputs_match_tables_and_independent_source_bounda
         for chunk in &input.program().chunks {
             let response = crate::execute_host_program_request(chunk.request.clone()).await;
             response.validate_against(&chunk.request).unwrap();
-            let ProgramExecutionResponse::Success { value } = response else {
+            let ProgramExecutionResponse::Success {
+                outputs: mut response_outputs,
+            } = response
+            else {
                 panic!("named thermal function failed: {response:?}")
             };
+            assert_eq!(response_outputs.len(), 1, "one original semantic output");
+            let value = response_outputs.remove(0);
             outputs.push(GeneratorChunkOutput {
                 chunk_identity: chunk.plan.identity,
                 value,

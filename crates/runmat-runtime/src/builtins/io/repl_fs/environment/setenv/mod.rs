@@ -12,6 +12,6 @@ use runmat_value::Value;
     binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::environment::setenv"
 )]
-async fn setenv_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn setenv_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     execute::run(args)
 }

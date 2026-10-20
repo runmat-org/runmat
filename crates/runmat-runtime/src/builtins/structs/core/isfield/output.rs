@@ -11,7 +11,7 @@ pub(super) fn evaluate(
         Query::Scalar(name) => Ok(Value::Bool(contains(fields, &name))),
         Query::Strings(array) => {
             let values = array
-                .data
+                .data()
                 .iter()
                 .map(|name| u8::from(contains(fields, name)))
                 .collect();

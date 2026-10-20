@@ -75,11 +75,12 @@ pub(super) fn mask(
         return build(
             context,
             source.shape.len(),
-            source.data.len(),
+            source.data().len(),
             0,
             |axis| Ok(source.shape[axis]),
             |data, _, receipt| {
-                for (index, (output, input)) in data.iter_mut().zip(source.data.iter()).enumerate()
+                for (index, (output, input)) in
+                    data.iter_mut().zip(source.data().iter()).enumerate()
                 {
                     if index.is_multiple_of(CHECKPOINT_CHUNK) {
                         receipt
@@ -96,8 +97,8 @@ pub(super) fn mask(
 
     // Ordinary shared input requires copy-on-write; never detach a finite
     // replacement through this branch.
-    let mut data = Vec::with_capacity(source.data.len());
-    for (index, value) in source.data.iter().copied().enumerate() {
+    let mut data = Vec::with_capacity(source.data().len());
+    for (index, value) in source.data().iter().copied().enumerate() {
         checkpoint(context, triangle, index)?;
         data.push(if retained(index) { value } else { '\0' });
     }
@@ -122,7 +123,7 @@ fn geometry(
             .checked_mul(extent)
             .ok_or_else(|| invalid(triangle, "Character shape exceeds platform limits"))?;
     }
-    if count != source.data.len() || rows != source.rows || cols != source.cols {
+    if count != source.data().len() || rows != source.rows || cols != source.cols {
         return Err(invalid(
             triangle,
             "Character payload or cached dimensions disagree with shape",

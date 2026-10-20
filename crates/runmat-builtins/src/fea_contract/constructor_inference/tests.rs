@@ -7,8 +7,8 @@ use crate::fea_contract::{
 };
 use crate::{BuiltinCatalogProvenance, BuiltinDocumentation};
 use runmat_types::{
-    CellFact, CertaintyFact, DynamicReason, LiteralContext, LiteralValue, ObjectFact,
-    OutputSelection, RequestedOutputCount, ShapeFact, StorageFact, ValueFact, ValueKindFact,
+    CellFact, DynamicReason, LiteralContext, LiteralValue, ObjectFact, OutputSelection,
+    RequestedOutputCount, ShapeFact, StorageFact, ValueFact, ValueKindFact,
 };
 use std::collections::BTreeMap;
 
@@ -35,30 +35,87 @@ fn entry() -> BuiltinCatalogEntry {
 }
 
 #[test]
-fn path_capability_is_declared_without_changing_pure_constructor_admission() {
-    let pure = entry();
-    assert!(pure.contract.capabilities.is_empty());
-    let path = catalog_entry::entry(ConstructorEntryDefinition {
-        provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
-        name: "fea.load",
-        documentation: BuiltinDocumentation::EMPTY,
-        descriptor: &FEA_MODEL_DESCRIPTOR,
-        inference: |request, entry| {
-            infer_constructor(request, entry, FeaConstructorKind::LoadDocument)
-        },
-        integer_capabilities: &[],
-        integer_audit: Some(&FEA_STRUCTURAL_INTEGER_AUDIT),
-        filesystem_read: true,
-        distributed: crate::BuiltinDistributedPolicy::Unsupported,
-    });
+fn study_and_material_assignment_require_the_current_typed_operands() {
+    let object = |class| {
+        ValueFact::proven(
+            ValueKindFact::Object(ObjectFact {
+                class: None,
+                runtime_class: Some(StaticClassIdentity::new(class).owned()),
+                properties: BTreeMap::new(),
+                properties_complete: false,
+                handle_semantics: Some(false),
+            }),
+            ShapeFact::Scalar,
+            StorageFact::Opaque,
+        )
+    };
+    let arguments = vec![
+        ValueFact::scalar(ValueKindFact::String),
+        object("geometry.Asset"),
+        object("fea.Model"),
+    ];
+    let typed = infer_constructor(
+        &request(arguments, vec![LiteralValue::Unknown; 3]),
+        &crate::FEA_STUDY_CATALOG_ENTRY,
+        FeaConstructorKind::Study,
+    );
+    assert!(typed.diagnostics.is_empty(), "{:?}", typed.diagnostics);
+    let path = infer_constructor(
+        &request(
+            vec![ValueFact::scalar(ValueKindFact::String)],
+            vec![LiteralValue::Unknown],
+        ),
+        &crate::FEA_STUDY_CATALOG_ENTRY,
+        FeaConstructorKind::Study,
+    );
+    assert!(path
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "RM-CATALOG-FEA-ARITY"));
+    let assigned = infer_constructor(
+        &request(
+            vec![object("fea.PropertyRegionTarget"), object("fea.Material")],
+            vec![LiteralValue::Unknown; 2],
+        ),
+        &crate::FEA_MATERIAL_ASSIGNMENT_CATALOG_ENTRY,
+        FeaConstructorKind::MaterialAssignment,
+    );
+    assert!(
+        assigned.diagnostics.is_empty(),
+        "{:?}",
+        assigned.diagnostics
+    );
+    let text = infer_constructor(
+        &request(
+            vec![ValueFact::scalar(ValueKindFact::String); 2],
+            vec![LiteralValue::Unknown; 2],
+        ),
+        &crate::FEA_MATERIAL_ASSIGNMENT_CATALOG_ENTRY,
+        FeaConstructorKind::MaterialAssignment,
+    );
     assert_eq!(
-        path.contract.capabilities,
-        &[runmat_types::CapabilityRequirement::Filesystem]
+        text.diagnostics
+            .iter()
+            .filter(|d| d.code == "RM-CATALOG-FEA-COMPONENT")
+            .count(),
+        2
     );
 }
 
 #[test]
-fn model_requires_literal_profile_and_host_geometry_class() {
+fn pure_model_and_mesh_persisting_study_declare_their_actual_effects() {
+    assert!(crate::FEA_MODEL_CATALOG_ENTRY
+        .contract
+        .capabilities
+        .is_empty());
+    assert!(crate::FEA_STUDY_CATALOG_ENTRY
+        .contract
+        .effects
+        .contains(&runmat_types::EffectKind::FilesystemWrite));
+}
+
+#[test]
+fn model_requires_explicit_sequence_or_steps_and_host_geometry_class() {
     assert_eq!(
         entry().contract.compatibility,
         crate::BuiltinCompatibility::RunMat
@@ -86,15 +143,20 @@ fn model_requires_literal_profile_and_host_geometry_class() {
     assert!(missing
         .diagnostics
         .iter()
-        .any(|d| d.code == "RM-CATALOG-FEA-PROFILE"));
+        .any(|d| d.code == "RM-CATALOG-FEA-SEQUENCE"));
     let valid = infer_constructor(
         &request(
-            vec![text.clone(), geometry, text.clone(), text],
+            vec![
+                text.clone(),
+                geometry.clone(),
+                text.clone(),
+                ValueFact::unknown(DynamicReason::RuntimeValue),
+            ],
             vec![
                 LiteralValue::Unknown,
                 LiteralValue::Unknown,
-                LiteralValue::String("P_rofile".into()),
-                LiteralValue::String("linear_static_structural".into()),
+                LiteralValue::String("Steps".into()),
+                LiteralValue::Unknown,
             ],
         ),
         &entry(),
@@ -105,87 +167,147 @@ fn model_requires_literal_profile_and_host_geometry_class() {
     assert!(
         matches!(&valid.outputs[0].kind, ValueKindFact::Object(object) if object.runtime_class.as_ref().is_some_and(|class| class.is(FEA_MODEL_CLASS)))
     );
+
+    let unknown = ValueFact::unknown(DynamicReason::RuntimeValue);
+    let steps = |shape| {
+        ValueFact::proven(
+            ValueKindFact::Cell(CellFact {
+                element: Box::new(unknown.clone()),
+                elements: Vec::new(),
+                elements_complete: false,
+            }),
+            shape,
+            StorageFact::Dense,
+        )
+    };
+    let empty = steps(ShapeFact::from(vec![Some(0), Some(0)]));
+    let nonempty = steps(ShapeFact::from(vec![Some(1), Some(1)]));
+    let unknown_shape = steps(ShapeFact::Unknown);
+    let options = |tail: Vec<(Option<&str>, ValueFact)>| {
+        let mut arguments = vec![text.clone(), geometry.clone()];
+        let mut literals = vec![LiteralValue::Unknown; 2];
+        for (name, value) in tail {
+            arguments.extend([text.clone(), value]);
+            literals.extend([
+                name.map(|name| LiteralValue::String(name.into()))
+                    .unwrap_or(LiteralValue::Unknown),
+                LiteralValue::Unknown,
+            ]);
+        }
+        infer_constructor(
+            &request(arguments, literals),
+            &entry(),
+            FeaConstructorKind::Model,
+        )
+    };
+    for (label, tail, rejects) in [
+        (
+            "sequence and empty steps",
+            vec![
+                (Some("Sequence"), unknown.clone()),
+                (Some("Steps"), empty.clone()),
+            ],
+            false,
+        ),
+        (
+            "sequence and unknown steps",
+            vec![
+                (Some("Sequence"), unknown.clone()),
+                (Some("Steps"), unknown.clone()),
+            ],
+            false,
+        ),
+        (
+            "unknown cell shape",
+            vec![
+                (Some("Sequence"), unknown.clone()),
+                (Some("Steps"), unknown_shape),
+            ],
+            false,
+        ),
+        (
+            "nonempty conflict",
+            vec![
+                (Some("Sequence"), unknown.clone()),
+                (Some("Steps"), nonempty.clone()),
+            ],
+            true,
+        ),
+        (
+            "empty last wins",
+            vec![
+                (Some("Sequence"), unknown.clone()),
+                (Some("Steps"), nonempty.clone()),
+                (Some("Steps"), empty.clone()),
+            ],
+            false,
+        ),
+        (
+            "nonempty last wins",
+            vec![
+                (Some("Sequence"), unknown.clone()),
+                (Some("Steps"), empty.clone()),
+                (Some("Steps"), nonempty.clone()),
+            ],
+            true,
+        ),
+        (
+            "later unknown name",
+            vec![
+                (Some("Sequence"), unknown.clone()),
+                (Some("Steps"), nonempty.clone()),
+                (None, empty.clone()),
+            ],
+            false,
+        ),
+        ("empty without sequence", vec![(Some("Steps"), empty)], true),
+        (
+            "unknown without sequence",
+            vec![(Some("Steps"), unknown)],
+            false,
+        ),
+        (
+            "nonempty without sequence",
+            vec![(Some("Steps"), nonempty)],
+            false,
+        ),
+    ] {
+        let result = options(tail);
+        assert_eq!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "RM-CATALOG-FEA-SEQUENCE"),
+            rejects,
+            "{label}: {:?}",
+            result.diagnostics
+        );
+    }
 }
 
 #[test]
-fn document_class_is_dynamic_and_text_arrays_are_rejected() {
+fn structural_text_identifiers_reject_arrays_and_keep_possible_character_rows() {
     let mut text_array = ValueFact::scalar(ValueKindFact::String);
     text_array.shape = ShapeFact::from(vec![Some(2), Some(1)]);
-    let loaded = infer_constructor(
-        &request(vec![text_array], vec![LiteralValue::Unknown]),
-        &entry(),
-        FeaConstructorKind::LoadDocument,
-    );
-    assert!(loaded
-        .diagnostics
-        .iter()
-        .any(|d| d.code == "RM-CATALOG-FEA-TEXT"));
-    assert!(matches!(
-        loaded.outputs[0].certainty,
-        CertaintyFact::Dynamic(DynamicReason::RuntimeValue)
-    ));
-
-    // A partially typed [1, N] value could be a valid character row.
-    let mut possible_char_row = ValueFact::unknown(DynamicReason::RuntimeValue);
-    possible_char_row.shape = ShapeFact::from(vec![Some(1), Some(7)]);
-    let uncertain = infer_constructor(
-        &request(vec![possible_char_row], vec![LiteralValue::Unknown]),
-        &entry(),
-        FeaConstructorKind::LoadDocument,
-    );
-    assert!(!uncertain
-        .diagnostics
-        .iter()
-        .any(|d| d.code == "RM-CATALOG-FEA-TEXT"));
-    let mut possible_ranked_char = ValueFact::scalar(ValueKindFact::Character);
-    possible_ranked_char.shape = ShapeFact::Ranked { rank: 3 };
-    assert!(host_text(&possible_ranked_char));
-
-    // fea.study(path) currently delegates to the same loader and may
-    // return a sweep. The path spelling cannot prove Study class.
-    let path_form = infer_constructor(
-        &request(
-            vec![ValueFact::scalar(ValueKindFact::String)],
-            vec![LiteralValue::Unknown],
-        ),
-        &entry(),
-        FeaConstructorKind::Study,
-    );
-    assert!(matches!(
-        path_form.outputs[0].certainty,
-        CertaintyFact::Dynamic(DynamicReason::RuntimeValue)
-    ));
-    assert!(
-        matches!(&path_form.outputs[0].kind, ValueKindFact::Object(object) if object.runtime_class.is_none())
-    );
+    assert!(!host_text(&text_array));
+    let mut row = ValueFact::unknown(DynamicReason::RuntimeValue);
+    row.shape = ShapeFact::from(vec![Some(1), Some(7)]);
+    assert!(host_text(&row));
 }
 
 #[test]
-fn study_constructor_requires_profile_and_step_has_exact_arity() {
+fn study_constructor_requires_an_explicit_third_model_operand() {
     let text = ValueFact::scalar(ValueKindFact::String);
-    let geometry = object_result(FeaConstructorKind::Model, false);
-    let mut geometry = geometry;
+    let mut geometry = object_result(FeaConstructorKind::Model);
     if let ValueKindFact::Object(object) = &mut geometry.kind {
         object.runtime_class = Some(StaticClassIdentity::new("geometry.Asset").owned());
     }
     let study = infer_constructor(
-        &request(vec![text.clone(), geometry], vec![LiteralValue::Unknown; 2]),
-        &entry(),
+        &request(vec![text, geometry], vec![LiteralValue::Unknown; 2]),
+        &crate::FEA_STUDY_CATALOG_ENTRY,
         FeaConstructorKind::Study,
     );
     assert!(study
-        .diagnostics
-        .iter()
-        .any(|d| d.code == "RM-CATALOG-FEA-PROFILE"));
-    let step = infer_constructor(
-        &request(
-            vec![text.clone(), text.clone(), text],
-            vec![LiteralValue::Unknown; 3],
-        ),
-        &entry(),
-        FeaConstructorKind::Step,
-    );
-    assert!(step
         .diagnostics
         .iter()
         .any(|d| d.code == "RM-CATALOG-FEA-ARITY"));
@@ -231,39 +353,31 @@ fn sweep_rejects_known_non_study_cell_and_numeric_failfast() {
 }
 
 #[test]
-fn author_study_requires_summary_and_profile_before_result_class() {
-    let text = ValueFact::scalar(ValueKindFact::String);
-    let geometry = ValueFact::proven(
-        ValueKindFact::Object(ObjectFact {
-            class: None,
-            runtime_class: Some(StaticClassIdentity::new("geometry.Asset").owned()),
-            properties: BTreeMap::new(),
-            properties_complete: false,
-            handle_semantics: Some(false),
-        }),
-        ShapeFact::Scalar,
-        StorageFact::Opaque,
-    );
-    let numeric_summary = ValueFact::scalar(ValueKindFact::Numeric(runmat_types::NumericFact {
+fn study_rejects_numeric_replacement_for_the_typed_model() {
+    let mut geometry = object_result(FeaConstructorKind::Model);
+    if let ValueKindFact::Object(object) = &mut geometry.kind {
+        object.runtime_class = Some(StaticClassIdentity::new("geometry.Asset").owned());
+    }
+    let numeric_model = ValueFact::scalar(ValueKindFact::Numeric(runmat_types::NumericFact {
         class: runmat_types::NumericClass::Double,
         domain: runmat_types::NumericDomain::Real,
     }));
     let inferred = infer_constructor(
         &request(
-            vec![text, geometry, numeric_summary],
+            vec![
+                ValueFact::scalar(ValueKindFact::String),
+                geometry,
+                numeric_model,
+            ],
             vec![LiteralValue::Unknown; 3],
         ),
-        &entry(),
-        FeaConstructorKind::AuthorStudy,
+        &crate::FEA_STUDY_CATALOG_ENTRY,
+        FeaConstructorKind::Study,
     );
     assert!(inferred
         .diagnostics
         .iter()
-        .any(|d| d.code == "RM-CATALOG-FEA-AUTHORING-SUMMARY"));
-    assert!(inferred
-        .diagnostics
-        .iter()
-        .any(|d| d.code == "RM-CATALOG-FEA-PROFILE"));
+        .any(|d| d.code == "RM-CATALOG-FEA-COMPONENT"));
     assert!(
         matches!(&inferred.outputs[0].kind, ValueKindFact::Object(object) if object.runtime_class.as_ref().is_some_and(|class| class.is(FEA_STUDY_CLASS)))
     );

@@ -1,7 +1,8 @@
 use crate::fea_contract::{
     catalog_entry::{self, ConstructorDocumentationDefinition},
+    descriptors::FEA_COMPARE_DESCRIPTOR,
     example_fixtures::CLOSED_CUBE_STUDY,
-    integer::{FEA_COMPARE_DESCRIPTOR, FEA_STRUCTURAL_INTEGER_AUDIT},
+    integer::FEA_STRUCTURAL_INTEGER_AUDIT,
     operation_entry::{self, OperationEffectProfile, OperationEntryDefinition},
     result_inference::{infer_result, FeaResultKind},
 };
@@ -13,7 +14,7 @@ fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
 }
 const EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "identity-comparison", title: "Compare a persisted run with itself",
-    program: "study = fea.load('cube.fea');\nrun = fea.run(study);\ncomparison = fea.compare(run.run_id, run.run_id);",
+    program: "geom = geometry.load('cube.stl');\nsteel = fea.material('steel', 'YoungsModulusPa', int64(200000000000), 'PoissonRatio', 0.3);\ntarget = fea.PropertyRegionTarget.allSolids(geom);\nassignment = fea.materialAssignment(target, steel);\nregion = geometry.region(geom, 'region_default');\nfixed = fea.StructuralConstraint.fixed('fixed', region);\nstep = fea.StructuralStep.static('static');\nmodel = fea.model('cube_model', geom, 'Materials', {steel}, 'MaterialAssignments', {assignment}, 'Constraints', {fixed}, 'Steps', {step});\nstudy = fea.study('closed_cube_static', geom, model);\nrun = fea.run(study);\nstepRun = run.step('static');\ncomparison = fea.compare(stepRun.run_id, stepRun.run_id);",
     display_output: None, compatibility: BuiltinExampleCompatibility::RunMat,
     harness: BuiltinExampleHarness::NativeFilesystem, fixture: CLOSED_CUBE_STUDY,
     requirements: BuiltinExampleRequirements::NONE,
@@ -21,19 +22,16 @@ const EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
 }];
 const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(ConstructorDocumentationDefinition {
     title: "fea.compare", summary: "Compare persisted FEA run evidence.",
-    description: "`fea.compare(baselineRunId, candidateRunId)` compares summary, status, quality, iteration, and timing evidence from two persisted run identifiers.",
-    keywords: &["fea", "compare", "results", "quality"], related: &["fea.run", "fea.results", "fea.trends"],
-    sections: &[BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
-        "Exactly two host text run ids are required; there are no Name, Value options. Numeric and resident inputs reject before artifact lookup.",
-        "Both ids are resolved from the artifact store. Count and count-delta fields remain exact signed integers; timing deltas are binary64 measurements.",
-        "The example compares one persisted run with itself to give a deterministic identity oracle. In ordinary use pass ids from distinct baseline and candidate runs.",
-        "No solver or numeric provider runs during comparison, and no OCCT importer is needed.",
-    ] }], examples: EXAMPLES,
-    faqs: &[BuiltinDocumentationFaq { question: "Can options follow the two ids?", answer: "No. The current contract accepts exactly two run ids." }],
-    links: &[BuiltinDocumentationLink { label: "FEA operation reference", target: BuiltinDocumentationLinkTarget::Documentation("/docs/fea/operation-reference") }],
-    implementation: &[BuiltinDocumentationLink { label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/comparison.rs") }],
-    verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Comparison operation", location: "crates/runmat-runtime/src/analysis/tests.rs" }],
-    notes: &["Run identifiers are host text and cannot be execution-owned distributed numeric arrays."],
+    description: "`fea.compare(baselineRunId, candidateRunId)` requires exactly two host text run identifiers.",
+    keywords: &["fea", "compare"], related: &["fea.model", "fea.study", "fea.results"],
+    sections: &[BuiltinDocumentationSection { heading: "Typed boundary", paragraphs: &[
+        "Comparison reads persisted artifacts without executing a solver. Structural counts and deltas remain exact integers; physical and timing measurements remain binary64.",
+        "Host structural identities, revisions, shapes, and counts remain exact. Physics conversions occur only at their explicit owning boundaries; resident inputs are not implicitly gathered.",
+    ] }], examples: EXAMPLES, faqs: &[],
+    links: &[BuiltinDocumentationLink { label: "FEA API", target: BuiltinDocumentationLinkTarget::Documentation("/docs/fea/using-fea") }],
+    implementation: &[BuiltinDocumentationLink { label: "Current implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/mod.rs") }],
+    verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Typed Runtime FEA contracts", location: "crates/runmat-runtime/src/builtins/fea/mod.rs::tests::typed_constructors_build_full_study_and_sweep_objects" }],
+    notes: &["Catalog examples require execution qualification; these declarations are not solver or numerical conformance receipts."],
 });
 pub const FEA_COMPARE_CATALOG_ENTRY: BuiltinCatalogEntry =
     operation_entry::entry(OperationEntryDefinition {

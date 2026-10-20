@@ -43,7 +43,10 @@ fn cancelled_move_rejects_before_provider_effects_with_typed_cause() {
     let error = runmat_filesystem::with_provider_override(filesystem.clone(), || {
         futures::executor::block_on(super::super::movefile_builtin(
             Some(runtime),
-            vec![Value::from("source.bin"), Value::from("target.bin")],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("source.bin"),
+                Value::from("target.bin"),
+            ]),
         ))
         .expect_err("cancelled move")
     });

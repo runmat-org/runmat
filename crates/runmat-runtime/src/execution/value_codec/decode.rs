@@ -3,8 +3,7 @@ use runmat_execution::value::{
 };
 use runmat_value::{
     CellArray, CharArray, Closure, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage,
-    LogicalArray, MException, ObjectInstance, SparseTensor, StringArray, StructValue, Tensor,
-    Value,
+    LogicalArray, MException, SparseTensor, StringArray, Tensor, Value,
 };
 use std::num::NonZeroUsize;
 use std::rc::Rc;
@@ -125,8 +124,9 @@ pub async fn decode_inline_values_cooperatively(
 }
 
 /// Decode into one admitted final argument backing under a selected Runtime.
-/// This charges the outer collection, not decoder task/child allocations or
-/// their construction-root metadata, which retain independent L25 owners.
+/// The outer collection and private decoder control blocks have independent
+/// admitted owners. Child payloads and construction roots retain their own
+/// representation-specific allocation/publication contracts.
 pub async fn decode_inline_values_cooperatively_in_context(
     payloads: &[ValuePayload],
     limits: ValueLimits,
@@ -189,12 +189,8 @@ async fn decode_validated_values(
 ) -> Result<RootedValues, CooperativeValueCodecError> {
     let mut values = DecodedCollection::new(payloads.len(), runtime)?;
     for payload in payloads {
-        let mut machine = DecodeMachine::new_with_runtime(
-            payload,
-            "$".to_owned(),
-            source_resolver.clone(),
-            runtime,
-        );
+        let mut machine =
+            DecodeMachine::new_with_runtime(payload, "$", source_resolver.clone(), runtime)?;
         loop {
             match machine.advance(DECODE_WORK_QUANTUM)? {
                 DecodeProgress::Pending { completed_work } => {
@@ -232,8 +228,7 @@ fn drain_machine_rooted_with_frames<'a>(
     frame_sources: Option<&'a dyn InlineFrameSourceAuthority>,
 ) -> Result<crate::execution::RootedValueMember, ValueCodecError> {
     crate::builtins::ensure_builtin_value_classes_registered();
-    let mut machine =
-        DecodeMachine::new_with_frame_sources(payload, "$".to_owned(), None, frame_sources);
+    let mut machine = DecodeMachine::new_with_frame_sources(payload, "$", None, frame_sources)?;
     loop {
         match machine.advance(NonZeroUsize::new(usize::MAX).expect("usize::MAX is nonzero"))? {
             DecodeProgress::Pending { .. } => continue,

@@ -17,7 +17,7 @@ pub(super) fn root_struct(
         .finish()
         .map_err(|error| error.into_runtime_error())?
         .with_owned_output_storage(|values| {
-            let mut structure = StructValue::new();
+            let mut structure = runmat_value::UnboundedStructValueBuilder::new();
             let values = values.try_into_owned().map_err(|_| {
                 crate::sequence::sequence_error_to_runtime(
                     runmat_value::ValueSequenceError::SharedOutputStorage,
@@ -26,7 +26,7 @@ pub(super) fn root_struct(
             for (name, value) in names.into_iter().zip(values) {
                 structure.insert(name, value);
             }
-            root_value(Value::Struct(structure))
+            root_value(Value::Struct(structure.finish()))
         })
 }
 

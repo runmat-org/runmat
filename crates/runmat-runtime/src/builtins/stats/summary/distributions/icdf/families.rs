@@ -15,7 +15,10 @@ pub(super) fn parse_distribution_name(value: &Value) -> BuiltinResult<IcdfDistri
     })
 }
 
-pub(super) async fn normal_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn normal_icdf(
+    p: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     let args = super::normal_args("icdf", p, rest, DistributionKind::GenericInv).await?;
     let data = args
         .x
@@ -27,7 +30,10 @@ pub(super) async fn normal_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult<Val
     super::finish(args.shape, data)
 }
 
-pub(super) async fn student_t_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn student_t_icdf(
+    p: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     let args = super::t_args("icdf", p, rest).await?;
     let data = args
         .x
@@ -38,7 +44,10 @@ pub(super) async fn student_t_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult<
     super::finish(args.shape, data)
 }
 
-pub(super) async fn weibull_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn weibull_icdf(
+    p: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     let args = super::three_args("icdf", p, rest, Some((1.0, 1.0))).await?;
     let data = args
         .x
@@ -50,7 +59,10 @@ pub(super) async fn weibull_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult<Va
     super::finish(args.shape, data)
 }
 
-pub(super) async fn chi_square_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn chi_square_icdf(
+    p: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     let args = super::t_args("icdf", p, rest).await?;
     let data = args
         .x
@@ -63,7 +75,7 @@ pub(super) async fn chi_square_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult
 
 pub(super) async fn binomial_icdf(
     p: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
     runtime: Option<&crate::context::RuntimeContext>,
 ) -> BuiltinResult<Value> {
     let args = super::three_args("icdf", p, rest, None).await?;
@@ -81,7 +93,10 @@ pub(super) async fn binomial_icdf(
     super::finish(args.shape, data)
 }
 
-pub(super) async fn gamma_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn gamma_icdf(
+    p: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     let args = super::three_args("icdf", p, rest, None).await?;
     let data = args
         .x
@@ -93,7 +108,10 @@ pub(super) async fn gamma_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult<Valu
     super::finish(args.shape, data)
 }
 
-pub(super) async fn exponential_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn exponential_icdf(
+    p: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     let args = one_param_args(IcdfDistribution::Exponential, p, rest).await?;
     let data = args
         .x
@@ -106,7 +124,7 @@ pub(super) async fn exponential_icdf(p: Value, rest: Vec<Value>) -> BuiltinResul
 
 pub(super) async fn poisson_icdf(
     p: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
     runtime: Option<&crate::context::RuntimeContext>,
 ) -> BuiltinResult<Value> {
     let args = one_param_args(IcdfDistribution::Poisson, p, rest).await?;
@@ -121,7 +139,10 @@ pub(super) async fn poisson_icdf(
     super::finish(args.shape, data)
 }
 
-pub(super) async fn uniform_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn uniform_icdf(
+    p: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     let args = super::three_args("icdf", p, rest, Some((0.0, 1.0))).await?;
     let data = args
         .x
@@ -133,7 +154,10 @@ pub(super) async fn uniform_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult<Va
     super::finish(args.shape, data)
 }
 
-pub(super) async fn lognormal_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn lognormal_icdf(
+    p: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     let args = super::normal_args("icdf", p, rest, DistributionKind::GenericInv).await?;
     let data = args
         .x
@@ -145,7 +169,10 @@ pub(super) async fn lognormal_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult<
     super::finish(args.shape, data)
 }
 
-pub(super) async fn beta_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn beta_icdf(
+    p: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     let args = super::three_args("icdf", p, rest, None).await?;
     let data = args
         .x
@@ -157,7 +184,7 @@ pub(super) async fn beta_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult<Value
     super::finish(args.shape, data)
 }
 
-pub(super) async fn f_icdf(p: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn f_icdf(p: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     let args = super::three_args("icdf", p, rest, None).await?;
     let data = args
         .x
@@ -178,7 +205,7 @@ struct OneParamArgs {
 async fn one_param_args(
     distribution: IcdfDistribution,
     p: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<OneParamArgs> {
     if rest.len() != 1 {
         return Err(super::normal_error(

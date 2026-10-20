@@ -23,7 +23,7 @@ pub(super) async fn matfile_read_step(
     let owner = resolve_matfile(runtime, &object)?;
     if field == PROPERTIES_FIELD {
         let value = object
-            .properties
+            .properties()
             .get(PROPERTIES_FIELD)
             .cloned()
             .ok_or_else(|| matfile_error("matfile object is missing Properties"))?;

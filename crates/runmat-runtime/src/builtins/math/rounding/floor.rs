@@ -74,7 +74,7 @@ fn builtin_error_with_detail(
 async fn floor_builtin(
     runtime: Option<RuntimeContext>,
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<RootedValue> {
     super::unary::reject_excess_outputs(BUILTIN_NAME, &FLOOR_ERROR_TOO_MANY_OUTPUTS)?;
     if !rest.is_empty() {
@@ -110,7 +110,7 @@ async fn floor_table(object: ObjectInstance) -> BuiltinResult<RootedValue> {
         .map_err(|err| builtin_error_with_detail(&FLOOR_ERROR_INVALID_INPUT, err.message))?;
     let mut names = Vec::with_capacity(variables.fields.len());
     let mut rounded = RootedValuesBuilder::with_capacity(variables.fields.len());
-    for (name, value) in variables.fields {
+    for (name, value) in variables.into_fields_unbounded() {
         crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
         let value = match value {
             Value::GpuTensor(handle) => floor_gpu(handle).await?,
@@ -206,7 +206,7 @@ fn floor_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
 }
 
 fn floor_char_array(ca: CharArray) -> BuiltinResult<Value> {
-    let mut data = Vec::with_capacity(ca.data.len());
+    let mut data = Vec::with_capacity(ca.data().len());
     for ch in ca.to_column_major() {
         data.push(apply_floor_scalar(ch as u32 as f64));
     }
@@ -279,7 +279,12 @@ pub(crate) mod tests {
     };
 
     fn floor_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::floor_builtin(None, value, rest)).map(|owned| owned.value().clone())
+        block_on(super::floor_builtin(
+            None,
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
+        .map(|owned| owned.value().clone())
     }
 
     fn assert_error_contains(error: RuntimeError, needle: &str) {
@@ -472,7 +477,12 @@ pub(crate) mod tests {
             columns.into_iter().map(Value::Tensor).collect(),
         )
         .unwrap();
-        let output = block_on(super::floor_builtin(None, input, Vec::new())).unwrap();
+        let output = block_on(super::floor_builtin(
+            None,
+            input,
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap();
         let Value::Object(output) = output.value() else {
             panic!("expected table output");
         };

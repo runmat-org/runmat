@@ -6,7 +6,7 @@ pub(super) fn group_info(
     name: &str,
     filename: Option<&Path>,
 ) -> BuiltinResult<StructValue> {
-    let mut info = StructValue::new();
+    let mut info = runmat_value::UnboundedStructValueBuilder::new();
     if let Some(path) = filename {
         info.insert("Filename", Value::string(path.display().to_string()));
     }
@@ -38,7 +38,7 @@ pub(super) fn group_info(
     info.insert("Datasets", cell_column(datasets, builtin)?);
     info.insert("Datatypes", cell_column(Vec::new(), builtin)?);
     info.insert("Links", cell_column(Vec::new(), builtin)?);
-    Ok(info)
+    Ok(info.finish())
 }
 
 pub(super) fn dataset_info(
@@ -57,7 +57,7 @@ pub(super) fn dataset_info(
                 err,
             )
         })?;
-    let mut info = StructValue::new();
+    let mut info = runmat_value::UnboundedStructValueBuilder::new();
     info.insert("Name", Value::string(name.to_string()));
     info.insert("Datatype", Value::string(type_name(&dtype)));
     info.insert("Class", Value::string(matlab_class_for_type(&dtype)));
@@ -67,7 +67,7 @@ pub(super) fn dataset_info(
     );
     info.insert("Size", shape_value(shape)?);
     info.insert("Attributes", attributes_info(builtin, ds)?);
-    Ok(info)
+    Ok(info.finish())
 }
 
 pub(super) fn attributes_info(builtin: &'static str, location: &Location) -> BuiltinResult<Value> {
@@ -106,12 +106,12 @@ pub(super) fn attribute_info(
                 err,
             )
         })?;
-    let mut info = StructValue::new();
+    let mut info = runmat_value::UnboundedStructValueBuilder::new();
     info.insert("Name", Value::string(name.to_string()));
     info.insert("Datatype", Value::string(type_name(&dtype)));
     info.insert("Class", Value::string(matlab_class_for_type(&dtype)));
     info.insert("Size", shape_value(attr.shape())?);
-    Ok(info)
+    Ok(info.finish())
 }
 
 pub(super) fn render_group(

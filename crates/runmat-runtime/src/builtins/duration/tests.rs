@@ -18,11 +18,11 @@ async fn duration_subsasgn(
     rhs: Value,
 ) -> crate::BuiltinResult<crate::execution::RootedValue> {
     let subscript = crate::object::indexing::standard_substruct_fixture_from_parts(&kind, payload)?;
-    super::builtins::duration_subsasgn(obj, subscript, rhs).await
+    super::builtins::duration_subsasgn(None, obj, subscript, rhs).await
 }
 
 fn run_duration(args: Vec<Value>) -> Value {
-    futures::executor::block_on(duration_builtin(args)).expect("duration")
+    futures::executor::block_on(duration_builtin_source(None, args)).expect("duration")
 }
 
 fn integer_tensor(storage: runmat_value::IntegerStorage, shape: Vec<usize>) -> Value {
@@ -47,7 +47,7 @@ fn duration_low_rank_components_and_indexing_preserve_admitted_geometry() {
     assert_eq!(days.shape(), &[2]);
     let strings = duration_string_array(&vector).unwrap().unwrap();
     assert_eq!(strings.shape, vec![2]);
-    assert_eq!(strings.data.len(), 2);
+    assert_eq!(strings.data().len(), 2);
     assert_eq!(
         duration_summary(&vector).unwrap(),
         Some("[2 duration]".into())
@@ -71,9 +71,11 @@ fn duration_low_rank_components_and_indexing_preserve_admitted_geometry() {
     assert_eq!(selected.materialize_f64(), vec![values[1], values[0]]);
 
     let mismatch = Value::Tensor(Tensor::new(vec![0.0, 0.0], vec![1, 2]).unwrap());
-    let error =
-        futures::executor::block_on(duration_builtin(vec![hours, mismatch, Value::Num(0.0)]))
-            .expect_err("non-scalar components require exact shape, not equal cardinality");
+    let error = futures::executor::block_on(duration_builtin_source(
+        None,
+        vec![hours, mismatch, Value::Num(0.0)],
+    ))
+    .expect_err("non-scalar components require exact shape, not equal cardinality");
     assert_eq!(
         error.identifier(),
         Some(DurationErrorKind::ShapeMismatch.identifier())
@@ -131,21 +133,27 @@ fn duration_builds_from_components() {
 
 #[test]
 fn typed_duration_diagnostics_preserve_messages_and_context() {
-    let invalid = futures::executor::block_on(duration_builtin(vec![Value::String("bad".into())]))
-        .expect_err("text is not a numeric duration component");
+    let invalid = futures::executor::block_on(duration_builtin_source(
+        None,
+        vec![Value::String("bad".into())],
+    ))
+    .expect_err("text is not a numeric duration component");
     assert_eq!(
         invalid.identifier(),
         Some(DurationErrorKind::InvalidArgument.identifier())
     );
     assert!(invalid.message().contains("expected a numeric"));
 
-    let invalid_format = futures::executor::block_on(duration_builtin(vec![
-        Value::Num(1.0),
-        Value::Num(2.0),
-        Value::Num(3.0),
-        Value::String("Format".into()),
-        Value::String("bogus".into()),
-    ]))
+    let invalid_format = futures::executor::block_on(duration_builtin_source(
+        None,
+        vec![
+            Value::Num(1.0),
+            Value::Num(2.0),
+            Value::Num(3.0),
+            Value::String("Format".into()),
+            Value::String("bogus".into()),
+        ],
+    ))
     .expect_err("unsupported Format value");
     assert_eq!(
         invalid_format.identifier(),
@@ -157,8 +165,11 @@ fn typed_duration_diagnostics_preserve_messages_and_context() {
 
     let lhs = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap());
     let rhs = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap());
-    let mismatch = futures::executor::block_on(duration_builtin(vec![lhs, rhs, Value::Num(0.0)]))
-        .expect_err("incompatible components");
+    let mismatch = futures::executor::block_on(duration_builtin_source(
+        None,
+        vec![lhs, rhs, Value::Num(0.0)],
+    ))
+    .expect_err("incompatible components");
     assert_eq!(
         mismatch.identifier(),
         Some(DurationErrorKind::ShapeMismatch.identifier())
@@ -283,35 +294,38 @@ fn duration_public_components_preserve_nan_and_infinity() {
             duration_string_array(&value)
                 .expect("string conversion")
                 .expect("duration string array")
-                .data,
+                .data(),
             vec![expected.to_string()]
         );
         let chars = duration_char_array(&value)
             .expect("char conversion")
             .expect("duration char array");
-        assert_eq!(chars.data.iter().collect::<String>(), expected);
+        assert_eq!(chars.data().iter().collect::<String>(), expected);
     }
 }
 
 #[test]
 fn duration_short_numeric_forms_are_extension_gated_but_matrix_is_public() {
     let strict = crate::compatibility::push_runmat_extensions_enabled(false);
-    let error = futures::executor::block_on(duration_builtin(vec![Value::Num(1.0)]))
+    let error = futures::executor::block_on(duration_builtin_source(None, vec![Value::Num(1.0)]))
         .expect_err("one-component hour extension");
     assert_eq!(
         error.identifier(),
         DURATION_SHORT_COMPONENT_EXTENSION.error_identifier
     );
     let matrix = integer_tensor(runmat_value::IntegerStorage::U8(vec![1, 30, 0]), vec![1, 3]);
-    futures::executor::block_on(duration_builtin(vec![matrix]))
+    futures::executor::block_on(duration_builtin_source(None, vec![matrix]))
         .expect("documented matrix form remains public");
     drop(strict);
 
     let extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-    futures::executor::block_on(duration_builtin(vec![Value::Num(1.0)]))
+    futures::executor::block_on(duration_builtin_source(None, vec![Value::Num(1.0)]))
         .expect("one-component extension in RunMat mode");
-    futures::executor::block_on(duration_builtin(vec![Value::Num(1.0), Value::Num(30.0)]))
-        .expect("two-component extension in RunMat mode");
+    futures::executor::block_on(duration_builtin_source(
+        None,
+        vec![Value::Num(1.0), Value::Num(30.0)],
+    ))
+    .expect("two-component extension in RunMat mode");
     drop(extensions);
 }
 
@@ -330,7 +344,7 @@ fn duration_gpu_extension_rejects_before_provider_access() {
             .is_none()
     );
     let resident = Value::GpuTensor(allocation.handle.clone());
-    let error = futures::executor::block_on(duration_builtin(vec![resident]))
+    let error = futures::executor::block_on(duration_builtin_source(None, vec![resident]))
         .expect_err("GPU extension gate");
     assert_eq!(
         error.identifier(),
@@ -345,6 +359,7 @@ fn duration_gpu_extension_rejects_before_provider_access() {
 #[test]
 fn duration_missing_days_render_without_error() {
     let value = duration_object_from_days_tensor(
+        None,
         Tensor::new(vec![f64::NAN], vec![1, 1]).unwrap(),
         DEFAULT_DURATION_FORMAT,
     )
@@ -352,7 +367,7 @@ fn duration_missing_days_render_without_error() {
     let rendered = duration_string_array(&value)
         .expect("string array")
         .expect("duration strings");
-    assert_eq!(rendered.data, vec!["NaN".to_string()]);
+    assert_eq!(rendered.data(), vec!["NaN".to_string()]);
     assert_eq!(
         duration_display_text(&value).expect("display"),
         Some("NaN".to_string())
@@ -399,8 +414,8 @@ fn duration_unit_helpers_create_and_convert_values() {
 fn duration_unit_helpers_read_typed_integer_days_exactly() {
     let days = Tensor::new_integer(runmat_value::IntegerStorage::I16(vec![1, 2]), vec![1, 2])
         .expect("integer tensor");
-    let value =
-        duration_object_from_days_tensor(days, DEFAULT_DURATION_FORMAT).expect("duration object");
+    let value = duration_object_from_days_tensor(None, days, DEFAULT_DURATION_FORMAT)
+        .expect("duration object");
 
     let hours = futures::executor::block_on(hours_builtin(value.clone())).expect("hours");
     assert_eq!(
@@ -425,8 +440,8 @@ fn duration_supports_format_assignment_and_indexing() {
     let updated = futures::executor::block_on(duration_subsasgn(
         value.clone(),
         ".".to_string(),
-        Value::String(FORMAT_FIELD.to_string()),
-        Value::String("hh:mm".to_string()),
+        Value::String(FORMAT_FIELD.to_string().into()),
+        Value::String("hh:mm".to_string().into()),
     ))
     .expect("subsasgn");
     let rendered = duration_display_text(&updated)
@@ -498,9 +513,9 @@ fn duration_wide_index_does_not_round_through_double() {
 
 #[test]
 fn duration_comparisons_return_logical_values_without_tolerance() {
-    let zero = duration_object_from_days(vec![0.0], vec![1, 1], DEFAULT_DURATION_FORMAT)
+    let zero = duration_object_from_days(None, vec![0.0], vec![1, 1], DEFAULT_DURATION_FORMAT)
         .expect("zero duration");
-    let tiny = duration_object_from_days(vec![1.0e-13], vec![1, 1], DEFAULT_DURATION_FORMAT)
+    let tiny = duration_object_from_days(None, vec![1.0e-13], vec![1, 1], DEFAULT_DURATION_FORMAT)
         .expect("tiny duration");
     assert_eq!(
         futures::executor::block_on(super::builtins::duration_eq(zero.clone(), tiny.clone()))
@@ -564,9 +579,10 @@ fn member_indexing_rejects_unrelated_object_class() {
 
 #[test]
 fn duration_arithmetic_and_comparison_broadcast_dimensions() {
-    let column = duration_object_from_days(vec![1.0, 2.0], vec![2, 1], DEFAULT_DURATION_FORMAT)
-        .expect("column duration");
-    let row = duration_object_from_days(vec![1.0, 3.0], vec![1, 2], DEFAULT_DURATION_FORMAT)
+    let column =
+        duration_object_from_days(None, vec![1.0, 2.0], vec![2, 1], DEFAULT_DURATION_FORMAT)
+            .expect("column duration");
+    let row = duration_object_from_days(None, vec![1.0, 3.0], vec![1, 2], DEFAULT_DURATION_FORMAT)
         .expect("row duration");
     let equal = futures::executor::block_on(super::builtins::duration_eq(column.clone(), row))
         .expect("broadcast equality");
@@ -574,9 +590,12 @@ fn duration_arithmetic_and_comparison_broadcast_dimensions() {
         panic!("comparison must return a logical array");
     };
     assert_eq!(equal.shape, vec![2, 2]);
-    let shifted =
-        futures::executor::block_on(super::builtins::duration_plus(column, Value::Num(1.0)))
-            .expect("numeric days addition");
+    let shifted = futures::executor::block_on(super::builtins::duration_plus(
+        None,
+        column,
+        Value::Num(1.0),
+    ))
+    .expect("numeric days addition");
     let days = duration_tensor_from_duration_value(&shifted).expect("duration days");
     assert_eq!(days.shape(), &[2, 1]);
     assert_eq!(days.materialize_f64(), vec![2.0, 3.0]);
@@ -597,10 +616,11 @@ fn duration_empty_component_and_unit_shapes_are_retained() {
 
 #[test]
 fn duration_nd_and_empty_operator_shapes_are_retained() {
-    let cube = duration_object_from_days(vec![1.0; 8], vec![2, 2, 2], DEFAULT_DURATION_FORMAT)
-        .expect("N-D duration");
-    let shifted =
-        futures::executor::block_on(duration_plus(cube, Value::Num(1.0))).expect("N-D addition");
+    let cube =
+        duration_object_from_days(None, vec![1.0; 8], vec![2, 2, 2], DEFAULT_DURATION_FORMAT)
+            .expect("N-D duration");
+    let shifted = futures::executor::block_on(duration_plus(None, cube, Value::Num(1.0)))
+        .expect("N-D addition");
     assert_eq!(
         duration_tensor_from_duration_value(&shifted)
             .unwrap()
@@ -608,7 +628,7 @@ fn duration_nd_and_empty_operator_shapes_are_retained() {
         &[2, 2, 2]
     );
 
-    let empty = duration_object_from_days(vec![], vec![0, 2], DEFAULT_DURATION_FORMAT)
+    let empty = duration_object_from_days(None, vec![], vec![0, 2], DEFAULT_DURATION_FORMAT)
         .expect("empty duration");
     let compared =
         futures::executor::block_on(duration_eq(empty, Value::Num(1.0))).expect("empty comparison");
@@ -627,12 +647,12 @@ fn duration_does_not_download_unrelated_resident_object_property() {
             runmat_accelerate_api::GpuTensorStorage::Real,
         )
         .expect("resident allocation");
-    let mut value = duration_object_from_days(vec![1.0], vec![1, 1], DEFAULT_DURATION_FORMAT)
+    let mut value = duration_object_from_days(None, vec![1.0], vec![1, 1], DEFAULT_DURATION_FORMAT)
         .expect("duration");
     let Value::Object(ref mut object) = value else {
         unreachable!()
     };
-    object.properties.insert(
+    object.replace_property_unbounded(
         "unrelated".into(),
         Value::GpuTensor(allocation.handle.clone()),
     );
@@ -658,12 +678,12 @@ fn duration_nested_resident_day_count_rejects_before_download() {
             runmat_accelerate_api::GpuTensorStorage::Real,
         )
         .expect("resident allocation");
-    let mut value = duration_object_from_days(vec![1.0], vec![1, 1], DEFAULT_DURATION_FORMAT)
+    let mut value = duration_object_from_days(None, vec![1.0], vec![1, 1], DEFAULT_DURATION_FORMAT)
         .expect("duration");
     let Value::Object(ref mut object) = value else {
         unreachable!()
     };
-    object.properties.insert(
+    object.replace_property_unbounded(
         DAYS_FIELD.into(),
         Value::GpuTensor(allocation.handle.clone()),
     );
@@ -691,11 +711,14 @@ fn duration_constructor_rejects_host_shape_conflict_before_resident_download() {
         )
         .expect("resident allocation");
     let host = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap());
-    let error = futures::executor::block_on(duration_builtin(vec![
-        host,
-        Value::GpuTensor(allocation.handle.clone()),
-        Value::Num(0.0),
-    ]))
+    let error = futures::executor::block_on(duration_builtin_source(
+        None,
+        vec![
+            host,
+            Value::GpuTensor(allocation.handle.clone()),
+            Value::Num(0.0),
+        ],
+    ))
     .expect_err("shape mismatch must preflight before provider access");
     assert!(error.message().contains("matching sizes"));
     assert_eq!(allocation.probe.retirements(), 0);
@@ -717,11 +740,10 @@ fn logical_component_shape_conflict_precedes_resident_download() {
             runmat_value::LogicalArray::new(vec![1, 0, 1], vec![1, 3]).unwrap(),
         );
         provider.reset_telemetry();
-        let error = futures::executor::block_on(duration_builtin(vec![
-            Value::GpuTensor(resident),
-            logical,
-            Value::Num(0.0),
-        ]))
+        let error = futures::executor::block_on(duration_builtin_source(
+            None,
+            vec![Value::GpuTensor(resident), logical, Value::Num(0.0)],
+        ))
         .expect_err("known logical shape conflict");
         assert!(error.message().contains("matching sizes"));
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
@@ -738,18 +760,17 @@ fn operator_shape_conflicts_precede_resident_download_and_valid_input_gathers_on
         )
         .unwrap();
         let mut lhs =
-            duration_object_from_days(vec![0.0], vec![1, 1], DEFAULT_DURATION_FORMAT).unwrap();
+            duration_object_from_days(None, vec![0.0], vec![1, 1], DEFAULT_DURATION_FORMAT)
+                .unwrap();
         let Value::Object(object) = &mut lhs else {
             unreachable!()
         };
-        object
-            .properties
-            .insert(DAYS_FIELD.into(), Value::GpuTensor(resident));
+        object.replace_property_unbounded(DAYS_FIELD.into(), Value::GpuTensor(resident));
         provider.reset_telemetry();
         let bad = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap());
         for result in [
-            futures::executor::block_on(duration_plus(lhs.clone(), bad.clone())),
-            futures::executor::block_on(duration_minus(lhs.clone(), bad.clone())),
+            futures::executor::block_on(duration_plus(None, lhs.clone(), bad.clone())),
+            futures::executor::block_on(duration_minus(None, lhs.clone(), bad.clone())),
             futures::executor::block_on(duration_eq(lhs.clone(), bad)),
         ] {
             assert!(result
@@ -759,16 +780,17 @@ fn operator_shape_conflicts_precede_resident_download_and_valid_input_gathers_on
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
         }
         let datetime = crate::builtins::datetime::datetime_object_from_serial_tensor(
+            None,
             Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap(),
             "yyyy-MM-dd",
         )
         .unwrap();
-        let error = futures::executor::block_on(duration_plus(lhs.clone(), datetime))
+        let error = futures::executor::block_on(duration_plus(None, lhs.clone(), datetime))
             .expect_err("datetime shape conflict");
         assert!(error.message().contains("broadcast"));
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
 
-        let valid = futures::executor::block_on(duration_plus(lhs, Value::Num(1.0)))
+        let valid = futures::executor::block_on(duration_plus(None, lhs, Value::Num(1.0)))
             .expect("resident duration addition");
         assert_eq!(
             duration_tensor_from_duration_value(&valid)

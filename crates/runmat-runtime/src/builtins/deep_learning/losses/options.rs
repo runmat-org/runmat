@@ -43,11 +43,18 @@ pub(super) struct ParsedLossOptions {
 }
 
 impl ParsedLossOptions {
-    pub(super) fn from_args(args: Vec<Value>) -> BuiltinResult<Self> {
-        let parsed = parse_name_values(args, "crossentropy")?;
+    pub(super) fn from_view(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<Self> {
+        if !args.len().is_multiple_of(2) {
+            return Err(deep_learning_error(
+                "crossentropy",
+                "crossentropy: name-value options must be paired",
+            ));
+        }
         let mut known = BTreeMap::new();
         let mut unknown = BTreeMap::new();
-        for (name, value) in parsed {
+        for pair in args.chunks_exact(2) {
+            let name = scalar_text(&pair[0], "crossentropy")?.to_ascii_lowercase();
+            let value = pair[1].clone();
             if let Some(key) = OptionKey::from_name(&name) {
                 known.insert(key, value);
             } else {
@@ -135,11 +142,11 @@ pub(super) struct CrossentropyOptions {
 
 impl CrossentropyOptions {
     pub(super) fn from_args(
-        args: Vec<Value>,
+        args: crate::call::FunctionArgumentView<'_>,
         predictions: &LossPayload,
         positional_weights: Option<LossWeights>,
     ) -> BuiltinResult<Self> {
-        let mut parsed = ParsedLossOptions::from_args(args)?;
+        let mut parsed = ParsedLossOptions::from_view(args)?;
         let mode = parsed
             .remove(OptionKey::ClassificationMode)
             .or_else(|| parsed.remove(OptionKey::TargetCategories))

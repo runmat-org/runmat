@@ -103,7 +103,7 @@ fn logical_character_and_complex_vectors_are_supported() {
         panic!("expected characters")
     };
     assert_eq!(
-        output.data,
+        output.data(),
         vec!['a', 'b', 'a', 'c', 'a', 'd', 'b', 'c', 'b', 'd', 'c', 'd']
     );
 

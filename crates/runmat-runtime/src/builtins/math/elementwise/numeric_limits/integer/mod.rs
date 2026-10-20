@@ -7,13 +7,13 @@ use runmat_value::{ComplexTensor, IntegerComplexStorage, IntegerStorage, Numeric
 use crate::BuiltinResult;
 
 pub(super) fn execute(
-    arguments: Vec<Value>,
+    arguments: crate::call::BuiltinArguments,
     kind: IntegerLimitKind,
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
-    match arguments.as_slice() {
-        [] => Ok(Value::Int(value::scalar(NumericDType::I32, kind))),
-        [class] if super::syntax::text(class).is_some() => {
+    match (arguments.len(), arguments.get(0), arguments.get(1)) {
+        (0, _, _) => Ok(Value::Int(value::scalar(NumericDType::I32, kind))),
+        (1, Some(class), _) if super::syntax::text(class).is_some() => {
             let text = super::syntax::text(class).expect("guarded text value");
             let class = runmat_types::NumericClass::from_class_name(text.trim())
                 .and_then(runmat_types::NumericClass::integer_class)
@@ -22,7 +22,7 @@ pub(super) fn execute(
                 })?;
             Ok(Value::Int(value::scalar(class.into(), kind)))
         }
-        [keyword, prototype]
+        (2, Some(keyword), Some(prototype))
             if super::syntax::text(keyword)
                 .is_some_and(|text| text.eq_ignore_ascii_case("like")) =>
         {

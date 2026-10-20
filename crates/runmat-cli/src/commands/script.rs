@@ -55,28 +55,41 @@ pub async fn execute_script_with_args(
     execution: ExecutionTargetArgs,
 ) -> Result<()> {
     execute_script_with_graphics(
-        script,
-        args,
-        emit_bytecode_path,
+        ScriptInvocation {
+            script,
+            args,
+            emit_bytecode_path,
+            fea_json,
+            execution,
+        },
         cli,
         config,
-        fea_json,
-        execution,
         &runmat_core::SessionGraphicsHost::Unavailable,
     )
     .await
 }
 
+pub(crate) struct ScriptInvocation {
+    pub(crate) script: PathBuf,
+    pub(crate) args: Vec<String>,
+    pub(crate) emit_bytecode_path: Option<PathBuf>,
+    pub(crate) fea_json: bool,
+    pub(crate) execution: ExecutionTargetArgs,
+}
+
 pub(crate) async fn execute_script_with_graphics(
-    script: PathBuf,
-    args: Vec<String>,
-    emit_bytecode_path: Option<PathBuf>,
+    invocation: ScriptInvocation,
     cli: &Cli,
     config: &RunMatRuntimeConfig,
-    fea_json: bool,
-    execution: ExecutionTargetArgs,
     graphics: &runmat_core::SessionGraphicsHost,
 ) -> Result<()> {
+    let ScriptInvocation {
+        script,
+        args,
+        emit_bytecode_path,
+        fea_json,
+        execution,
+    } = invocation;
     if script.as_path() == Path::new("-") {
         return execute_stdin_script_with_graphics(emit_bytecode_path, cli, config, graphics).await;
     }

@@ -229,10 +229,10 @@ fn logical_tabulate(name: &str, data: Vec<u8>) -> BuiltinResult<Value> {
 pub(super) fn label_for_value(value: &Value) -> Option<String> {
     match value {
         Value::String(text) => Some(text.as_str().to_owned()),
-        Value::StringArray(array) if array.data.len() == 1 => {
-            Some(array.data[0].as_str().to_owned())
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Some(array.data()[0].as_str().to_owned())
         }
-        Value::CharArray(chars) if chars.rows == 1 => Some(chars.data.iter().collect()),
+        Value::CharArray(chars) if chars.rows == 1 => Some(chars.data().iter().collect()),
         Value::Num(num) => Some(num.to_string()),
         Value::Int(int) => Some(int.decimal_string()),
         Value::Bool(flag) => Some(flag.to_string()),
@@ -275,15 +275,16 @@ fn tabulate_value(name: &str, value: Value) -> BuiltinResult<Value> {
             .map_err(|err| descriptive_error(name, format!("{name}: {err}")))
             .and_then(|tensor| numeric_tabulate(name, tensor)),
         Value::String(text) => string_tabulate(name, [text.as_str().to_owned()]),
-        Value::StringArray(array) => {
-            string_tabulate(name, array.data.iter().map(|text| text.as_str().to_owned()))
-        }
+        Value::StringArray(array) => string_tabulate(
+            name,
+            array.data().iter().map(|text| text.as_str().to_owned()),
+        ),
         Value::CharArray(chars) if chars.rows == 1 => {
-            string_tabulate(name, chars.data.into_char_iter().map(|ch| ch.to_string()))
+            string_tabulate(name, chars.data().iter().copied().map(|ch| ch.to_string()))
         }
         Value::Cell(cell) => {
-            let mut labels = Vec::with_capacity(cell.data.len());
-            for entry in &cell.data {
+            let mut labels = Vec::with_capacity(cell.data().len());
+            for entry in cell.data() {
                 let Some(label) = label_for_value(entry) else {
                     return Err(descriptive_error(
                         name,
@@ -323,7 +324,11 @@ pub mod tabulate {
             )?;
         }
         if let Value::Cell(cell) = &value {
-            if cell.data.iter().any(crate::dispatcher::value_contains_gpu) {
+            if cell
+                .data()
+                .iter()
+                .any(crate::dispatcher::value_contains_gpu)
+            {
                 return Err(descriptive_error(
                     "tabulate",
                     "tabulate: cell entries must be scalar strings or scalars",

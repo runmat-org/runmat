@@ -471,14 +471,14 @@ fn parse_direction_list(value: &Value) -> crate::BuiltinResult<Option<Vec<Direct
     let strings = match value {
         Value::StringArray(array) => Some(
             array
-                .data
+                .data()
                 .iter()
                 .map(|text| Cow::Borrowed(text.as_str()))
                 .collect::<Vec<_>>(),
         ),
         Value::Cell(cell) => {
-            let mut strings = Vec::with_capacity(cell.data.len());
-            for value in &cell.data {
+            let mut strings = Vec::with_capacity(cell.data().len());
+            for value in cell.data() {
                 let Some(value) = tensor::value_to_string(value) else {
                     return Err(invalid_argument(
                         "issortedrows: direction cell arrays must contain character vectors or strings",
@@ -682,8 +682,8 @@ fn check_complex_values<T: SetFloat, S: ComplexSequence<T> + ?Sized>(
 
 fn check_char(array: &CharArray, rows: usize, cols: usize, args: &Args) -> bool {
     check_adjacent(rows, args, |row, column, direction| {
-        let left = array.data[row * cols + column];
-        let right = array.data[(row + 1) * cols + column];
+        let left = array.data()[row * cols + column];
+        let right = array.data()[(row + 1) * cols + column];
         apply_direction(left.cmp(&right), direction)
     })
 }

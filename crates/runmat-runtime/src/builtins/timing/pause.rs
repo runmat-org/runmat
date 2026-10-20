@@ -57,7 +57,10 @@ enum PauseWait {
     context = true,
     builtin_path = "crate::builtins::timing::pause"
 )]
-async fn pause_builtin(runtime: Option<RuntimeContext>, args: Vec<Value>) -> BuiltinResult<Value> {
+async fn pause_builtin(
+    runtime: Option<RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     let runtime = runtime.ok_or_else(|| {
         pause_error_with_message(
             PAUSE_ERROR_CONTEXT_UNAVAILABLE.message,
@@ -177,10 +180,10 @@ async fn classify_argument(arg: &Value) -> Result<PauseArgument, RuntimeError> {
     match host_value {
         Value::String(text) => parse_command(&text),
         Value::CharArray(ca) => {
-            if ca.rows == 0 || ca.data.is_empty() {
+            if ca.rows == 0 || ca.data().is_empty() {
                 Ok(PauseArgument::Wait(PauseWait::Default))
             } else if ca.rows == 1 {
-                let text: String = ca.data.iter().collect();
+                let text: String = ca.data().iter().collect();
                 parse_command(&text)
             } else {
                 Err(pause_error_with_message(
@@ -190,10 +193,10 @@ async fn classify_argument(arg: &Value) -> Result<PauseArgument, RuntimeError> {
             }
         }
         Value::StringArray(sa) => {
-            if sa.data.is_empty() {
+            if sa.data().is_empty() {
                 Ok(PauseArgument::Wait(PauseWait::Default))
-            } else if sa.data.len() == 1 {
-                parse_command(&sa.data[0])
+            } else if sa.data().len() == 1 {
+                parse_command(&sa.data()[0])
             } else {
                 Err(pause_error_with_message(
                     PAUSE_ERROR_INVALID_ARG.message,
@@ -332,7 +335,11 @@ pub(crate) mod tests {
 
     async fn pause_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         let runtime = TEST_RUNTIME.with(Clone::clone);
-        super::pause_builtin(Some(runtime), args).await
+        super::pause_builtin(
+            Some(runtime),
+            crate::builtins::common::test_support::builtin_arguments(args),
+        )
+        .await
     }
 
     #[cfg(feature = "wgpu")]
@@ -354,7 +361,7 @@ pub(crate) mod tests {
 
     fn char_array_to_string(value: Value) -> String {
         match value {
-            Value::CharArray(ca) if ca.rows == 1 => ca.data.iter().collect(),
+            Value::CharArray(ca) if ca.rows == 1 => ca.data().iter().collect(),
             other => panic!("expected char array, got {other:?}"),
         }
     }
@@ -732,12 +739,15 @@ pub(crate) mod tests {
         );
         let invalid = block_on(super::pause_builtin(
             Some(runtime.clone()),
-            vec![Value::Num(f64::MAX)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(f64::MAX)]),
         ))
         .unwrap_err();
         assert_pause_error_identifier(invalid, PAUSE_ERROR_INVALID_ARG.identifier.unwrap());
         assert_eq!(calls.get(), 0);
-        let mut wait = Box::pin(super::pause_builtin(Some(runtime), vec![Value::Num(1.0)]));
+        let mut wait = Box::pin(super::pause_builtin(
+            Some(runtime),
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
+        ));
         let waker = futures::task::noop_waker();
         let mut context = Context::from_waker(&waker);
         assert!(wait.as_mut().poll(&mut context).is_pending());

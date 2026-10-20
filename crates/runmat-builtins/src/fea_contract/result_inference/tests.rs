@@ -1,6 +1,6 @@
 use super::*;
 use crate::fea_contract::{
-    integer::{FEA_FIELD_DESCRIPTOR, FEA_PLOT_DESCRIPTOR, FEA_RESULTS_DESCRIPTOR},
+    descriptors::{FEA_FIELD_DESCRIPTOR, FEA_PLOT_DESCRIPTOR, FEA_RESULTS_DESCRIPTOR},
     operation_entry::{self, OperationEffectProfile, OperationEntryDefinition},
 };
 use crate::{
@@ -54,6 +54,40 @@ fn result_references_do_not_accept_numeric_or_resident_values() {
     assert!(
         matches!(&inferred.outputs[0].kind, ValueKindFact::Object(object) if object.runtime_class.as_ref().is_some_and(|class| class.is(FEA_FIELD_CLASS)))
     );
+}
+
+#[test]
+fn typed_field_selector_and_frequency_replace_the_retired_text_form() {
+    let call = |selector, sample| CallRequest {
+        arguments: vec![object_result(FEA_STEP_RUN_RESULT_CLASS), selector, sample],
+        literals: LiteralContext::new(vec![LiteralValue::Unknown; 3]),
+        outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+    };
+    let typed = infer_result(
+        &call(
+            object_result(StaticClassIdentity::new("fea.StructuralField")),
+            object_result(StaticClassIdentity::new("fea.Frequency")),
+        ),
+        &entry(),
+        FeaResultKind::Field,
+    );
+    assert!(typed.diagnostics.is_empty(), "{:?}", typed.diagnostics);
+    let retired = infer_result(
+        &call(
+            ValueFact::scalar(ValueKindFact::String),
+            ValueFact::scalar(ValueKindFact::String),
+        ),
+        &entry(),
+        FeaResultKind::Field,
+    );
+    assert!(retired
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "RM-CATALOG-FEA-FIELD-ID"));
+    assert!(retired
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "RM-CATALOG-FEA-SAMPLE"));
 }
 
 #[test]

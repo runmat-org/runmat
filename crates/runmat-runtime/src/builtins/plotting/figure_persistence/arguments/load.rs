@@ -1,7 +1,7 @@
 use super::*;
 
 pub(in super::super) fn parse_openfig_args(
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     builtin: &'static str,
 ) -> BuiltinResult<OpenFigRequest> {
     if args.is_empty() || args.len() > 3 {
@@ -16,7 +16,7 @@ pub(in super::super) fn parse_openfig_args(
     let mut visibility = None;
     let mut saw_copies = false;
     let mut copies = OpenFigCopies::New;
-    for value in &args[1..] {
+    for value in args.iter().skip(1) {
         let token = scalar_string(value, builtin)?;
         match token.trim().to_ascii_lowercase().as_str() {
             "new" if !saw_copies => {
@@ -48,7 +48,7 @@ pub(in super::super) fn parse_openfig_args(
 }
 
 pub(in super::super) fn parse_hgload_args(
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<(OpenFigRequest, Option<StructValue>)> {
     if args.is_empty() || args.len() > 2 {
         return Err(persistence_error(
@@ -57,7 +57,7 @@ pub(in super::super) fn parse_hgload_args(
             "hgload: expected filename and optional property structure",
         ));
     }
-    let request = parse_openfig_args(&args[..1], HGLOAD)?;
+    let request = parse_openfig_args(args.range(..1)?, HGLOAD)?;
     let overrides = match args.get(1) {
         Some(Value::Struct(st)) => Some(st.clone()),
         Some(_) => {

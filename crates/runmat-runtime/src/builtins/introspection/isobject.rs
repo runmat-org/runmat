@@ -33,7 +33,7 @@ mod tests {
     use crate::builtins::common::test_support;
     use runmat_value::{
         CellArray, CharArray, Closure, HandleRef, IntValue, IntegerStorage, Listener, MException,
-        ObjectInstance, StructValue, Tensor,
+        ObjectInstance, Tensor,
     };
 
     fn handle_target() -> runmat_gc::GcHandle {
@@ -73,16 +73,16 @@ mod tests {
 
     #[test]
     fn non_object_values_report_false() {
-        let mut st = StructValue::new();
+        let mut st = runmat_value::UnboundedStructValueBuilder::new();
         st.insert("x", Value::Num(1.0));
         let values = vec![
             Value::Num(1.0),
             Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor")),
             Value::Bool(true),
-            Value::String("text".to_string()),
+            Value::String("text".to_string().into()),
             Value::CharArray(CharArray::new_row("text")),
             Value::Cell(CellArray::new(vec![Value::Num(1.0)], 1, 1).expect("cell")),
-            Value::Struct(st),
+            Value::Struct(st.finish()),
             Value::FunctionHandle("sin".into()),
             Value::Closure(Closure::from_data(runmat_value::ClosureData {
                 lexical_environment: None,

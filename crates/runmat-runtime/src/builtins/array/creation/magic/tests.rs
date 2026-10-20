@@ -61,7 +61,9 @@ use runmat_value::ComplexTensor;
 use runmat_value::IntegerStorage;
 
 fn magic_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    block_on(super::magic_builtin(args))
+    block_on(super::magic_builtin(
+        crate::builtins::common::test_support::builtin_arguments(args),
+    ))
 }
 
 #[test]

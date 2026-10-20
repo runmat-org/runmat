@@ -9,7 +9,10 @@ use runmat_value::Value;
 use super::findgroups_builtin;
 
 fn call(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    block_on(findgroups_builtin(first, rest))
+    block_on(findgroups_builtin(
+        first,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    ))
 }
 
 fn output_list(value: Value) -> Vec<Value> {

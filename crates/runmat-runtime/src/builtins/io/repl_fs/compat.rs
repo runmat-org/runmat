@@ -20,7 +20,7 @@ use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
 #[cfg(any(test, windows))]
 use runmat_value::CellArray;
-use runmat_value::{CharArray, ObjectInstance, StructValue, Value};
+use runmat_value::{CharArray, StructValue, UnboundedObjectBuilder, Value};
 
 use crate::builtins::common::fs::{expand_user_path, path_to_string};
 use crate::output_count;
@@ -96,7 +96,7 @@ pub(super) fn compat_error(name: &str, message: impl Into<String>) -> RuntimeErr
     build_runtime_error(message).with_builtin(name).build()
 }
 
-fn map_control_flow(name: &str, err: RuntimeError) -> RuntimeError {
+pub(super) fn map_control_flow(name: &str, err: RuntimeError) -> RuntimeError {
     let identifier = err.identifier().map(str::to_string);
     let mut builder = build_runtime_error(format!("{name}: {}", err.message()))
         .with_builtin(name)
@@ -137,7 +137,7 @@ pub(super) fn scalar_text(value: &Value, name: &str, arg: &str) -> BuiltinResult
 }
 
 fn char_row_to_string(array: &CharArray) -> String {
-    let mut text: String = array.data.iter().take(array.cols).collect();
+    let mut text: String = array.data().iter().take(array.cols).collect();
     while text.ends_with(' ') {
         text.pop();
     }
@@ -172,9 +172,9 @@ fn output_list_for_count(default: Vec<Value>) -> Value {
 fn value_contains_resident(value: &Value) -> bool {
     match value {
         Value::GpuTensor(_) => true,
-        Value::Cell(value) => value.data.iter().any(value_contains_resident),
+        Value::Cell(value) => value.data().iter().any(value_contains_resident),
         Value::Struct(value) => value.fields.values().any(value_contains_resident),
-        Value::Object(value) => value.properties.values().any(value_contains_resident),
+        Value::Object(value) => value.properties().values().any(value_contains_resident),
         Value::Closure(value) => value.captures.iter().any(value_contains_resident),
         Value::OutputList(values) => values.iter().any(value_contains_resident),
         _ => false,
@@ -189,7 +189,7 @@ fn value_contains_resident(value: &Value) -> bool {
 )]
 async fn system_builtin(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let requested = output_count::current_output_count();
     if requested.is_some_and(|count| count > 2) {
@@ -268,7 +268,7 @@ fn cellstr(values: Vec<String>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
-async fn fileattrib_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn fileattrib_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     if output_count::current_output_count().is_some_and(|count| count > 2) {
         let mut failure = build_runtime_error(FILEATTRIB_ERROR_TOO_MANY_OUTPUTS.message)
             .with_builtin("fileattrib");
@@ -284,7 +284,7 @@ async fn fileattrib_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         ));
     }
     let path = value_to_path(&args[0], "fileattrib", "path")?;
-    let readonly = parse_fileattrib_flags(&args[1..])?;
+    let readonly = parse_fileattrib_flags(args.view().range(1..)?)?;
     let selected = CapturedFsPath::capture(path, "fileattrib")?;
     if let Some(readonly) = readonly {
         selected.set_readonly(readonly).await.map_err(|source| {
@@ -314,7 +314,9 @@ async fn fileattrib_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     }
 }
 
-fn parse_fileattrib_flags(flags: &[Value]) -> BuiltinResult<Option<bool>> {
+fn parse_fileattrib_flags(
+    flags: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Option<bool>> {
     // Decode the complete option list before the first filesystem mutation.
     // The last writable flag determines the single provider-owned update.
     let mut readonly = None;
@@ -343,7 +345,7 @@ fn parse_fileattrib_flags(flags: &[Value]) -> BuiltinResult<Option<bool>> {
 }
 
 fn fileattrib_struct(path: &Path, meta: &vfs::FsMetadata) -> StructValue {
-    let mut st = StructValue::new();
+    let mut st = runmat_value::UnboundedStructValueBuilder::new();
     st.insert("Name", char_value(&path_to_string(path)));
     st.insert("archive", Value::Num(f64::NAN));
     st.insert("system", Value::Num(f64::NAN));
@@ -358,13 +360,13 @@ fn fileattrib_struct(path: &Path, meta: &vfs::FsMetadata) -> StructValue {
     st.insert("OtherRead", Value::Num(f64::NAN));
     st.insert("OtherWrite", Value::Num(f64::NAN));
     st.insert("OtherExecute", Value::Num(f64::NAN));
-    st
+    st.finish()
 }
 
 fn error_struct(message: &str) -> StructValue {
-    let mut st = StructValue::new();
+    let mut st = runmat_value::UnboundedStructValueBuilder::new();
     st.insert("message", char_value(message));
-    st
+    st.finish()
 }
 
 #[runtime_builtin(
@@ -372,7 +374,7 @@ fn error_struct(message: &str) -> StructValue {
     binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
-async fn rehash_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn rehash_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     use crate::user_functions::DynamicFunctionRefreshRequest;
 
     if output_count::current_output_count().is_some_and(|count| count > 1) {
@@ -381,9 +383,9 @@ async fn rehash_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             .with_identifier("RunMat:rehash:TooManyOutputs")
             .build());
     }
-    let request = match args.as_slice() {
-        [] => DynamicFunctionRefreshRequest::Default,
-        [argument] => {
+    let request = match (args.len(), args.first()) {
+        (0, _) => DynamicFunctionRefreshRequest::Default,
+        (1, Some(argument)) => {
             let mode = scalar_text(argument, "rehash", "mode").map_err(|source| {
                 build_runtime_error(source.message().to_owned())
                     .with_builtin("rehash")
@@ -431,7 +433,7 @@ async fn rehash_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 )]
 async fn userpath_builtin(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     user_path::run(runtime, args).await
 }
@@ -444,7 +446,7 @@ async fn userpath_builtin(
 )]
 async fn restoredefaultpath_builtin(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     user_path::restore(runtime, args)
 }
@@ -457,7 +459,7 @@ async fn restoredefaultpath_builtin(
 )]
 async fn memmapfile_builtin(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     output_count::validate_fixed_outputs(
         &MEMMAPFILE_DESCRIPTOR,
@@ -490,7 +492,7 @@ async fn memmapfile_builtin(
             .with_source(source)
             .build()
     })?;
-    let option_args = &args[1..];
+    let option_args = args.view().range(1..)?;
     if !option_args.len().is_multiple_of(2) {
         return Err(memmapfile::typed_error(
             &MEMMAPFILE_ERROR_INVALID_CALL,
@@ -509,7 +511,7 @@ async fn memmapfile_builtin(
         if !value_contains_resident(&pair[1]) {
             option.validate_host_value(&pair[1])?;
         }
-        options.push((option, &pair[1]));
+        options.push((option, pair.get(1).expect("validated option pair")));
     }
     let input = CapturedFsPath::capture(filename, "memmapfile").map_err(|source| {
         build_runtime_error(source.message().to_owned())
@@ -601,11 +603,9 @@ async fn memmapfile_builtin(
             fields: format.receiver_fields(),
             format_presentation: format.receiver_presentation(),
         };
-        let mut object =
-            ObjectInstance::new(MEMMAPFILE_CLASS.owned()).with_memmap_receiver(receiver);
-        object
-            .properties
-            .insert("Filename".into(), char_value(&path_to_string(&input.path)));
+        let mut object = UnboundedObjectBuilder::new(MEMMAPFILE_CLASS.owned());
+        object.insert("Filename".into(), char_value(&path_to_string(&input.path)));
+        let object = object.finish().with_memmap_receiver(receiver);
         if let Some(cooperation) = &mut cooperation {
             cooperation
                 .checkpoint(0)
@@ -666,11 +666,12 @@ async fn memmapfile_builtin(
         fields: format.receiver_fields(),
         format_presentation: format.receiver_presentation(),
     };
-    let mut object = ObjectInstance::new(MEMMAPFILE_CLASS.owned()).with_memmap_receiver(receiver);
-    object.properties.insert(
+    let mut object = UnboundedObjectBuilder::new(MEMMAPFILE_CLASS.owned());
+    object.insert(
         "Filename".to_string(),
         char_value(&path_to_string(&input.path)),
     );
+    let object = object.finish().with_memmap_receiver(receiver);
     if let Some(cooperation) = &mut cooperation {
         cooperation
             .checkpoint(0)
@@ -922,7 +923,11 @@ mod tests {
             Value::Int(runmat_value::IntValue::I64(i64::MIN)),
             unregistered_resident_value(),
         ] {
-            let error = run(userpath_builtin(None, vec![invalid])).expect_err("invalid path text");
+            let error = run(userpath_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![invalid]),
+            ))
+            .expect_err("invalid path text");
             assert!(error.message().contains("must be host text"));
             assert!(!error.message().to_ascii_lowercase().contains("provider"));
         }
@@ -946,11 +951,11 @@ mod tests {
         );
         let value = run(memmapfile_builtin(
             None,
-            vec![
-                Value::String(path_to_string(&path)),
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String(path_to_string(&path).into()),
                 char_value("Format"),
                 fmt,
-            ],
+            ]),
         ))
         .unwrap();
         let mapped_data = mapped_property(value, "Data");
@@ -973,11 +978,11 @@ mod tests {
         let strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = run(memmapfile_builtin(
             None,
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::String("definitely-missing.bin".into()),
                 Value::String("Offset".into()),
                 Value::Int(runmat_value::IntValue::U64(0)),
-            ],
+            ]),
         ))
         .expect_err("typed integer control must be gated");
         assert_eq!(
@@ -992,7 +997,9 @@ mod tests {
         let _requested = output_count::push_output_count(Some(2)).expect("output-count scope");
         let error = run(memmapfile_builtin(
             None,
-            vec![Value::String("definitely-missing-output-count.bin".into())],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "definitely-missing-output-count.bin".into(),
+            )]),
         ))
         .expect_err("fixed single result");
         assert_eq!(
@@ -1145,13 +1152,13 @@ mod tests {
         vfs::set_current_dir(&root).expect("table cwd");
         let result = futures::executor::block_on(memmapfile_builtin(
             None,
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::String("records.bin".into()),
                 char_value("Format"),
                 format,
                 char_value("Repeat"),
                 Value::Num(2.0),
-            ],
+            ]),
         ))
         .expect("mapped table");
         let Value::Object(mapped) = result else {
@@ -1180,11 +1187,11 @@ mod tests {
         );
         let error = futures::executor::block_on(memmapfile_builtin(
             None,
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::String("definitely-missing-format-table.bin".into()),
                 char_value("Format"),
                 duplicated,
-            ],
+            ]),
         ))
         .expect_err("duplicate fields fail before file access");
         assert!(error.message().contains("unique"));
@@ -1247,13 +1254,13 @@ mod tests {
         let earlier_resident = unregistered_resident_value();
         let unknown = run(memmapfile_builtin(
             None,
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 filename.clone(),
                 Value::String("Offset".into()),
                 earlier_resident.clone(),
                 Value::String("Unknown".into()),
                 Value::Num(1.0),
-            ],
+            ]),
         ))
         .expect_err("unknown option is a preflight error");
         assert!(unknown.message().contains("unsupported option"));
@@ -1261,13 +1268,13 @@ mod tests {
 
         let invalid = run(memmapfile_builtin(
             None,
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 filename,
                 Value::String("Offset".into()),
                 earlier_resident,
                 Value::String("Format".into()),
                 Value::String("not-a-supported-dtype".into()),
-            ],
+            ]),
         ))
         .expect_err("invalid known format is a preflight error");
         assert!(invalid.message().contains("unsupported Format type"));
@@ -1438,9 +1445,14 @@ mod tests {
         #[cfg(not(windows))]
         let command = "printf hello";
         let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
-        let value = system_builtin(Some(runtime), vec![Value::String(command.to_string())])
-            .await
-            .unwrap();
+        let value = system_builtin(
+            Some(runtime),
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                command.to_string().into(),
+            )]),
+        )
+        .await
+        .unwrap();
         let Value::OutputList(values) = value else {
             panic!("expected output list");
         };
@@ -1456,7 +1468,9 @@ mod tests {
     fn system_rejects_integer_commands_before_process_access() {
         let error = run(system_builtin(
             None,
-            vec![Value::Int(runmat_value::IntValue::U64(u64::MAX))],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(
+                runmat_value::IntValue::U64(u64::MAX),
+            )]),
         ))
         .expect_err("integer command must reject");
         assert!(error.message().contains("command must be"));
@@ -1466,10 +1480,10 @@ mod tests {
     fn system_rejects_integer_echo_options_before_process_access() {
         let error = run(system_builtin(
             None,
-            vec![
-                Value::String("printf should-not-run".to_string()),
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("printf should-not-run".to_string().into()),
                 Value::Int(runmat_value::IntValue::U8(1)),
-            ],
+            ]),
         ))
         .expect_err("integer option must reject");
         assert!(error.message().contains("option must be"));
@@ -1480,7 +1494,9 @@ mod tests {
         let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let error = run(system_builtin(
             None,
-            vec![Value::String("printf should-not-run".to_string())],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "printf should-not-run".to_string().into(),
+            )]),
         ))
         .expect_err("unsupported output count must reject");
         assert!(error.message().contains("at most two outputs"));
@@ -1491,25 +1507,31 @@ mod tests {
         let _guard = runmat_filesystem::provider_override_lock();
         let path = std::env::temp_dir().join("runmat_fileattrib_test.txt");
         std::fs::write(&path, "data").unwrap();
-        let rejected = run(fileattrib_builtin(vec![
-            Value::String(path_to_string(&path)),
-            char_value("-w"),
-            char_value("unsupported"),
-        ]))
+        let rejected = run(fileattrib_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String(path_to_string(&path).into()),
+                char_value("-w"),
+                char_value("unsupported"),
+            ]),
+        ))
         .expect_err("a later invalid flag cannot leave an earlier mutation");
         assert!(rejected.message().contains("unsupported attribute flag"));
         assert!(!std::fs::metadata(&path).unwrap().permissions().readonly());
-        run(fileattrib_builtin(vec![
-            Value::String(path_to_string(&path)),
-            char_value("-w"),
-        ]))
+        run(fileattrib_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String(path_to_string(&path).into()),
+                char_value("-w"),
+            ]),
+        ))
         .unwrap();
         let readonly = std::fs::metadata(&path).unwrap().permissions().readonly();
         assert!(readonly);
-        run(fileattrib_builtin(vec![
-            Value::String(path_to_string(&path)),
-            char_value("+w"),
-        ]))
+        run(fileattrib_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String(path_to_string(&path).into()),
+                char_value("+w"),
+            ]),
+        ))
         .unwrap();
         let readonly = std::fs::metadata(&path).unwrap().permissions().readonly();
         assert!(!readonly);
@@ -1527,11 +1549,13 @@ mod tests {
         let path = root.join("input.bin");
         provider.write_project_path(&path, b"value").unwrap();
         let _installed = vfs::replace_provider(provider.clone());
-        let error = run(fileattrib_builtin(vec![
-            Value::String(path_to_string(&path)),
-            char_value("-w"),
-            char_value("+r"),
-        ]))
+        let error = run(fileattrib_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String(path_to_string(&path).into()),
+                char_value("-w"),
+                char_value("+r"),
+            ]),
+        ))
         .expect_err("unsupported read permission must reject before mutation");
         assert_eq!(
             error.identifier(),
@@ -1559,10 +1583,12 @@ mod tests {
         for count in 0..=2 {
             let _outputs =
                 output_count::push_output_count(Some(count)).expect("output-count scope");
-            let Value::OutputList(outputs) = run(fileattrib_builtin(vec![
-                Value::String("input.bin".into()),
-                char_value("+w"),
-            ]))
+            let Value::OutputList(outputs) = run(fileattrib_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::String("input.bin".into()),
+                    char_value("+w"),
+                ]),
+            ))
             .expect("supported requested output count") else {
                 panic!("explicit count produces output list");
             };
@@ -1576,10 +1602,12 @@ mod tests {
         }
 
         let _outputs = output_count::push_output_count(Some(3)).expect("output-count scope");
-        let error = run(fileattrib_builtin(vec![
-            Value::String("input.bin".into()),
-            char_value("-w"),
-        ]))
+        let error = run(fileattrib_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("input.bin".into()),
+                char_value("-w"),
+            ]),
+        ))
         .expect_err("third output rejects before read-only mutation");
         assert_eq!(
             error.identifier(),
@@ -1616,13 +1644,24 @@ mod tests {
             scalar_text(&accepted, "fileattrib", "attribute").unwrap(),
             "-w"
         );
-        assert!(run(fileattrib_builtin(vec![page.clone(), char_value("-w"),])).is_err());
-        assert!(run(fileattrib_builtin(vec![
-            Value::String("input.bin".into()),
-            page.clone(),
-        ]))
+        assert!(run(fileattrib_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                page.clone(),
+                char_value("-w"),
+            ])
+        ))
         .is_err());
-        assert!(run(rehash_builtin(vec![page])).is_err());
+        assert!(run(fileattrib_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("input.bin".into()),
+                page.clone(),
+            ])
+        ))
+        .is_err());
+        assert!(run(rehash_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![page])
+        ))
+        .is_err());
         assert!(!futures::executor::block_on(provider.metadata(&path))
             .unwrap()
             .is_readonly());
@@ -1670,9 +1709,12 @@ mod tests {
         let _installed = vfs::replace_provider(provider);
         vfs::set_current_dir(&root).unwrap();
         let _outputs = output_count::push_output_count(Some(2)).expect("output-count scope");
-        let Value::OutputList(outputs) =
-            run(fileattrib_builtin(vec![Value::String("sample.bin".into())])).unwrap()
-        else {
+        let Value::OutputList(outputs) = run(fileattrib_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "sample.bin".into(),
+            )]),
+        ))
+        .unwrap() else {
             panic!("two requested fileattrib outputs");
         };
         assert_eq!(outputs[0], Value::Num(1.0));
@@ -1706,29 +1748,39 @@ mod tests {
 
     #[test]
     fn fileattrib_rejects_numeric_and_resident_inputs_before_external_access() {
-        let numeric =
-            run(fileattrib_builtin(vec![Value::Num(1.0)])).expect_err("numeric path must reject");
+        let numeric = run(fileattrib_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
+        ))
+        .expect_err("numeric path must reject");
         assert!(numeric.message().contains("path must be"));
 
-        let numeric_flag = run(fileattrib_builtin(vec![
-            Value::String("missing-fileattrib-path".to_string()),
-            Value::Num(1.0),
-        ]))
+        let numeric_flag = run(fileattrib_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("missing-fileattrib-path".to_string().into()),
+                Value::Num(1.0),
+            ]),
+        ))
         .expect_err("numeric attribute must reject");
         assert!(numeric_flag.message().contains("attribute must be"));
 
-        let resident_path = run(fileattrib_builtin(vec![unregistered_resident_value()]))
-            .expect_err("resident path must reject");
+        let resident_path = run(fileattrib_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                unregistered_resident_value(),
+            ]),
+        ))
+        .expect_err("resident path must reject");
         assert!(resident_path.message().contains("path must be"));
         assert!(!resident_path
             .message()
             .to_ascii_lowercase()
             .contains("provider"));
 
-        let resident_flag = run(fileattrib_builtin(vec![
-            Value::String("missing-fileattrib-path".to_string()),
-            unregistered_resident_value(),
-        ]))
+        let resident_flag = run(fileattrib_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("missing-fileattrib-path".to_string().into()),
+                unregistered_resident_value(),
+            ]),
+        ))
         .expect_err("resident attribute must reject");
         assert!(resident_flag.message().contains("attribute must be"));
         assert!(!resident_flag
@@ -1763,7 +1815,13 @@ mod tests {
             vec![Value::String("toolbox".into())],
             vec![char_value("toolboxcache")],
         ] {
-            assert_eq!(run(rehash_builtin(arguments)).unwrap(), Value::Num(0.0));
+            assert_eq!(
+                run(rehash_builtin(
+                    crate::builtins::common::test_support::builtin_arguments(arguments)
+                ))
+                .unwrap(),
+                Value::Num(0.0)
+            );
         }
         assert_eq!(
             observed.borrow().as_slice(),
@@ -1774,26 +1832,36 @@ mod tests {
                 DynamicFunctionRefreshRequest::ToolboxCache,
             ]
         );
-        let error = run(rehash_builtin(vec![char_value("not-a-mode")]))
-            .expect_err("invalid mode must fail before cache callback");
+        let error = run(rehash_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![char_value(
+                "not-a-mode",
+            )]),
+        ))
+        .expect_err("invalid mode must fail before cache callback");
         assert!(error.message().contains("expected path"));
         assert_eq!(error.identifier(), Some("RunMat:rehash:InvalidMode"));
         assert_eq!(observed.borrow().len(), 4);
-        let error = run(rehash_builtin(vec![Value::Num(1.0)]))
-            .expect_err("numeric mode must fail before cache callback");
+        let error = run(rehash_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
+        ))
+        .expect_err("numeric mode must fail before cache callback");
         assert!(error.message().contains("mode must be"));
         assert_eq!(error.identifier(), Some("RunMat:rehash:InvalidMode"));
         assert_eq!(observed.borrow().len(), 4);
-        let error = run(rehash_builtin(vec![
-            char_value("path"),
-            char_value("toolbox"),
-        ]))
+        let error = run(rehash_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                char_value("path"),
+                char_value("toolbox"),
+            ]),
+        ))
         .expect_err("extra mode must fail before cache callback");
         assert_eq!(error.identifier(), Some("RunMat:rehash:InvalidCall"));
         assert_eq!(observed.borrow().len(), 4);
         let _outputs = output_count::push_output_count(Some(2)).expect("output-count scope");
-        let error = run(rehash_builtin(Vec::new()))
-            .expect_err("unsupported output count must fail before cache callback");
+        let error = run(rehash_builtin(
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect_err("unsupported output count must fail before cache callback");
         assert_eq!(error.identifier(), Some("RunMat:rehash:TooManyOutputs"));
         assert_eq!(observed.borrow().len(), 4);
     }
@@ -1806,7 +1874,10 @@ mod tests {
             crate::execution::RuntimeExecutionService::new(),
         ));
         let _active = context.enter();
-        let error = run(rehash_builtin(Vec::new())).expect_err("no cache owner exists");
+        let error = run(rehash_builtin(
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect_err("no cache owner exists");
         assert_eq!(error.identifier(), Some("RunMat:rehash:Unavailable"));
     }
 
@@ -1831,7 +1902,10 @@ mod tests {
             Box::pin(async { Ok(()) })
         })));
         let _active = context.enter();
-        let error = run(rehash_builtin(Vec::new())).expect_err("cancelled refresh cannot mutate");
+        let error = run(rehash_builtin(
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect_err("cancelled refresh cannot mutate");
         assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
         assert!(matches!(
             error.source.as_ref().and_then(|source| {
@@ -1876,7 +1950,9 @@ mod tests {
             Box::pin(PendingRefresh(Rc::clone(&selected)))
         })));
         let _active = context.enter();
-        let mut call = Box::pin(rehash_builtin(Vec::new()));
+        let mut call = Box::pin(rehash_builtin(
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ));
         let waker = futures::task::noop_waker();
         let mut poll = Context::from_waker(&waker);
         assert!(call.as_mut().poll(&mut poll).is_pending());
@@ -1925,7 +2001,9 @@ mod tests {
             Box::pin(PendingRefresh(Rc::clone(&selected)))
         })));
         let _active = context.enter();
-        let mut call = Box::pin(rehash_builtin(Vec::new()));
+        let mut call = Box::pin(rehash_builtin(
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ));
         let waker = futures::task::noop_waker();
         assert!(call
             .as_mut()

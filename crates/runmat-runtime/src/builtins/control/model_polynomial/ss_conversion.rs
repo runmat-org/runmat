@@ -1,8 +1,8 @@
 //! State-space to SISO transfer-function conversion for control analysis.
 use crate::builtins::common::tensor;
 use crate::builtins::control::tf_model::{
-    control_error, gather_ss_properties, internal_identifier, invalid_model_identifier, scalar_f64,
-    unsupported_model_identifier, TfModel, TfOptions,
+    control_error, gather_ss_property_values, internal_identifier, invalid_model_identifier,
+    scalar_f64, unsupported_model_identifier, TfModel, TfOptions,
 };
 use crate::context::host_allocation::{HostAllocationError, HostAllocationReceipt};
 use crate::context::RuntimeContext;
@@ -155,7 +155,7 @@ pub(crate) async fn ss_object_to_tf_async(
 ) -> BuiltinResult<TfModel> {
     const REQUIRED: [&str; 7] = ["A", "B", "C", "D", "Ts", "InputDelay", "OutputDelay"];
     for name in REQUIRED {
-        if !object.properties.contains_key(name) {
+        if !object.properties().contains_key(name) {
             return Err(conversion_error(
                 format!("model object is missing {name} property"),
                 ConversionErrorKind::InvalidModel,
@@ -166,31 +166,32 @@ pub(crate) async fn ss_object_to_tf_async(
     // An unsupported host delay is a model-admission error, not a reason to
     // download otherwise valid resident state matrices.
     for name in ["InputDelay", "OutputDelay"] {
-        if let Some(value) = object.properties.get(name) {
+        if let Some(value) = object.properties().get(name) {
             if !matches!(value, Value::GpuTensor(_)) {
                 ensure_zero_delay_value(value, name)
                     .map_err(|error| error.into_runtime(builtin))?;
             }
         }
     }
-    let gathered = gather_ss_properties(object, &REQUIRED, builtin).await?;
-    ss_object_to_tf(&gathered, builtin).map_err(|error| error.into_runtime(builtin))
+    let gathered = gather_ss_property_values(&object, REQUIRED, builtin).await?;
+    ss_values_to_tf(&gathered, builtin).map_err(|error| error.into_runtime(builtin))
 }
 
-fn ss_object_to_tf(object: &ObjectInstance, builtin: &'static str) -> ConversionResult<TfModel> {
-    let a = matrix_property(object, "A")?;
-    let b = matrix_property(object, "B")?;
-    let c = matrix_property(object, "C")?;
-    let d = matrix_property(object, "D")?;
-    let sample_time = scalar_property(object, "Ts", builtin)?;
+fn ss_values_to_tf(values: &[Value; 7], builtin: &'static str) -> ConversionResult<TfModel> {
+    let [a_value, b_value, c_value, d_value, sample_value, input_delay, output_delay] = values;
+    let a = matrix_value(a_value, "A")?;
+    let b = matrix_value(b_value, "B")?;
+    let c = matrix_value(c_value, "C")?;
+    let d = matrix_value(d_value, "D")?;
+    let sample_time = scalar_value(sample_value, "Ts", builtin)?;
     if !sample_time.is_finite() || sample_time < 0.0 {
         return Err(conversion_error(
             "ss sample time must be a finite nonnegative scalar",
             ConversionErrorKind::InvalidModel,
         ));
     }
-    ensure_zero_delay_property(object, "InputDelay")?;
-    ensure_zero_delay_property(object, "OutputDelay")?;
+    ensure_zero_delay_value(input_delay, "InputDelay")?;
+    ensure_zero_delay_value(output_delay, "OutputDelay")?;
     validate_ss_dimensions(&a, &b, &c, &d)?;
 
     let denominator = characteristic_polynomial_from_matrix(&a)?;
@@ -222,6 +223,20 @@ fn ss_object_to_tf(object: &ObjectInstance, builtin: &'static str) -> Conversion
     })
 }
 
+#[cfg(test)]
+fn ss_object_to_tf(object: &ObjectInstance, builtin: &'static str) -> ConversionResult<TfModel> {
+    let values = [
+        property(object, "A")?.clone(),
+        property(object, "B")?.clone(),
+        property(object, "C")?.clone(),
+        property(object, "D")?.clone(),
+        property(object, "Ts")?.clone(),
+        property(object, "InputDelay")?.clone(),
+        property(object, "OutputDelay")?.clone(),
+    ];
+    ss_values_to_tf(&values, builtin)
+}
+
 /// MIMO coefficient grid in column-major (output, input) order. This uses
 /// the same characteristic and Markov coefficient algorithm as the SISO path.
 pub(crate) async fn ss_object_coefficient_grid_async(
@@ -231,7 +246,7 @@ pub(crate) async fn ss_object_coefficient_grid_async(
 ) -> BuiltinResult<(Vec<Vec<Complex64>>, Vec<Complex64>, usize, usize, f64)> {
     const REQUIRED: [&str; 7] = ["A", "B", "C", "D", "Ts", "InputDelay", "OutputDelay"];
     for name in REQUIRED {
-        if !object.properties.contains_key(name) {
+        if !object.properties().contains_key(name) {
             return Err(conversion_error(
                 format!("model object is missing {name} property"),
                 ConversionErrorKind::InvalidModel,
@@ -240,7 +255,7 @@ pub(crate) async fn ss_object_coefficient_grid_async(
         }
     }
     for name in ["InputDelay", "OutputDelay"] {
-        if let Some(value) = object.properties.get(name) {
+        if let Some(value) = object.properties().get(name) {
             if !matches!(value, Value::GpuTensor(_)) {
                 ensure_zero_delay_value(value, name)
                     .map_err(|error| error.into_runtime(builtin))?;
@@ -263,16 +278,17 @@ pub(crate) async fn ss_object_coefficient_grid_async(
         .map_err(|error| allocation_error(builtin, runtime, error))?;
     let mut buffers =
         preallocate_polynomial_buffers(receipt.as_ref(), runtime, geometry.states, builtin)?;
-    let object = gather_ss_properties(object, &REQUIRED, builtin).await?;
+    let values = gather_ss_property_values(&object, REQUIRED, builtin).await?;
     let result = (|| -> ConversionResult<_> {
-        ensure_zero_delay_property(&object, "InputDelay")?;
-        ensure_zero_delay_property(&object, "OutputDelay")?;
-        let a = HostMatrixView::new(property(&object, "A")?, "A")?;
-        let b = HostMatrixView::new(property(&object, "B")?, "B")?;
-        let c = HostMatrixView::new(property(&object, "C")?, "C")?;
-        let d = HostMatrixView::new(property(&object, "D")?, "D")?;
+        let [a, b, c, d, sample, input_delay, output_delay] = &values;
+        ensure_zero_delay_value(input_delay, "InputDelay")?;
+        ensure_zero_delay_value(output_delay, "OutputDelay")?;
+        let a = HostMatrixView::new(a, "A")?;
+        let b = HostMatrixView::new(b, "B")?;
+        let c = HostMatrixView::new(c, "C")?;
+        let d = HostMatrixView::new(d, "D")?;
         validate_general_dimensions(&a, &b, &c, &d)?;
-        let sample_time = scalar_property(&object, "Ts", builtin)?;
+        let sample_time = scalar_value(sample, "Ts", builtin)?;
         if sample_time < 0.0 {
             return Err(conversion_error(
                 "ss sample time must be nonnegative",
@@ -344,7 +360,7 @@ pub(crate) async fn ss_object_coefficient_grid_async(
 }
 
 fn property<'a>(object: &'a ObjectInstance, name: &str) -> ConversionResult<&'a Value> {
-    object.properties.get(name).ok_or_else(|| {
+    object.properties().get(name).ok_or_else(|| {
         conversion_error(
             format!("model object is missing {name} property"),
             ConversionErrorKind::InvalidModel,
@@ -352,6 +368,7 @@ fn property<'a>(object: &'a ObjectInstance, name: &str) -> ConversionResult<&'a 
     })
 }
 
+#[cfg(test)]
 fn matrix_property(object: &ObjectInstance, name: &str) -> ConversionResult<DMatrix<Complex64>> {
     matrix_value(property(object, name)?, name)
 }
@@ -422,12 +439,8 @@ fn rows_cols(shape: &[usize]) -> (usize, usize) {
     }
 }
 
-fn scalar_property(
-    object: &ObjectInstance,
-    name: &str,
-    builtin: &'static str,
-) -> ConversionResult<f64> {
-    let value = scalar_f64(property(object, name)?, name, builtin)
+fn scalar_value(value: &Value, name: &str, builtin: &'static str) -> ConversionResult<f64> {
+    let value = scalar_f64(value, name, builtin)
         .map_err(|error| conversion_error(error.message(), ConversionErrorKind::InvalidModel))?;
     if value.is_finite() {
         Ok(value)
@@ -437,10 +450,6 @@ fn scalar_property(
             ConversionErrorKind::InvalidModel,
         ))
     }
-}
-
-fn ensure_zero_delay_property(object: &ObjectInstance, name: &str) -> ConversionResult<()> {
-    ensure_zero_delay_value(property(object, name)?, name)
 }
 
 fn ensure_zero_delay_value(value: &Value, name: &str) -> ConversionResult<()> {

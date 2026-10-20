@@ -78,7 +78,7 @@ fn struct_error_with_message(
     binding_variant = "default",
     builtin_path = "crate::builtins::structs::core::r#struct"
 )]
-async fn struct_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn struct_builtin(rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &runmat_builtins::STRUCT_DESCRIPTOR,
         &runmat_builtins::STRUCT_ERROR_TOO_MANY_OUTPUTS,
@@ -107,7 +107,7 @@ async fn struct_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
     }
 }
 
-fn build_from_pairs(args: Vec<Value>) -> BuiltinResult<Value> {
+fn build_from_pairs(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     let mut entries: Vec<FieldEntry> = Vec::new();
     let mut target_shape: Option<Vec<usize>> = None;
     let mut field_names = std::collections::HashSet::with_capacity(args.len() / 2);
@@ -148,7 +148,7 @@ fn build_from_pairs(args: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 fn build_scalar_struct(entries: Vec<FieldEntry>) -> BuiltinResult<Value> {
-    let mut fields = StructValue::new();
+    let mut fields = runmat_value::UnboundedStructValueBuilder::new();
     for entry in entries {
         match entry.value {
             FieldValue::Single(value) => {
@@ -166,7 +166,7 @@ fn build_scalar_struct(entries: Vec<FieldEntry>) -> BuiltinResult<Value> {
             }
         }
     }
-    Ok(Value::Struct(fields))
+    Ok(Value::Struct(fields.finish()))
 }
 
 fn build_struct_array(entries: Vec<FieldEntry>, shape: Vec<usize>) -> BuiltinResult<Value> {
@@ -177,7 +177,7 @@ fn build_struct_array(entries: Vec<FieldEntry>, shape: Vec<usize>) -> BuiltinRes
 
     for entry in &entries {
         if let FieldValue::Cell(cell) = &entry.value {
-            if cell.data.len() != total_len {
+            if cell.data().len() != total_len {
                 return Err(struct_error(&STRUCT_ERROR_CELL_SIZE_MISMATCH));
             }
         }
@@ -192,7 +192,7 @@ fn build_struct_array(entries: Vec<FieldEntry>, shape: Vec<usize>) -> BuiltinRes
         .collect::<Vec<_>>();
     let mut structs = Vec::with_capacity(total_len);
     for idx in 0..total_len {
-        let mut fields = StructValue::new();
+        let mut fields = runmat_value::UnboundedStructValueBuilder::with_capacity(entries.len());
         for (entry, column_major) in entries.iter().zip(&column_major_cells) {
             let value = match &entry.value {
                 FieldValue::Single(val) => val.clone(),
@@ -204,7 +204,7 @@ fn build_struct_array(entries: Vec<FieldEntry>, shape: Vec<usize>) -> BuiltinRes
             };
             fields.fields.insert(entry.name.clone(), value);
         }
-        structs.push(fields);
+        structs.push(fields.finish());
     }
 
     let field_names = entries.iter().map(|entry| entry.name.clone()).collect();
@@ -231,8 +231,8 @@ fn parse_field_name(value: &Value) -> BuiltinResult<String> {
     let text = match value {
         Value::String(s) => s.to_string(),
         Value::StringArray(sa) => {
-            if sa.data.len() == 1 {
-                sa.data[0].to_string()
+            if sa.data().len() == 1 {
+                sa.data()[0].to_string()
             } else {
                 return Err(struct_error(&STRUCT_ERROR_FIELD_NAME_SCALAR));
             }
@@ -249,8 +249,8 @@ fn char_array_to_string(ca: &CharArray) -> BuiltinResult<String> {
     if ca.rows > 1 {
         return Err(struct_error(&STRUCT_ERROR_FIELD_NAME_CHAR_VECTOR));
     }
-    let mut out = String::with_capacity(ca.data.len());
-    for ch in &ca.data {
+    let mut out = String::with_capacity(ca.data().len());
+    for ch in ca.data() {
         out.push(*ch);
     }
     Ok(out)
@@ -287,7 +287,9 @@ pub(crate) mod tests {
     }
 
     fn run_struct(args: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(struct_builtin(args))
+        futures::executor::block_on(struct_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -515,9 +517,10 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_allows_existing_struct_copy() {
-        let mut base = StructValue::new();
+        let mut base = runmat_value::UnboundedStructValueBuilder::with_capacity(1);
         base.fields
             .insert("id".to_string(), Value::Int(IntValue::I32(7)));
+        let base = base.finish();
         let copy = run_struct(vec![Value::Struct(base.clone())]).expect("struct");
         assert_eq!(copy, Value::Struct(base));
     }
@@ -525,10 +528,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_copies_struct_array_argument() {
-        let mut proto = StructValue::new();
+        let mut proto = runmat_value::UnboundedStructValueBuilder::with_capacity(1);
         proto
             .fields
             .insert("id".into(), Value::Int(IntValue::I32(7)));
+        let proto = proto.finish();
         let struct_array = StructArray::new(vec![proto.clone(); 3], vec![1, 3]).unwrap();
         let original = struct_array.clone();
         let result =

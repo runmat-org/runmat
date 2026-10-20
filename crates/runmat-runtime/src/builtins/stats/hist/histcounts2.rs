@@ -44,14 +44,18 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::hist::histcounts2"
 )]
-async fn histcounts2_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn histcounts2_builtin(
+    x: Value,
+    y: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     let requested_outputs = crate::output_count::current_output_count();
     if requested_outputs.is_some_and(|count| count > 5) {
         return Err(builtin_error("histcounts2: too many output arguments"));
     }
-    parse_options(&rest)?;
-    ensure_histcounts2_public_syntax(&rest)?;
-    let eval = evaluate(x, y, &rest).await?;
+    parse_options(rest.view())?;
+    ensure_histcounts2_public_syntax(rest.view())?;
+    let eval = evaluate(x, y, rest.view()).await?;
     if let Some(out_count) = requested_outputs {
         if out_count == 0 {
             return Ok(Value::output_list(Vec::new()));
@@ -72,7 +76,9 @@ async fn histcounts2_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::Bui
     Ok(eval.into_counts_value())
 }
 
-pub(crate) fn ensure_histcounts2_public_syntax(args: &[Value]) -> BuiltinResult<()> {
+pub(crate) fn ensure_histcounts2_public_syntax(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     let mut extension = false;
     if args.len() >= 2 && !is_option_key(&args[0]) && !is_option_key(&args[1]) {
         let first = numeric_vector(&args[0], NAME, "positional X argument")?;
@@ -116,7 +122,11 @@ pub(crate) fn ensure_histcounts2_public_syntax(args: &[Value]) -> BuiltinResult<
 }
 
 /// Evaluate `histcounts2` once and surface all outputs.
-pub async fn evaluate(x: Value, y: Value, rest: &[Value]) -> BuiltinResult<Histcounts2Evaluation> {
+pub async fn evaluate(
+    x: Value,
+    y: Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Histcounts2Evaluation> {
     let options = parse_options(rest)?;
     preflight_observation_shapes(&x, &y)?;
     if matches!(&x, Value::GpuTensor(_)) || matches!(&y, Value::GpuTensor(_)) {

@@ -46,7 +46,7 @@ fn timeit_error_with_message(
 async fn timeit_builtin(
     runtime: Option<RuntimeContext>,
     func: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     let runtime = runtime.ok_or_else(|| {
         timeit_error_with_message(
@@ -54,7 +54,7 @@ async fn timeit_builtin(
             &TIMEIT_ERROR_CONTEXT_UNAVAILABLE,
         )
     })?;
-    let requested_outputs = parse_num_outputs(&runtime, &func, &rest).await?;
+    let requested_outputs = parse_num_outputs(&runtime, &func, rest.view()).await?;
     let callable = {
         let _context = runtime.enter();
         prepare_callable(func, requested_outputs)?
@@ -79,7 +79,7 @@ async fn timeit_builtin(
 async fn parse_num_outputs(
     runtime: &RuntimeContext,
     func: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> Result<Option<usize>, crate::RuntimeError> {
     match rest.len() {
         0 => Ok(None),
@@ -229,7 +229,7 @@ fn prepare_callable(
                     &TIMEIT_ERROR_HANDLE_KIND,
                 ))
             } else {
-                let text: String = arr.data.iter().collect();
+                let text: String = arr.data().iter().collect();
                 parse_handle_string(&text).map(|handle| TimeitCallable {
                     handle: canonicalize_text_handle(handle),
                     num_outputs,
@@ -237,8 +237,8 @@ fn prepare_callable(
             }
         }
         Value::StringArray(sa) => {
-            if sa.data.len() == 1 {
-                parse_handle_string(&sa.data[0]).map(|handle| TimeitCallable {
+            if sa.data().len() == 1 {
+                parse_handle_string(&sa.data()[0]).map(|handle| TimeitCallable {
                     handle: canonicalize_text_handle(handle),
                     num_outputs,
                 })
@@ -272,7 +272,7 @@ fn prepare_callable(
         Value::BoundFunctionHandle(handle) => {
             let normalized = normalize_name(&handle.name)?;
             let mut data = handle.into_data();
-            data.name = normalized;
+            data.name = normalized.into();
             Ok(TimeitCallable {
                 handle: Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
                     data,
@@ -288,14 +288,9 @@ fn prepare_callable(
                     ) {
                         return Ok(TimeitCallable {
                             handle: Value::Closure(
-                                closure.bind_resolved(
-                                    crate::user_functions::bound_function_binding_for(function),
-                                    crate::user_functions::source_function_for(function).map_or(
-                                        runmat_types::FunctionSourceRole::Unknown,
-                                        |info| info.role,
-                                    ),
-                                    crate::user_functions::source_file_for(function),
-                                ),
+                                crate::call::closure_binding::bind_selected_closure(
+                                    closure, function,
+                                )?,
                             ),
                             num_outputs,
                         });

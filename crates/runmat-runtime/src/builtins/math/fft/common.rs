@@ -1072,10 +1072,12 @@ pub fn parse_symflag(value: &Value, builtin: &str) -> BuiltinResult<Option<bool>
     let text: Option<Cow<'_, str>> = match value {
         Value::String(s) => Some(Cow::Borrowed(s.as_str())),
         Value::CharArray(ca) if ca.rows == 1 => {
-            let collected: String = ca.data.iter().collect();
+            let collected: String = ca.data().iter().collect();
             Some(Cow::Owned(collected))
         }
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(Cow::Borrowed(sa.data[0].as_str())),
+        Value::StringArray(sa) if sa.data().len() == 1 => {
+            Some(Cow::Borrowed(sa.data()[0].as_str()))
+        }
         _ => None,
     };
 

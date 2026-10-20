@@ -10,9 +10,9 @@ pub(super) fn string_columns(
     let rows = value.rows();
     let columns = value.cols();
     if !split || columns <= 1 || rows == 1 {
-        let rows = value.data.len();
+        let rows = value.data().len();
         let value = StringArray::from_shared_storage(
-            value.data,
+            value.into_parts().0,
             runmat_value::SharedShape::new_unmanaged(vec![rows, 1]),
         )?;
         return GroupColumn::vector(name, Value::StringArray(value)).map(|column| vec![column]);
@@ -20,7 +20,7 @@ pub(super) fn string_columns(
     (0..columns)
         .map(|column| {
             let data = (0..rows)
-                .map(|row| value.data[row + column * rows].clone())
+                .map(|row| value.data()[row + column * rows].clone())
                 .collect();
             let value = StringArray::from_texts_unbounded(data, vec![rows, 1])?;
             GroupColumn::vector(format!("{name}{}", column + 1), Value::StringArray(value))

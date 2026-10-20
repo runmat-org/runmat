@@ -44,7 +44,7 @@ pub(super) fn labels_from_value(value: Value, name: &str) -> BuiltinResult<Label
         Value::StringArray(array) => {
             ensure_vector_shape(&array.shape, name)?;
             Ok(LabelVector {
-                labels: array.data.iter().map(|text| Label::Text(text.as_str().to_owned())).collect(),
+                labels: array.data().iter().map(|text| Label::Text(text.as_str().to_owned())).collect(),
                 kind: LabelKind::String,
                 categories: None,
             })
@@ -60,8 +60,8 @@ pub(super) fn labels_from_value(value: Value, name: &str) -> BuiltinResult<Label
         })},
         Value::Cell(cell) => {
             ensure_vector_shape(&cell.shape, name)?;
-            let mut labels = Vec::with_capacity(cell.data.len());
-            for item in cell.data.iter() {
+            let mut labels = Vec::with_capacity(cell.data().len());
+            for item in cell.data().iter() {
                 labels.push(Label::Text(scalar_text(item, name)?));
             }
             Ok(LabelVector {
@@ -103,10 +103,10 @@ pub(super) fn ensure_vector_shape(shape: &[usize], name: &str) -> BuiltinResult<
 pub(super) fn categorical_categories(
     object: &ObjectInstance,
 ) -> BuiltinResult<Option<Vec<String>>> {
-    match object.properties.get("Categories") {
+    match object.properties().get("Categories") {
         Some(Value::StringArray(array)) => Ok(Some(
             array
-                .data
+                .data()
                 .iter()
                 .map(|text| text.as_str().to_owned())
                 .collect(),
@@ -122,7 +122,7 @@ pub(super) fn ensure_categorical_vector_shape(
     object: &ObjectInstance,
     name: &str,
 ) -> BuiltinResult<()> {
-    match object.properties.get("Codes") {
+    match object.properties().get("Codes") {
         Some(Value::Tensor(tensor)) => ensure_vector_shape(tensor.shape(), name),
         Some(_) => Err(invalid("confusionmat: categorical Codes must be numeric")),
         None => Ok(()),
@@ -135,9 +135,11 @@ pub(super) fn scalar_text(value: &Value, name: &str) -> BuiltinResult<String> {
         Value::CharArray(chars)
             if chars.rows <= 1 && chars.shape.iter().skip(2).all(|dimension| *dimension == 1) =>
         {
-            Ok(chars.data.iter().collect())
+            Ok(chars.data().iter().collect())
         }
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].as_str().to_owned()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(array.data()[0].as_str().to_owned())
+        }
         other => Err(invalid(format!(
             "confusionmat: {name} must be a string scalar, got {other:?}"
         ))),

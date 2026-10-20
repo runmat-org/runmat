@@ -1229,7 +1229,7 @@ mod cooperation_tests {
         );
         let actual = block_on(evaluate_with_cooperation(
             signal.clone(),
-            &args,
+            crate::call::FunctionArgumentView::from_slice(&args),
             &mut SignalCooperation::with_budget(ready_budget, BUILTIN_NAME),
         ))
         .unwrap();
@@ -1246,7 +1246,7 @@ mod cooperation_tests {
         );
         let error = block_on(evaluate_with_cooperation(
             signal,
-            &args,
+            crate::call::FunctionArgumentView::from_slice(&args),
             &mut SignalCooperation::with_budget(failure_budget, BUILTIN_NAME),
         ))
         .unwrap_err();

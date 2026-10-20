@@ -12,7 +12,7 @@ use runmat_macros::runtime_builtin;
 
 use crate::builtins::math::signal::common::window_provider::{try_generate, CosineWindow};
 use crate::builtins::math::signal::common::{
-    hamming_coefficient, is_scalar_logical_window_length, parse_window_controls,
+    hamming_coefficient, is_scalar_logical_window_length, parse_window_controls_view,
     window_allocation_error, window_options_from_length, window_tensor, SignalCooperation,
     WindowArgError,
 };
@@ -97,7 +97,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 async fn hamming_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
     n: runmat_value::Value,
-    varargin: Vec<runmat_value::Value>,
+    varargin: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<runmat_value::Value> {
     hamming_in_runtime(runtime.as_ref(), n, varargin).await
 }
@@ -107,15 +107,21 @@ async fn hamming_builtin(
     n: runmat_value::Value,
     varargin: Vec<runmat_value::Value>,
 ) -> crate::BuiltinResult<runmat_value::Value> {
-    hamming_in_runtime(None, n, varargin).await
+    hamming_in_runtime(
+        None,
+        n,
+        crate::call::BuiltinArguments::from_borrowed(&varargin, None)?,
+    )
+    .await
 }
 
 async fn hamming_in_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
     n: runmat_value::Value,
-    varargin: Vec<runmat_value::Value>,
+    varargin: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<runmat_value::Value> {
-    let controls = parse_window_controls(&varargin, true).map_err(hamming_map_window_error)?;
+    let controls =
+        parse_window_controls_view(varargin.view(), true).map_err(hamming_map_window_error)?;
     if is_scalar_logical_window_length(&n) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &HAMMING_LOGICAL_LENGTH_EXTENSION,
@@ -156,7 +162,7 @@ mod tests {
         let error = block_on(hamming_builtin_registered(
             Some(runtime),
             Value::Num(8193.0),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect_err("cancelled invocation");
         assert_eq!(error.identifier(), Some("RunMat:Cancelled"));

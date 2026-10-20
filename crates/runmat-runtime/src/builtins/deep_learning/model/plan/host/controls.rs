@@ -1,3 +1,5 @@
+#[cfg(test)]
+use crate::builtins::deep_learning::arguments::DeepLearningObjectEdit as _;
 use runmat_builtins::{
     DeepLearningConvolutionPaddingMode, DeepLearningConvolutionPaddingValueMode,
     DeepLearningLayerKind as K, DeepLearningLayerOption as O,
@@ -29,7 +31,7 @@ pub(in crate::builtins::deep_learning) enum Controls {
 
 fn value(layer: &ObjectInstance, kind: K, option: O) -> Option<&Value> {
     layer
-        .properties
+        .properties()
         .iter()
         .find_map(|(name, value)| (kind.option(name) == Some(option)).then_some(value))
 }
@@ -170,7 +172,7 @@ pub(super) fn decode(
             )?)
             .ok_or_else(|| invalid(function, O::GateActivationFunction))?;
             let hidden_size = layer
-                .properties
+                .properties()
                 .get(P::NumHiddenUnits.canonical_name())
                 .ok_or_else(|| {
                     deep_learning_error(
@@ -203,7 +205,7 @@ pub(super) fn decode(
         K::Relu => Controls::Relu,
         K::Elu => {
             let alpha = layer
-                .properties
+                .properties()
                 .get(P::Alpha.canonical_name())
                 .map(|value| numeric_scalar(value, function, P::Alpha.canonical_name()))
                 .transpose()?
@@ -262,7 +264,9 @@ mod tests {
     fn convolution(padding: Option<Value>) -> ObjectInstance {
         let mut layer = ObjectInstance::new(CONVOLUTION_1D_LAYER_CLASS.owned());
         if let Some(padding) = padding {
-            layer.properties.insert("Padding".into(), padding);
+            layer
+                .replace_dl_property("Padding", padding)
+                .expect("fixture property");
         }
         layer
     }
@@ -293,7 +297,7 @@ mod tests {
         for mode in DeepLearningConvolutionPaddingMode::ALL {
             assert_eq!(
                 admitted_padding(&convolution(Some(Value::String(
-                    mode.canonical_name().to_ascii_uppercase()
+                    mode.canonical_name().to_ascii_uppercase().into()
                 )))),
                 conv::Padding::from(mode)
             );
@@ -304,10 +308,12 @@ mod tests {
         );
         for mode in DeepLearningConvolutionPaddingValueMode::ALL {
             let mut layer = convolution(None);
-            layer.properties.insert(
-                O::PaddingValue.canonical_name().into(),
-                Value::String(mode.canonical_name().to_ascii_uppercase()),
-            );
+            layer
+                .replace_dl_property(
+                    O::PaddingValue.canonical_name(),
+                    Value::String(mode.canonical_name().to_ascii_uppercase().into()),
+                )
+                .expect("fixture property");
             let Controls::Convolution(options) =
                 decode(&layer, K::Convolution1D, "forward").expect("padding-value mode must lower")
             else {
@@ -317,8 +323,8 @@ mod tests {
         }
         let mut layer = convolution(None);
         layer
-            .properties
-            .insert(O::PaddingValue.canonical_name().into(), Value::Num(3.5));
+            .replace_dl_property(O::PaddingValue.canonical_name(), Value::Num(3.5))
+            .expect("fixture property");
         let Controls::Convolution(options) =
             decode(&layer, K::Convolution1D, "forward").expect("numeric padding value must lower")
         else {
@@ -327,10 +333,9 @@ mod tests {
         assert_eq!(options.padding_value, conv::PaddingValue::Constant(3.5));
         for option in [O::Padding, O::PaddingValue] {
             let mut layer = convolution(None);
-            layer.properties.insert(
-                option.canonical_name().into(),
-                Value::String("invented".into()),
-            );
+            layer
+                .replace_dl_property(option.canonical_name(), Value::String("invented".into()))
+                .expect("fixture property");
             assert!(decode(&layer, K::Convolution1D, "forward").is_err());
         }
     }
@@ -341,12 +346,14 @@ mod tests {
             for mode in DeepLearningRecurrentOutputMode::ALL {
                 let mut layer = ObjectInstance::new(class.owned());
                 layer
-                    .properties
-                    .insert("NumHiddenUnits".into(), Value::Num(2.0));
-                layer.properties.insert(
-                    O::OutputMode.canonical_name().into(),
-                    Value::String(mode.canonical_name().to_ascii_uppercase()),
-                );
+                    .replace_dl_property("NumHiddenUnits", Value::Num(2.0))
+                    .expect("fixture property");
+                layer
+                    .replace_dl_property(
+                        O::OutputMode.canonical_name(),
+                        Value::String(mode.canonical_name().to_ascii_uppercase().into()),
+                    )
+                    .expect("fixture property");
                 let Controls::Recurrent(options) =
                     decode(&layer, kind, "forward").expect("output mode must lower")
                 else {
@@ -354,10 +361,12 @@ mod tests {
                 };
                 assert_eq!(options.output_mode, mode);
                 for activation in DeepLearningRecurrentStateActivation::ALL {
-                    layer.properties.insert(
-                        O::StateActivationFunction.canonical_name().into(),
-                        Value::String(activation.canonical_name().to_ascii_uppercase()),
-                    );
+                    layer
+                        .replace_dl_property(
+                            O::StateActivationFunction.canonical_name(),
+                            Value::String(activation.canonical_name().to_ascii_uppercase().into()),
+                        )
+                        .expect("fixture property");
                     let Controls::Recurrent(options) =
                         decode(&layer, kind, "forward").expect("state activation must lower")
                     else {
@@ -366,13 +375,15 @@ mod tests {
                     assert_eq!(options.state_activation, activation);
                 }
                 layer
-                    .properties
-                    .remove(O::StateActivationFunction.canonical_name());
+                    .remove_dl_property(O::StateActivationFunction.canonical_name())
+                    .expect("fixture property removal");
                 for activation in DeepLearningRecurrentGateActivation::ALL {
-                    layer.properties.insert(
-                        O::GateActivationFunction.canonical_name().into(),
-                        Value::String(activation.canonical_name().to_ascii_uppercase()),
-                    );
+                    layer
+                        .replace_dl_property(
+                            O::GateActivationFunction.canonical_name(),
+                            Value::String(activation.canonical_name().to_ascii_uppercase().into()),
+                        )
+                        .expect("fixture property");
                     let Controls::Recurrent(options) =
                         decode(&layer, kind, "forward").expect("gate activation must lower")
                     else {
@@ -381,19 +392,23 @@ mod tests {
                     assert_eq!(options.gate_activation, activation);
                 }
                 layer
-                    .properties
-                    .remove(O::GateActivationFunction.canonical_name());
+                    .remove_dl_property(O::GateActivationFunction.canonical_name())
+                    .expect("fixture property removal");
                 for option in [
                     O::OutputMode,
                     O::StateActivationFunction,
                     O::GateActivationFunction,
                 ] {
-                    layer.properties.insert(
-                        option.canonical_name().into(),
-                        Value::String("invented".into()),
-                    );
+                    layer
+                        .replace_dl_property(
+                            option.canonical_name(),
+                            Value::String("invented".into()),
+                        )
+                        .expect("fixture property");
                     assert!(decode(&layer, kind, "forward").is_err());
-                    layer.properties.remove(option.canonical_name());
+                    layer
+                        .remove_dl_property(option.canonical_name())
+                        .expect("fixture property removal");
                 }
             }
         }

@@ -1,6 +1,7 @@
 use crate::fea_contract::{
     catalog_entry::{self, ConstructorDocumentationDefinition},
     descriptors::FEA_PLAN_DESCRIPTOR,
+    example_fixtures::CLOSED_CUBE_STUDY,
     integer::FEA_STRUCTURAL_INTEGER_AUDIT,
     operation_entry::{self, OperationEffectProfile, OperationEntryDefinition},
     operation_inference::{infer_evidence, FeaEvidenceKind},
@@ -11,21 +12,14 @@ use runmat_types::{CallInference, CallRequest};
 fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer_evidence(request, entry, FeaEvidenceKind::Plan)
 }
-const FIXTURE: BuiltinExampleFixture = BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture {
-    id: BuiltinExampleFixtureId { local_name: "planning-study" }, root: BuiltinFilesystemRoot::IsolatedWorkspace,
-    entries: &[
-        BuiltinFilesystemEntry::File { relative_path: "bracket.fea", content: BuiltinFixtureContent::Utf8("version: 1\nkind: study\nid: bracket_static\ngeometry:\n  path: part.stl\n  units: meter\nmodel:\n  profile: linear_static_structural\nrun:\n  backend: cpu\n") },
-        BuiltinFilesystemEntry::File { relative_path: "part.stl", content: BuiltinFixtureContent::Utf8("solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n") },
-    ],
-});
 const EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     id: "plan-study",
     title: "Plan without solving",
-    program: "study = fea.load('bracket.fea');\nplan = fea.plan(study);",
+    program: "geom = geometry.load('cube.stl');\nsteel = fea.material('steel', 'YoungsModulusPa', int64(200000000000), 'PoissonRatio', 0.3);\ntarget = fea.PropertyRegionTarget.allSolids(geom);\nassignment = fea.materialAssignment(target, steel);\nregion = geometry.region(geom, 'region_default');\nfixed = fea.StructuralConstraint.fixed('fixed', region);\nstep = fea.StructuralStep.static('static');\nmodel = fea.model('cube_model', geom, 'Materials', {steel}, 'MaterialAssignments', {assignment}, 'Constraints', {fixed}, 'Steps', {step});\nstudy = fea.study('closed_cube_static', geom, model);\nplan = fea.plan(study);",
     display_output: None,
     compatibility: BuiltinExampleCompatibility::RunMat,
     harness: BuiltinExampleHarness::NativeFilesystem,
-    fixture: FIXTURE,
+    fixture: CLOSED_CUBE_STUDY,
     requirements: BuiltinExampleRequirements::NONE,
     verification: BuiltinExampleVerification::Assertions {
         source:
@@ -33,20 +27,17 @@ const EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     },
 }];
 const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(ConstructorDocumentationDefinition {
-    title: "fea.plan", summary: "Plan a typed FEA study or sweep without solving.",
-    description: "`fea.plan(studyOrSweepOrPath)` validates and plans a typed study, sweep, or `.fea` document, then persists planning evidence.",
-    keywords: &["fea", "plan", "study", "validation"], related: &["fea.validate", "fea.run", "fea.load"],
-    sections: &[BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
-        "Exactly one host `.fea` path, `fea.Study`, or `fea.Sweep` is required. Numeric arrays and resident values have no document role.",
-        "Planning resolves model data, validates it, selects a versioned operation sequence, and writes evidence; the solver is not executed.",
-        "A single study and sweep both return `fea.Plan`. Counts, indexes, and revisions remain exact structural integers; estimated physical and timing quantities keep their floating representation.",
-        "Already loaded or STL geometry needs no OCCT. Path resolution of topology-bearing CAD may require the configured importer.",
-    ] }], examples: EXAMPLES,
-    faqs: &[BuiltinDocumentationFaq { question: "Does planning solve the model?", answer: "No. It records the selected operation sequence without running the solver." }],
-    links: &[BuiltinDocumentationLink { label: "FEA solves", target: BuiltinDocumentationLinkTarget::Documentation("/docs/fea/solves") }],
-    implementation: &[BuiltinDocumentationLink { label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/entrypoints.rs") }],
-    verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Document plan", location: "crates/runmat-runtime/src/builtins/fea/tests/construction.rs::fea_load_validate_and_plan_document_workflow" }],
-    notes: &["Filesystem capability covers document/geometry resolution and planning evidence. Distributed object/path operands have no partition-local planner."],
+    title: "fea.plan", summary: "Plan a typed FEA study or sweep.",
+    description: "`fea.plan(studyOrSweep)` accepts exactly one typed host fea.Study or fea.Sweep, not a document path.",
+    keywords: &["fea", "plan"], related: &["fea.model", "fea.study", "fea.results"],
+    sections: &[BuiltinDocumentationSection { heading: "Typed boundary", paragraphs: &[
+        "Returns fea.Plan for a study or fea.SweepPlan for a sweep and persists planning evidence without executing the solver.",
+        "Host structural identities, revisions, shapes, and counts remain exact. Physics conversions occur only at their explicit owning boundaries; resident inputs are not implicitly gathered.",
+    ] }], examples: EXAMPLES, faqs: &[],
+    links: &[BuiltinDocumentationLink { label: "FEA API", target: BuiltinDocumentationLinkTarget::Documentation("/docs/fea/using-fea") }],
+    implementation: &[BuiltinDocumentationLink { label: "Current implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/mod.rs") }],
+    verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Typed Runtime FEA contracts", location: "crates/runmat-runtime/src/builtins/fea/mod.rs::tests::typed_constructors_build_full_study_and_sweep_objects" }],
+    notes: &["Catalog examples require execution qualification; these declarations are not solver or numerical conformance receipts."],
 });
 pub const FEA_PLAN_CATALOG_ENTRY: BuiltinCatalogEntry =
     operation_entry::entry(OperationEntryDefinition {

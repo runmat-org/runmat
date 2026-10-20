@@ -15,9 +15,9 @@ fn indexing_context_enumerations_are_registered_in_each_runtime_session() {
             let Value::ClassRef(identity) = reference else {
                 panic!("classref must return a class identity");
             };
-            assert_eq!(identity, class);
+            assert_eq!(identity.as_identity(), &class);
             let member = crate::object::resolve::load_static_member(
-                &identity,
+                identity.as_identity(),
                 INDEXING_CONTEXT_STATEMENT,
                 None,
             )
@@ -25,10 +25,10 @@ fn indexing_context_enumerations_are_registered_in_each_runtime_session() {
             let Value::Object(value) = member else {
                 panic!("enum member must retain its class identity");
             };
-            assert_eq!(value.class_name, identity);
+            assert_eq!(value.class_name(), &identity);
             assert_eq!(
-                value.properties.get(ENUM_MEMBER_PROPERTY),
-                Some(&Value::String(INDEXING_CONTEXT_STATEMENT.to_owned()))
+                value.property(ENUM_MEMBER_PROPERTY),
+                Some(&Value::String(INDEXING_CONTEXT_STATEMENT.to_owned().into()))
             );
         }
     }

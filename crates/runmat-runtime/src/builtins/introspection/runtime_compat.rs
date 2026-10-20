@@ -41,7 +41,7 @@ impl CompatibilityOperation {
     binding_variant = "default",
     builtin_path = "crate::builtins::introspection::runtime_compat"
 )]
-fn version_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+fn version_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     if args.is_empty() {
         return Ok(Value::from(RUNMAT_VERSION));
     }
@@ -94,7 +94,7 @@ fn ver_less_than_builtin(product: Value, version: Value) -> BuiltinResult<Value>
     binding_variant = "default",
     builtin_path = "crate::builtins::introspection::runtime_compat"
 )]
-fn isdeployed_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+fn isdeployed_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     if !args.is_empty() {
         return Err(error(
             CompatibilityOperation::IsDeployed,
@@ -107,8 +107,10 @@ fn isdeployed_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 fn text_scalar(value: &Value, operation: CompatibilityOperation) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.as_str().to_owned()),
-        Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data.iter().collect()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].as_str().to_owned()),
+        Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data().iter().collect()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(array.data()[0].as_str().to_owned())
+        }
         _ => Err(error(
             operation,
             "runtime compatibility helper: expected text scalar",
@@ -156,18 +158,30 @@ mod tests {
     #[test]
     fn version_options_return_text() {
         assert!(matches!(
-            version_builtin(Vec::new()).unwrap(),
+            version_builtin(crate::builtins::common::test_support::builtin_arguments(
+                Vec::new()
+            ))
+            .unwrap(),
             Value::String(_)
         ));
         assert_eq!(
-            version_builtin(vec![Value::from("-release")]).unwrap(),
+            version_builtin(crate::builtins::common::test_support::builtin_arguments(
+                vec![Value::from("-release")]
+            ))
+            .unwrap(),
             Value::from(crate::compatibility::MATLAB_COMPATIBILITY_RELEASE)
         );
     }
 
     #[test]
     fn deployed_and_version_comparison_are_stable() {
-        assert_eq!(isdeployed_builtin(Vec::new()).unwrap(), Value::Bool(false));
+        assert_eq!(
+            isdeployed_builtin(crate::builtins::common::test_support::builtin_arguments(
+                Vec::new()
+            ))
+            .unwrap(),
+            Value::Bool(false)
+        );
         assert_eq!(
             ver_less_than_builtin(Value::from("matlab"), Value::from("99.0")).unwrap(),
             Value::Bool(true)
@@ -188,7 +202,12 @@ mod tests {
 
     #[test]
     fn runtime_version_controls_reject_integer_aliases() {
-        assert!(version_builtin(vec![Value::Int(runmat_value::IntValue::I32(1))]).is_err());
+        assert!(
+            version_builtin(crate::builtins::common::test_support::builtin_arguments(
+                vec![Value::Int(runmat_value::IntValue::I32(1))]
+            ))
+            .is_err()
+        );
         assert!(ver_less_than_builtin(
             Value::Int(runmat_value::IntValue::I32(1)),
             Value::from(crate::compatibility::MATLAB_COMPATIBILITY_VERSION),
@@ -203,9 +222,15 @@ mod tests {
 
     #[test]
     fn public_compatibility_forms_preserve_error_owner() {
-        let version = version_builtin(vec![Value::Num(1.0)]).unwrap_err();
+        let version = version_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::Num(1.0)],
+        ))
+        .unwrap_err();
         let comparison = ver_less_than_builtin(Value::Bool(true), Value::from("1.0")).unwrap_err();
-        let deployed = isdeployed_builtin(vec![Value::Bool(true)]).unwrap_err();
+        let deployed = isdeployed_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Bool(true)]),
+        )
+        .unwrap_err();
         for error in [version, comparison, deployed] {
             assert_eq!(
                 error.identifier(),

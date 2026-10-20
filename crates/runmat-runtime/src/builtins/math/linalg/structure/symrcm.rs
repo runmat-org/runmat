@@ -876,7 +876,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn symrcm_rejects_unsupported_type() {
-        let err = symrcm_builtin(Value::String("abc".to_string())).expect_err("should fail");
+        let err = symrcm_builtin(Value::String("abc".to_string().into())).expect_err("should fail");
         assert_eq!(err.identifier(), SYMRCM_ERROR_INVALID_INPUT.identifier);
         let message = err.to_string();
         assert!(

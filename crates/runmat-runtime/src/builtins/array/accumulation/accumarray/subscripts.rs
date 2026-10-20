@@ -65,7 +65,7 @@ fn parse_borrowed(value: &Value) -> BuiltinResult<Vec<Vec<usize>>> {
                 })
                 .collect()
         }
-        Value::Cell(cell) => parse_cell_columns(cell.data.as_slice()),
+        Value::Cell(cell) => parse_cell_columns(cell.data_owner().as_slice()),
         other => Err(error::invalid(format!(
             "accumarray: unsupported subscript input {other:?}"
         ))),

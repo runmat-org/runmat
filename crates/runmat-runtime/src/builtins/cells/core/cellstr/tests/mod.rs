@@ -10,12 +10,12 @@ fn call(value: Value) -> crate::BuiltinResult<Value> {
 }
 
 fn strings(cell: &CellArray) -> Vec<String> {
-    cell.data.iter().map(text).collect()
+    cell.data().iter().map(text).collect()
 }
 
 fn text(value: &Value) -> String {
     match value {
-        Value::CharArray(array) => array.data.iter().collect(),
+        Value::CharArray(array) => array.data().iter().collect(),
         other => panic!("expected character array, found {other:?}"),
     }
 }

@@ -17,11 +17,11 @@ pub(super) enum AssigninSelector {
 pub(super) fn selector(value: &Value) -> Result<AssigninSelector, RuntimeError> {
     let selected = match value {
         Value::String(text) => classify(text),
-        Value::StringArray(array) if array.data.len() == 1 => classify(&array.data[0]),
+        Value::StringArray(array) if array.data().len() == 1 => classify(&array.data()[0]),
         Value::CharArray(chars) if chars.rows == 1 => {
-            if char_row_eq_ascii(&chars.data, b"caller") {
+            if char_row_eq_ascii(chars.data(), b"caller") {
                 AssigninSelector::Caller
-            } else if char_row_eq_ascii(&chars.data, b"base") {
+            } else if char_row_eq_ascii(chars.data(), b"base") {
                 AssigninSelector::Base
             } else {
                 AssigninSelector::Unknown
@@ -38,18 +38,18 @@ pub(super) fn name<'a>(
 ) -> Result<&'a str, RuntimeError> {
     let name = match value {
         Value::String(text) => text.as_str(),
-        Value::StringArray(array) if array.data.len() == 1 => array.data[0].as_str(),
+        Value::StringArray(array) if array.data().len() == 1 => array.data()[0].as_str(),
         Value::CharArray(chars) if chars.rows == 1 => {
-            if chars.data.len() > character_row.len() {
+            if chars.data().len() > character_row.len() {
                 return Err(invalid_name_error());
             }
-            for (byte, character) in character_row.iter_mut().zip(chars.data.iter()) {
+            for (byte, character) in character_row.iter_mut().zip(chars.data().iter()) {
                 if !character.is_ascii() {
                     return Err(invalid_name_error());
                 }
                 *byte = *character as u8;
             }
-            std::str::from_utf8(&character_row[..chars.data.len()])
+            std::str::from_utf8(&character_row[..chars.data().len()])
                 .map_err(|_| invalid_name_error())?
         }
         _ => return Err(argument_type_error()),

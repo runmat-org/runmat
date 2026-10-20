@@ -49,7 +49,10 @@ impl RemoteWorkerChannel for DeliveryWorker {
             let AttemptReport::Succeeded { result } = &mut report else {
                 unreachable!()
             };
-            result.resources.as_mut().unwrap().worker_id =
+            let AttemptSuccess::Values { resources, .. } = result else {
+                panic!("value accounting fixture")
+            };
+            resources.as_mut().unwrap().worker_id =
                 WorkerId::derive(&[b"foreign-delivery-accounting"]);
         }
         Ok(report)
@@ -87,6 +90,7 @@ async fn failed_result_delivery_preserves_valid_original_accounting_through_cold
         pool.add_worker(Arc::new(DeliveryWorker {
             original: ResultObjectWorker {
                 spec: WorkerSpec {
+                    host: crate::test_support::host_inventory(),
                     id: WorkerId::derive(&[scope.bytes(), b"producer"]),
                     pool_id,
                     resources: inventory(1_000),
@@ -133,7 +137,7 @@ async fn failed_result_delivery_preserves_valid_original_accounting_through_cold
                 0,
             )
             .unwrap();
-            assert_eq!(terminal.resources, producer.resources);
+            assert_eq!(terminal.resources.as_deref(), producer.resources());
             evidence.resource_aggregate(1).unwrap();
         }
         let snapshot = pool.snapshot();

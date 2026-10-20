@@ -64,16 +64,16 @@ async fn perfcurve_builtin(
     labels: Value,
     scores: Value,
     posclass: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    let inspected = options::inspect(&rest);
-    gate_integer_extensions(&labels, &scores, &posclass, &rest, &inspected)?;
+    let inspected = options::inspect(rest.view());
+    gate_integer_extensions(&labels, &scores, &posclass, rest.view(), &inspected)?;
     let requested_outputs = output_count::current_output_count();
     if matches!(requested_outputs, Some(count) if count > 7) {
         return Err(invalid("perfcurve: too many output arguments"));
     }
-    let names = options::validate(&rest, inspected)?;
-    gate_host_integer_exactness(&scores, &rest, &names).await?;
+    let names = options::validate(rest.view(), inspected)?;
+    gate_host_integer_exactness(&scores, rest.view(), &names).await?;
     let admitted = admission::preflight(labels, scores, posclass, rest, names)?;
     if let Some(0) = requested_outputs {
         return Ok(Value::output_list(Vec::new()));
@@ -99,7 +99,7 @@ fn gate_integer_extensions(
     labels: &Value,
     scores: &Value,
     posclass: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     inspected: &[options::OptionSlot],
 ) -> BuiltinResult<()> {
     for value in [labels, scores, posclass] {
@@ -162,7 +162,7 @@ fn gate_integer_extensions(
 
 async fn gate_host_integer_exactness(
     scores: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     names: &[OptionName],
 ) -> BuiltinResult<()> {
     if !matches!(scores, Value::GpuTensor(_)) {

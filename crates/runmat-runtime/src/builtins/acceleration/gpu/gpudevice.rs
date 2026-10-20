@@ -73,7 +73,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::acceleration::gpu::gpudevice"
 )]
-async fn gpu_device_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn gpu_device_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     if args
         .first()
         .is_some_and(|value| matches!(value, Value::Bool(_) | Value::LogicalArray(_)))
@@ -83,11 +83,11 @@ async fn gpu_device_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             BUILTIN_NAME,
         )?;
     }
-    let result = match args.as_slice() {
-        [] => active_device_metadata()
+    let result = match (args.len(), args.first()) {
+        (0, _) => active_device_metadata()
             .ok_or_else(|| gpu_device_error(&GPU_DEVICE_ERROR_NO_PROVIDER))
             .map(|metadata| Value::Struct(metadata.into_struct())),
-        [arg] => handle_single_argument(arg),
+        (1, Some(arg)) => handle_single_argument(arg),
         _ => return Err(gpu_device_error(&GPU_DEVICE_ERROR_TOO_MANY_INPUTS).into()),
     }?;
     crate::compatibility::ensure_builtin_extension_enabled(
@@ -101,7 +101,7 @@ fn is_keyword(value: &Value, keyword: &str) -> bool {
     match value {
         Value::String(s) => s.trim().eq_ignore_ascii_case(keyword),
         Value::CharArray(ca) if ca.rows == 1 => {
-            let collected: String = ca.data.iter().collect();
+            let collected: String = ca.data().iter().collect();
             collected.trim().eq_ignore_ascii_case(keyword)
         }
         _ => false,

@@ -4,7 +4,8 @@ mod dependencies;
 async fn run(
     session: &mut RunMatSession,
     source: &str,
-) -> Result<crate::abi::ExecutionOutcome, crate::RunError> {
+) -> Result<runmat_runtime::execution::RootedResult<crate::abi::ExecutionOutcome>, crate::RunError>
+{
     let request = crate::abi::ExecutionRequest::for_source(
         crate::abi::SourceInput::Text {
             name: "retained_original.m".into(),
@@ -17,28 +18,42 @@ async fn run(
     session.execute_request(request).await.result
 }
 
-async fn capture(session: &mut RunMatSession, service: &CapturingService) -> DeferredCall {
+async fn capture(session: &mut RunMatSession, service: &CapturingService) -> CapturedCall {
     run(session, "f = retainedAsync(5);")
         .await
         .expect("original retained callable capture");
-    service.original.borrow_mut().take().expect("original call")
+    service.take_original()
 }
 
-async fn cold_value(call: &DeferredCall) -> Value {
-    let envelope = runmat_execution::ExecutableUnitEnvelope::from_canonical_bytes(
-        call.program.as_deref().unwrap(),
-    )
-    .unwrap();
+async fn cold_value(call: &CapturedCall) -> runmat_runtime::execution::RootedValueSequence {
+    let envelope = call.envelope();
     assert_eq!(
-        call.program_revision.as_ref(),
-        Some(&envelope.manifest.identity.program)
+        call.origin(),
+        runmat_execution::FunctionBindingOrigin::from_revision(
+            &envelope.manifest.identity.program,
+            call.origin().function
+        )
+        .unwrap()
     );
+    cold_envelope_value(
+        &envelope,
+        call.call.invocation.arguments().to_vec(),
+        call.call.invocation.requested_outputs(),
+    )
+    .await
+}
+
+async fn cold_envelope_value(
+    envelope: &runmat_execution::ExecutableUnitEnvelope,
+    arguments: Vec<Value>,
+    outputs: usize,
+) -> runmat_runtime::execution::RootedValueSequence {
     let mut cold = RunMatSession::with_options(false, false).unwrap();
     assert!(
         cold.invoke_portable_unit(
-            &envelope,
-            call.arguments.clone(),
-            call.requested_outputs,
+            envelope,
+            arguments.clone(),
+            outputs,
             &crate::InvocationControl::default()
         )
         .await
@@ -47,9 +62,9 @@ async fn cold_value(call: &DeferredCall) -> Value {
     );
     cold.set_compat_mode(runmat_parser::CompatMode::RunMat);
     cold.invoke_portable_unit(
-        &envelope,
-        call.arguments.clone(),
-        call.requested_outputs,
+        envelope,
+        arguments,
+        outputs,
         &crate::InvocationControl::default(),
     )
     .await
@@ -64,10 +79,7 @@ async fn prior_raw_function_capture_preserves_original_product_across_redefiniti
     let original = "async function y = retainedAsync(x); y = x + 7; end";
     run(&mut session, original).await.unwrap();
     let first = capture(&mut session, &service).await;
-    let envelope = runmat_execution::ExecutableUnitEnvelope::from_canonical_bytes(
-        first.program.as_deref().unwrap(),
-    )
-    .unwrap();
+    let envelope = first.envelope();
     assert_eq!(
         ExecutableUnit::from_portable_envelope(&envelope)
             .unwrap()
@@ -75,15 +87,11 @@ async fn prior_raw_function_capture_preserves_original_product_across_redefiniti
             .text,
         original
     );
-    assert_eq!(cold_value(&first).await, Value::Num(12.0));
+    assert_eq!(cold_value(&first).await.as_slice(), &[Value::Num(12.0)]);
     run(&mut session, "f = retainedAsync(5);\nfunction y = localOne(x); y = x + 1; end\nfunction y = localTwo(x); y = x + 2; end").await.unwrap();
-    let colliding = service
-        .original
-        .borrow_mut()
-        .take()
-        .expect("retained target survived unit-local ordinal collision");
-    assert_eq!(colliding.program, first.program);
-    assert_eq!(colliding.function, first.function);
+    let colliding = service.take_original();
+    assert_eq!(colliding.envelope(), first.envelope());
+    assert_eq!(colliding.origin(), first.origin());
 
     let rejected = run(
         &mut session,
@@ -102,8 +110,8 @@ async fn prior_raw_function_capture_preserves_original_product_across_redefiniti
         "raw runtime failures are reported as structured diagnostics"
     );
     let after_failure = capture(&mut session, &service).await;
-    assert_eq!(after_failure.program, first.program);
-    assert_eq!(after_failure.program_revision, first.program_revision);
+    assert_eq!(after_failure.envelope(), first.envelope());
+    assert_eq!(after_failure.origin(), first.origin());
     run(
         &mut session,
         "async function y = retainedAsync(x); y = x + 30; end",
@@ -111,10 +119,16 @@ async fn prior_raw_function_capture_preserves_original_product_across_redefiniti
     .await
     .unwrap();
     let replacement = capture(&mut session, &service).await;
-    assert_ne!(replacement.program_revision, first.program_revision);
-    assert_ne!(replacement.function, first.function);
-    assert_eq!(cold_value(&replacement).await, Value::Num(35.0));
-    assert_eq!(cold_value(&first).await, Value::Num(12.0));
+    assert_ne!(
+        replacement.envelope().manifest.identity.program,
+        first.envelope().manifest.identity.program
+    );
+    assert_ne!(replacement.origin(), first.origin());
+    assert_eq!(
+        cold_value(&replacement).await.as_slice(),
+        &[Value::Num(35.0)]
+    );
+    assert_eq!(cold_value(&first).await.as_slice(), &[Value::Num(12.0)]);
     assert!(session.runtime_context.program_revision().is_none());
     assert!(session.program_service.active.borrow().is_empty());
 }
@@ -171,16 +185,15 @@ async fn retained_program_owner_validates_caller_and_preserves_original_cold_pro
         .program_service
         .freeze_executable(origin, &caller.revision().program_revision)
         .is_err());
-    let call = DeferredCall {
-        console: None,
-        environment: runmat_execution::EnvironmentSnapshot::default(),
-        function: function.0 as usize,
-        arguments: vec![Value::Num(5.0)],
-        requested_outputs: 1,
-        program_revision: Some(envelope.manifest.identity.program.clone()),
-        program: Some(envelope.canonical_bytes().unwrap()),
-    };
-    assert_eq!(cold_value(&call).await, Value::Num(12.0));
+    // The retained program API returns an authenticated original compiler
+    // envelope, not a deferred graph issuer. Execute that original product
+    // directly rather than constructing a synthetic DeferredCall authority.
+    assert_eq!(
+        cold_envelope_value(&envelope, vec![Value::Num(5.0)], 1)
+            .await
+            .as_slice(),
+        &[Value::Num(12.0)]
+    );
 }
 
 #[tokio::test]
@@ -216,26 +229,22 @@ async fn earlier_async_declaration_is_captured_by_interpreter_and_forced_native_
                 &caller,
                 crate::ProcedureInvocation {
                     target: crate::ProcedureTarget::Function("caller".into()),
-                    arguments: vec![Value::Num(5.0)],
+                    arguments: crate::ProcedureArguments::Source(vec![Value::Num(5.0)]),
                     requested_outputs: 1,
                 },
                 &control,
             )
             .await
             .unwrap();
-        assert!(matches!(result, Value::Future(_)));
-        let captured = service
-            .original
-            .borrow_mut()
-            .take()
-            .expect("retained external future");
+        assert!(matches!(result.as_slice(), [Value::Future(_)]));
+        let captured = service.take_original();
         assert_ne!(
-            captured.program_revision.as_ref(),
-            Some(&caller.revision().program_revision)
+            captured.envelope().manifest.identity.program,
+            caller.revision().program_revision
         );
-        assert_eq!(captured.program, original.program);
-        assert_eq!(captured.function, original.function);
-        assert_eq!(cold_value(&captured).await, Value::Num(12.0));
+        assert_eq!(captured.envelope(), original.envelope());
+        assert_eq!(captured.origin(), original.origin());
+        assert_eq!(cold_value(&captured).await.as_slice(), &[Value::Num(12.0)]);
         assert!(session.runtime_context.program_revision().is_none());
         assert!(session.program_service.active.borrow().is_empty());
     }

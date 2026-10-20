@@ -47,14 +47,17 @@ impl LayerOperationalPlan {
                 ));
             };
             let kind =
-                DeepLearningLayerKind::from_identity(&layer.class_name).ok_or_else(|| {
+                DeepLearningLayerKind::from_identity(layer.class_name()).ok_or_else(|| {
                     deep_learning_error(
                         function,
-                        format!("{function}: unsupported layer type '{}'", layer.class_name),
+                        format!(
+                            "{function}: unsupported layer type '{}'",
+                            layer.class_name()
+                        ),
                     )
                 })?;
             let mut seen = BTreeSet::new();
-            for (name, value) in &layer.properties {
+            for (name, value) in layer.properties() {
                 if DeepLearningLayerStructuralProperty::from_name(name)
                     .is_some_and(|property| property.belongs_to(kind))
                 {

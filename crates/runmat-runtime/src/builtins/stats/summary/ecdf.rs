@@ -23,7 +23,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 #[cfg(feature = "plot-core")]
-use crate::builtins::plotting::op_common::{apply_axes_target, split_leading_axes_handle};
+use crate::builtins::plotting::op_common::{apply_axes_target, split_leading_axes_arguments};
 #[cfg(feature = "plot-core")]
 use crate::builtins::plotting::state::{render_active_plot, PlotRenderOptions};
 use crate::builtins::stats::summary::distribution_math::standard_normal_inv;
@@ -178,14 +178,15 @@ impl EcdfEvaluation {
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::summary::ecdf"
 )]
-pub(crate) async fn ecdf_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(crate) async fn ecdf_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     let (axes_target, args) = split_ecdf_axes_target(args, ECDF_OWNER)?;
-    let mut args = args.into_iter();
+    let mut args = args;
+    let _argument_sources = args.fork();
     let y = args
-        .next()
+        .pop_front()
         .ok_or_else(|| invalid_argument(ECDF_OWNER, "ecdf: expected sample data"))?;
     ensure_ecdf_value_extension(&y, &ECDF_INTEGER_Y_EXTENSION, &ECDF_LOGICAL_Y_EXTENSION)?;
-    let options = EcdfOptionPlan::admit(args.collect())?;
+    let options = EcdfOptionPlan::admit(args)?;
     options.ensure_extensions()?;
     let options = options.preflight_known()?;
     preflight_ecdf_sample(&y)?;
@@ -412,12 +413,12 @@ fn internal_error_with_cause(cause: RuntimeError) -> RuntimeError {
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::summary::ecdf"
 )]
-pub(crate) async fn cdfplot_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(crate) async fn cdfplot_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     cdfplot_with_presentation(args).await
 }
 
 #[cfg(feature = "plot-core")]
-async fn cdfplot_with_presentation(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn cdfplot_with_presentation(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     let (axes_target, args) = split_ecdf_axes_target(args, CDFPLOT_OWNER)?;
     if args.len() != 1 {
         return Err(invalid_argument(
@@ -427,9 +428,11 @@ async fn cdfplot_with_presentation(args: Vec<Value>) -> BuiltinResult<Value> {
     }
     ensure_cdfplot_extensions_enabled(&args[0])?;
     preflight_cdfplot_sample(&args[0])?;
-    let args = gather_values(args).await?;
-    ensure_exact_cdfplot_integer_boundary(&args[0])?;
-    let data = cdfplot_numeric_vector(&args[0])?;
+    let sample = gather_if_needed_async(&args[0])
+        .await
+        .map_err(|cause| wrap_gather_error(CDFPLOT_OWNER, cause))?;
+    ensure_exact_cdfplot_integer_boundary(&sample)?;
+    let data = cdfplot_numeric_vector(&sample)?;
     let stats = cdfplot_stats(&data)?;
     let eval_input = Value::Tensor(
         Tensor::new(data.clone(), vec![data.len(), 1])
@@ -451,7 +454,7 @@ async fn cdfplot_with_presentation(args: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 #[cfg(not(feature = "plot-core"))]
-async fn cdfplot_with_presentation(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn cdfplot_with_presentation(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     if args.len() != 1 {
         return Err(invalid_argument(
             CDFPLOT_OWNER,
@@ -465,7 +468,7 @@ async fn cdfplot_with_presentation(args: Vec<Value>) -> BuiltinResult<Value> {
 
 #[cfg(feature = "plot-core")]
 fn split_ecdf_axes_target(
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
     builtin: EmpiricalBuiltin,
 ) -> BuiltinResult<crate::builtins::plotting::op_common::SplitAxesArgs> {
     let first_is_data_only = args.len() == 1
@@ -477,14 +480,14 @@ fn split_ecdf_axes_target(
     if first_is_data_only {
         return Ok((None, args));
     }
-    split_leading_axes_handle(args, builtin.name()).map_err(|err| map_error(builtin, err))
+    split_leading_axes_arguments(args, builtin.name()).map_err(|err| map_error(builtin, err))
 }
 
 #[cfg(not(feature = "plot-core"))]
 fn split_ecdf_axes_target(
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
     _builtin: EmpiricalBuiltin,
-) -> BuiltinResult<(EcdfAxesTarget, Vec<Value>)> {
+) -> BuiltinResult<(EcdfAxesTarget, crate::call::BuiltinArguments)> {
     Ok(((), args))
 }
 
@@ -678,19 +681,6 @@ fn wrap_gather_error(builtin: EmpiricalBuiltin, cause: RuntimeError) -> RuntimeE
     owner.span = cause.span;
     owner.source = Some(Box::new(cause));
     owner
-}
-
-#[cfg(feature = "plot-core")]
-async fn gather_values(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {
-    let mut gathered = Vec::with_capacity(values.len());
-    for value in values {
-        gathered.push(
-            gather_if_needed_async(&value)
-                .await
-                .map_err(|cause| wrap_gather_error(CDFPLOT_OWNER, cause))?,
-        );
-    }
-    Ok(gathered)
 }
 
 #[cfg(test)]

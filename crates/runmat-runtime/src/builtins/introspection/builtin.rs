@@ -8,7 +8,14 @@ use runmat_value::Value;
 
 use crate::execution::RootedValue;
 
-fn parse_substruct_type_and_subs(arg: &Value) -> crate::BuiltinResult<(String, Value)> {
+#[cfg(test)]
+#[path = "builtin/ownership_tests.rs"]
+mod ownership_tests;
+
+fn parse_substruct_type_and_subs(
+    arg: &Value,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> crate::BuiltinResult<(runmat_value::Utf8Text, Value)> {
     let Value::Struct(st) = arg else {
         return Err(crate::build_runtime_error(
             "builtin: substruct argument must be a scalar struct",
@@ -21,11 +28,7 @@ fn parse_substruct_type_and_subs(arg: &Value) -> crate::BuiltinResult<(String, V
             .with_builtin("builtin")
             .build()
     })?;
-    let kind = String::try_from(kind_value).map_err(|err| {
-        crate::build_runtime_error(format!("builtin subsref/subsasgn: {err}"))
-            .with_builtin("builtin")
-            .build()
-    })?;
+    let kind = crate::call::argument_text::convert(kind_value, runtime)?;
     let subs = st.fields.get("subs").cloned().ok_or_else(|| {
         crate::build_runtime_error("builtin: substruct argument missing field 'subs'")
             .with_builtin("builtin")
@@ -34,78 +37,108 @@ fn parse_substruct_type_and_subs(arg: &Value) -> crate::BuiltinResult<(String, V
     Ok((kind, subs))
 }
 
-fn builtin_member_field_name(subs: &Value, op: &str) -> crate::BuiltinResult<String> {
-    String::try_from(subs).map_err(|err| {
-        crate::build_runtime_error(format!("builtin {op}: {err}"))
-            .with_builtin("builtin")
-            .build()
+async fn call_registered(
+    runtime: Option<&crate::context::RuntimeContext>,
+    name: &str,
+    arguments: crate::call::BuiltinArguments,
+    requested_outputs: usize,
+) -> crate::BuiltinResult<RootedValue> {
+    crate::context::check_active_host()?;
+    let result = crate::dispatcher::call_retained_registered_builtin_sequence_with_outputs(
+        name,
+        arguments,
+        requested_outputs,
+        runtime,
+    )
+    .await
+    .and_then(crate::call::arguments::project_rooted_legacy_builtin_value_abi);
+    crate::context::check_active_host()?;
+    result
+}
+
+/// Only the two/three replacement headers are published; source registrations
+/// and immutable payload generations remain the existing transform's owners.
+async fn member_arguments(
+    rest: &crate::call::BuiltinArguments,
+    field: runmat_value::Utf8Text,
+    count: usize,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> crate::BuiltinResult<crate::call::BuiltinArguments> {
+    rest.try_map_preserving_roots_async(count, runtime, |index| {
+        std::future::ready(Ok(if index == 1 {
+            Value::String(field.clone())
+        } else {
+            rest[index].clone()
+        }))
     })
+    .await
 }
 
 async fn dispatch_builtin_subsref(
-    rest: &[Value],
+    runtime: Option<&crate::context::RuntimeContext>,
+    rest: crate::call::BuiltinArguments,
     requested_outputs: usize,
 ) -> crate::BuiltinResult<RootedValue> {
     if rest.len() != 2 {
-        return crate::call_builtin_async_with_outputs("subsref", rest, requested_outputs).await;
+        return call_registered(runtime, "subsref", rest, requested_outputs).await;
     }
-    let (kind, subs) = parse_substruct_type_and_subs(&rest[1])?;
+    let (kind, subs) = parse_substruct_type_and_subs(&rest[1], runtime)?;
     if kind != crate::OBJECT_INDEX_MEMBER {
-        return crate::call_builtin_async_with_outputs("subsref", rest, requested_outputs).await;
+        return call_registered(runtime, "subsref", rest, requested_outputs).await;
     }
-    let field = builtin_member_field_name(&subs, "subsref")?;
-    match crate::builtins::structs::core::getfield::get_member_value(rest[0].clone(), &field).await
+    let field = crate::call::argument_text::convert(&subs, runtime)?;
+    match crate::builtins::structs::core::getfield::get_member_value_in_context(
+        runtime,
+        rest[0].clone(),
+        &field,
+    )
+    .await
     {
         Ok(value) => Ok(value),
         Err(err) if err.identifier() == Some("RunMat:getfield:ObjectProperty") => {
-            crate::call_builtin_async_with_outputs(
-                "call_method",
-                &[rest[0].clone(), Value::string(field)],
-                requested_outputs,
-            )
-            .await
+            let method = member_arguments(&rest, field, 2, runtime).await?;
+            call_registered(runtime, "call_method", method, requested_outputs).await
         }
         Err(err) => Err(err),
     }
 }
 
 async fn dispatch_builtin_subsasgn(
-    rest: &[Value],
+    runtime: Option<&crate::context::RuntimeContext>,
+    rest: crate::call::BuiltinArguments,
     requested_outputs: usize,
 ) -> crate::BuiltinResult<RootedValue> {
     if rest.len() != 3 {
-        return crate::call_builtin_async_with_outputs("subsasgn", rest, requested_outputs).await;
+        return call_registered(runtime, "subsasgn", rest, requested_outputs).await;
     }
-    let (kind, subs) = parse_substruct_type_and_subs(&rest[1])?;
+    let (kind, subs) = parse_substruct_type_and_subs(&rest[1], runtime)?;
     if kind != crate::OBJECT_INDEX_MEMBER {
-        return crate::call_builtin_async_with_outputs("subsasgn", rest, requested_outputs).await;
+        return call_registered(runtime, "subsasgn", rest, requested_outputs).await;
     }
-    let field = builtin_member_field_name(&subs, "subsasgn")?;
-    crate::call_builtin_async_with_outputs(
-        "setfield",
-        &[rest[0].clone(), Value::string(field), rest[2].clone()],
-        requested_outputs,
-    )
-    .await
+    let field = crate::call::argument_text::convert(&subs, runtime)?;
+    let assignment = member_arguments(&rest, field, 3, runtime).await?;
+    call_registered(runtime, "setfield", assignment, requested_outputs).await
 }
 
 #[runtime_builtin(
     name = "builtin",
+    context = true,
     binding_variant = "default",
     builtin_path = "crate::builtins::introspection::builtin"
 )]
-pub async fn builtin_builtin(name: String, rest: Vec<Value>) -> crate::BuiltinResult<RootedValue> {
+pub async fn builtin_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    name: runmat_value::Utf8Text,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<RootedValue> {
     let requested_outputs = crate::output_count::current_output_count().unwrap_or(1);
-
     if name.eq_ignore_ascii_case("subsref") {
-        return dispatch_builtin_subsref(&rest, requested_outputs).await;
+        return dispatch_builtin_subsref(runtime.as_ref(), rest, requested_outputs).await;
     }
-
     if name.eq_ignore_ascii_case("subsasgn") {
-        return dispatch_builtin_subsasgn(&rest, requested_outputs).await;
+        return dispatch_builtin_subsasgn(runtime.as_ref(), rest, requested_outputs).await;
     }
-
-    crate::call_builtin_async_with_outputs(&name, &rest, requested_outputs).await
+    call_registered(runtime.as_ref(), &name, rest, requested_outputs).await
 }
 
 #[cfg(test)]
@@ -115,7 +148,13 @@ mod tests {
     use runmat_value::{IntValue, IntegerStorage, NumericStorage, Tensor};
 
     fn call(name: &str, rest: Vec<Value>) -> crate::BuiltinResult<RootedValue> {
-        block_on(builtin_builtin(name.to_string(), rest))
+        block_on(builtin_builtin(
+            None,
+            name.into(),
+            crate::execution::RootedValues::new(rest)
+                .map_err(|error| error.into_runtime_error())?
+                .into(),
+        ))
     }
 
     #[cfg(feature = "wgpu")]

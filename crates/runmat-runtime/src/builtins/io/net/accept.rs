@@ -6,7 +6,7 @@ use runmat_builtins::{
     ACCEPT_ERROR_TIMEOUT,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{ForeignRef, IntValue, ObjectInstance, StructValue, Value};
+use runmat_value::{ForeignRef, IntValue, Value};
 
 use super::control::{default_user_data, parse_timeout_value};
 use crate::context::{RuntimeTcpByteOrder, RuntimeTcpInvocation};
@@ -27,8 +27,8 @@ const BUILTIN_NAME: &str = "accept";
 pub(crate) async fn accept_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     server: Value,
-    rest: Vec<Value>,
-) -> crate::BuiltinResult<Value> {
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     let server_authority = super::receiver::authority(&server, runmat_builtins::TCPSERVER_CLASS)
         .ok_or_else(|| {
             accept_flow(
@@ -36,7 +36,7 @@ pub(crate) async fn accept_builtin(
                 "accept: expected a live tcpserver object",
             )
         })?;
-    let prepared_options = preflight_accept_options(&rest)?;
+    let prepared_options = preflight_accept_options(rest.view())?;
     let service = super::transport::service(runtime.as_ref(), BUILTIN_NAME)?;
     let mut work = super::transport::NetCooperation::new(runtime.as_ref(), BUILTIN_NAME);
     let options = parse_accept_options(rest, prepared_options).await?;
@@ -73,13 +73,14 @@ pub(crate) async fn accept_builtin(
             }
         })?;
     work.completed(0).await?;
-    Ok(build_tcpclient_value(
+    build_tcpclient_value(
+        runtime.as_ref(),
         endpoint.authority,
         endpoint.local_addr,
         endpoint.peer_addr,
         endpoint.io_timeout,
         endpoint.byte_order,
-    ))
+    )
 }
 
 #[derive(Default)]
@@ -87,7 +88,9 @@ struct AcceptOptions {
     timeout: Option<f64>,
 }
 
-fn preflight_accept_options(rest: &[Value]) -> BuiltinResult<Vec<Option<NetConstructorOption>>> {
+fn preflight_accept_options(
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Vec<Option<NetConstructorOption>>> {
     if !rest.len().is_multiple_of(2) {
         return Err(accept_flow(
             &ACCEPT_ERROR_INVALID_NAME_VALUE,
@@ -127,7 +130,7 @@ fn preflight_accept_options(rest: &[Value]) -> BuiltinResult<Vec<Option<NetConst
 }
 
 async fn parse_accept_options(
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
     prepared: Vec<Option<NetConstructorOption>>,
 ) -> BuiltinResult<AcceptOptions> {
     if rest.is_empty() {
@@ -216,67 +219,47 @@ fn validate_timeout(timeout: f64) -> BuiltinResult<()> {
 }
 
 fn build_tcpclient_value(
+    runtime: Option<&crate::context::RuntimeContext>,
     authority: ForeignRef,
     local_addr: SocketAddr,
     peer_addr: SocketAddr,
     timeout: Option<Duration>,
     byte_order: RuntimeTcpByteOrder,
-) -> Value {
-    let mut st = StructValue::new();
-    st.fields
-        .insert("Type".to_string(), Value::string("tcpclient".to_string()));
-    st.fields.insert(
-        "Address".to_string(),
-        Value::string(peer_addr.ip().to_string()),
-    );
-    st.fields.insert(
-        "Port".to_string(),
-        Value::Int(IntValue::U16(peer_addr.port())),
-    );
-    st.fields.insert(
-        "ServerAddress".to_string(),
-        Value::string(local_addr.ip().to_string()),
-    );
-    st.fields.insert(
-        "ServerPort".to_string(),
-        Value::Int(IntValue::U16(local_addr.port())),
-    );
-    st.fields.insert("Connected".to_string(), Value::Bool(true));
-    st.fields
-        .insert("Status".to_string(), Value::string("connected".to_string()));
-    st.fields.insert(
-        "NumBytesAvailable".to_string(),
-        Value::Int(IntValue::I32(0)),
-    );
-    st.fields
-        .insert("BytesAvailableFcn".to_string(), default_user_data());
-    st.fields.insert(
-        "BytesAvailableFcnMode".to_string(),
-        Value::string("byte".to_string()),
-    );
-    st.fields.insert(
-        "BytesAvailableFcnCount".to_string(),
-        Value::Int(IntValue::I32(1)),
-    );
-    st.fields.insert(
-        "ByteOrder".to_string(),
-        Value::String(
-            match byte_order {
-                RuntimeTcpByteOrder::Little => "little-endian",
-                RuntimeTcpByteOrder::Big => "big-endian",
-            }
-            .into(),
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
+    let properties = [
+        ("Type", Value::string("tcpclient".to_string())),
+        ("Address", Value::string(peer_addr.ip().to_string())),
+        ("Port", Value::Int(IntValue::U16(peer_addr.port()))),
+        ("ServerAddress", Value::string(local_addr.ip().to_string())),
+        ("ServerPort", Value::Int(IntValue::U16(local_addr.port()))),
+        ("Connected", Value::Bool(true)),
+        ("Status", Value::string("connected".to_string())),
+        ("NumBytesAvailable", Value::Int(IntValue::I32(0))),
+        ("BytesAvailableFcn", default_user_data()),
+        ("BytesAvailableFcnMode", Value::string("byte".to_string())),
+        ("BytesAvailableFcnCount", Value::Int(IntValue::I32(1))),
+        (
+            "ByteOrder",
+            Value::String(
+                match byte_order {
+                    RuntimeTcpByteOrder::Little => "little-endian",
+                    RuntimeTcpByteOrder::Big => "big-endian",
+                }
+                .into(),
+            ),
         ),
-    );
-    st.fields.insert(
-        "Timeout".to_string(),
-        Value::Num(timeout.map_or(f64::INFINITY, |duration| duration.as_secs_f64())),
-    );
-    st.fields
-        .insert("UserData".to_string(), default_user_data());
-    let mut object = ObjectInstance::new(runmat_builtins::TCPCLIENT_CLASS);
-    object.properties = st.fields.into_iter().collect();
-    Value::Object(object.with_tcp_authority(authority))
+        (
+            "Timeout",
+            Value::Num(timeout.map_or(f64::INFINITY, |duration| duration.as_secs_f64())),
+        ),
+        ("UserData", default_user_data()),
+    ];
+    crate::execution::object::construct_object_from_fields_with_native(
+        runtime,
+        runmat_builtins::TCPCLIENT_CLASS.display_name(),
+        properties.iter().map(|(name, value)| (*name, value)),
+        Some(crate::execution::object::ObjectNativeInitialization::TcpAuthority(authority)),
+    )
 }
 
 fn accept_error_with_message(
@@ -326,7 +309,7 @@ pub(crate) mod tests {
     fn struct_field<'a>(value: &'a Value, name: &str) -> &'a Value {
         match value {
             Value::Object(object) => object
-                .properties
+                .properties()
                 .get(name)
                 .unwrap_or_else(|| panic!("missing field {name}")),
             _ => panic!("expected TCP object"),
@@ -362,8 +345,12 @@ pub(crate) mod tests {
         runtime: &RuntimeContext,
         server: Value,
         rest: Vec<Value>,
-    ) -> BuiltinResult<Value> {
-        futures::executor::block_on(accept_builtin(Some(runtime.clone()), server, rest))
+    ) -> BuiltinResult<crate::execution::RootedValue> {
+        futures::executor::block_on(accept_builtin(
+            Some(runtime.clone()),
+            server,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -396,14 +383,14 @@ pub(crate) mod tests {
                     Some(runtime.clone()),
                     Value::from("127.0.0.1"),
                     Value::Num(0.0),
-                    vec![],
+                    crate::builtins::common::test_support::builtin_arguments(vec![]),
                 ))
                 .expect("live server authority");
             for options in [
                 vec![Value::from("Timeout"), Value::Num(-1.0)],
                 vec![Value::from("Backlog"), Value::Num(1.0)],
             ] {
-                let err = run_accept(&runtime, server.clone(), options)
+                let err = run_accept(&runtime, server.value().clone(), options)
                     .expect_err("invalid controls reject on valid server authority");
                 assert_eq!(err.identifier(), ACCEPT_ERROR_INVALID_NAME_VALUE.identifier);
             }
@@ -477,12 +464,12 @@ pub(crate) mod tests {
         address: Value,
         port: Value,
         rest: Vec<Value>,
-    ) -> BuiltinResult<Value> {
+    ) -> BuiltinResult<crate::execution::RootedValue> {
         futures::executor::block_on(tcpserver_builtin(
             Some(runtime.clone()),
             address,
             port,
-            rest,
+            crate::builtins::common::test_support::builtin_arguments(rest),
         ))
     }
 
@@ -523,7 +510,8 @@ pub(crate) mod tests {
             TcpStream::connect(("127.0.0.1", port)).expect("connect")
         });
 
-        let client = run_accept(&runtime, server_value.clone(), Vec::new()).expect("accept");
+        let client =
+            run_accept(&runtime, server_value.value().clone(), Vec::new()).expect("accept");
         let stream = handle.join().expect("client thread");
         drop(stream);
 
@@ -559,7 +547,7 @@ pub(crate) mod tests {
         .expect("tcpserver");
         let err = run_accept(
             &runtime,
-            server_value.clone(),
+            server_value.value().clone(),
             vec![Value::from("Timeout"), Value::Num(0.05)],
         )
         .unwrap_err();
@@ -590,7 +578,7 @@ pub(crate) mod tests {
         .expect("tcpserver");
         let err = run_accept(
             &runtime,
-            server_value.clone(),
+            server_value.value().clone(),
             vec![Value::from("Timeout"), Value::Num(-1.0)],
         )
         .unwrap_err();
@@ -624,7 +612,7 @@ pub(crate) mod tests {
 
         let client = run_accept(
             &runtime,
-            server_value.clone(),
+            server_value.value().clone(),
             vec![Value::from("Timeout"), Value::Int(IntValue::U8(1))],
         )
         .expect("accept");

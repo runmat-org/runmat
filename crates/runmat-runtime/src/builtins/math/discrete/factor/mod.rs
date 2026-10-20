@@ -47,7 +47,7 @@ fn factor_error(error: FactorError, detail: impl std::fmt::Display) -> RuntimeEr
     binding_variant = "default",
     builtin_path = "crate::builtins::math::discrete::factor"
 )]
-async fn factor_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn factor_builtin(value: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     if !rest.is_empty() {
         return Err(factor_error(
             FactorError::InvalidInput,

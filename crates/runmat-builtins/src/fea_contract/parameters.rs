@@ -1,6 +1,6 @@
-use crate::BuiltinParamArity;
-use crate::BuiltinParamDescriptor;
-use crate::BuiltinParamType;
+//! Shared parameters of the typed FEA public and method surface.
+
+use crate::*;
 
 pub const OUT_ANY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "result",
@@ -9,21 +9,16 @@ pub const OUT_ANY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     default: None,
     description: "FEA object or operation result.",
 }];
-pub const IN_PATH: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "path",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Path to a .fea file.",
-}];
+
 pub const IN_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "study",
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "A .fea path, fea.Study object, or fea.Sweep object.",
+    description: "A fea.Study or fea.Sweep object.",
 }];
-pub const IN_STUDY_ARGS: [BuiltinParamDescriptor; 3] = [
+
+pub const IN_STUDY_ARGS: [BuiltinParamDescriptor; 4] = [
     BuiltinParamDescriptor {
         name: "id",
         ty: BuiltinParamType::StringScalar,
@@ -39,44 +34,21 @@ pub const IN_STUDY_ARGS: [BuiltinParamDescriptor; 3] = [
         description: "geometry.Asset returned by geometry.load.",
     },
     BuiltinParamDescriptor {
-        name: "Name, Value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Required Profile plus Backend, ModelId, and model setup options.",
-    },
-];
-pub const IN_AUTHOR_STUDY_ARGS: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "id",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Study id.",
-    },
-    BuiltinParamDescriptor {
-        name: "geometry",
+        name: "model",
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "geometry.Asset returned by geometry.load.",
-    },
-    BuiltinParamDescriptor {
-        name: "meshAuthoringSummary",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Compact mesh authoring evidence summary.",
+        description: "Explicit fea.Model bound to the supplied geometry revision.",
     },
     BuiltinParamDescriptor {
         name: "Name, Value",
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Variadic,
         default: None,
-        description:
-            "Required Profile plus Backend, boundary/driving region selectors, structural force vector, and analysis mesh artifact paths.",
+        description: "Optional Mesh and Execution settings.",
     },
 ];
+
 pub const IN_VARIADIC_ARGS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "args",
     ty: BuiltinParamType::Any,
@@ -105,9 +77,11 @@ pub const MODEL_INPUTS: [BuiltinParamDescriptor; 3] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Variadic,
         default: None,
-        description: "Profile, frame, defaults, and typed model-component options.",
+        description:
+            "Explicit frame, materials, assignments, constraints, boundaries, signals, excitations, steps or sequence, domains, and interfaces.",
     },
 ];
+
 pub const MATERIAL_INPUTS: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "id",
@@ -124,139 +98,7 @@ pub const MATERIAL_INPUTS: [BuiltinParamDescriptor; 2] = [
         description: "Mechanical, thermal, acoustic, electrical, and plastic material fields.",
     },
 ];
-pub const MATERIAL_ASSIGNMENT_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "region",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Geometry region selector.",
-    },
-    BuiltinParamDescriptor {
-        name: "material",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Assigned material id.",
-    },
-    BuiltinParamDescriptor {
-        name: "Name, Value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Expected-material and confidence options.",
-    },
-];
-pub const LOAD_CASE_INPUTS: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "id",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Load-case id.",
-    },
-    BuiltinParamDescriptor {
-        name: "region",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Geometry region selector.",
-    },
-    BuiltinParamDescriptor {
-        name: "kind",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Load kind.",
-    },
-    BuiltinParamDescriptor {
-        name: "Name, Value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Numeric fields required by the selected load kind.",
-    },
-];
-pub const DOMAIN_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "kind",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Physics-domain kind.",
-    },
-    BuiltinParamDescriptor {
-        name: "Name, Value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Typed fields for the selected domain kind.",
-    },
-];
-pub const INTERFACE_INPUTS: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "id",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Interface id.",
-    },
-    BuiltinParamDescriptor {
-        name: "primaryRegion",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Primary geometry region selector.",
-    },
-    BuiltinParamDescriptor {
-        name: "secondaryRegion",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Secondary geometry region selector.",
-    },
-    BuiltinParamDescriptor {
-        name: "Name, Value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Interface kind and numeric fields.",
-    },
-];
-pub const STEP_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "id",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Analysis-step id.",
-    },
-    BuiltinParamDescriptor {
-        name: "kind",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description:
-            "Static, modal, transient, thermal, nonlinear, electromagnetic, or CFD step kind.",
-    },
-];
-pub const RUN_OPTIONS_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "solver",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "FEA solver family.",
-    },
-    BuiltinParamDescriptor {
-        name: "Name, Value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description:
-            "Family-specific structural, tolerance, timing, precision, and quality options.",
-    },
-];
+
 pub const SWEEP_INPUTS: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
         name: "id",
@@ -280,6 +122,7 @@ pub const SWEEP_INPUTS: [BuiltinParamDescriptor; 3] = [
         description: "Optional logical FailFast control.",
     },
 ];
+
 pub const RESULTS_INPUTS: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "runOrRunId",
@@ -296,6 +139,7 @@ pub const RESULTS_INPUTS: [BuiltinParamDescriptor; 2] = [
         description: "Field, diagnostic, one-based mode/snapshot selector, and inclusion options.",
     },
 ];
+
 pub const TRENDS_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "Name, Value",
     ty: BuiltinParamType::Any,
@@ -303,7 +147,8 @@ pub const TRENDS_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     default: None,
     description: "Optional positive integer WindowSize.",
 }];
-pub const FIELD_INPUTS: [BuiltinParamDescriptor; 2] = [
+
+pub const FIELD_INPUTS: [BuiltinParamDescriptor; 3] = [
     BuiltinParamDescriptor {
         name: "resultsOrRun",
         ty: BuiltinParamType::Any,
@@ -312,66 +157,79 @@ pub const FIELD_INPUTS: [BuiltinParamDescriptor; 2] = [
         description: "fea.Results, fea.RunResult, or persisted run id.",
     },
     BuiltinParamDescriptor {
-        name: "fieldId",
-        ty: BuiltinParamType::StringScalar,
+        name: "field",
+        ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Exact field id or unique dotted suffix.",
+        description: "Typed quantity or authored-output selector, such as fea.StructuralField.stress() or fea.OutputField.named(\"peak_stress\").",
+    },
+    BuiltinParamDescriptor {
+        name: "sample",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: None,
+        description: "Typed independent-domain sample, such as fea.Frequency.hertz(120).",
     },
 ];
-pub const PLOT_CONTEXT_INPUTS: [BuiltinParamDescriptor; 3] = [
+
+pub const FIELD_PAGE_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "field",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Artifact-backed fea.Field returned by fea.field.",
+    },
+    BuiltinParamDescriptor {
+        name: "start",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: Some("1"),
+        description: "One-based logical value index.",
+    },
+    BuiltinParamDescriptor {
+        name: "count",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Optional,
+        default: Some("256"),
+        description: "Positive maximum logical value count, capped at 4096.",
+    },
+];
+
+pub const PLOT_CONTEXT_INPUTS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "field",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "FEA field carrying result and study context.",
+    },
+    BuiltinParamDescriptor {
+        name: "Name, Value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Visualization options such as Edges, Overlay, or Deformed.",
+    },
+];
+
+pub const MESH_CONTEXT_INPUTS: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "context",
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "FEA run, results, field, or study context.",
-    },
-    BuiltinParamDescriptor {
-        name: "fieldId",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Optional field id.",
+        description: "FEA run, results, or field carrying mesh context.",
     },
     BuiltinParamDescriptor {
         name: "Name, Value",
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Variadic,
         default: None,
-        description: "Optional Field/FieldId, Mesh, Overlay, and Deformed controls.",
+        description: "Mesh display options such as Source or Edges.",
     },
 ];
-pub const PLOT_STUDY_INPUTS: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "study",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "FEA study carrying geometry context.",
-    },
-    BuiltinParamDescriptor {
-        name: "runId",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Persisted run id.",
-    },
-    BuiltinParamDescriptor {
-        name: "fieldId",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Optional field id.",
-    },
-    BuiltinParamDescriptor {
-        name: "Name, Value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Optional Field/FieldId, Mesh, Overlay, and Deformed controls.",
-    },
-];
+
 pub const COMPARE_INPUTS: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "baselineRunId",
@@ -386,5 +244,29 @@ pub const COMPARE_INPUTS: [BuiltinParamDescriptor; 2] = [
         arity: BuiltinParamArity::Required,
         default: None,
         description: "Candidate persisted run id.",
+    },
+];
+
+pub const MATERIAL_ASSIGNMENT_INPUTS: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "target",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Typed beam, shell, solid, or cell property-region target.",
+    },
+    BuiltinParamDescriptor {
+        name: "material",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Typed fea.Material value.",
+    },
+    BuiltinParamDescriptor {
+        name: "Name, Value",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Expected-material and confidence options.",
     },
 ];

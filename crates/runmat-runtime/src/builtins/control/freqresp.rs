@@ -20,7 +20,7 @@ const NAME: &str = "freqresp";
 async fn freqresp_builtin(
     runtime: Option<RuntimeContext>,
     system: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     if rest.len() > 1 || crate::output_count::current_output_count().is_some_and(|count| count > 2)
     {

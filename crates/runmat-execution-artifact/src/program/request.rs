@@ -307,7 +307,10 @@ impl<
         let form = self.artifact.borrow().form;
         let arguments = self.arguments.as_ref();
         validate_console(self.console, form)?;
-        self.environment.borrow().validate().map_err(contract_error)?;
+        self.environment
+            .borrow()
+            .validate()
+            .map_err(contract_error)?;
         let artifact = self.artifact.borrow().validate_context(recipe)?;
         if self.callable.validate().is_err()
             || matches!(self.callable, ProgramCallable::GraphTarget { .. })

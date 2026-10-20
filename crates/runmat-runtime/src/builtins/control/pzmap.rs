@@ -62,7 +62,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::control::pzmap"
 )]
-async fn pzmap_builtin(sys: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn pzmap_builtin(sys: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     if crate::output_count::current_output_count().is_some_and(|count| count > 2) {
         return Err(pzmap_error(
             "pzmap: too many output arguments",
@@ -107,7 +107,10 @@ fn is_plot_form_call() -> bool {
 }
 
 #[cfg(feature = "plot-core")]
-async fn plot_pole_zero_map_statement(first_sys: Value, rest: Vec<Value>) -> BuiltinResult<()> {
+async fn plot_pole_zero_map_statement(
+    first_sys: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<()> {
     let mut systems = vec![(first_sys, None)];
     for arg in rest {
         if is_plot_style_arg(&arg) {
@@ -188,7 +191,7 @@ impl PoleZeroMap {
                 return Err(pzmap_error(
                     format!(
                         "pzmap: unsupported model class '{}'; supported classes are tf and ss",
-                        object.class_name
+                        object.class_name()
                     ),
                     &PZMAP_ERROR_UNSUPPORTED_MODEL,
                 ));
@@ -234,7 +237,12 @@ async fn render_pole_zero_map(
     let mut args = Vec::new();
     push_pole_zero_map_series(&mut args, eval, style, series_index)?;
     render_pole_zero_map_args(args).await?;
-    let points: Vec<Complex64> = eval.poles.iter().chain(eval.zeros.iter()).copied().collect();
+    let points: Vec<Complex64> = eval
+        .poles
+        .iter()
+        .chain(eval.zeros.iter())
+        .copied()
+        .collect();
     super::frame_complex_plane(&points, 0.15).await;
     Ok(())
 }
@@ -379,17 +387,17 @@ mod tests {
             let resident =
                 crate::builtins::common::gpu_helpers::upload_tensor(provider, &den).unwrap();
             let mut model = ObjectInstance::new(TF_CLASS.to_string());
-            model.properties.insert("Numerator".into(), Value::Num(1.0));
-            model
-                .properties
-                .insert("Denominator".into(), Value::GpuTensor(resident));
+            model.replace_property_unbounded("Numerator".into(), Value::Num(1.0));
+            model.replace_property_unbounded("Denominator".into(), Value::GpuTensor(resident));
             for name in ["Ts", "InputDelay", "OutputDelay"] {
-                model.properties.insert(name.into(), Value::Num(0.0));
+                model.replace_property_unbounded(name.into(), Value::Num(0.0));
             }
             provider.reset_telemetry();
             let error = block_on(plot_pole_zero_map_statement(
                 Value::Object(model),
-                vec![Value::from("not-a-style")],
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::from(
+                    "not-a-style",
+                )]),
             ))
             .expect_err("invalid style");
             assert_eq!(error.identifier(), Some("RunMat:pzmap:InvalidArgument"));
@@ -405,26 +413,20 @@ mod tests {
                 crate::builtins::common::gpu_helpers::upload_tensor(provider, &unrelated)
                     .expect("upload unrelated property");
             let mut model = ObjectInstance::new(TF_CLASS.to_string());
-            model.properties.insert("Numerator".into(), Value::Num(2.0));
-            model
-                .properties
-                .insert("Denominator".into(), Value::Num(1.0));
-            model.properties.insert("Ts".into(), Value::Num(0.0));
-            model
-                .properties
-                .insert("InputDelay".into(), Value::Num(0.0));
-            model
-                .properties
-                .insert("OutputDelay".into(), Value::Num(0.0));
-            model
-                .properties
-                .insert("Unrelated".into(), Value::GpuTensor(resident));
+            model.replace_property_unbounded("Numerator".into(), Value::Num(2.0));
+            model.replace_property_unbounded("Denominator".into(), Value::Num(1.0));
+            model.replace_property_unbounded("Ts".into(), Value::Num(0.0));
+            model.replace_property_unbounded("InputDelay".into(), Value::Num(0.0));
+            model.replace_property_unbounded("OutputDelay".into(), Value::Num(0.0));
+            model.replace_property_unbounded("Unrelated".into(), Value::GpuTensor(resident));
             let _outputs =
                 crate::output_count::push_output_count(Some(2)).expect("output-count scope");
             provider.reset_telemetry();
-            let Value::OutputList(values) =
-                block_on(pzmap_builtin(Value::Object(model), vec![])).expect("static gain")
-            else {
+            let Value::OutputList(values) = block_on(pzmap_builtin(
+                Value::Object(model),
+                crate::builtins::common::test_support::builtin_arguments(vec![]),
+            ))
+            .expect("static gain") else {
                 panic!("expected two outputs");
             };
             assert_eq!(values.len(), 2);
@@ -448,7 +450,12 @@ mod tests {
     }
 
     fn run_pzmap(sys: crate::execution::RootedValue, rest: Vec<Value>) -> BuiltinResult<Value> {
-        sys.with_owned(|sys| block_on(pzmap_builtin(sys, rest)))
+        sys.with_owned(|sys| {
+            block_on(pzmap_builtin(
+                sys,
+                crate::builtins::common::test_support::builtin_arguments(rest),
+            ))
+        })
     }
 
     fn tensor(value: &Value) -> &Tensor {

@@ -4,7 +4,7 @@ use super::*;
 pub(in super::super) async fn execute_openfig(
     runtime: Option<crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let selected_runtime = runtime.clone();
     in_selected_runtime(
@@ -17,10 +17,10 @@ pub(in super::super) async fn execute_openfig(
 async fn execute_openfig_in_context(
     runtime: Option<&crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     validate_load_outputs(requested_outputs, 1, OPENFIG)?;
-    let request = parse_openfig_args(&args, OPENFIG)?;
+    let request = parse_openfig_args(args.view(), OPENFIG)?;
     let selected = FigureFsPath::capture(&request.path).map_err(|source| {
         persistence_error_with_source(
             &ERROR_IO,
@@ -89,7 +89,7 @@ fn apply_open_visibility(
 pub(in super::super) async fn execute_hgload(
     runtime: Option<crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<runmat_value::ValueSequence> {
     let selected_runtime = runtime.clone();
     in_selected_runtime(
@@ -102,10 +102,10 @@ pub(in super::super) async fn execute_hgload(
 async fn execute_hgload_in_context(
     runtime: Option<&crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<runmat_value::ValueSequence> {
     validate_load_outputs(requested_outputs, 2, HGLOAD)?;
-    let (request, overrides) = parse_hgload_args(&args)?;
+    let (request, overrides) = parse_hgload_args(args.view())?;
     let selected = FigureFsPath::capture(&request.path).map_err(|source| {
         persistence_error_with_source(
             &ERROR_IO,

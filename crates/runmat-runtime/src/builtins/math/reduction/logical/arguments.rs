@@ -14,7 +14,7 @@ pub(in crate::builtins::math::reduction) enum ReductionSpec {
 
 pub(super) async fn parse(
     config: &LogicalReductionConfig,
-    arguments: &[Value],
+    arguments: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<(ReductionSpec, ReductionNaN)> {
     let mut spec = ReductionSpec::Default;
     let mut nan_mode = config.default_nan_mode();

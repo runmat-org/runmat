@@ -12,7 +12,7 @@ fn moving_mad_retains_single_precision_and_low_rank_geometry() {
         let Value::Tensor(output) = block_on(movmad_builtin(
             Value::Tensor(input),
             Value::Num(3.0),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .unwrap() else {
             panic!("moving MAD must retain tensor representation");
@@ -27,7 +27,7 @@ fn movmad_computes_centered_median_absolute_deviation() {
     let result = block_on(movmad_builtin(
         tensor(vec![1.0, 2.0, 100.0, 4.0, 5.0], vec![5, 1]),
         Value::Num(3.0),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap();
     assert!(matches!(result, Value::Tensor(t) if t.materialize_f64()[2] == 2.0));
@@ -41,7 +41,7 @@ fn movmad_reads_typed_integer_storage_and_returns_double_output() {
     let result = block_on(movmad_builtin(
         Value::Tensor(input),
         Value::Num(3.0),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap();
 
@@ -71,7 +71,7 @@ fn movmad_accepts_all_integer_classes_into_double_output() {
         let result = block_on(movmad_builtin(
             Value::Tensor(input),
             Value::Num(3.0),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .unwrap();
         assert!(
@@ -96,7 +96,7 @@ fn movmad_rejects_invalid_controls_before_resident_download() {
         let error = block_on(movmad_builtin(
             Value::GpuTensor(allocation.handle.clone()),
             window,
-            rest,
+            crate::builtins::common::test_support::builtin_arguments(rest),
         ))
         .expect_err("invalid controls must be rejected before provider access");
         assert_eq!(error.identifier(), Some("RunMat:missing:InvalidArgument"));
@@ -120,7 +120,7 @@ fn movmad_does_not_use_global_provider_for_unowned_input() {
         let error = block_on(movmad_builtin(
             Value::GpuTensor(allocation.handle.clone()),
             Value::Num(3.0),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect_err("the global provider cannot claim an unrelated allocation");
         assert_eq!(error.identifier(), Some("RunMat:missing:InvalidArgument"));
@@ -141,7 +141,7 @@ fn movmad_gpu_large_window_follows_compatibility_mode() {
             let error = block_on(movmad_builtin(
                 Value::GpuTensor(handle.clone()),
                 Value::Num(32.0),
-                Vec::new(),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
             ))
             .unwrap_err();
             assert_eq!(
@@ -154,7 +154,7 @@ fn movmad_gpu_large_window_follows_compatibility_mode() {
             let result = block_on(movmad_builtin(
                 Value::GpuTensor(handle.clone()),
                 Value::Num(32.0),
-                Vec::new(),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
             ))
             .unwrap();
             assert!(matches!(result, Value::GpuTensor(_)));

@@ -76,7 +76,7 @@ fn fused_mean_all_codegen_and_exec_on_vector() {
             origin: ValueOrigin::Constant,
             ty: Type::String,
             shape: ShapeInfo::Scalar,
-            constant: Some(Value::String("all".to_string())),
+            constant: Some(Value::String("all".into())),
         },
         ValueInfo {
             id: v_mse,
@@ -151,7 +151,7 @@ fn fused_mean_all_codegen_and_exec_on_vector() {
         constants: HashMap::new(),
         const_values: {
             let mut cv = HashMap::new();
-            cv.insert(v_all, Value::String("all".to_string()));
+            cv.insert(v_all, Value::String("all".into()));
             cv
         },
         materialized_stores: Vec::new(),

@@ -16,6 +16,7 @@ fn setup_plot_tests() {
 }
 
 fn run_scatterplot(x: Value, rest: Vec<Value>) -> BuiltinResult<f64> {
+    let rest = crate::call::BuiltinArguments::from_borrowed(&rest, None)?;
     block_on(super::scatterplot_builtin(x, rest))
 }
 
@@ -92,26 +93,33 @@ fn scatterplot_figure_parser_rejects_all_integer_storages_without_mirrors() {
 
 #[test]
 fn scatterplot_rejects_offset_equal_to_decimation() {
-    let err = ScatterplotOptions::parse(vec![Value::Num(2.0), Value::Num(2.0)]).unwrap_err();
+    let err = ScatterplotOptions::parse(crate::builtins::common::test_support::builtin_arguments(
+        vec![Value::Num(2.0), Value::Num(2.0)],
+    ))
+    .unwrap_err();
     assert!(err.to_string().contains("offset must be less than n"));
 }
 
 #[test]
 fn scatterplot_rejects_invalid_marker_at_parse_time() {
-    let err = ScatterplotOptions::parse(vec![Value::Num(1.0), Value::Num(0.0), Value::Num(7.0)])
-        .unwrap_err();
+    let err = ScatterplotOptions::parse(crate::builtins::common::test_support::builtin_arguments(
+        vec![Value::Num(1.0), Value::Num(0.0), Value::Num(7.0)],
+    ))
+    .unwrap_err();
     assert_eq!(err.identifier(), Some("RunMat:scatterplot:InvalidArgument"));
     assert!(!err.to_string().contains("PlotFailed"));
 }
 
 #[test]
 fn scatterplot_rejects_unknown_figure_at_parse_time() {
-    let err = ScatterplotOptions::parse(vec![
-        Value::Num(1.0),
-        Value::Num(0.0),
-        Value::String("x".into()),
-        Value::Num(f64::from(u32::MAX)),
-    ])
+    let err = ScatterplotOptions::parse(crate::builtins::common::test_support::builtin_arguments(
+        vec![
+            Value::Num(1.0),
+            Value::Num(0.0),
+            Value::String("x".into()),
+            Value::Num(f64::from(u32::MAX)),
+        ],
+    ))
     .unwrap_err();
     assert_eq!(err.identifier(), Some("RunMat:scatterplot:InvalidArgument"));
     assert!(!err.to_string().contains("PlotFailed"));
@@ -120,12 +128,14 @@ fn scatterplot_rejects_unknown_figure_at_parse_time() {
 #[test]
 fn scatterplot_rejects_nonscalar_figure_at_parse_time() {
     let figure = Tensor::new(vec![1.0, 2.0], vec![2, 1]).expect("tensor");
-    let err = ScatterplotOptions::parse(vec![
-        Value::Num(1.0),
-        Value::Num(0.0),
-        Value::String("x".into()),
-        Value::Tensor(figure),
-    ])
+    let err = ScatterplotOptions::parse(crate::builtins::common::test_support::builtin_arguments(
+        vec![
+            Value::Num(1.0),
+            Value::Num(0.0),
+            Value::String("x".into()),
+            Value::Tensor(figure),
+        ],
+    ))
     .unwrap_err();
     assert_eq!(err.identifier(), Some("RunMat:scatterplot:InvalidArgument"));
     assert!(!err.to_string().contains("PlotFailed"));

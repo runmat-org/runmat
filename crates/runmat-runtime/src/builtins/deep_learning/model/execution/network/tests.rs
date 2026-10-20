@@ -2,11 +2,17 @@ use futures::executor::block_on;
 use runmat_value::{CellArray, IntegerStorage, NumericDType, Tensor, Value};
 
 use super::*;
+use crate::builtins::deep_learning::tests::fully_connected_layer_builtin;
 use crate::builtins::deep_learning::{layers::*, model::dlnetwork_builtin, object};
 
 fn network() -> crate::execution::RootedValue {
-    let input = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
+    let input = block_on(feature_input_layer_builtin(
+        Value::Num(2.0),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap();
     let dense = block_on(fully_connected_layer_builtin(
+        None,
         Value::Num(1.0),
         vec![
             Value::String("Weights".into()),
@@ -42,7 +48,8 @@ fn predict_column_input_returns_batch_major_native_single_scores() {
             ("Format", Value::String("CB".into())),
             ("Labels", Value::String("CB".into())),
         ],
-    );
+    )
+    .expect("fixture object");
     let result = block_on(execute_network(NetworkExecutionRequest {
         runtime: None,
         network: network_object(network.value()),
@@ -83,7 +90,8 @@ fn caller_identity_selects_integer_compatibility_without_duplicate_numerics() {
             ("Format", Value::String("BC".into())),
             ("Labels", Value::String("BC".into())),
         ],
-    );
+    )
+    .expect("fixture object");
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
     let error = block_on(execute_network(NetworkExecutionRequest {
         runtime: None,

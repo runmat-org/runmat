@@ -5,7 +5,7 @@ use super::*;
 /// Keywords are decoded once, and only selected numerical operands are retained.
 pub(in crate::builtins::stats::summary::normalize) fn admit_args(
     domain: InputDomain,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<AdmittedArgs> {
     let keywords = rest
         .iter()
@@ -114,7 +114,7 @@ pub(in crate::builtins::stats::summary::normalize) fn admit_args(
 }
 
 struct Cursor {
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
     keywords: Vec<Option<NormalizeKeyword>>,
     idx: usize,
 }

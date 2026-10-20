@@ -22,13 +22,23 @@ impl Callable {
         self.0.builtin_identity()
     }
 
+    #[cfg(test)]
     pub(in crate::builtins::acceleration::gpu::arrayfun) async fn call(
         &self,
         context: Option<&crate::context::RuntimeContext>,
         arguments: &[Value],
     ) -> BuiltinResult<RootedValue> {
+        let arguments = crate::call::BuiltinArguments::from_borrowed(arguments, context)?;
+        self.call_retained(context, arguments).await
+    }
+
+    pub(in crate::builtins::acceleration::gpu::arrayfun) async fn call_retained(
+        &self,
+        context: Option<&crate::context::RuntimeContext>,
+        arguments: crate::call::BuiltinArguments,
+    ) -> BuiltinResult<RootedValue> {
         self.0
-            .invoke_with_outputs_in_context(context, arguments, 1)
+            .invoke_retained(context, arguments, 1)
             .await
             .map_err(error_map::call)
     }

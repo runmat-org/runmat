@@ -29,6 +29,7 @@ pub struct NativeExecutor {
         std::collections::BTreeSet<runmat_execution::host::NativeDeploymentServiceKind>,
     selected_source_evaluation: Option<runmat_execution::host::VerifiedNativeServiceIssuer>,
 }
+
 struct EntryRepresentationProfile {
     function: FunctionId,
     profile: crate::RepresentationProfile,
@@ -49,6 +50,18 @@ pub struct NativeInvocationRequest {
     pub arguments: Vec<Value>,
     pub requested_outputs: usize,
     pub runtime: RuntimeContext,
+    pub deoptimization: DeoptimizationPolicy,
+    pub osr_target: Option<OsrTarget>,
+    pub workspace: Option<super::workspace::NativeWorkspaceInput>,
+}
+
+/// Live rooted inputs with the same execution controls as source ingress.
+pub struct RootedNativeInvocationRequest {
+    pub function: FunctionId,
+    pub arguments: runmat_runtime::call::RootedFunctionArguments,
+    pub requested_outputs: usize,
+    pub runtime: RuntimeContext,
+    pub lexical_environment: Option<runmat_value::LexicalEnvironment>,
     pub deoptimization: DeoptimizationPolicy,
     pub osr_target: Option<OsrTarget>,
     pub workspace: Option<super::workspace::NativeWorkspaceInput>,
@@ -133,6 +146,33 @@ impl NativeExecutor {
         runtime: RuntimeContext,
         lexical_environment: Option<runmat_value::LexicalEnvironment>,
     ) -> NativeExecutorResult<NativeInvocation> {
+        self.begin_rooted_request_async(RootedNativeInvocationRequest {
+            function,
+            arguments,
+            requested_outputs,
+            runtime,
+            lexical_environment,
+            deoptimization: DeoptimizationPolicy::default(),
+            osr_target: None,
+            workspace: None,
+        })
+        .await
+    }
+
+    pub async fn begin_rooted_request_async(
+        &self,
+        request: RootedNativeInvocationRequest,
+    ) -> NativeExecutorResult<NativeInvocation> {
+        let RootedNativeInvocationRequest {
+            function,
+            arguments,
+            requested_outputs,
+            runtime,
+            lexical_environment,
+            deoptimization,
+            osr_target,
+            workspace,
+        } = request;
         self.require_runtime_services(&runtime)?;
         let retained_captures = self.retained_capture_arguments(function, &arguments)?;
         self.validate_entry_profile(function, arguments.supplied().iter())?;
@@ -143,31 +183,28 @@ impl NativeExecutor {
             .ok_or_else(|| {
                 NativeExecutorError::Host(format!("native function {} is unavailable", function.0))
             })?;
-        arguments
-            .with_owned_supplied_async(|_callable, supplied| async move {
-                let _callable = _callable;
-                let specs = super::state::function_input_specs(function_ir)?;
-                let prepared = runmat_runtime::call::function_abi::prepare_function_inputs_owned(
-                    &function_ir.name,
-                    supplied,
-                    function_ir.abi.fixed_inputs.len(),
-                    function_ir.abi.varargin.is_some(),
-                    &specs,
-                )
-                .await?;
-                let request = NativeRequestParts {
-                    function,
-                    captures: retained_captures,
-                    inputs: NativeFunctionInputs::Prepared(prepared),
-                    requested_outputs,
-                    runtime,
-                    deoptimization: DeoptimizationPolicy::default(),
-                    osr_target: None,
-                    workspace: None,
-                };
-                self.begin_request_with_environment_parts(request, lexical_environment)
-            })
-            .await?
+        let supplied = arguments.into_supplied_arguments();
+        let specs = super::state::function_input_specs(function_ir)?;
+        let prepared = runmat_runtime::call::function_abi::prepare_function_inputs_rooted(
+            &function_ir.name,
+            supplied,
+            function_ir.abi.fixed_inputs.len(),
+            function_ir.abi.varargin.is_some(),
+            &specs,
+            Some(&runtime),
+        )
+        .await?;
+        let request = NativeRequestParts {
+            function,
+            captures: retained_captures,
+            inputs: NativeFunctionInputs::prepared(prepared),
+            requested_outputs,
+            runtime,
+            deoptimization,
+            osr_target,
+            workspace,
+        };
+        self.begin_request_with_environment_parts(request, lexical_environment)
     }
 
     /// Bind verified Native IR to an executable with the same exact function set.
@@ -540,7 +577,7 @@ impl NativeExecutor {
                     .into_iter()
                     .map(NativeCaptureInput::Owned)
                     .collect(),
-                inputs: NativeFunctionInputs::Legacy(arguments),
+                inputs: NativeFunctionInputs::legacy(arguments),
                 requested_outputs,
                 runtime,
                 deoptimization,
@@ -577,10 +614,7 @@ impl NativeExecutor {
         } = request;
         self.require_runtime_services(&runtime)?;
         let profile_values = || {
-            let arguments = match &inputs {
-                NativeFunctionInputs::Legacy(arguments) => arguments.as_slice(),
-                NativeFunctionInputs::Prepared(_) => &[],
-            };
+            let arguments = inputs.legacy_arguments().unwrap_or(&[]);
             arguments.iter().chain(
                 workspace
                     .as_ref()
@@ -588,11 +622,11 @@ impl NativeExecutor {
                     .flat_map(|workspace| workspace.profile_values()),
             )
         };
-        if matches!(&inputs, NativeFunctionInputs::Legacy(_)) {
+        if inputs.legacy_arguments().is_some() {
             self.validate_entry_profile(function, profile_values())?;
         }
         if let Some(target) = &osr_target {
-            if matches!(&inputs, NativeFunctionInputs::Legacy(_)) {
+            if inputs.legacy_arguments().is_some() {
                 target
                     .executor()
                     .validate_entry_profile(function, profile_values())?;

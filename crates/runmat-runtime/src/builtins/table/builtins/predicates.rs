@@ -47,7 +47,7 @@ pub(crate) async fn isordinal_builtin(value: Value) -> BuiltinResult<Value> {
         value,
         Value::Object(ref object)
             if object.is_class(CATEGORICAL_CLASS)
-                && matches!(object.properties.get("Ordinal"), Some(Value::Bool(true)))
+                && matches!(object.properties().get("Ordinal"), Some(Value::Bool(true)))
     )))
 }
 

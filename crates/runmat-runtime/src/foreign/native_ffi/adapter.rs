@@ -43,7 +43,7 @@ use runmat_types::{
     CapabilityRequirement, ForeignAffinity, ForeignCapability, ForeignLifetime, ForeignOwnership,
     ForeignTypeIdentity,
 };
-use runmat_value::{CellArray, ForeignResourceKey, StructValue, Value};
+use runmat_value::{CellArray, ForeignResourceKey, Value};
 
 use super::super::{
     foreign_error, foreign_error_with_source, ForeignAdapter, ForeignAdapterDescriptor,
@@ -588,7 +588,7 @@ impl NativeFfiAdapter {
             NativeFfiOperation::Structure => self.structure(&call.arguments),
             NativeFfiOperation::PointerValue => self.pointer_value(&call.arguments),
             NativeFfiOperation::GetMember => self.get_member(&call.arguments),
-            NativeFfiOperation::SetMember => self.set_member(&call.arguments),
+            NativeFfiOperation::SetMember => self.set_member(&context, &call.arguments),
             NativeFfiOperation::InvokeMember => self.invoke_member(&call.arguments),
             NativeFfiOperation::BuildInterface => self.build_interface(&call.arguments),
             NativeFfiOperation::LoadReport | NativeFfiOperation::Call => {

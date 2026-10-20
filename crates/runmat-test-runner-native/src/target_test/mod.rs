@@ -6,6 +6,8 @@
 //! decoded identity fields alone as permission to execute a test.
 
 mod image;
+mod application;
+pub use application::{run_compiled_native_application, NativePairedApplicationReport};
 mod process;
 
 pub use process::run_native_target_test;

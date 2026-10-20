@@ -71,7 +71,11 @@ fn current_constructor_handle_keeps_its_class_defaults_after_republication() {
                 &unit,
                 ProcedureInvocation {
                     target: ProcedureTarget::Function("unrelatedNative".into()),
-                    arguments: vec![Value::Num(4.0), old_ctor, old_fn],
+                    arguments: crate::ProcedureArguments::Source(vec![
+                        Value::Num(4.0),
+                        old_ctor,
+                        old_fn,
+                    ]),
                     requested_outputs: 3,
                 },
                 &InvocationControl::default().force_generic_native(),
@@ -90,15 +94,15 @@ fn current_constructor_handle_keeps_its_class_defaults_after_republication() {
                 panic!("native-retained constructor must return a live object")
             };
             assert_eq!(
-                properties.properties.get("seed"),
+                properties.properties().get("seed"),
                 Some(&Value::Num(11.0)),
                 "native registry owns old constructor: {}; selected product: {}; returned bodyTag: {:?}",
                 native_selected_body.is_some(),
                 native_has_old_product,
-                properties.properties.get("bodyTag")
+                properties.properties().get("bodyTag")
             );
             assert_eq!(
-                properties.properties.get("bodyTag"),
+                properties.properties().get("bodyTag"),
                 Some(&Value::Num(101.0))
             );
         }

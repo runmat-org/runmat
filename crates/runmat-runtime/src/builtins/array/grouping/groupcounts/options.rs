@@ -37,7 +37,7 @@ enum OptionName {
 
 impl GroupCountOptions {
     pub(super) fn split_and_parse(values: Vec<Value>) -> BuiltinResult<(Vec<Value>, Self)> {
-        let start = option_start(&values);
+        let start = option_start(crate::call::FunctionArgumentView::from_slice(&values));
         let (positional, pairs) = values.split_at(start);
         if !pairs.len().is_multiple_of(2) {
             return Err(error::invalid(
@@ -79,7 +79,7 @@ impl OptionName {
     }
 }
 
-pub(super) fn option_start(values: &[Value]) -> usize {
+pub(super) fn option_start(values: crate::call::FunctionArgumentView<'_>) -> usize {
     values
         .iter()
         .position(|value| OptionName::parse(value).is_some())
@@ -113,7 +113,7 @@ pub(super) fn scalar_text(value: &Value) -> Option<std::borrow::Cow<'_, str>> {
     match value {
         Value::String(value) => Some(std::borrow::Cow::Borrowed(value.as_str())),
         Value::CharArray(value) if value.rows <= 1 => {
-            Some(std::borrow::Cow::Owned(value.data.iter().collect()))
+            Some(std::borrow::Cow::Owned(value.data().iter().collect()))
         }
         _ => None,
     }

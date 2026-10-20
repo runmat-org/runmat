@@ -124,6 +124,8 @@ fn portable_function_request_invokes_the_admitted_local_registry_body() {
     )
     .expect("program artifact");
     let request = ProgramExecutionRequest {
+        console: None,
+        environment: runmat_execution::EnvironmentSnapshot::default(),
         schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         recipe,
         artifact,
@@ -203,6 +205,8 @@ fn class_constructor_manifest_uses_its_exact_admitted_registry_name() {
         );
         let bytes = envelope.canonical_bytes().expect("canonical class product");
         runmat_vm::admit_executable_unit(&bytes).expect("admit class constructor product");
+        crate::ExecutableUnit::from_portable_envelope(&envelope)
+            .expect("registered constructor alias survives an exact-origin round trip");
 
         let mut wrong_name = envelope.clone();
         wrong_name.manifest.identity.entrypoint = "SeedDerived".into();
@@ -213,9 +217,9 @@ fn class_constructor_manifest_uses_its_exact_admitted_registry_name() {
         )
         .expect_err("a public class alias is not a registered constructor name");
         assert!(
-            error
-                .to_string()
-                .contains("executable entrypoint is absent from its admitted function registry"),
+            error.to_string().contains(
+                "executable entrypoint identity disagrees with its admitted function body"
+            ),
             "{error}"
         );
 
@@ -343,7 +347,7 @@ fn portable_script_entrypoint_rejects_registry_and_layout_identity_mismatches() 
     assert!(
         error
             .to_string()
-            .contains("executable entrypoint is absent from its admitted function registry"),
+            .contains("executable entrypoint identity disagrees with its admitted function body: original origin is absent"),
         "{error}"
     );
 

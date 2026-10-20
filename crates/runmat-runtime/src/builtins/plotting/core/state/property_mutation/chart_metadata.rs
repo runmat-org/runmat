@@ -86,11 +86,9 @@ pub(crate) fn set_heatmap_display_labels_for_property(
         // Heatmaps draw their first row at the top, so the y tick labels run bottom-up reversed.
         let mut drawn_y_labels = current_y_labels;
         drawn_y_labels.reverse();
-        state.figure.set_axes_tick_labels(
-            axes_index,
-            Some(current_x_labels),
-            Some(drawn_y_labels),
-        );
+        state
+            .figure
+            .set_axes_tick_labels(axes_index, Some(current_x_labels), Some(drawn_y_labels));
         state.revision = state.revision.wrapping_add(1);
         state.figure.clone()
     };

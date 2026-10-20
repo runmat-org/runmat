@@ -21,7 +21,7 @@ fn mat2cell_gpu_falls_back_to_host() {
             other => panic!("expected cell array, got {other:?}"),
         };
         assert_eq!(cell.shape, vec![2, 2]);
-        let block = cell.data[3].clone();
+        let block = cell.data()[3].clone();
         let gathered = test_support::gather(block).expect("gather");
         assert_eq!(gathered.materialize_f64(), vec![5.0, 6.0]);
         assert_eq!(gathered.shape(), &[2, 1]);
@@ -66,8 +66,8 @@ fn mat2cell_wgpu_matches_cpu_partitions() {
         other => panic!("expected cell array, got {other:?}"),
     };
     assert_eq!(cpu_cell.shape, gpu_cell.shape);
-    assert_eq!(cpu_cell.data.len(), gpu_cell.data.len());
-    for (cpu, gpu) in cpu_cell.data.iter().zip(gpu_cell.data.iter()) {
+    assert_eq!(cpu_cell.data().len(), gpu_cell.data().len());
+    for (cpu, gpu) in cpu_cell.data().iter().zip(gpu_cell.data().iter()) {
         let cpu_val = cpu.clone();
         let gpu_val = gpu.clone();
         let cpu_tensor = test_support::gather(cpu_val).expect("cpu gather");

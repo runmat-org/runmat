@@ -100,7 +100,7 @@ impl BoxplotOptionPlan {
     }
 
     pub(super) fn admit(
-        args: Vec<Value>,
+        args: crate::call::BuiltinArguments,
         first_kind: Option<BoxplotOptionKind>,
     ) -> BuiltinResult<Self> {
         if !args.len().is_multiple_of(2) {

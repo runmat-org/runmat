@@ -102,9 +102,16 @@ async fn empty_array_with_scalar(
 #[runtime_builtin(
     name = "series",
     binding_variant = "default",
-    builtin_path = "crate::builtins::control::series"
+    builtin_path = "crate::builtins::control::series",
+    context = true
 )]
-async fn series_builtin(first: Value, second: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn series_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    first: Value,
+    second: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let runtime = runtime.ok_or_else(|| argument_error("series requires a runtime context"))?;
     if crate::output_count::current_output_count().is_some_and(|count| count > 1) {
         return Err(argument_error("series returns at most one model"));
     }
@@ -117,22 +124,22 @@ async fn series_builtin(first: Value, second: Value, rest: Vec<Value>) -> Builti
             ));
         }
     }
-    let (named, channels) = match rest.as_slice() {
-        [] => (false, None),
-        [option]
-            if tensor::value_to_string(option)
-                .is_some_and(|text| text.eq_ignore_ascii_case("name")) =>
+    let view = rest.view();
+    let (named, channels) = match view.len() {
+        0 => (false, None),
+        1 if tensor::value_to_string(view.first().expect("one argument"))
+            .is_some_and(|text| text.eq_ignore_ascii_case("name")) =>
         {
             (true, None)
         }
-        [outputs, inputs] => (
+        2 => (
             false,
             Some((
-                channel_indices(outputs).await?,
-                channel_indices(inputs).await?,
+                channel_indices(view.get(0).expect("two arguments")).await?,
+                channel_indices(view.get(1).expect("two arguments")).await?,
             )),
         ),
-        [_] => {
+        1 => {
             return Err(argument_error(
                 "series one-argument selector must be 'name'",
             ))
@@ -163,8 +170,12 @@ async fn series_builtin(first: Value, second: Value, rest: Vec<Value>) -> Builti
                 };
             }
             let shape = first.shape().to_vec();
-            let values = first.into_data().into_iter().zip(second.into_data());
-            compose_array(shape, values, named, channels.as_ref()).await?
+            let values = first
+                .data()
+                .iter()
+                .cloned()
+                .zip(second.data().iter().cloned());
+            compose_array(&runtime, shape, values, named, channels.as_ref()).await?
         }
         (Value::ObjectArray(first), second) => {
             if first.is_empty() {
@@ -172,10 +183,11 @@ async fn series_builtin(first: Value, second: Value, rest: Vec<Value>) -> Builti
             } else {
                 let shape = first.shape().to_vec();
                 let values = first
-                    .into_data()
-                    .into_iter()
+                    .data()
+                    .iter()
+                    .cloned()
                     .map(|entry| (entry, second.clone()));
-                compose_array(shape, values, named, channels.as_ref()).await?
+                compose_array(&runtime, shape, values, named, channels.as_ref()).await?
             }
         }
         (first, Value::ObjectArray(second)) => {
@@ -184,13 +196,14 @@ async fn series_builtin(first: Value, second: Value, rest: Vec<Value>) -> Builti
             } else {
                 let shape = second.shape().to_vec();
                 let values = second
-                    .into_data()
-                    .into_iter()
+                    .data()
+                    .iter()
+                    .cloned()
                     .map(|entry| (first.clone(), entry));
-                compose_array(shape, values, named, channels.as_ref()).await?
+                compose_array(&runtime, shape, values, named, channels.as_ref()).await?
             }
         }
-        (first, second) => compose_pair(first, second, named, channels.as_ref()).await?,
+        (first, second) => compose_pair(&runtime, first, second, named, channels.as_ref()).await?,
     };
     if crate::output_count::current_output_count() == Some(0) {
         Ok(Value::output_list(Vec::new()))
@@ -200,6 +213,7 @@ async fn series_builtin(first: Value, second: Value, rest: Vec<Value>) -> Builti
 }
 
 async fn compose_pair(
+    runtime: &crate::context::RuntimeContext,
     first: Value,
     second: Value,
     named: bool,
@@ -208,9 +222,10 @@ async fn compose_pair(
     let first = SeriesModel::from_value(first).await?;
     let second = SeriesModel::from_value(second).await?;
     if named {
-        SeriesModel::compose_by_name(first, second).await
+        SeriesModel::compose_by_name(runtime, first, second).await
     } else {
         SeriesModel::compose(
+            runtime,
             first,
             second,
             channels.map(|(outputs, inputs)| (outputs.as_slice(), inputs.as_slice())),
@@ -220,6 +235,7 @@ async fn compose_pair(
 }
 
 async fn compose_array<I>(
+    runtime: &crate::context::RuntimeContext,
     shape: Vec<usize>,
     values: I,
     named: bool,
@@ -230,14 +246,14 @@ where
 {
     let mut outputs = Vec::new();
     for (first, second) in values {
-        match compose_pair(first, second, named, channels).await? {
+        match compose_pair(runtime, first, second, named, channels).await? {
             Value::Object(object) => outputs.push(object),
             _ => return Err(argument_error("series produced a non-model array element")),
         }
     }
     let class = outputs
         .first()
-        .map(|object| object.class_name.clone())
+        .map(|object| object.class_name().clone())
         .ok_or_else(|| argument_error("series cannot infer the class of an empty model array"))?;
     ObjectArray::from_objects(class, outputs, shape)
         .map(Value::ObjectArray)
@@ -285,9 +301,22 @@ mod tests {
     use super::*;
     use futures::executor::block_on;
 
+    fn runtime() -> crate::context::RuntimeContext {
+        crate::context::RuntimeContext::new(std::rc::Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ))
+    }
+
+    async fn series_builtin(first: Value, second: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let runtime = runtime();
+        let rest = crate::call::BuiltinArguments::from_borrowed(&rest, Some(&runtime))?;
+        super::series_builtin(Some(runtime), first, second, rest).await
+    }
+
     #[test]
     fn array_cascade_preserves_column_major_model_shape() {
         let result = block_on(compose_array(
+            &runtime(),
             vec![1, 2],
             [
                 (Value::Num(2.0), Value::Num(3.0)),
@@ -334,12 +363,18 @@ mod tests {
         .unwrap()
         .to_value(NAME)
         .unwrap();
+        let ss_runtime = runtime();
+        let empty_arguments: [Value; 0] = [];
+        let ss_arguments =
+            crate::call::BuiltinArguments::from_borrowed(&empty_arguments, Some(&ss_runtime))
+                .expect("empty arguments");
         let ss = block_on(crate::builtins::control::ss::ss_builtin(
+            Some(ss_runtime),
             Value::Num(-1.0),
             Value::Num(1.0),
             Value::Num(1.0),
             Value::Num(0.0),
-            Vec::new(),
+            ss_arguments,
         ))
         .unwrap();
         for (array_class, scalar, result_class) in [

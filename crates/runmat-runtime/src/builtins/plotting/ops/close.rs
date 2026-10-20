@@ -2,15 +2,20 @@
 
 use std::collections::BTreeSet;
 
+#[cfg(test)]
 use runmat_value::Value;
 
-use super::op_common::figure_actions::{parse_close_action, FigureAction};
+#[cfg(test)]
+use super::op_common::figure_actions::parse_close_action;
+use super::op_common::figure_actions::{parse_close_action_view, FigureAction};
 use super::state::{close_figure, close_figure_with_builtin, figure_handles, FigureHandle};
 #[cfg(test)]
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 
-pub(crate) fn close_plot_targets(rest: &[Value]) -> crate::BuiltinResult<f64> {
-    match parse_close_action(rest)? {
+pub(crate) fn close_plot_targets(
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<f64> {
+    match parse_close_action_view(rest)? {
         FigureAction::Current => {
             if figure_handles().is_empty() {
                 return Ok(1.0);
@@ -55,6 +60,10 @@ pub(crate) mod tests {
     };
     use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{IntegerStorage, Tensor};
+
+    fn close_plot_targets(values: &[Value]) -> crate::BuiltinResult<f64> {
+        super::close_plot_targets(crate::call::FunctionArgumentView::from_slice(values))
+    }
 
     fn setup_plot_tests() -> PlotTestLockGuard {
         let guard = lock_plot_test_context();
@@ -126,7 +135,7 @@ pub(crate) mod tests {
     #[test]
     fn parse_all_flag() {
         let _guard = setup_plot_tests();
-        let values = vec![Value::String("all".to_string())];
+        let values = vec![Value::String("all".to_string().into())];
         assert!(matches!(
             parse_close_action(&values).unwrap(),
             FigureAction::All
@@ -153,7 +162,7 @@ pub(crate) mod tests {
         figure_builtin(vec![Value::Num(8.0)]).expect("figure 8");
         figure_builtin(vec![Value::Num(9.0)]).expect("figure 9");
         assert_eq!(
-            close_plot_targets(&[Value::String("all".to_string())]).unwrap(),
+            close_plot_targets(&[Value::String("all".to_string().into())]).unwrap(),
             1.0
         );
     }

@@ -19,3 +19,16 @@ pub(super) fn internal(detail: impl std::fmt::Display) -> RuntimeError {
         format!("combinations: {detail}"),
     )
 }
+
+/// Preserve the operational gather failure under the existing presentation.
+/// Argument destination admission failures bypass this domain mapper entirely.
+pub(super) fn gathered(source: RuntimeError) -> RuntimeError {
+    let descriptor = &runmat_builtins::COMBINATIONS_ERROR_INTERNAL;
+    let mut builder = build_runtime_error(format!("combinations: {source}"))
+        .with_builtin("combinations")
+        .with_source(source);
+    if let Some(identifier) = descriptor.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}

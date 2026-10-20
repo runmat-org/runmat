@@ -114,12 +114,12 @@ fn hilbert_error_with_message(
 async fn hilbert_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let mut cooperation = SignalCooperation::new(runtime.as_ref(), BUILTIN_NAME);
     cooperation.completed(0).await?;
-    ensure_hilbert_extensions(&value, &rest)?;
-    let length = parse_arguments(&rest)?;
+    ensure_hilbert_extensions(&value, rest.view())?;
+    let length = parse_arguments(rest.view())?;
     let result = match value {
         Value::GpuTensor(handle) => hilbert_gpu_tensor(handle, length, &mut cooperation).await,
         Value::Complex(re, _) => hilbert_tensor(
@@ -254,7 +254,10 @@ async fn hilbert_gpu_tensor(
     super::resident_output::restore(&handle, host, BUILTIN_NAME, &[])
 }
 
-fn ensure_hilbert_extensions(value: &Value, args: &[Value]) -> BuiltinResult<()> {
+fn ensure_hilbert_extensions(
+    value: &Value,
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     let integer_data = matches!(value, Value::Int(_))
         || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
         || matches!(value, Value::ComplexTensor(tensor) if tensor.integer_storage().is_some())
@@ -286,7 +289,8 @@ fn ensure_hilbert_extensions(value: &Value, args: &[Value]) -> BuiltinResult<()>
             BUILTIN_NAME,
         )?;
     }
-    if let [length] = args {
+    if args.len() == 1 {
+        let length = args.first().expect("one Hilbert length argument");
         let typed_integer = matches!(length, Value::Int(_))
             || matches!(length, Value::Tensor(tensor) if tensor.integer_storage().is_some());
         if typed_integer {
@@ -376,7 +380,7 @@ fn hilbert_input_metadata(handle: &GpuTensorHandle) -> HilbertGpuMetadata {
     }
 }
 
-fn parse_arguments(args: &[Value]) -> BuiltinResult<Option<usize>> {
+fn parse_arguments(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<Option<usize>> {
     match args.len() {
         0 => Ok(None),
         1 => parse_length(&args[0], BUILTIN_NAME).map_err(|source| {

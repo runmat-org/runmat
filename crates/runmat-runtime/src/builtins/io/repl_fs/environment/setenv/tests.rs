@@ -3,7 +3,9 @@ use runmat_value::{IntValue, StringArray, Value};
 
 fn run(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-    futures::executor::block_on(setenv_builtin(args))
+    futures::executor::block_on(setenv_builtin(
+        crate::builtins::common::test_support::builtin_arguments(args),
+    ))
 }
 
 #[test]
@@ -19,7 +21,7 @@ fn scalar_and_exact_integer_values_update_the_portable_environment() {
     ] {
         let name = format!("RUNMAT_SETENV_TEST_{suffix}");
         assert_eq!(
-            run(vec![Value::String(name.clone()), value]).unwrap(),
+            run(vec![Value::String(name.clone().into()), value]).unwrap(),
             Value::Num(0.0)
         );
         assert_eq!(crate::builtins::common::env::var(&name).unwrap(), expected);
@@ -69,11 +71,13 @@ fn invalid_later_name_does_not_apply_an_earlier_update() {
 #[test]
 fn dictionary_updates_use_typed_dictionary_identity() {
     let _guard = runmat_filesystem::provider_override_lock();
-    let dictionary = super::super::dictionary::from_pairs(vec![(
-        "RUNMAT_SETENV_TEST_DICT".into(),
-        "value".into(),
-    )])
-    .unwrap();
+    let dictionary = super::super::dictionary::from_pairs(
+        None,
+        vec![("RUNMAT_SETENV_TEST_DICT".into(), "value".into())],
+    )
+    .unwrap()
+    .into_value_and_lease()
+    .0;
     run(vec![dictionary]).unwrap();
     assert_eq!(
         crate::builtins::common::env::var("RUNMAT_SETENV_TEST_DICT").unwrap(),

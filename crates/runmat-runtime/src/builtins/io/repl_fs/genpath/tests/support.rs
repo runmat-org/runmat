@@ -4,7 +4,9 @@ use std::path::Path;
 use runmat_value::Value;
 
 pub(super) fn call(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    futures::executor::block_on(super::super::execute::run(args))
+    futures::executor::block_on(super::super::execute::run(
+        crate::builtins::common::test_support::builtin_arguments(args),
+    ))
 }
 
 pub(super) fn text(value: Value) -> String {

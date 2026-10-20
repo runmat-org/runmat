@@ -106,7 +106,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 async fn sin_builtin(
     runtime: Option<RuntimeContext>,
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<RootedValue> {
     let _inputs = RootedValueLease::for_values(std::iter::once(&value).chain(rest.iter()))
         .map_err(|cause| cause.into_runtime_error())?;
@@ -115,9 +115,9 @@ async fn sin_builtin(
         &runmat_builtins::SIN_ERROR_TOO_MANY_OUTPUTS,
         "sin",
     )?;
-    let output = parse_output_template(&rest)?;
+    let output = parse_output_template(rest.view())?;
     let output = admit_output_template(output)?;
-    ensure_sin_extensions(&value, &rest).await?;
+    ensure_sin_extensions(&value, rest.view()).await?;
     if let Some(symbolic) = symbolic_function(&value, SymbolicFunction::Sin) {
         let symbolic = RootedValue::new(symbolic).map_err(|cause| cause.into_runtime_error())?;
         let output = apply_output_template(symbolic.value().clone(), &output, &[]).await?;
@@ -173,7 +173,10 @@ async fn sin_admitted(value: Value, protected: Vec<GpuTensorHandle>) -> BuiltinR
     RootedValue::new(base).map_err(|cause| cause.into_runtime_error())
 }
 
-async fn ensure_sin_extensions(value: &Value, rest: &[Value]) -> BuiltinResult<()> {
+async fn ensure_sin_extensions(
+    value: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     crate::builtins::common::validation::ensure_runmat_real_integer_f64_boundary(
         value,
         &SIN_INTEGER_INPUT_EXTENSION,
@@ -335,7 +338,7 @@ fn sin_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
 
 fn sin_char_array(ca: CharArray) -> BuiltinResult<Value> {
     let data = ca
-        .data
+        .data()
         .iter()
         .map(|&ch| (ch as u32 as f64).sin())
         .collect::<Vec<_>>();
@@ -397,7 +400,12 @@ pub(crate) mod tests {
     #[test]
     fn sin_scalar() {
         let value = Value::Num(std::f64::consts::PI / 2.0);
-        let result = block_on(sin_builtin(None, value, Vec::new())).expect("sin");
+        let result = block_on(sin_builtin(
+            None,
+            value,
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect("sin");
         match result.value() {
             Value::Num(v) => assert!((v - 1.0).abs() < 1e-12),
             other => panic!("expected scalar result, got {other:?}"),
@@ -410,7 +418,7 @@ pub(crate) mod tests {
         let scalar = block_on(sin_builtin(
             None,
             Value::Tensor(Tensor::new(vec![0.0], Vec::new()).unwrap()),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect("rank-zero sin");
         assert_eq!(scalar.value(), &Value::Num(0.0));
@@ -418,7 +426,7 @@ pub(crate) mod tests {
         let vector = block_on(sin_builtin(
             None,
             Value::Tensor(Tensor::new(vec![0.0, 0.0], vec![2]).unwrap()),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect("rank-one sin");
         let Value::Tensor(vector) = vector.value() else {
@@ -432,7 +440,12 @@ pub(crate) mod tests {
     #[test]
     fn sin_tensor_elements() {
         let tensor = Tensor::new(vec![0.0, std::f64::consts::PI], vec![2, 1]).unwrap();
-        let result = block_on(sin_builtin(None, Value::Tensor(tensor), Vec::new())).expect("sin");
+        let result = block_on(sin_builtin(
+            None,
+            Value::Tensor(tensor),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect("sin");
         match result.value() {
             Value::Tensor(t) => {
                 assert_eq!(t.shape(), &[2, 1]);
@@ -448,7 +461,12 @@ pub(crate) mod tests {
     fn sin_preserves_single_tensor_storage() {
         let tensor = Tensor::from_f32(vec![0.0, std::f32::consts::FRAC_PI_2], vec![2, 1])
             .expect("single tensor");
-        let result = block_on(sin_builtin(None, Value::Tensor(tensor), Vec::new())).expect("sin");
+        let result = block_on(sin_builtin(
+            None,
+            Value::Tensor(tensor),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect("sin");
         let Value::Tensor(output) = result.value() else {
             panic!("expected tensor result, got {result:?}");
         };
@@ -465,7 +483,12 @@ pub(crate) mod tests {
             Tensor::new_integer(runmat_value::IntegerStorage::I16(vec![0, 1, 2]), vec![3, 1])
                 .expect("integer tensor");
 
-        let result = block_on(sin_builtin(None, Value::Tensor(tensor), Vec::new())).expect("sin");
+        let result = block_on(sin_builtin(
+            None,
+            Value::Tensor(tensor),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect("sin");
         match result.value() {
             Value::Tensor(out) => {
                 assert_eq!(out.shape(), &[3, 1]);
@@ -504,7 +527,12 @@ pub(crate) mod tests {
     fn sin_int_value_promotes() {
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let value = Value::Int(IntValue::I32(1));
-        let result = block_on(sin_builtin(None, value, Vec::new())).expect("sin");
+        let result = block_on(sin_builtin(
+            None,
+            value,
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect("sin");
         match result.value() {
             Value::Num(v) => assert!((v - 1.0_f64.sin()).abs() < 1e-12),
             other => panic!("expected scalar result, got {other:?}"),
@@ -514,8 +542,12 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sin_complex_scalar() {
-        let result =
-            block_on(sin_builtin(None, Value::Complex(1.0, 2.0), Vec::new())).expect("sin");
+        let result = block_on(sin_builtin(
+            None,
+            Value::Complex(1.0, 2.0),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect("sin");
         match result.value() {
             Value::Complex(re, im) => {
                 assert!((re - (1.0f64.sin() * 2.0f64.cosh())).abs() < 1e-12);
@@ -533,7 +565,7 @@ pub(crate) mod tests {
         let result = block_on(sin_builtin(
             None,
             Value::ComplexTensor(input.clone()),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect("sin");
         let Value::ComplexTensor(output) = result.value() else {
@@ -552,7 +584,12 @@ pub(crate) mod tests {
     fn sin_char_array_roundtrip() {
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let chars = CharArray::new("abc".chars().collect(), 1, 3).unwrap();
-        let result = block_on(sin_builtin(None, Value::CharArray(chars), Vec::new())).expect("sin");
+        let result = block_on(sin_builtin(
+            None,
+            Value::CharArray(chars),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect("sin");
         match result.value() {
             Value::Tensor(t) => {
                 assert_eq!(t.shape(), &[1, 3]);
@@ -578,7 +615,7 @@ pub(crate) mod tests {
             let result = block_on(sin_builtin(
                 Some(provider_context()),
                 Value::GpuTensor(handle),
-                Vec::new(),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
             ))
             .expect("sin");
             let gathered = test_support::gather(result.value().clone()).expect("gather");
@@ -594,7 +631,7 @@ pub(crate) mod tests {
         let err = block_on(sin_builtin(
             None,
             Value::Num(1.0),
-            vec![Value::from("like")],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from("like")]),
         ))
         .expect_err("expected error");
         assert_eq!(err.identifier(), SIN_ERROR_INVALID_OPTION.identifier);
@@ -609,7 +646,10 @@ pub(crate) mod tests {
         let result = block_on(sin_builtin(
             None,
             Value::Num(1.0),
-            vec![Value::from("like"), Value::Complex(0.0, 1.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("like"),
+                Value::Complex(0.0, 1.0),
+            ]),
         ))
         .expect("sin");
         match result.value() {
@@ -630,7 +670,10 @@ pub(crate) mod tests {
         let result = block_on(sin_builtin(
             None,
             Value::Tensor(input),
-            vec![Value::from("like"), Value::Complex(0.0, 1.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("like"),
+                Value::Complex(0.0, 1.0),
+            ]),
         ))
         .expect("sin");
         let Value::ComplexTensor(output) = result.value() else {
@@ -657,7 +700,10 @@ pub(crate) mod tests {
             let result = block_on(sin_builtin(
                 Some(provider_context()),
                 Value::Tensor(tensor.clone()),
-                vec![Value::from("like"), Value::GpuTensor(proto.clone())],
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::from("like"),
+                    Value::GpuTensor(proto.clone()),
+                ]),
             ))
             .expect("sin");
             match result.value() {
@@ -685,7 +731,10 @@ pub(crate) mod tests {
             let result = block_on(sin_builtin(
                 Some(provider_context()),
                 Value::Tensor(input),
-                vec![Value::from("like"), Value::GpuTensor(prototype)],
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::from("like"),
+                    Value::GpuTensor(prototype),
+                ]),
             ))
             .expect("sin");
             let Value::GpuTensor(output) = result.value() else {
@@ -715,7 +764,7 @@ pub(crate) mod tests {
             let result = block_on(sin_builtin(
                 Some(provider_context()),
                 Value::GpuTensor(handle),
-                Vec::new(),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
             ))
             .expect("sin");
             let out = match result.value() {
@@ -755,7 +804,10 @@ pub(crate) mod tests {
             let result = block_on(sin_builtin(
                 Some(provider_context()),
                 Value::Tensor(input.clone()),
-                vec![Value::from("like"), Value::GpuTensor(proto)],
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::from("like"),
+                    Value::GpuTensor(proto),
+                ]),
             ))
             .expect("sin");
             let Value::GpuTensor(handle) = result.value() else {
@@ -796,7 +848,10 @@ pub(crate) mod tests {
             let result = block_on(sin_builtin(
                 Some(provider_context()),
                 Value::GpuTensor(input_handle),
-                vec![Value::from("like"), Value::GpuTensor(proto)],
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::from("like"),
+                    Value::GpuTensor(proto),
+                ]),
             ))
             .expect("sin");
             let Value::GpuTensor(handle) = result.value() else {
@@ -835,7 +890,10 @@ pub(crate) mod tests {
             let result = block_on(sin_builtin(
                 Some(provider_context()),
                 Value::GpuTensor(handle),
-                vec![Value::from("like"), Value::Num(0.0)],
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::from("like"),
+                    Value::Num(0.0),
+                ]),
             ))
             .expect("sin");
             match result.value() {
@@ -858,7 +916,11 @@ pub(crate) mod tests {
         let err = block_on(sin_builtin(
             None,
             Value::Num(0.0),
-            vec![Value::from("like"), Value::Num(0.0), Value::Num(1.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("like"),
+                Value::Num(0.0),
+                Value::Num(1.0),
+            ]),
         ))
         .expect_err("expected error");
         let message = error_message(err);
@@ -873,7 +935,10 @@ pub(crate) mod tests {
         let result = block_on(sin_builtin(
             None,
             Value::Tensor(tensor.clone()),
-            vec![Value::from("LIKE"), Value::Num(0.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("LIKE"),
+                Value::Num(0.0),
+            ]),
         ))
         .expect("sin");
         match result.value() {
@@ -895,7 +960,10 @@ pub(crate) mod tests {
         let result = block_on(sin_builtin(
             None,
             Value::Num(0.0),
-            vec![Value::CharArray(keyword), Value::Num(0.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::CharArray(keyword),
+                Value::Num(0.0),
+            ]),
         ))
         .expect("sin");
         match result.value() {
@@ -946,7 +1014,10 @@ pub(crate) mod tests {
         let result = block_on(sin_builtin(
             Some(provider_context()),
             Value::Tensor(single),
-            vec![Value::from("like"), Value::GpuTensor(prototype)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("like"),
+                Value::GpuTensor(prototype),
+            ]),
         ))
         .expect("single WGPU sin");
         let Value::GpuTensor(result) = result.value() else {

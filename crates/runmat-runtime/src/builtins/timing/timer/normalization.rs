@@ -80,7 +80,7 @@ fn normalize_callback(value: Value, name: &str) -> BuiltinResult<Value> {
         | Value::BoundFunctionHandle(_)
         | Value::Closure(_) => Ok(value),
         Value::Cell(ref cell)
-            if cell.data.is_empty() || cell.data.first().is_some_and(is_callback_function) =>
+            if cell.data().is_empty() || cell.data().first().is_some_and(is_callback_function) =>
         {
             Ok(value)
         }
@@ -125,7 +125,7 @@ pub(super) fn value_to_string(value: &Value) -> BuiltinResult<runmat_value::Utf8
     match value {
         Value::String(text) => Ok(text.clone()),
         Value::CharArray(chars) if chars.rows == 1 => {
-            Ok(chars.data.iter().collect::<String>().into())
+            Ok(chars.data().iter().collect::<String>().into())
         }
         other => Err(timer_error(
             &TIMER_ERROR_INVALID_INPUT,

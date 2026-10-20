@@ -17,7 +17,10 @@ fn resident_integer_controls_do_not_round_through_binary64() {
             assert_eq!(k, usize::MAX);
             let args = futures::executor::block_on(parse_topk_args(
                 kind,
-                &[Value::Num(1.), Value::GpuTensor(handle.clone())],
+                crate::call::FunctionArgumentView::from_slice(&[
+                    Value::Num(1.),
+                    Value::GpuTensor(handle.clone()),
+                ]),
             ))
             .unwrap();
             assert_eq!(args.dim, Some(usize::MAX));

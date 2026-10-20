@@ -77,7 +77,11 @@ struct ParsedArgs {
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::ml::lscov"
 )]
-async fn lscov_builtin(a: Value, b: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn lscov_builtin(
+    a: Value,
+    b: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if rest.len() > 2 {
         return Err(invalid("lscov: accepts at most four input arguments"));
     }

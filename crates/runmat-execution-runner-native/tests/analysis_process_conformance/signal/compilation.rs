@@ -42,6 +42,7 @@ pub(super) async fn compile(source: &str) -> CompiledSignalFixture {
     let mut session = runmat_core::RunMatSession::with_options(false, false).unwrap();
     session
         .install_project_handoff(runmat_package::FrozenProjectHandoff::new(project.clone()))
+        .await
         .unwrap();
     let unit = session
         .compile_executable_unit(

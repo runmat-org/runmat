@@ -220,7 +220,9 @@ impl ResourceAccountingSummary {
                 .checked_add(interval.usage.relay_bytes)
                 .ok_or_else(|| summary_error("relay overflowed"))?;
             for accelerator in &interval.usage.accelerator_millis {
-                let total = accelerator_millis.entry(usage_key(accelerator)).or_default();
+                let total = accelerator_millis
+                    .entry(usage_key(accelerator))
+                    .or_default();
                 *total = total
                     .checked_add(accelerator.device_millis)
                     .ok_or_else(|| summary_error("accelerator time overflowed"))?;

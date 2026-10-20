@@ -14,13 +14,19 @@ pub(super) struct InputPlan {
 
 impl InputPlan {
     pub(super) async fn prepare(
-        inputs: Vec<Value>,
+        context: Option<&crate::context::RuntimeContext>,
+        inputs: &crate::call::BuiltinArguments,
         has_provider_input: bool,
     ) -> BuiltinResult<Self> {
         let mut prepared = Vec::with_capacity(inputs.len());
         for value in inputs {
-            validate_input(&value)?;
-            let data = ArrayData::from_value(gather_if_needed_async(&value).await?)?;
+            validate_input(value)?;
+            let gather = gather_if_needed_async(value);
+            let host = match context {
+                Some(context) => context.scope(gather).await?,
+                None => gather.await?,
+            };
+            let data = ArrayData::from_value(host)?;
             let shape = data.shape_vec();
             let strides = broadcast::compute_strides(&shape);
             prepared.push(ArrayInput {

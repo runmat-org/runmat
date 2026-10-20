@@ -27,7 +27,7 @@ fn parse_filter_cell(
     cell: &CellArray,
     invalid_argument: ErrorMapper,
 ) -> BuiltinResult<Vec<OpenFileDialogFilter>> {
-    if cell.data.is_empty() {
+    if cell.data().is_empty() {
         return Ok(default_filters());
     }
     if crate::builtins::common::shape::effective_rank(&cell.shape) > 2
@@ -92,10 +92,10 @@ pub(crate) fn try_scalar_text(value: &Value) -> Option<String> {
             if chars.rows == 1
                 && crate::builtins::common::shape::effective_rank(&chars.shape) <= 2 =>
         {
-            Some(chars.data.iter().collect())
+            Some(chars.data().iter().collect())
         }
-        Value::StringArray(array) if array.data.len() == 1 => {
-            Some(array.data[0].as_str().to_owned())
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Some(array.data()[0].as_str().to_owned())
         }
         _ => None,
     }

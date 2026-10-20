@@ -15,8 +15,7 @@ use runmat_builtins::{
 use runmat_filesystem::FsPublicationDisposition;
 use runmat_macros::runtime_builtin;
 use runmat_value::{
-    CellArray, CharArray, IntValue, LogicalArray, SparseTensor, StringArray, StructValue, Tensor,
-    Value,
+    CellArray, CharArray, IntValue, LogicalArray, SparseTensor, StringArray, Tensor, Value,
 };
 
 use crate::builtins::common::fs::expand_user_path;
@@ -51,7 +50,7 @@ async fn xlswrite_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     filename: Value,
     data: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     if matches!(crate::output_count::current_output_count(), Some(n) if n > 2) {
         return Err(xlswrite_error_with(
@@ -120,11 +119,11 @@ async fn write_spreadsheet(
     runtime: Option<&crate::context::RuntimeContext>,
     filename: Value,
     data: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<usize> {
     let mut cooperation = TabularCooperation::new(runtime, BUILTIN_NAME);
     let path = resolve_path(&filename)?;
-    XlsWriteRequest::preflight_host_arguments(&rest)?;
+    XlsWriteRequest::preflight_host_arguments(rest.view())?;
     XlsTable::preflight_host_known(&data, &mut cooperation).await?;
     let owner = TabularFsOwner::capture(Some(&path)).map_err(|source| {
         xlswrite_error_with_source(
@@ -155,7 +154,7 @@ async fn write_spreadsheet(
         data
     };
     let args = gather_arguments(runtime, &mut cooperation, &rest).await?;
-    let request = XlsWriteRequest::parse(&args)?;
+    let request = XlsWriteRequest::parse(args.view())?;
     let table =
         XlsTable::from_value_cooperative(data_value, runtime, &mut cooperation, &selected).await?;
     let lock = await_io(
@@ -216,17 +215,17 @@ async fn write_spreadsheet(
 async fn gather_arguments(
     runtime: Option<&crate::context::RuntimeContext>,
     cooperation: &mut TabularCooperation<'_>,
-    args: &[Value],
-) -> BuiltinResult<Vec<Value>> {
-    let mut gathered = Vec::with_capacity(args.len());
-    for value in args {
-        gathered.push(
-            await_io(runtime, BUILTIN_NAME, gather_if_needed_async(value))
+    args: &crate::call::BuiltinArguments,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    let gathered = args
+        .try_map_preserving_roots_async(args.len(), runtime, async |index| {
+            let value = await_io(runtime, BUILTIN_NAME, gather_if_needed_async(&args[index]))
                 .await?
-                .map_err(map_control_flow)?,
-        );
-        cooperation.completed(0).await?;
-    }
+                .map_err(map_control_flow)?;
+            cooperation.completed(0).await?;
+            Ok(value)
+        })
+        .await?;
     Ok(gathered)
 }
 
@@ -245,7 +244,7 @@ fn status_outputs(success: bool, err: Option<&RuntimeError>) -> Value {
 }
 
 fn message_value(err: Option<&RuntimeError>) -> Value {
-    let mut message = StructValue::new();
+    let mut message = runmat_value::UnboundedStructValueBuilder::new();
     message.insert(
         "message",
         Value::string(err.map(|e| e.message().to_string()).unwrap_or_default()),
@@ -258,7 +257,7 @@ fn message_value(err: Option<&RuntimeError>) -> Value {
                 .to_string(),
         ),
     );
-    Value::Struct(message)
+    Value::Struct(message.finish())
 }
 
 #[path = "xlswrite/controls.rs"]

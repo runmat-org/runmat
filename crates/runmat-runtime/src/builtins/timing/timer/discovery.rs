@@ -48,7 +48,7 @@ fn normalize_find_value(value: Value) -> Value {
     }
     match value {
         Value::CharArray(chars) if chars.rows == 1 => {
-            Value::string(chars.data.iter().collect::<String>())
+            Value::string(chars.data().iter().collect::<String>())
         }
         other => other,
     }

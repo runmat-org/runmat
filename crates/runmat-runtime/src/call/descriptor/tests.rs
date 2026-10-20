@@ -9,6 +9,253 @@ thread_local! {
 
 struct FailingBuiltin;
 
+thread_local! {
+    static CAPTURE_POINTERS: Cell<[usize; 4]> = const { Cell::new([0; 4]) };
+    static CAPTURE_READY: Cell<bool> = const { Cell::new(false) };
+    static CAPTURE_DENIED: Cell<bool> = const { Cell::new(false) };
+    static CAPTURE_EFFECTS: Cell<usize> = const { Cell::new(0) };
+}
+
+struct CapturedBuiltin;
+impl RuntimeBuiltinService for CapturedBuiltin {
+    fn bindings_by_name(&self, name: &str) -> Vec<crate::builtin::RuntimeBuiltinBinding> {
+        if name != "horzcat" {
+            return Vec::new();
+        }
+        let entry = runmat_builtins::builtin_catalog_primary_entry_by_name(name).unwrap();
+        vec![crate::builtin::RuntimeBuiltinBinding::new(
+            runmat_builtins::BuiltinBindingIdentity {
+                builtin: entry.identity,
+                variant: "default",
+            },
+            captured_builtin,
+        )
+        .with_continuation_layout(|| crate::builtin::continuation_layout_for(captured_body))]
+    }
+}
+fn captured_builtin(
+    invocation: crate::builtin::RuntimeBuiltinInvocation<'_>,
+) -> crate::builtin::RuntimeBuiltinFuture {
+    let input = match invocation.into_continuation_input() {
+        Ok(input) => input,
+        Err(error) => return Box::pin(std::future::ready(Err(error))),
+    };
+    let runtime = input.context.clone();
+    crate::builtin::admitted_builtin_future_with(runtime, "horzcat", move |_| captured_body(input))
+}
+async fn captured_body(
+    input: crate::builtin::BuiltinContinuationInput,
+) -> Result<crate::execution::RootedValueSequence, crate::RuntimeError> {
+    let original = input.args.fork().into_function_arguments();
+    assert_eq!(original.capture_count(), 1);
+    assert_eq!(original.supplied_count(), 1);
+    assert_eq!(original.supplied(), &[Value::Num(73.)]);
+    let Value::Object(object) = &original.captures()[0] else {
+        panic!("original object capture")
+    };
+    let Value::Struct(record) = object.property("record").unwrap() else {
+        panic!("nested structure")
+    };
+    let Value::String(text) = record.fields.get("text").unwrap() else {
+        panic!("nested text")
+    };
+    let Value::Tensor(tensor) = record.fields.get("tensor").unwrap() else {
+        panic!("nested tensor")
+    };
+    CAPTURE_POINTERS.with(|pointers| {
+        assert_eq!(
+            pointers.get(),
+            [
+                object.properties().entries().as_ptr() as usize,
+                record.fields.entries().as_ptr() as usize,
+                text.as_str().as_ptr() as usize,
+                tensor.as_f64_slice().unwrap().as_ptr() as usize,
+            ]
+        )
+    });
+    // Both success and denial exercise the real final-slot admission factory.
+    // Denial exceeds this test host's finite capacity before a callback effect.
+    let count = if CAPTURE_DENIED.with(Cell::get) {
+        1 << 20
+    } else {
+        input.args.len()
+    };
+    let headers = input.args.fork().try_map_preserving_roots(
+        count,
+        input.context.as_ref(),
+        |index, source| Ok(source[index % source.len()].clone()),
+    )?;
+    CAPTURE_EFFECTS.with(|effects| effects.set(effects.get() + 1));
+    std::future::poll_fn(|_| {
+        if CAPTURE_READY.with(Cell::get) {
+            std::task::Poll::Ready(())
+        } else {
+            std::task::Poll::Pending
+        }
+    })
+    .await;
+    assert_eq!(headers.len(), 2);
+    Ok(crate::execution::RootedValueSequence::empty())
+}
+
+#[test]
+fn bounded_captured_builtin_preserves_original_generations_and_pending_roots() {
+    use crate::context::host_allocation::HostAllocationError;
+    use crate::context::{
+        host_effect::{HostEffectAllocationError, ManagedHostEffectLedger},
+        ParallelCapability, RuntimeParallelResources, RuntimeParallelService,
+    };
+    use std::{
+        future::Future,
+        task::{Context, Poll},
+    };
+    struct Parallel(ManagedHostEffectLedger);
+    impl RuntimeParallelService for Parallel {
+        fn supports(&self, _: ParallelCapability) -> bool {
+            false
+        }
+        fn placement_resources(&self) -> RuntimeParallelResources {
+            let snapshot = self.0.snapshot();
+            RuntimeParallelResources {
+                cpu_millicores_available: 1000,
+                memory_available_bytes: Some(snapshot.free_bytes()),
+                epoch: snapshot.epoch,
+            }
+        }
+        fn managed_host_effect_ledger(&self) -> Option<ManagedHostEffectLedger> {
+            Some(self.0.clone())
+        }
+    }
+    struct Resolver;
+    impl FunctionNameResolver for Resolver {
+        fn resolve_function(&self, _: &str) -> Option<runmat_types::FunctionId> {
+            None
+        }
+    }
+    for dynamic in [false, true] {
+        for outcome in ["complete", "drop", "deny"] {
+            runmat_gc::gc_test_context(|| {
+                CAPTURE_READY.with(|ready| ready.set(false));
+                CAPTURE_DENIED.with(|denied| denied.set(outcome == "deny"));
+                CAPTURE_EFFECTS.with(|effects| effects.set(0));
+                let ledger = ManagedHostEffectLedger::new_with_epoch(1 << 20, 1);
+                let runtime =
+                    RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+                        .with_service_ports(
+                            RuntimeServicePorts::default()
+                                .with_parallel(Rc::new(Parallel(ledger.clone())))
+                                .with_builtin(Rc::new(CapturedBuiltin)),
+                        );
+                let root = runmat_gc::gc_allocate_rooted(Value::Num(19.)).unwrap();
+                let handle = root.handle();
+                let tensor = runmat_value::Tensor::new(vec![2., 3., 5.], vec![1, 3]).unwrap();
+                let mut record = runmat_value::UnboundedStructValueBuilder::new();
+                record.insert("text", Value::string("original captured text"));
+                record.insert("tensor", Value::Tensor(tensor));
+                record.insert(
+                    "handle",
+                    Value::HandleObject(runmat_value::HandleRef {
+                        class_name: "CapturedBuiltinFixture".into(),
+                        target: handle,
+                        valid: true,
+                    }),
+                );
+                let record = record.finish();
+                let mut object =
+                    runmat_value::UnboundedObjectBuilder::new("CapturedBuiltinFixture");
+                object.insert("record".into(), Value::Struct(record));
+                let object = object.finish();
+                let Value::Struct(record) = object.property("record").unwrap() else {
+                    unreachable!()
+                };
+                let Value::String(text) = record.fields.get("text").unwrap() else {
+                    unreachable!()
+                };
+                let Value::Tensor(tensor) = record.fields.get("tensor").unwrap() else {
+                    unreachable!()
+                };
+                CAPTURE_POINTERS.with(|pointers| {
+                    pointers.set([
+                        object.properties().entries().as_ptr() as usize,
+                        record.fields.entries().as_ptr() as usize,
+                        text.as_str().as_ptr() as usize,
+                        tensor.as_f64_slice().unwrap().as_ptr() as usize,
+                    ])
+                });
+                let closure = runmat_value::Closure::new(
+                    "horzcat".into(),
+                    None,
+                    runmat_types::FunctionSourceRole::Anonymous,
+                    None,
+                    vec![Value::Object(object)],
+                    None,
+                );
+                let mut descriptor = CallableDescriptor::from_feval_value(
+                    Value::Closure(closure),
+                    vec![Value::Num(73.)],
+                    0,
+                    &Resolver,
+                );
+                let CallableTarget::CapturedResolved {
+                    identity,
+                    fallback_policy,
+                    ..
+                } = &mut descriptor.target
+                else {
+                    panic!("captured descriptor")
+                };
+                assert!(matches!(identity, CallableIdentity::Builtin(_)));
+                if dynamic {
+                    // Exercise semantic Continue on the same selected capture
+                    // generation, not the new-callee normalization adapter.
+                    *identity =
+                        CallableIdentity::DynamicName(runmat_types::SymbolName("horzcat".into()));
+                    *fallback_policy = CallableFallbackPolicy::RuntimeNameResolution;
+                }
+                let mut future =
+                    Box::pin(execute_callable_descriptor_in_context(&runtime, descriptor));
+                root.unroot().unwrap();
+                runmat_gc::gc_collect_major().unwrap();
+                assert!(runmat_gc::gc_clone_value(&handle).is_ok());
+                let mut context = Context::from_waker(futures::task::noop_waker_ref());
+                let polled = future.as_mut().poll(&mut context);
+                if outcome == "deny" {
+                    let Poll::Ready(Err(error)) = polled else {
+                        panic!("final headers must be denied before effect")
+                    };
+                    assert_eq!(
+                        error
+                            .source
+                            .as_deref()
+                            .and_then(|source| source.downcast_ref::<HostAllocationError>()),
+                        Some(&HostAllocationError::Resource(
+                            HostEffectAllocationError::ExceedsCapacity
+                        ))
+                    );
+                    CAPTURE_EFFECTS.with(|effects| assert_eq!(effects.get(), 0));
+                } else {
+                    assert!(polled.is_pending());
+                    CAPTURE_EFFECTS.with(|effects| assert_eq!(effects.get(), 1));
+                    runmat_gc::gc_collect_major().unwrap();
+                    assert!(runmat_gc::gc_clone_value(&handle).is_ok());
+                    assert!(ledger.snapshot().live_reserved_bytes > 0);
+                    if outcome == "complete" {
+                        CAPTURE_READY.with(|ready| ready.set(true));
+                        let Poll::Ready(Ok(outputs)) = future.as_mut().poll(&mut context) else {
+                            panic!("complete selected body")
+                        };
+                        assert!(outputs.value().is_empty());
+                    }
+                }
+                drop(future);
+                runmat_gc::gc_collect_major().unwrap();
+                assert!(runmat_gc::gc_clone_value(&handle).is_err());
+                assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+            });
+        }
+    }
+}
+
 impl RuntimeBuiltinService for FailingBuiltin {
     fn bindings_by_name(&self, name: &str) -> Vec<crate::builtin::RuntimeBuiltinBinding> {
         let Some(entry) = runmat_builtins::builtin_catalog_primary_entry_by_name(name) else {
@@ -34,6 +281,13 @@ impl RuntimeBuiltinService for FailingBuiltin {
 
 #[test]
 fn selected_named_fallback_error_is_not_absence_or_replayed() {
+    struct NoSemanticFunctions;
+    impl FunctionNameResolver for NoSemanticFunctions {
+        fn resolve_function(&self, _: &str) -> Option<runmat_types::FunctionId> {
+            None
+        }
+    }
+
     let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
         .with_service_ports(RuntimeServicePorts::default().with_builtin(Rc::new(FailingBuiltin)));
     let source = crate::source_context::lease_source_context_in_context(
@@ -72,6 +326,22 @@ fn selected_named_fallback_error_is_not_absence_or_replayed() {
             crate::runtime_error::RuntimeFailureOrigin::Unclassified
         );
         CALLS.with(|calls| assert_eq!(calls.get(), 1));
+
+        let callback = RepeatableCallable::select(
+            &runtime,
+            Value::function_handle("logical".into()),
+            &NoSemanticFunctions,
+        )
+        .expect("select the named builtin callback once");
+        for expected_calls in 2..=3 {
+            let arguments =
+                crate::execution::RootedValues::in_context(vec![Value::Num(1.0)], &runtime)
+                    .expect("root the next callback input");
+            let error = futures::executor::block_on(callback.invoke_rooted(&runtime, arguments, 1))
+                .expect_err("a selected callback error is not an unavailable function");
+            assert_eq!(error.identifier(), Some(identifier));
+            CALLS.with(|calls| assert_eq!(calls.get(), expected_calls));
+        }
     }
 }
 

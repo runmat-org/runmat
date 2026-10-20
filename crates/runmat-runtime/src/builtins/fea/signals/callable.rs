@@ -324,7 +324,10 @@ fn callable_signal<Q>(
     let mut interpolation = SignalInterpolation::Linear;
     let mut extrapolation = SignalExtrapolation::Reject;
     let mut seen = HashSet::new();
-    for pair in expect_name_value_tail(builtin, &args[4..])? {
+    for pair in expect_name_value_tail(
+        builtin,
+        crate::call::FunctionArgumentView::from_slice(&args[4..]),
+    )? {
         if !seen.insert(pair.key.clone()) {
             return Err(builtin_error(
                 builtin,
@@ -458,7 +461,7 @@ fn generator_arguments(
             "Arguments must be a cell array so each callable argument has an explicit boundary",
         ));
     };
-    cell.data
+    cell.data()
         .iter()
         .enumerate()
         .map(|(index, value)| generator_argument(builtin, index, value))
@@ -485,7 +488,7 @@ fn generator_argument(
         Value::Num(value) if value.is_finite() => GeneratorArgument::Real(*value),
         Value::String(value) => GeneratorArgument::Text(value.to_string()),
         Value::CharArray(value) if value.rows == 1 => {
-            GeneratorArgument::Text(value.data.iter().collect())
+            GeneratorArgument::Text(value.data().iter().collect())
         }
         Value::Tensor(_) => GeneratorArgument::RealVector(finite_numeric_vector(
             builtin,
@@ -551,13 +554,19 @@ mod tests {
             Value::Int(IntValue::U64(3)),
         ))
         .unwrap();
-        let callable = Value::Closure(Closure {
-            function_name: "anonymous#7".into(),
-            bound_function: Some(7),
-            captures: vec![Value::Tensor(
+        let callable = Value::Closure(Closure::new(
+            "anonymous#7".into(),
+            Some(crate::user_functions::test_support::exact_portable_binding(
+                7,
+                "fea callable capture fixture",
+            )),
+            runmat_types::FunctionSourceRole::Anonymous,
+            None,
+            vec![Value::Tensor(
                 Tensor::new_2d(vec![1.0, 2.0, 3.0], 3, 1).unwrap(),
             )],
-        });
+            None,
+        ));
         let arguments = Value::Cell(
             CellArray::new(
                 vec![
@@ -627,11 +636,17 @@ mod tests {
         .is_err());
         assert!(block_on(acceleration(vec![
             Value::String("base".into()),
-            Value::Closure(Closure {
-                function_name: "loads.pulse".into(),
-                bound_function: Some(8),
-                captures: vec![Value::ClassRef("mutable.SessionObject".into())],
-            }),
+            Value::Closure(Closure::new(
+                "loads.pulse".into(),
+                Some(crate::user_functions::test_support::exact_portable_binding(
+                    8,
+                    "fea rejected mutable capture fixture"
+                )),
+                runmat_types::FunctionSourceRole::Anonymous,
+                None,
+                vec![Value::ClassRef("mutable.SessionObject".into())],
+                None,
+            )),
             domain,
             sampling,
         ]))

@@ -51,7 +51,8 @@ pub(crate) struct NativeInvocation<'a> {
         runmat_types::ProgramPointId,
     )>,
     pub preferred_function: Option<&'a str>,
-    pub arguments: Vec<Value>,
+    pub arguments: runmat_runtime::call::BuiltinArguments,
+    pub lexical_environment: Option<runmat_value::LexicalEnvironment>,
     pub requested_outputs: usize,
     pub runtime: runmat_runtime::context::RuntimeContext,
     pub dynamic_admission: Option<runmat_vm::DynamicEvalAdmissionPort>,
@@ -68,6 +69,7 @@ pub(crate) async fn invoke(
         osr,
         preferred_function,
         arguments,
+        lexical_environment,
         requested_outputs,
         runtime,
         dynamic_admission,
@@ -86,7 +88,7 @@ pub(crate) async fn invoke(
         .transpose()?
         .unwrap_or(published.entrypoint);
     let selected_function = function;
-    let selected_body = runtime_functions.get_current(selected_function);
+    let selected_body = runtime_functions.get_current(function);
     let runtime = if selected_body.is_some_and(|body| {
         body.class_method_owner.as_ref().is_some_and(|owner| {
             owner.role == runmat_types::ClassMethodRole::Constructor && !owner.is_static
@@ -115,12 +117,7 @@ pub(crate) async fn invoke(
         let registry = Rc::clone(&registry);
         Rc::new(move |function| registry.exact_bound_binding(function))
     });
-    let native_functions = unit
-        .mir()
-        .bodies
-        .keys()
-        .copied()
-        .collect::<BTreeSet<_>>();
+    let native_functions = unit.mir().bodies.keys().copied().collect::<BTreeSet<_>>();
     let previous_invoker = user_functions::current_semantic_function_invoker();
     let nested_executor = Rc::clone(&published.executor);
     let nested_runtime = runtime.native_invocation_context().0;
@@ -469,11 +466,10 @@ pub(crate) async fn invoke(
                     ));
                 }
                 let runtime = isolated_procedure_runtime(runtime);
-                if unit.owns_callable(FunctionId(call.function))
-                {
-                    return invoke_vm_with_admission(
+                if unit.owns_callable(FunctionId(call.function)) {
+                    return invoke_vm_with_rooted_admission(
                         call.function,
-                        &call.arguments,
+                        call.arguments,
                         call.requested_outputs,
                         &registry,
                         runtime,
@@ -554,9 +550,11 @@ pub(crate) async fn invoke(
                     super::deopt::DeoptimizationRequest {
                         executor,
                         function,
-                        captures: call.captures,
                         lexical_environment: call.environment,
-                        arguments: call.arguments,
+                        inputs: super::deopt::Inputs::Source {
+                            captures: call.captures,
+                            arguments: call.arguments,
+                        },
                         requested_outputs: call.requested_outputs,
                         runtime,
                         dynamic_admission,
@@ -646,9 +644,8 @@ pub(crate) async fn invoke(
         super::deopt::DeoptimizationRequest {
             executor: published.executor,
             function,
-            captures: Vec::new(),
-            lexical_environment: None,
-            arguments,
+            lexical_environment,
+            inputs: super::deopt::Inputs::Retained(arguments.into_function_arguments()),
             requested_outputs,
             runtime,
             dynamic_admission,
@@ -679,39 +676,6 @@ pub(crate) async fn invoke(
         },
         |error| error.into_runtime_error(),
     )
-}
-
-async fn invoke_vm_with_admission(
-    function: usize,
-    arguments: &[Value],
-    requested_outputs: usize,
-    registry: &runmat_vm::FunctionRegistry,
-    runtime: runmat_runtime::context::RuntimeContext,
-    lexical_environment: Option<runmat_value::LexicalEnvironment>,
-    dynamic_admission: Option<runmat_vm::DynamicEvalAdmissionPort>,
-) -> Result<runmat_runtime::execution::RootedValueSequence, runmat_runtime::RuntimeError> {
-    if let Some(dynamic_admission) = dynamic_admission {
-        runmat_vm::invoke_semantic_function_value_with_dynamic_admission_in_context(
-            function,
-            arguments,
-            requested_outputs,
-            registry,
-            runtime,
-            lexical_environment,
-            dynamic_admission,
-        )
-        .await
-    } else {
-        runmat_vm::invoke_semantic_function_value_with_environment_in_context(
-            function,
-            arguments,
-            requested_outputs,
-            registry,
-            runtime,
-            lexical_environment,
-        )
-        .await
-    }
 }
 
 async fn invoke_vm_with_rooted_admission(

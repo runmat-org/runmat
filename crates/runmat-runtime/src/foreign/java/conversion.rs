@@ -36,7 +36,7 @@ pub(super) fn value_to_java(value: Value) -> Result<JavaValue, RuntimeError> {
         Value::StringArray(value) => Ok(JavaValue::Array {
             component: JavaParameterType::String,
             elements: value
-                .data
+                .data()
                 .iter()
                 .map(|value| JavaValue::String(value.as_str().to_owned()))
                 .collect(),
@@ -48,7 +48,7 @@ pub(super) fn value_to_java(value: Value) -> Result<JavaValue, RuntimeError> {
         Value::Cell(value) => Ok(JavaValue::Array {
             component: JavaParameterType::Object("java.lang.Object".into()),
             elements: value
-                .data
+                .data()
                 .iter()
                 .map(value_ref_to_java)
                 .collect::<Result<_, _>>()?,
@@ -83,7 +83,7 @@ pub(super) fn value_ref_to_java(value: &Value) -> Result<JavaValue, RuntimeError
         Value::StringArray(value) => Ok(JavaValue::Array {
             component: JavaParameterType::String,
             elements: value
-                .data
+                .data()
                 .iter()
                 .map(|value| JavaValue::String(value.as_str().to_owned()))
                 .collect(),
@@ -95,7 +95,7 @@ pub(super) fn value_ref_to_java(value: &Value) -> Result<JavaValue, RuntimeError
         Value::Cell(value) => Ok(JavaValue::Array {
             component: JavaParameterType::Object("java.lang.Object".into()),
             elements: value
-                .data
+                .data()
                 .iter()
                 .map(value_ref_to_java)
                 .collect::<Result<_, _>>()?,

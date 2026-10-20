@@ -122,12 +122,12 @@ pub(in crate::builtins::table) fn compare_table_cells(
         }
         Value::StringArray(array) => {
             let av = array
-                .data
+                .data()
                 .get(a)
                 .map(|text| text.as_str())
                 .unwrap_or_default();
             let bv = array
-                .data
+                .data()
                 .get(b)
                 .map(|text| text.as_str())
                 .unwrap_or_default();
@@ -250,7 +250,7 @@ pub(in crate::builtins::table) fn cell_group_atom(value: &Value, row: usize) -> 
                 .unwrap_or(GroupAtom::Missing)
         }
         Value::StringArray(array) => array
-            .data
+            .data()
             .get(row)
             .map(ToString::to_string)
             .map(text_group_atom)
@@ -486,7 +486,7 @@ pub(in crate::builtins::table) fn groupsummary_impl(
     table: Value,
     groupvars: Value,
     method: Value,
-    rest: Vec<Value>,
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<Value> {
     let object = into_table_object(table, "groupsummary")?;
     let names = table_variable_names_from_object(&object)?;
@@ -550,7 +550,7 @@ pub(in crate::builtins::table) fn groupsummary_impl(
             .filter(|name| {
                 table_variables(&object)
                     .ok()
-                    .and_then(|vars| vars.fields.get(*name).cloned())
+                    .and_then(|vars| vars.fields.get(name).cloned())
                     .map(|value| matches!(value, Value::Tensor(_)))
                     .unwrap_or(false)
             })
@@ -625,7 +625,7 @@ pub(in crate::builtins::table) fn cell_key_string(value: &Value, row: usize) -> 
                 .unwrap_or_default()
         }
         Value::StringArray(array) => array
-            .data
+            .data()
             .get(row)
             .map(ToString::to_string)
             .unwrap_or_default(),

@@ -18,8 +18,11 @@ fn numeric_path_mutation_decode_keeps_low_rank_and_empty_row_policy() {
         (vec![0, 0], Vec::new(), ""),
     ] {
         let value = Value::Tensor(runmat_value::Tensor::new(codes, shape).unwrap());
-        let Ok(tokens) = futures::executor::block_on(text::decode(vec![value], "addpath", policy))
-        else {
+        let Ok(tokens) = futures::executor::block_on(text::decode(
+            crate::builtins::common::test_support::builtin_arguments(vec![value]),
+            "addpath",
+            policy,
+        )) else {
             panic!("admitted numeric path row")
         };
         assert_eq!(tokens, vec![expected]);
@@ -30,7 +33,11 @@ fn numeric_path_mutation_decode_keeps_low_rank_and_empty_row_policy() {
     ] {
         let value = Value::Tensor(runmat_value::Tensor::new(codes, shape).unwrap());
         assert!(matches!(
-            futures::executor::block_on(text::decode(vec![value], "addpath", policy)),
+            futures::executor::block_on(text::decode(
+                crate::builtins::common::test_support::builtin_arguments(vec![value]),
+                "addpath",
+                policy
+            )),
             Err(DecodeError::InvalidInput)
         ));
     }
@@ -38,7 +45,9 @@ fn numeric_path_mutation_decode_keeps_low_rank_and_empty_row_policy() {
         crate::builtins::io::repl_fs::test_support::unregistered_numeric_allocation(vec![2]);
     assert!(matches!(
         futures::executor::block_on(text::decode(
-            vec![Value::GpuTensor(allocation.handle)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(
+                allocation.handle
+            )]),
             "addpath",
             policy,
         )),
@@ -55,7 +64,7 @@ fn rejects_missing_arguments_and_conflicting_positions() {
     );
     let directory = tempdir().expect("directory");
     let error = super::run(vec![
-        Value::String(directory.path().to_string_lossy().into_owned()),
+        Value::String(directory.path().to_string_lossy().into_owned().into()),
         Value::String("-begin".into()),
         Value::String("-end".into()),
     ])
@@ -73,7 +82,7 @@ fn failed_validation_leaves_the_path_unchanged() {
     let original = canonical(valid.path());
     crate::builtins::common::path_state::set_path_string(&original);
     let error = super::run(vec![
-        Value::String(valid.path().to_string_lossy().into_owned()),
+        Value::String(valid.path().to_string_lossy().into_owned().into()),
         Value::String("missing/path/for/addpath".into()),
     ])
     .expect_err("missing folder");
@@ -108,7 +117,7 @@ fn distinguishes_files_and_the_reserved_path_definition_name() {
     let _guard = PathGuard::new();
     let file = NamedTempFile::new().expect("file");
     let file_error = super::run(vec![Value::String(
-        file.path().to_string_lossy().into_owned(),
+        file.path().to_string_lossy().into_owned().into(),
     )])
     .expect_err("not a folder");
     assert_eq!(

@@ -1,5 +1,7 @@
 //! MATLAB-compatible `fliplr` builtin with GPU-aware semantics for RunMat.
 
+use crate::aggregate::structure::operations as struct_ops;
+
 use crate::builtins::array::shape::flip::{
     complex_tensor_into_value, flip_char_array_with, flip_complex_tensor_with, flip_gpu_with,
     flip_logical_array_with, flip_string_array_with, flip_tensor_with,
@@ -106,10 +108,9 @@ async fn fliplr_builtin(value: Value) -> crate::BuiltinResult<Value> {
             &FLIPLR_ERROR_UNSUPPORTED_INPUT,
         )),
         Value::Struct(structure) => Ok(Value::Struct(structure)),
-        Value::StructArray(array) => array
-            .flip(1)
+        Value::StructArray(array) => struct_ops::flip(array, 1)
             .map(Value::StructArray)
-            .map_err(|error| fliplr_error(error)),
+            .map_err(|error| struct_ops::remap(error, |message| fliplr_error(message))),
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
@@ -148,7 +149,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_value::{
         CharArray, IntegerComplexStorage, IntegerStorage, LogicalArray, StringArray, StructArray,
-        StructValue, Tensor, Value,
+        Tensor, Value,
     };
 
     #[test]
@@ -221,7 +222,7 @@ pub(crate) mod tests {
         let result = fliplr_builtin(Value::CharArray(chars)).expect("fliplr");
         match result {
             Value::CharArray(out) => {
-                let collected: String = out.data.iter().collect();
+                let collected: String = out.data().iter().collect();
                 assert_eq!(collected, "nurtam");
             }
             other => panic!("expected char array, got {other:?}"),
@@ -235,7 +236,7 @@ pub(crate) mod tests {
             StringArray::new(vec!["left".into(), "right".into()], vec![1, 2]).expect("strings");
         let result = fliplr_builtin(Value::StringArray(strings)).expect("fliplr");
         match result {
-            Value::StringArray(out) => assert_eq!(out.data, vec!["right", "left"]),
+            Value::StringArray(out) => assert_eq!(out.data(), vec!["right", "left"]),
             other => panic!("expected string array, got {other:?}"),
         }
     }
@@ -343,14 +344,16 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fliplr_preserves_scalar_and_reorders_struct_arrays() {
-        let mut first = StructValue::new();
+        let mut first = runmat_value::UnboundedStructValueBuilder::new();
         first.insert("value", Value::Num(1.0));
+        let first = first.finish();
         assert_eq!(
             fliplr_builtin(Value::Struct(first.clone())).unwrap(),
             Value::Struct(first.clone())
         );
-        let mut second = StructValue::new();
+        let mut second = runmat_value::UnboundedStructValueBuilder::new();
         second.insert("value", Value::Num(2.0));
+        let second = second.finish();
         let array = StructArray::new(vec![first, second], vec![1, 2]).unwrap();
         let Value::StructArray(output) = fliplr_builtin(Value::StructArray(array)).unwrap() else {
             panic!("expected structure array");

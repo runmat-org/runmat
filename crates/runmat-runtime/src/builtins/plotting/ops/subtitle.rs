@@ -4,7 +4,6 @@ use runmat_builtins::{
     SUBTITLE_ERROR_TOO_MANY_OUTPUTS,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::Value;
 
 use super::op_common::{annotation_error, map_figure_error, parse_text_command};
 use super::state::set_figure_subtitle_for_axes;
@@ -14,7 +13,7 @@ use super::state::set_figure_subtitle_for_axes;
     binding_variant = "default",
     builtin_path = "crate::builtins::plotting::subtitle"
 )]
-pub fn subtitle_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+pub fn subtitle_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<f64> {
     crate::output_count::validate_fixed_outputs(
         &SUBTITLE_DESCRIPTOR,
         &SUBTITLE_ERROR_TOO_MANY_OUTPUTS,
@@ -30,7 +29,7 @@ pub fn subtitle_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
             "subtitle",
         )?;
     }
-    let command = parse_text_command("subtitle", &args)
+    let command = parse_text_command("subtitle", args.view())
         .map_err(|error| annotation_error("subtitle", &SUBTITLE_ERROR_INVALID_ARGUMENT, error))?;
     let target = command.resolve_target();
     set_figure_subtitle_for_axes(target.0, target.1, &command.text, command.style).map_err(|err| {
@@ -78,7 +77,10 @@ mod tests {
     #[test]
     fn subtitle_returns_text_handle_and_updates_active_axes() {
         let _guard = setup_plot_tests();
-        let handle = subtitle_builtin(vec![Value::String("Slope = 2".into())]).unwrap();
+        let handle = subtitle_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::String("Slope = 2".into())],
+        ))
+        .unwrap();
         let (figure, axes, kind) =
             crate::builtins::plotting::state::decode_plot_object_handle(handle).unwrap();
         assert_eq!(figure, current_figure_handle());
@@ -110,16 +112,18 @@ mod tests {
             )
             .unwrap(),
         );
-        subtitle_builtin(vec![
-            Value::Num(ax),
-            lines,
-            Value::String("FontSize".into()),
-            Value::Num(13.0),
-            Value::String("FontWeight".into()),
-            Value::String("bold".into()),
-            Value::String("Visible".into()),
-            Value::Bool(false),
-        ])
+        subtitle_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![
+                Value::Num(ax),
+                lines,
+                Value::String("FontSize".into()),
+                Value::Num(13.0),
+                Value::String("FontWeight".into()),
+                Value::String("bold".into()),
+                Value::String("Visible".into()),
+                Value::Bool(false),
+            ],
+        ))
         .unwrap();
 
         let fig = clone_figure(current_figure_handle()).unwrap();
@@ -133,7 +137,10 @@ mod tests {
     #[test]
     fn get_axes_and_subtitle_handle_expose_subtitle() {
         let _guard = setup_plot_tests();
-        let handle = subtitle_builtin(vec![Value::String("Details".into())]).unwrap();
+        let handle = subtitle_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::String("Details".into())],
+        ))
+        .unwrap();
         let ax = crate::builtins::plotting::gca::gca_builtin(Vec::new()).unwrap();
 
         let subtitle_prop =
@@ -148,11 +155,13 @@ mod tests {
     #[test]
     fn subtitle_rejects_bad_properties() {
         let _guard = setup_plot_tests();
-        let err = subtitle_builtin(vec![
-            Value::String("Oops".into()),
-            Value::String("FontSize".into()),
-            Value::String("large".into()),
-        ])
+        let err = subtitle_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![
+                Value::String("Oops".into()),
+                Value::String("FontSize".into()),
+                Value::String("large".into()),
+            ],
+        ))
         .unwrap_err();
         assert!(err.message.contains("FontSize must be numeric"));
     }
@@ -160,11 +169,13 @@ mod tests {
     #[test]
     fn subtitle_accepts_documented_integer_font_size() {
         let _guard = setup_plot_tests();
-        let handle = subtitle_builtin(vec![
-            Value::String("Integer font size".into()),
-            Value::String("FontSize".into()),
-            Value::Int(IntValue::U16(14)),
-        ])
+        let handle = subtitle_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![
+                Value::String("Integer font size".into()),
+                Value::String("FontSize".into()),
+                Value::Int(IntValue::U16(14)),
+            ],
+        ))
         .expect("integer FontSize");
         let fig = clone_figure(current_figure_handle()).expect("figure");
         let (_, axes, _) =
@@ -193,10 +204,12 @@ mod tests {
                 .and_then(|metadata| metadata.subtitle.clone())
         });
         let strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let error = subtitle_builtin(vec![
-            Value::Int(IntValue::U64(axes_handle)),
-            Value::String("Blocked".into()),
-        ])
+        let error = subtitle_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![
+                Value::Int(IntValue::U64(axes_handle)),
+                Value::String("Blocked".into()),
+            ],
+        ))
         .expect_err("strict mode rejects typed integer axes aliases");
         assert_eq!(
             error.identifier(),
@@ -211,10 +224,12 @@ mod tests {
         drop(strict);
 
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-        let handle = subtitle_builtin(vec![
-            Value::Int(IntValue::U64(axes_handle)),
-            Value::String("Allowed".into()),
-        ])
+        let handle = subtitle_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![
+                Value::Int(IntValue::U64(axes_handle)),
+                Value::String("Allowed".into()),
+            ],
+        ))
         .expect("extension mode accepts a typed integer axes alias");
         assert!(handle.is_finite());
     }
@@ -224,13 +239,19 @@ mod tests {
 mod output_contract_tests {
     #[test]
     fn missing_required_input_uses_identity_diagnostic() {
-        let error = super::subtitle_builtin(vec![]).expect_err("missing annotation input");
+        let error = super::subtitle_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        )
+        .expect_err("missing annotation input");
         assert_eq!(error.identifier(), Some("RunMat:subtitle:InvalidArgument"));
     }
     #[test]
     fn excessive_outputs_reject_before_argument_or_graphics_effects() {
         let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
-        let error = super::subtitle_builtin(vec![]).expect_err("excess outputs");
+        let error = super::subtitle_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        )
+        .expect_err("excess outputs");
         assert_eq!(error.identifier(), Some("RunMat:subtitle:TooManyOutputs"));
     }
 }

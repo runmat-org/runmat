@@ -29,7 +29,9 @@ fn cancelled(
     let original = from_snapshot(
         &driver.snapshot(),
         &request,
-        Err("an arbitrary cancellation diagnostic".into()),
+        Err(TransferFailure::Execution(
+            "an arbitrary cancellation diagnostic".into(),
+        )),
     )
     .unwrap();
     let completion = TaskCompletion::new();
@@ -113,7 +115,12 @@ fn a_failed_task_diagnostic_cannot_impersonate_typed_cancellation() {
             },
         )))
         .unwrap();
-    let original = from_snapshot(&driver.snapshot(), &request, Err(message.into())).unwrap();
+    let original = from_snapshot(
+        &driver.snapshot(),
+        &request,
+        Err(TransferFailure::Execution(message.into())),
+    )
+    .unwrap();
     let completion = TaskCompletion::new();
     completion.complete(original, NativeCheckpointEvidence::Durable);
     let completion = completion.try_native_completion().unwrap();

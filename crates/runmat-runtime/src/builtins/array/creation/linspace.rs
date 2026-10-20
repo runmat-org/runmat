@@ -101,7 +101,7 @@ fn linspace_type(_args: &[Type], ctx: &ResolveContext) -> Type {
 async fn linspace_builtin(
     start: Value,
     stop: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(linspace_error(&LINSPACE_ERROR_ARG_COUNT));
@@ -713,7 +713,11 @@ pub(crate) mod tests {
         stop: Value,
         rest: Vec<Value>,
     ) -> crate::BuiltinResult<Value> {
-        block_on(super::linspace_builtin(start, stop, rest))
+        block_on(super::linspace_builtin(
+            start,
+            stop,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

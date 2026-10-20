@@ -4,8 +4,15 @@ use runmat_accelerate_api::{GpuTensorStorage, HostNumericDataView, HostNumericTe
 use runmat_value::{ComplexElement, ComplexTensor, NumericDType};
 
 fn pooling_network() -> crate::execution::RootedValue {
-    let input = block_on(sequence_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
-    let pooling = block_on(global_average_pooling_1d_layer_builtin(vec![])).unwrap();
+    let input = block_on(sequence_input_layer_builtin(
+        Value::Num(2.0),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap();
+    let pooling = block_on(global_average_pooling_1d_layer_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap();
     block_on(dlnetwork_builtin(vec![Value::Cell(
         CellArray::new(vec![input, pooling], 2, 1).unwrap(),
     )]))
@@ -21,6 +28,7 @@ fn formatted(data: Value) -> Value {
             ("Labels", Value::String("CBT".into())),
         ],
     )
+    .expect("fixture object")
 }
 
 fn predict(input: Value) -> Result<Value, crate::RuntimeError> {
@@ -55,16 +63,16 @@ fn public_complex_predict_preserves_precision_and_presents_raw_and_formatted_out
         let Value::Object(wrapped) = wrapped else {
             panic!("formatted dlarray output")
         };
-        let Some(Value::ComplexTensor(data)) = wrapped.properties.get("Data") else {
+        let Some(Value::ComplexTensor(data)) = wrapped.properties().get("Data") else {
             panic!("complex dlarray Data")
         };
-        assert!(wrapped.class_name.is(super::super::DLARRAY_CLASS));
+        assert!(wrapped.class_name().is(super::super::DLARRAY_CLASS));
         assert_eq!(
-            wrapped.properties.get("Format"),
+            wrapped.properties().get("Format"),
             Some(&Value::String("CB".into()))
         );
         assert_eq!(
-            wrapped.properties.get("Labels"),
+            wrapped.properties().get("Labels"),
             Some(&Value::String("CB".into()))
         );
         assert_eq!(raw.shape(), &[2, 2]);
@@ -143,7 +151,11 @@ fn public_complex_device_input_rejects_before_effects_even_for_host_compatible_t
                 let result = match caller {
                     super::super::NetworkCaller::Forward => {
                         let network = pooling_network();
-                        block_on(forward_builtin(network.value().clone(), input, vec![]))
+                        block_on(forward_builtin(
+                            network.value().clone(),
+                            input,
+                            crate::builtins::common::test_support::builtin_arguments(vec![]),
+                        ))
                     }
                     super::super::NetworkCaller::Predict => predict(input),
                 };

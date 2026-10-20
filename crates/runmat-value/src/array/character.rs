@@ -2,7 +2,7 @@ use super::*;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CharArray {
-    pub data: ExactArrayStorage<char>,
+    pub(crate) data: ExactArrayStorage<char>,
     /// Full MATLAB-visible shape vector. Character payloads retain their
     /// historical row-major layout within each 2-D page.
     pub shape: SharedShape,
@@ -83,6 +83,46 @@ impl CharArray {
 
     pub fn data(&self) -> &[char] {
         self.data.as_slice()
+    }
+    pub fn data_owner(&self) -> &ExactArrayStorage<char> {
+        &self.data
+    }
+    pub fn into_parts(self) -> (ExactArrayStorage<char>, SharedShape, usize, usize) {
+        (self.data, self.shape, self.rows, self.cols)
+    }
+    pub fn make_data_unique_unbounded(&mut self) -> Result<(), crate::ExactArrayMutationError> {
+        self.data.make_unique_unbounded()
+    }
+    /// Publish a borrowed-owner transformation without copying characters or
+    /// dimensions. Ordinary unpublished vectors acquire their original header.
+    pub fn from_shared_storage(
+        data: ExactArrayStorage<char>,
+        shape: SharedShape,
+    ) -> Result<Self, String> {
+        if total_len(&shape) != Some(data.len()) {
+            return Err("Character payload length does not match shape".into());
+        }
+        let data = if data.is_shallow_clone() {
+            data
+        } else {
+            let values = data
+                .try_into_owned()
+                .expect("unpublished character slots are unique")
+                .try_into_unbounded_vec()
+                .expect("unpublished character slots have no claim");
+            if values.capacity() == 0 {
+                ExactArrayStorage::empty()
+            } else {
+                ExactArrayStorage::shared_unbounded(values)
+            }
+        };
+        let (rows, cols) = shape_rows_cols(&shape);
+        Ok(Self {
+            data,
+            shape,
+            rows,
+            cols,
+        })
     }
 
     /// Mutate only a unique, fixed-length owner. Exact aliases refuse.

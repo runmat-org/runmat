@@ -56,7 +56,7 @@ fn pagefun_internal_error(message: impl Into<String>) -> RuntimeError {
 async fn pagefun_builtin(
     func: Value,
     first: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &PAGEFUN_DESCRIPTOR,
@@ -93,7 +93,11 @@ async fn pagefun_builtin(
     }
 }
 
-async fn pagefun_impl(func: Value, first: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn pagefun_impl(
+    func: Value,
+    first: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     let operation = PageOperation::from_callable(func)?;
     let mut operands = Vec::with_capacity(rest.len() + 1);
     operands.push(first);

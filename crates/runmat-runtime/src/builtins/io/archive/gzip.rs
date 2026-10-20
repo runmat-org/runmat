@@ -55,9 +55,11 @@ fn scalar_text(value: &Value, name: &str, arg: &str) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.as_str().to_owned()),
         Value::CharArray(array) if array.rows == 1 && effective_rank(&array.shape) <= 2 => {
-            Ok(array.data.iter().collect())
+            Ok(array.data().iter().collect())
         }
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].as_str().to_owned()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(array.data()[0].as_str().to_owned())
+        }
         _ => Err(archive_error(
             name,
             format!("{name}: {arg} must be a string scalar or character vector"),
@@ -75,12 +77,12 @@ fn path_from_value(value: &Value, name: &str, arg: &str) -> BuiltinResult<PathBu
 fn paths_from_value(value: &Value, name: &str, arg: &str) -> BuiltinResult<Vec<PathBuf>> {
     match value {
         Value::StringArray(array) => array
-            .data
+            .data()
             .iter()
             .map(|text| path_from_text(text, name))
             .collect(),
         Value::Cell(cell) => cell
-            .data
+            .data()
             .iter()
             .map(|value| path_from_value(value, name, arg))
             .collect(),
@@ -173,7 +175,7 @@ fn cellstr(paths: Vec<PathBuf>, name: &str) -> BuiltinResult<Value> {
 )]
 async fn gzip_builtin(
     context: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(&GZIP_DESCRIPTOR, &GZIP_ERROR_OUTPUTS, "gzip")?;
     if args.is_empty() || args.len() > 2 {
@@ -228,7 +230,7 @@ async fn gzip_one(
 )]
 async fn gunzip_builtin(
     context: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &GUNZIP_DESCRIPTOR,
@@ -273,12 +275,12 @@ enum GunzipSource {
 fn gunzip_sources_from_value(value: &Value) -> BuiltinResult<Vec<GunzipSource>> {
     match value {
         Value::StringArray(array) => array
-            .data
+            .data()
             .iter()
             .map(|text| parse_gunzip_source(text))
             .collect(),
         Value::Cell(cell) => cell
-            .data
+            .data()
             .iter()
             .map(|value| {
                 scalar_text(value, "gunzip", "filename").and_then(|text| parse_gunzip_source(&text))
@@ -413,7 +415,9 @@ mod tests {
         std::fs::write(&input, "hello").unwrap();
         run(gzip_builtin(
             None,
-            vec![Value::String(path_to_string(&input))],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                path_to_string(&input).into(),
+            )]),
         ))
         .unwrap();
         let gz = dir.join("data.txt.gz");
@@ -421,7 +425,9 @@ mod tests {
         std::fs::remove_file(&input).unwrap();
         run(gunzip_builtin(
             None,
-            vec![Value::String(path_to_string(&gz))],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                path_to_string(&gz).into(),
+            )]),
         ))
         .unwrap();
         assert_eq!(std::fs::read_to_string(&input).unwrap(), "hello");
@@ -443,11 +449,17 @@ mod tests {
             vec![2, 1],
         )
         .unwrap();
-        let value = run(gzip_builtin(None, vec![Value::StringArray(inputs)])).unwrap();
+        let value = run(gzip_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::StringArray(
+                inputs,
+            )]),
+        ))
+        .unwrap();
         let Value::Cell(files) = value else {
             panic!("expected cell output");
         };
-        assert_eq!(files.data.len(), 2);
+        assert_eq!(files.data().len(), 2);
         assert!(dir.join("a.txt.gz").exists());
         assert!(dir.join("b.txt.gz").exists());
         let _ = std::fs::remove_dir_all(dir);
@@ -466,24 +478,27 @@ mod tests {
         vfs::with_provider_override(std::sync::Arc::new(filesystem), || {
             let output = run(gzip_builtin(
                 None,
-                vec![
+                crate::builtins::common::test_support::builtin_arguments(vec![
                     Value::String("in/*.txt".into()),
                     Value::String("compressed".into()),
-                ],
+                ]),
             ))
             .unwrap();
             let Value::Cell(files) = output else {
                 panic!("expected cell paths")
             };
             let names: Vec<_> = files
-                .data
+                .data()
                 .iter()
                 .map(|value| scalar_text(value, "gzip", "output").unwrap())
                 .collect();
             assert_eq!(names, vec!["compressed/a.txt.gz", "compressed/b.txt.gz"]);
             run(gunzip_builtin(
                 None,
-                vec![Value::Cell(files), Value::String("restored".into())],
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Cell(files),
+                    Value::String("restored".into()),
+                ]),
             ))
             .unwrap();
             assert_eq!(
@@ -501,10 +516,10 @@ mod tests {
     fn invalid_output_folder_is_admitted_before_wildcard_filesystem_access() {
         let error = run(gzip_builtin(
             None,
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::String("/missing/gzip-admission/*.txt".into()),
                 Value::Num(1.0),
-            ],
+            ]),
         ))
         .unwrap_err();
         assert!(error.message().contains("outputfolder must be"), "{error}");
@@ -514,8 +529,20 @@ mod tests {
     fn requested_outputs_reject_before_invalid_input_or_provider_access() {
         let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         for (name, result) in [
-            ("gzip", run(gzip_builtin(None, vec![Value::Num(1.0)]))),
-            ("gunzip", run(gunzip_builtin(None, vec![Value::Num(1.0)]))),
+            (
+                "gzip",
+                run(gzip_builtin(
+                    None,
+                    crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
+                )),
+            ),
+            (
+                "gunzip",
+                run(gunzip_builtin(
+                    None,
+                    crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
+                )),
+            ),
         ] {
             assert_eq!(
                 result.unwrap_err().identifier(),

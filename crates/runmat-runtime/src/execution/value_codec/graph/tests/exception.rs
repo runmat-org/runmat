@@ -246,7 +246,14 @@ fn retired_local_diagnostic_does_not_admit_a_reused_numeric_source() {
             .diagnostic_source
             .as_ref()
             .is_some_and(crate::CallFrameDiagnosticSource::is_detached));
-        assert_eq!(rebuilt.stack, ["old_callback"]);
+        assert_eq!(
+            rebuilt
+                .stack
+                .iter()
+                .map(|frame| frame.as_str())
+                .collect::<Vec<_>>(),
+            ["old_callback"]
+        );
         assert_eq!(
             rebuilt
                 .original()
@@ -304,7 +311,14 @@ fn retired_local_diagnostic_does_not_admit_a_reused_numeric_source() {
         let Value::MException(spanless_rebuilt) = &spanless_rebuilt.values()[0] else {
             panic!("spanless reconstructed exception")
         };
-        assert_eq!(spanless_rebuilt.stack, ["old_callback"]);
+        assert_eq!(
+            spanless_rebuilt
+                .stack
+                .iter()
+                .map(|frame| frame.as_str())
+                .collect::<Vec<_>>(),
+            ["old_callback"]
+        );
         assert!(spanless_rebuilt
             .original()
             .expect("original error")

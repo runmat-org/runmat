@@ -12,7 +12,7 @@ use runmat_builtins::{
     TCPCLIENT_ZERO_PORT_EXTENSION as ZERO_PORT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{ForeignRef, IntValue, ObjectInstance, StructValue, Value};
+use runmat_value::{ForeignRef, IntValue, Value};
 
 use super::control::{
     canonicalize_byte_order, default_user_data, parse_port, parse_timeout_value, string_scalar,
@@ -69,8 +69,8 @@ pub(crate) async fn tcpclient_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     host: Value,
     port: Value,
-    rest: Vec<Value>,
-) -> crate::BuiltinResult<Value> {
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     if std::iter::once(&host)
         .chain(std::iter::once(&port))
         .chain(rest.iter())
@@ -82,7 +82,7 @@ pub(crate) async fn tcpclient_builtin(
         )?;
     }
     ensure_integer_extension(&port, &INTEGER_PORT_EXTENSION)?;
-    let prepared_options = preflight_name_value_extensions(&rest).await?;
+    let prepared_options = preflight_name_value_extensions(rest.view()).await?;
     let known_host = if matches!(&host, Value::GpuTensor(_)) {
         None
     } else {
@@ -154,13 +154,14 @@ pub(crate) async fn tcpclient_builtin(
             )
         })?;
     work.completed(0).await?;
-    Ok(build_tcpclient_object(
+    build_tcpclient_object(
+        runtime.as_ref(),
         endpoint.authority,
         &host_text,
         endpoint.peer_addr,
         endpoint.local_addr,
         &options,
-    ))
+    )
 }
 
 fn timeout_duration(seconds: f64) -> Option<std::time::Duration> {
@@ -194,7 +195,7 @@ fn parse_endpoint_port(port: &Value) -> BuiltinResult<u16> {
 }
 
 async fn preflight_name_value_extensions(
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<Vec<Option<NetConstructorOption>>> {
     if !rest.len().is_multiple_of(2) {
         return Err(tcpclient_flow(
@@ -337,7 +338,7 @@ impl Default for TcpClientOptions {
 }
 
 async fn parse_name_value_pairs(
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
     prepared: Vec<Option<NetConstructorOption>>,
 ) -> BuiltinResult<TcpClientOptions> {
     if rest.is_empty() {
@@ -549,13 +550,13 @@ fn parse_buffer_size(value: &Value, label: &str) -> BuiltinResult<i32> {
 }
 
 fn build_tcpclient_object(
+    runtime: Option<&crate::context::RuntimeContext>,
     authority: ForeignRef,
     requested_host: &str,
     peer_addr: SocketAddr,
     local_addr: SocketAddr,
     options: &TcpClientOptions,
-) -> Value {
-    let mut st = StructValue::new();
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
     let remote_addr = peer_addr.ip().to_string();
     let remote_port = peer_addr.port();
     let local_address = local_addr.ip().to_string();
@@ -566,67 +567,44 @@ fn build_tcpclient_object(
         .clone()
         .unwrap_or_else(|| format!("tcpclient:{requested_host}:{remote_port}"));
 
-    st.fields
-        .insert("Type".to_string(), Value::string("tcpclient".to_string()));
-    st.fields.insert("Name".to_string(), Value::string(name));
-    st.fields
-        .insert("Address".to_string(), Value::string(remote_addr.clone()));
-    st.fields
-        .insert("Port".to_string(), Value::Num(f64::from(remote_port)));
-    st.fields.insert(
-        "ServerAddress".to_string(),
-        Value::string(remote_addr.clone()),
-    );
-    st.fields
-        .insert("ServerPort".to_string(), Value::Num(f64::from(remote_port)));
-    st.fields
-        .insert("LocalAddress".to_string(), Value::string(local_address));
-    st.fields
-        .insert("LocalPort".to_string(), Value::Num(f64::from(local_port)));
-    st.fields.insert(
-        "RequestedAddress".to_string(),
-        Value::string(requested_host.to_string()),
-    );
-    st.fields.insert("Connected".to_string(), Value::Bool(true));
-    st.fields
-        .insert("Status".to_string(), Value::string("connected".to_string()));
-    st.fields.insert(
-        "NumBytesAvailable".to_string(),
-        Value::Int(IntValue::I32(0)),
-    );
-    st.fields
-        .insert("BytesAvailableFcn".to_string(), default_user_data());
-    st.fields.insert(
-        "BytesAvailableFcnMode".to_string(),
-        Value::string("byte".to_string()),
-    );
-    st.fields.insert(
-        "BytesAvailableFcnCount".to_string(),
-        Value::Int(IntValue::I32(1)),
-    );
-    st.fields.insert(
-        "ByteOrder".to_string(),
-        Value::string(options.byte_order.clone()),
-    );
-    st.fields
-        .insert("Timeout".to_string(), Value::Num(options.timeout));
-    st.fields.insert(
-        "ConnectTimeout".to_string(),
-        Value::Num(options.connect_timeout),
-    );
-    st.fields.insert(
-        "InputBufferSize".to_string(),
-        Value::Int(IntValue::I32(options.input_buffer_size)),
-    );
-    st.fields.insert(
-        "OutputBufferSize".to_string(),
-        Value::Int(IntValue::I32(options.output_buffer_size)),
-    );
-    st.fields
-        .insert("UserData".to_string(), options.user_data.clone());
-    let mut object = ObjectInstance::new(runmat_builtins::TCPCLIENT_CLASS);
-    object.properties = st.fields.into_iter().collect();
-    Value::Object(object.with_tcp_authority(authority))
+    let properties = [
+        ("Type", Value::string("tcpclient".to_string())),
+        ("Name", Value::string(name)),
+        ("Address", Value::string(remote_addr.clone())),
+        ("Port", Value::Num(f64::from(remote_port))),
+        ("ServerAddress", Value::string(remote_addr.clone())),
+        ("ServerPort", Value::Num(f64::from(remote_port))),
+        ("LocalAddress", Value::string(local_address)),
+        ("LocalPort", Value::Num(f64::from(local_port))),
+        (
+            "RequestedAddress",
+            Value::string(requested_host.to_string()),
+        ),
+        ("Connected", Value::Bool(true)),
+        ("Status", Value::string("connected".to_string())),
+        ("NumBytesAvailable", Value::Int(IntValue::I32(0))),
+        ("BytesAvailableFcn", default_user_data()),
+        ("BytesAvailableFcnMode", Value::string("byte".to_string())),
+        ("BytesAvailableFcnCount", Value::Int(IntValue::I32(1))),
+        ("ByteOrder", Value::string(options.byte_order.clone())),
+        ("Timeout", Value::Num(options.timeout)),
+        ("ConnectTimeout", Value::Num(options.connect_timeout)),
+        (
+            "InputBufferSize",
+            Value::Int(IntValue::I32(options.input_buffer_size)),
+        ),
+        (
+            "OutputBufferSize",
+            Value::Int(IntValue::I32(options.output_buffer_size)),
+        ),
+        ("UserData", options.user_data.clone()),
+    ];
+    crate::execution::object::construct_object_from_fields_with_native(
+        runtime,
+        runmat_builtins::TCPCLIENT_CLASS.display_name(),
+        properties.iter().map(|(name, value)| (*name, value)),
+        Some(crate::execution::object::ObjectNativeInitialization::TcpAuthority(authority)),
+    )
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -647,7 +625,7 @@ pub(crate) mod tests {
     fn struct_field<'a>(value: &'a Value, name: &str) -> &'a Value {
         match value {
             Value::Object(object) => object
-                .properties
+                .properties()
                 .get(name)
                 .unwrap_or_else(|| panic!("missing field {name}")),
             _ => panic!("expected TCP object"),
@@ -658,7 +636,11 @@ pub(crate) mod tests {
         assert_eq!(err.identifier(), Some(expected));
     }
 
-    fn run_tcpclient(host: Value, port: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    fn run_tcpclient(
+        host: Value,
+        port: Value,
+        rest: Vec<Value>,
+    ) -> BuiltinResult<crate::execution::RootedValue> {
         let driver = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .enable_all()
@@ -668,7 +650,12 @@ pub(crate) mod tests {
         let runtime =
             RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
                 .with_service_ports(RuntimeServicePorts::default().with_tcp(service));
-        driver.block_on(tcpclient_builtin(Some(runtime), host, port, rest))
+        driver.block_on(tcpclient_builtin(
+            Some(runtime),
+            host,
+            port,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -772,7 +759,9 @@ pub(crate) mod tests {
             other => panic!("expected Address string, got {other:?}"),
         }
 
-        assert!(matches!(&client, Value::Object(object) if object.tcp_authority().is_some()));
+        assert!(
+            matches!(client.value(), Value::Object(object) if object.tcp_authority().is_some())
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -829,7 +818,9 @@ pub(crate) mod tests {
             other => panic!("expected UserData numeric, got {other:?}"),
         }
 
-        assert!(matches!(&client, Value::Object(object) if object.tcp_authority().is_some()));
+        assert!(
+            matches!(client.value(), Value::Object(object) if object.tcp_authority().is_some())
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -16,7 +16,7 @@ pub(super) struct RemoveRequest {
     pub(super) resolve_symbolic_links: bool,
 }
 
-pub(super) async fn parse(args: Vec<Value>) -> BuiltinResult<RemoveRequest> {
+pub(super) async fn parse(args: crate::call::BuiltinArguments) -> BuiltinResult<RemoveRequest> {
     if !(1..=4).contains(&args.len()) {
         return Err(error(&RMDIR_ERROR_ARITY));
     }
@@ -25,8 +25,8 @@ pub(super) async fn parse(args: Vec<Value>) -> BuiltinResult<RemoveRequest> {
     if folder.is_empty() {
         return Err(error(&RMDIR_ERROR_EMPTY_NAME));
     }
-    let (recursive, option_start) = recursive_prefix(&args)?;
-    let resolve_symbolic_links = symbolic_link_option(&args, option_start).await?;
+    let (recursive, option_start) = recursive_prefix(args.view())?;
+    let resolve_symbolic_links = symbolic_link_option(args.view(), option_start).await?;
     let path = expand_user_path(&folder, "rmdir")
         .map(PathBuf::from)
         .map_err(|cause| error_with_source(&RMDIR_ERROR_FILESYSTEM, cause.into()))?;
@@ -37,7 +37,7 @@ pub(super) async fn parse(args: Vec<Value>) -> BuiltinResult<RemoveRequest> {
     })
 }
 
-fn recursive_prefix(args: &[Value]) -> BuiltinResult<(bool, usize)> {
+fn recursive_prefix(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<(bool, usize)> {
     let Some(value) = args.get(1) else {
         return Ok((false, 1));
     };
@@ -48,7 +48,10 @@ fn recursive_prefix(args: &[Value]) -> BuiltinResult<(bool, usize)> {
     }
 }
 
-async fn symbolic_link_option(args: &[Value], start: usize) -> BuiltinResult<bool> {
+async fn symbolic_link_option(
+    args: crate::call::FunctionArgumentView<'_>,
+    start: usize,
+) -> BuiltinResult<bool> {
     if args.len() == start {
         return Ok(false);
     }

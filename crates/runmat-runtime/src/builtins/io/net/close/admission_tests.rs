@@ -128,20 +128,25 @@ fn paged_selector_rejects_without_tcp_effect_but_trailing_singleton_admits() {
     let paged = char_selector(vec![1, 1, 7]);
     assert!(futures::executor::block_on(close_if_network_targets(
         Some(&runtime),
-        std::slice::from_ref(&paged)
+        crate::call::FunctionArgumentView::from_slice(std::slice::from_ref(&paged))
     ))
     .expect("paged text is not a TCP selector")
     .is_none());
-    assert!(
-        futures::executor::block_on(close_builtin(Some(runtime.clone()), vec![paged])).is_err()
-    );
+    assert!(futures::executor::block_on(close_builtin(
+        Some(runtime.clone()),
+        crate::builtins::common::test_support::builtin_arguments(vec![paged])
+    ))
+    .is_err());
     assert_eq!(calls.scope.get(), 0);
     assert_eq!(calls.endpoint.get(), 0);
 
     let trailing_singleton = char_selector(vec![1, 7, 1]);
     assert_eq!(
-        futures::executor::block_on(close_builtin(Some(runtime), vec![trailing_singleton]))
-            .expect("scalar character selector"),
+        futures::executor::block_on(close_builtin(
+            Some(runtime),
+            crate::builtins::common::test_support::builtin_arguments(vec![trailing_singleton])
+        ))
+        .expect("scalar character selector"),
         1.0
     );
     assert_eq!(calls.scope.get(), 1);
@@ -153,7 +158,7 @@ fn pinned_mode_rejects_selector_and_tcp_cell_before_service_but_keeps_direct_rec
     let (runtime, calls) = fixture();
     let selector = futures::executor::block_on(close_builtin(
         Some(runtime.clone()),
-        vec![Value::from("clients")],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("clients")]),
     ))
     .expect_err("TCP scope selector is RunMat-only");
     assert_eq!(
@@ -161,8 +166,11 @@ fn pinned_mode_rejects_selector_and_tcp_cell_before_service_but_keeps_direct_rec
         CLOSE_NETWORK_SELECTOR_EXTENSION.error_identifier
     );
     let cell = Value::Cell(CellArray::new(vec![client()], 1, 1).expect("cell"));
-    let container = futures::executor::block_on(close_builtin(Some(runtime.clone()), vec![cell]))
-        .expect_err("TCP cell is RunMat-only");
+    let container = futures::executor::block_on(close_builtin(
+        Some(runtime.clone()),
+        crate::builtins::common::test_support::builtin_arguments(vec![cell]),
+    ))
+    .expect_err("TCP cell is RunMat-only");
     assert_eq!(
         container.identifier(),
         CLOSE_TCP_CELL_EXTENSION.error_identifier
@@ -171,8 +179,11 @@ fn pinned_mode_rejects_selector_and_tcp_cell_before_service_but_keeps_direct_rec
     assert_eq!(calls.endpoint.get(), 0);
 
     assert_eq!(
-        futures::executor::block_on(close_builtin(Some(runtime), vec![client()]))
-            .expect("direct TCP receiver remains admitted"),
+        futures::executor::block_on(close_builtin(
+            Some(runtime),
+            crate::builtins::common::test_support::builtin_arguments(vec![client()])
+        ))
+        .expect("direct TCP receiver remains admitted"),
         1.0
     );
     assert_eq!(calls.endpoint.get(), 1);
@@ -186,8 +197,11 @@ fn nested_tcp_cell_is_runmat_only_and_validates_before_partial_close() {
         CellArray::new(vec![Value::from("clients"), client()], 1, 2).expect("valid targets"),
     );
     assert_eq!(
-        futures::executor::block_on(close_builtin(Some(runtime.clone()), vec![valid]))
-            .expect("RunMat TCP cell"),
+        futures::executor::block_on(close_builtin(
+            Some(runtime.clone()),
+            crate::builtins::common::test_support::builtin_arguments(vec![valid])
+        ))
+        .expect("RunMat TCP cell"),
         1.0
     );
     assert_eq!(calls.scope.get(), 1);
@@ -204,8 +218,11 @@ fn nested_tcp_cell_is_runmat_only_and_validates_before_partial_close() {
         )
         .expect("invalid second target"),
     );
-    let error = futures::executor::block_on(close_builtin(Some(runtime), vec![invalid]))
-        .expect_err("invalid later target rejects before TCP effect");
+    let error = futures::executor::block_on(close_builtin(
+        Some(runtime),
+        crate::builtins::common::test_support::builtin_arguments(vec![invalid]),
+    ))
+    .expect_err("invalid later target rejects before TCP effect");
     assert_eq!(error.identifier(), Some("RunMat:close:InvalidHandle"));
     assert_eq!(calls.scope.get(), 1);
     assert_eq!(calls.endpoint.get(), 1);

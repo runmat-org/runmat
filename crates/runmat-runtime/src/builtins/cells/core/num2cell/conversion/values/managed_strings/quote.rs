@@ -73,7 +73,7 @@ pub(super) fn retained_bytes(
             )
             .ok_or_else(|| admission(runtime, HostAllocationError::Overflow))?;
     }
-    for text in input.data.iter() {
+    for text in input.data().iter() {
         if text.has_retained_claim() || text.capacity() == 0 {
             continue;
         }

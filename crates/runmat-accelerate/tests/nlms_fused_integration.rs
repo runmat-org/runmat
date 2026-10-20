@@ -428,7 +428,7 @@ fn nlms_two_fused_reductions_integration() {
                 origin: ValueOrigin::Constant,
                 ty: Type::String,
                 shape: ShapeInfo::Scalar,
-                constant: Some(Value::String("all".to_string())),
+                constant: Some(Value::String("all".into())),
             },
             ValueInfo {
                 id: v_mean,
@@ -500,7 +500,7 @@ fn nlms_two_fused_reductions_integration() {
             constants: HashMap::new(),
             const_values: {
                 let mut cv = HashMap::new();
-                cv.insert(v_all, Value::String("all".to_string()));
+                cv.insert(v_all, Value::String("all".into()));
                 cv
             },
             materialized_stores: Vec::new(),

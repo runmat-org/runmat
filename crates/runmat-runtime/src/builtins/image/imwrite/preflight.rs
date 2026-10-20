@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) fn preflight_option_text(
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     mut index: usize,
     filename: &str,
     indexed_source: bool,
@@ -203,7 +203,9 @@ fn preflight_known_option_value(
 
 /// Metadata-only validation retains class, ownership and geometry precedence
 /// without scanning host pixels before option syntax/admission is known.
-pub(super) fn preflight_resident_argument_roles(args: &[Value]) -> BuiltinResult<()> {
+pub(super) fn preflight_resident_argument_roles(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     for value in args {
         if let Value::GpuTensor(handle) = value {
             validate_resident_numeric_metadata(handle, &IMWRITE_ERROR_INVALID_ARGUMENT)?;
@@ -256,7 +258,7 @@ pub(super) fn preflight_resident_argument_roles(args: &[Value]) -> BuiltinResult
 /// Value-level scans run only after the complete known option tail has passed
 /// admission. They still precede any provider readback or filesystem effect.
 pub(super) async fn preflight_known_host_pixels(
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     cooperation: &mut ImageCooperation,
 ) -> BuiltinResult<()> {
     let Some(image) = args.first() else {

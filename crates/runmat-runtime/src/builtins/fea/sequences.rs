@@ -988,7 +988,7 @@ pub async fn configure_step(args: Vec<Value>) -> BuiltinResult<Value> {
             "step must be a typed FEA procedure step",
         ));
     };
-    let class_name = match object.class_name.display_name() {
+    let class_name = match object.class_name().display_name() {
         FEA_STRUCTURAL_STEP_CLASS => FEA_STRUCTURAL_STEP_CLASS,
         FEA_THERMAL_STEP_CLASS => FEA_THERMAL_STEP_CLASS,
         FEA_ELECTROMAGNETIC_STEP_CLASS => FEA_ELECTROMAGNETIC_STEP_CLASS,
@@ -1268,7 +1268,7 @@ mod tests {
             super::super::study_policies::observation::component_all()
                 .await
                 .expect("component"),
-            super::super::constraints::support::frame::coordinate_frame_global_builtin()
+            super::super::constraints::support::frame::coordinate_frame_global_builtin(None)
                 .await
                 .expect("frame"),
             super::super::study_policies::observation::sign_native()
@@ -1338,30 +1338,35 @@ mod tests {
             "solid triangle\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid triangle\n",
         )
         .expect("write geometry fixture");
-        let geometry = crate::builtins::geometry::geometry_load_builtin(vec![Value::String(
-            path.to_string_lossy().into_owned(),
-        )])
+        let geometry = crate::builtins::geometry::geometry_load_builtin(
+            Value::String(path.to_string_lossy().into_owned().into()),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        )
         .await
         .expect("load geometry fixture");
-        let model_value = super::super::modeling::create_model_object_from_args(vec![
-            Value::String("model".into()),
-            geometry.clone(),
-            Value::String("Sequence".into()),
-            value.clone(),
-        ])
+        let model_value = super::super::modeling::create_model_object_from_args(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("model".into()),
+                geometry.clone(),
+                Value::String("Sequence".into()),
+                value.clone(),
+            ]),
+        )
         .expect("compose model with explicit sequence");
         let model: AnalysisModel =
             object_payload("test", &model_value, FEA_MODEL_CLASS).expect("decode typed model");
         assert_eq!(model.sequence.sequence_id, "production");
 
-        let conflict = super::super::modeling::create_model_object_from_args(vec![
-            Value::String("model".into()),
-            geometry,
-            Value::String("Sequence".into()),
-            value,
-            Value::String("Steps".into()),
-            cell(vec![configured_for_conflict]),
-        ])
+        let conflict = super::super::modeling::create_model_object_from_args(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("model".into()),
+                geometry,
+                Value::String("Sequence".into()),
+                value,
+                Value::String("Steps".into()),
+                cell(vec![configured_for_conflict]),
+            ]),
+        )
         .expect_err("sequence and steps must remain mutually exclusive");
         assert!(conflict.message.contains("mutually exclusive"));
     }

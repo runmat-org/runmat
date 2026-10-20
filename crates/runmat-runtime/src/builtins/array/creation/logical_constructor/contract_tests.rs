@@ -157,10 +157,18 @@ impl AccelProvider for GuardProvider {
 
 fn call(name: &str, args: Vec<Value>) -> crate::BuiltinResult<Value> {
     match name {
-        "true" => block_on(true_builtin(args)),
-        "false" => block_on(false_builtin(args)),
-        "inf" => block_on(crate::builtins::array::creation::inf::inf_builtin(args)),
-        "nan" => block_on(crate::builtins::array::creation::nan::nan_builtin(args)),
+        "true" => block_on(true_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        )),
+        "false" => block_on(false_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        )),
+        "inf" => block_on(crate::builtins::array::creation::inf::inf_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        )),
+        "nan" => block_on(crate::builtins::array::creation::nan::nan_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        )),
         _ => unreachable!(),
     }
 }

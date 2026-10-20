@@ -1,21 +1,24 @@
 use runmat_test::descriptor::{ProcedureDescriptor, ProcedureKind};
-use runmat_value::{ObjectInstance, Value};
+use runmat_value::Value;
 
 use crate::{ExecutableUnit, ProcedureInvocation};
 
 pub(super) fn invocation_for(
+    runtime: &runmat_runtime::context::RuntimeContext,
     unit: &ExecutableUnit,
     procedure: &ProcedureDescriptor,
     parameters: &[runmat_test::descriptor::ParameterDescriptor],
-) -> Result<ProcedureInvocation, String> {
+) -> Result<ProcedureInvocation, runmat_runtime::RuntimeError> {
     if procedure.kind == ProcedureKind::ScriptSection {
         return Ok(ProcedureInvocation::entrypoint());
     }
-    let function_name = function_name(procedure)?;
+    let function_name = function_name(procedure).map_err(projection_error)?;
     let mut arguments = Vec::new();
-    let input_count = unit
-        .procedure_input_count(&function_name)
-        .ok_or_else(|| format!("compiled procedure '{function_name}' is unavailable"))?;
+    let input_count = unit.procedure_input_count(&function_name).ok_or_else(|| {
+        projection_error(format!(
+            "compiled procedure '{function_name}' is unavailable"
+        ))
+    })?;
     if input_count > parameters.len() {
         runmat_runtime::testing::ensure_testing_classes();
         let class_name = match procedure.kind {
@@ -26,16 +29,22 @@ pub(super) fn invocation_for(
             | ProcedureKind::SuiteFactory
             | ProcedureKind::ScriptSection => None,
         };
-        let mut test_case = ObjectInstance::new(
-            class_name.unwrap_or_else(|| "matlab.unittest.FunctionTestCase".into()),
-        );
-        test_case
-            .properties
-            .insert("Name".into(), Value::String(procedure.display_name.clone()));
-        arguments.push(Value::Object(test_case));
+        let name =
+            runmat_runtime::call::argument_text::copy_str(&procedure.display_name, Some(runtime))?;
+        let fields = [("Name", Value::String(name))];
+        let test_case = runmat_runtime::testing::object_from_fields_in_context(
+            runtime,
+            class_name
+                .as_deref()
+                .unwrap_or("matlab.unittest.FunctionTestCase"),
+            fields.iter().map(|(key, value)| (*key, value)),
+        )?;
+        // The projected TestCase contains only the admitted scalar text above,
+        // not newly allocated GC identities.
+        arguments.push(test_case.with_owned(|value| value));
     }
     for parameter in parameters {
-        arguments.push(super::value::from_json(&parameter.value)?);
+        arguments.push(super::value::from_json(&parameter.value).map_err(projection_error)?);
     }
     Ok(ProcedureInvocation::function(function_name, arguments))
 }
@@ -90,4 +99,9 @@ fn class_name(procedure: &ProcedureDescriptor) -> Option<String> {
     semantic_segments(procedure)
         .first()
         .map(|name| (*name).to_owned())
+}
+fn projection_error(message: impl Into<String>) -> runmat_runtime::RuntimeError {
+    runmat_runtime::build_runtime_error(message)
+        .with_identifier("RunMat:Testing:ProcedureProjection")
+        .build()
 }

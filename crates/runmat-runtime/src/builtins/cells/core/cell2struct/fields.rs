@@ -3,8 +3,8 @@ use runmat_value::{CharArray, Value};
 pub(super) fn parse(value: &Value) -> crate::BuiltinResult<Vec<String>> {
     let names = match value {
         Value::String(text) => vec![text.to_string()],
-        Value::StringArray(array) => array.data.iter().map(ToString::to_string).collect(),
-        Value::CharArray(chars) if chars.rows == 1 => vec![chars.data.iter().collect()],
+        Value::StringArray(array) => array.data().iter().map(ToString::to_string).collect(),
+        Value::CharArray(chars) if chars.rows == 1 => vec![chars.data().iter().collect()],
         Value::CharArray(chars) => character_rows(chars),
         Value::Cell(cell) => cell
             .iter_column_major()
@@ -25,7 +25,7 @@ fn character_rows(chars: &CharArray) -> Vec<String> {
     (0..chars.rows)
         .map(|row| {
             let start = row * chars.cols;
-            chars.data[start..start + chars.cols]
+            chars.data()[start..start + chars.cols]
                 .iter()
                 .collect::<String>()
                 .trim_end()

@@ -28,7 +28,7 @@ const ISEQUALN_BUILTIN_NAME: &str = "isequaln";
     binding_variant = "default",
     builtin_path = "crate::builtins::logical::rel::isequal"
 )]
-async fn isequal_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn isequal_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     equality_builtin(args, false, BUILTIN_NAME).await
 }
 
@@ -38,12 +38,12 @@ async fn isequal_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::logical::rel::isequal"
 )]
-async fn isequaln_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn isequaln_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     equality_builtin(args, true, ISEQUALN_BUILTIN_NAME).await
 }
 
 async fn equality_builtin(
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
     nan_equal: bool,
     builtin_name: &'static str,
 ) -> crate::BuiltinResult<Value> {
@@ -97,12 +97,9 @@ async fn gather_value(
                     equality_error_with_detail(builtin_name, internal_error, error.to_string())
                 })
         }
-        Value::StructArray(records) => records
-            .try_map_values_async(|value| {
-                Box::pin(gather_value(value, builtin_name, internal_error))
-            })
-            .await
-            .map(Value::StructArray),
+        Value::StructArray(records) => {
+            crate::dispatcher::gather_if_needed_owned_async(Value::StructArray(records), None).await
+        }
         other => Ok(other),
     }
 }
@@ -158,10 +155,10 @@ fn values_equal(a: &Value, b: &Value, nan_equal: bool) -> bool {
         (Value::String(a), Value::String(b)) => a == b,
         (Value::StringArray(a), Value::StringArray(b)) => string_arrays_equal(a, b),
         (Value::String(a), Value::StringArray(b)) => {
-            array_shapes_equal(&b.shape, &[1, 1]) && b.data.len() == 1 && b.data[0] == *a
+            array_shapes_equal(&b.shape, &[1, 1]) && b.data().len() == 1 && b.data()[0] == *a
         }
         (Value::StringArray(a), Value::String(b)) => {
-            array_shapes_equal(&a.shape, &[1, 1]) && a.data.len() == 1 && a.data[0] == *b
+            array_shapes_equal(&a.shape, &[1, 1]) && a.data().len() == 1 && a.data()[0] == *b
         }
 
         // Cells
@@ -216,7 +213,7 @@ impl RealNumericView<'_> {
             Self::Scalar(_) => 1,
             Self::Tensor(value) => value.len(),
             Self::Logical(value) => value.data.len(),
-            Self::Char(value) => value.data.len(),
+            Self::Char(value) => value.data().len(),
             Self::Sparse(value) => value.rows.saturating_mul(value.cols),
         }
     }
@@ -228,7 +225,7 @@ impl RealNumericView<'_> {
                 .numeric_value_at(index)
                 .expect("numeric view index validated by length"),
             Self::Logical(value) => NumericScalar::U8(u8::from(value.data[index] != 0)),
-            Self::Char(value) => NumericScalar::U32(value.data[index] as u32),
+            Self::Char(value) => NumericScalar::U32(value.data()[index] as u32),
             Self::Sparse(value) => sparse_numeric_value_at(value, index),
         }
     }
@@ -358,16 +355,16 @@ fn string_arrays_equal(a: &StringArray, b: &StringArray) -> bool {
     if !array_shapes_equal(&a.shape, &b.shape) {
         return false;
     }
-    a.data == b.data
+    a.data() == b.data()
 }
 
 fn cells_equal(a: &CellArray, b: &CellArray, nan_equal: bool) -> bool {
-    if a.data.len() != b.data.len() {
+    if a.data().len() != b.data().len() {
         return false;
     }
-    a.data
+    a.data()
         .iter()
-        .zip(b.data.iter())
+        .zip(b.data().iter())
         .all(|(x, y)| values_equal(x, y, nan_equal))
 }
 

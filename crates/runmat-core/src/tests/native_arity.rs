@@ -30,7 +30,7 @@ fn call(
 ) -> ProcedureInvocation {
     ProcedureInvocation {
         target: ProcedureTarget::Function(function.into()),
-        arguments,
+        arguments: crate::ProcedureArguments::Source(arguments),
         requested_outputs,
     }
 }

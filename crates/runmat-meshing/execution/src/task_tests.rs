@@ -564,7 +564,7 @@ impl Fixture {
         let host_bytes = self.host().canonical_bytes().unwrap();
         let logical_digest = Digest::sha256(&host_bytes);
         let invocation = ValueRef {
-            schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1,
+            schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION,
             id: self.context.artifact_access.value_id(logical_digest),
             logical_digest,
             encoded_length: host_bytes.len() as u64,

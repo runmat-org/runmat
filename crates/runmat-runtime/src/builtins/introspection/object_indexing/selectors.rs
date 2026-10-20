@@ -60,20 +60,20 @@ pub(super) fn brace_selection_count(target: &Value, subs: &Value) -> crate::Buil
             "brace or parentheses subscripts must be stored in a cell array",
         ));
     };
-    if subscripts.data.is_empty() {
+    if subscripts.data().is_empty() {
         return Ok(0);
     }
-    if subscripts.data.len() == 1 {
-        return single_subscript_count(target, &subscripts.data[0], 0, 1);
+    if subscripts.data().len() == 1 {
+        return single_subscript_count(target, &subscripts.data()[0], 0, 1);
     }
     let mut count = 1usize;
-    for (dim, subscript) in subscripts.data.iter().enumerate() {
+    for (dim, subscript) in subscripts.data().iter().enumerate() {
         count = count
             .checked_mul(single_subscript_count(
                 target,
                 subscript,
                 dim,
-                subscripts.data.len(),
+                subscripts.data().len(),
             )?)
             .ok_or_else(|| {
                 num_args_error(
@@ -95,10 +95,10 @@ pub(super) fn single_subscript_count(
         Value::String(value) if value.trim() == ":" => {
             target_colon_extent(target, dim, selector_count)
         }
-        Value::CharArray(chars) if chars.data.iter().collect::<String>().trim() == ":" => {
+        Value::CharArray(chars) if chars.data().iter().collect::<String>().trim() == ":" => {
             target_colon_extent(target, dim, selector_count)
         }
-        Value::StringArray(array) if array.data.len() == 1 && array.data[0].trim() == ":" => {
+        Value::StringArray(array) if array.data().len() == 1 && array.data()[0].trim() == ":" => {
             target_colon_extent(target, dim, selector_count)
         }
         Value::Bool(flag) => Ok(usize::from(*flag)),

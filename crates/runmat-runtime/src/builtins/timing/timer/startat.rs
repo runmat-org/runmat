@@ -6,15 +6,16 @@ use std::time::Duration;
 
 const MAX_STARTAT_DELAY: Duration = Duration::from_secs(25 * 24 * 60 * 60);
 
-pub(super) fn is_legacy_relative_scalar(args: &[Value]) -> bool {
-    matches!(args, [Value::Num(_) | Value::Int(_)])
-        || matches!(args, [Value::Tensor(tensor)] if tensor::is_scalar_tensor(tensor))
+pub(super) fn is_legacy_relative_scalar(args: crate::call::FunctionArgumentView<'_>) -> bool {
+    args.len() == 1 && matches!(args.first(), Some(Value::Num(_) | Value::Int(_)))
+        || args.len() == 1
+            && matches!(args.first(), Some(Value::Tensor(tensor)) if tensor::is_scalar_tensor(tensor))
 }
 
 pub(super) async fn start_at_absolute(
     runtime: &RuntimeContext,
     receiver: &Value,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<()> {
     let (handles, receiver_shape) = receiver_handles(runtime, receiver)?;
     let timing = runtime.service_ports().timing();
@@ -25,7 +26,8 @@ pub(super) async fn start_at_absolute(
             "startat: host-local calendar is unavailable for this wall-clock instant",
         )
     })?;
-    let serials = crate::builtins::datetime::timer_firing_serials(args, reference)?;
+    let serials =
+        crate::builtins::datetime::timer_firing_arguments(Some(runtime), args, reference)?;
     let serial_values = serials.materialize_f64();
     let scalar = serial_values.len() == 1;
     if !scalar && serials.shape() != receiver_shape.as_slice() {
@@ -81,7 +83,7 @@ pub(super) fn receiver_handles(
             Ok((vec![handle.clone()], vec![1, 1]))
         }
         Value::Cell(cell) => {
-            let mut handles = Vec::with_capacity(cell.data.len());
+            let mut handles = Vec::with_capacity(cell.data().len());
             for item in cell.iter_column_major() {
                 let Value::HandleObject(handle) = item else {
                     return Err(timer_error(

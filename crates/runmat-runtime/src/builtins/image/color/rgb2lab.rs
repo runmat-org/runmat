@@ -64,9 +64,9 @@ fn rgb2lab_map_error(err: RuntimeError, fallback: &'static BuiltinErrorDescripto
 async fn rgb2lab_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     rgb: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<crate::execution::RootedValue> {
-    let options = parse_rgb2lab_options(&rest)?;
+    let options = parse_rgb2lab_options(rest.view())?;
     crate::output_count::validate_fixed_outputs(
         &RGB2LAB_DESCRIPTOR,
         &RGB2LAB_ERROR_TOO_MANY_OUTPUTS,
@@ -276,7 +276,9 @@ impl Default for Rgb2LabOptions {
     }
 }
 
-fn parse_rgb2lab_options(rest: &[Value]) -> BuiltinResult<Rgb2LabOptions> {
+fn parse_rgb2lab_options(
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Rgb2LabOptions> {
     if rest.len() > 4 {
         return Err(rgb2lab_error(&RGB2LAB_ERROR_TOO_MANY_INPUTS));
     }

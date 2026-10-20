@@ -29,7 +29,10 @@ use futures::executor::block_on;
 use runmat_value::{ComplexTensor, Tensor, Value};
 
 fn call(value: Value) -> BuiltinResult<Value> {
-    block_on(perms_builtin(value, Vec::new()))
+    block_on(perms_builtin(
+        value,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
 }
 
 fn tensor_rows(tensor: &Tensor) -> Vec<Vec<f64>> {

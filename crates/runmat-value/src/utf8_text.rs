@@ -175,6 +175,32 @@ impl Utf8Text {
         Ok((byte_len, requested))
     }
 
+    /// Concatenate borrowed UTF-8 parts directly in one exact immutable owner.
+    /// No temporary String or byte vector is created. The immutable part slice
+    /// guarantees the same UTF-8 boundaries during length and fill passes.
+    pub fn try_copy_parts_exact_with<E>(
+        parts: &[&str],
+        permit: &dyn ExactHostAllocationPermit,
+        mut checkpoint: impl FnMut(usize) -> Result<(), E>,
+    ) -> Result<Self, crate::ExactArrayInitializationError<E>> {
+        use crate::ExactArrayInitializationError::{Allocation, Element};
+        let mut length = 0usize;
+        for part in parts {
+            checkpoint(length).map_err(Element)?;
+            length = length
+                .checked_add(part.len())
+                .ok_or(Allocation(ExactHostNumericAllocationError::LayoutOverflow))?;
+        }
+        let mut source = parts.iter().flat_map(|part| part.bytes());
+        let bytes = ExactArrayStorage::try_initialize(length, permit, |index| {
+            if index % 4096 == 0 {
+                checkpoint(index)?;
+            }
+            Ok(source.next().expect("stable UTF-8 parts byte length"))
+        })?;
+        Ok(Self(bytes))
+    }
+
     /// Encode borrowed characters directly into an exact UTF-8 owner. The
     /// caller quotes this same input first; both scans remain cancellable.
     pub fn try_copy_chars_exact_with<E>(

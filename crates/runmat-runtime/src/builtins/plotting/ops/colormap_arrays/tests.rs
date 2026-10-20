@@ -17,7 +17,7 @@ fn named_colormaps_return_m_by_3_rgb_arrays() {
     for (name, builtin) in [
         (
             "parula",
-            parula_builtin as fn(Vec<Value>) -> BuiltinResult<Value>,
+            parula_builtin as fn(crate::call::BuiltinArguments) -> BuiltinResult<Value>,
         ),
         ("colorcube", colorcube_builtin),
         ("viridis", viridis_builtin),
@@ -38,7 +38,10 @@ fn named_colormaps_return_m_by_3_rgb_arrays() {
         ("pink", pink_builtin),
         ("lines", lines_builtin),
     ] {
-        let Value::Tensor(cmap) = builtin(vec![Value::Num(6.0)]).expect(name) else {
+        let Value::Tensor(cmap) = builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(6.0)]),
+        )
+        .expect(name) else {
             panic!("expected tensor");
         };
         assert_eq!(
@@ -59,7 +62,7 @@ fn every_named_palette_preserves_zero_rows_double_class_and_typed_errors() {
     for (name, builtin) in [
         (
             "autumn",
-            autumn_builtin as fn(Vec<Value>) -> BuiltinResult<Value>,
+            autumn_builtin as fn(crate::call::BuiltinArguments) -> BuiltinResult<Value>,
         ),
         ("bone", bone_builtin),
         ("colorcube", colorcube_builtin),
@@ -80,7 +83,10 @@ fn every_named_palette_preserves_zero_rows_double_class_and_typed_errors() {
         ("viridis", viridis_builtin),
         ("winter", winter_builtin),
     ] {
-        let Value::Tensor(empty) = builtin(vec![Value::Num(0.0)]).expect(name) else {
+        let Value::Tensor(empty) = builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(0.0)]),
+        )
+        .expect(name) else {
             panic!("{name} must return a numeric tensor");
         };
         assert_eq!(
@@ -97,7 +103,10 @@ fn every_named_palette_preserves_zero_rows_double_class_and_typed_errors() {
             vec![Value::String("8".into())],
             vec![Value::Num(1.0), Value::Num(2.0)],
         ] {
-            let error = builtin(bad).expect_err(name);
+            let error = builtin(crate::builtins::common::test_support::builtin_arguments(
+                bad,
+            ))
+            .expect_err(name);
             assert_eq!(
                 error.identifier(),
                 PALETTE_INVALID_ARGUMENT.identifier,
@@ -112,7 +121,10 @@ fn default_length_tracks_current_colormap_length() {
     let _guard = setup();
     let _ = figure_builtin(vec![]).expect("figure");
     set_colormap_with_length(ColorMap::ColorCube, 17);
-    let Value::Tensor(cmap) = parula_builtin(vec![]).expect("parula default") else {
+    let Value::Tensor(cmap) = parula_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    )
+    .expect("parula default") else {
         panic!("expected tensor");
     };
     assert_eq!((cmap.rows(), cmap.cols()), (17, 3));
@@ -120,9 +132,15 @@ fn default_length_tracks_current_colormap_length() {
 
 #[test]
 fn length_argument_validates_nonnegative_integer() {
-    let err = parula_builtin(vec![Value::Num(1.5)]).expect_err("fractional length");
+    let err = parula_builtin(crate::builtins::common::test_support::builtin_arguments(
+        vec![Value::Num(1.5)],
+    ))
+    .expect_err("fractional length");
     assert!(err.message().contains("nonnegative integer"));
-    let err = colorcube_builtin(vec![Value::Num(-1.0)]).expect_err("negative length");
+    let err = colorcube_builtin(crate::builtins::common::test_support::builtin_arguments(
+        vec![Value::Num(-1.0)],
+    ))
+    .expect_err("negative length");
     assert!(err.message().contains("nonnegative integer"));
 }
 
@@ -166,9 +184,10 @@ fn colorcube_accepts_all_integer_length_classes_and_returns_double() {
 
     for storage in storages {
         let length = Tensor::new_integer(storage, vec![1, 1]).expect("length");
-        let Value::Tensor(cmap) =
-            colorcube_builtin(vec![Value::Tensor(length)]).expect("colorcube")
-        else {
+        let Value::Tensor(cmap) = colorcube_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(length)]),
+        )
+        .expect("colorcube") else {
             panic!("expected colormap tensor");
         };
         assert_eq!((cmap.rows(), cmap.cols()), (6, 3));
@@ -191,8 +210,10 @@ fn parula_accepts_all_integer_length_classes_and_returns_double() {
 
     for storage in storages {
         let length = Tensor::new_integer(storage, vec![1, 1]).expect("length");
-        let Value::Tensor(cmap) = parula_builtin(vec![Value::Tensor(length)]).expect("parula")
-        else {
+        let Value::Tensor(cmap) = parula_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(length)]),
+        )
+        .expect("parula") else {
             panic!("expected colormap tensor");
         };
         assert_eq!((cmap.rows(), cmap.cols()), (6, 3));
@@ -212,7 +233,10 @@ fn colorcube_rejects_resident_length_without_provider_dispatch() {
             .unwrap()
             .handle,
     );
-    let err = colorcube_builtin(vec![resident]).expect_err("resident length");
+    let err = colorcube_builtin(crate::builtins::common::test_support::builtin_arguments(
+        vec![resident],
+    ))
+    .expect_err("resident length");
     assert!(err.message().contains("numeric scalar"));
 }
 

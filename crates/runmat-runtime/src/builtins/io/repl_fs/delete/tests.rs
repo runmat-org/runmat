@@ -6,7 +6,9 @@ use std::sync::Arc;
 use tempfile::tempdir;
 
 fn delete_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    futures::executor::block_on(super::delete_builtin(None, args))
+    let args =
+        crate::execution::RootedValues::new(args).map_err(|error| error.into_runtime_error())?;
+    futures::executor::block_on(super::delete_builtin(None, args.into()))
 }
 
 fn ident(error: &'static BuiltinErrorDescriptor) -> Option<&'static str> {
@@ -166,7 +168,7 @@ fn delete_handle_with_resident_property_preserves_opaque_payload() {
             let Value::Object(object) = target else {
                 panic!("expected object")
             };
-            object.properties.insert("data".into(), resident.clone());
+            object.replace_property_unbounded("data".into(), resident.clone());
         })
         .expect("store resident property");
         assert!(crate::value_contains_gpu(&value));
@@ -177,7 +179,7 @@ fn delete_handle_with_resident_property_preserves_opaque_payload() {
             let Value::Object(object) = target else {
                 panic!("expected object")
             };
-            object.properties.get("data").cloned()
+            object.properties().get("data").cloned()
         })
         .expect("read retained payload");
         assert_eq!(payload, Some(resident));
@@ -473,7 +475,9 @@ fn cancelled_invocation_rejects_before_filesystem_mutation_with_typed_cause() {
     let error = runmat_filesystem::with_provider_override(memory.clone(), || {
         futures::executor::block_on(super::delete_builtin(
             Some(runtime),
-            vec![Value::String("keep.txt".into())],
+            crate::execution::RootedValues::new(vec![Value::String("keep.txt".into())])
+                .expect("source argument owner")
+                .into(),
         ))
         .expect_err("cancelled call")
     });

@@ -3,16 +3,17 @@ use runmat_value::Value;
 
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-pub(super) async fn gather(args: &[Value], builtin: &'static str) -> BuiltinResult<Vec<Value>> {
-    let mut gathered = Vec::with_capacity(args.len());
-    for value in args {
-        gathered.push(
-            gather_if_needed_async(value)
-                .await
-                .map_err(|error| map_gather_error(error, builtin))?,
-        );
-    }
-    Ok(gathered)
+pub(super) async fn gather(
+    args: &crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+    builtin: &'static str,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    args.try_map_preserving_roots_async(args.len(), runtime, async |index| {
+        gather_if_needed_async(&args[index])
+            .await
+            .map_err(|error| map_gather_error(error, builtin))
+    })
+    .await
 }
 
 pub(super) fn text(
@@ -26,9 +27,11 @@ pub(super) fn text(
             if array.rows == 1
                 && crate::builtins::common::shape::effective_rank(&array.shape) <= 2 =>
         {
-            Ok(array.data.iter().collect())
+            Ok(array.data().iter().collect())
         }
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].as_str().to_owned()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(array.data()[0].as_str().to_owned())
+        }
         _ => Err(descriptor_error(error, builtin)),
     }
 }

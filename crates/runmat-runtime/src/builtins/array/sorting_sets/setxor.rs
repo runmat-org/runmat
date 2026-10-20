@@ -650,7 +650,7 @@ fn value_into_string_array(value: Value) -> crate::BuiltinResult<StringArray> {
 fn char_array_to_string_array(chars: CharArray) -> crate::BuiltinResult<StringArray> {
     let values = (0..chars.rows)
         .map(|row| {
-            chars.data[row * chars.cols..row * chars.cols + chars.cols]
+            chars.data()[row * chars.cols..row * chars.cols + chars.cols]
                 .iter()
                 .collect()
         })
@@ -1158,7 +1158,7 @@ fn setxor_char(
             for row in 0..a.rows {
                 let linear_idx = row + col * a.rows;
                 let data_idx = row * a.cols + col;
-                let ch = a.data[data_idx];
+                let ch = a.data()[data_idx];
                 add_sym_entry(
                     &mut entries,
                     &mut map,
@@ -1174,7 +1174,7 @@ fn setxor_char(
             for row in 0..b.rows {
                 let linear_idx = row + col * b.rows;
                 let data_idx = row * b.cols + col;
-                let ch = b.data[data_idx];
+                let ch = b.data()[data_idx];
                 add_sym_entry(
                     &mut entries,
                     &mut map,
@@ -1240,7 +1240,7 @@ fn setxor_string(
         let mut entries = Vec::<SymEntry<&Utf8Text>>::new();
         let mut map: HashMap<&str, usize> = HashMap::new();
         let mut order_counter = 0usize;
-        for (idx, value) in a.data.iter().enumerate() {
+        for (idx, value) in a.data().iter().enumerate() {
             add_sym_entry(
                 &mut entries,
                 &mut map,
@@ -1251,7 +1251,7 @@ fn setxor_string(
                 &mut order_counter,
             );
         }
-        for (idx, value) in b.data.iter().enumerate() {
+        for (idx, value) in b.data().iter().enumerate() {
             add_sym_entry(
                 &mut entries,
                 &mut map,
@@ -1785,13 +1785,13 @@ fn complex_row<T: Copy, S: ComplexSequence<T> + ?Sized>(
 
 fn char_row(array: &CharArray, row: usize) -> Vec<char> {
     (0..array.cols)
-        .map(|col| array.data[row * array.cols + col])
+        .map(|col| array.data()[row * array.cols + col])
         .collect()
 }
 
 fn string_row(array: &StringArray, row: usize, cols: usize) -> Vec<&Utf8Text> {
     (0..cols)
-        .map(|col| &array.data[row + col * array.shape[0]])
+        .map(|col| &array.data()[row + col * array.shape[0]])
         .collect()
 }
 
@@ -1905,7 +1905,7 @@ mod tests {
         let Value::CharArray(empty_projection) = result else {
             panic!("expected character result");
         };
-        assert_eq!(empty_projection.data, vec!['a']);
+        assert_eq!(empty_projection.data(), vec!['a']);
 
         let rank_one = Tensor::new(vec![f64::from('b' as u32), f64::from('c' as u32)], vec![2])
             .expect("rank one");
@@ -1919,7 +1919,7 @@ mod tests {
             panic!("expected character result");
         };
         assert_eq!((row_projection.rows, row_projection.cols), (1, 3));
-        assert_eq!(row_projection.data, vec!['a', 'b', 'c']);
+        assert_eq!(row_projection.data(), vec!['a', 'b', 'c']);
     }
 
     #[test]
@@ -2364,7 +2364,7 @@ mod tests {
         let Value::CharArray(values) = eval.values_value() else {
             panic!("expected char array");
         };
-        assert_eq!(values.data, vec!['i', 'o']);
+        assert_eq!(values.data(), vec!['i', 'o']);
         assert_eq!((values.rows, values.cols), (1, 2));
         let ia = tensor::value_into_tensor_for("setxor", eval.ia_value()).unwrap();
         assert_double(&ia, &[2.0]);
@@ -2380,7 +2380,7 @@ mod tests {
         let Value::CharArray(values) = eval.values_value() else {
             panic!("expected char array");
         };
-        assert_eq!(values.data, vec!['a', 'c', 'd']);
+        assert_eq!(values.data(), vec!['a', 'c', 'd']);
         assert_eq!((values.rows, values.cols), (1, 3));
         let ia = tensor::value_into_tensor_for("setxor", eval.ia_value()).unwrap();
         assert_double(&ia, &[1.0, 3.0]);
@@ -2397,7 +2397,7 @@ mod tests {
         let Value::StringArray(values) = eval.values_value() else {
             panic!("expected string array");
         };
-        assert_eq!(values.data, vec!["alpha".to_string()]);
+        assert_eq!(values.data(), vec!["alpha".to_string()]);
         assert_eq!(values.shape, vec![1, 1]);
     }
 
@@ -2434,7 +2434,7 @@ mod tests {
         };
         assert_eq!(values.shape, vec![2, 2]);
         assert_eq!(
-            values.data,
+            values.data(),
             vec![
                 "alpha".to_string(),
                 "delta".to_string(),

@@ -38,7 +38,7 @@ fn heterogeneous_cell_group_keys_do_not_collapse_into_display_text() {
         CellArray::new(
             vec![
                 Value::Int(IntValue::U64(wide)),
-                Value::String(wide.to_string()),
+                Value::String(wide.to_string().into()),
             ],
             2,
             1,
@@ -66,7 +66,7 @@ fn heterogeneous_cell_group_keys_do_not_collapse_into_display_text() {
             CellArray::new(
                 vec![
                     Value::Int(IntValue::U64(wide)),
-                    Value::String(wide.to_string()),
+                    Value::String(wide.to_string().into()),
                 ],
                 2,
                 1,
@@ -106,10 +106,8 @@ fn character_group_rows_follow_the_canonical_row_major_payload() {
 fn categorical_group_length_uses_all_codes_not_only_sample_prefix() {
     let mut group =
         runmat_value::ObjectInstance::new(runmat_types::standard::CATEGORICAL.to_string());
-    group
-        .properties
-        .insert("Codes".to_string(), tensor(vec![1.0, 2.0, 1.0], vec![3, 1]));
-    group.properties.insert(
+    group.replace_property_unbounded("Codes".to_string(), tensor(vec![1.0, 2.0, 1.0], vec![3, 1]));
+    group.replace_property_unbounded(
         "Categories".to_string(),
         Value::StringArray(StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap()),
     );
@@ -140,8 +138,7 @@ fn categorical_group_length_uses_all_codes_not_only_sample_prefix() {
 fn owned_host_sample_passes_materialization_boundary_without_copy() {
     let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
     let original_payload = tensor.as_f64_slice().unwrap().as_ptr();
-    let mut values = block_on(gather_values(vec![Value::Tensor(tensor)])).unwrap();
-    let Value::Tensor(result) = values.remove(0) else {
+    let Value::Tensor(result) = block_on(gather_value(Value::Tensor(tensor))).unwrap() else {
         panic!("host tensor must retain its value kind");
     };
     assert_eq!(result.as_f64_slice().unwrap().as_ptr(), original_payload);
@@ -610,12 +607,16 @@ fn full_factor_controls_reject_before_cartesian_slot_allocation() {
 #[test]
 fn later_factor_control_override_owns_count_validation() {
     let plan = BoxplotOptionPlan::admit(
-        vec![
-            Value::from("FactorSeparator"),
-            Value::Num(2.0),
-            Value::from("FactorSeparator"),
-            Value::Num(1.0),
-        ],
+        crate::call::BuiltinArguments::from_borrowed(
+            &[
+                Value::from("FactorSeparator"),
+                Value::Num(2.0),
+                Value::from("FactorSeparator"),
+                Value::Num(1.0),
+            ],
+            None,
+        )
+        .unwrap(),
         None,
     )
     .unwrap();
@@ -636,12 +637,16 @@ fn ungrouped_vector_and_matrix_have_one_synthetic_factor() {
             ..Default::default()
         };
         let plan = BoxplotOptionPlan::admit(
-            vec![
-                Value::from("FactorSeparator"),
-                Value::Num(1.0),
-                Value::from("FactorGap"),
-                Value::Num(10.0),
-            ],
+            crate::call::BuiltinArguments::from_borrowed(
+                &[
+                    Value::from("FactorSeparator"),
+                    Value::Num(1.0),
+                    Value::from("FactorGap"),
+                    Value::Num(10.0),
+                ],
+                None,
+            )
+            .unwrap(),
             None,
         )
         .unwrap();
@@ -802,8 +807,11 @@ fn documented_single_data_groups_and_options_need_no_extension() {
         &mut cooperation::BoxplotCooperation::new(None),
     ))
     .expect("documented single sample and group");
-    BoxplotOptionPlan::admit(args[2..].to_vec(), Some(BoxplotOptionKind::Whisker))
-        .expect("documented single option");
+    BoxplotOptionPlan::admit(
+        crate::call::BuiltinArguments::from_borrowed(&args[2..], None).unwrap(),
+        Some(BoxplotOptionKind::Whisker),
+    )
+    .expect("documented single option");
 }
 
 #[test]

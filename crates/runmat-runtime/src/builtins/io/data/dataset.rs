@@ -115,7 +115,7 @@ async fn dataset_array_builtin(
     runtime: Option<RuntimeContext>,
     base: Value,
     name: Value,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<crate::execution::RootedValue> {
     let owner = dataset_owner(runtime.as_ref(), &base)?;
     let array_name = parse_string(&name, "Dataset.array name")?;
     handle_admission::execute(
@@ -132,7 +132,7 @@ async fn dataset_array_builtin(
                 )));
             }
             let lease = authority::issue_child(&owner, HandleRole::Array(array_name.clone()))?;
-            Ok(array_object(&owner.public_path, &array_name, lease))
+            array_object(runtime.as_ref(), &owner.public_path, &array_name, lease)
         },
     )
     .await
@@ -167,7 +167,7 @@ async fn dataset_get_attr_builtin(
     runtime: Option<RuntimeContext>,
     base: Value,
     key: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(data_error(
@@ -252,7 +252,7 @@ async fn dataset_set_attrs_builtin(
             let mut manifest =
                 crate::data::read_manifest_on(owner.filesystem.as_ref(), &owner.root).await?;
             for (k, v) in &incoming.fields {
-                manifest.attrs.insert(k.clone(), value_to_json(v));
+                manifest.attrs.insert(k.to_owned(), value_to_json(v));
             }
             manifest.updated_at = now_rfc3339();
             manifest.txn_sequence = manifest.txn_sequence.saturating_add(1);
@@ -273,8 +273,8 @@ async fn dataset_set_attrs_builtin(
 async fn dataset_begin_builtin(
     runtime: Option<RuntimeContext>,
     base: Value,
-    rest: Vec<Value>,
-) -> BuiltinResult<Value> {
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<crate::execution::RootedValue> {
     if !rest.is_empty() {
         return Err(data_error("Dataset.begin does not accept trailing options"));
     }
@@ -296,7 +296,7 @@ async fn dataset_begin_builtin(
             base_sequence = manifest.txn_sequence,
             "data transaction begin"
         );
-        Ok(transaction_object(&owner.public_path, &tx_id, lease))
+        transaction_object(runtime.as_ref(), &owner.public_path, &tx_id, lease)
     })
     .await
 }
@@ -311,7 +311,7 @@ async fn dataset_snapshot_builtin(
     runtime: Option<RuntimeContext>,
     base: Value,
     label: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     if !rest.is_empty() {
         return Err(data_error(
@@ -356,15 +356,15 @@ async fn dataset_snapshot_builtin(
 async fn dataset_refresh_builtin(
     runtime: Option<RuntimeContext>,
     base: Value,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<crate::execution::RootedValue> {
     let owner = dataset_owner(runtime.as_ref(), &base)?;
     handle_admission::execute(runtime.as_ref(), &owner, Op::DatasetRefresh, &[], async {
         let manifest =
             crate::data::read_manifest_on(owner.filesystem.as_ref(), &owner.root).await?;
         let lease = authority::renew_dataset(&owner)?;
-        let mut ds = dataset_object(&owner.public_path, &manifest, lease);
-        hydrate_dataset_descriptor_on(owner.filesystem.as_ref(), &owner.root, &mut ds).await;
-        Ok(ds)
+        let ds = dataset_object(runtime.as_ref(), &owner.public_path, &manifest, lease)?;
+        hydrate_dataset_descriptor_on(runtime.as_ref(), owner.filesystem.as_ref(), &owner.root, ds)
+            .await
     })
     .await
 }

@@ -190,21 +190,27 @@ async fn upsample_builtin_registered(
     runtime: Option<RuntimeContext>,
     x: Value,
     n: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     upsample_in_runtime(runtime.as_ref(), x, n, rest).await
 }
 
 #[cfg(test)]
 async fn upsample_builtin(x: Value, n: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    upsample_in_runtime(None, x, n, rest).await
+    upsample_in_runtime(
+        None,
+        x,
+        n,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    )
+    .await
 }
 
 async fn upsample_in_runtime(
     runtime: Option<&RuntimeContext>,
     x: Value,
     n: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let mut cooperation = SignalCooperation::new(runtime, UPSAMPLE_NAME)
         .with_integer_error_descriptor(&SAMPLE_ERROR_BUILD_OUTPUT);
@@ -240,21 +246,27 @@ async fn downsample_builtin_registered(
     runtime: Option<RuntimeContext>,
     x: Value,
     n: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     downsample_in_runtime(runtime.as_ref(), x, n, rest).await
 }
 
 #[cfg(test)]
 async fn downsample_builtin(x: Value, n: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    downsample_in_runtime(None, x, n, rest).await
+    downsample_in_runtime(
+        None,
+        x,
+        n,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    )
+    .await
 }
 
 async fn downsample_in_runtime(
     runtime: Option<&RuntimeContext>,
     x: Value,
     n: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let mut cooperation = SignalCooperation::new(runtime, DOWNSAMPLE_NAME)
         .with_integer_error_descriptor(&SAMPLE_ERROR_BUILD_OUTPUT);
@@ -356,14 +368,21 @@ async fn resample_builtin_registered(
     x: Value,
     p: Value,
     q: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     resample_in_runtime(runtime.as_ref(), x, p, q, rest).await
 }
 
 #[cfg(test)]
 async fn resample_builtin(x: Value, p: Value, q: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    resample_in_runtime(None, x, p, q, rest).await
+    resample_in_runtime(
+        None,
+        x,
+        p,
+        q,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    )
+    .await
 }
 
 async fn resample_in_runtime(
@@ -371,7 +390,7 @@ async fn resample_in_runtime(
     x: Value,
     p: Value,
     q: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let mut cooperation = SignalCooperation::new(runtime, RESAMPLE_NAME)
         .with_integer_error_descriptor(&SAMPLE_ERROR_BUILD_OUTPUT);
@@ -448,7 +467,7 @@ async fn sample_rate_builtin(
     op: SampleOp,
     x: Value,
     n: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
     cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<Value> {
     if rest.len() > 1 {

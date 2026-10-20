@@ -45,8 +45,8 @@ pub(super) fn parse_trainnet_loss(value: &Value) -> BuiltinResult<LossKind> {
 pub(super) fn is_label_target(value: &Value) -> bool {
     match value {
         Value::String(_) | Value::CharArray(_) | Value::StringArray(_) => true,
-        Value::Cell(cell) => cell.data.iter().all(is_label_target),
-        Value::Object(object) => object.class_name.is(runmat_types::standard::CATEGORICAL),
+        Value::Cell(cell) => cell.data().iter().all(is_label_target),
+        Value::Object(object) => object.class_name().is(runmat_types::standard::CATEGORICAL),
         _ => false,
     }
 }
@@ -128,22 +128,24 @@ pub(super) fn label_strings(
             Ok(Some(labels))
         }
         Value::String(text) => Ok(Some(vec![text.to_string()])),
-        Value::CharArray(chars) if chars.rows == 1 => Ok(Some(vec![chars.data.iter().collect()])),
-        Value::StringArray(array) => Ok(Some(array.data.iter().map(ToString::to_string).collect())),
+        Value::CharArray(chars) if chars.rows == 1 => Ok(Some(vec![chars.data().iter().collect()])),
+        Value::StringArray(array) => {
+            Ok(Some(array.data().iter().map(ToString::to_string).collect()))
+        }
         Value::Cell(cell) => cell
-            .data
+            .data()
             .iter()
             .map(|item| scalar_text(item, function))
             .collect::<BuiltinResult<Vec<_>>>()
             .map(Some),
-        Value::Object(object) if object.class_name.is(runmat_types::standard::CATEGORICAL) => {
-            let Some(Value::StringArray(categories)) = object.properties.get("Categories") else {
+        Value::Object(object) if object.class_name().is(runmat_types::standard::CATEGORICAL) => {
+            let Some(Value::StringArray(categories)) = object.properties().get("Categories") else {
                 return Err(deep_learning_error(
                     function,
                     format!("{function}: categorical labels are missing Categories"),
                 ));
             };
-            let Some(Value::Tensor(codes)) = object.properties.get("Codes") else {
+            let Some(Value::Tensor(codes)) = object.properties().get("Codes") else {
                 return Err(deep_learning_error(
                     function,
                     format!("{function}: categorical labels are missing numeric Codes"),
@@ -157,8 +159,8 @@ pub(super) fn label_strings(
                         format!("{function}: categorical Codes storage is invalid"),
                     )
                 })?;
-                let index = categorical_index(code, categories.data.len(), function)?;
-                labels.push(categories.data[index].to_string());
+                let index = categorical_index(code, categories.data().len(), function)?;
+                labels.push(categories.data()[index].to_string());
             }
             Ok(Some(labels))
         }

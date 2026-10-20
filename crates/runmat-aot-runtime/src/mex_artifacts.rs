@@ -130,8 +130,12 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
             crate::mex::install(&runtime, session.clone(), local_tasks.clone()).unwrap();
         local_tasks
             .drive_until(runtime.clone().scope(async {
+                let arguments = runmat_runtime::call::RootedFunctionArguments::ordinary(
+                    runmat_runtime::execution::RootedValues::in_context(Vec::new(), &runtime)
+                        .expect("root embedded MEX arguments in their original runtime"),
+                );
                 let value = session
-                    .load_and_call("embedded_fixture", Vec::new(), 1, runtime.clone())
+                    .load_and_call("embedded_fixture", arguments, 1, runtime.clone())
                     .await
                     .break_value()
                     .expect("installed artifact resolves")

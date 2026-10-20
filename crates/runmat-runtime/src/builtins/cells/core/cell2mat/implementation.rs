@@ -9,7 +9,7 @@ pub(super) async fn execute(value: Value) -> BuiltinResult<Value> {
     let Value::Cell(cells) = value else {
         return Err(invalid_input("expected a cell array input"));
     };
-    if cells.data.is_empty() {
+    if cells.data().is_empty() {
         return empty_double();
     }
     let (kind, entries) = super::input::gather(&cells).await?;

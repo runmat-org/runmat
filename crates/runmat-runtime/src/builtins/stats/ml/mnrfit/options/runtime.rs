@@ -35,11 +35,11 @@ pub(in crate::builtins::stats::ml::mnrfit) async fn prepare_values(
     let mut actions = Vec::new();
     for (name, value) in values {
         if name == OptionName::Options {
-            let Value::Struct(mut statset) = value else {
+            let Value::Struct(statset) = value else {
                 return Err(invalid("mnrfit: Options must be a struct"));
             };
             for field in MnrfitStatsetField::ALL {
-                let Some(value) = statset.fields.remove(field.public_name()) else {
+                let Some(value) = statset.fields.get(field.public_name()).cloned() else {
                     continue;
                 };
                 if crate::dispatcher::value_contains_gpu(&value) {

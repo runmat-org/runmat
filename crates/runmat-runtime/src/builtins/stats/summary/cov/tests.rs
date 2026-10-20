@@ -68,7 +68,10 @@ fn cov_descriptor_signatures_cover_core_forms() {
 }
 
 fn cov_builtin_sync(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    block_on(super::cov_builtin(value, rest))
+    block_on(super::cov_builtin(
+        value,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    ))
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -83,7 +86,11 @@ fn cov_matrix_basic() {
         vec![5, 3],
     )
     .unwrap();
-    let result = block_on(cov_builtin(Value::Tensor(tensor), Vec::new())).expect("cov");
+    let result = block_on(cov_builtin(
+        Value::Tensor(tensor),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect("cov");
     let tensor = match result {
         Value::Tensor(t) => t,
         other => panic!("expected tensor result, got {other:?}"),
@@ -101,7 +108,11 @@ fn cov_matrix_basic() {
 fn cov_two_vectors() {
     let x = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap();
     let y = Tensor::new(vec![10.0, 11.0, 9.0, 12.0], vec![4, 1]).unwrap();
-    let result = block_on(cov_builtin(Value::Tensor(x), vec![Value::Tensor(y)])).expect("cov");
+    let result = block_on(cov_builtin(
+        Value::Tensor(x),
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(y)]),
+    ))
+    .expect("cov");
     let tensor = match result {
         Value::Tensor(t) => t,
         other => panic!("expected tensor result, got {other:?}"),
@@ -118,35 +129,42 @@ fn cov_two_vectors() {
 #[test]
 fn cov_row_vector_scalar_empty_and_paired_matrix_shapes_match_contract() {
     let row = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
-    let Value::Tensor(row_cov) =
-        block_on(cov_builtin(Value::Tensor(row), Vec::new())).expect("row covariance")
-    else {
+    let Value::Tensor(row_cov) = block_on(cov_builtin(
+        Value::Tensor(row),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect("row covariance") else {
         panic!("expected tensor");
     };
     assert_tensor_close(&row_cov, &[1.0], 1.0e-12);
 
     let scalar = Tensor::new(vec![7.0], vec![1, 1]).unwrap();
-    let Value::Tensor(scalar_cov) =
-        block_on(cov_builtin(Value::Tensor(scalar), Vec::new())).expect("scalar covariance")
-    else {
+    let Value::Tensor(scalar_cov) = block_on(cov_builtin(
+        Value::Tensor(scalar),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect("scalar covariance") else {
         panic!("expected tensor");
     };
     assert_tensor_close(&scalar_cov, &[0.0], 1.0e-12);
 
     let empty = Tensor::new(Vec::new(), vec![0, 0]).unwrap();
-    let Value::Tensor(empty_cov) =
-        block_on(cov_builtin(Value::Tensor(empty), Vec::new())).expect("empty covariance")
-    else {
+    let Value::Tensor(empty_cov) = block_on(cov_builtin(
+        Value::Tensor(empty),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect("empty covariance") else {
         panic!("expected tensor");
     };
     assert_tensor_close(&empty_cov, &[f64::NAN], 0.0);
 
     let left = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
     let right = Tensor::new(vec![5.0, 6.0, 7.0, 8.0], vec![2, 2]).unwrap();
-    let Value::Tensor(pair_cov) =
-        block_on(cov_builtin(Value::Tensor(left), vec![Value::Tensor(right)]))
-            .expect("paired matrix covariance")
-    else {
+    let Value::Tensor(pair_cov) = block_on(cov_builtin(
+        Value::Tensor(left),
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(right)]),
+    ))
+    .expect("paired matrix covariance") else {
         panic!("expected tensor");
     };
     let expected = [5.0 / 3.0; 4];
@@ -168,7 +186,7 @@ fn cov_weighted_vector() {
     let weights = Tensor::new(vec![1.0, 1.0, 1.0, 2.0, 2.0], vec![5, 1]).unwrap();
     let result = block_on(cov_builtin(
         Value::Tensor(tensor),
-        vec![Value::Tensor(weights)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(weights)]),
     ))
     .expect("cov");
     let tensor = match result {
@@ -203,7 +221,7 @@ fn cov_accepts_typed_integer_matrix_and_weights() {
     );
     let result = block_on(cov_builtin(
         Value::Tensor(tensor),
-        vec![Value::Tensor(weights)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(weights)]),
     ))
     .expect("cov");
     let tensor = match result {
@@ -227,7 +245,7 @@ fn cov_rejects_negative_typed_integer_weights() {
     let weights = poisoned_int_tensor(IntegerStorage::I16(vec![1, -1]), vec![2, 1], 1.0);
     let err = block_on(cov_builtin(
         Value::Tensor(tensor),
-        vec![Value::Tensor(weights)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(weights)]),
     ))
     .expect_err("negative weights should fail");
     assert_eq!(err.identifier(), COV_ERROR_INVALID_ARGUMENT.identifier);
@@ -238,7 +256,7 @@ fn cov_extensions_are_independently_gated_before_computation() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
     let integer_error = block_on(cov_builtin(
         Value::Tensor(Tensor::new_integer(IntegerStorage::I16(vec![1, 2, 3]), vec![3, 1]).unwrap()),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap_err();
     assert_eq!(
@@ -246,7 +264,11 @@ fn cov_extensions_are_independently_gated_before_computation() {
         Some("RunMat:compatibility:CovIntegerDataExtension")
     );
 
-    let logical_error = block_on(cov_builtin(Value::Bool(true), Vec::new())).unwrap_err();
+    let logical_error = block_on(cov_builtin(
+        Value::Bool(true),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap_err();
     assert_eq!(
         logical_error.identifier(),
         Some("RunMat:compatibility:CovLogicalDataExtension")
@@ -255,7 +277,7 @@ fn cov_extensions_are_independently_gated_before_computation() {
     let data = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
     let normalization_error = block_on(cov_builtin(
         Value::Tensor(data.clone()),
-        vec![Value::Int(IntValue::U8(1))],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(IntValue::U8(1))]),
     ))
     .unwrap_err();
     assert_eq!(
@@ -266,7 +288,7 @@ fn cov_extensions_are_independently_gated_before_computation() {
     let weights = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
     let weight_error = block_on(cov_builtin(
         Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 3.0, 2.0, 1.0], vec![3, 2]).unwrap()),
-        vec![Value::Tensor(weights)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(weights)]),
     ))
     .unwrap_err();
     assert_eq!(
@@ -291,19 +313,22 @@ fn cov_supports_all_eight_integer_classes_and_wide_centering() {
     for storage in storages {
         let class = storage.class_name();
         let data = Tensor::new_integer(storage.clone(), vec![3, 1]).unwrap();
-        let Value::Tensor(covariance) = block_on(cov_builtin(Value::Tensor(data), Vec::new()))
-            .unwrap_or_else(|error| panic!("{class}: {error}"))
-        else {
+        let Value::Tensor(covariance) = block_on(cov_builtin(
+            Value::Tensor(data),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap_or_else(|error| panic!("{class}: {error}")) else {
             panic!("{class}: expected tensor");
         };
         assert_tensor_close(&covariance, &[1.0], 1.0e-12);
 
         let left = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let right = Tensor::new_integer(storage.clone(), vec![3, 1]).unwrap();
-        let Value::Tensor(pair) =
-            block_on(cov_builtin(Value::Tensor(left), vec![Value::Tensor(right)]))
-                .unwrap_or_else(|error| panic!("{class} paired data: {error}"))
-        else {
+        let Value::Tensor(pair) = block_on(cov_builtin(
+            Value::Tensor(left),
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(right)]),
+        ))
+        .unwrap_or_else(|error| panic!("{class} paired data: {error}")) else {
             panic!("{class}: expected paired tensor");
         };
         assert_tensor_close(&pair, &[1.0; 4], 1.0e-12);
@@ -312,7 +337,7 @@ fn cov_supports_all_eight_integer_classes_and_wide_centering() {
         let weights = Tensor::new_integer(storage, vec![3, 1]).unwrap();
         let weighted = block_on(cov_builtin(
             Value::Tensor(matrix),
-            vec![Value::Tensor(weights)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(weights)]),
         ))
         .unwrap_or_else(|error| panic!("{class} weights: {error}"));
         assert!(matches!(weighted, Value::Tensor(_)));
@@ -324,9 +349,11 @@ fn cov_supports_all_eight_integer_classes_and_wide_centering() {
         vec![3, 1],
     )
     .unwrap();
-    let Value::Tensor(covariance) =
-        block_on(cov_builtin(Value::Tensor(wide), Vec::new())).expect("wide covariance")
-    else {
+    let Value::Tensor(covariance) = block_on(cov_builtin(
+        Value::Tensor(wide),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect("wide covariance") else {
         panic!("expected tensor");
     };
     assert_tensor_close(&covariance, &[1.0], 1.0e-12);
@@ -338,8 +365,11 @@ fn cov_resident_integer_data_rejects_before_provider_dispatch() {
         let tensor = Tensor::new_integer(IntegerStorage::U16(vec![1, 2, 3]), vec![3, 1]).unwrap();
         let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload integer");
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        let error =
-            block_on(cov_builtin(Value::GpuTensor(handle.clone()), Vec::new())).unwrap_err();
+        let error = block_on(cov_builtin(
+            Value::GpuTensor(handle.clone()),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap_err();
         assert_eq!(
             error.identifier(),
             Some("RunMat:compatibility:CovIntegerDataExtension")
@@ -371,7 +401,7 @@ fn cov_omitrows() {
     .unwrap();
     let result = block_on(cov_builtin(
         Value::Tensor(tensor),
-        vec![Value::from("omitrows")],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("omitrows")]),
     ))
     .expect("cov");
     let tensor = match result {
@@ -406,7 +436,7 @@ fn cov_partialrows() {
     .unwrap();
     let result = block_on(cov_builtin(
         Value::Tensor(tensor),
-        vec![Value::from("partialrows")],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("partialrows")]),
     ))
     .expect("cov");
     let tensor = match result {
@@ -432,8 +462,11 @@ fn cov_partialrows() {
 fn cov_mismatched_rows_errors() {
     let left = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap();
     let right = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-    let err = block_on(cov_builtin(Value::Tensor(left), vec![Value::Tensor(right)]))
-        .expect_err("expected mismatch error");
+    let err = block_on(cov_builtin(
+        Value::Tensor(left),
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(right)]),
+    ))
+    .expect_err("expected mismatch error");
     assert_eq!(err.identifier(), COV_ERROR_ROWS_MISMATCH.identifier);
 }
 
@@ -441,8 +474,11 @@ fn cov_mismatched_rows_errors() {
 #[test]
 fn cov_invalid_flag_errors() {
     let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-    let err = block_on(cov_builtin(Value::Tensor(tensor), vec![Value::Num(2.5)]))
-        .expect_err("expected invalid flag error");
+    let err = block_on(cov_builtin(
+        Value::Tensor(tensor),
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(2.5)]),
+    ))
+    .expect_err("expected invalid flag error");
     assert_eq!(err.identifier(), COV_ERROR_NORMALIZATION_INVALID.identifier);
 }
 
@@ -455,7 +491,10 @@ fn cov_weight_vector_length_mismatch_errors() {
     let w = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
     let err = block_on(cov_builtin(
         Value::Tensor(x),
-        vec![Value::Tensor(y), Value::Tensor(w)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Tensor(y),
+            Value::Tensor(w),
+        ]),
     ))
     .expect_err("expected weight length mismatch");
     assert_eq!(
@@ -470,7 +509,10 @@ fn cov_unknown_rows_option_errors() {
     let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
     let err = block_on(cov_builtin(
         Value::Tensor(tensor),
-        vec![Value::from("rows"), Value::from("bogus")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("rows"),
+            Value::from("bogus"),
+        ]),
     ))
     .expect_err("expected unknown rows option error");
     assert_eq!(err.identifier(), COV_ERROR_ROWS_OPTION_UNKNOWN.identifier);
@@ -482,7 +524,10 @@ fn cov_duplicate_normalization_flag_errors() {
     let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
     let err = block_on(cov_builtin(
         Value::Tensor(tensor),
-        vec![Value::Num(0.0), Value::Num(1.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(0.0),
+            Value::Num(1.0),
+        ]),
     ))
     .expect_err("expected duplicate normalization flag error");
     assert_eq!(
@@ -500,7 +545,11 @@ fn cov_too_many_array_arguments_errors() {
     let z = Tensor::new(vec![7.0, 8.0, 9.0], vec![3, 1]).unwrap();
     let err = block_on(cov_builtin(
         Value::Tensor(x),
-        vec![Value::Tensor(y), Value::Tensor(w), Value::Tensor(z)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Tensor(y),
+            Value::Tensor(w),
+            Value::Tensor(z),
+        ]),
     ))
     .expect_err("expected too many array arguments error");
     assert_eq!(
@@ -526,7 +575,11 @@ fn cov_gpu_roundtrip() {
             shape: tensor.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
-        let result = block_on(cov_builtin(Value::GpuTensor(handle), Vec::new())).expect("cov");
+        let result = block_on(cov_builtin(
+            Value::GpuTensor(handle),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect("cov");
         let gathered = test_support::gather(result).expect("gather");
         let expected = [
             0.0250, 0.0075, //
@@ -558,7 +611,7 @@ fn cov_gpu_host_weights_return_resident_result() {
 
         let result = block_on(cov_builtin(
             Value::GpuTensor(handle),
-            vec![Value::Tensor(weights)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(weights)]),
         ))
         .expect("weighted cov");
         assert!(matches!(result, Value::GpuTensor(_)));
@@ -602,7 +655,9 @@ fn cov_gpu_resident_weights_return_resident_result() {
 
         let result = block_on(cov_builtin(
             Value::GpuTensor(data),
-            vec![Value::GpuTensor(weight_handle)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(
+                weight_handle,
+            )]),
         ))
         .expect("weighted cov");
         assert!(matches!(result, Value::GpuTensor(_)));
@@ -639,7 +694,9 @@ fn cov_gpu_rejects_negative_resident_weights() {
 
         let err = block_on(cov_builtin(
             Value::GpuTensor(data),
-            vec![Value::GpuTensor(weight_handle)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(
+                weight_handle,
+            )]),
         ))
         .expect_err("negative weights should fail");
         assert_eq!(err.identifier(), COV_ERROR_INVALID_ARGUMENT.identifier);
@@ -669,7 +726,11 @@ fn cov_wgpu_matches_cpu() {
     )
     .unwrap();
 
-    let cpu_result = block_on(cov_builtin(Value::Tensor(tensor.clone()), Vec::new())).expect("cov");
+    let cpu_result = block_on(cov_builtin(
+        Value::Tensor(tensor.clone()),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect("cov");
     let cpu_tensor = match cpu_result {
         Value::Tensor(t) => t,
         other => panic!("expected tensor result, got {other:?}"),
@@ -732,8 +793,11 @@ fn cov_wgpu_noncentered_f32_cancellation_matches_quantized_oracle() {
     }
     assert!(expected[0] > 0.0 && expected[0] < 0.1);
 
-    let cpu_result = block_on(cov_builtin(Value::Tensor(tensor.clone()), Vec::new()))
-        .expect("host typed single covariance");
+    let cpu_result = block_on(cov_builtin(
+        Value::Tensor(tensor.clone()),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect("host typed single covariance");
     let Value::Tensor(cpu_tensor) = cpu_result else {
         panic!("expected host tensor covariance");
     };
@@ -840,7 +904,9 @@ fn cov_wgpu_weighted_matches_cpu_and_stays_resident() {
 
     let cpu_result = block_on(cov_builtin(
         Value::Tensor(tensor.clone()),
-        vec![Value::Tensor(weights.clone())],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(
+            weights.clone(),
+        )]),
     ))
     .expect("cov");
     let cpu_tensor = match cpu_result {

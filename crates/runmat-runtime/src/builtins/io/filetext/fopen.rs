@@ -60,9 +60,9 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 )]
 async fn fopen_builtin(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
-    let eval = evaluate_in(runtime.as_ref(), &args).await?;
+    let eval = evaluate_retained(runtime.as_ref(), args).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Value::output_list(Vec::new()));
@@ -93,6 +93,14 @@ pub async fn evaluate_in(
     runtime: Option<&crate::context::RuntimeContext>,
     args: &[Value],
 ) -> BuiltinResult<FopenEval> {
+    let args = crate::call::BuiltinArguments::from_borrowed(args, runtime)?;
+    evaluate_retained(runtime, args).await
+}
+
+async fn evaluate_retained(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<FopenEval> {
     if args.is_empty()
         || args
             .first()
@@ -106,7 +114,7 @@ pub async fn evaluate_in(
     if let Some(first) = args.first() {
         preflight_query_fid(first)?;
     }
-    preflight_form(args)?;
+    preflight_form(args.view())?;
     let filesystem = if let Some(first) = args.first() {
         if !matches_keyword(first, "all")
             && !is_numeric_value(first)
@@ -123,23 +131,24 @@ pub async fn evaluate_in(
     } else {
         None
     };
-    let gathered = super::cooperation::await_io(runtime, BUILTIN_NAME, gather_args(args)).await??;
+    let gathered =
+        super::cooperation::await_io(runtime, BUILTIN_NAME, gather_args(runtime, &args)).await??;
     if gathered.is_empty() {
-        return handle_all(runtime, &[]);
+        return handle_all(runtime, crate::call::FunctionArgumentView::from_slice(&[]));
     }
     let first = &gathered[0];
     if matches_keyword(first, "all") {
-        return handle_all(runtime, &gathered[1..]);
+        return handle_all(runtime, gathered.view().range(1..)?);
     }
     if is_numeric_value(first) {
-        return handle_query(runtime, first, &gathered[1..]);
+        return handle_query(runtime, first, gathered.view().range(1..)?);
     }
-    handle_open(runtime, first, &gathered[1..], filesystem).await
+    handle_open(runtime, first, gathered.view().range(1..)?, filesystem).await
 }
 
 /// Reject controls whose host value or resident metadata already proves the
 /// call invalid. This runs before any unrelated resident operand is gathered.
-fn preflight_form(args: &[Value]) -> BuiltinResult<()> {
+fn preflight_form(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<()> {
     let Some(first) = args.first() else {
         return Ok(());
     };
@@ -194,16 +203,16 @@ fn preflight_form(args: &[Value]) -> BuiltinResult<()> {
     Ok(())
 }
 
-async fn gather_args(args: &[Value]) -> BuiltinResult<Vec<Value>> {
-    let mut gathered = Vec::with_capacity(args.len());
-    for value in args {
-        gathered.push(
-            gather_if_needed_async(value)
-                .await
-                .map_err(map_control_flow)?,
-        );
-    }
-    Ok(gathered)
+async fn gather_args(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: &crate::call::BuiltinArguments,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    args.try_map_preserving_roots_async(args.len(), runtime, async |index| {
+        gather_if_needed_async(&args[index])
+            .await
+            .map_err(map_control_flow)
+    })
+    .await
 }
 
 fn matches_keyword(value: &Value, keyword: &str) -> bool {
@@ -412,10 +421,10 @@ fn scalar_string<'a>(
     match value {
         Value::String(s) => Ok(std::borrow::Cow::Borrowed(s.as_str())),
         Value::CharArray(ca) if ca.rows == 1 => {
-            Ok(std::borrow::Cow::Owned(ca.data.iter().collect()))
+            Ok(std::borrow::Cow::Owned(ca.data().iter().collect()))
         }
-        Value::StringArray(sa) if sa.data.len() == 1 => {
-            Ok(std::borrow::Cow::Borrowed(sa.data[0].as_str()))
+        Value::StringArray(sa) if sa.data().len() == 1 => {
+            Ok(std::borrow::Cow::Borrowed(sa.data()[0].as_str()))
         }
         _ => Err(fopen_error_with_detail(error, err_detail)),
     }

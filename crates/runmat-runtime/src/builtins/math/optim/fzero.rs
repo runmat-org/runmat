@@ -121,7 +121,7 @@ async fn fzero_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
     function: Value,
     x: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     fzero_in_runtime(runtime.as_ref(), function, x, rest).await
 }
@@ -130,7 +130,7 @@ async fn fzero_builtin_registered(
 pub(super) async fn fzero_builtin(
     function: Value,
     x: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     fzero_in_runtime(None, function, x, rest).await
 }
@@ -139,7 +139,7 @@ async fn fzero_in_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
     function: Value,
     x: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let mut cooperation = ScalarCooperation::new(OptimSolver::Fzero, runtime);
     cooperation.completed(0).await?;
@@ -584,12 +584,12 @@ fn finalize(result: BrentZeroResult, options: &FzeroOptions, single: bool) -> Bu
 }
 
 fn build_output_struct(result: &BrentZeroResult, message: &str) -> StructValue {
-    let mut fields = StructValue::new();
+    let mut fields = runmat_value::UnboundedStructValueBuilder::new();
     fields.insert("iterations", Value::Num(result.iterations as f64));
     fields.insert("funcCount", Value::Num(result.func_count as f64));
     fields.insert("algorithm", Value::from(ALGORITHM));
     fields.insert("message", Value::from(message.to_string()));
-    fields
+    fields.finish()
 }
 
 fn build_message(result: &BrentZeroResult) -> String {

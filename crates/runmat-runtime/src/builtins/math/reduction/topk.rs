@@ -19,8 +19,8 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
     binding_variant = "default",
     builtin_path = "crate::builtins::math::reduction::topk"
 )]
-async fn maxk_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    evaluate_topk(TopKKind::Max, value, &rest)
+async fn maxk_builtin(value: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    evaluate_topk(TopKKind::Max, value, rest.view())
         .await?
         .into_value(TopKKind::Max)
 }
@@ -30,8 +30,8 @@ async fn maxk_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::math::reduction::topk"
 )]
-async fn mink_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    evaluate_topk(TopKKind::Min, value, &rest)
+async fn mink_builtin(value: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    evaluate_topk(TopKKind::Min, value, rest.view())
         .await?
         .into_value(TopKKind::Min)
 }
@@ -102,7 +102,7 @@ struct TopKArgs {
 async fn evaluate_topk(
     kind: TopKKind,
     value: Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<TopKEvaluation> {
     if crate::output_count::current_output_count().is_some_and(|count| count > 2) {
         return Err(topk_invalid_argument(

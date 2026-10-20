@@ -9,15 +9,34 @@ fn request() -> TaskRequest {
     let environment =
         crate::EnvironmentSnapshot::new(vec![("TEST".into(), "original".into())]).unwrap();
     TaskRequest {
+        schema_version: TASK_REQUEST_SCHEMA_VERSION,
         id: TaskId::derive(&[b"task"]),
         scope_id: ExecutionScopeId::derive(&[b"scope"]),
         pool_id: PoolId::derive(&[b"pool"]),
-        program_artifact_id: ArtifactId::derive(&[b"program"]),
-        callable: Callable {
-            owner_identity: "test".into(),
-            qualified_name: "entry".into(),
-            entrypoint_digest: Digest::sha256(b"entry"),
-        },
+        executable: TaskExecutableIdentity::ProgramArtifact(ArtifactId::derive(&[b"program"])),
+        callable: Callable::for_program(
+            "test",
+            &ProgramCallable::semantic(runmat_types::ProgramFunctionId(0), Some("entry".into())),
+        ),
+        // This contract-only fixture exercises invocation accounting, not
+        // compiler issuance or admission to an actual execution host.
+        host: crate::host::ExecutionHostRequirement::portable(
+            crate::ProgramEnvironment::new(
+                crate::schema::PROGRAM_SEMANTIC_SCHEMA_V2,
+                crate::schema::PROGRAM_COMPILER_SCHEMA_V2,
+                Digest::sha256(b"console-contract-test-runtime"),
+                Digest::sha256(b"console-contract-test-catalog"),
+                "runmat",
+            )
+            .unwrap(),
+            runmat_types::CapabilitySet::default(),
+            runmat_types::InteropManifest::empty(),
+            std::collections::BTreeSet::from([
+                crate::security::ExecutionTrustTier::CustomerTrusted,
+            ]),
+        )
+        .unwrap(),
+        invocation_context: ProgramInvocationContext::Direct,
         inputs: Vec::new(),
         resources: ResourceRequest {
             cpu_millicores: 1000,
@@ -35,6 +54,7 @@ fn request() -> TaskRequest {
         console: Some(limits),
         outputs: OutputContract {
             requested_outputs: 1,
+            owned_work: None,
         },
         retry: RetryPolicy::Never,
         deadline_unix_millis: None,

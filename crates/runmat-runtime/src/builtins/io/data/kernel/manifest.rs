@@ -272,17 +272,19 @@ pub(in crate::builtins::io::data) fn numeric_dimension_to_usize(
 pub(in crate::builtins::io::data) fn attrs_to_struct(
     attrs: &BTreeMap<String, serde_json::Value>,
 ) -> Value {
-    let mut out = StructValue::new();
+    let mut out = runmat_value::UnboundedStructValueBuilder::new();
     for (k, v) in attrs {
         out.fields.insert(k.clone(), json_to_value(v));
     }
-    Value::Struct(out)
+    Value::Struct(out.finish())
 }
 
 pub(in crate::builtins::io::data) fn value_to_json(value: &Value) -> serde_json::Value {
     match value {
         Value::String(s) => serde_json::Value::String(s.as_str().to_owned()),
-        Value::CharArray(chars) => serde_json::Value::String(chars.data.iter().collect::<String>()),
+        Value::CharArray(chars) => {
+            serde_json::Value::String(chars.data().iter().collect::<String>())
+        }
         Value::Num(n) => serde_json::json!(n),
         Value::Int(i) => int_value_to_json(i),
         Value::Bool(b) => serde_json::json!(b),
@@ -309,11 +311,11 @@ pub(in crate::builtins::io::data) fn json_to_value(value: &serde_json::Value) ->
                 .unwrap_or_else(|_| Value::string("<invalid-array>".to_string()))
         }
         serde_json::Value::Object(map) => {
-            let mut s = StructValue::new();
+            let mut s = runmat_value::UnboundedStructValueBuilder::new();
             for (k, v) in map {
                 s.fields.insert(k.clone(), json_to_value(v));
             }
-            Value::Struct(s)
+            Value::Struct(s.finish())
         }
         serde_json::Value::Null => Value::string("".to_string()),
     }

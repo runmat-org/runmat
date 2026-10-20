@@ -38,9 +38,13 @@ fn assert_matrix_close(tensor: &Tensor, rows: &[[f64; 3]]) {
 #[test]
 fn linkage_complete_accepts_condensed_distance_vector() {
     let y = tensor_value(vec![1.0, 4.0, 6.0, 5.0, 7.0, 2.0], 1, 6);
-    let Value::Tensor(z) =
-        block_on(linkage_builtin(y, vec![Value::String("complete".into())])).unwrap()
-    else {
+    let Value::Tensor(z) = block_on(linkage_builtin(
+        y,
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+            "complete".into(),
+        )]),
+    ))
+    .unwrap() else {
         panic!("expected tensor");
     };
     assert_matrix_close(&z, &[[1.0, 2.0, 1.0], [3.0, 4.0, 2.0], [5.0, 6.0, 7.0]]);
@@ -52,7 +56,9 @@ fn linkage_preserves_rank_one_condensed_input_and_rank_zero_rejection() {
     let input = Value::Tensor(Tensor::new(vec![1.0, 4.0, 6.0, 5.0, 7.0, 2.0], vec![6]).unwrap());
     let Value::Tensor(tree) = block_on(linkage_builtin(
         input,
-        vec![Value::String("complete".into())],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+            "complete".into(),
+        )]),
     ))
     .unwrap() else {
         panic!("expected clustering tree tensor");
@@ -60,7 +66,11 @@ fn linkage_preserves_rank_one_condensed_input_and_rank_zero_rejection() {
     assert_matrix_close(&tree, &[[1.0, 2.0, 1.0], [3.0, 4.0, 2.0], [5.0, 6.0, 7.0]]);
 
     let scalar = Value::Tensor(Tensor::new(vec![1.0], Vec::new()).unwrap());
-    let error = block_on(linkage_builtin(scalar, Vec::new())).unwrap_err();
+    let error = block_on(linkage_builtin(
+        scalar,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap_err();
     assert!(error.contains("input must be a numeric vector or 2-D matrix"));
 }
 
@@ -68,9 +78,13 @@ fn linkage_preserves_rank_one_condensed_input_and_rank_zero_rejection() {
 fn linkage_condensed_vector_reads_typed_integer_storage_exactly() {
     let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     let y = typed_integer_tensor_value(IntegerStorage::I16(vec![1, 4, 6, 5, 7, 2]), vec![1, 6]);
-    let Value::Tensor(z) =
-        block_on(linkage_builtin(y, vec![Value::String("complete".into())])).unwrap()
-    else {
+    let Value::Tensor(z) = block_on(linkage_builtin(
+        y,
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+            "complete".into(),
+        )]),
+    ))
+    .unwrap() else {
         panic!("expected tensor");
     };
     assert_matrix_close(&z, &[[1.0, 2.0, 1.0], [3.0, 4.0, 2.0], [5.0, 6.0, 7.0]]);
@@ -86,9 +100,13 @@ fn linkage_single_computes_from_observation_matrix() {
         4,
         2,
     );
-    let Value::Tensor(z) =
-        block_on(linkage_builtin(x, vec![Value::String("single".into())])).unwrap()
-    else {
+    let Value::Tensor(z) = block_on(linkage_builtin(
+        x,
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+            "single".into(),
+        )]),
+    ))
+    .unwrap() else {
         panic!("expected tensor");
     };
     assert_matrix_close(
@@ -104,9 +122,13 @@ fn linkage_single_computes_from_observation_matrix() {
 #[test]
 fn linkage_column_vector_is_observation_matrix_not_condensed_vector() {
     let x = tensor_value(vec![0.0, 1.0, 2.0], 3, 1);
-    let Value::Tensor(z) =
-        block_on(linkage_builtin(x, vec![Value::String("single".into())])).unwrap()
-    else {
+    let Value::Tensor(z) = block_on(linkage_builtin(
+        x,
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+            "single".into(),
+        )]),
+    ))
+    .unwrap() else {
         panic!("expected tensor");
     };
     assert_matrix_close(&z, &[[1.0, 2.0, 1.0], [3.0, 4.0, 1.0]]);
@@ -135,7 +157,10 @@ fn linkage_average_uses_pdist_metric_cell() {
     );
     let Value::Tensor(z) = block_on(linkage_builtin(
         x,
-        vec![Value::String("average".into()), metric],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::String("average".into()),
+            metric,
+        ]),
     ))
     .unwrap() else {
         panic!("expected tensor");
@@ -154,9 +179,13 @@ fn linkage_ward_matches_singleton_euclidean_first_merge() {
         4,
         2,
     );
-    let Value::Tensor(z) =
-        block_on(linkage_builtin(x, vec![Value::String("ward".into())])).unwrap()
-    else {
+    let Value::Tensor(z) = block_on(linkage_builtin(
+        x,
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+            "ward".into(),
+        )]),
+    ))
+    .unwrap() else {
         panic!("expected tensor");
     };
     assert_eq!(z.shape(), [3, 3]);
@@ -165,7 +194,11 @@ fn linkage_ward_matches_singleton_euclidean_first_merge() {
 
 #[test]
 fn linkage_rejects_bad_distance_vector_length() {
-    let err = block_on(linkage_builtin(tensor_value(vec![1.0, 2.0], 1, 2), vec![])).unwrap_err();
+    let err = block_on(linkage_builtin(
+        tensor_value(vec![1.0, 2.0], 1, 2),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap_err();
     assert!(err.to_string().contains("condensed distance vector length"));
 }
 
@@ -175,8 +208,11 @@ fn linkage_preflights_resource_geometry_before_resident_download() {
         let oversized = tensor(vec![0.0; 701], 701, 1);
         let resident = crate::builtins::common::gpu_helpers::upload_tensor(provider, &oversized)
             .expect("upload observations");
-        let error = block_on(linkage_builtin(Value::GpuTensor(resident), Vec::new()))
-            .expect_err("historical observation cap must be checked before download");
+        let error = block_on(linkage_builtin(
+            Value::GpuTensor(resident),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect_err("historical observation cap must be checked before download");
         assert!(error.message().contains("too many observations"));
 
         let complex =
@@ -184,8 +220,11 @@ fn linkage_preflights_resource_geometry_before_resident_download() {
         let resident =
             crate::builtins::common::gpu_helpers::upload_complex_tensor(provider, &complex)
                 .expect("upload complex input");
-        let error = block_on(linkage_builtin(Value::GpuTensor(resident), Vec::new()))
-            .expect_err("physical complex storage must be rejected before download");
+        let error = block_on(linkage_builtin(
+            Value::GpuTensor(resident),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect_err("physical complex storage must be rejected before download");
         assert!(error.message().contains("real numeric"));
     });
 }
@@ -194,10 +233,10 @@ fn linkage_preflights_resource_geometry_before_resident_download() {
 fn linkage_rejects_metric_for_condensed_vector() {
     let err = block_on(linkage_builtin(
         tensor_value(vec![1.0, 4.0, 6.0], 1, 3),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::String("single".into()),
             Value::String("cityblock".into()),
-        ],
+        ]),
     ))
     .unwrap_err();
     assert!(err
@@ -209,18 +248,21 @@ fn linkage_rejects_metric_for_condensed_vector() {
 fn shared_metric_admission_uses_linkage_error_identity() {
     let error = block_on(linkage_builtin(
         tensor_value(vec![0.0, 1.0, 2.0], 3, 1),
-        vec![Value::from("single"), Value::from("unsupported-metric")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("single"),
+            Value::from("unsupported-metric"),
+        ]),
     ))
     .expect_err("unknown metric must fail at the linkage boundary");
     assert_eq!(error.identifier(), Some("RunMat:linkage:InvalidArgument"));
 
     let error = block_on(linkage_builtin(
         tensor_value(vec![0.0, 1.0, 2.0], 3, 1),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("single"),
             Value::from("minkowski"),
             Value::Num(-2.0),
-        ],
+        ]),
     ))
     .expect_err("shared Minkowski parameter admission must use linkage identity");
     assert_eq!(error.identifier(), Some("RunMat:linkage:InvalidArgument"));
@@ -230,7 +272,7 @@ fn shared_metric_admission_uses_linkage_error_identity() {
 fn linkage_rejects_nonfinite_distances() {
     let err = block_on(linkage_builtin(
         tensor_value(vec![1.0, f64::INFINITY, 2.0], 1, 3),
-        vec![],
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
     ))
     .unwrap_err();
     assert!(err.to_string().contains("distances must be finite"));
@@ -240,7 +282,9 @@ fn linkage_rejects_nonfinite_distances() {
 fn linkage_rejects_noneuclidean_condensed_distances_for_ward_family() {
     let err = block_on(linkage_builtin(
         tensor_value(vec![1.0, 1.0, 3.0], 1, 3),
-        vec![Value::String("ward".into())],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+            "ward".into(),
+        )]),
     ))
     .unwrap_err();
     assert!(err.to_string().contains("require Euclidean"));
@@ -251,36 +295,36 @@ fn linkage_savememory_requires_text_and_euclidean_ward_family() {
     let x = tensor_value(vec![0.0, 1.0, 2.0], 3, 1);
     let err = block_on(linkage_builtin(
         x.clone(),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::String("single".into()),
             Value::String("euclidean".into()),
             Value::String("savememory".into()),
             Value::String("on".into()),
-        ],
+        ]),
     ))
     .unwrap_err();
     assert!(err.to_string().contains("centroid, median, or ward"));
 
     let err = block_on(linkage_builtin(
         x.clone(),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::String("ward".into()),
             Value::String("cityblock".into()),
             Value::String("savememory".into()),
             Value::String("on".into()),
-        ],
+        ]),
     ))
     .unwrap_err();
     assert!(err.to_string().contains("Euclidean distance metric"));
 
     let err = block_on(linkage_builtin(
         x,
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::String("ward".into()),
             Value::String("euclidean".into()),
             Value::String("savememory".into()),
             Value::Bool(true),
-        ],
+        ]),
     ))
     .unwrap_err();
     assert!(err.to_string().contains("must be 'on' or 'off'"));
@@ -291,7 +335,7 @@ fn linkage_integer_roles_are_independently_gated() {
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
     let data_error = block_on(linkage_builtin(
         typed_integer_tensor_value(IntegerStorage::U16(vec![1, 2, 3]), vec![1, 3]),
-        vec![],
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
     ))
     .unwrap_err();
     assert_eq!(
@@ -312,7 +356,10 @@ fn linkage_integer_roles_are_independently_gated() {
     );
     let parameter_error = block_on(linkage_builtin(
         tensor_value(vec![0.0, 1.0, 2.0], 3, 1),
-        vec![Value::from("average"), metric],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("average"),
+            metric,
+        ]),
     ))
     .unwrap_err();
     assert_eq!(
@@ -326,7 +373,7 @@ fn linkage_rejects_lossy_integer_data_and_distance_parameters() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let data_error = block_on(linkage_builtin(
         typed_integer_tensor_value(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), vec![1, 1]),
-        vec![],
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
     ))
     .unwrap_err();
     assert!(data_error
@@ -346,7 +393,10 @@ fn linkage_rejects_lossy_integer_data_and_distance_parameters() {
     );
     let parameter_error = block_on(linkage_builtin(
         tensor_value(vec![0.0, 1.0, 2.0], 3, 1),
-        vec![Value::from("average"), metric],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("average"),
+            metric,
+        ]),
     ))
     .unwrap_err();
     assert!(parameter_error
@@ -368,7 +418,11 @@ fn linkage_explicit_gpu_fallback_is_gated_before_download() {
     let handle = handle
         .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
         .expect("validated provenance");
-    let error = block_on(linkage_builtin(Value::GpuTensor(handle.clone()), vec![])).unwrap_err();
+    let error = block_on(linkage_builtin(
+        Value::GpuTensor(handle.clone()),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap_err();
     assert_eq!(
         error.identifier(),
         Some("RunMat:compatibility:LinkageExplicitGpuInputExtension")
@@ -387,9 +441,11 @@ fn linkage_automatic_residency_gathers_transparently() {
             .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
             .expect("validated provenance");
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let Value::Tensor(output) = block_on(linkage_builtin(Value::GpuTensor(handle), vec![]))
-            .expect("automatic residency may gather transparently")
-        else {
+        let Value::Tensor(output) = block_on(linkage_builtin(
+            Value::GpuTensor(handle),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .expect("automatic residency may gather transparently") else {
             panic!("linkage remains a host implementation");
         };
         assert_matrix_close(&output, &[[1.0, 2.0, 1.0], [3.0, 4.0, 1.0]]);

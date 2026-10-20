@@ -17,11 +17,12 @@ fn getfield_integer_capabilities_cover_payloads_and_structural_indices() {
 
 #[test]
 fn getfield_rejects_nonscalar_intermediate_structure_selection() {
-    let mut first = StructValue::new();
+    let mut first = runmat_value::UnboundedStructValueBuilder::new();
     first.fields.insert("name".into(), Value::from("first"));
-    let mut second = StructValue::new();
+    let mut second = runmat_value::UnboundedStructValueBuilder::new();
     second.fields.insert("name".into(), Value::from("second"));
-    let array = StructArray::new(vec![first, second], vec![1, 2]).expect("structure array");
+    let array = StructArray::new(vec![first.finish(), second.finish()], vec![1, 2])
+        .expect("structure array");
     let indices = Tensor::new_integer(IntegerStorage::U8(vec![1, 2]), vec![1, 2]).expect("indices");
     let selector =
         CellArray::new_with_shape(vec![Value::Tensor(indices)], vec![1, 1]).expect("selector");
@@ -46,7 +47,7 @@ fn getfield_missing_field_errors() {
 
 #[test]
 fn getfield_maps_shared_index_bounds_to_its_catalog_error() {
-    let mut structure = StructValue::new();
+    let mut structure = runmat_value::UnboundedStructValueBuilder::new();
     structure.fields.insert(
         "values".to_string(),
         Value::Tensor(Tensor::new(vec![10.0], vec![1, 1]).expect("tensor")),
@@ -54,7 +55,7 @@ fn getfield_maps_shared_index_bounds_to_its_catalog_error() {
     let selector = CellArray::new_with_shape(vec![Value::Int(IntValue::I32(2))], vec![1, 1])
         .expect("selector");
     let error = run_getfield(
-        Value::Struct(structure),
+        Value::Struct(structure.finish()),
         vec![Value::from("values"), Value::Cell(selector)],
     )
     .expect_err("out-of-bounds access");
@@ -67,11 +68,12 @@ fn getfield_maps_shared_index_bounds_to_its_catalog_error() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn indexing_missing_field_name_fails() {
-    let mut outer = StructValue::new();
+    let mut outer = runmat_value::UnboundedStructValueBuilder::new();
     outer.fields.insert("inner".to_string(), Value::Num(1.0));
     let index = CellArray::new_with_shape(vec![Value::Int(IntValue::I32(1))], vec![1, 1]).unwrap();
-    let err =
-        error_message(run_getfield(Value::Struct(outer), vec![Value::Cell(index)]).unwrap_err());
+    let err = error_message(
+        run_getfield(Value::Struct(outer.finish()), vec![Value::Cell(index)]).unwrap_err(),
+    );
     assert!(err.contains("expected field name"));
 }
 

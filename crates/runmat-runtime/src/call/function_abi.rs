@@ -9,6 +9,8 @@ use runmat_types::{
     FunctionArgValidator,
 };
 use runmat_value::{CellArray, IntValue, Tensor, Value};
+mod retained;
+pub use retained::prepare_function_inputs_rooted;
 
 /// Borrowed semantic contract for one fixed function input.
 ///
@@ -27,9 +29,11 @@ pub struct FunctionInputSpec<'a> {
 pub struct PreparedFunctionInputs {
     /// One value per fixed input. `None` preserves MATLAB's unassigned state
     /// for an omitted argument that has no default.
-    pub fixed: Vec<Option<Value>>,
+    pub fixed: runmat_value::ExactArrayStorage<Option<Value>>,
     pub varargin: Option<CellArray>,
     pub nargin: usize,
+    // Physical final slots/varargin retire before the original root forest.
+    _sources: crate::call::BuiltinArguments,
 }
 
 pub fn prepare_function_inputs(
@@ -63,90 +67,52 @@ pub async fn prepare_function_inputs_async(
     accepts_varargin: bool,
     specs: &[FunctionInputSpec<'_>],
 ) -> Result<PreparedFunctionInputs, RuntimeError> {
-    // Compatibility callers lend a slice. Materialize it once at this
-    // explicit boundary; the selected owned-entry path below never clones
-    // those Values and shares the exact same validation semantics.
-    prepare_function_inputs_owned(
+    let context = crate::context::legacy::active();
+    let values = match context.as_ref() {
+        Some(runtime) => crate::execution::RootedValues::try_initialize_in_context(
+            supplied.len(),
+            runtime,
+            |index| Ok::<_, crate::RuntimeError>(supplied[index].clone()),
+        )?,
+        None => crate::execution::RootedValues::new(supplied.to_vec())
+            .map_err(|error| error.into_runtime_error())?,
+    };
+    prepare_function_inputs_rooted(
         function_name,
-        supplied.to_vec(),
+        values.into(),
         fixed_input_count,
         accepts_varargin,
         specs,
+        context.as_ref(),
     )
     .await
 }
 
-/// Validate an owned function-entry suffix before moving its Values into
-/// fixed inputs and `varargin`. The caller must retain the original input
-/// root lease through this async operation and until the frame is installed.
-/// This avoids copying tensor, closure, and foreign payloads at entry.
+/// Compatibility for callers that already own an ordinary Vec. Contextual
+/// publication adopts its physical backing; selected rooted entries never
+/// shed their existing exact owner into this adapter.
 pub async fn prepare_function_inputs_owned(
     function_name: &str,
-    mut supplied: Vec<Value>,
+    supplied: Vec<Value>,
     fixed_input_count: usize,
     accepts_varargin: bool,
     specs: &[FunctionInputSpec<'_>],
 ) -> Result<PreparedFunctionInputs, RuntimeError> {
-    if supplied.len() > fixed_input_count && !accepts_varargin {
-        return Err(semantic_error(
-            "TooManyInputs",
-            format!(
-                "semantic function {function_name} expected {fixed_input_count} inputs, got {}",
-                supplied.len()
-            ),
-        ));
-    }
-    if specs
-        .iter()
-        .any(|spec| spec.input_index >= fixed_input_count)
-    {
-        return Err(semantic_error(
-            "InvalidInputSlot",
-            "function argument slot out of bounds",
-        ));
-    }
-
-    // Keep only default Values here. Every supplied Value remains in its
-    // original vector while potentially asynchronous validators inspect it.
-    let mut defaults = vec![None; fixed_input_count];
-    for spec in specs {
-        if supplied.get(spec.input_index).is_none() && defaults[spec.input_index].is_none() {
-            if let Some(default) = spec.default_value {
-                defaults[spec.input_index] = Some(default_value(default));
-            }
-        }
-        if let Some(value) = supplied
-            .get(spec.input_index)
-            .or_else(|| defaults[spec.input_index].as_ref())
-        {
-            validate_input(function_name, spec.input_index, value, spec).await?;
-        }
-    }
-
-    let nargin = supplied.len();
-    let supplied_fixed = fixed_input_count.min(nargin);
-    let mut fixed = defaults;
-    for (target, value) in fixed
-        .iter_mut()
-        .take(supplied_fixed)
-        .zip(supplied.drain(..supplied_fixed))
-    {
-        *target = Some(value);
-    }
-    let varargin = if accepts_varargin {
-        let columns = supplied.len();
-        Some(
-            CellArray::new(supplied, 1, columns)
-                .map_err(|error| semantic_error("VararginPack", format!("varargin: {error}")))?,
-        )
-    } else {
-        None
+    let context = crate::context::legacy::active();
+    let supplied = match context.as_ref() {
+        Some(runtime) => crate::execution::RootedValues::in_context(supplied, runtime)?,
+        None => crate::execution::RootedValues::new(supplied)
+            .map_err(|error| error.into_runtime_error())?,
     };
-    Ok(PreparedFunctionInputs {
-        fixed,
-        varargin,
-        nargin,
-    })
+    prepare_function_inputs_rooted(
+        function_name,
+        supplied.into(),
+        fixed_input_count,
+        accepts_varargin,
+        specs,
+        context.as_ref(),
+    )
+    .await
 }
 
 pub fn collect_function_outputs(
@@ -429,7 +395,7 @@ mod tests {
             vec![Some(Value::Num(1.0)), Some(Value::Num(3.0))]
         );
         assert_eq!(prepared.nargin, 1);
-        assert_eq!(prepared.varargin.unwrap().data.len(), 0);
+        assert_eq!(prepared.varargin.unwrap().data().len(), 0);
     }
 
     #[test]

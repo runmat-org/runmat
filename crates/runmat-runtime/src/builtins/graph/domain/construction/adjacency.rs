@@ -3,7 +3,9 @@ use super::super::parsing::{canonical, parse_node_names, parse_string_vector, sc
 use super::*;
 use crate::builtins::common::tensor;
 
-pub(in crate::builtins::graph::domain) fn is_adjacency_form(args: &[Value]) -> bool {
+pub(in crate::builtins::graph::domain) fn is_adjacency_form(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> bool {
     args.first().is_some_and(|value| match value {
         Value::Tensor(tensor) => {
             tensor.shape().len() == 2 && tensor.shape()[0] == tensor.shape()[1]
@@ -22,7 +24,7 @@ pub(in crate::builtins::graph::domain) fn is_adjacency_form(args: &[Value]) -> b
 pub(super) fn graph_from_adjacency(
     name: &'static str,
     directed: bool,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<Value> {
     let node_count = match &args[0] {
         Value::Tensor(matrix) => {
@@ -156,15 +158,21 @@ mod tests {
         let rank_zero = Tensor::new(vec![0.0], Vec::new()).expect("rank-zero tensor");
         let rank_one = Tensor::new(vec![0.0, 0.0], vec![2]).expect("rank-one tensor");
         for tensor in [rank_zero, rank_one] {
-            let error = block_on(graph_builtin(vec![Value::Tensor(tensor)]))
-                .expect_err("non-matrix adjacency must be rejected");
+            let error = block_on(graph_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(
+                    tensor,
+                )]),
+            ))
+            .expect_err("non-matrix adjacency must be rejected");
             assert_eq!(error.identifier(), Some("RunMat:graph:InvalidArgument"));
             assert!(error.message().contains("adjacency matrix must be square"));
         }
 
         let matrix =
             Tensor::new(vec![0.0, 1.0, 1.0, 0.0], vec![2, 2]).expect("two-by-two adjacency");
-        block_on(graph_builtin(vec![Value::Tensor(matrix)]))
-            .expect("rank-two square adjacency remains accepted");
+        block_on(graph_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(matrix)]),
+        ))
+        .expect("rank-two square adjacency remains accepted");
     }
 }

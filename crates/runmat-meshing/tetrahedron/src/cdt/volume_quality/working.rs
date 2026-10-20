@@ -128,7 +128,10 @@ impl WorkingVolumeQuality {
 
     /// Remaining (shape, refinement) violations; a constant-time diagnostic read.
     pub(in crate::cdt) fn violation_counts(&self) -> (usize, usize) {
-        (self.shape.priorities.len(), self.refinement.priorities.len())
+        (
+            self.shape.priorities.len(),
+            self.refinement.priorities.len(),
+        )
     }
 
     pub(in crate::cdt) fn cell_count(&self) -> usize {

@@ -50,22 +50,23 @@ impl RegisteredImmutableValueClass {
         object: &ObjectInstance,
         path: &str,
     ) -> Result<(), ValueCodecError> {
-        if object.class_name.display_name() != self.class_name {
+        if object.class_name().display_name() != self.class_name {
             return Err(ValueCodecError::invalid(
                 path,
                 format!(
                     "registered immutable class `{}` cannot encode object of class `{}`",
-                    self.class_name, object.class_name
+                    self.class_name,
+                    object.class_name()
                 ),
             ));
         }
-        if object.dynamic_properties.is_some() {
+        if object.dynamic_property_count() != 0 {
             return Err(ValueCodecError::invalid(
                 path,
                 "registered immutable value classes cannot have dynamic properties",
             ));
         }
-        for field in object.properties.keys() {
+        for field in object.properties().keys() {
             if !self.allowed_fields.contains(field) {
                 return Err(ValueCodecError::invalid(
                     path,
@@ -77,7 +78,7 @@ impl RegisteredImmutableValueClass {
             }
         }
         for field in &self.required_fields {
-            if !object.properties.contains_key(field) {
+            if !object.properties().contains_key(field) {
                 return Err(ValueCodecError::invalid(
                     path,
                     format!(

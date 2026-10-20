@@ -22,18 +22,23 @@ fn free_boundary_aliases_reject_excess_outputs_before_receiver_access() {
 #[test]
 fn constructor_and_nearest_aliases_reject_excess_outputs_before_geometry() {
     let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
-    let constructor = block_on(delaunay_tri_builtin(vec![Value::Num(f64::NAN)]))
-        .expect_err("constructor output bound precedes input inspection");
+    let constructor = block_on(delaunay_tri_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(f64::NAN)]),
+    ))
+    .expect_err("constructor output bound precedes input inspection");
     assert_eq!(
         constructor.identifier(),
         runmat_builtins::DELAUNAY_TRI_ERROR_TOO_MANY_OUTPUTS.identifier
     );
     for error in [
-        block_on(nearest_neighbor_builtin(Value::Num(0.0), vec![]))
-            .expect_err("function output bound"),
+        block_on(nearest_neighbor_builtin(
+            Value::Num(0.0),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .expect_err("function output bound"),
         block_on(delaunay_tri_nearest_neighbor_builtin(
             Value::Num(0.0),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .expect_err("method output bound"),
     ] {
@@ -49,10 +54,16 @@ fn point_location_aliases_bound_outputs_before_receiver_and_return_barycentric_r
     {
         let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         for error in [
-            block_on(point_location_builtin(Value::Num(0.0), vec![]))
-                .expect_err("function output bound"),
-            block_on(delaunay_tri_point_location_builtin(Value::Num(0.0), vec![]))
-                .expect_err("method output bound"),
+            block_on(point_location_builtin(
+                Value::Num(0.0),
+                crate::builtins::common::test_support::builtin_arguments(vec![]),
+            ))
+            .expect_err("function output bound"),
+            block_on(delaunay_tri_point_location_builtin(
+                Value::Num(0.0),
+                crate::builtins::common::test_support::builtin_arguments(vec![]),
+            ))
+            .expect_err("method output bound"),
         ] {
             assert_eq!(
                 error.identifier(),
@@ -60,22 +71,32 @@ fn point_location_aliases_bound_outputs_before_receiver_and_return_barycentric_r
             );
         }
     }
-    let dt = block_on(delaunay_tri_builtin(vec![tensor(
-        &[0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
-        3,
-        2,
-    )]))
+    let dt = block_on(delaunay_tri_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![tensor(
+            &[0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+            3,
+            2,
+        )]),
+    ))
     .unwrap();
     let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     for result in [
         block_on(point_location_builtin(
             dt.clone(),
-            vec![tensor(&[0.25, 0.25], 1, 2)],
+            crate::builtins::common::test_support::builtin_arguments(vec![tensor(
+                &[0.25, 0.25],
+                1,
+                2,
+            )]),
         ))
         .unwrap(),
         block_on(delaunay_tri_point_location_builtin(
             dt.clone(),
-            vec![tensor(&[0.25, 0.25], 1, 2)],
+            crate::builtins::common::test_support::builtin_arguments(vec![tensor(
+                &[0.25, 0.25],
+                1,
+                2,
+            )]),
         ))
         .unwrap(),
     ] {
@@ -113,33 +134,37 @@ fn object(value: Value) -> ObjectInstance {
 #[test]
 fn delaunaytri_builds_legacy_and_modern_properties() {
     let dt = object(
-        block_on(delaunay_tri_builtin(vec![tensor(
-            &[0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0],
-            4,
-            2,
-        )]))
+        block_on(delaunay_tri_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![tensor(
+                &[0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0],
+                4,
+                2,
+            )]),
+        ))
         .unwrap(),
     );
-    assert!(dt.class_name.is(DELAUNAY_TRI_CLASS));
-    let Value::Tensor(points) = dt.properties.get("X").unwrap() else {
+    assert!(dt.class_name().is(DELAUNAY_TRI_CLASS));
+    let Value::Tensor(points) = dt.properties().get("X").unwrap() else {
         panic!("expected points")
     };
     assert_eq!(points.shape(), [4, 2]);
-    let Value::Tensor(tri) = dt.properties.get("Triangulation").unwrap() else {
+    let Value::Tensor(tri) = dt.properties().get("Triangulation").unwrap() else {
         panic!("expected triangulation")
     };
     assert_eq!(tri.shape(), [2, 3]);
-    assert!(dt.properties.contains_key("ConnectivityList"));
-    assert!(dt.properties.contains_key("Points"));
+    assert!(dt.properties().contains_key("ConnectivityList"));
+    assert!(dt.properties().contains_key("Points"));
 }
 
 #[test]
 fn delaunaytri_rejects_point_matrices_that_are_not_two_dimensional() {
-    let err = block_on(delaunay_tri_builtin(vec![tensor(
-        &[0.0, 1.0, 0.0, 1.0, 4.0, 5.0, 6.0, 7.0],
-        2,
-        4,
-    )]))
+    let err = block_on(delaunay_tri_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![tensor(
+            &[0.0, 1.0, 0.0, 1.0, 4.0, 5.0, 6.0, 7.0],
+            2,
+            4,
+        )]),
+    ))
     .expect_err("4-column point matrix should fail");
     assert!(err.message.contains("N-by-2"));
 }
@@ -147,13 +172,15 @@ fn delaunaytri_rejects_point_matrices_that_are_not_two_dimensional() {
 #[test]
 fn delaunaytri_accepts_coordinate_vectors() {
     let dt = object(
-        block_on(delaunay_tri_builtin(vec![
-            tensor(&[0.0, 1.0, 0.0], 1, 3),
-            tensor(&[0.0, 0.0, 1.0], 1, 3),
-        ]))
+        block_on(delaunay_tri_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                tensor(&[0.0, 1.0, 0.0], 1, 3),
+                tensor(&[0.0, 0.0, 1.0], 1, 3),
+            ]),
+        ))
         .unwrap(),
     );
-    let Value::Tensor(points) = dt.properties.get("Points").unwrap() else {
+    let Value::Tensor(points) = dt.properties().get("Points").unwrap() else {
         panic!("expected points")
     };
     assert_eq!(points.shape(), [3, 2]);
@@ -198,17 +225,21 @@ fn delaunaytri_integer_extensions_follow_compatibility_mode() {
     let empty_topology = || integer_tensor(IntegerStorage::U16(Vec::new()), 0, 2);
     {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        let error = block_on(delaunay_tri_builtin(vec![points()]))
-            .expect_err("MATLAB mode rejects typed-integer constructor coordinates");
+        let error = block_on(delaunay_tri_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![points()]),
+        ))
+        .expect_err("MATLAB mode rejects typed-integer constructor coordinates");
         assert_eq!(
             error.identifier(),
             Some("RunMat:compatibility:DelaunayTriIntegerCoordinatesExtension")
         );
 
-        let error = block_on(delaunay_tri_builtin(vec![
-            tensor(&[0.0, 1.0, 0.0, 0.0, 0.0, 1.0], 3, 2),
-            empty_topology(),
-        ]))
+        let error = block_on(delaunay_tri_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                tensor(&[0.0, 1.0, 0.0, 0.0, 0.0, 1.0], 3, 2),
+                empty_topology(),
+            ]),
+        ))
         .expect_err("MATLAB mode rejects typed-integer constructor topology");
         assert_eq!(
             error.identifier(),
@@ -222,9 +253,11 @@ fn delaunaytri_integer_extensions_follow_compatibility_mode() {
                 storage: runmat_accelerate_api::GpuTensorStorage::Real,
             })
             .unwrap();
-        let error = block_on(delaunay_tri_builtin(vec![Value::GpuTensor(
-            resident_points.handle.clone(),
-        )]))
+        let error = block_on(delaunay_tri_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(
+                resident_points.handle.clone(),
+            )]),
+        ))
         .expect_err("MATLAB mode rejects resident integer coordinates before gather");
         assert_eq!(
             error.identifier(),
@@ -238,10 +271,12 @@ fn delaunaytri_integer_extensions_follow_compatibility_mode() {
                 runmat_accelerate_api::GpuTensorStorage::Real,
             )
             .unwrap();
-        let error = block_on(delaunay_tri_builtin(vec![
-            tensor(&[0.0, 1.0, 0.0, 0.0, 0.0, 1.0], 3, 2),
-            Value::GpuTensor(resident_topology.handle.clone()),
-        ]))
+        let error = block_on(delaunay_tri_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                tensor(&[0.0, 1.0, 0.0, 0.0, 0.0, 1.0], 3, 2),
+                Value::GpuTensor(resident_topology.handle.clone()),
+            ]),
+        ))
         .expect_err("MATLAB mode rejects resident integer topology before gather");
         assert_eq!(
             error.identifier(),
@@ -255,11 +290,16 @@ fn delaunaytri_integer_extensions_follow_compatibility_mode() {
     }
     {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        assert!(block_on(delaunay_tri_builtin(vec![points()])).is_ok());
-        assert!(block_on(delaunay_tri_builtin(vec![
-            tensor(&[0.0, 1.0, 0.0, 0.0, 0.0, 1.0], 3, 2),
-            empty_topology(),
-        ]))
+        assert!(block_on(delaunay_tri_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![points()])
+        ))
+        .is_ok());
+        assert!(block_on(delaunay_tri_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                tensor(&[0.0, 1.0, 0.0, 0.0, 0.0, 1.0], 3, 2),
+                empty_topology(),
+            ])
+        ))
         .is_ok());
     }
 }
@@ -268,11 +308,13 @@ fn delaunaytri_integer_extensions_follow_compatibility_mode() {
 fn delaunaytri_object_and_query_extensions_follow_compatibility_mode() {
     let make_object = || {
         object(
-            block_on(delaunay_tri_builtin(vec![tensor(
-                &[0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
-                3,
-                2,
-            )]))
+            block_on(delaunay_tri_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![tensor(
+                    &[0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+                    3,
+                    2,
+                )]),
+            ))
             .expect("double constructor"),
         )
     };
@@ -280,13 +322,17 @@ fn delaunaytri_object_and_query_extensions_follow_compatibility_mode() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
 
         let mut integer_points = make_object();
-        integer_points.properties.insert(
+        integer_points.replace_property_unbounded(
             POINTS_PROPERTY.to_string(),
             integer_tensor(IntegerStorage::U16(vec![0, 1, 0, 0, 0, 1]), 3, 2),
         );
         let error = block_on(nearest_neighbor_builtin(
             Value::Object(integer_points),
-            vec![tensor(&[0.1, 0.1], 1, 2)],
+            crate::builtins::common::test_support::builtin_arguments(vec![tensor(
+                &[0.1, 0.1],
+                1,
+                2,
+            )]),
         ))
         .expect_err("MATLAB mode rejects integer object points");
         assert_eq!(
@@ -297,7 +343,11 @@ fn delaunaytri_object_and_query_extensions_follow_compatibility_mode() {
         let object = Value::Object(make_object());
         let error = block_on(nearest_neighbor_builtin(
             object,
-            vec![integer_tensor(IntegerStorage::U16(vec![0, 0]), 1, 2)],
+            crate::builtins::common::test_support::builtin_arguments(vec![integer_tensor(
+                IntegerStorage::U16(vec![0, 0]),
+                1,
+                2,
+            )]),
         ))
         .expect_err("MATLAB mode rejects integer query points");
         assert_eq!(
@@ -306,7 +356,7 @@ fn delaunaytri_object_and_query_extensions_follow_compatibility_mode() {
         );
 
         let mut integer_topology = make_object();
-        integer_topology.properties.insert(
+        integer_topology.replace_property_unbounded(
             CONNECTIVITY_PROPERTY.to_string(),
             integer_tensor(IntegerStorage::U16(vec![1, 2, 3]), 1, 3),
         );
@@ -322,12 +372,16 @@ fn delaunaytri_object_and_query_extensions_follow_compatibility_mode() {
         let object = Value::Object(make_object());
         assert!(block_on(nearest_neighbor_builtin(
             object,
-            vec![integer_tensor(IntegerStorage::U16(vec![0, 0]), 1, 2)],
+            crate::builtins::common::test_support::builtin_arguments(vec![integer_tensor(
+                IntegerStorage::U16(vec![0, 0]),
+                1,
+                2
+            )]),
         ))
         .is_ok());
 
         let mut integer_topology = make_object();
-        integer_topology.properties.insert(
+        integer_topology.replace_property_unbounded(
             CONNECTIVITY_PROPERTY.to_string(),
             integer_tensor(IntegerStorage::U16(vec![1, 2, 3]), 1, 3),
         );
@@ -350,11 +404,16 @@ fn topology_index_parser_preserves_wide_integer_values_exactly() {
 
 #[test]
 fn delaunaytri_empty_constructor_returns_empty_topology() {
-    let dt = object(block_on(delaunay_tri_builtin(vec![])).unwrap());
-    let Value::Tensor(points) = dt.properties.get("X").unwrap() else {
+    let dt = object(
+        block_on(delaunay_tri_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap(),
+    );
+    let Value::Tensor(points) = dt.properties().get("X").unwrap() else {
         panic!("expected points")
     };
-    let Value::Tensor(tri) = dt.properties.get("Triangulation").unwrap() else {
+    let Value::Tensor(tri) = dt.properties().get("Triangulation").unwrap() else {
         panic!("expected triangulation")
     };
     assert_eq!(points.shape(), [0, 2]);
@@ -363,29 +422,35 @@ fn delaunaytri_empty_constructor_returns_empty_topology() {
 
 #[test]
 fn delaunaytri_rejects_3d_and_nonempty_constraints_deterministically() {
-    let err = block_on(delaunay_tri_builtin(vec![tensor(
-        &[0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 2.0, 2.0, 2.0],
-        3,
-        3,
-    )]))
+    let err = block_on(delaunay_tri_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![tensor(
+            &[0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 2.0, 2.0, 2.0],
+            3,
+            3,
+        )]),
+    ))
     .expect_err("3-D should be explicit");
     assert_eq!(err.identifier(), ERROR_UNSUPPORTED.identifier);
 
-    let err = block_on(delaunay_tri_builtin(vec![
-        tensor(&[0.0, 1.0, 0.0, 0.0, 0.0, 1.0], 3, 2),
-        tensor(&[1.0, 2.0], 1, 2),
-    ]))
+    let err = block_on(delaunay_tri_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            tensor(&[0.0, 1.0, 0.0, 0.0, 0.0, 1.0], 3, 2),
+            tensor(&[1.0, 2.0], 1, 2),
+        ]),
+    ))
     .expect_err("constraints should be explicit");
     assert_eq!(err.identifier(), ERROR_UNSUPPORTED.identifier);
 }
 
 #[test]
 fn delaunaytri_query_helpers_return_expected_shapes() {
-    let dt = block_on(delaunay_tri_builtin(vec![tensor(
-        &[0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
-        3,
-        2,
-    )]))
+    let dt = block_on(delaunay_tri_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![tensor(
+            &[0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+            3,
+            2,
+        )]),
+    ))
     .unwrap();
     let Value::Tensor(edges) = block_on(free_boundary_builtin(dt.clone())).unwrap() else {
         panic!("expected boundary tensor")
@@ -394,7 +459,7 @@ fn delaunaytri_query_helpers_return_expected_shapes() {
 
     let Value::Tensor(nn) = block_on(nearest_neighbor_builtin(
         dt.clone(),
-        vec![tensor(&[0.1, 0.8], 1, 2)],
+        crate::builtins::common::test_support::builtin_arguments(vec![tensor(&[0.1, 0.8], 1, 2)]),
     ))
     .unwrap() else {
         panic!("expected nearest tensor")
@@ -403,7 +468,7 @@ fn delaunaytri_query_helpers_return_expected_shapes() {
 
     let location = block_on(point_location_builtin(
         dt,
-        vec![tensor(&[0.25, 0.25], 1, 2)],
+        crate::builtins::common::test_support::builtin_arguments(vec![tensor(&[0.25, 0.25], 1, 2)]),
     ))
     .unwrap();
     let Value::Tensor(ti) = location else {
@@ -416,20 +481,22 @@ fn delaunaytri_query_helpers_return_expected_shapes() {
 #[test]
 fn point_location_rejects_inconsistent_object_connectivity() {
     let mut object = object(
-        block_on(delaunay_tri_builtin(vec![tensor(
-            &[0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
-            3,
-            2,
-        )]))
+        block_on(delaunay_tri_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![tensor(
+                &[0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+                3,
+                2,
+            )]),
+        ))
         .unwrap(),
     );
-    object.properties.insert(
+    object.replace_property_unbounded(
         CONNECTIVITY_PROPERTY.to_string(),
         tensor(&[1.0, 2.0, 9.0], 1, 3),
     );
     let err = block_on(point_location_builtin(
         Value::Object(object),
-        vec![tensor(&[0.25, 0.25], 1, 2)],
+        crate::builtins::common::test_support::builtin_arguments(vec![tensor(&[0.25, 0.25], 1, 2)]),
     ))
     .expect_err("bad object connectivity should be rejected");
     assert_eq!(err.identifier(), ERROR_INVALID_ARGUMENT.identifier);

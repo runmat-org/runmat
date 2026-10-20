@@ -15,7 +15,7 @@ pub(super) fn classification_matrix_dimensions(tensor: &Tensor) -> (usize, usize
 
 pub(super) fn build_fit_spec(
     first: Value,
-    mut rest: Vec<Value>,
+    rest: crate::call::FunctionArgumentView<'_>,
     arguments: FitclinearArguments,
 ) -> BuiltinResult<FitSpec> {
     if is_table_value(&first) {
@@ -26,7 +26,8 @@ pub(super) fn build_fit_spec(
                 "fitclinear: matrix input requires response vector Y",
             ));
         }
-        let y = rest.remove(0);
+        let y = rest[0].clone();
+        let rest = rest.range(1..)?;
         build_matrix_fit_spec(first, y, rest, arguments)
     }
 }
@@ -38,11 +39,11 @@ pub(super) fn is_table_value(value: &Value) -> bool {
 fn build_matrix_fit_spec(
     x_value: Value,
     y_value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::FunctionArgumentView<'_>,
     arguments: FitclinearArguments,
 ) -> BuiltinResult<FitSpec> {
     let mut options = FitOptions::default();
-    parse_fit_options(&rest, arguments.options, 1, &mut options)?;
+    parse_fit_options(rest, arguments.options, 1, &mut options)?;
     if let Some(WeightSpec::Variable(_)) = options.weights {
         return Err(fitclinear_invalid(
             "fitclinear: weights variable names require table input",
@@ -81,7 +82,7 @@ fn build_matrix_fit_spec(
 
 fn build_table_fit_spec(
     first: Value,
-    rest: Vec<Value>,
+    rest: crate::call::FunctionArgumentView<'_>,
     arguments: FitclinearArguments,
 ) -> BuiltinResult<FitSpec> {
     let object = match first {
@@ -123,7 +124,7 @@ fn build_table_fit_spec(
             }
         }
     }
-    parse_fit_options(&rest, arguments.options, 0, &mut options)?;
+    parse_fit_options(rest, arguments.options, 0, &mut options)?;
     if options.observations_in == ObservationsIn::Columns {
         return Err(fitclinear_invalid(
             "fitclinear: ObservationsIn='columns' is not supported for table input",
@@ -343,7 +344,7 @@ mod tests {
         let error = build_matrix_fit_spec(
             Value::Tensor(rank_one),
             Value::Tensor(labels),
-            Vec::new(),
+            crate::call::FunctionArgumentView::from_slice(&[]),
             arguments(),
         )
         .expect_err("rank-one X is one observation, not three");
@@ -355,7 +356,7 @@ mod tests {
         let error = build_matrix_fit_spec(
             Value::Tensor(rank_zero),
             Value::Tensor(labels),
-            Vec::new(),
+            crate::call::FunctionArgumentView::from_slice(&[]),
             arguments(),
         )
         .expect_err("rank-zero X has no phantom observation");

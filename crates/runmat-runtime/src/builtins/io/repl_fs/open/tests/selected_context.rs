@@ -25,7 +25,7 @@ fn selected_context_without_host_never_falls_back_for_variable_or_file() {
     let _ambient = ambient.enter();
     for arguments in [
         vec![Value::from("answer")],
-        vec![Value::String(path.to_string_lossy().into_owned())],
+        vec![Value::String(path.to_string_lossy().into_owned().into())],
     ] {
         let error = block_on(dispatch(&selected, &arguments)).expect_err("selected host required");
         assert_eq!(
@@ -52,7 +52,7 @@ fn variable_and_file_routes_keep_exact_pending_selected_hosts_and_drop_lifetimes
     let (file_context, file_host, file_release) = controlled_context();
     let _ambient = ambient.enter();
     let variable_args = [Value::from("answer")];
-    let file_args = [Value::String(path.to_string_lossy().into_owned())];
+    let file_args = [Value::String(path.to_string_lossy().into_owned().into())];
     let mut variable = Box::pin(dispatch(&variable_context, &variable_args));
     let mut file = Box::pin(dispatch(&file_context, &file_args));
 

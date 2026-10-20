@@ -18,7 +18,10 @@ fn known_invalid_count_or_datatype_rejects_before_resident_control_download() {
     let invalid_datatype = futures::executor::block_on(read_builtin(
         None,
         resident_client.clone(),
-        vec![resident_count.clone(), Value::from("uint128")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            resident_count.clone(),
+            Value::from("uint128"),
+        ]),
     ))
     .expect_err("known invalid datatype must reject first");
     assert_eq!(
@@ -29,7 +32,10 @@ fn known_invalid_count_or_datatype_rejects_before_resident_control_download() {
     let invalid_count = futures::executor::block_on(read_builtin(
         None,
         resident_client,
-        vec![Value::Num(0.0), resident_count],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(0.0),
+            resident_count,
+        ]),
     ))
     .expect_err("known invalid count must reject first");
     assert_eq!(invalid_count.identifier(), Some("RunMat:read:InvalidCount"));
@@ -86,7 +92,11 @@ fn typed_read_count_and_handle_parsers_are_exact() {
 }
 
 fn run_read(host: &TcpTestHost, client: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    futures::executor::block_on(read_builtin(Some(host.runtime.clone()), client, rest))
+    futures::executor::block_on(read_builtin(
+        Some(host.runtime.clone()),
+        client,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    ))
 }
 
 fn decode(bytes: &[u8], datatype: DataType, order: ByteOrder) -> BuiltinResult<Value> {
@@ -377,7 +387,7 @@ fn cancelled_pending_read_wakes_without_peer_and_sibling_call_keeps_socket() {
     let mut call = Box::pin(read_builtin(
         Some(runtime),
         client.clone(),
-        vec![Value::Num(1.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
     ));
     let wakes = Arc::new(Wakes(AtomicUsize::new(0)));
     let waker = waker_ref(&wakes);

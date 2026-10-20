@@ -242,7 +242,7 @@ pub(in crate::builtins::table) fn parse_vartype_selector(
     names: &[String],
 ) -> BuiltinResult<Vec<String>> {
     let kind = selector
-        .properties
+        .properties()
         .get("Type")
         .map(|value| scalar_text(value, "vartype type"))
         .transpose()?
@@ -254,7 +254,7 @@ pub(in crate::builtins::table) fn parse_vartype_selector(
         .filter(|name| {
             variables
                 .fields
-                .get(*name)
+                .get(name)
                 .map(|value| vartype_matches(value, &kind))
                 .unwrap_or(false)
         })
@@ -298,17 +298,17 @@ pub(in crate::builtins::table) fn parse_timerange_selector(
         .ok_or_else(|| invalid_index("timerange selector requires timetable RowTimes"))?;
     let serials = timerange_numeric_values(&row_times)?;
     let start = selector
-        .properties
+        .properties()
         .get("Start")
         .map(timerange_bound_value)
         .transpose()?;
     let end = selector
-        .properties
+        .properties()
         .get("End")
         .map(timerange_bound_value)
         .transpose()?;
     let inclusivity = selector
-        .properties
+        .properties()
         .get("Inclusivity")
         .map(|value| scalar_text(value, "timerange inclusivity"))
         .transpose()?
@@ -392,7 +392,7 @@ pub(in crate::builtins::table) fn parse_rowfilter_selector(
     object: &ObjectInstance,
 ) -> BuiltinResult<Vec<usize>> {
     let height = table_height(object)?;
-    let predicate = selector.properties.get("Predicate");
+    let predicate = selector.properties().get("Predicate");
     if let Some(predicate) = predicate {
         match predicate {
             Value::LogicalArray(mask) => {
@@ -410,7 +410,7 @@ pub(in crate::builtins::table) fn parse_rowfilter_selector(
                 return evaluate_named_rowfilter(text, selector, object);
             }
             Value::CharArray(chars) if chars.rows == 1 => {
-                let text = chars.data.iter().collect::<String>();
+                let text = chars.data().iter().collect::<String>();
                 return evaluate_named_rowfilter(&text, selector, object);
             }
             _ => {}
@@ -444,7 +444,7 @@ pub(in crate::builtins::table) fn evaluate_named_rowfilter(
     object: &ObjectInstance,
 ) -> BuiltinResult<Vec<usize>> {
     let variable_names = selector
-        .properties
+        .properties()
         .get("Variables")
         .map(string_list)
         .transpose()?
@@ -602,11 +602,11 @@ pub(in crate::builtins::table) fn value_is_missing_scalar(value: &Value) -> bool
         Value::Num(value) => value.is_nan(),
         Value::String(text) => text.is_empty() || text == "<missing>",
         Value::StringArray(array) => array
-            .data
+            .data()
             .first()
             .map(|text| text.is_empty())
             .unwrap_or(true),
-        Value::CharArray(array) => array.data.iter().all(|ch| ch.is_whitespace()),
+        Value::CharArray(array) => array.data().iter().all(|ch| ch.is_whitespace()),
         Value::Tensor(tensor) => {
             if tensor.integer_storage().is_some() {
                 tensor.is_empty()

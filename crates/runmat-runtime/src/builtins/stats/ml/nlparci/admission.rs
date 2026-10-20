@@ -44,7 +44,11 @@ pub(super) fn dimensions(value: &Value) -> BuiltinResult<(usize, usize, NumericD
     Ok((rows, cols, dtype))
 }
 
-pub(super) fn admit(beta: &Value, residual: &Value, rest: Vec<Value>) -> BuiltinResult<Admitted> {
+pub(super) fn admit(
+    beta: &Value,
+    residual: &Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Admitted> {
     if !matches!(rest.len(), 2 | 4) {
         return Err(invalid("expected beta, residuals, and a Jacobian or Covar name-value pair, optionally followed by Alpha"));
     }

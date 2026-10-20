@@ -25,7 +25,7 @@ const BUILTIN_NAME: &str = "open";
 )]
 async fn open_builtin(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<RootedValue> {
     if args.len() != 1 {
         return Err(open_error(
@@ -126,9 +126,11 @@ fn open_name(value: &Value) -> BuiltinResult<String> {
             if chars.rows == 1
                 && crate::builtins::common::shape::effective_rank(&chars.shape) <= 2 =>
         {
-            Ok(chars.data.iter().collect::<String>())
+            Ok(chars.data().iter().collect::<String>())
         }
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].as_str().to_owned()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(array.data()[0].as_str().to_owned())
+        }
         _ => Err(open_error(&OPEN_ERROR_NAME, OPEN_ERROR_NAME.message)),
     }
 }

@@ -2022,12 +2022,12 @@ mod source_discovery_tests {
                 .values()
                 .find(|metadata| metadata.name.0 == "helper")
                 .unwrap();
-            assert_ne!(helper.source.0 as usize, primary.source_id);
+            assert_ne!(helper.source, primary.source_id);
             let helper_source = unit
                 .source_map()
                 .entries()
                 .iter()
-                .find(|entry| entry.source_id == helper.source.0 as usize)
+                .find(|entry| entry.source_id == helper.source)
                 .unwrap();
             assert!(helper_source.relative_path.ends_with("helper.m"));
             assert!(unit
@@ -2040,10 +2040,10 @@ mod source_discovery_tests {
                     assert_eq!(metadata.source, unit.mir().functions[&parent].source);
                 }
                 if metadata.name.0 == name {
-                    assert_eq!(metadata.source.0 as usize, primary.source_id);
+                    assert_eq!(metadata.source, primary.source_id);
                 }
                 if let Some(function) = unit.bytecode().function_registry.get(*id) {
-                    assert_eq!(function.source_id.unwrap().0, metadata.source.0 as usize);
+                    assert_eq!(function.source_id.unwrap().program(), Some(metadata.source));
                 }
             }
             for region in &unit.analysis().regions {

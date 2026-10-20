@@ -77,8 +77,10 @@ fn fread_classifies_resident_size_and_skip_before_gathering() {
             .handle,
     );
     let precision = Value::from("uint8");
-    let args = [&resident, &precision, &resident];
-    let (size, _, skip, _, _) = classify_arguments(&args).expect("classified controls");
+    let args = [resident.clone(), precision, resident];
+    let (size, _, skip, _, _) =
+        classify_arguments(crate::call::FunctionArgumentView::from_slice(&args))
+            .expect("classified controls");
     assert!(matches!(size, Some(Value::GpuTensor(_))));
     assert!(matches!(skip, Some(Value::GpuTensor(_))));
     let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);

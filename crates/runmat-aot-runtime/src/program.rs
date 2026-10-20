@@ -39,7 +39,7 @@ pub async fn invoke(
     let execution =
         runmat_runtime::context::run_native_continuation(&runtime, placement, roots, async move {
             let _active =
-                runmat_runtime::user_functions::push_active_semantic_function(function.0 as usize)?;
+                runmat_runtime::user_functions::push_active_semantic_function(function.0)?;
             executor
                 .invoke_async(function, arguments, requested_outputs, selected)
                 .await
@@ -71,7 +71,7 @@ pub async fn invoke_workspace(
     let execution =
         runmat_runtime::context::run_native_continuation(&runtime, placement, roots, async move {
             let _active =
-                runmat_runtime::user_functions::push_active_semantic_function(function.0 as usize)?;
+                runmat_runtime::user_functions::push_active_semantic_function(function.0)?;
             executor
                 .invoke_workspace_async(function, workspace, requested_outputs, selected)
                 .await
@@ -107,7 +107,7 @@ pub async fn invoke_rooted(
         arguments,
         move |arguments| async move {
             let _active =
-                runmat_runtime::user_functions::push_active_semantic_function(function.0 as usize)?;
+                runmat_runtime::user_functions::push_active_semantic_function(function.0)?;
             executor
                 .invoke_rooted_function_arguments_async(
                     function,
@@ -248,7 +248,7 @@ impl ProgramInvocationGuards {
                             return runtime
                                 .scope(previous(
                                     Some(runtime.clone()),
-                                    function.0 as usize,
+                                    function.0,
                                     arguments,
                                     requested_outputs,
                                 ))
@@ -395,7 +395,7 @@ impl ProgramInvocationGuards {
                         roots,
                         async move {
                             let _active = runmat_runtime::user_functions::push_active_semantic_function(
-                                function.0 as usize,
+                                function.0,
                             )?;
                             let _environment_roots = environment_roots;
                             executor
@@ -461,11 +461,11 @@ impl ProgramInvocationGuards {
                     .unwrap_or_default();
                 let selected = scoped.or_else(|| {
                     name_selection::select(&resolver_program, caller, name)
-                        .map(|function| function.0 as usize)
+                        .map(|function| function.0)
                 });
                 if let Some(function) = selected {
                     let own_source = own_scoped
-                        .filter(|selected| selected.0 as usize == function)
+                        .filter(|selected| selected.0 == function)
                         .and_then(|_| source_facts.get(&function).cloned());
                     let previous = (scoped.is_some() && own_source.is_none())
                         .then(|| {
@@ -608,7 +608,7 @@ async fn invoke_native_values(
         arguments,
         move |arguments| async move {
             let _active =
-                runmat_runtime::user_functions::push_active_semantic_function(function.0 as usize)?;
+                runmat_runtime::user_functions::push_active_semantic_function(function.0)?;
             let _environment_roots = environment_roots;
             executor
                 .invoke_rooted_function_arguments_async(

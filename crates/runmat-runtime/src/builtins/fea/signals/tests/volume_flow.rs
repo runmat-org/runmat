@@ -30,6 +30,9 @@ fn volume_flow_constant_is_portable_typed_and_scalar_finite() {
     let Value::Object(mut object) = value else {
         unreachable!()
     };
-    object.class_name = MASS_FLOW_SIGNAL_CLASS.into();
+    object = crate::builtins::common::test_support::reclassify_object_unbounded(
+        &object,
+        MASS_FLOW_SIGNAL_CLASS,
+    );
     assert!(physical_signal_from_value("test", &Value::Object(object)).is_err());
 }

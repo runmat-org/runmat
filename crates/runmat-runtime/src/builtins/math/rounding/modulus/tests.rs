@@ -73,11 +73,13 @@ fn mod_maps_table_variables_and_preserves_container() {
 #[test]
 fn mod_duration_returns_duration_in_source_format() {
     let duration = crate::builtins::duration::duration_object_from_days_tensor(
+        None,
         Tensor::new(vec![25.0 / 24.0, 50.0 / 24.0], vec![1, 2]).unwrap(),
         "hh:mm:ss",
     )
     .unwrap();
     let divisor = crate::builtins::duration::duration_object_from_days_tensor(
+        None,
         Tensor::new(vec![1.0], vec![1, 1]).unwrap(),
         "hh:mm:ss",
     )

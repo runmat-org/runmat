@@ -1,7 +1,10 @@
 //! Coefficient form, class, shape and compatibility admission.
 use super::*;
 
-pub(super) fn coefficient_count(args: &[Value], owner: ReferenceLineOwner) -> BuiltinResult<usize> {
+pub(super) fn coefficient_count(
+    args: crate::call::FunctionArgumentView<'_>,
+    owner: ReferenceLineOwner,
+) -> BuiltinResult<usize> {
     if matches!(owner, ReferenceLineOwner::Lsline) {
         return if args.is_empty() {
             Ok(0)
@@ -52,10 +55,11 @@ fn coefficient_element_count(value: &Value, owner: ReferenceLineOwner) -> Builti
 }
 
 pub(super) async fn normalize_refline_coefficients(
-    args: &mut [Value],
+    args: crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
     owner: ReferenceLineOwner,
     coefficient_count: usize,
-) -> BuiltinResult<()> {
+) -> BuiltinResult<crate::call::BuiltinArguments> {
     use crate::builtins::common::validation::{
         native_integer_value_is_exact_f64, value_has_logical_class, value_has_native_integer_class,
     };
@@ -88,28 +92,40 @@ pub(super) async fn normalize_refline_coefficients(
             }
         }
     }
-    preflight_host_coefficients(args, coefficient_count, owner)?;
-    for value in args.iter_mut().take(coefficient_count) {
-        if matches!(value, Value::GpuTensor(_)) {
-            *value = crate::dispatcher::gather_if_needed_async(value)
-                .await
-                .map_err(|err| {
-                    let message = format!("{}: {err}", owner.name());
-                    owner.invalid_with_source(message, err)
-                })?;
-        }
-        if value_has_native_integer_class(value) && !native_integer_value_is_exact_f64(value) {
-            return Err(owner.invalid(format!(
-                "{}: integer coefficients must be exactly representable as double",
-                owner.name()
-            )));
-        }
+    preflight_host_coefficients(args.view(), coefficient_count, owner)?;
+    let coefficients = args.into_range(..coefficient_count)?;
+    if !coefficients
+        .iter()
+        .any(|value| matches!(value, Value::GpuTensor(_)))
+    {
+        return Ok(coefficients);
     }
-    Ok(())
+    coefficients
+        .try_map_preserving_roots_async(coefficient_count, runtime, async |index| {
+            let value = if matches!(coefficients[index], Value::GpuTensor(_)) {
+                crate::dispatcher::gather_if_needed_async(&coefficients[index])
+                    .await
+                    .map_err(|err| {
+                        let message = format!("{}: {err}", owner.name());
+                        owner.invalid_with_source(message, err)
+                    })?
+            } else {
+                coefficients[index].clone()
+            };
+            if value_has_native_integer_class(&value) && !native_integer_value_is_exact_f64(&value)
+            {
+                return Err(owner.invalid(format!(
+                    "{}: integer coefficients must be exactly representable as double",
+                    owner.name()
+                )));
+            }
+            Ok(value)
+        })
+        .await
 }
 
 fn preflight_host_coefficients(
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     coefficient_count: usize,
     owner: ReferenceLineOwner,
 ) -> BuiltinResult<()> {
@@ -140,27 +156,25 @@ pub(super) struct ReflineLineSpec {
     pub(super) x_span: (f64, f64),
 }
 
-pub(super) fn split_optional_axes(args: Vec<Value>) -> BuiltinResult<(AxesTarget, Vec<Value>)> {
-    let mut iter = args.into_iter();
-    let Some(first) = iter.next() else {
-        return Ok((None, Vec::new()));
+pub(super) fn split_optional_axes(
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<(AxesTarget, crate::call::BuiltinArguments)> {
+    let Some(first) = args.first() else {
+        return Ok((None, args));
     };
-    if let Ok(PlotHandle::Axes(handle, axes_index)) = resolve_plot_handle(&first, NAME) {
-        return Ok((Some((handle, axes_index)), iter.collect()));
+    if let Ok(PlotHandle::Axes(handle, axes_index)) = resolve_plot_handle(first, NAME) {
+        return Ok((Some((handle, axes_index)), args.into_range(1..)?));
     }
-    let mut rest = Vec::with_capacity(iter.size_hint().0 + 1);
-    rest.push(first);
-    rest.extend(iter);
-    Ok((None, rest))
+    Ok((None, args))
 }
 
-pub(super) fn parse_refline_coefficients(
-    args: &[Value],
+pub(super) fn parse_refline_coefficients<'a>(
+    args: crate::call::FunctionArgumentView<'a>,
     owner: ReferenceLineOwner,
-) -> BuiltinResult<(ReflinePlan, &[Value])> {
-    match args {
-        [] => Ok((ReflinePlan::LeastSquares, &[])),
-        [coeffs, rest @ ..] => {
+) -> BuiltinResult<(ReflinePlan, crate::call::FunctionArgumentView<'a>)> {
+    match args.split_first() {
+        None => Ok((ReflinePlan::LeastSquares, args)),
+        Some((coeffs, rest)) => {
             if let Some(pair) = coefficient_pair(coeffs, owner)? {
                 return Ok((
                     ReflinePlan::Explicit {
@@ -178,7 +192,7 @@ pub(super) fn parse_refline_coefficients(
             }
             let slope = finite_scalar(coeffs, "slope", owner)?;
             let intercept = finite_scalar(&rest[0], "intercept", owner)?;
-            Ok((ReflinePlan::Explicit { slope, intercept }, &rest[1..]))
+            Ok((ReflinePlan::Explicit { slope, intercept }, rest.range(1..)?))
         }
     }
 }

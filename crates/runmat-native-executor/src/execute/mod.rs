@@ -31,6 +31,6 @@ pub use workspace::{
 
 pub use executor::{
     NativeExecution, NativeExecutor, NativeExecutorOptions, NativeInvocationRequest,
-    RootedNativeExecution,
+    RootedNativeExecution, RootedNativeInvocationRequest,
 };
 pub use invocation::{NativeInvocation, NativeInvocationStep};

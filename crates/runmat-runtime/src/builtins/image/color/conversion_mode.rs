@@ -13,7 +13,7 @@ pub(crate) fn decode(value: &Value) -> Option<ImageIndexMode> {
     match value {
         Value::String(text) => ImageIndexMode::from_option_text(text),
         Value::CharArray(chars) => {
-            let text: String = chars.data.iter().collect();
+            let text: String = chars.data().iter().collect();
             ImageIndexMode::from_option_text(&text)
         }
         _ => None,

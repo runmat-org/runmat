@@ -139,7 +139,7 @@ impl TruthTensor {
         Self {
             shape: vec![array.rows, array.cols],
             data: array
-                .data
+                .data()
                 .iter()
                 .map(|character| TruthValue::from_bool(u32::from(*character) != 0))
                 .collect(),

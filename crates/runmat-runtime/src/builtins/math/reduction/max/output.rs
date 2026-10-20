@@ -24,7 +24,9 @@ impl MaxEvaluation {
     }
 }
 
-pub(super) fn reject_pairwise_multiple_outputs(rest: &[Value]) -> BuiltinResult<()> {
+pub(super) fn reject_pairwise_multiple_outputs(
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     if crate::output_count::current_output_count().unwrap_or(1) > 1
         && rest
             .first()

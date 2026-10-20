@@ -21,7 +21,7 @@ const ERROR_OVERFLOW: BuiltinErrorDescriptor = runmat_builtins::IDIVIDE_ERROR_OV
 mod operand;
 mod rounding;
 
-pub(super) async fn evaluate(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn evaluate(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         runmat_builtins::IDIVIDE_CATALOG_ENTRY.descriptor,
         &ERROR_INVALID_INPUT,

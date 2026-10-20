@@ -189,7 +189,11 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::ops::cross"
 )]
-async fn cross_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn cross_builtin(
+    lhs: Value,
+    rhs: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(cross_invalid_argument("cross: too many input arguments"));
     }
@@ -1398,6 +1402,10 @@ pub(crate) mod tests {
     }
 
     fn cross_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::cross_builtin(lhs, rhs, rest))
+        block_on(super::cross_builtin(
+            lhs,
+            rhs,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 }

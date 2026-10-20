@@ -12,7 +12,10 @@ pub(super) struct IcdfAdmission {
 }
 
 impl IcdfAdmission {
-    pub(super) fn new(p: &Value, rest: &[Value]) -> BuiltinResult<Self> {
+    pub(super) fn new(
+        p: &Value,
+        rest: crate::call::FunctionArgumentView<'_>,
+    ) -> BuiltinResult<Self> {
         let values = std::iter::once(p).chain(rest.iter());
         if values.clone().any(is_typed_integer_value) {
             crate::compatibility::ensure_builtin_extension_enabled(

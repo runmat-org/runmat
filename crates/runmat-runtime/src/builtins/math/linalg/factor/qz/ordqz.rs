@@ -117,10 +117,10 @@ fn selector_labels(selector: &Value, pairs: &[(c64, c64)]) -> BuiltinResult<Clus
     }
     let keyword = match selector {
         Value::String(text) => Some(text.as_str().to_owned()),
-        Value::StringArray(array) if array.data.len() == 1 => {
-            Some(array.data[0].as_str().to_owned())
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Some(array.data()[0].as_str().to_owned())
         }
-        Value::CharArray(chars) if chars.rows <= 1 => Some(chars.data.iter().collect()),
+        Value::CharArray(chars) if chars.rows <= 1 => Some(chars.data().iter().collect()),
         _ => None,
     };
     if let Some(keyword) = keyword {
@@ -237,7 +237,7 @@ fn validated_factor(value: &Value, n: usize) -> BuiltinResult<Mat<c64>> {
 async fn ordqz_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     aa: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     if rest.len() != 4 {
         return Err(invalid("ordqz requires AA, BB, Q, Z, and a selector"));
@@ -271,7 +271,7 @@ async fn ordqz_builtin(
         NumericDType::F32
     };
     let real = std::iter::once(&aa)
-        .chain(rest[..3].iter())
+        .chain(rest.view().range(..3).expect("validated ordqz inputs"))
         .all(|value| matches!(value, Value::Tensor(_) | Value::Num(_)));
     let mode = if real { Mode::Real } else { Mode::Complex };
     let requested = crate::output_count::current_output_count().unwrap_or(1);

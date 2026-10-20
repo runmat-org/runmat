@@ -40,7 +40,7 @@ struct ParsedLogicalFill {
 }
 
 pub(super) async fn logical_fill(
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
     fill: bool,
     config: &LogicalFillConfig,
 ) -> BuiltinResult<Value> {
@@ -49,7 +49,10 @@ pub(super) async fn logical_fill(
 }
 
 impl ParsedLogicalFill {
-    async fn parse(args: Vec<Value>, config: &LogicalFillConfig) -> BuiltinResult<Self> {
+    async fn parse(
+        args: crate::call::BuiltinArguments,
+        config: &LogicalFillConfig,
+    ) -> BuiltinResult<Self> {
         let name = config.name;
         let mut dims = Vec::new();
         let mut saw_size_vector = false;
@@ -426,9 +429,9 @@ fn normalize_logical_shape(mut shape: Vec<usize>) -> Vec<usize> {
 fn keyword_of(value: &Value) -> Option<String> {
     match value {
         Value::String(s) => Some(s.to_ascii_lowercase()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].to_ascii_lowercase()),
+        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].to_ascii_lowercase()),
         Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data.iter().collect();
+            let text: String = ca.data().iter().collect();
             Some(text.to_ascii_lowercase())
         }
         _ => None,

@@ -9,7 +9,7 @@ use runmat_builtins::{HARMMEAN_INTEGER_CONTROL_EXTENSION, HARMMEAN_INTEGER_DATA_
 )]
 pub(crate) async fn harmmean_builtin(
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     let kind = ReductionKind::Harmonic;
     admit_data(kind, &value)?;
@@ -19,7 +19,7 @@ pub(crate) async fn harmmean_builtin(
             kind.name(),
         )?;
     }
-    let options = options::parse(kind, rest).await?;
+    let options = options::parse(kind, &rest).await?;
     if options.typed_integer_control {
         crate::compatibility::ensure_builtin_extension_enabled(
             &HARMMEAN_INTEGER_CONTROL_EXTENSION,
@@ -33,4 +33,15 @@ pub(crate) async fn harmmean_builtin(
     }
     let (values, shape, dtype) = data::materialize(kind, value).await?.real_values(kind)?;
     host::reduce(kind, values, shape, dtype, &options)
+}
+#[cfg(test)]
+pub(crate) async fn harmmean_builtin_source(
+    value: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    harmmean_builtin(
+        value,
+        crate::call::BuiltinArguments::from_borrowed(&rest, None)?,
+    )
+    .await
 }

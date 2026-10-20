@@ -14,10 +14,12 @@ use crate::{build_runtime_error, BuiltinResult};
 
 use super::super::result::DirectoryOutcome;
 
-pub(super) async fn evaluate(args: Vec<Value>) -> BuiltinResult<DirectoryOutcome> {
-    let target = match args.as_slice() {
-        [folder] => single_target(folder)?,
-        [parent, child] => child_target(parent, child)?,
+pub(super) async fn evaluate(
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<DirectoryOutcome> {
+    let target = match (args.len(), args.get(0), args.get(1)) {
+        (1, Some(folder), _) => single_target(folder)?,
+        (2, Some(parent), Some(child)) => child_target(parent, child)?,
         _ => return Err(error(&MKDIR_ERROR_ARITY)),
     };
     Ok(create(&target).await)

@@ -3,10 +3,9 @@ use runmat_execution::identity::{ArtifactId, WorkerId};
 use runmat_execution::resource::{ResourceInventory, ResourceRequest};
 use runmat_execution::state::PoolState;
 use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
-use runmat_execution::{
-    CancellationReason, Digest, ExecutionScopeId, OutputContract, PoolId, TaskId,
-};
+use runmat_execution::{CancellationReason, ExecutionScopeId, OutputContract, PoolId, TaskId};
 use runmat_execution_runner::port::BackendReport;
+use runmat_execution_runner::AttemptSuccess;
 use runmat_execution_runner::{
     AttemptReport, Driver, DriverAction, DriverCommand, DriverConfig, PoolSpec, TaskSubmission,
     WorkerSpec,
@@ -48,6 +47,7 @@ fn assigned() -> (Driver, AttemptRequest) {
         .unwrap();
     driver
         .handle(DriverCommand::RegisterWorker(WorkerSpec {
+            host: crate::test_support::host_inventory(),
             id: worker,
             pool_id: pool,
             resources: inventory,
@@ -59,14 +59,22 @@ fn assigned() -> (Driver, AttemptRequest) {
         id: TaskId::derive(&[b"completion"]),
         scope_id: scope,
         pool_id: pool,
-        program_artifact_id: ArtifactId::derive(&[b"completion"]),
-        callable: Callable {
-            owner_identity: "test".into(),
-            qualified_name: "completion".into(),
-            entrypoint_digest: Digest::sha256(b"completion"),
-        },
+        schema_version: runmat_execution::task::TASK_REQUEST_SCHEMA_VERSION,
+        executable: runmat_execution::TaskExecutableIdentity::ProgramArtifact(ArtifactId::derive(
+            &[b"completion"],
+        )),
+        host: crate::test_support::host_requirement(),
+        invocation_context: runmat_execution::ProgramInvocationContext::Direct,
+        callable: Callable::for_program(
+            "test",
+            &runmat_execution::ProgramCallable::semantic(
+                runmat_execution::ProgramFunctionId(0),
+                Some("completion".into()),
+            ),
+        ),
         inputs: Vec::new(),
         outputs: OutputContract {
+            owned_work: None,
             requested_outputs: 0,
         },
         resources: ResourceRequest {
@@ -106,19 +114,22 @@ fn completion_publishes_result_and_history_once() {
     assert!(completion.try_attempt_history().is_none());
     completion.complete(
         CompletedTask {
-            result: Err("original".into()),
+            result: Err(TransferFailure::Execution("original".into())),
             evidence: None,
         },
         NativeCheckpointEvidence::Durable,
     );
     completion.complete(
         CompletedTask {
-            result: Err("late".into()),
+            result: Err(TransferFailure::Execution("late".into())),
             evidence: None,
         },
         NativeCheckpointEvidence::Durable,
     );
-    assert_eq!(completion.try_value(), Some(Err("original".into())));
+    assert_eq!(
+        completion.try_value(),
+        Some(Err(TransferFailure::Execution("original".into())))
+    );
     assert_eq!(completion.try_attempt_history(), Some(Vec::new()));
 }
 
@@ -142,7 +153,7 @@ fn late_worker_success_cannot_override_scheduler_cancellation() {
         )))
         .unwrap();
     let completed = from_snapshot(&driver.snapshot(), &request, Ok(success)).unwrap();
-    assert_eq!(completed.result, Err("execution was cancelled".into()));
+    assert_eq!(completed.result, Err(TransferFailure::Cancelled));
     assert_eq!(completed.evidence.as_ref().unwrap().attempts.len(), 1);
     assert!(completed.evidence.as_ref().unwrap().attempts[0]
         .terminal
@@ -167,8 +178,12 @@ fn committed_original_result_wins_over_a_different_raw_response() {
             },
         )))
         .unwrap();
-    let completed =
-        from_snapshot(&driver.snapshot(), &request, Err("stale raw error".into())).unwrap();
+    let completed = from_snapshot(
+        &driver.snapshot(),
+        &request,
+        Err(TransferFailure::Execution("stale raw error".into())),
+    )
+    .unwrap();
     assert_eq!(completed.result, Ok(success));
     assert_eq!(completed.evidence.as_ref().unwrap().attempts.len(), 1);
     let mut invalid = driver.snapshot();
@@ -176,7 +191,7 @@ fn committed_original_result_wins_over_a_different_raw_response() {
     assert!(from_snapshot(
         &invalid,
         &request,
-        Ok(AttemptSuccess {
+        Ok(AttemptSuccess::Values {
             outputs: Vec::new(),
             result_objects: Vec::new(),
             resources: None,
@@ -215,7 +230,9 @@ fn uncertain_checkpoint_blocks_delivery_without_rewriting_original_execution() {
         completion.complete(original, checkpoint.clone());
         assert_eq!(
             completion.try_value(),
-            Some(Err(checkpoint.delivery_error().unwrap()))
+            Some(Err(TransferFailure::Infrastructure(
+                checkpoint.delivery_error().unwrap()
+            )))
         );
         assert_eq!(completion.try_scheduler_result(), Some(Ok(success)));
         assert_eq!(completion.try_checkpoint_evidence(), Some(checkpoint));

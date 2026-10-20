@@ -8,7 +8,12 @@ use std::ffi::OsString;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 async fn fspecial_builtin(kind: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    super::fspecial_builtin(None, kind, rest).await
+    super::fspecial_builtin(
+        None,
+        kind,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    )
+    .await
 }
 
 struct FspecialFailureProvider {
@@ -197,16 +202,22 @@ fn fspecial_lengths_preserve_typed_integer_tensor_bounds() {
 fn fspecial_accepts_all_integer_classes_from_authoritative_storage() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     for tensor in all_integer_scalar_tensors(2) {
-        let spec = build_filter_spec(&Value::from("average"), &[Value::Tensor(tensor)])
-            .expect("integer size");
+        let spec = build_filter_spec(
+            &Value::from("average"),
+            crate::call::FunctionArgumentView::from_slice(&[Value::Tensor(tensor)]),
+        )
+        .expect("integer size");
         assert!(matches!(
             spec,
             FspecialFilterSpec::Average { rows: 2, cols: 2 }
         ));
     }
     for tensor in all_integer_scalar_tensors(1) {
-        let spec = build_filter_spec(&Value::from("laplacian"), &[Value::Tensor(tensor)])
-            .expect("integer parameter");
+        let spec = build_filter_spec(
+            &Value::from("laplacian"),
+            crate::call::FunctionArgumentView::from_slice(&[Value::Tensor(tensor)]),
+        )
+        .expect("integer parameter");
         assert!(matches!(spec, FspecialFilterSpec::Laplacian { alpha: 1.0 }));
     }
 }
@@ -216,8 +227,11 @@ fn fspecial_rejects_inexact_wide_integer_computational_parameters() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     let wide = (1_u64 << 53) + 1;
     let radius = Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).unwrap();
-    let error = build_filter_spec(&Value::from("disk"), &[Value::Tensor(radius)])
-        .expect_err("inexact radius");
+    let error = build_filter_spec(
+        &Value::from("disk"),
+        crate::call::FunctionArgumentView::from_slice(&[Value::Tensor(radius)]),
+    )
+    .expect_err("inexact radius");
     assert!(error.message().contains("exactly representable as double"));
 }
 
@@ -537,7 +551,11 @@ fn fspecial_gaussian_gpu_matches_cpu() {
     let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
         runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
     );
-    let spec = build_filter_spec(&Value::from("gaussian"), &[]).unwrap();
+    let spec = build_filter_spec(
+        &Value::from("gaussian"),
+        crate::call::FunctionArgumentView::from_slice(&[]),
+    )
+    .unwrap();
     let tensor = spec.generate_tensor().unwrap();
     let gpu_tensor = match finalize_output_with_gpu_policy(&spec, tensor, true).unwrap() {
         Value::GpuTensor(handle) => {

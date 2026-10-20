@@ -1,7 +1,7 @@
 //! Explicit selected-pack compilation. The ordinary embedded archive route is
 //! unchanged; this path never downgrades a failed selected selection to it.
 
-mod admission;
+use runmat_aot::selected_admission as admission;
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;

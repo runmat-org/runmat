@@ -31,7 +31,31 @@ fn gather_owned<'a>(
                 "legacy output-list carrier reached scalar gather dispatch",
             )
         })?;
+        let context = crate::context::legacy::active();
+        let owner =
+            crate::context::host_allocation::HostAllocationReceipt::capture_owner(context.as_ref())
+                .map_err(|source| {
+                    crate::context::host_allocation::host_allocation_runtime_error(
+                        context.as_ref(),
+                        "RunMat:gather:Ownership",
+                        "gather ownership admission failed",
+                        source,
+                    )
+                })?;
+        let _roots = super::structure_alias::lease(&value, context.as_ref())?;
         gather_in_place(&mut value, budget).await?;
+        if let Some(owner) = owner {
+            owner
+                .check(context.as_ref().expect("managed owner has context"))
+                .map_err(|source| {
+                    crate::context::host_allocation::host_allocation_runtime_error(
+                        context.as_ref(),
+                        "RunMat:gather:Ownership",
+                        "gather authority changed",
+                        source,
+                    )
+                })?;
+        }
         Ok(value)
     })
 }
@@ -124,7 +148,7 @@ fn gather_in_place<'a>(
                     }
                     Ok(())
                 } else if cell
-                    .data
+                    .data()
                     .iter()
                     .any(super::owned_gpu::has_transformable_gpu)
                 {
@@ -164,7 +188,26 @@ fn gather_in_place<'a>(
                 }
             }
             Value::Struct(record) => {
-                for child in record.fields.values_mut() {
+                if !record
+                    .fields
+                    .values()
+                    .any(super::owned_gpu::has_transformable_gpu)
+                {
+                    return Ok(());
+                }
+                let context = crate::context::legacy::active();
+                let mut _replacement_roots = None;
+                if !record.fields.is_unique() {
+                    let (replacement, roots) =
+                        super::structure_alias::record(record, context.as_ref())?;
+                    *record = replacement;
+                    _replacement_roots = Some(roots);
+                }
+                for child in record
+                    .fields
+                    .try_values_mut_unique()
+                    .expect("explicit unique map owner")
+                {
                     if let Some(budget) = budget.as_deref_mut() {
                         budget.checkpoint(1).await.map_err(execution_error)?;
                     }
@@ -261,7 +304,7 @@ mod tests {
     use futures::executor::block_on;
     use runmat_accelerate_api::{GpuTensorStorage, NumericElementType};
     use runmat_execution::{cancellation::CancellationSource, CancellationReason};
-    use runmat_value::{CellArray, CharArray, Closure, IntValue, ObjectInstance, StructValue};
+    use runmat_value::{CellArray, CharArray, Closure, IntValue, ObjectInstance};
     use std::cell::Cell;
     use std::error::Error;
     use std::future::Future;
@@ -273,7 +316,7 @@ mod tests {
     #[test]
     fn owned_cell_gather_moves_host_payload_and_preserves_wide_integer_and_shape() {
         let chars = CharArray::new_row("2024-04-09");
-        let original = chars.data.as_ptr();
+        let original = chars.data().as_ptr();
         let input = Value::Cell(
             CellArray::new_with_shape(
                 vec![Value::CharArray(chars), Value::Int(IntValue::U64(u64::MAX))],
@@ -284,17 +327,19 @@ mod tests {
         let Value::Cell(source) = &input else {
             unreachable!("constructed cell")
         };
-        let original_collection = source.data.as_slice().as_ptr();
+        let original_collection = source.data().as_ptr();
         let Value::Cell(output) = block_on(gather_if_needed_owned_async(input, None)).unwrap()
         else {
             panic!("expected cell");
         };
         assert_eq!(output.shape, [1, 2, 1]);
-        assert_eq!(output.data.as_slice().as_ptr(), original_collection);
+        assert_eq!(output.data().as_ptr(), original_collection);
         assert!(
-            matches!(&output.data[0], Value::CharArray(value) if value.data.as_ptr() == original)
+            matches!(&output.data()[0], Value::CharArray(value) if value.data().as_ptr() == original)
         );
-        assert!(matches!(&output.data[1], Value::Int(IntValue::U64(value)) if *value == u64::MAX));
+        assert!(
+            matches!(&output.data()[1], Value::Int(IntValue::U64(value)) if *value == u64::MAX)
+        );
     }
 
     #[test]
@@ -338,7 +383,7 @@ mod tests {
     #[test]
     fn multilevel_cell_moves_host_leaf_but_rejects_nested_transient() {
         let chars = CharArray::new_row("2024-04-09");
-        let pointer = chars.data.as_ptr();
+        let pointer = chars.data().as_ptr();
         let nested = Value::Cell(
             CellArray::new(
                 vec![Value::Cell(
@@ -353,11 +398,11 @@ mod tests {
         else {
             panic!("outer cell");
         };
-        let Value::Cell(inner) = &outer.data[0] else {
+        let Value::Cell(inner) = &outer.data()[0] else {
             panic!("inner cell");
         };
         assert!(
-            matches!(&inner.data[0], Value::CharArray(value) if value.data.as_ptr() == pointer)
+            matches!(&inner.data()[0], Value::CharArray(value) if value.data().as_ptr() == pointer)
         );
 
         let nested_transient = Value::Cell(
@@ -381,10 +426,10 @@ mod tests {
     #[test]
     fn host_aggregates_preserve_canonical_transient_descendant_rejection() {
         let transient = || Value::output_list(vec![Value::Num(1.0)]);
-        let mut structure = StructValue::new();
+        let mut structure = runmat_value::UnboundedStructValueBuilder::new();
         structure.insert("payload", transient());
         let mut object = ObjectInstance::new("GatherFixture");
-        object.properties.insert("Payload".into(), transient());
+        object.replace_property_unbounded("Payload".into(), transient());
         let closure = Closure::from_data(runmat_value::ClosureData {
             lexical_environment: None,
             function_name: "f".into(),
@@ -394,7 +439,7 @@ mod tests {
             captures: vec![transient()].into(),
         });
         for input in [
-            Value::Struct(structure),
+            Value::Struct(structure.finish()),
             Value::Object(object),
             Value::Closure(closure),
         ] {

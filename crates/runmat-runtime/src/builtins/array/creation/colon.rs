@@ -128,13 +128,13 @@ fn sequence_provider_error(
 async fn colon_builtin(
     start: Value,
     step_or_end: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(colon_error(&COLON_ERROR_ARG_COUNT));
     }
 
-    ensure_colon_extensions(&start, &step_or_end, &rest)?;
+    ensure_colon_extensions(&start, &step_or_end, rest.view())?;
 
     if [&start, &step_or_end].into_iter().chain(rest.iter()).any(|value| matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())) {
         return resident_integer_colon(start, step_or_end, rest).await;
@@ -211,7 +211,7 @@ async fn colon_builtin(
 async fn resident_integer_colon(
     start: Value,
     step_or_end: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     let mut owner_device = None;
     for value in [&start, &step_or_end].into_iter().chain(rest.iter()) {
@@ -292,7 +292,7 @@ async fn gather_colon_operand(value: Value) -> crate::BuiltinResult<Value> {
 fn ensure_colon_extensions(
     start: &Value,
     step_or_end: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> crate::BuiltinResult<()> {
     for value in std::iter::once(start)
         .chain(std::iter::once(step_or_end))
@@ -1056,7 +1056,7 @@ fn char_scalar(name: &str, array: &CharArray) -> crate::BuiltinResult<f64> {
             &COLON_ERROR_NON_SCALAR_INPUT,
         ));
     }
-    let ch = array.data[0];
+    let ch = array.data()[0];
     Ok(ch as u32 as f64)
 }
 
@@ -1093,7 +1093,11 @@ pub(crate) mod tests {
     };
 
     fn colon_builtin(start: Value, stop: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-        block_on(super::colon_builtin(start, stop, rest))
+        block_on(super::colon_builtin(
+            start,
+            stop,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1783,7 +1787,7 @@ pub(crate) mod tests {
                 assert_eq!(arr.rows, 1);
                 assert_eq!(arr.cols, 5);
                 let expected: Vec<char> = "abcde".chars().collect();
-                assert_eq!(arr.data, expected);
+                assert_eq!(arr.data(), expected);
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -1801,7 +1805,7 @@ pub(crate) mod tests {
                 assert_eq!(arr.rows, 1);
                 assert_eq!(arr.cols, 4);
                 let expected: Vec<char> = "aceg".chars().collect();
-                assert_eq!(arr.data, expected);
+                assert_eq!(arr.data(), expected);
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -1853,7 +1857,7 @@ pub(crate) mod tests {
             Value::CharArray(arr) => {
                 assert_eq!(arr.rows, 1);
                 assert_eq!(arr.cols, 0);
-                assert!(arr.data.is_empty());
+                assert!(arr.data().is_empty());
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -1871,7 +1875,7 @@ pub(crate) mod tests {
                 assert_eq!(arr.rows, 1);
                 assert_eq!(arr.cols, 5);
                 let expected: Vec<char> = "fedcb".chars().collect();
-                assert_eq!(arr.data, expected);
+                assert_eq!(arr.data(), expected);
             }
             other => panic!("expected char array, got {other:?}"),
         }

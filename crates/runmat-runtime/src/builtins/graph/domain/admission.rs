@@ -21,7 +21,7 @@ pub(super) use nodes::{
 };
 
 fn admit_constructor_integer_forms(
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     directed: bool,
     name: &'static str,
 ) -> BuiltinResult<()> {
@@ -60,7 +60,7 @@ fn admit_constructor_integer_forms(
 
 pub(super) async fn graph_node_count(value: &Value, name: &'static str) -> BuiltinResult<usize> {
     let object = expect_graph_object(value, name)?;
-    if let Some(count) = object.properties.get(NUM_NODES_PROPERTY) {
+    if let Some(count) = object.properties().get(NUM_NODES_PROPERTY) {
         if is_host_value(count) {
             return positive_integer_scalar(count, name);
         }
@@ -72,7 +72,7 @@ pub(super) async fn graph_node_count(value: &Value, name: &'static str) -> Built
 
 pub(super) fn graph_edge_count(value: &Value, name: &'static str) -> BuiltinResult<usize> {
     let object = expect_graph_object(value, name)?;
-    let Some(Value::Object(edges)) = object.properties.get("Edges") else {
+    let Some(Value::Object(edges)) = object.properties().get("Edges") else {
         return Ok(0);
     };
     let variables = table_variables(edges)
@@ -115,18 +115,19 @@ fn expect_graph_object<'a>(
 }
 
 pub(super) async fn constructor_arguments(
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
     directed: bool,
     name: &'static str,
-) -> BuiltinResult<Vec<Value>> {
-    admit_constructor_integer_forms(&args, directed, name)?;
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    admit_constructor_integer_forms(args.view(), directed, name)?;
     if args.len() > 4 {
         return Err(graph_error(
             name,
             format!("{name}: expected at most four constructor arguments"),
         ));
     }
-    if is_adjacency_form(&args) && args.len() > 2 {
+    if is_adjacency_form(args.view()) && args.len() > 2 {
         return Err(graph_error(
             name,
             format!("{name}: adjacency construction accepts at most one option or name list"),
@@ -135,7 +136,7 @@ pub(super) async fn constructor_arguments(
     // Validate all locally decidable roles before downloading the first
     // resident input. A resident operand's contents are validated afterward by
     // the constructor itself.
-    if args.len() == 1 || is_adjacency_form(&args) {
+    if args.len() == 1 || is_adjacency_form(args.view()) {
         if let Some(Value::Tensor(matrix)) = args.first() {
             let shape = matrix.shape();
             if shape.len() != 2 || shape[0] != shape[1] {
@@ -222,11 +223,7 @@ pub(super) async fn constructor_arguments(
                 .map_err(|message| graph_error(name, format!("{name}: {message}")))?;
         }
     }
-    let mut gathered = Vec::with_capacity(args.len());
-    for value in args {
-        gathered.push(gather_if_needed_async(&value).await?);
-    }
-    Ok(gathered)
+    crate::dispatcher::gather_builtin_arguments_async(args, runtime).await
 }
 
 /// Materialize only the graph representation fields consumed by graph queries.
@@ -243,10 +240,33 @@ pub(super) async fn graph_data_async(
     }
     preflight_graph_host_fields(object, name)?;
     let mut object = object.clone();
-    if let Some(value) = object.properties.get_mut(NUM_NODES_PROPERTY) {
-        *value = gather_if_needed_async(value).await?;
+    if let Some(value) = object.property(NUM_NODES_PROPERTY) {
+        let context = crate::context::legacy::active();
+        let _source = crate::execution::structure::replacement::lease(
+            &Value::Object(object.clone()),
+            context.as_ref(),
+        )?;
+        let gathered = gather_if_needed_async(value).await?;
+        let gathered = crate::execution::structure::replacement::root(gathered, context.as_ref())?;
+        gathered.with_owned(|value| {
+            crate::execution::object::replacement::replace_property(
+                context.as_ref(),
+                &mut object,
+                NUM_NODES_PROPERTY,
+                value,
+                |message, source| {
+                    crate::context::host_allocation::host_allocation_runtime_error(
+                        context.as_ref(),
+                        "RunMat:graph:ObjectAllocation",
+                        message,
+                        source,
+                    )
+                },
+                |message| graph_error(name, message),
+            )
+        })?;
     }
-    let node_columns: &[&str] = if object.properties.contains_key(NUM_NODES_PROPERTY) {
+    let node_columns: &[&str] = if object.properties().contains_key(NUM_NODES_PROPERTY) {
         &["Name"]
     } else {
         &["Name", "Index"]
@@ -258,12 +278,12 @@ pub(super) async fn graph_data_async(
 
 fn preflight_graph_host_fields(object: &ObjectInstance, name: &'static str) -> BuiltinResult<()> {
     let count = object
-        .properties
+        .properties()
         .get(NUM_NODES_PROPERTY)
         .filter(|value| is_host_value(value))
         .map(|value| positive_integer_scalar(value, name))
         .transpose()?;
-    if let Some(Value::Object(nodes)) = object.properties.get("Nodes") {
+    if let Some(Value::Object(nodes)) = object.properties().get("Nodes") {
         let vars = table_variables(nodes)
             .map_err(|error| graph_error(name, format!("{name}: invalid Nodes table: {error}")))?;
         if let Some(value) = vars.fields.get("Name").filter(|value| is_host_value(value)) {
@@ -277,7 +297,7 @@ fn preflight_graph_host_fields(object: &ObjectInstance, name: &'static str) -> B
             }
         }
     }
-    if let Some(Value::Object(edges)) = object.properties.get("Edges") {
+    if let Some(Value::Object(edges)) = object.properties().get("Edges") {
         let vars = table_variables(edges)
             .map_err(|error| graph_error(name, format!("{name}: invalid Edges table: {error}")))?;
         let endpoints = vars.fields.get("EndNodes");
@@ -336,25 +356,56 @@ async fn gather_table_columns(
     columns: &[&str],
     name: &'static str,
 ) -> BuiltinResult<()> {
-    let Some(Value::Object(table)) = object.properties.get(property) else {
+    let Some(Value::Object(table)) = object.property(property) else {
         return Ok(());
     };
-    let mut variables = table_variables(table)
+    let variables = table_variables(table)
         .map_err(|error| graph_error(name, format!("{name}: invalid {property} table: {error}")))?;
+    let context = crate::context::legacy::active();
+    let source =
+        crate::execution::structure::replacement::root(Value::Struct(variables), context.as_ref())?;
+    let Value::Struct(source_variables) = source.value() else {
+        unreachable!("variable structure")
+    };
+    let prepared_variables =
+        crate::execution::structure::replacement::record(source_variables, context.as_ref())?;
+    let _roots = prepared_variables.1;
+    let mut variables = prepared_variables.0;
     let mut changed = false;
     for column in columns {
-        if let Some(value) = variables.fields.get_mut(*column) {
+        if let Some(value) = variables.fields.get(column) {
             if !is_host_value(value) {
-                *value = gather_if_needed_async(value).await?;
+                let gathered = gather_if_needed_async(value).await?;
+                let gathered =
+                    crate::execution::structure::replacement::root(gathered, context.as_ref())?;
+                variables
+                    .try_replace_unique(column, gathered.value().clone())
+                    .expect("new admitted map contains the selected column");
                 changed = true;
             }
         }
     }
     if changed {
-        object.properties.insert(
-            property.to_string(),
-            table_replace_variables_like(table, variables)?,
-        );
+        let replacement = table_replace_variables_like(table, variables)?;
+        let replacement =
+            crate::execution::structure::replacement::root(replacement, context.as_ref())?;
+        replacement.with_owned(|replacement| {
+            crate::execution::object::replacement::replace_property(
+                context.as_ref(),
+                object,
+                property,
+                replacement,
+                |message, source| {
+                    crate::context::host_allocation::host_allocation_runtime_error(
+                        context.as_ref(),
+                        "RunMat:graph:ObjectAllocation",
+                        message,
+                        source,
+                    )
+                },
+                |message| graph_error(name, message),
+            )
+        })?;
     }
     Ok(())
 }

@@ -3,19 +3,25 @@ use super::*;
 pub(in crate::builtins::stats::summary) async fn evaluate_cdf_entry(
     distribution: Value,
     x: Value,
-    mut rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let tail = if rest
         .last()
         .and_then(keyword_of)
         .is_some_and(|value| value.eq_ignore_ascii_case("upper"))
     {
-        rest.pop();
         CdfTail::Upper
     } else {
         CdfTail::Lower
     };
-    let selection = admission::evaluation(FittedOperation::Cumulative, &distribution, &x, &rest)?;
+    let rest = if matches!(tail, CdfTail::Upper) {
+        let end = rest.len() - 1;
+        rest.into_range(..end)?
+    } else {
+        rest
+    };
+    let selection =
+        admission::evaluation(FittedOperation::Cumulative, &distribution, &x, rest.view())?;
     evaluate_cdf(selection, x, rest, tail).await
 }
 
@@ -28,12 +34,12 @@ pub(super) enum CdfOutputPrecision {
 pub(super) async fn evaluate_cdf(
     selection: DistributionSelection,
     input: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
     tail: CdfTail,
 ) -> BuiltinResult<Value> {
     let kind = match selection {
         DistributionSelection::Fitted(fit) => {
-            ensure_cdf_extensions(&input, &[])?;
+            ensure_cdf_extensions(&input, crate::call::FunctionArgumentView::from_slice(&[]))?;
             let precision = cdf_output_precision(&[&input]);
             let residency = EvaluationResidency::capture(&[&input]);
             let x = cdf_value_to_tensor(input).await?;
@@ -47,7 +53,7 @@ pub(super) async fn evaluate_cdf(
         }
         DistributionSelection::Named(kind) => kind,
     };
-    ensure_cdf_extensions(&input, &rest)?;
+    ensure_cdf_extensions(&input, rest.view())?;
     let mut original_inputs = Vec::with_capacity(rest.len() + 1);
     original_inputs.push(&input);
     original_inputs.extend(rest.iter());
@@ -55,7 +61,7 @@ pub(super) async fn evaluate_cdf(
     let residency = EvaluationResidency::capture(&original_inputs);
     let x = cdf_value_to_tensor(input).await?;
     ensure_exact_cdf_integer_boundary(&x, "x")?;
-    let parameters = parse_cdf_parameter_tensors(kind, rest).await?;
+    let parameters = parse_cdf_parameter_tensors(kind, rest.view()).await?;
     for (index, parameter) in parameters.iter().enumerate() {
         ensure_exact_cdf_integer_boundary(parameter, kind.parameter_names()[index])?;
     }
@@ -77,7 +83,10 @@ pub(super) async fn evaluate_cdf(
     finish_cdf(shape, data, precision, residency)
 }
 
-pub(super) fn ensure_cdf_extensions(input: &Value, parameters: &[Value]) -> BuiltinResult<()> {
+pub(super) fn ensure_cdf_extensions(
+    input: &Value,
+    parameters: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     if is_typed_integer_value(input) {
         crate::compatibility::ensure_builtin_extension_enabled(&CDF_INTEGER_X_EXTENSION, CDF_NAME)?;
     }
@@ -133,27 +142,29 @@ pub(super) async fn cdf_value_to_tensor(value: Value) -> BuiltinResult<Tensor> {
 
 pub(super) async fn parse_cdf_parameter_tensors(
     kind: DistributionKind,
-    rest: Vec<Value>,
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<Vec<Tensor>> {
     match kind {
-        DistributionKind::Normal | DistributionKind::Lognormal => match rest.as_slice() {
-            [] => Ok(vec![scalar_tensor(0.0), scalar_tensor(1.0)]),
-            [mu] => Ok(vec![
-                cdf_value_to_tensor(mu.clone()).await?,
-                scalar_tensor(1.0),
-            ]),
-            [mu, sigma] => Ok(vec![
-                cdf_value_to_tensor(mu.clone()).await?,
-                cdf_value_to_tensor(sigma.clone()).await?,
-            ]),
-            _ => Err(invalid_for(
-                CDF_NAME,
-                format!(
-                    "cdf: {} distribution expects x, x and mu, or x, mu, sigma",
-                    kind.canonical_name()
-                ),
-            )),
-        },
+        DistributionKind::Normal | DistributionKind::Lognormal => {
+            match (rest.len(), rest.get(0), rest.get(1)) {
+                (0, _, _) => Ok(vec![scalar_tensor(0.0), scalar_tensor(1.0)]),
+                (1, Some(mu), _) => Ok(vec![
+                    cdf_value_to_tensor(mu.clone()).await?,
+                    scalar_tensor(1.0),
+                ]),
+                (2, Some(mu), Some(sigma)) => Ok(vec![
+                    cdf_value_to_tensor(mu.clone()).await?,
+                    cdf_value_to_tensor(sigma.clone()).await?,
+                ]),
+                _ => Err(invalid_for(
+                    CDF_NAME,
+                    format!(
+                        "cdf: {} distribution expects x, x and mu, or x, mu, sigma",
+                        kind.canonical_name()
+                    ),
+                )),
+            }
+        }
         DistributionKind::Exponential | DistributionKind::Poisson => {
             if rest.len() != 1 {
                 return Err(invalid_for(

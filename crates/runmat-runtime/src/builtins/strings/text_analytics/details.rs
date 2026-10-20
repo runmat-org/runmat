@@ -12,8 +12,9 @@ use crate::builtins::strings::text_analytics::dependencies::{
 };
 use crate::builtins::strings::text_analytics::documents::{
     document_token_type_with_options, documents_from_object, options_from_document_object,
-    parse_top_level_domains, text_analytics_error, tokenized_document_language,
-    top_level_domains_value, words_from_word_vector, TOKENIZED_DOCUMENT_CLASS,
+    parse_top_level_domains, replace_document_properties, text_analytics_error,
+    tokenized_document_language, top_level_domains_value, words_from_word_vector,
+    TOKENIZED_DOCUMENT_CLASS,
 };
 use crate::builtins::strings::text_analytics::entities::entity_details_from_object;
 use crate::builtins::strings::text_analytics::lemmas::lemma_details_from_object;
@@ -71,22 +72,28 @@ fn direct_numeric_or_resident_input(value: &Value) -> bool {
 )]
 async fn add_type_details_builtin(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    let gathered = gather_args(args, "addTypeDetails").await?;
-    let (documents, options) = parse_add_type_details_args(runtime.as_ref(), gathered)?;
+    let gathered = gather_args(&args, runtime.as_ref(), "addTypeDetails").await?;
+    let (documents, options) = parse_add_type_details_args(runtime.as_ref(), gathered.view())?;
     let mut object = tokenized_document_object(documents, "addTypeDetails")?;
     let mut document_options = options_from_document_object(&object);
     if let Some(top_level_domains) = options.top_level_domains {
         document_options.top_level_domains = top_level_domains;
         document_options.top_level_domains_custom = true;
-        object.properties.insert(
-            "TopLevelDomains".to_string(),
-            top_level_domains_value(&document_options.top_level_domains, "addTypeDetails")?,
-        );
-        object
-            .properties
-            .insert("TopLevelDomainsCustom".to_string(), Value::Bool(true));
+        let domains =
+            top_level_domains_value(&document_options.top_level_domains, "addTypeDetails")?;
+        let custom = Value::Bool(true);
+        let updates = [
+            ("TopLevelDomains", domains),
+            ("TopLevelDomainsCustom", custom),
+        ];
+        replace_document_properties(
+            runtime.as_ref(),
+            &mut object,
+            updates.iter().map(|(name, value)| (*name, value)),
+            "addTypeDetails",
+        )?;
     }
     let documents = documents_from_object(&object, "addTypeDetails")?;
     let type_details = if options.discard_known_values {
@@ -95,9 +102,13 @@ async fn add_type_details_builtin(
         let stored_types = type_details_from_object(&object, "addTypeDetails")?;
         type_details_cell_preserving_known(&documents, stored_types.as_deref(), &document_options)?
     };
-    object
-        .properties
-        .insert(TYPE_DETAILS_PROPERTY.to_string(), type_details);
+    let updates = [(TYPE_DETAILS_PROPERTY, type_details)];
+    replace_document_properties(
+        runtime.as_ref(),
+        &mut object,
+        updates.iter().map(|(name, value)| (*name, value)),
+        "addTypeDetails",
+    )?;
     Ok(Value::Object(object))
 }
 
@@ -109,32 +120,59 @@ async fn add_type_details_builtin(
 )]
 pub(in crate::builtins::strings::text_analytics) async fn add_sentence_details_builtin(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    let gathered = gather_args(args, "addSentenceDetails").await?;
-    let (documents, options) = parse_add_sentence_details_args(runtime.as_ref(), gathered)?;
-    let mut object = tokenized_document_object(documents, "addSentenceDetails")?;
-    let documents = documents_from_object(&object, "addSentenceDetails")?;
-    let sentence_numbers = if options.discard_known_values {
-        sentence_numbers_cell(&documents, &options)?
-    } else {
-        let stored = sentence_numbers_from_object(&object, "addSentenceDetails")?;
-        sentence_numbers_cell_preserving_known(&documents, stored.as_deref(), &options)?
-    };
-    object
-        .properties
-        .insert(SENTENCE_NUMBERS_PROPERTY.to_string(), sentence_numbers);
-    Ok(Value::Object(object))
+    let gathered = gather_args(&args, runtime.as_ref(), "addSentenceDetails").await?;
+    let (documents, options) = parse_add_sentence_details_args(runtime.as_ref(), gathered.view())?;
+    let object = tokenized_document_object(documents, "addSentenceDetails")?;
+    apply_sentence_details(runtime.as_ref(), object, &options).map(Value::Object)
 }
 
-async fn gather_args(args: Vec<Value>, fn_name: &str) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(args.len());
-    for arg in args {
-        out.push(gather_if_needed_async(&arg).await.map_err(|err| {
-            text_analytics_error(fn_name, format!("{fn_name}: failed to gather input: {err}"))
-        })?);
+pub(in crate::builtins::strings::text_analytics) fn add_sentence_details_to_object(
+    runtime: Option<&crate::context::RuntimeContext>,
+    object: ObjectInstance,
+    abbreviations: Option<&Value>,
+) -> BuiltinResult<ObjectInstance> {
+    let mut options = AddSentenceDetailsOptions::default();
+    if let Some(abbreviations) = abbreviations {
+        options.abbreviations = parse_abbreviations(abbreviations)?;
     }
-    Ok(out)
+    apply_sentence_details(runtime, object, &options)
+}
+
+fn apply_sentence_details(
+    runtime: Option<&crate::context::RuntimeContext>,
+    mut object: ObjectInstance,
+    options: &AddSentenceDetailsOptions,
+) -> BuiltinResult<ObjectInstance> {
+    let documents = documents_from_object(&object, "addSentenceDetails")?;
+    let sentence_numbers = if options.discard_known_values {
+        sentence_numbers_cell(&documents, options)?
+    } else {
+        let stored = sentence_numbers_from_object(&object, "addSentenceDetails")?;
+        sentence_numbers_cell_preserving_known(&documents, stored.as_deref(), options)?
+    };
+    let updates = [(SENTENCE_NUMBERS_PROPERTY, sentence_numbers)];
+    replace_document_properties(
+        runtime,
+        &mut object,
+        updates.iter().map(|(name, value)| (*name, value)),
+        "addSentenceDetails",
+    )?;
+    Ok(object)
+}
+
+async fn gather_args(
+    args: &crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+    fn_name: &str,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    args.try_map_preserving_roots_async(args.len(), runtime, async |index| {
+        gather_if_needed_async(&args[index]).await.map_err(|err| {
+            text_analytics_error(fn_name, format!("{fn_name}: failed to gather input: {err}"))
+        })
+    })
+    .await
 }
 
 #[derive(Clone, Debug)]
@@ -170,7 +208,7 @@ struct AddTypeDetailsOptions {
 
 fn parse_add_sentence_details_args(
     runtime: Option<&crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<(Value, AddSentenceDetailsOptions)> {
     if args.is_empty() {
         return Err(text_analytics_error(
@@ -215,7 +253,7 @@ fn parse_add_sentence_details_args(
 
 fn parse_add_type_details_args(
     runtime: Option<&crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<(Value, AddTypeDetailsOptions)> {
     if args.is_empty() {
         return Err(text_analytics_error(
@@ -264,7 +302,7 @@ fn tokenized_document_object(value: Value, fn_name: &str) -> BuiltinResult<Objec
             fn_name,
             format!(
                 "{fn_name}: expected tokenizedDocument object, got {}",
-                object.class_name
+                object.class_name()
             ),
         )),
         other => Err(text_analytics_error(
@@ -489,7 +527,7 @@ fn token_details_table(object: &ObjectInstance) -> BuiltinResult<Value> {
 
 fn has_default_token_details(object: &ObjectInstance) -> bool {
     !matches!(
-        object.properties.get("TokenizeMethod"),
+        object.properties().get("TokenizeMethod"),
         Some(Value::String(value)) if value.eq_ignore_ascii_case("none")
     )
 }
@@ -982,7 +1020,7 @@ fn type_details_from_object(
     object: &ObjectInstance,
     fn_name: &str,
 ) -> BuiltinResult<Option<Vec<Vec<String>>>> {
-    let Some(value) = object.properties.get(TYPE_DETAILS_PROPERTY) else {
+    let Some(value) = object.properties().get(TYPE_DETAILS_PROPERTY) else {
         return Ok(None);
     };
     let Value::Cell(cell) = value else {
@@ -991,8 +1029,8 @@ fn type_details_from_object(
             format!("{fn_name}: tokenizedDocument object has invalid TypeDetails property"),
         ));
     };
-    let mut out = Vec::with_capacity(cell.data.len());
-    for item in &cell.data {
+    let mut out = Vec::with_capacity(cell.data().len());
+    for item in cell.data() {
         let Value::StringArray(array) = item else {
             return Err(text_analytics_error(
                 fn_name,
@@ -1001,7 +1039,7 @@ fn type_details_from_object(
         };
         out.push(
             array
-                .data
+                .data()
                 .iter()
                 .map(|text| text.as_str().to_owned())
                 .collect(),
@@ -1014,7 +1052,7 @@ fn sentence_numbers_from_object(
     object: &ObjectInstance,
     fn_name: &str,
 ) -> BuiltinResult<Option<Vec<Vec<f64>>>> {
-    let Some(value) = object.properties.get(SENTENCE_NUMBERS_PROPERTY) else {
+    let Some(value) = object.properties().get(SENTENCE_NUMBERS_PROPERTY) else {
         return Ok(None);
     };
     let Value::Cell(cell) = value else {
@@ -1023,8 +1061,8 @@ fn sentence_numbers_from_object(
             format!("{fn_name}: tokenizedDocument object has invalid SentenceNumbers property"),
         ));
     };
-    let mut out = Vec::with_capacity(cell.data.len());
-    for item in &cell.data {
+    let mut out = Vec::with_capacity(cell.data().len());
+    for item in cell.data() {
         let Value::Tensor(tensor) = item else {
             return Err(text_analytics_error(
                 fn_name,
@@ -1067,11 +1105,17 @@ mod tests {
     }
 
     fn run_add_type(args: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(add_type_details_builtin(None, args))
+        futures::executor::block_on(add_type_details_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
 
     fn run_add_sentence(args: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(add_sentence_details_builtin(None, args))
+        futures::executor::block_on(add_sentence_details_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
 
     fn object(value: Value) -> ObjectInstance {
@@ -1092,7 +1136,7 @@ mod tests {
 
     fn string_column(table: &ObjectInstance, name: &str) -> Vec<String> {
         match table_column(table, name) {
-            Value::StringArray(array) => array.data,
+            Value::StringArray(array) => array.data().iter().map(ToString::to_string).collect(),
             other => panic!("expected string column {name}, got {other:?}"),
         }
     }
@@ -1129,7 +1173,7 @@ mod tests {
     #[test]
     fn sentence_numbers_from_object_reads_typed_integer_storage_exactly() {
         let mut object = ObjectInstance::new(TOKENIZED_DOCUMENT_CLASS.to_string());
-        object.properties.insert(
+        object.replace_property_unbounded(
             SENTENCE_NUMBERS_PROPERTY.to_string(),
             Value::Cell(
                 CellArray::new(
@@ -1321,7 +1365,7 @@ mod tests {
         let docs =
             object(run_tokenized(vec![Value::String("One. Two.".into())]).expect("tokenized"));
         let mut malformed = docs.clone();
-        malformed.properties.insert(
+        malformed.replace_property_unbounded(
             SENTENCE_NUMBERS_PROPERTY.to_string(),
             Value::Cell(
                 CellArray::new(
@@ -1342,7 +1386,7 @@ mod tests {
         let docs =
             object(run_tokenized(vec![Value::String("One. Two.".into())]).expect("tokenized"));
         let mut stale = docs.clone();
-        stale.properties.insert(
+        stale.replace_property_unbounded(
             SENTENCE_NUMBERS_PROPERTY.to_string(),
             Value::Cell(
                 CellArray::new(
@@ -1441,8 +1485,8 @@ mod tests {
         )
         .expect("custom token table");
         let docs = run_tokenized(vec![
-            Value::String("Na+ in H2O".to_string()),
-            Value::String("CustomTokens".to_string()),
+            Value::String("Na+ in H2O".to_string().into()),
+            Value::String("CustomTokens".to_string().into()),
             custom_tokens,
         ])
         .expect("tokenized");
@@ -1500,7 +1544,7 @@ mod tests {
             .expect("tokenized"),
         );
         let mut stale = docs.clone();
-        stale.properties.insert(
+        stale.replace_property_unbounded(
             TYPE_DETAILS_PROPERTY.to_string(),
             Value::Cell(
                 CellArray::new(
@@ -1611,7 +1655,7 @@ mod tests {
             .expect("tokenized"),
         );
         let mut typed = docs.clone();
-        typed.properties.insert(
+        typed.replace_property_unbounded(
             TYPE_DETAILS_PROPERTY.to_string(),
             Value::Cell(
                 CellArray::new(
@@ -1664,7 +1708,7 @@ mod tests {
             .expect("tokenized"),
         );
         let mut typed = docs.clone();
-        typed.properties.insert(
+        typed.replace_property_unbounded(
             TYPE_DETAILS_PROPERTY.to_string(),
             Value::Cell(
                 CellArray::new(

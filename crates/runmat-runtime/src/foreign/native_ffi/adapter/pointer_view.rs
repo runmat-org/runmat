@@ -135,6 +135,7 @@ impl NativeFfiAdapter {
 
     pub(super) fn set_member(
         &self,
+        context: &RuntimeContext,
         arguments: &(impl InvocationArguments + ?Sized),
     ) -> Result<Value, RuntimeError> {
         if arguments.len() != 3 {
@@ -169,33 +170,39 @@ impl NativeFfiAdapter {
                         .map_err(|error| foreign_error_with_source(ForeignErrorKind::InvalidCall, error))?;
                     return Ok(Value::Foreign(reference.clone()));
                 }
-                let replacement = match member {
+                match member {
                     PointerMember::Value => unreachable!("handled by borrowed pointer assignment"),
-                    PointerMember::DataType => return Err(invalid_call(
+                    PointerMember::DataType => Err(invalid_call(
                         "native pointer member `DataType` is read-only",
                     )),
                     PointerMember::Field(member) => {
                         let current = pointer.value(&metadata).map_err(|error| {
                             foreign_error_with_source(ForeignErrorKind::InvalidCall, error)
                         })?;
-                        let Value::Struct(mut structure) = current else {
+                        let current = crate::execution::RootedValue::in_context(current, context)?;
+                        let Value::Struct(structure) = current.value() else {
                             return Err(invalid_call(format!(
                                 "native pointer member `{member}` is unavailable"
                             )));
                         };
-                        let Some(field) = structure.fields.get_mut(&member) else {
+                        if !structure.fields.contains_key(&member) {
                             return Err(invalid_call(format!(
                                 "native structure has no field `{member}`"
                             )));
-                        };
-                        *field = arguments.get(2).expect("validated member value").clone();
-                        Value::Struct(structure)
+                        }
+                        let replacement = arguments.get(2).expect("validated member value");
+                        let replacement_roots = crate::execution::structure::replacement::lease(replacement, Some(context))?;
+                        let updated = crate::execution::construct_struct_from_fields_in_context(
+                            context,
+                            structure.fields.iter().map(|(name, value)| (name, if name == member.as_str() { replacement } else { value })),
+                        )?;
+                        pointer.set_value(updated.value(), &metadata).map_err(|error| {
+                            foreign_error_with_source(ForeignErrorKind::InvalidCall, error)
+                        })?;
+                        drop(replacement_roots);
+                        Ok(Value::Foreign(reference.clone()))
                     }
-                };
-                pointer.set_value(&replacement, &metadata).map_err(|error| {
-                    foreign_error_with_source(ForeignErrorKind::InvalidCall, error)
-                })?;
-                Ok(Value::Foreign(reference.clone()))
+                }
             }
             PointerEntry::Opaque { .. } => Err(invalid_call(
                 "opaque library pointer values cannot be assigned without an explicit copy contract",
@@ -438,13 +445,13 @@ pub(super) fn pointer_dimension(value: &Value) -> Result<usize, RuntimeError> {
 pub(super) fn default_structure_value(
     name: &str,
     metadata: &NativeLibraryMetadata,
-) -> Result<StructValue, RuntimeError> {
+) -> Result<runmat_value::StructValue, RuntimeError> {
     let definition = metadata
         .structures
         .iter()
         .find(|definition| definition.name == name)
         .ok_or_else(|| invalid_call(format!("missing native structure definition `{name}`")))?;
-    let mut value = StructValue::new();
+    let mut value = runmat_value::UnboundedStructValueBuilder::new();
     for field in &definition.fields {
         let field_value = match &field.ty {
             NativeType::Scalar { .. } | NativeType::Enumeration { .. } => Value::Num(0.0),
@@ -458,9 +465,9 @@ pub(super) fn default_structure_value(
                 )))
             }
         };
-        value.fields.insert(field.name.clone(), field_value);
+        value.insert(field.name.clone(), field_value);
     }
-    Ok(value)
+    Ok(value.finish())
 }
 
 pub(super) fn pointer_type_identity(nominal_type: String) -> ForeignTypeIdentity {

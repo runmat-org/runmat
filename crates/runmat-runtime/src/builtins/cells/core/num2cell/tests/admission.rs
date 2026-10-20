@@ -23,7 +23,12 @@ fn rejects_matrix_duplicate_and_out_of_range_dimensions() {
         Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap(),
         Tensor::new(vec![3.0], vec![1, 1]).unwrap(),
     ] {
-        assert!(block_on(num2cell_builtin(None, input(), vec![Value::Tensor(dims)])).is_err());
+        assert!(block_on(num2cell_builtin(
+            None,
+            input(),
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(dims)])
+        ))
+        .is_err());
     }
 }
 
@@ -35,8 +40,12 @@ fn explicit_group_dimension_still_rejects_rank_zero_sources() {
         Value::ComplexTensor(ComplexTensor::new(vec![(2.0, 3.0)], vec![]).unwrap()),
         Value::Cell(CellArray::new_with_shape(Vec::new(), vec![]).unwrap()),
     ] {
-        let error = block_on(num2cell_builtin(None, input, vec![Value::Num(1.0)]))
-            .expect_err("rank-zero source has no first axis");
+        let error = block_on(num2cell_builtin(
+            None,
+            input,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
+        ))
+        .expect_err("rank-zero source has no first axis");
         assert_eq!(error.identifier(), Some("RunMat:num2cell:InvalidInput"));
         assert!(error
             .to_string()

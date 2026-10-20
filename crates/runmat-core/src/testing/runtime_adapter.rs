@@ -69,12 +69,16 @@ async fn run_arguments(
 ) -> runmat_runtime::BuiltinResult<Value> {
     let (snapshot, selected_names, requested_coverage) =
         snapshot_from_arguments(compat, project.as_ref(), args).await?;
+    let parent = caller.as_ref().map(|runtime| runtime.cancellation());
     let mut session = construct_child_session(
         compat,
         caller,
         #[cfg(not(target_arch = "wasm32"))]
         child_tasks,
     )?;
+    // The child owns the outer continuation receipt before test procedures
+    // create nested invocations. Retire only after report publication.
+    let _admission = session.admit_execution(parent.as_ref());
     if let Some(project) = project {
         #[cfg(not(target_arch = "wasm32"))]
         install_child_project(&mut session, project)?.await?;
@@ -87,7 +91,10 @@ async fn run_arguments(
         names: selected_names,
         ..TestSelector::default()
     };
-    let runtime = session.runtime_context().clone();
+    let runtime = session
+        .runtime_context()
+        .clone()
+        .with_cancellation_token(session.runtime_context().cancellation());
     let test_session = &mut session;
     let test_snapshot = &snapshot;
     let test_selector = &selector;
@@ -111,7 +118,7 @@ async fn run_arguments(
     .await?;
     let run = completed_run.expect("successful test continuation produces its report");
     let coverage = coverage.or_else(|| requested_coverage.then(MatlabCoverageSelection::default));
-    result_value(&run, coverage.as_ref())
+    result_value(&runtime, &run, coverage.as_ref())
 }
 
 async fn discover_arguments(
@@ -124,12 +131,14 @@ async fn discover_arguments(
 ) -> runmat_runtime::BuiltinResult<Value> {
     let (snapshot, selected_names, _) =
         snapshot_from_arguments(compat, project.as_ref(), args).await?;
+    let parent = caller.as_ref().map(|runtime| runtime.cancellation());
     let mut session = construct_child_session(
         compat,
         caller,
         #[cfg(not(target_arch = "wasm32"))]
         child_tasks,
     )?;
+    let _admission = session.admit_execution(parent.as_ref());
     if let Some(project) = project {
         #[cfg(not(target_arch = "wasm32"))]
         install_child_project(&mut session, project)?.await?;
@@ -145,26 +154,30 @@ async fn discover_arguments(
             names: selected_names,
             ..TestSelector::default()
         });
-    let values = discovery
-        .suites
-        .into_iter()
-        .flat_map(|suite| suite.tests)
-        .map(|test| {
-            let mut value = runmat_runtime::testing::test_suite_object(&test);
-            if let Value::Object(object) = &mut value {
-                object.properties.insert(
-                    "TestFile".into(),
-                    Value::String(display_source_path(&test.procedure.source)),
-                );
-            }
-            value
-        })
-        .collect();
-    runmat_runtime::testing::object_array_or_scalar(
+    let runtime = session.runtime_context();
+    let count = discovery.suites.iter().map(|suite| suite.tests.len()).sum();
+    let mut tests = discovery.suites.into_iter().flat_map(|suite| suite.tests);
+    // These projected objects contain text/scalar children only; there are no
+    // unregistered GC identities between initializer calls.
+    let values =
+        runmat_runtime::execution::RootedValues::try_initialize_in_context(count, runtime, |_| {
+            let test = tests.next().expect("discovery count matches its tests");
+            let value = runmat_runtime::testing::test_suite_object_in_context(runtime, &test)?;
+            let file = display_source_path(&test.procedure.source);
+            let updates = [("TestFile", projected_text(runtime, &file)?)];
+            runmat_runtime::testing::replace_object_properties_in_context(
+                runtime,
+                value,
+                updates.iter().map(|(key, value)| (*key, value)),
+            )
+            .map(|value| value.with_owned(|value| value))
+        })?;
+    runmat_runtime::testing::object_array_or_scalar_in_context(
+        runtime,
         runmat_runtime::testing::TEST_SUITE_CLASS,
         values,
     )
-    .map_err(|error| runtime_error("RunMat:Testing:SuiteProjection", error))
+    .map(|value| value.with_owned(|value| value))
 }
 
 async fn snapshot_from_arguments(
@@ -247,7 +260,10 @@ fn install_child_project<'a>(
     session: &'a mut RunMatSession,
     project: runmat_package::FrozenProjectHandoff,
 ) -> runmat_runtime::BuiltinResult<runmat_runtime::execution::RuntimeContinuationFuture<'a, ()>> {
-    let runtime = session.runtime_context().clone();
+    let runtime = session
+        .runtime_context()
+        .clone()
+        .with_cancellation_token(session.runtime_context().cancellation());
     runmat_runtime::execution::admit_domain_continuation_with(&runtime, move || async move {
         session
             .install_project_handoff(project)
@@ -284,6 +300,7 @@ fn construct_child_session(
 }
 
 fn result_value(
+    runtime: &runmat_runtime::context::RuntimeContext,
     run: &super::CoreTestRun,
     coverage_selection: Option<&MatlabCoverageSelection>,
 ) -> runmat_runtime::BuiltinResult<Value> {
@@ -299,68 +316,76 @@ fn result_value(
         .tests()
         .map(|test| (test.id.clone(), test))
         .collect::<HashMap<_, _>>();
-    let values = run
-        .results
-        .iter()
-        .map(|result| {
+    let values = runmat_runtime::execution::RootedValues::try_initialize_in_context(
+        run.results.len(),
+        runtime,
+        |index| {
+            let result = &run.results[index];
             let descriptor = tests.get(&result.test_id).ok_or_else(|| {
                 runtime_error(
                     "RunMat:Testing:ResultProjection",
                     "result has no matching test descriptor",
                 )
             })?;
-            let mut value =
-                runmat_runtime::testing::test_result_object(&descriptor.display_name, result);
-            if let Value::Object(object) = &mut value {
-                object.properties.insert(
-                    "TestFile".into(),
-                    Value::String(display_source_path(&descriptor.procedure.source)),
-                );
-                object.properties.insert("Duration".into(), Value::Num(0.0));
-                let details = result
-                    .attempts
-                    .last()
-                    .and_then(|attempt| attempt.diagnostics.first())
-                    .map(|diagnostic| diagnostic.message.clone())
-                    .unwrap_or_default();
-                object
-                    .properties
-                    .insert("Details".into(), Value::String(details));
-                if let Some(coverage) = &coverage {
-                    let statements =
-                        coverage.summary(runmat_test::coverage::CoverageMetric::Statement);
-                    let functions =
-                        coverage.summary(runmat_test::coverage::CoverageMetric::Function);
-                    let mut summary = runmat_value::ObjectInstance::new("RunMatCoverageResult");
-                    summary.properties.insert(
-                        "StatementsCovered".into(),
-                        Value::Num(statements.covered as f64),
-                    );
-                    summary.properties.insert(
-                        "StatementsTotal".into(),
+            let value = runmat_runtime::testing::test_result_object_in_context(
+                runtime,
+                &descriptor.display_name,
+                result,
+            )?;
+            let file = display_source_path(&descriptor.procedure.source);
+            let details = result
+                .attempts
+                .last()
+                .and_then(|attempt| attempt.diagnostics.first())
+                .map(|diagnostic| diagnostic.message.as_str())
+                .unwrap_or_default();
+            let updates = [
+                ("TestFile", projected_text(runtime, &file)?),
+                ("Duration", Value::Num(0.0)),
+                ("Details", projected_text(runtime, details)?),
+            ];
+            let value = runmat_runtime::testing::replace_object_properties_in_context(
+                runtime,
+                value,
+                updates.iter().map(|(key, value)| (*key, value)),
+            )?;
+            let value = if let Some(coverage) = &coverage {
+                let statements = coverage.summary(runmat_test::coverage::CoverageMetric::Statement);
+                let functions = coverage.summary(runmat_test::coverage::CoverageMetric::Function);
+                let fields = [
+                    ("StatementsCovered", Value::Num(statements.covered as f64)),
+                    (
+                        "StatementsTotal",
                         Value::Num(statements.instrumented as f64),
-                    );
-                    summary.properties.insert(
-                        "FunctionsCovered".into(),
-                        Value::Num(functions.covered as f64),
-                    );
-                    summary.properties.insert(
-                        "FunctionsTotal".into(),
-                        Value::Num(functions.instrumented as f64),
-                    );
-                    object
-                        .properties
-                        .insert("Coverage".into(), Value::Object(summary));
-                }
-            }
-            Ok(value)
-        })
-        .collect::<runmat_runtime::BuiltinResult<Vec<_>>>()?;
-    runmat_runtime::testing::object_array_or_scalar(
+                    ),
+                    ("FunctionsCovered", Value::Num(functions.covered as f64)),
+                    ("FunctionsTotal", Value::Num(functions.instrumented as f64)),
+                ];
+                let summary = runmat_runtime::testing::object_from_fields_in_context(
+                    runtime,
+                    "RunMatCoverageResult",
+                    fields.iter().map(|(key, value)| (*key, value)),
+                )?;
+                let updates = [("Coverage", summary.value().clone())];
+                runmat_runtime::testing::replace_object_properties_in_context(
+                    runtime,
+                    value,
+                    updates.iter().map(|(key, value)| (*key, value)),
+                )?
+            } else {
+                value
+            };
+            // This report schema has no GC edges; exact object/text owners move
+            // into the final admitted result slots before their roots retire.
+            Ok::<_, runmat_runtime::RuntimeError>(value.with_owned(|value| value))
+        },
+    )?;
+    runmat_runtime::testing::object_array_or_scalar_in_context(
+        runtime,
         runmat_runtime::testing::TEST_RESULT_CLASS,
         values,
     )
-    .map_err(|error| runtime_error("RunMat:Testing:ResultProjection", error))
+    .map(|value| value.with_owned(|value| value))
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -374,17 +399,19 @@ fn coverage_plugin_selection(value: &Value) -> Option<MatlabCoverageSelection> {
         return None;
     };
     if !object
-        .class_name
+        .class_name()
         .is(runmat_types::standard::UNIT_TEST_CODE_COVERAGE_PLUGIN)
     {
         return None;
     }
-    let folders = match object.properties.get("Folders") {
-        Some(Value::StringArray(folders)) => folders.data.clone(),
+    let folders = match object.properties().get("Folders") {
+        Some(Value::StringArray(folders)) => {
+            folders.data().iter().map(ToString::to_string).collect()
+        }
         _ => Vec::new(),
     };
     let including_subfolders = matches!(
-        object.properties.get("IncludingSubfolders"),
+        object.properties().get("IncludingSubfolders"),
         Some(Value::Bool(true))
     );
     Some(MatlabCoverageSelection {
@@ -467,10 +494,10 @@ fn suite_targets(suite: Value) -> Vec<Value> {
         let Value::Object(object) = value else {
             continue;
         };
-        if let Some(file) = object.properties.get("TestFile") {
+        if let Some(file) = object.properties().get("TestFile") {
             files.push(file.clone());
         }
-        if let Some(procedure) = object.properties.get("ProcedureName") {
+        if let Some(procedure) = object.properties().get("ProcedureName") {
             procedures.push(procedure.clone());
         }
     }
@@ -501,6 +528,13 @@ fn runtime_error(
     runmat_runtime::build_runtime_error(message)
         .with_identifier(identifier)
         .build()
+}
+
+fn projected_text(
+    runtime: &runmat_runtime::context::RuntimeContext,
+    source: &str,
+) -> runmat_runtime::BuiltinResult<Value> {
+    runmat_runtime::call::argument_text::copy_str(source, Some(runtime)).map(Value::String)
 }
 
 #[cfg(test)]

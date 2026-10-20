@@ -41,13 +41,14 @@ use output::{builtin_demand, evaluation_to_value, reject_pairwise_multiple_outpu
 pub(super) async fn max_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    if let Some(eval) = crate::builtins::table::categorical_max_evaluate(&value, &rest).await {
+    if let Some(eval) = crate::builtins::table::categorical_max_evaluate(&value, rest.view()).await
+    {
         return crate::builtins::table::categorical_extrema_to_value(eval?);
     }
-    reject_pairwise_multiple_outputs(&rest)?;
-    let eval = evaluate_for_demand(runtime.as_ref(), value, &rest, builtin_demand()).await?;
+    reject_pairwise_multiple_outputs(rest.view())?;
+    let eval = evaluate_for_demand(runtime.as_ref(), value, rest.view(), builtin_demand()).await?;
     evaluation_to_value(eval)
 }
 
@@ -58,7 +59,10 @@ pub(crate) use nanmax::__runmat_wasm_register_builtin_nanmax_builtin;
 use nanmax::nanmax_builtin;
 
 /// Evaluate the builtin once and expose both outputs (value + indices).
-pub async fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<MaxEvaluation> {
+pub async fn evaluate(
+    value: Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<MaxEvaluation> {
     let evaluated = evaluate_for_demand(
         None,
         value,
@@ -70,10 +74,10 @@ pub async fn evaluate(value: Value, rest: &[Value]) -> BuiltinResult<MaxEvaluati
     Ok(MaxEvaluation { values, indices })
 }
 
-async fn evaluate_for_demand(
+pub(super) async fn evaluate_for_demand(
     runtime: Option<&crate::context::RuntimeContext>,
     value: Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     demand: super::extrema_provider::ExtremaDemand,
 ) -> BuiltinResult<super::extrema_provider::ExtremaResult> {
     if crate::builtins::common::validation::is_typed_complex_integer(&value) {

@@ -77,7 +77,7 @@ fn rlocus_error(
     binding_variant = "default",
     builtin_path = "crate::builtins::control::rlocus"
 )]
-async fn rlocus_builtin(sys: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn rlocus_builtin(sys: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     if crate::builtins::common::validation::value_has_native_integer_class(&sys)
         || matches!(sys, Value::GpuTensor(_))
     {
@@ -147,7 +147,10 @@ fn is_statement_form_call() -> bool {
 }
 
 #[cfg(feature = "plot-core")]
-async fn plot_root_locus_statement(first_sys: Value, rest: Vec<Value>) -> BuiltinResult<()> {
+async fn plot_root_locus_statement(
+    first_sys: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<()> {
     let mut systems = vec![(first_sys, None)];
     let mut gains = None;
 
@@ -410,7 +413,7 @@ impl DynamicModel {
         Err(rlocus_error(
             format!(
                 "rlocus: unsupported model class '{}'; expected SISO tf or ss",
-                object.class_name
+                object.class_name()
             ),
             &RLOCUS_ERROR_UNSUPPORTED_MODEL,
         ))
@@ -463,8 +466,12 @@ impl RootLocus {
     fn focus_points(&self, model: &TfModel) -> Vec<Complex64> {
         let physical = model.physical_polynomials();
         let (numerator, denominator) = (physical.numerator(), physical.denominator());
-        let mut points: Vec<Complex64> =
-            self.poles.iter().chain(self.zeros.iter()).copied().collect();
+        let mut points: Vec<Complex64> = self
+            .poles
+            .iter()
+            .chain(self.zeros.iter())
+            .copied()
+            .collect();
         let scale = points.iter().map(|p| p.norm()).fold(1.0_f64, f64::max);
         for gain in critical_gains(numerator, denominator) {
             let Ok(roots) = roots_for_gain(numerator, denominator, gain, self.branches) else {
@@ -484,7 +491,11 @@ impl RootLocus {
             for gain_idx in 1..self.gains.len() {
                 let a = self.root(branch, gain_idx - 1);
                 let b = self.root(branch, gain_idx);
-                if a.re.is_finite() && b.re.is_finite() && a.re.signum() != b.re.signum() && a.re != b.re {
+                if a.re.is_finite()
+                    && b.re.is_finite()
+                    && a.re.signum() != b.re.signum()
+                    && a.re != b.re
+                {
                     let t = a.re / (a.re - b.re);
                     points.push(Complex64::new(0.0, a.im + t * (b.im - a.im)));
                 }
@@ -855,17 +866,17 @@ mod tests {
             let resident =
                 crate::builtins::common::gpu_helpers::upload_tensor(provider, &den).unwrap();
             let mut model = ObjectInstance::new(TF_CLASS.to_string());
-            model.properties.insert("Numerator".into(), Value::Num(1.0));
-            model
-                .properties
-                .insert("Denominator".into(), Value::GpuTensor(resident));
+            model.replace_property_unbounded("Numerator".into(), Value::Num(1.0));
+            model.replace_property_unbounded("Denominator".into(), Value::GpuTensor(resident));
             for name in ["Ts", "InputDelay", "OutputDelay"] {
-                model.properties.insert(name.into(), Value::Num(0.0));
+                model.replace_property_unbounded(name.into(), Value::Num(0.0));
             }
             provider.reset_telemetry();
             let error = block_on(rlocus_builtin(
                 Value::Object(model.clone()),
-                vec![Value::from("not-a-gain")],
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::from(
+                    "not-a-gain",
+                )]),
             ))
             .expect_err("invalid gain");
             assert_eq!(error.identifier(), Some("RunMat:rlocus:InvalidArgument"));
@@ -874,7 +885,9 @@ mod tests {
             provider.reset_telemetry();
             let error = block_on(plot_root_locus_statement(
                 Value::Object(model),
-                vec![Value::from("not-a-style")],
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::from(
+                    "not-a-style",
+                )]),
             ))
             .expect_err("invalid style");
             assert_eq!(error.identifier(), Some("RunMat:rlocus:InvalidArgument"));
@@ -897,26 +910,21 @@ mod tests {
                 crate::builtins::common::gpu_helpers::upload_tensor(provider, &unrelated)
                     .expect("upload unrelated property");
             let mut model = ObjectInstance::new(TF_CLASS.to_string());
-            model.properties.insert("Numerator".into(), Value::Num(1.0));
-            model.properties.insert(
+            model.replace_property_unbounded("Numerator".into(), Value::Num(1.0));
+            model.replace_property_unbounded(
                 "Denominator".into(),
                 Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap()),
             );
-            model.properties.insert("Ts".into(), Value::Num(0.0));
-            model
-                .properties
-                .insert("InputDelay".into(), Value::Num(0.0));
-            model
-                .properties
-                .insert("OutputDelay".into(), Value::Num(0.0));
-            model
-                .properties
-                .insert("Unrelated".into(), Value::GpuTensor(resident));
+            model.replace_property_unbounded("Ts".into(), Value::Num(0.0));
+            model.replace_property_unbounded("InputDelay".into(), Value::Num(0.0));
+            model.replace_property_unbounded("OutputDelay".into(), Value::Num(0.0));
+            model.replace_property_unbounded("Unrelated".into(), Value::GpuTensor(resident));
             provider.reset_telemetry();
-            let Value::Tensor(roots) =
-                block_on(rlocus_builtin(Value::Object(model), vec![Value::Num(1.0)]))
-                    .expect("root locus")
-            else {
+            let Value::Tensor(roots) = block_on(rlocus_builtin(
+                Value::Object(model),
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
+            ))
+            .expect("root locus") else {
                 panic!("expected root matrix");
             };
             assert_eq!(roots.shape(), &[1, 1]);
@@ -957,7 +965,12 @@ mod tests {
     }
 
     fn run_rlocus(sys: crate::execution::RootedValue, rest: Vec<Value>) -> BuiltinResult<Value> {
-        sys.with_owned(|sys| block_on(rlocus_builtin(sys, rest)))
+        sys.with_owned(|sys| {
+            block_on(rlocus_builtin(
+                sys,
+                crate::builtins::common::test_support::builtin_arguments(rest),
+            ))
+        })
     }
 
     fn tensor(value: &Value) -> &Tensor {

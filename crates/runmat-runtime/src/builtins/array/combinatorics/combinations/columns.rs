@@ -25,12 +25,12 @@ impl CombinationColumn {
             Value::Bool(value) => Self::Logical(vec![u8::from(value)]),
             Value::LogicalArray(array) => Self::Logical(array.data.to_vec()),
             Value::String(value) => Self::String(ExactArrayStorage::unbounded(vec![value])),
-            Value::StringArray(array) => Self::String(array.data),
+            Value::StringArray(array) => Self::String(array.into_parts().0),
             Value::CharArray(array) if array.rows == 1 => {
                 Self::String(ExactArrayStorage::unbounded(
                     array
-                        .data
-                        .into_iter()
+                        .data()
+                        .iter()
                         .map(|value| Utf8Text::new(value.to_string()))
                         .collect(),
                 ))

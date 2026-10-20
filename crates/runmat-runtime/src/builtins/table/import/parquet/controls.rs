@@ -38,7 +38,9 @@ impl<'a> RowGroupInput<'a> {
 }
 
 impl ParquetReadOptions {
-    pub(in crate::builtins::table) async fn parse(args: &[Value]) -> BuiltinResult<Self> {
+    pub(in crate::builtins::table) async fn parse(
+        args: crate::call::FunctionArgumentView<'_>,
+    ) -> BuiltinResult<Self> {
         if !args.len().is_multiple_of(2) {
             return Err(invalid_argument(
                 "parquetread: name-value options must be provided in pairs",
@@ -48,7 +50,7 @@ impl ParquetReadOptions {
         let mut row_groups = Vec::new();
         for pair in args.chunks_exact(2) {
             let name = scalar_text(&pair[0], "parquetread option")?;
-            let value = &pair[1];
+            let value = pair.get(1).expect("exact option pair");
             match ParquetReadControl::parse(&name) {
                 Some(ParquetReadControl::SelectedVariableNames) => {
                     options.selected_variable_names = Some(string_list(value)?)

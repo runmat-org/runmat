@@ -33,7 +33,7 @@ fn sparse_triangular_operator_and_builtin_preserve_single_on_vm_and_native() {
                 &unit,
                 ProcedureInvocation {
                     target: ProcedureTarget::Function("nativeSparseTriangular".into()),
-                    arguments: vec![matrix.clone(), rhs.clone()],
+                    arguments: crate::ProcedureArguments::Source(vec![matrix.clone(), rhs.clone()]),
                     requested_outputs: 2,
                 },
                 &control,

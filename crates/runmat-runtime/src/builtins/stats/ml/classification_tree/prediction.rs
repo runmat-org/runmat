@@ -3,7 +3,7 @@ use super::*;
 pub(crate) fn predict_classification_tree_object(
     object: ObjectInstance,
     xnew: Value,
-    rest: Vec<Value>,
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<Vec<Value>> {
     if !rest.is_empty() {
         return Err(predict_invalid(
@@ -18,7 +18,7 @@ pub(crate) fn predict_classification_tree_object(
     let node_classes = numeric_property(&object, "__RunMatTreeNodeClass")?;
     let node_probs = matrix_property(&object, "__RunMatTreeNodeProb")?;
     let class_names_value = object
-        .properties
+        .properties()
         .get("__RunMatTreeClassNames")
         .cloned()
         .ok_or_else(|| predict_invalid("predict: tree is missing class names"))?;

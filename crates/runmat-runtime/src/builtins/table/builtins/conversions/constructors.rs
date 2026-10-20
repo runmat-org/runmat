@@ -6,20 +6,23 @@ const BUILTIN_NAME: &str = "array2table";
 #[runtime_builtin(
     name = "array2table",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::table::builtins::conversions::constructors"
 )]
-pub(crate) async fn array2table_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(crate) async fn array2table_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if matches!(value, Value::GpuTensor(_)) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &ARRAY2TABLE_GPU_INPUT_EXTENSION,
             BUILTIN_NAME,
         )?;
     }
-    let value = gather_if_needed_async(&value)
-        .await
-        .map_err(map_control_flow)?;
-    let rest = gather_values(&rest).await?;
-    let mut options = parse_array2table_options(&rest)?;
+    let value = gather_retained_value(&value, runtime.as_ref()).await?;
+    let rest = gather_retained_values(&rest, runtime.as_ref()).await?;
+    let mut options = parse_array2table_options(rest.view())?;
     let columns = split_value_columns(value)?;
     let names = options
         .variable_names
@@ -30,10 +33,11 @@ pub(crate) async fn array2table_builtin(value: Value, rest: Vec<Value>) -> Built
         options.dimension_names.as_deref(),
     )?;
     let table = table_from_columns_with_properties(names, columns, options.row_names)?;
-    apply_array2table_dimension_names(table, options.dimension_names)
+    apply_array2table_dimension_names(runtime.as_ref(), table, options.dimension_names)
 }
 
 fn apply_array2table_dimension_names(
+    runtime: Option<&crate::context::RuntimeContext>,
     mut table: Value,
     dimension_names: Option<Vec<String>>,
 ) -> BuiltinResult<Value> {
@@ -45,18 +49,23 @@ fn apply_array2table_dimension_names(
             "array2table: internal table construction failed",
         ));
     };
-    set_table_dimension_names(object, dimension_names, "array2table")?;
+    set_table_dimension_names(runtime, object, dimension_names, "array2table")?;
     Ok(table)
 }
 
 #[runtime_builtin(
     name = "cell2table",
+    context = true,
     binding_variant = "default",
     builtin_path = "crate::builtins::table::builtins::conversions::constructors"
 )]
-pub(crate) async fn cell2table_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let rest = gather_values(&rest).await?;
-    let options = parse_table_options(&rest, "cell2table")?;
+pub(crate) async fn cell2table_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let rest = gather_retained_values(&rest, runtime.as_ref()).await?;
+    let options = parse_table_options(rest.view(), "cell2table")?;
     let Value::Cell(cell) = value else {
         return Err(invalid_argument("cell2table: expected cell array input"));
     };
@@ -88,20 +97,23 @@ pub(crate) async fn cell2table_builtin(value: Value, rest: Vec<Value>) -> Builti
 
 #[runtime_builtin(
     name = "struct2table",
+    context = true,
     binding_variant = "default",
     builtin_path = "crate::builtins::table::builtins::conversions::constructors"
 )]
-pub(crate) async fn struct2table_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    let value = gather_if_needed_async(&value)
-        .await
-        .map_err(map_control_flow)?;
-    let rest = gather_values(&rest).await?;
-    let options = parse_struct2table_options(&rest)?;
+pub(crate) async fn struct2table_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let value = gather_retained_value(&value, runtime.as_ref()).await?;
+    let rest = gather_retained_values(&rest, runtime.as_ref()).await?;
+    let options = parse_struct2table_options(rest.view())?;
     match value {
         Value::Struct(st) => {
             let mut names = Vec::with_capacity(st.fields.len());
             let mut columns = Vec::with_capacity(st.fields.len());
-            for (name, value) in st.fields {
+            for (name, value) in st.into_fields_unbounded() {
                 names.push(name);
                 if options.as_array && value_row_count(&value)? != 1 {
                     columns.push(Value::Cell(
@@ -116,7 +128,10 @@ pub(crate) async fn struct2table_builtin(value: Value, rest: Vec<Value>) -> Buil
         }
         Value::StructArray(array) => {
             let rows = array.len();
-            let field_names = array.field_names().cloned().collect::<Vec<_>>();
+            let field_names = array
+                .field_names()
+                .map(ToOwned::to_owned)
+                .collect::<Vec<_>>();
             let mut columns = Vec::with_capacity(field_names.len());
             for name in &field_names {
                 let values = array

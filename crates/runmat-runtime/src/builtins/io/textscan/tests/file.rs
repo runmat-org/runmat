@@ -153,7 +153,7 @@ fn textscan_repeated_file_read_preserves_next_record_position() {
         None,
         Value::Num(fid as f64),
         Value::from("%f %s"),
-        vec![Value::Num(1.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
     ))
     .expect("textscan");
     assert_eq!(numeric_column(&out, 0), vec![10.0]);
@@ -192,7 +192,7 @@ fn initial_utf8_bom_partial_read_seeks_to_exact_source_byte() {
         None,
         Value::Num(fid as f64),
         Value::from("%f"),
-        vec![Value::Num(1.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
     ))
     .expect("read first record");
     assert_eq!(numeric_column(&out, 0), vec![10.0]);
@@ -281,7 +281,7 @@ fn shift_jis_registered_file_restores_source_byte_position(
         None,
         Value::Num(fid as f64),
         Value::from("%f %s"),
-        vec![Value::Num(1.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
     ))
     .expect("textscan");
     assert_eq!(numeric_column(&out, 0), vec![1.0]);
@@ -305,7 +305,7 @@ fn textscan_rejects_standard_stream_identifiers() {
         None,
         Value::Num(0.0),
         Value::from("%f"),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect_err("standard stream rejected");
     assert!(err.message().contains("standard input/output"));
@@ -319,7 +319,7 @@ fn excessive_output_request_rejects_before_text_or_file_scan() {
         None,
         Value::from("not a file and not parsed"),
         Value::from("%f"),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect_err("fixed output count");
     assert_eq!(err.identifier(), Some("RunMat:textscan:InvalidArgument"));
@@ -350,7 +350,10 @@ fn textscan_reads_from_registered_file_identifier() {
         None,
         Value::Num(fid as f64),
         Value::from("%f %s"),
-        vec![Value::from("HeaderLines"), Value::Num(1.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("HeaderLines"),
+            Value::Num(1.0),
+        ]),
     ))
     .expect("textscan");
     assert_eq!(numeric_column(&out, 0), vec![10.0, 20.0]);

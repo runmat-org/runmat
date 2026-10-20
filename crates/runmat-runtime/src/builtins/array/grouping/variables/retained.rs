@@ -22,11 +22,11 @@ pub(super) fn columns(
     }
     match source.value() {
         Value::Cell(cell) if is_group_vector_list(cell) => {
-            let mut columns = Vec::with_capacity(cell.data.len());
-            for index in 0..cell.data.len() {
+            let mut columns = Vec::with_capacity(cell.data().len());
+            for index in 0..cell.data().len() {
                 let child = source
                     .project(|value| match value {
-                        Value::Cell(cell) => cell.data.get(index),
+                        Value::Cell(cell) => cell.data().get(index),
                         _ => None,
                     })
                     .ok_or_else(|| {

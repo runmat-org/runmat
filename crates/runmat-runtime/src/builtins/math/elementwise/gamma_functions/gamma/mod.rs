@@ -71,7 +71,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::math::elementwise::gamma_functions::gamma"
 )]
-async fn gamma_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn gamma_builtin(value: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     reject_excess_outputs()?;
     if !rest.is_empty() {
         return Err(gamma_error_with_detail(

@@ -20,7 +20,9 @@ fn public_call_rejects_an_initially_invalid_resource_lease_before_provider_effec
 
     let error = futures::executor::block_on(super::super::super::gzip_builtin(
         None,
-        vec![Value::String("source.bin".into())],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+            "source.bin".into(),
+        )]),
     ))
     .expect_err("invalid resource lease");
 
@@ -44,7 +46,9 @@ fn invalid_local_gunzip_filename_rejects_before_provider_effects() {
     let error = runmat_filesystem::with_provider_override(selected.clone(), || {
         futures::executor::block_on(super::super::super::gunzip_builtin(
             None,
-            vec![Value::String("/".into())],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "/".into(),
+            )]),
         ))
         .expect_err("root has no archive filename")
     });
@@ -76,7 +80,9 @@ fn invalid_url_gunzip_filename_rejects_before_http_or_filesystem_effects() {
 
     let error = futures::executor::block_on(super::super::super::gunzip_builtin(
         Some(runtime),
-        vec![Value::String("https://example.invalid/.gz".into())],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+            "https://example.invalid/.gz".into(),
+        )]),
     ))
     .expect_err("empty decompressed filename");
 

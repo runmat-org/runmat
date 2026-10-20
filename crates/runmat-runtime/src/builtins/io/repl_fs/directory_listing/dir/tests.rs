@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 use tempfile::tempdir;
 
 fn run(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    futures::executor::block_on(dir_builtin(args))
+    futures::executor::block_on(dir_builtin(
+        crate::builtins::common::test_support::builtin_arguments(args),
+    ))
 }
 
 fn names(value: Value) -> Vec<String> {
@@ -17,7 +19,7 @@ fn names(value: Value) -> Vec<String> {
     elements
         .into_iter()
         .map(|entry| match entry.fields.get("name") {
-            Some(Value::CharArray(name)) if name.rows == 1 => name.data.iter().collect(),
+            Some(Value::CharArray(name)) if name.rows == 1 => name.data().iter().collect(),
             other => panic!("expected character-row name, got {other:?}"),
         })
         .collect()

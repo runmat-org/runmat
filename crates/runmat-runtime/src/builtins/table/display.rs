@@ -87,7 +87,7 @@ pub(super) fn render_table_cell(value: &Value, row: usize) -> String {
             .map(format_table_number)
             .unwrap_or_default(),
         Value::StringArray(array) => array
-            .data
+            .data()
             .get(row)
             .map(ToString::to_string)
             .unwrap_or_default(),
@@ -100,7 +100,7 @@ pub(super) fn render_table_cell(value: &Value, row: usize) -> String {
             crate::builtins::datetime::datetime_string_array(value)
                 .ok()
                 .flatten()
-                .and_then(|array| array.data.get(row).map(ToString::to_string))
+                .and_then(|array| array.data().get(row).map(ToString::to_string))
                 .unwrap_or_else(|| value.to_string())
         }
         Value::Object(obj) if obj.is_class(CATEGORICAL_CLASS) => {
@@ -111,7 +111,7 @@ pub(super) fn render_table_cell(value: &Value, row: usize) -> String {
 }
 
 pub(crate) fn categorical_label_at(object: &ObjectInstance, row: usize) -> Option<String> {
-    let code = match object.properties.get("Codes")? {
+    let code = match object.properties().get("Codes")? {
         Value::Tensor(tensor) => tensor.get2(row, 0).ok()?,
         _ => return None,
     };
@@ -119,8 +119,8 @@ pub(crate) fn categorical_label_at(object: &ObjectInstance, row: usize) -> Optio
         return Some("<undefined>".to_string());
     }
     let idx = code.round() as usize - 1;
-    match object.properties.get("Categories")? {
-        Value::StringArray(array) => array.data.get(idx).map(ToString::to_string),
+    match object.properties().get("Categories")? {
+        Value::StringArray(array) => array.data().get(idx).map(ToString::to_string),
         _ => None,
     }
 }

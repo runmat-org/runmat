@@ -48,7 +48,7 @@ impl RunMatSession {
                 &unit,
                 ProcedureInvocation {
                     target,
-                    arguments,
+                    arguments: crate::ProcedureArguments::Source(arguments),
                     requested_outputs,
                 },
                 control,

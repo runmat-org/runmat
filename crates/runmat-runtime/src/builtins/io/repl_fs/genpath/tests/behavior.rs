@@ -28,7 +28,7 @@ fn returns_a_character_row_for_a_folder() {
     let _lock = runmat_filesystem::provider_override_lock();
     let directory = tempdir().expect("directory");
     let result = call(vec![Value::String(
-        directory.path().to_string_lossy().into(),
+        directory.path().to_string_lossy().into_owned().into(),
     )])
     .expect("genpath");
     assert!(matches!(
@@ -84,7 +84,7 @@ fn deduplicates_symbolic_link_targets() {
         symlink(&target, directory.path().join("alias")).expect("symlink");
         let result = segments(
             call(vec![Value::String(
-                directory.path().to_string_lossy().into(),
+                directory.path().to_string_lossy().into_owned().into(),
             )])
             .expect("genpath"),
         );

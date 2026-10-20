@@ -23,7 +23,7 @@ pub(crate) use spec::{
 fn cell2struct_builtin(
     cells: Value,
     fields: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &runmat_builtins::CELL2STRUCT_DESCRIPTOR,

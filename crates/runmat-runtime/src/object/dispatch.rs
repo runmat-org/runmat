@@ -687,7 +687,7 @@ async fn call_method_or_member_index_with_fallback_in_scope(
 ) -> Result<RootedValueSequence, RuntimeError> {
     match base {
         Value::Object(obj) => {
-            let class_name = obj.class_name.clone();
+            let class_name = obj.class_name().clone();
             Box::pin(call_member_index_on_object_like(
                 runtime,
                 Value::Object(obj),
@@ -715,7 +715,7 @@ async fn call_method_or_member_index_with_fallback_in_scope(
             .await
         }
         Value::HandleObject(handle) => {
-            let class_name = handle.class_name.clone();
+            let class_name = handle.class_name.as_identity().clone();
             Box::pin(call_member_index_on_object_like(
                 runtime,
                 Value::HandleObject(handle),

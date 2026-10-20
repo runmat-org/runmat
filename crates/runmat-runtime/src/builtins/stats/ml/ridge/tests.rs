@@ -71,7 +71,13 @@ fn tensor_out(value: Value) -> Tensor {
 fn scaled_false_restores_intercept_and_original_scale() {
     let y = tensor(vec![1.0, 3.0, 5.0, 7.0], 4, 1);
     let x = tensor(vec![0.0, 1.0, 2.0, 3.0], 4, 1);
-    let out = block_on(ridge_builtin(y, x, Value::Num(0.0), vec![Value::Num(0.0)])).unwrap();
+    let out = block_on(ridge_builtin(
+        y,
+        x,
+        Value::Num(0.0),
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(0.0)]),
+    ))
+    .unwrap();
     let out = tensor_out(out);
     assert_eq!(out.shape(), [2, 1]);
     assert!((out.materialize_f64()[0] - 1.0).abs() < 1.0e-10);
@@ -85,7 +91,13 @@ fn ridge_accepts_typed_integer_response_design_and_k() {
     let x = poisoned_int_tensor(IntegerStorage::I16(vec![0, 1, 2, 3]), 4, 1, f64::NAN);
     let k = poisoned_int_tensor(IntegerStorage::U8(vec![0, 1]), 1, 2, f64::NAN);
     let scaled = poisoned_int_tensor(IntegerStorage::U8(vec![0]), 1, 1, 1.0);
-    let out = block_on(ridge_builtin(y, x, k, vec![scaled])).unwrap();
+    let out = block_on(ridge_builtin(
+        y,
+        x,
+        k,
+        crate::builtins::common::test_support::builtin_arguments(vec![scaled]),
+    ))
+    .unwrap();
     let out = tensor_out(out);
     assert_eq!(out.shape(), [2, 2]);
     assert!((out.materialize_f64()[0] - 1.0).abs() < 1.0e-10);
@@ -100,7 +112,7 @@ fn scaled_true_returns_standardized_coefficients_for_each_k() {
         y,
         x,
         tensor(vec![0.0, 1.0], 1, 2),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap();
     let out = tensor_out(out);
@@ -113,7 +125,13 @@ fn scaled_true_returns_standardized_coefficients_for_each_k() {
 fn rows_with_nan_are_omitted() {
     let y = tensor(vec![1.0, f64::NAN, 5.0, 7.0], 4, 1);
     let x = tensor(vec![0.0, 1.0, 2.0, 3.0], 4, 1);
-    let out = block_on(ridge_builtin(y, x, Value::Num(0.0), vec![Value::Num(0.0)])).unwrap();
+    let out = block_on(ridge_builtin(
+        y,
+        x,
+        Value::Num(0.0),
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(0.0)]),
+    ))
+    .unwrap();
     let out = tensor_out(out);
     assert!((out.materialize_f64()[0] - 1.0).abs() < 1.0e-10);
     assert!((out.materialize_f64()[1] - 2.0).abs() < 1.0e-10);
@@ -127,10 +145,16 @@ fn invalid_inputs_are_rejected() {
         y.clone(),
         x.clone(),
         Value::Num(-1.0),
-        Vec::new()
+        crate::builtins::common::test_support::builtin_arguments(Vec::new())
     ))
     .is_err());
-    assert!(block_on(ridge_builtin(y, x, Value::Num(0.0), vec![Value::Num(2.0)])).is_err());
+    assert!(block_on(ridge_builtin(
+        y,
+        x,
+        Value::Num(0.0),
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(2.0)])
+    ))
+    .is_err());
 }
 
 #[test]
@@ -146,7 +170,7 @@ fn wide_integer_scaled_flag_does_not_round_into_an_admitted_value() {
             y.clone(),
             x.clone(),
             Value::Num(0.0),
-            vec![scaled]
+            crate::builtins::common::test_support::builtin_arguments(vec![scaled])
         ))
         .is_err());
     }
@@ -175,7 +199,7 @@ fn ridge_preserves_preflight_and_cached_compute_rank_boundaries() {
         scalar.clone(),
         scalar,
         Value::Num(0.0),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect_err("cached 0-by-0 response is not a vector");
     assert!(error.message().contains("y must be a vector"));
@@ -183,8 +207,13 @@ fn ridge_preserves_preflight_and_cached_compute_rank_boundaries() {
     let response = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).unwrap());
     let design = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).unwrap());
     assert!(super::admission::preflight_data(&response, &design, &Value::Num(0.0)).is_ok());
-    let error = block_on(ridge_builtin(response, design, Value::Num(0.0), Vec::new()))
-        .expect_err("cached rank-one design has one row");
+    let error = block_on(ridge_builtin(
+        response,
+        design,
+        Value::Num(0.0),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect_err("cached rank-one design has one row");
     assert!(error
         .message()
         .contains("length(y) must match the number of rows in X"));
@@ -203,7 +232,7 @@ fn invalid_host_flag_precedes_resident_integer_download() {
         Value::GpuTensor(resident),
         x,
         Value::Num(0.0),
-        vec![Value::Num(2.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(2.0)]),
     ))
     .expect_err("invalid host flag");
     assert!(error.message().contains("scaled"));
@@ -215,7 +244,13 @@ fn logical_response_design_and_parameter_are_admitted() {
     let y =
         Value::LogicalArray(runmat_value::LogicalArray::new(vec![0, 1, 0, 1], vec![4, 1]).unwrap());
     let x = tensor(vec![0.0, 1.0, 2.0, 3.0], 4, 1);
-    let out = block_on(ridge_builtin(y, x, Value::Bool(false), Vec::new())).unwrap();
+    let out = block_on(ridge_builtin(
+        y,
+        x,
+        Value::Bool(false),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap();
     let out = tensor_out(out);
     assert_eq!(out.shape(), [1, 1]);
     assert!(out.materialize_f64()[0].is_finite());
@@ -225,7 +260,13 @@ fn logical_response_design_and_parameter_are_admitted() {
 fn rank_deficient_k_zero_uses_minimum_norm_solution() {
     let y = tensor(vec![2.0, 4.0, 6.0], 3, 1);
     let x = tensor(vec![1.0, 2.0, 3.0, 2.0, 4.0, 6.0], 3, 2);
-    let out = block_on(ridge_builtin(y, x, Value::Num(0.0), vec![Value::Num(0.0)])).unwrap();
+    let out = block_on(ridge_builtin(
+        y,
+        x,
+        Value::Num(0.0),
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(0.0)]),
+    ))
+    .unwrap();
     let out = tensor_out(out);
     assert_eq!(out.shape(), [3, 1]);
     assert!(out.materialize_f64()[0].abs() < 1.0e-10);

@@ -2,7 +2,7 @@ use runmat_value::Value;
 
 use super::super::path_mutation::text::NumericPolicy;
 
-pub(super) async fn run(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub(super) async fn run(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     if args.is_empty() {
         return Err(super::errors::descriptor(
             &runmat_builtins::ADDPATH_ERROR_TOO_FEW_ARGUMENTS,

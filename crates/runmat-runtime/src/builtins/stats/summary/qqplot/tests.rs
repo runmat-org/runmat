@@ -76,7 +76,12 @@ fn qqplot_public_path_preserves_rank_zero_and_rank_one_samples() {
             vec![1.0, 3.0],
         ),
     ] {
-        let handles = tensor_data(block_on(qqplot_builtin(vec![sample])).unwrap());
+        let handles = tensor_data(
+            block_on(qqplot_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![sample]),
+            ))
+            .unwrap(),
+        );
         let observed = tensor_data(
             get_builtin(vec![Value::Num(handles[0]), Value::String("YData".into())]).unwrap(),
         );
@@ -87,7 +92,14 @@ fn qqplot_public_path_preserves_rank_zero_and_rank_one_samples() {
 #[test]
 fn qqplot_normal_vector_returns_data_reference_and_quartile_handles() {
     let _guard = setup();
-    let out = block_on(qqplot_builtin(vec![tensor(vec![1.0, 2.0, 4.0, 8.0], 4, 1)])).unwrap();
+    let out = block_on(qqplot_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![tensor(
+            vec![1.0, 2.0, 4.0, 8.0],
+            4,
+            1,
+        )]),
+    ))
+    .unwrap();
     let handles = tensor_data(out);
     assert_eq!(handles.len(), 3);
 
@@ -125,11 +137,13 @@ fn qqplot_normal_vector_returns_data_reference_and_quartile_handles() {
 #[test]
 fn qqplot_percentage_vector_interpolates_sample_quantiles() {
     let _guard = setup();
-    let out = block_on(qqplot_builtin(vec![
-        tensor(vec![0.0, 10.0, 20.0], 3, 1),
-        tensor(Vec::new(), 0, 0),
-        tensor(vec![25.0, 50.0, 75.0], 1, 3),
-    ]))
+    let out = block_on(qqplot_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            tensor(vec![0.0, 10.0, 20.0], 3, 1),
+            tensor(Vec::new(), 0, 0),
+            tensor(vec![25.0, 50.0, 75.0], 1, 3),
+        ]),
+    ))
     .unwrap();
     let handles = tensor_data(out);
     let y = tensor_data(
@@ -142,11 +156,13 @@ fn qqplot_percentage_vector_interpolates_sample_quantiles() {
 fn qqplot_accepts_typed_integer_samples_and_pvec() {
     let _guard = setup();
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-    let out = block_on(qqplot_builtin(vec![
-        int_tensor(IntegerStorage::I16(vec![0, 10, 20]), 3, 1),
-        int_tensor(IntegerStorage::I16(Vec::new()), 0, 0),
-        int_tensor(IntegerStorage::U8(vec![25, 50, 75]), 1, 3),
-    ]))
+    let out = block_on(qqplot_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            int_tensor(IntegerStorage::I16(vec![0, 10, 20]), 3, 1),
+            int_tensor(IntegerStorage::I16(Vec::new()), 0, 0),
+            int_tensor(IntegerStorage::U8(vec![25, 50, 75]), 1, 3),
+        ]),
+    ))
     .unwrap();
     let handles = tensor_data(out);
     let y = tensor_data(
@@ -158,11 +174,13 @@ fn qqplot_accepts_typed_integer_samples_and_pvec() {
 #[test]
 fn qqplot_integer_extensions_are_gated_and_inexact_values_reject() {
     let strict = crate::compatibility::push_runmat_extensions_enabled(false);
-    let error = block_on(qqplot_builtin(vec![int_tensor(
-        IntegerStorage::I16(vec![1, 2]),
-        2,
-        1,
-    )]))
+    let error = block_on(qqplot_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![int_tensor(
+            IntegerStorage::I16(vec![1, 2]),
+            2,
+            1,
+        )]),
+    ))
     .expect_err("strict mode rejects integer samples");
     assert_eq!(
         error.identifier(),
@@ -171,11 +189,13 @@ fn qqplot_integer_extensions_are_gated_and_inexact_values_reject() {
     drop(strict);
 
     let strict = crate::compatibility::push_runmat_extensions_enabled(false);
-    let error = block_on(qqplot_builtin(vec![
-        tensor(vec![1.0, 2.0], 2, 1),
-        tensor(Vec::new(), 0, 0),
-        int_tensor(IntegerStorage::U8(vec![25, 75]), 1, 2),
-    ]))
+    let error = block_on(qqplot_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            tensor(vec![1.0, 2.0], 2, 1),
+            tensor(Vec::new(), 0, 0),
+            int_tensor(IntegerStorage::U8(vec![25, 75]), 1, 2),
+        ]),
+    ))
     .expect_err("strict mode rejects integer pvec");
     assert_eq!(
         error.identifier(),
@@ -184,11 +204,13 @@ fn qqplot_integer_extensions_are_gated_and_inexact_values_reject() {
     drop(strict);
 
     let extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-    let error = block_on(qqplot_builtin(vec![int_tensor(
-        IntegerStorage::U64(vec![(1_u64 << 53) + 1, 2]),
-        2,
-        1,
-    )]))
+    let error = block_on(qqplot_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![int_tensor(
+            IntegerStorage::U64(vec![(1_u64 << 53) + 1, 2]),
+            2,
+            1,
+        )]),
+    ))
     .expect_err("inexact integer sample rejects");
     assert!(error.message().contains("exactly representable as double"));
     drop(extensions);
@@ -208,8 +230,10 @@ fn qqplot_strict_mode_gates_explicit_gpu_before_provider_access() {
         .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
         .expect("validated provenance");
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-    let error = block_on(qqplot_builtin(vec![Value::GpuTensor(handle)]))
-        .expect_err("strict mode rejects explicit GPU input before gather");
+    let error = block_on(qqplot_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(handle)]),
+    ))
+    .expect_err("strict mode rejects explicit GPU input before gather");
     assert_eq!(
         error.identifier(),
         QQPLOT_EXPLICIT_GPU_EXTENSION.error_identifier
@@ -219,8 +243,10 @@ fn qqplot_strict_mode_gates_explicit_gpu_before_provider_access() {
 #[test]
 fn qqplot_logical_input_is_a_gated_extension() {
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-    let error = block_on(qqplot_builtin(vec![Value::Bool(true)]))
-        .expect_err("strict mode rejects logical sample extension");
+    let error = block_on(qqplot_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Bool(true)]),
+    ))
+    .expect_err("strict mode rejects logical sample extension");
     assert_eq!(
         error.identifier(),
         QQPLOT_LOGICAL_INPUT_EXTENSION.error_identifier
@@ -230,11 +256,13 @@ fn qqplot_logical_input_is_a_gated_extension() {
 #[test]
 fn qqplot_two_sample_uses_common_probabilities() {
     let _guard = setup();
-    let out = block_on(qqplot_builtin(vec![
-        tensor(vec![1.0, 3.0, 5.0], 3, 1),
-        tensor(vec![2.0, 4.0, 6.0], 3, 1),
-        tensor(vec![50.0], 1, 1),
-    ]))
+    let out = block_on(qqplot_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            tensor(vec![1.0, 3.0, 5.0], 3, 1),
+            tensor(vec![2.0, 4.0, 6.0], 3, 1),
+            tensor(vec![50.0], 1, 1),
+        ]),
+    ))
     .unwrap();
     let handles = tensor_data(out);
     let x = tensor_data(
@@ -250,11 +278,13 @@ fn qqplot_two_sample_uses_common_probabilities() {
 #[test]
 fn qqplot_two_sample_matrices_pair_columns_and_do_not_treat_y_as_pvec() {
     let _guard = setup();
-    let out = block_on(qqplot_builtin(vec![
-        tensor(vec![0.1, 0.2, 1.0, 2.0], 2, 2),
-        tensor(vec![0.3, 0.4, 3.0, 4.0], 2, 2),
-        tensor(vec![50.0], 1, 1),
-    ]))
+    let out = block_on(qqplot_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            tensor(vec![0.1, 0.2, 1.0, 2.0], 2, 2),
+            tensor(vec![0.3, 0.4, 3.0, 4.0], 2, 2),
+            tensor(vec![50.0], 1, 1),
+        ]),
+    ))
     .unwrap();
     let handles = tensor_data(out);
     assert_eq!(handles.len(), 6);
@@ -281,11 +311,13 @@ fn qqplot_two_sample_matrices_pair_columns_and_do_not_treat_y_as_pvec() {
 #[test]
 fn qqplot_matrix_creates_one_series_per_column_and_omits_nan() {
     let _guard = setup();
-    let out = block_on(qqplot_builtin(vec![tensor(
-        vec![1.0, 2.0, f64::NAN, 4.0, 10.0, 20.0],
-        3,
-        2,
-    )]))
+    let out = block_on(qqplot_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![tensor(
+            vec![1.0, 2.0, f64::NAN, 4.0, 10.0, 20.0],
+            3,
+            2,
+        )]),
+    ))
     .unwrap();
     let handles = tensor_data(out);
     assert_eq!(handles.len(), 6);
@@ -297,11 +329,13 @@ fn qqplot_matrix_creates_one_series_per_column_and_omits_nan() {
 
 #[test]
 fn qqplot_rejects_bad_inputs() {
-    let err = block_on(qqplot_builtin(vec![
-        tensor(vec![1.0, 2.0], 2, 1),
-        tensor(vec![3.0, 4.0], 2, 1),
-        tensor(vec![-1.0], 1, 1),
-    ]))
+    let err = block_on(qqplot_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            tensor(vec![1.0, 2.0], 2, 1),
+            tensor(vec![3.0, 4.0], 2, 1),
+            tensor(vec![-1.0], 1, 1),
+        ]),
+    ))
     .unwrap_err();
     assert!(err.message.contains("pvec"));
 }

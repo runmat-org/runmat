@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) fn reject_resident_persistence_arguments(
-    values: &[Value],
+    values: crate::call::FunctionArgumentView<'_>,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
     if values.iter().any(|value| {

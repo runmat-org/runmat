@@ -5,7 +5,9 @@ use std::sync::Arc;
 use tempfile::tempdir;
 
 fn run(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    futures::executor::block_on(ls_builtin(args))
+    futures::executor::block_on(ls_builtin(
+        crate::builtins::common::test_support::builtin_arguments(args),
+    ))
 }
 
 fn rows(value: Value) -> Vec<String> {
@@ -15,7 +17,7 @@ fn rows(value: Value) -> Vec<String> {
     (0..array.rows)
         .map(|row| {
             (0..array.cols)
-                .map(|column| array.data[row * array.cols + column])
+                .map(|column| array.data()[row * array.cols + column])
                 .collect::<String>()
                 .trim_end()
                 .to_string()
@@ -86,8 +88,8 @@ fn strict_mode_uses_a_unix_character_vector() {
         panic!("expected character array");
     };
     assert_eq!(listing.rows, 1);
-    assert!(listing.data.iter().collect::<String>().contains("a.txt"));
-    assert!(listing.data.iter().collect::<String>().contains("b.txt"));
+    assert!(listing.data().iter().collect::<String>().contains("a.txt"));
+    assert!(listing.data().iter().collect::<String>().contains("b.txt"));
 }
 
 #[test]

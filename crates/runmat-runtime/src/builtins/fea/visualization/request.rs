@@ -149,7 +149,7 @@ pub(in crate::builtins::fea) fn plot_request_from_args(
             "plot requires an fea.Field",
         ));
     };
-    if object.class_name.display_name() != FEA_FIELD_CLASS {
+    if object.class_name().display_name() != FEA_FIELD_CLASS {
         return Err(builtin_error(
             PLOT_NAME,
             &ERROR_INPUT,
@@ -157,7 +157,7 @@ pub(in crate::builtins::fea) fn plot_request_from_args(
         ));
     }
     let field_id = object
-        .properties
+        .properties()
         .get("field_id")
         .and_then(|value| match value {
             Value::String(field_id) => Some(field_id.clone()),

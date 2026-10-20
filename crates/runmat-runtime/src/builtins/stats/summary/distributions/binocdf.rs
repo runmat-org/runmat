@@ -11,7 +11,10 @@ use runmat_builtins::{
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::summary::distributions::binocdf"
 )]
-pub(crate) async fn binocdf_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(crate) async fn binocdf_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     let args = parse_args(value, rest).await?;
     let data = args
         .x
@@ -32,8 +35,11 @@ struct BinocdfArgs {
     output: NormalOutputPlan,
 }
 
-async fn parse_args(value: Value, mut rest: Vec<Value>) -> BuiltinResult<BinocdfArgs> {
-    let tail = super::pop_upper_tail(&mut rest);
+async fn parse_args(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<BinocdfArgs> {
+    let (rest, tail) = super::split_upper_tail(rest)?;
     if rest.len() != 2 {
         return Err(super::normal_error(
             "binocdf",
@@ -43,10 +49,10 @@ async fn parse_args(value: Value, mut rest: Vec<Value>) -> BuiltinResult<Binocdf
     let inputs = [&value, &rest[0], &rest[1]];
     ensure_extensions(inputs)?;
     numeric_inputs("binocdf", &inputs, NumericShapePolicy::Broadcast)?;
-    let output = NormalOutputPlan::inspect("binocdf", &value, &rest)?;
+    let output = NormalOutputPlan::inspect("binocdf", &value, rest.view())?;
     let x = super::normal_value_to_tensor("binocdf", "x", value).await?;
-    let n = super::normal_value_to_tensor("binocdf", "n", rest.remove(0)).await?;
-    let p = super::normal_value_to_tensor("binocdf", "p", rest.remove(0)).await?;
+    let n = super::normal_value_to_tensor("binocdf", "n", rest[0].clone()).await?;
+    let p = super::normal_value_to_tensor("binocdf", "p", rest[1].clone()).await?;
     let (mut broadcasted, shape) = super::broadcast_tensors("binocdf", &[&x, &n, &p])?;
     Ok(BinocdfArgs {
         x: broadcasted.remove(0),

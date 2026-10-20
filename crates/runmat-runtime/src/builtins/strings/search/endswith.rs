@@ -55,20 +55,22 @@ fn remap_endswith_flow(err: RuntimeError) -> RuntimeError {
 
 #[runtime_builtin(
     name = "endsWith",
+    context = true,
     binding_variant = "default",
     builtin_path = "crate::builtins::strings::search::endswith"
 )]
 async fn endswith_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     text: Value,
     pattern: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     reject_resident_numeric_text(&text)?;
     reject_resident_numeric_text(&pattern)?;
     let subject = TextCollection::from_subject(BUILTIN_NAME, text).map_err(|err| {
         endswith_error_with_message(err.message().to_string(), &ENDSWITH_ERROR_INVALID_INPUT)
     })?;
-    let ignore_case = validate_endswith_options(rest).await?;
+    let ignore_case = validate_endswith_options(runtime.as_ref(), rest).await?;
     if matches!(pattern, Value::Object(_)) {
         let regex = pattern_regex(&pattern, BUILTIN_NAME).map_err(|err| {
             endswith_error_with_message(err.message().to_string(), &ENDSWITH_ERROR_INVALID_INPUT)
@@ -81,7 +83,10 @@ async fn endswith_builtin(
     evaluate_endswith(&subject, &patterns, ignore_case)
 }
 
-async fn validate_endswith_options(rest: Vec<Value>) -> BuiltinResult<bool> {
+async fn validate_endswith_options(
+    runtime: Option<&crate::context::RuntimeContext>,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<bool> {
     if rest.len() > 2 {
         return Err(endswith_error_with_message(
             "endsWith: expected at most one 'IgnoreCase' name-value pair",
@@ -97,7 +102,7 @@ async fn validate_endswith_options(rest: Vec<Value>) -> BuiltinResult<bool> {
             ));
         }
     }
-    if let Some(value) = option_value(&rest) {
+    if let Some(value) = option_value(rest.view()) {
         validate_ignore_case_shape(value)?;
     }
     let has_resident = rest
@@ -106,7 +111,7 @@ async fn validate_endswith_options(rest: Vec<Value>) -> BuiltinResult<bool> {
     let parsed_host = if has_resident {
         None
     } else {
-        Some(parse_ignore_case(BUILTIN_NAME, &rest).map_err(|err| {
+        Some(parse_ignore_case(BUILTIN_NAME, rest.view()).map_err(|err| {
             endswith_error_with_message(err.message().to_string(), &ENDSWITH_ERROR_INVALID_OPTION)
         })?)
     };
@@ -125,7 +130,7 @@ async fn validate_endswith_options(rest: Vec<Value>) -> BuiltinResult<bool> {
             BUILTIN_NAME,
         )?;
     }
-    let value = option_value(&rest);
+    let value = option_value(rest.view());
     if value.is_some_and(is_numeric_ignore_case_value) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &ENDSWITH_NUMERIC_IGNORE_CASE_EXTENSION,
@@ -142,23 +147,22 @@ async fn validate_endswith_options(rest: Vec<Value>) -> BuiltinResult<bool> {
         return Ok(ignore_case);
     }
 
-    let mut host = Vec::with_capacity(rest.len());
-    for value in rest {
-        host.push(
-            gather_if_needed_async(&value)
+    let host = rest
+        .try_map_preserving_roots_async(rest.len(), runtime, async |index| {
+            gather_if_needed_async(&rest[index])
                 .await
-                .map_err(remap_endswith_flow)?,
-        );
-    }
-    parse_ignore_case(BUILTIN_NAME, &host).map_err(|err| {
+                .map_err(remap_endswith_flow)
+        })
+        .await?;
+    parse_ignore_case(BUILTIN_NAME, host.view()).map_err(|err| {
         endswith_error_with_message(err.message().to_string(), &ENDSWITH_ERROR_INVALID_OPTION)
     })
 }
 
-fn option_value(rest: &[Value]) -> Option<&Value> {
-    match rest {
-        [value] => Some(value),
-        [_, value] => Some(value),
+fn option_value(rest: crate::call::FunctionArgumentView<'_>) -> Option<&Value> {
+    match rest.len() {
+        1 => rest.get(0),
+        2 => rest.get(1),
         _ => None,
     }
 }
@@ -298,7 +302,14 @@ pub(crate) mod tests {
     use runmat_value::{CellArray, CharArray, IntValue, LogicalArray, StringArray, Tensor};
 
     fn run_endswith(text: Value, pattern: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(endswith_builtin(text, pattern, rest))
+        futures::executor::block_on(endswith_builtin(
+            None,
+            text,
+            pattern,
+            crate::execution::RootedValues::new(rest)
+                .map_err(crate::execution::ExecutionServiceError::into_runtime_error)?
+                .into(),
+        ))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

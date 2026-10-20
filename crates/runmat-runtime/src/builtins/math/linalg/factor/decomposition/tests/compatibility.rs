@@ -45,7 +45,7 @@ fn integer_check_condition_has_an_independent_strict_mode_gate() {
     let args = || {
         vec![
             a.clone(),
-            Value::String("CheckCondition".to_string()),
+            Value::String("CheckCondition".to_string().into()),
             Value::Int(IntValue::U8(1)),
         ]
     };
@@ -78,7 +78,7 @@ fn nonfloating_object_methods_recheck_the_compatibility_gate() {
         block_on(decomposition_subsref(
             d.clone(),
             OBJECT_INDEX_MEMBER.to_string(),
-            Value::String(TYPE_FIELD.to_string()),
+            Value::String(TYPE_FIELD.to_string().into()),
         ))
         .expect_err("property access must recheck gate"),
         block_on(decomposition_uplus(d.clone())).expect_err("uplus must recheck gate"),
@@ -196,7 +196,7 @@ fn scale_and_rank_integer_controls_gate_and_reject_inexact_binary64_values() {
         );
         let error = call_constructor(vec![
             tensor(&[2.0], 1, 1),
-            Value::String("RankTolerance".to_string()),
+            Value::String("RankTolerance".to_string().into()),
             Value::Int(IntValue::I64(1)),
         ])
         .expect_err("integer rank gate");
@@ -222,7 +222,7 @@ fn scale_and_rank_integer_controls_gate_and_reject_inexact_binary64_values() {
     }
     let rank_error = call_constructor(vec![
         tensor(&[2.0], 1, 1),
-        Value::String("RankTolerance".to_string()),
+        Value::String("RankTolerance".to_string().into()),
         Value::Int(IntValue::U64((1_u64 << 53) + 1)),
     ])
     .expect_err("inexact rank boundary");

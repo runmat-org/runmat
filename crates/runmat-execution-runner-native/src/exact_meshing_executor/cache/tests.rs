@@ -28,7 +28,7 @@ impl Cache {
             .map(|(name, length)| {
                 let digest = Digest::sha256(name);
                 runmat_execution::value::ValueRef {
-                    schema_version: 1,
+                    schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION,
                     id: access.value_id(digest),
                     logical_digest: digest,
                     encoded_length: *length,

@@ -2,16 +2,16 @@ use super::*;
 
 pub(crate) async fn evaluate_binary_bitwise(
     name: &'static str,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
     operator: BinaryBitwiseOperator,
     single_extension: &BuiltinExtensionDescriptor,
     gpu_undocumented_input_extension: &BuiltinExtensionDescriptor,
     gpu_assumed_type_extension: &BuiltinExtensionDescriptor,
 ) -> BuiltinResult<Value> {
-    let protected = borrowed_gpu_inputs(&args);
+    let protected = borrowed_gpu_inputs(args.view());
     enforce_public_binary_bitwise_compatibility(
         name,
-        &args,
+        args.view(),
         single_extension,
         gpu_undocumented_input_extension,
         gpu_assumed_type_extension,
@@ -22,7 +22,7 @@ pub(crate) async fn evaluate_binary_bitwise(
         };
         Some(handle.clone())
     });
-    let logical_output = args.len() >= 2 && args[..2].iter().all(is_logical_bitwise_value);
+    let logical_output = args.len() >= 2 && args.iter().take(2).all(is_logical_bitwise_value);
     let result = binary_bitwise_from_args(name, args, operator).await?;
     let result = if logical_output {
         bitwise_result_as_logical(name, result)?
@@ -34,7 +34,7 @@ pub(crate) async fn evaluate_binary_bitwise(
 
 fn enforce_public_binary_bitwise_compatibility(
     name: &str,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     single_extension: &BuiltinExtensionDescriptor,
     gpu_undocumented_input_extension: &BuiltinExtensionDescriptor,
     gpu_assumed_type_extension: &BuiltinExtensionDescriptor,

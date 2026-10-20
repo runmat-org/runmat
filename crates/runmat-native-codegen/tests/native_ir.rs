@@ -801,10 +801,7 @@ fn selected_entrypoint_preserves_the_complete_mir_entrypoint_inventory() {
     let manifest = manifest(analysis.revision.schema_version);
 
     let assembly = lower_with(&mir, &analysis, &manifest).unwrap();
-    assert_eq!(
-        assembly.entrypoints,
-        vec![FunctionId(0), FunctionId(1)]
-    );
+    assert_eq!(assembly.entrypoints, vec![FunctionId(0), FunctionId(1)]);
     assert_eq!(assembly.selected_entrypoint, FunctionId(0));
     assert_eq!(
         assembly.selected_portable_entrypoint,

@@ -69,16 +69,16 @@ async fn butter_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     n: Value,
     wn: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     let mut cooperation = SignalCooperation::new(runtime.as_ref(), BUILTIN_NAME);
-    evaluate_with_cooperation(n, wn, &rest, &mut cooperation).await
+    evaluate_with_cooperation(n, wn, rest.view(), &mut cooperation).await
 }
 
 async fn evaluate_with_cooperation(
     n: Value,
     wn: Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     cooperation: &mut SignalCooperation,
 ) -> crate::BuiltinResult<Value> {
     cooperation.completed(0).await?;
@@ -129,7 +129,11 @@ struct ButterArgs {
 }
 
 impl ButterArgs {
-    async fn parse(n: Value, wn: Value, rest: &[Value]) -> BuiltinResult<Self> {
+    async fn parse(
+        n: Value,
+        wn: Value,
+        rest: crate::call::FunctionArgumentView<'_>,
+    ) -> BuiltinResult<Self> {
         if rest.len() > 2 {
             return Err(butter_error(&BUTTER_ERROR_ARG_COUNT));
         }
@@ -219,7 +223,11 @@ fn is_single_value(value: &Value) -> bool {
                     == Some(runmat_accelerate_api::ProviderPrecision::F32))
 }
 
-fn ensure_input_extensions(n: &Value, wn: &Value, rest: &[Value]) -> BuiltinResult<()> {
+fn ensure_input_extensions(
+    n: &Value,
+    wn: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     for (value, integer, logical, single) in [
         (
             n,
@@ -390,8 +398,10 @@ fn parse_cutoff(value: Value) -> BuiltinResult<Vec<f64>> {
 fn parse_option_token(value: Value) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.into_string_unbounded()),
-        Value::CharArray(chars) => Ok(chars.data.into_char_iter().collect()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].as_str().to_owned()),
+        Value::CharArray(chars) => Ok(chars.data().iter().copied().collect()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(array.data()[0].as_str().to_owned())
+        }
         other => Err(butter_error_with_detail(
             &BUTTER_ERROR_INVALID_OPTION,
             format!("expected a string option, received {other:?}"),

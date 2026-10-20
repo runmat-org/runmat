@@ -184,7 +184,7 @@ impl AllFiniteBoundary {
             Value::SparseTensor(value) => sparse_all_finite(&value),
             Value::LogicalArray(_) | Value::CharArray(_) => true,
             Value::String(_) => false,
-            Value::StringArray(value) => value.data.is_empty(),
+            Value::StringArray(value) => value.data().is_empty(),
             _ => return Err(self.error(self.invalid, "unsupported input representation")),
         };
         Ok(Value::Bool(finite))

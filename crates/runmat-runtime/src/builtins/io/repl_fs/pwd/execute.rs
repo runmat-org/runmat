@@ -6,7 +6,7 @@ use super::super::working_directory;
 
 const BUILTIN_NAME: &str = "pwd";
 
-pub(super) fn run(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) fn run(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &runmat_builtins::PWD_DESCRIPTOR,
         &runmat_builtins::PWD_ERROR_TOO_MANY_OUTPUTS,

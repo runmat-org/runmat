@@ -1787,7 +1787,9 @@ mod linear_launch_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::wgpu::provider::{register_test_wgpu_provider, WgpuProviderOptions};
+    use crate::backend::wgpu::provider::{
+        register_retained_test_wgpu_provider, register_test_wgpu_provider, WgpuProviderOptions,
+    };
     use futures::executor::block_on;
     use runmat_accelerate_api::{HostNumericDataView, HostNumericTensorView};
 
@@ -1795,8 +1797,9 @@ mod tests {
     #[test]
     #[ignore = "requires a live WGPU adapter; run explicitly for triangular effect-phase qualification"]
     fn triangular_futures_are_lazy_and_post_buffer_failures_are_terminal() {
-        let provider = register_wgpu_provider(WgpuProviderOptions::default())
+        let session = register_retained_test_wgpu_provider(WgpuProviderOptions::default())
             .expect("live WGPU adapter required for triangular effect-phase qualification");
+        let provider = session.provider();
         let values_f32 = [1.0_f32, 2.0, 3.0, 4.0];
         let values_f64 = [1.0_f64, 2.0, 3.0, 4.0];
         let data = match provider.precision() {

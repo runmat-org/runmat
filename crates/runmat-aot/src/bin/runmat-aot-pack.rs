@@ -31,6 +31,9 @@ fn run() -> Result<(), String> {
         Some(value) if value == std::ffi::OsStr::new("--selected-tree") => {
             return run_selected_tree(inputs);
         }
+        Some(value) if value == std::ffi::OsStr::new("--host-probe-facts") => {
+            return run_host_probe_facts(inputs);
+        }
         _ => {}
     }
     let arguments = parse_arguments(std::env::args_os().skip(1))?;
@@ -85,6 +88,102 @@ fn run() -> Result<(), String> {
         let _ = std::fs::remove_file(&arguments.payload_out);
         return Err(error);
     }
+    Ok(())
+}
+
+#[derive(serde::Serialize)]
+struct MeasuredNativeProbeFacts {
+    target: runmat_execution::host::SelectedNativeTarget,
+    abi: runmat_execution::host::NativeAbiBinding,
+    probe_digest: runmat_execution::Digest,
+}
+
+#[derive(serde::Serialize)]
+struct InspectedNativeArchiveFacts {
+    archive_digest: runmat_execution::Digest,
+    native: MeasuredNativeProbeFacts,
+    accelerators: runmat_execution::host::NativeAcceleratorProfile,
+}
+
+#[derive(serde::Serialize)]
+struct HostProbeFacts {
+    schema_version: u16,
+    host: MeasuredNativeProbeFacts,
+    linked_runtime: runmat_execution::Digest,
+    linked_catalog: runmat_execution::Digest,
+    source_evaluation_service_abi: runmat_execution::Digest,
+    archive: Option<InspectedNativeArchiveFacts>,
+}
+
+/// Actual host-linked Runtime facts plus optional bounded target-archive
+/// inspection. Neither structural probe equality nor this tool's JSON is an
+/// archive execution, service grant, source-build or ISA qualification receipt.
+fn run_host_probe_facts(
+    mut inputs: impl Iterator<Item = std::ffi::OsString>,
+) -> Result<(), String> {
+    let archive = match inputs.next().as_deref() {
+        None => None,
+        Some(value) if value == std::ffi::OsStr::new("--archive") => Some(PathBuf::from(
+            inputs.next().ok_or("--archive requires a path")?,
+        )),
+        _ => return Err("--host-probe-facts accepts only optional --archive PATH".into()),
+    };
+    if inputs.next().is_some() {
+        return Err("unexpected trailing host-probe option".into());
+    }
+    let host_target = runmat_native_codegen::NativeTarget::current();
+    let (target, probe) = host_target
+        .native_parts()
+        .map_err(|error| error.to_string())?;
+    let measured = |target: &runmat_execution::host::SelectedNativeTarget,
+                    probe: &runmat_execution::host::NativeAbiProbe|
+     -> Result<MeasuredNativeProbeFacts, String> {
+        Ok(MeasuredNativeProbeFacts {
+            target: target.clone(),
+            abi: probe.binding().map_err(|error| error.to_string())?,
+            probe_digest: runmat_execution::Digest::sha256(probe.canonical_bytes()),
+        })
+    };
+    let archive = archive
+        .map(|path| {
+            let bytes = read_bounded(
+                &path,
+                runmat_execution_artifact::target_pack::MAX_COMPONENT_BYTES,
+            )?;
+            let probe = runmat_aot::archive::read_native_abi_probe(&bytes)
+                .map_err(|error| error.to_string())?;
+            let baseline = match probe.architecture {
+                runmat_execution::host::NativeArchitecture::Aarch64 => {
+                    runmat_execution::host::NativeCpuBaseline::ArmV8A
+                }
+                runmat_execution::host::NativeArchitecture::X86_64 => {
+                    runmat_execution::host::NativeCpuBaseline::X86_64V1
+                }
+            };
+            let target = runmat_native_codegen::NativeTarget::from_probe(probe, baseline)
+                .map_err(|error| error.to_string())?;
+            let (target, probe) = target.native_parts().map_err(|error| error.to_string())?;
+            Ok::<_, String>(InspectedNativeArchiveFacts {
+                archive_digest: runmat_execution::Digest::sha256(&bytes),
+                native: measured(target, probe)?,
+                accelerators: runmat_aot::archive::read_native_accelerator_profile(&bytes)
+                    .map_err(|error| error.to_string())?,
+            })
+        })
+        .transpose()?;
+    let facts = HostProbeFacts {
+        schema_version: 1,
+        host: measured(target, probe)?,
+        linked_runtime: runmat_runtime::native::linked_runtime_fingerprint(),
+        linked_catalog: runmat_runtime::native::linked_catalog_fingerprint(),
+        source_evaluation_service_abi: runmat_execution::host::native_source_evaluation_service_abi(
+        ),
+        archive,
+    };
+    println!(
+        "{}",
+        serde_json::to_string(&facts).map_err(|error| error.to_string())?
+    );
     Ok(())
 }
 

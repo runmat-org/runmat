@@ -7,14 +7,14 @@ use runmat_value::Value;
     binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::path_predicate::isfolder"
 )]
-async fn isfolder_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn isfolder_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &runmat_builtins::ISFOLDER_DESCRIPTOR,
         &runmat_builtins::ISFOLDER_ERROR_TOO_MANY_OUTPUTS,
         "isfolder",
     )?;
     super::execute::evaluate(
-        &args,
+        args.view(),
         "isfolder",
         &ISFOLDER_ERROR_ARITY,
         &ISFOLDER_ERROR_PATH,

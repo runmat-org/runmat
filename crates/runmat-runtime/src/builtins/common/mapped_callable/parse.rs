@@ -8,10 +8,12 @@ impl MappedCallable {
         match value {
             Value::String(text) => Self::parse_text(&text),
             Value::CharArray(value) if value.rows == 1 => {
-                Self::parse_text(&value.data.iter().collect::<String>())
+                Self::parse_text(&value.data().iter().collect::<String>())
             }
             Value::CharArray(_) => Err(CallableParseError::CharacterNameMustBeRow),
-            Value::StringArray(value) if value.data.len() == 1 => Self::parse_text(&value.data[0]),
+            Value::StringArray(value) if value.data().len() == 1 => {
+                Self::parse_text(&value.data()[0])
+            }
             Value::StringArray(_) => Err(CallableParseError::StringNameMustBeScalar),
             Value::FunctionHandle(name) => Self::parse_text(&name),
             Value::ExternalFunctionHandle(name) => {
@@ -20,21 +22,23 @@ impl MappedCallable {
             Value::BoundFunctionHandle(handle) => {
                 let data = handle.into_data();
                 Ok(Self::Closure(
-                    crate::call::descriptor::RetainedClosureValue::new(Closure::new(
-                        data.name,
-                        Some(runmat_value::BoundFunctionBinding {
-                            function: data.function,
-                            authority: data.authority,
-                        }),
-                        data.source_role,
-                        data.source_file,
-                        Vec::new(),
-                        None,
+                    crate::call::descriptor::RetainedClosureValue::new(Closure::from_data(
+                        runmat_value::ClosureData {
+                            function_name: data.name,
+                            binding: Some(runmat_value::BoundFunctionBinding {
+                                function: data.function,
+                                authority: data.authority,
+                            }),
+                            source_role: data.source_role,
+                            source_file: data.source_file,
+                            captures: runmat_value::OutputListStorage::empty(),
+                            lexical_environment: None,
+                        },
                     )),
                 ))
             }
             Value::Closure(closure) => Ok(Self::Closure(
-                crate::call::descriptor::RetainedClosureValue::new(Self::bind_closure(closure)),
+                crate::call::descriptor::RetainedClosureValue::new(Self::bind_closure(closure)?),
             )),
             Value::Num(_) | Value::Int(_) | Value::Bool(_) => Err(CallableParseError::ScalarValue),
             value => Err(CallableParseError::UnsupportedValue(value)),
@@ -78,19 +82,15 @@ impl MappedCallable {
             .unwrap_or(Self::DynamicName { name })
     }
 
-    fn bind_closure(closure: Closure) -> Closure {
+    fn bind_closure(closure: Closure) -> Result<Closure, CallableParseError> {
         if closure.binding.is_none() {
             if let Some(function) =
                 user_functions::resolve_semantic_function_by_name(&closure.function_name)
             {
-                return closure.bind_resolved(
-                    user_functions::bound_function_binding_for(function),
-                    user_functions::source_function_for(function)
-                        .map_or(runmat_types::FunctionSourceRole::Unknown, |info| info.role),
-                    user_functions::source_file_for(function),
-                );
+                return crate::call::closure_binding::bind_selected_closure(closure, function)
+                    .map_err(CallableParseError::Runtime);
             }
         }
-        closure
+        Ok(closure)
     }
 }

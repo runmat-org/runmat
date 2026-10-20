@@ -1,8 +1,23 @@
 use super::*;
 use futures::executor::block_on;
-use runmat_value::IntegerStorage;
+use runmat_value::{IntegerStorage, ObjectInstance};
 
 use crate::builtins::stats::ml::bayesian_test_provider as provider_fixture;
+
+async fn optimizable_variable_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    name: Value,
+    range: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    super::optimizable_variable_builtin(
+        runtime,
+        name,
+        range,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    )
+    .await
+}
 
 fn object(value: Value) -> ObjectInstance {
     let Value::Object(object) = value else {
@@ -20,31 +35,36 @@ fn typed_integer_range(storage: IntegerStorage) -> Value {
 #[test]
 fn builds_real_variable_with_defaults() {
     let out = block_on(optimizable_variable_builtin(
+        None,
         Value::String("depth".into()),
         Value::Tensor(Tensor::new(vec![1.0, 10.0], vec![1, 2]).unwrap()),
         vec![],
     ))
     .expect("optimizableVariable");
     let object = object(out);
-    assert!(object.class_name.is(CLASS_IDENTITY));
+    assert!(object.class_name().is(CLASS_IDENTITY));
     assert_eq!(
-        object.properties.get("Name"),
+        object.properties().get("Name"),
         Some(&Value::String("depth".into()))
     );
     assert_eq!(
-        object.properties.get("Type"),
+        object.properties().get("Type"),
         Some(&Value::String("real".into()))
     );
     assert_eq!(
-        object.properties.get("Transform"),
+        object.properties().get("Transform"),
         Some(&Value::String("none".into()))
     );
-    assert_eq!(object.properties.get("Optimize"), Some(&Value::Bool(true)));
+    assert_eq!(
+        object.properties().get("Optimize"),
+        Some(&Value::Bool(true))
+    );
 }
 
 #[test]
 fn last_effective_option_value_retains_previous_override_semantics() {
     let result = block_on(optimizable_variable_builtin(
+        None,
         Value::String("depth".into()),
         Value::Tensor(Tensor::new(vec![1.0, 10.0], vec![1, 2]).unwrap()),
         vec![
@@ -56,7 +76,7 @@ fn last_effective_option_value_retains_previous_override_semantics() {
     ))
     .expect("only the last effective Type is validated");
     assert_eq!(
-        object(result).properties.get("Type"),
+        object(result).properties().get("Type"),
         Some(&Value::String("real".into()))
     );
 }
@@ -91,6 +111,7 @@ fn numeric_resident_text_options_fail_before_range_download() {
     let resident = provider.allocation();
     for option in ["Type", "Transform"] {
         let error = block_on(optimizable_variable_builtin(
+            None,
             Value::String("depth".into()),
             Value::GpuTensor(resident.handle.clone()),
             vec![
@@ -118,6 +139,7 @@ fn overridden_numeric_resident_type_does_not_change_effective_option() {
     let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
     let resident = provider.allocation();
     let result = block_on(optimizable_variable_builtin(
+        None,
         Value::String("depth".into()),
         Value::Tensor(Tensor::new(vec![1.0, 10.0], vec![1, 2]).unwrap()),
         vec![
@@ -129,7 +151,7 @@ fn overridden_numeric_resident_type_does_not_change_effective_option() {
     ))
     .expect("last effective Type determines admission");
     assert_eq!(
-        object(result).properties.get("Type"),
+        object(result).properties().get("Type"),
         Some(&Value::String("real".into()))
     );
     assert_eq!(provider.downloads(), 0);
@@ -192,6 +214,7 @@ fn failed_range_download_keeps_nested_cause_and_borrowed_allocation() {
     let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
     let resident = provider.allocation();
     let error = block_on(optimizable_variable_builtin(
+        None,
         Value::String("depth".into()),
         Value::GpuTensor(resident.handle.clone()),
         vec![],
@@ -223,6 +246,7 @@ fn failed_range_download_keeps_nested_cause_and_borrowed_allocation() {
 #[test]
 fn builds_integer_log_variable_with_optimize_false() {
     let out = block_on(optimizable_variable_builtin(
+        None,
         Value::String("trees".into()),
         Value::Tensor(Tensor::new(vec![0.0, 1000.0], vec![1, 2]).unwrap()),
         vec![
@@ -237,14 +261,17 @@ fn builds_integer_log_variable_with_optimize_false() {
     .expect("optimizableVariable integer");
     let object = object(out);
     assert_eq!(
-        object.properties.get("Type"),
+        object.properties().get("Type"),
         Some(&Value::String("integer".into()))
     );
     assert_eq!(
-        object.properties.get("Transform"),
+        object.properties().get("Transform"),
         Some(&Value::String("log".into()))
     );
-    assert_eq!(object.properties.get("Optimize"), Some(&Value::Bool(false)));
+    assert_eq!(
+        object.properties().get("Optimize"),
+        Some(&Value::Bool(false))
+    );
 }
 
 #[test]
@@ -252,6 +279,7 @@ fn typed_integer_range_bounds_are_read_from_exact_storage() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let range = typed_integer_range(IntegerStorage::I16(vec![0, 1000]));
     let out = block_on(optimizable_variable_builtin(
+        None,
         Value::String("trees".into()),
         range,
         vec![
@@ -264,10 +292,10 @@ fn typed_integer_range_bounds_are_read_from_exact_storage() {
     .expect("optimizableVariable integer");
     let object = object(out);
     assert_eq!(
-        object.properties.get("Type"),
+        object.properties().get("Type"),
         Some(&Value::String("integer".into()))
     );
-    let Some(Value::Tensor(range)) = object.properties.get("Range") else {
+    let Some(Value::Tensor(range)) = object.properties().get("Range") else {
         panic!("expected tensor Range");
     };
     assert_eq!(
@@ -288,6 +316,7 @@ fn builds_categorical_variable_from_cellstr() {
         .unwrap(),
     );
     let out = block_on(optimizable_variable_builtin(
+        None,
         Value::String("kernel".into()),
         categories.clone(),
         vec![
@@ -298,15 +327,16 @@ fn builds_categorical_variable_from_cellstr() {
     .expect("optimizableVariable categorical");
     let object = object(out);
     assert_eq!(
-        object.properties.get("Type"),
+        object.properties().get("Type"),
         Some(&Value::String("categorical".into()))
     );
-    assert_eq!(object.properties.get("Range"), Some(&categories));
+    assert_eq!(object.properties().get("Range"), Some(&categories));
 }
 
 #[test]
 fn infers_categorical_type_from_text_range() {
     let out = block_on(optimizable_variable_builtin(
+        None,
         Value::String("method".into()),
         Value::StringArray(StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap()),
         vec![],
@@ -314,7 +344,7 @@ fn infers_categorical_type_from_text_range() {
     .expect("optimizableVariable categorical inferred");
     let object = object(out);
     assert_eq!(
-        object.properties.get("Type"),
+        object.properties().get("Type"),
         Some(&Value::String("categorical".into()))
     );
 }
@@ -322,6 +352,7 @@ fn infers_categorical_type_from_text_range() {
 #[test]
 fn accepts_explicit_categorical_scalar_string_range() {
     let out = block_on(optimizable_variable_builtin(
+        None,
         Value::String("method".into()),
         Value::String("rbf".into()),
         vec![
@@ -332,11 +363,11 @@ fn accepts_explicit_categorical_scalar_string_range() {
     .expect("optimizableVariable scalar categorical");
     let object = object(out);
     assert_eq!(
-        object.properties.get("Range"),
+        object.properties().get("Range"),
         Some(&Value::String("rbf".into()))
     );
     assert_eq!(
-        object.properties.get("Type"),
+        object.properties().get("Type"),
         Some(&Value::String("categorical".into()))
     );
 }
@@ -344,6 +375,7 @@ fn accepts_explicit_categorical_scalar_string_range() {
 #[test]
 fn rejects_invalid_ranges_and_options() {
     let err = block_on(optimizable_variable_builtin(
+        None,
         Value::String("bad".into()),
         Value::Tensor(Tensor::new(vec![2.0, 1.0], vec![1, 2]).unwrap()),
         vec![],
@@ -352,6 +384,7 @@ fn rejects_invalid_ranges_and_options() {
     assert!(err.to_string().contains("finite and increasing"));
 
     let err = block_on(optimizable_variable_builtin(
+        None,
         Value::String("bad".into()),
         Value::Tensor(Tensor::new(vec![1.5, 3.0], vec![1, 2]).unwrap()),
         vec![
@@ -363,6 +396,7 @@ fn rejects_invalid_ranges_and_options() {
     assert!(err.to_string().contains("whole numbers"));
 
     let err = block_on(optimizable_variable_builtin(
+        None,
         Value::String("bad".into()),
         Value::Tensor(Tensor::new(vec![0.0, 3.0], vec![1, 2]).unwrap()),
         vec![
@@ -374,6 +408,7 @@ fn rejects_invalid_ranges_and_options() {
     assert!(err.to_string().contains("positive real"));
 
     let err = block_on(optimizable_variable_builtin(
+        None,
         Value::String("bad".into()),
         Value::Tensor(Tensor::new(vec![-1.0, 3.0], vec![1, 2]).unwrap()),
         vec![
@@ -387,6 +422,7 @@ fn rejects_invalid_ranges_and_options() {
     assert!(err.to_string().contains("nonnegative integer"));
 
     let err = block_on(optimizable_variable_builtin(
+        None,
         Value::String("bad".into()),
         Value::Tensor(Tensor::new(vec![1.0, 3.0], vec![1, 2]).unwrap()),
         vec![Value::String("Type".into()), Value::String("int".into())],
@@ -395,6 +431,7 @@ fn rejects_invalid_ranges_and_options() {
     assert!(err.to_string().contains("unsupported Type"));
 
     let err = block_on(optimizable_variable_builtin(
+        None,
         Value::String("bad".into()),
         Value::StringArray(StringArray::new(vec!["a".into(), "a".into()], vec![1, 2]).unwrap()),
         vec![
@@ -412,6 +449,7 @@ fn wide_integer_bounds_require_exact_binary64_conversion() {
     let exact_lower = 1_u64 << 54;
     let exact_upper = exact_lower + 4;
     let accepted = block_on(optimizable_variable_builtin(
+        None,
         Value::String("wide".into()),
         typed_integer_range(IntegerStorage::U64(vec![exact_lower, exact_upper])),
         vec![
@@ -420,9 +458,10 @@ fn wide_integer_bounds_require_exact_binary64_conversion() {
         ],
     ))
     .expect("aligned wide bounds remain exact");
-    assert!(object(accepted).class_name.is(CLASS_IDENTITY));
+    assert!(object(accepted).class_name().is(CLASS_IDENTITY));
 
     let error = block_on(optimizable_variable_builtin(
+        None,
         Value::String("rounded".into()),
         typed_integer_range(IntegerStorage::U64(vec![
             (1_u64 << 53) + 1,
@@ -441,6 +480,7 @@ fn wide_integer_bounds_require_exact_binary64_conversion() {
 fn matlab_compatibility_rejects_typed_integer_range_at_admission() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
     let error = block_on(optimizable_variable_builtin(
+        None,
         Value::String("trees".into()),
         typed_integer_range(IntegerStorage::I16(vec![0, 1000])),
         vec![],

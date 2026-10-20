@@ -14,7 +14,10 @@ fn bitcmp_preserves_all_native_integer_scalar_classes() {
         (IntValue::U64(0b0101), IntValue::U64(u64::MAX - 5)),
     ];
     for (input, expected) in cases {
-        let actual = block_on(bitcmp_builtin(vec![Value::Int(input)])).expect("bitcmp");
+        let actual = block_on(bitcmp_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(input)]),
+        ))
+        .expect("bitcmp");
         assert_eq!(actual, Value::Int(expected));
     }
 }
@@ -23,9 +26,10 @@ fn bitcmp_preserves_all_native_integer_scalar_classes() {
 fn bitcmp_preserves_exact_integer_arrays_and_default_double_behavior() {
     let input =
         Tensor::new_integer(IntegerStorage::U64(vec![0, 1_u64 << 63]), vec![1, 2]).expect("input");
-    let Value::Tensor(output) =
-        block_on(bitcmp_builtin(vec![Value::Tensor(input)])).expect("bitcmp")
-    else {
+    let Value::Tensor(output) = block_on(bitcmp_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(input)]),
+    ))
+    .expect("bitcmp") else {
         panic!("expected tensor result");
     };
     assert_eq!(
@@ -34,7 +38,10 @@ fn bitcmp_preserves_exact_integer_arrays_and_default_double_behavior() {
     );
 
     assert_eq!(
-        block_on(bitcmp_builtin(vec![Value::Num(0.0)])).expect("double bitcmp"),
+        block_on(bitcmp_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(0.0)])
+        ))
+        .expect("double bitcmp"),
         Value::Num(u64::MAX as f64)
     );
 }
@@ -43,10 +50,12 @@ fn bitcmp_preserves_exact_integer_arrays_and_default_double_behavior() {
 fn bitcmp_sparse_double_materializes_when_complementing_implicit_zeros() {
     let sparse = runmat_value::SparseTensor::new(2, 2, vec![0, 1, 2], vec![0, 1], vec![5.0, 1.0])
         .expect("sparse");
-    let Value::Tensor(output) = block_on(bitcmp_builtin(vec![
-        Value::SparseTensor(sparse),
-        Value::String("uint8".to_string()),
-    ]))
+    let Value::Tensor(output) = block_on(bitcmp_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::SparseTensor(sparse),
+            Value::String("uint8".to_string().into()),
+        ]),
+    ))
     .expect("sparse bitcmp") else {
         panic!("bitcmp must materialize a complement of sparse implicit zeros");
     };

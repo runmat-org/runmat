@@ -969,7 +969,7 @@ fn issorted_floating_complex<T: SetFloat, S: ComplexSequence<T> + ?Sized>(
 }
 
 fn issorted_string(array: &StringArray, args: &IssortedArgs) -> crate::BuiltinResult<bool> {
-    if array.data.is_empty() {
+    if array.data().is_empty() {
         return Ok(true);
     }
     if !matches!(args.comparison, ComparisonMethod::Auto) {
@@ -1074,7 +1074,7 @@ fn check_string_dimension(array: &StringArray, dim: usize, args: &IssortedArgs) 
             slice.clear();
             for k in 0..len_dim {
                 let idx = before_idx + k * before + after_idx * before * len_dim;
-                slice.push(array.data[idx].as_str());
+                slice.push(array.data()[idx].as_str());
             }
             if !check_string_slice(&slice, args.direction, args.missing) {
                 return false;
@@ -1230,7 +1230,7 @@ fn string_rows_in_order(
     order: OrderSpec,
     missing: MissingPlacement,
 ) -> bool {
-    if order.strict && array.data.iter().any(|s| is_string_missing(s)) {
+    if order.strict && array.data().iter().any(|s| is_string_missing(s)) {
         return false;
     }
     let missing_resolved = missing.resolve(order.direction);
@@ -1315,8 +1315,8 @@ fn compare_string_row_pair(
         let idx_a = a + col * rows;
         let idx_b = b + col * rows;
         let ord = compare_string_scalars(
-            array.data[idx_a].as_str(),
-            array.data[idx_b].as_str(),
+            array.data()[idx_a].as_str(),
+            array.data()[idx_b].as_str(),
             direction,
             missing,
         );
@@ -1680,7 +1680,7 @@ fn char_array_to_tensor(array: &CharArray) -> crate::BuiltinResult<Tensor> {
     let mut data = vec![0.0f64; rows * cols];
     for r in 0..rows {
         for c in 0..cols {
-            let ch = array.data[r * cols + c];
+            let ch = array.data()[r * cols + c];
             let idx = r + c * rows;
             data[idx] = ch as u32 as f64;
         }

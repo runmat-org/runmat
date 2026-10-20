@@ -34,10 +34,10 @@ fn public_gzip_keeps_captured_owner_when_ambient_provider_is_replaced() {
 
     let value = futures::executor::block_on(super::super::super::gzip_builtin(
         None,
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::String("source.bin".into()),
             Value::String("out".into()),
-        ],
+        ]),
     ))
     .expect("public gzip through captured owner");
 
@@ -45,8 +45,8 @@ fn public_gzip_keeps_captured_owner_when_ambient_provider_is_replaced() {
         panic!("gzip output must be a cell")
     };
     assert!(matches!(
-        outputs.data.as_slice(),
-        [Value::CharArray(path)] if path.data.iter().collect::<String>() == "out/source.bin.gz"
+        outputs.data(),
+        [Value::CharArray(path)] if path.data().iter().collect::<String>() == "out/source.bin.gz"
     ));
     assert!(selected
         .memory
@@ -90,10 +90,10 @@ fn public_url_gunzip_keeps_filesystem_owner_captured_before_http() {
 
     let value = futures::executor::block_on(super::super::super::gunzip_builtin(
         Some(runtime),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::String("https://example.invalid/archive.bin.gz".into()),
             Value::String("out".into()),
-        ],
+        ]),
     ))
     .expect("public URL gunzip");
 
@@ -101,8 +101,8 @@ fn public_url_gunzip_keeps_filesystem_owner_captured_before_http() {
         panic!("gunzip output must be a cell")
     };
     assert!(matches!(
-        outputs.data.as_slice(),
-        [Value::CharArray(path)] if path.data.iter().collect::<String>() == "out/archive.bin"
+        outputs.data(),
+        [Value::CharArray(path)] if path.data().iter().collect::<String>() == "out/archive.bin"
     ));
     assert_eq!(sends.load(Ordering::SeqCst), 1);
     assert_eq!(
@@ -139,10 +139,10 @@ fn read_revocation_stops_codec_and_output_effects_with_typed_source() {
 
     let error = futures::executor::block_on(super::super::super::gzip_builtin(
         None,
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::String("source.bin".into()),
             Value::String("out".into()),
-        ],
+        ]),
     ))
     .expect_err("revoked owner");
 
@@ -172,10 +172,10 @@ fn provider_error_remains_primary_when_the_same_failed_read_revokes_its_lease() 
 
     let error = futures::executor::block_on(super::super::super::gzip_builtin(
         None,
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::String("source.bin".into()),
             Value::String("out".into()),
-        ],
+        ]),
     ))
     .expect_err("selected provider error");
 
@@ -203,10 +203,10 @@ fn wildcard_enumeration_stops_between_provider_awaits_when_authority_is_revoked(
 
     let error = futures::executor::block_on(super::super::super::gzip_builtin(
         None,
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::String("folder/*.bin".into()),
             Value::String("out".into()),
-        ],
+        ]),
     ))
     .expect_err("revoked enumeration owner");
 
@@ -262,10 +262,10 @@ fn revoked_metadata_errors_remain_primary_and_never_start_a_fallback_operation()
 
         let error = futures::executor::block_on(super::super::super::gzip_builtin(
             None,
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::String(input.into()),
                 Value::String("/selected/out".into()),
-            ],
+            ]),
         ))
         .expect_err(label);
 

@@ -15,7 +15,7 @@ pub fn value_is_text(value: &Value) -> bool {
     match value {
         Value::String(_) | Value::StringArray(_) => true,
         Value::CharArray(chars) => is_character_row(chars),
-        Value::Cell(cell) => cell.data.iter().all(value_is_text),
+        Value::Cell(cell) => cell.data().iter().all(value_is_text),
         _ => false,
     }
 }
@@ -24,7 +24,7 @@ pub fn value_is_text_scalar(value: &Value) -> bool {
     match value {
         Value::String(_) => true,
         Value::StringArray(strings) => {
-            strings.data.len() == 1 && strings.rows == 1 && strings.cols == 1
+            strings.data().len() == 1 && strings.rows == 1 && strings.cols == 1
         }
         Value::CharArray(chars) => is_character_row(chars),
         _ => false,
@@ -40,7 +40,7 @@ pub fn value_text_scalar_string(value: &Value) -> Option<String> {
     }
     match value {
         Value::String(text) => Some(text.as_str().to_owned()),
-        Value::StringArray(strings) => strings.data.first().map(|text| text.as_str().to_owned()),
+        Value::StringArray(strings) => strings.data().first().map(|text| text.as_str().to_owned()),
         Value::CharArray(chars) => chars.row_string(),
         _ => None,
     }
@@ -52,9 +52,9 @@ pub fn value_is_nonzero_length_text(value: &Value) -> bool {
     }
     match value {
         Value::String(s) => !s.is_empty(),
-        Value::StringArray(s) => s.data.iter().all(|value| !value.is_empty()),
+        Value::StringArray(s) => s.data().iter().all(|value| !value.is_empty()),
         Value::CharArray(c) => c.rows == 1 && c.cols > 0,
-        Value::Cell(c) => c.data.iter().all(value_is_nonzero_length_text),
+        Value::Cell(c) => c.data().iter().all(value_is_nonzero_length_text),
         _ => false,
     }
 }
@@ -63,14 +63,14 @@ pub(super) fn value_texts(value: &Value) -> Result<Vec<Cow<'_, str>>, RuntimeErr
     match value {
         Value::String(s) => Ok(vec![Cow::Borrowed(s.as_str())]),
         Value::StringArray(s) => Ok(s
-            .data
+            .data()
             .iter()
             .map(|text| Cow::Borrowed(text.as_str()))
             .collect()),
         Value::CharArray(c) if is_character_row(c) => Ok(vec![Cow::Owned(chars_to_string(c))]),
         Value::Cell(c) => {
-            let mut out = Vec::with_capacity(c.data.len());
-            for entry in &c.data {
+            let mut out = Vec::with_capacity(c.data().len());
+            for entry in c.data() {
                 out.extend(value_texts(entry)?);
             }
             Ok(out)
@@ -83,7 +83,7 @@ pub(super) fn value_texts(value: &Value) -> Result<Vec<Cow<'_, str>>, RuntimeErr
 }
 
 pub(super) fn chars_to_string(chars: &CharArray) -> String {
-    chars.data.iter().collect()
+    chars.data().iter().collect()
 }
 
 pub fn isvarname_value(value: &Value) -> bool {
@@ -99,7 +99,7 @@ pub fn namedargs2cell_value(value: Value) -> BuiltinResult<Value> {
         );
     };
     let mut data = Vec::with_capacity(struct_value.fields.len().saturating_mul(2));
-    for (field, value) in struct_value.fields {
+    for (field, value) in struct_value.into_fields_unbounded() {
         data.push(Value::string(field));
         data.push(value);
     }

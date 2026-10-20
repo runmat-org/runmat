@@ -358,9 +358,9 @@ fn ensure_figure_integer_property_extensions(args: &[Value]) -> crate::BuiltinRe
 fn figure_property_name(value: &Value) -> Option<String> {
     let text = match value {
         Value::String(text) => text.as_str().to_owned(),
-        Value::CharArray(chars) if chars.rows == 1 => chars.data.iter().collect(),
-        Value::StringArray(strings) if strings.data.len() == 1 => {
-            strings.data[0].as_str().to_owned()
+        Value::CharArray(chars) if chars.rows == 1 => chars.data().iter().collect(),
+        Value::StringArray(strings) if strings.data().len() == 1 => {
+            strings.data()[0].as_str().to_owned()
         }
         _ => return None,
     };
@@ -450,7 +450,7 @@ fn is_next_selector(value: &Value) -> bool {
     match value {
         Value::String(text) => text.trim().eq_ignore_ascii_case("next"),
         Value::CharArray(chars) => chars
-            .data
+            .data()
             .iter()
             .collect::<String>()
             .trim()

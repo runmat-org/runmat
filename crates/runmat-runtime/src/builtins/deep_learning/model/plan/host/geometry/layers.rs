@@ -36,7 +36,7 @@ pub(super) fn admit(
             }
             let expected = numeric_vector(
                 layer
-                    .properties
+                    .properties()
                     .get(P::InputSize.canonical_name())
                     .ok_or_else(|| fail(function, "input layer is missing InputSize"))?,
                 function,

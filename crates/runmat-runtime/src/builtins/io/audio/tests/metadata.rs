@@ -73,10 +73,13 @@ fn audioinfo_reads_wav_metadata() {
     ))
     .expect("audioinfo");
 
-    assert_eq!(field(&info, "Format"), &Value::String("WAV".to_string()));
+    assert_eq!(
+        field(&info, "Format"),
+        &Value::String("WAV".to_string().into())
+    );
     assert_eq!(
         field(&info, "CompressionMethod"),
-        &Value::String("PCM".to_string())
+        &Value::String("PCM".to_string().into())
     );
     assert_eq!(field(&info, "NumChannels"), &Value::Num(2.0));
     assert_eq!(field(&info, "SampleRate"), &Value::Num(44_100.0));
@@ -141,7 +144,10 @@ fn audioinfo_reads_flac_streaminfo() {
     ))
     .expect("audioinfo");
 
-    assert_eq!(field(&info, "Format"), &Value::String("FLAC".to_string()));
+    assert_eq!(
+        field(&info, "Format"),
+        &Value::String("FLAC".to_string().into())
+    );
     assert_eq!(field(&info, "NumChannels"), &Value::Num(2.0));
     assert_eq!(field(&info, "SampleRate"), &Value::Num(48_000.0));
     assert_eq!(field(&info, "TotalSamples"), &Value::Num(96_000.0));

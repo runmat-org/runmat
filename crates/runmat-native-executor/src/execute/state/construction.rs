@@ -40,10 +40,7 @@ impl HostState {
             runmat_runtime::context::RuntimeInvocationArity::Script
         } else {
             runmat_runtime::context::RuntimeInvocationArity::function(
-                match &inputs {
-                    NativeFunctionInputs::Legacy(arguments) => arguments.len(),
-                    NativeFunctionInputs::Prepared(prepared) => prepared.nargin,
-                },
+                inputs.input_count(),
                 requested_outputs,
             )
         };
@@ -83,8 +80,8 @@ impl HostState {
         // Compatibility entry owns a second Value forest for the direct ABI.
         // Selected retained entry arrives with one already validated, move-only
         // prepared input set and retains its original roots outside this frame.
-        let (arguments, prepared, _construction_roots) = match inputs {
-            NativeFunctionInputs::Legacy(arguments) => {
+        let (arguments, prepared, _construction_roots) = match inputs.try_into_prepared() {
+            Err(arguments) => {
                 let construction_values = arguments
                     .iter()
                     .cloned()
@@ -107,7 +104,7 @@ impl HostState {
                 )?;
                 (Some(arguments), prepared, Some(roots))
             }
-            NativeFunctionInputs::Prepared(prepared) => (None, prepared, None),
+            Ok(prepared) => (None, prepared, None),
         };
         let supplied_inputs = prepared.nargin;
         let missing_input_locals = function
@@ -242,7 +239,12 @@ impl HostState {
             })?;
             *slot = arena.insert(receiver.clone());
         }
-        for (local, value) in function.abi.fixed_inputs.iter().zip(prepared.fixed) {
+        for (local, value) in function
+            .abi
+            .fixed_inputs
+            .iter()
+            .zip(prepared.fixed.iter().cloned())
+        {
             let slot = locals.get_mut(local.0 as usize).ok_or_else(|| {
                 NativeExecutorError::Host("function ABI input local is out of bounds".into())
             })?;

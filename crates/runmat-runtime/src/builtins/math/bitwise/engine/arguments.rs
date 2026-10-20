@@ -2,7 +2,7 @@ use super::*;
 
 pub(super) async fn binary_bitwise_from_args(
     name: &'static str,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
     operator: BinaryBitwiseOperator,
 ) -> BuiltinResult<Value> {
     if !(2..=3).contains(&args.len()) {
@@ -32,7 +32,7 @@ pub(super) fn apply_binary_operator(operator: BinaryBitwiseOperator, left: u64, 
 
 pub(super) fn unary_args(
     name: &'static str,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<(Value, Option<IntegerClass>)> {
     if !(1..=2).contains(&args.len()) {
         return Err(error_with_detail(
@@ -52,7 +52,7 @@ pub(super) fn unary_args(
 
 pub(super) fn value_bit_args(
     name: &'static str,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<(Value, Value, Option<IntegerClass>)> {
     if !(2..=3).contains(&args.len()) {
         return Err(error_with_detail(
@@ -72,7 +72,7 @@ pub(super) fn value_bit_args(
 }
 
 pub(super) fn bitset_args(
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<(Value, Value, Option<Value>, Option<IntegerClass>)> {
     if !(2..=4).contains(&args.len()) {
         return Err(error_with_detail(

@@ -76,20 +76,12 @@ mod tests {
                     .expect("upload unrelated property");
             let mut model =
                 ObjectInstance::new(crate::builtins::control::tf_model::TF_CLASS.to_string());
-            model.properties.insert("Numerator".into(), Value::Num(2.0));
-            model
-                .properties
-                .insert("Denominator".into(), Value::Num(1.0));
-            model.properties.insert("Ts".into(), Value::Num(0.0));
-            model
-                .properties
-                .insert("InputDelay".into(), Value::Num(0.0));
-            model
-                .properties
-                .insert("OutputDelay".into(), Value::Num(0.0));
-            model
-                .properties
-                .insert("Unrelated".into(), Value::GpuTensor(resident));
+            model.replace_property_unbounded("Numerator".into(), Value::Num(2.0));
+            model.replace_property_unbounded("Denominator".into(), Value::Num(1.0));
+            model.replace_property_unbounded("Ts".into(), Value::Num(0.0));
+            model.replace_property_unbounded("InputDelay".into(), Value::Num(0.0));
+            model.replace_property_unbounded("OutputDelay".into(), Value::Num(0.0));
+            model.replace_property_unbounded("Unrelated".into(), Value::GpuTensor(resident));
             provider.reset_telemetry();
             let Value::Tensor(zeros) =
                 block_on(zero_builtin(Value::Object(model))).expect("static gain")

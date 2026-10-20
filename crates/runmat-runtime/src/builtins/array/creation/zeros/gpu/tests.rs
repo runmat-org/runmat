@@ -73,19 +73,23 @@ fn default_gpu_zeros_uses_double_when_preferred_precision_is_single() {
     // SAFETY: the leaked fixture has a unique immutable device id and outlives its handles.
     unsafe { runmat_accelerate_api::register_device_provider(provider) };
     let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
-    assert!(block_on(super::super::zeros_builtin(vec![
-        Value::Num(2.0),
-        Value::from("single"),
-        Value::from("double"),
-        Value::from("gpuArray"),
-    ]))
+    assert!(block_on(super::super::zeros_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(2.0),
+            Value::from("single"),
+            Value::from("double"),
+            Value::from("gpuArray"),
+        ])
+    ))
     .is_err());
     assert_eq!(fixture.uploads.load(Ordering::SeqCst), 0);
-    let result = block_on(super::super::zeros_builtin(vec![
-        Value::Num(2.0),
-        Value::Num(3.0),
-        Value::from("gpuArray"),
-    ]))
+    let result = block_on(super::super::zeros_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(2.0),
+            Value::Num(3.0),
+            Value::from("gpuArray"),
+        ]),
+    ))
     .unwrap();
     let Value::GpuTensor(handle) = result else {
         panic!("expected explicit resident zeros");

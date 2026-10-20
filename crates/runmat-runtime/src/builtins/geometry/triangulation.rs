@@ -10,9 +10,7 @@ use runmat_macros::runtime_builtin;
 use runmat_value::{IntegerStorage, NumericScalar, ObjectInstance, Tensor, Value};
 
 use crate::builtins::common::tensor as tensor_utils;
-use crate::{
-    build_runtime_error, current_requested_outputs, gather_if_needed_async, BuiltinResult,
-};
+use crate::{build_runtime_error, current_requested_outputs, BuiltinResult};
 
 mod contract;
 mod entrypoints;

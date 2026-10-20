@@ -16,11 +16,11 @@ fn known_later_invalid_option_precedes_deferred_control_transfer() {
     let error = block_on(onehotencode_builtin(
         tensor(vec![1.0, 2.0], vec![2, 1]),
         Value::Num(2.0),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             deferred_output_type,
             Value::from("NotAnEncodingOption"),
             Value::from("double"),
-        ],
+        ]),
     ))
     .expect_err("known invalid option must precede earlier deferred control gather");
     assert!(error.message.contains("unsupported option"), "{error}");
@@ -46,7 +46,10 @@ fn onehotencode_host_invalid_controls_precede_resident_input_access() {
     let error = block_on(onehotencode_builtin(
         resident,
         Value::Num(2.0),
-        vec![Value::from("UnsupportedOption"), Value::from("double")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("UnsupportedOption"),
+            Value::from("double"),
+        ]),
     ))
     .expect_err("invalid host option must precede input provider access");
     assert_eq!(
@@ -63,11 +66,11 @@ fn onehotencode_uses_feature_dimension_and_class_names() {
             StringArray::new(vec!["b".into(), "a".into(), "b".into()], vec![3, 1]).unwrap(),
         ),
         Value::Num(2.0),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("logical"),
             Value::from("ClassNames"),
             Value::StringArray(StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap()),
-        ],
+        ]),
     ))
     .unwrap() else {
         panic!("logical");
@@ -83,11 +86,11 @@ fn onehotencode_accepts_typename_before_name_value_options() {
             StringArray::new(vec!["b".into(), "a".into(), "b".into()], vec![3, 1]).unwrap(),
         ),
         Value::Num(2.0),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("single"),
             Value::from("ClassNames"),
             Value::StringArray(StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap()),
-        ],
+        ]),
     ))
     .unwrap() else {
         panic!("tensor");
@@ -101,7 +104,7 @@ fn onehotencode_requires_classnames_for_noncategorical_and_marks_excluded_labels
     let err = block_on(onehotencode_builtin(
         tensor(vec![1.0, 2.0], vec![2, 1]),
         Value::Num(2.0),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap_err();
     assert!(err.message.contains("ClassNames is required"));
@@ -109,10 +112,10 @@ fn onehotencode_requires_classnames_for_noncategorical_and_marks_excluded_labels
     let Value::Tensor(out) = block_on(onehotencode_builtin(
         tensor(vec![1.0, f64::NAN, 3.0], vec![3, 1]),
         Value::Num(2.0),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("ClassNames"),
             tensor(vec![1.0, 2.0], vec![1, 2]),
-        ],
+        ]),
     ))
     .unwrap() else {
         panic!("tensor");
@@ -126,11 +129,11 @@ fn onehotencode_requires_classnames_for_noncategorical_and_marks_excluded_labels
     let err = block_on(onehotencode_builtin(
         tensor(vec![1.0, 3.0], vec![2, 1]),
         Value::Num(2.0),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("logical"),
             Value::from("ClassNames"),
             tensor(vec![1.0, 2.0], vec![1, 2]),
-        ],
+        ]),
     ))
     .unwrap_err();
     assert!(err.message.contains("logical output cannot represent"));
@@ -141,10 +144,10 @@ fn onehotencode_reads_typed_integer_labels_and_classes_exactly() {
     let Value::Tensor(out) = block_on(onehotencode_builtin(
         int_tensor(IntegerStorage::U16(vec![1, 2, 1]), vec![3, 1]),
         Value::Num(2.0),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("ClassNames"),
             int_tensor(IntegerStorage::I16(vec![1, 2]), vec![1, 2]),
-        ],
+        ]),
     ))
     .unwrap() else {
         panic!("tensor");
@@ -160,11 +163,11 @@ fn onehotencode_distinguishes_adjacent_wide_integer_labels() {
     let Value::Tensor(out) = block_on(onehotencode_builtin(
         int_tensor(IntegerStorage::U64(vec![upper, lower, upper]), vec![3, 1]),
         Value::Int(IntValue::U8(2)),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("uint8"),
             Value::from("ClassNames"),
             int_tensor(IntegerStorage::U64(vec![lower, upper]), vec![1, 2]),
-        ],
+        ]),
     ))
     .expect("wide labels") else {
         panic!("typed one-hot tensor")
@@ -197,11 +200,11 @@ fn onehotencode_constructs_every_requested_native_numeric_class() {
         let Value::Tensor(out) = block_on(onehotencode_builtin(
             labels.clone(),
             Value::Num(2.0),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::from(typename),
                 Value::from("ClassNames"),
                 classes.clone(),
-            ],
+            ]),
         ))
         .expect("numeric typename") else {
             panic!("numeric tensor")
@@ -216,11 +219,11 @@ fn onehotencode_integer_output_rejects_missing_or_excluded_labels() {
     let error = block_on(onehotencode_builtin(
         int_tensor(IntegerStorage::I64(vec![1, 3]), vec![2, 1]),
         Value::Num(2.0),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("uint64"),
             Value::from("ClassNames"),
             int_tensor(IntegerStorage::I64(vec![1, 2]), vec![1, 2]),
-        ],
+        ]),
     ))
     .expect_err("integer output cannot hold NaN vectors");
     assert!(error
@@ -233,10 +236,10 @@ fn onehotencode_rejects_pathological_feature_dimension_before_resizing_shape() {
     let err = block_on(onehotencode_builtin(
         tensor(vec![1.0], vec![1, 1]),
         Value::Num(1_000_000_000.0),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("ClassNames"),
             tensor(vec![1.0, 2.0], vec![1, 2]),
-        ],
+        ]),
     ))
     .unwrap_err();
     assert!(err.message.contains("featureDim is too large"));

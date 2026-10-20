@@ -138,5 +138,5 @@ pub(super) async fn dateshift_builtin(
         };
         out.push(datenum_from_naive(shifted));
     }
-    datetime_object_from_serials(out, output_shape, format)
+    datetime_object_from_serials(None, out, output_shape, format)
 }

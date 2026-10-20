@@ -63,7 +63,7 @@ async fn fused_square_mean_all_matches_cpu() {
             origin: ValueOrigin::Constant,
             ty: Type::String,
             shape: ShapeInfo::Scalar,
-            constant: Some(Value::String("all".to_string())),
+            constant: Some(Value::String("all".into())),
         },
         ValueInfo {
             id: v_mean,
@@ -136,7 +136,7 @@ async fn fused_square_mean_all_matches_cpu() {
         constants: HashMap::new(),
         const_values: {
             let mut cv = HashMap::new();
-            cv.insert(v_all, Value::String("all".to_string()));
+            cv.insert(v_all, Value::String("all".into()));
             cv
         },
         materialized_stores: Vec::new(),

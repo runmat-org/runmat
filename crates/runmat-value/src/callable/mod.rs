@@ -12,7 +12,7 @@ pub use binding::{
     SelectedReceiverDeclarationSeal, SelectedStaticSiteBinding, StaticSiteDefinitionLease,
 };
 pub use bound_handle::{BoundFunctionHandle, BoundFunctionHandleData};
-pub use closure::{Closure, ClosureData};
+pub use closure::{Closure, ClosureData, ClosureHeaderError};
 pub(crate) use instance::CallableInstanceKind;
 pub use instance::{CallableInstanceId, CallableInstanceKey};
 pub use lexical_environment::LexicalEnvironment;

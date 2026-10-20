@@ -175,7 +175,7 @@ pub(crate) fn transform_string_array_case(
     let Some(runtime) = runtime else {
         return ordinary();
     };
-    let mut physical = ExactArrayStorage::<Utf8Text>::requested_bytes(input.data.len())
+    let mut physical = ExactArrayStorage::<Utf8Text>::requested_bytes(input.data().len())
         .map_err(|cause| admission_error(runtime, HostAllocationError::Numeric(cause)))?;
     let reuse_shape = input.shape.is_admitted();
     if !reuse_shape {
@@ -187,7 +187,7 @@ pub(crate) fn transform_string_array_case(
             )
             .ok_or_else(|| admission_error(runtime, HostAllocationError::Overflow))?;
     }
-    let mut claims = usize::from(!input.data.is_empty()) + usize::from(!reuse_shape);
+    let mut claims = usize::from(!input.data().is_empty()) + usize::from(!reuse_shape);
     let mut sigma_scratch_len = 0usize;
     for text in input.data() {
         if is_missing_string(text.as_str()) && text.has_retained_claim() {
@@ -248,8 +248,8 @@ pub(crate) fn transform_string_array_case(
     };
     let data = receipt
         .with_output_construction(runtime, |permit| {
-            ExactArrayStorage::try_initialize(input.data.len(), permit, |index| {
-                let text = &input.data[index];
+            ExactArrayStorage::try_initialize(input.data().len(), permit, |index| {
+                let text = &input.data()[index];
                 if is_missing_string(text.as_str()) && text.has_retained_claim() {
                     return Ok(text.clone());
                 }

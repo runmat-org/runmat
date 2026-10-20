@@ -140,11 +140,11 @@ impl<'a> TextCopy<'a> {
             }
             TextSource::CharacterRow { array, row } => {
                 let character = if array.rows <= 1 {
-                    array.data.get(self.cursor).copied()
+                    array.data().get(self.cursor).copied()
                 } else {
                     let offset = row.checked_mul(array.cols)?.checked_add(self.cursor)?;
                     (self.cursor < array.cols)
-                        .then(|| array.data.get(offset).copied())
+                        .then(|| array.data().get(offset).copied())
                         .flatten()
                 }?;
                 self.cursor += 1;

@@ -7,9 +7,13 @@ async fn lab2rgb_builtin(
     lab: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    super::lab2rgb_builtin(runtime, lab, rest)
-        .await
-        .map(|owned| owned.with_owned(|value| value))
+    super::lab2rgb_builtin(
+        runtime,
+        lab,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    )
+    .await
+    .map(|owned| owned.with_owned(|value| value))
 }
 use crate::builtins::common::{gpu_helpers, test_support};
 use futures::executor::block_on;

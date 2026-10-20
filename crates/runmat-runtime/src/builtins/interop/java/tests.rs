@@ -1,5 +1,9 @@
 use super::*;
 
+fn arguments(values: Vec<Value>) -> crate::call::BuiltinArguments {
+    crate::call::BuiltinArguments::from_borrowed(&values, None).expect("test Java arguments")
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 mod native {
     use super::*;
@@ -54,7 +58,7 @@ mod native {
         let (runtime, recorder) = context();
         let constructed = futures::executor::block_on(java_object_builtin(
             Some(runtime.clone()),
-            vec![Value::String("java.lang.StringBuilder".into())],
+            arguments(vec![Value::String("java.lang.StringBuilder".into())]),
         ));
         assert_eq!(
             constructed.unwrap().value(),
@@ -62,11 +66,11 @@ mod native {
         );
         let invoked = futures::executor::block_on(java_method_builtin(
             Some(runtime),
-            vec![
+            arguments(vec![
                 Value::String("max".into()),
                 Value::String("java.lang.Math".into()),
                 Value::Int(runmat_value::IntValue::I32(4)),
-            ],
+            ]),
         ));
         assert_eq!(invoked.unwrap().value(), &Value::String("returned".into()));
         let calls = recorder.calls.borrow();
@@ -90,14 +94,14 @@ mod native {
         let (runtime, recorder) = context();
         let invalid = futures::executor::block_on(java_method_builtin(
             Some(runtime),
-            vec![Value::String("max".into())],
+            arguments(vec![Value::String("max".into())]),
         ))
         .unwrap_err();
         assert_eq!(invalid.identifier(), Some("RunMat:Foreign:InvalidCall"));
         assert!(recorder.calls.borrow().is_empty());
         let missing = futures::executor::block_on(java_object_builtin(
             None,
-            vec![Value::String("java.lang.StringBuilder".into())],
+            arguments(vec![Value::String("java.lang.StringBuilder".into())]),
         ))
         .unwrap_err();
         assert_eq!(missing.identifier(), Some("RunMat:Foreign:HostUnavailable"));
@@ -109,19 +113,21 @@ mod native {
         let path = Value::String("lib/example.jar".into());
         let added = futures::executor::block_on(java_add_path_builtin(
             Some(runtime.clone()),
-            vec![path.clone()],
+            arguments(vec![path.clone()]),
         ))
         .unwrap();
         assert_eq!(added.value(), &Value::output_list(Vec::new()));
         let removed = futures::executor::block_on(java_remove_path_builtin(
             Some(runtime.clone()),
-            vec![path.clone()],
+            arguments(vec![path.clone()]),
         ))
         .unwrap();
         assert_eq!(removed.value(), &Value::output_list(Vec::new()));
-        let replaced =
-            futures::executor::block_on(java_class_path_builtin(Some(runtime), vec![path]))
-                .unwrap();
+        let replaced = futures::executor::block_on(java_class_path_builtin(
+            Some(runtime),
+            arguments(vec![path]),
+        ))
+        .unwrap();
         assert_eq!(replaced.value(), &Value::output_list(Vec::new()));
         let calls = recorder.calls.borrow();
         assert_eq!(calls.len(), 3);
@@ -137,14 +143,14 @@ mod native {
         for value in [Value::Num(42.0), Value::Bool(true)] {
             let error = futures::executor::block_on(java_add_path_builtin(
                 Some(runtime.clone()),
-                vec![Value::String("valid.jar".into()), value.clone()],
+                arguments(vec![Value::String("valid.jar".into()), value.clone()]),
             ))
             .unwrap_err();
             assert_eq!(error.identifier(), Some("RunMat:Foreign:InvalidCall"));
             assert!(recorder.calls.borrow().is_empty());
             let error = futures::executor::block_on(java_class_path_builtin(
                 Some(runtime.clone()),
-                vec![value],
+                arguments(vec![value]),
             ))
             .unwrap_err();
             assert_eq!(error.identifier(), Some("RunMat:Foreign:InvalidCall"));
@@ -163,7 +169,7 @@ mod native {
         .unwrap();
         let added = futures::executor::block_on(java_add_path_builtin(
             Some(runtime.clone()),
-            vec![Value::CharArray(trailing)],
+            arguments(vec![Value::CharArray(trailing)]),
         ));
         assert!(added.is_ok());
         let pages = runmat_value::CharArray::new_with_shape(
@@ -173,7 +179,7 @@ mod native {
         .unwrap();
         let error = futures::executor::block_on(java_add_path_builtin(
             Some(runtime),
-            vec![Value::CharArray(pages)],
+            arguments(vec![Value::CharArray(pages)]),
         ))
         .unwrap_err();
         assert_eq!(error.identifier(), Some("RunMat:Foreign:InvalidCall"));
@@ -189,29 +195,32 @@ mod native {
         let (runtime, recorder) = context();
         let query = futures::executor::block_on(java_class_path_builtin(
             Some(runtime.clone()),
-            vec![Value::String("-StAtIc".into())],
+            arguments(vec![Value::String("-StAtIc".into())]),
         ))
         .unwrap();
         assert_eq!(query.value(), &Value::String("returned".into()));
         let quiet = futures::executor::block_on(java_class_path_builtin(
             Some(runtime.clone()),
-            vec![Value::String("-v1".into())],
+            arguments(vec![Value::String("-v1".into())]),
         ))
         .unwrap();
         assert_eq!(quiet.value(), &Value::output_list(Vec::new()));
         let appended = futures::executor::block_on(java_add_path_builtin(
             Some(runtime),
-            vec![
+            arguments(vec![
                 Value::String("plugin.jar".into()),
                 Value::String("-end".into()),
-            ],
+            ]),
         ))
         .unwrap();
         assert_eq!(appended.value(), &Value::output_list(Vec::new()));
         let calls = recorder.calls.borrow();
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].symbol, "classpath");
-        assert_eq!(calls[0].arguments, vec![Value::String("static".into())]);
+        assert!(calls[0]
+            .arguments
+            .iter()
+            .eq([Value::String("static".into())].iter()));
         assert_eq!(calls[1].symbol, "add_classpath");
         assert_eq!(calls[1].arguments[1], Value::String("end".into()));
     }
@@ -250,18 +259,27 @@ fn browser_rejects_each_valid_jvm_operation_without_a_native_host() {
     let method = Value::String("valueOf".into());
     let path = Value::String("lib/example.jar".into());
     let calls = [
-        futures::executor::block_on(java_object_builtin(None, vec![class.clone()])),
-        futures::executor::block_on(java_object_edt_builtin(None, vec![class.clone()])),
+        futures::executor::block_on(java_object_builtin(None, arguments(vec![class.clone()]))),
+        futures::executor::block_on(java_object_edt_builtin(
+            None,
+            arguments(vec![class.clone()]),
+        )),
         futures::executor::block_on(java_method_builtin(
             None,
-            vec![method.clone(), class.clone()],
+            arguments(vec![method.clone(), class.clone()]),
         )),
-        futures::executor::block_on(java_method_edt_builtin(None, vec![method, class.clone()])),
-        futures::executor::block_on(java_array_builtin(None, vec![class, Value::Num(1.0)])),
-        futures::executor::block_on(java_add_path_builtin(None, vec![path.clone()])),
-        futures::executor::block_on(java_remove_path_builtin(None, vec![path])),
-        futures::executor::block_on(java_class_path_builtin(None, vec![])),
-        futures::executor::block_on(jenv_builtin(None, vec![])),
+        futures::executor::block_on(java_method_edt_builtin(
+            None,
+            arguments(vec![method, class.clone()]),
+        )),
+        futures::executor::block_on(java_array_builtin(
+            None,
+            arguments(vec![class, Value::Num(1.0)]),
+        )),
+        futures::executor::block_on(java_add_path_builtin(None, arguments(vec![path.clone()]))),
+        futures::executor::block_on(java_remove_path_builtin(None, arguments(vec![path]))),
+        futures::executor::block_on(java_class_path_builtin(None, arguments(vec![]))),
+        futures::executor::block_on(jenv_builtin(None, arguments(vec![]))),
     ];
     for call in calls {
         assert_eq!(

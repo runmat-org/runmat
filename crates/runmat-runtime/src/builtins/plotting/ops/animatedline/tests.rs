@@ -50,7 +50,10 @@ fn animatedline_descriptor_covers_core_forms() {
 #[test]
 fn animatedline_creates_empty_handle_with_default_limit() {
     let _guard = setup();
-    let handle = block_on(animatedline_builtin(Vec::new())).unwrap();
+    let handle = block_on(animatedline_builtin(
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap();
     assert!(matches!(handle, Value::Num(_)));
     let max = get_builtin(vec![
         handle.clone(),
@@ -66,7 +69,10 @@ fn animatedline_creates_empty_handle_with_default_limit() {
 fn animatedline_accepts_axes_handle_without_trailing_args() {
     let _guard = setup();
     let axes = crate::builtins::plotting::axes::axes_builtin(Vec::new()).unwrap();
-    let handle = block_on(animatedline_builtin(vec![Value::Num(axes)])).unwrap();
+    let handle = block_on(animatedline_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(axes)]),
+    ))
+    .unwrap();
     let parent = get_builtin(vec![handle, Value::String("Parent".into())]).unwrap();
     assert_eq!(parent, Value::Num(axes));
 }
@@ -74,12 +80,14 @@ fn animatedline_accepts_axes_handle_without_trailing_args() {
 #[test]
 fn animatedline_trims_initial_data_to_maximum() {
     let _guard = setup();
-    let handle = block_on(animatedline_builtin(vec![
-        vector(&[1.0, 2.0, 3.0]),
-        vector(&[4.0, 5.0, 6.0]),
-        Value::String("MaximumNumPoints".into()),
-        Value::Num(2.0),
-    ]))
+    let handle = block_on(animatedline_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            vector(&[1.0, 2.0, 3.0]),
+            vector(&[4.0, 5.0, 6.0]),
+            Value::String("MaximumNumPoints".into()),
+            Value::Num(2.0),
+        ]),
+    ))
     .unwrap();
     let x = get_builtin(vec![handle, Value::String("XData".into())]).unwrap();
     assert_eq!(tensor_data(x), vec![2.0, 3.0]);
@@ -99,16 +107,18 @@ fn animatedline_rejects_unrepresentable_maximum_before_cast() {
 #[test]
 fn animatedline_accepts_property_constructor_data() {
     let _guard = setup();
-    let handle = block_on(animatedline_builtin(vec![
-        Value::String("XData".into()),
-        vector(&[1.0, 2.0]),
-        Value::String("YData".into()),
-        vector(&[3.0, 4.0]),
-        Value::String("ZData".into()),
-        vector(&[5.0, 6.0]),
-        Value::String("LineWidth".into()),
-        Value::Num(2.0),
-    ]))
+    let handle = block_on(animatedline_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::String("XData".into()),
+            vector(&[1.0, 2.0]),
+            Value::String("YData".into()),
+            vector(&[3.0, 4.0]),
+            Value::String("ZData".into()),
+            vector(&[5.0, 6.0]),
+            Value::String("LineWidth".into()),
+            Value::Num(2.0),
+        ]),
+    ))
     .unwrap();
     let z = get_builtin(vec![handle.clone(), Value::String("ZData".into())]).unwrap();
     assert_eq!(tensor_data(z), vec![5.0, 6.0]);
@@ -119,11 +129,13 @@ fn animatedline_accepts_property_constructor_data() {
 #[test]
 fn animatedline_reads_typed_integer_constructor_data_exactly() {
     let _guard = setup();
-    let handle = block_on(animatedline_builtin(vec![
-        integer_vector(&[1, 2]),
-        integer_vector(&[10, 20]),
-        integer_vector(&[100, 200]),
-    ]))
+    let handle = block_on(animatedline_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            integer_vector(&[1, 2]),
+            integer_vector(&[10, 20]),
+            integer_vector(&[100, 200]),
+        ]),
+    ))
     .unwrap();
     assert_eq!(
         tensor_data(get_builtin(vec![handle.clone(), Value::String("XData".into())]).unwrap()),
@@ -143,11 +155,13 @@ fn animatedline_reads_typed_integer_constructor_data_exactly() {
 fn animatedline_accepts_all_integer_coordinate_classes_and_mixed_double() {
     let _guard = setup();
     for storage in all_integer_storages() {
-        let handle = block_on(animatedline_builtin(vec![
-            integer_value(storage.clone()),
-            vector(&[10.0, 20.0]),
-            integer_value(storage),
-        ]))
+        let handle = block_on(animatedline_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                integer_value(storage.clone()),
+                vector(&[10.0, 20.0]),
+                integer_value(storage),
+            ]),
+        ))
         .expect("all documented integer coordinates must construct");
         assert_eq!(
             tensor_data(get_builtin(vec![handle.clone(), Value::String("XData".into())]).unwrap()),
@@ -169,12 +183,14 @@ fn animatedline_reads_all_integer_maximum_classes_exactly() {
     let _guard = setup();
     for storage in all_integer_scalar_storages(2) {
         let maximum = storage.value_at(0).expect("integer scalar");
-        let handle = block_on(animatedline_builtin(vec![
-            vector(&[1.0, 2.0, 3.0]),
-            vector(&[4.0, 5.0, 6.0]),
-            Value::String("MaximumNumPoints".into()),
-            Value::Int(maximum),
-        ]))
+        let handle = block_on(animatedline_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                vector(&[1.0, 2.0, 3.0]),
+                vector(&[4.0, 5.0, 6.0]),
+                Value::String("MaximumNumPoints".into()),
+                Value::Int(maximum),
+            ]),
+        ))
         .expect("documented integer maximum must construct");
         assert_eq!(
             tensor_data(get_builtin(vec![handle, Value::String("XData".into())]).unwrap()),
@@ -210,10 +226,12 @@ fn animatedline_reads_all_integer_maximum_classes_exactly() {
 fn animatedline_set_accepts_all_integer_maximum_classes() {
     let _guard = setup();
     for storage in all_integer_scalar_storages(2) {
-        let handle = block_on(animatedline_builtin(vec![
-            vector(&[1.0, 2.0, 3.0]),
-            vector(&[4.0, 5.0, 6.0]),
-        ]))
+        let handle = block_on(animatedline_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                vector(&[1.0, 2.0, 3.0]),
+                vector(&[4.0, 5.0, 6.0]),
+            ]),
+        ))
         .expect("animated line");
         let plot_handle = resolve_plot_handle(&handle, BUILTIN_NAME).expect("plot handle");
         set_properties(
@@ -247,12 +265,14 @@ fn animatedline_gathers_all_integer_coordinate_and_maximum_classes() {
                 .expect("coordinate upload");
             let maximum_handle =
                 gpu_helpers::upload_tensor(provider, &maximum_tensor).expect("maximum upload");
-            let handle = block_on(animatedline_builtin(vec![
-                Value::GpuTensor(coordinate_handle),
-                vector(&[10.0, 20.0]),
-                Value::String("MaximumNumPoints".into()),
-                Value::GpuTensor(maximum_handle),
-            ]))
+            let handle = block_on(animatedline_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::GpuTensor(coordinate_handle),
+                    vector(&[10.0, 20.0]),
+                    Value::String("MaximumNumPoints".into()),
+                    Value::GpuTensor(maximum_handle),
+                ]),
+            ))
             .expect("resident documented integer inputs");
             assert_eq!(
                 tensor_data(get_builtin(vec![handle, Value::String("XData".into())]).unwrap()),
@@ -295,12 +315,14 @@ fn check_animatedline_wgpu_integer_gathers(require_device: bool) {
             gpu_helpers::upload_tensor(provider, &coordinate_tensor).expect("coordinate upload");
         let maximum_handle =
             gpu_helpers::upload_tensor(provider, &maximum_tensor).expect("maximum upload");
-        let handle = block_on(animatedline_builtin(vec![
-            Value::GpuTensor(coordinate_handle),
-            vector(&[10.0, 20.0]),
-            Value::String("MaximumNumPoints".into()),
-            Value::GpuTensor(maximum_handle),
-        ]))
+        let handle = block_on(animatedline_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::GpuTensor(coordinate_handle),
+                vector(&[10.0, 20.0]),
+                Value::String("MaximumNumPoints".into()),
+                Value::GpuTensor(maximum_handle),
+            ]),
+        ))
         .expect("resident WGPU integer inputs");
         assert_eq!(
             tensor_data(get_builtin(vec![handle, Value::String("XData".into())]).unwrap()),
@@ -312,12 +334,14 @@ fn check_animatedline_wgpu_integer_gathers(require_device: bool) {
 #[test]
 fn animatedline_rejects_undocumented_logical_coordinates() {
     let _guard = setup();
-    let error = block_on(animatedline_builtin(vec![
-        Value::String("XData".into()),
-        Value::Bool(true),
-        Value::String("YData".into()),
-        Value::Num(2.0),
-    ]))
+    let error = block_on(animatedline_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::String("XData".into()),
+            Value::Bool(true),
+            Value::String("YData".into()),
+            Value::Num(2.0),
+        ]),
+    ))
     .expect_err("logical coordinates are not documented");
     assert!(error.message().contains("must not be logical"));
 }
@@ -325,13 +349,15 @@ fn animatedline_rejects_undocumented_logical_coordinates() {
 #[test]
 fn animatedline_rejects_3d_marker_constructor() {
     let _guard = setup();
-    let err = block_on(animatedline_builtin(vec![
-        vector(&[1.0]),
-        vector(&[2.0]),
-        vector(&[3.0]),
-        Value::String("Marker".into()),
-        Value::String("o".into()),
-    ]))
+    let err = block_on(animatedline_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            vector(&[1.0]),
+            vector(&[2.0]),
+            vector(&[3.0]),
+            Value::String("Marker".into()),
+            Value::String("o".into()),
+        ]),
+    ))
     .unwrap_err();
     assert!(err.message.contains("marker"));
 }

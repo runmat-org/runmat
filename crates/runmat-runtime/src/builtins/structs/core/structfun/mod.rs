@@ -21,15 +21,17 @@ pub(super) const BUILTIN_NAME: &str = "structfun";
 
 #[runtime_builtin(
     name = "structfun",
+    context = true,
     binding_variant = "default",
     builtin_path = "crate::builtins::structs::core::structfun"
 )]
 async fn structfun_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     function: Value,
     structure: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<crate::execution::RootedValue> {
-    execution::execute(function, structure, rest).await
+    execution::execute(runtime.as_ref(), function, structure, rest).await
 }
 
 #[cfg(test)]

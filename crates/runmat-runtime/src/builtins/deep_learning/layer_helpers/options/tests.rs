@@ -27,18 +27,24 @@ fn recurrent_gate_factor_admission_requires_a_row_or_scalar() {
 fn constructor_admission_uses_the_canonical_convolution_modes() {
     let kind = DeepLearningLayerKind::Convolution1D;
     for mode in DeepLearningConvolutionPaddingMode::ALL {
-        let value = Value::String(mode.canonical_name().to_ascii_uppercase());
+        let value = Value::String(mode.canonical_name().to_ascii_uppercase().into());
         assert!(parse_layer_options(
-            &[Value::String("Padding".into()), value],
+            crate::call::FunctionArgumentView::from_slice(&[
+                Value::String("Padding".into()),
+                value
+            ]),
             kind,
             "convolution1dLayer"
         )
         .is_ok());
     }
     for mode in DeepLearningConvolutionPaddingValueMode::ALL {
-        let value = Value::String(mode.canonical_name().to_ascii_uppercase());
+        let value = Value::String(mode.canonical_name().to_ascii_uppercase().into());
         assert!(parse_layer_options(
-            &[Value::String("PaddingValue".into()), value],
+            crate::call::FunctionArgumentView::from_slice(&[
+                Value::String("PaddingValue".into()),
+                value
+            ]),
             kind,
             "convolution1dLayer"
         )
@@ -46,7 +52,10 @@ fn constructor_admission_uses_the_canonical_convolution_modes() {
     }
     for name in ["Padding", "PaddingValue"] {
         assert!(parse_layer_options(
-            &[Value::String(name.into()), Value::String("invented".into()),],
+            crate::call::FunctionArgumentView::from_slice(&[
+                Value::String(name.into()),
+                Value::String("invented".into()),
+            ]),
             kind,
             "convolution1dLayer"
         )
@@ -57,7 +66,7 @@ fn constructor_admission_uses_the_canonical_convolution_modes() {
         ("PaddingValue", Value::Num(3.5)),
     ] {
         assert!(parse_layer_options(
-            &[Value::String(name.into()), value],
+            crate::call::FunctionArgumentView::from_slice(&[Value::String(name.into()), value]),
             kind,
             "convolution1dLayer"
         )
@@ -84,20 +93,20 @@ fn constructor_admission_uses_the_canonical_recurrent_modes() {
         ] {
             for &value in values {
                 assert!(parse_layer_options(
-                    &[
+                    crate::call::FunctionArgumentView::from_slice(&[
                         Value::String(option.canonical_name().into()),
-                        Value::String(value.to_ascii_uppercase()),
-                    ],
+                        Value::String(value.to_ascii_uppercase().into()),
+                    ]),
                     kind,
                     "lstmLayer"
                 )
                 .is_ok());
             }
             assert!(parse_layer_options(
-                &[
+                crate::call::FunctionArgumentView::from_slice(&[
                     Value::String(option.canonical_name().into()),
                     Value::String("invented".into()),
-                ],
+                ]),
                 kind,
                 "lstmLayer"
             )

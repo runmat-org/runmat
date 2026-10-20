@@ -251,13 +251,13 @@ pub(super) fn ensure_response_spectrum_class_registered() {
 fn validate_object(object: &ObjectInstance) -> Result<(), String> {
     let missing = FIELDS
         .iter()
-        .filter(|field| !object.properties.contains_key(**field))
+        .filter(|field| !object.properties().contains_key(field))
         .copied()
         .collect::<Vec<_>>();
     if !missing.is_empty() {
         return Err(format!(
             "{}.{} is required",
-            object.class_name,
+            object.class_name(),
             missing.join(", ")
         ));
     }
@@ -294,7 +294,7 @@ mod tests {
         let extrapolation =
             super::super::response_spectrum_policies::choices::extrapolation_reject().await?;
         let direction = super::super::response_spectrum_policies::parameters::spectrum_direction(
-            coordinate_frame_global_builtin().await?,
+            coordinate_frame_global_builtin(None).await?,
             Tensor::new(vec![1.0, 0.0, 0.0], vec![1, 3])?.into(),
         )
         .await?;

@@ -12,7 +12,7 @@ fn pagefun_preserves_wide_integer_pages_without_float_materialization() {
     let result = pagefun_impl(
         Value::FunctionHandle("mtimes".into()),
         Value::Tensor(lhs),
-        vec![Value::Tensor(rhs)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(rhs)]),
     );
     let result = block_on(result).expect("typed integer page inputs");
     let Value::Tensor(result) = result else {
@@ -58,7 +58,7 @@ fn pagefun_preserves_wide_integer_scalar_without_float_materialization() {
     let result = pagefun_impl(
         Value::FunctionHandle("mtimes".into()),
         Value::Int(runmat_value::IntValue::U64(u64::MAX)),
-        vec![Value::Num(1.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
     );
 
     let result = block_on(result).expect("wide integer scalar");
@@ -83,7 +83,9 @@ fn pagefun_resident_integer_fallback_restores_exact_owner_and_class() {
         let result = block_on(pagefun_impl(
             Value::FunctionHandle("mtimes".into()),
             Value::GpuTensor(source.clone()),
-            vec![Value::Int(runmat_value::IntValue::U64(1))],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(
+                runmat_value::IntValue::U64(1),
+            )]),
         ))
         .expect("owner-aware integer fallback");
         let Value::GpuTensor(result) = result else {

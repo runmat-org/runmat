@@ -250,6 +250,7 @@ mod tests {
             driver: super::super::LinkerDriver {
                 path: "/tmp/one/linker".into(),
                 family: canonical.family,
+                environment: Vec::new(),
             },
             object: "/tmp/one/object.o".into(),
             runtime_archive: "/tmp/one/runtime.a".into(),

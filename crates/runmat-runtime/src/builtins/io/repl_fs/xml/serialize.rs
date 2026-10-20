@@ -17,14 +17,14 @@ pub(super) async fn serialize_xml_value(
             cooperation.completed(text.len()).await?;
             Ok(text)
         }
-        Value::Object(object) if object.class_name.is(XML_DOCUMENT_CLASS) => {
-            let element = object.properties.get("DocumentElement").ok_or_else(|| {
+        Value::Object(object) if object.class_name().is(XML_DOCUMENT_CLASS) => {
+            let element = object.properties().get("DocumentElement").ok_or_else(|| {
                 compat_error(
                     "xmlwrite",
                     "xmlwrite: document object has no serializable DocumentElement",
                 )
             })?;
-            let prefix = match object.properties.get("Text") {
+            let prefix = match object.properties().get("Text") {
                 Some(Value::String(source)) => {
                     super::parser::document_declaration_prefix(source, cooperation).await?
                 }
@@ -44,7 +44,7 @@ pub(super) async fn serialize_xml_value(
                 Ok(tree)
             }
         }
-        Value::Object(object) if object.class_name.is(XML_ELEMENT_CLASS) => {
+        Value::Object(object) if object.class_name().is(XML_ELEMENT_CLASS) => {
             serialize_xml_element_object(object, cooperation).await
         }
         Value::Struct(st) => serialize_xml_struct("root", st, cooperation).await,
@@ -60,12 +60,12 @@ async fn serialize_xml_element_object(
     cooperation: &mut XmlCooperation,
 ) -> BuiltinResult<String> {
     let name = object
-        .properties
+        .properties()
         .get("TagName")
-        .or_else(|| object.properties.get("NodeName"))
+        .or_else(|| object.properties().get("NodeName"))
         .ok_or_else(|| compat_error("xmlwrite", "xmlwrite: element object is missing TagName"))
         .and_then(|value| scalar_text(value, "xmlwrite", "TagName"))?;
-    let attrs = match object.properties.get("Attributes") {
+    let attrs = match object.properties().get("Attributes") {
         None => None,
         Some(Value::Struct(st)) => Some(st),
         Some(_) => {
@@ -75,13 +75,13 @@ async fn serialize_xml_element_object(
             ))
         }
     };
-    let text = match object.properties.get("TextContent") {
+    let text = match object.properties().get("TextContent") {
         None => String::new(),
         Some(value) => scalar_text(value, "xmlwrite", "TextContent")?,
     };
-    let children = match object.properties.get("ChildNodes") {
+    let children = match object.properties().get("ChildNodes") {
         None => &[][..],
-        Some(Value::Cell(cell)) => cell.data.as_slice(),
+        Some(Value::Cell(cell)) => cell.data_owner().as_slice(),
         Some(_) => {
             return Err(compat_error(
                 "xmlwrite",
@@ -150,7 +150,7 @@ async fn serialize_xml_struct_field(
         }
         Value::Cell(cell) => {
             let mut out = String::new();
-            for value in &cell.data {
+            for value in cell.data() {
                 out.push_str(&serialize_xml_struct_field(name.as_str(), value, cooperation).await?);
             }
             Ok(out)

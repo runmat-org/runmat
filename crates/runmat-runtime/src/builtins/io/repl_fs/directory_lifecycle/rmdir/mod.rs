@@ -12,7 +12,7 @@ use runmat_value::Value;
     binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::directory_lifecycle::rmdir"
 )]
-async fn rmdir_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn rmdir_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     let request = options::parse(args).await?;
     let outcome = execute::remove(request).await;
     super::result::complete(outcome, "rmdir")

@@ -5,6 +5,8 @@
 //! character arrays, and gpuArray handles. RunMat also offers separately gated
 //! dimension-vector and direction-keyword extensions.
 
+use crate::aggregate::structure::operations as struct_ops;
+
 use crate::builtins::common::arg_tokens::{tokens_from_values, ArgToken};
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
@@ -42,7 +44,10 @@ fn flip_error_for(builtin: &'static str, message: impl Into<String>) -> RuntimeE
     binding_variant = "default",
     builtin_path = "crate::builtins::array::shape::flip"
 )]
-async fn flip_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn flip_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &FLIP_DESCRIPTOR,
         &FLIP_ERROR_INVALID_INPUT,
@@ -51,8 +56,8 @@ async fn flip_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
     if rest.len() > 1 {
         return Err(flip_error(&FLIP_ERROR_TOO_MANY_INPUTS));
     }
-    ensure_flip_extensions(&rest)?;
-    let spec = parse_flip_spec(&rest)?;
+    ensure_flip_extensions(rest.view())?;
+    let spec = parse_flip_spec(rest.view())?;
     match value {
         Value::Tensor(tensor) => {
             let dims = resolve_dims(&spec, tensor.shape());
@@ -110,9 +115,9 @@ async fn flip_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         Value::StructArray(mut array) => {
             let dims = resolve_dims(&spec, array.shape());
             for dimension in dims {
-                array = array
-                    .flip(dimension - 1)
-                    .map_err(|error| flip_error_for("flip", error))?;
+                array = struct_ops::flip(array, dimension - 1).map_err(|error| {
+                    struct_ops::remap(error, |message| flip_error_for("flip", message))
+                })?;
             }
             Ok(Value::StructArray(array))
         }
@@ -148,7 +153,7 @@ enum FlipSpec {
     Dims(Vec<usize>),
 }
 
-fn ensure_flip_extensions(args: &[Value]) -> crate::BuiltinResult<()> {
+fn ensure_flip_extensions(args: crate::call::FunctionArgumentView<'_>) -> crate::BuiltinResult<()> {
     let Some(value) = args.first() else {
         return Ok(());
     };
@@ -184,7 +189,7 @@ fn ensure_flip_extensions(args: &[Value]) -> crate::BuiltinResult<()> {
     Ok(())
 }
 
-fn parse_flip_spec(args: &[Value]) -> crate::BuiltinResult<FlipSpec> {
+fn parse_flip_spec(args: crate::call::FunctionArgumentView<'_>) -> crate::BuiltinResult<FlipSpec> {
     match args.len() {
         0 => Ok(FlipSpec::Default),
         1 => {
@@ -274,7 +279,7 @@ fn parse_dims_value(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
             "flip: dimension argument must be specified on the host (numeric or string)",
         )),
         Value::StringArray(sa) => {
-            if sa.data.len() == 1 {
+            if sa.data().len() == 1 {
                 let tmp = Value::StringArray(sa.clone());
                 parse_direction(&tmp)?
                     .ok_or_else(|| flip_error_for("flip", "flip: dimension vector must be numeric"))
@@ -508,10 +513,10 @@ pub(crate) fn flip_string_array_with(
     array: StringArray,
     dims: &[usize],
 ) -> crate::BuiltinResult<StringArray> {
-    if array.data.is_empty() || dims.is_empty() {
+    if array.data().is_empty() || dims.is_empty() {
         return Ok(array);
     }
-    let data = flip_generic(&array.data, &array.shape, dims, builtin)?;
+    let data = flip_generic(array.data(), &array.shape, dims, builtin)?;
     StringArray::from_texts_unbounded(data, array.shape.to_vec())
         .map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")))
 }
@@ -525,7 +530,7 @@ pub(crate) fn flip_char_array_with(
     array: CharArray,
     dims: &[usize],
 ) -> crate::BuiltinResult<CharArray> {
-    if array.data.is_empty() || dims.is_empty() {
+    if array.data().is_empty() || dims.is_empty() {
         return Ok(array);
     }
     let shape = array.shape.to_vec();
@@ -729,7 +734,10 @@ pub(crate) mod tests {
     use futures::executor::block_on;
 
     fn flip_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-        block_on(super::flip_builtin(value, rest))
+        block_on(super::flip_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::{
@@ -741,9 +749,9 @@ pub(crate) mod tests {
     };
 
     fn structure(value: f64) -> StructValue {
-        let mut structure = StructValue::new();
+        let mut structure = runmat_value::UnboundedStructValueBuilder::new();
         structure.insert("value", Value::Num(value));
-        structure
+        structure.finish()
     }
 
     fn struct_values(value: Value) -> Vec<f64> {
@@ -1090,7 +1098,7 @@ pub(crate) mod tests {
             Value::CharArray(out) => {
                 assert_eq!(out.rows, 2);
                 assert_eq!(out.cols, 3);
-                let collected: String = out.data.iter().collect();
+                let collected: String = out.data().iter().collect();
                 assert_eq!(collected, "nurtam");
             }
             other => panic!("expected char array, got {other:?}"),
@@ -1157,7 +1165,7 @@ pub(crate) mod tests {
             flip_builtin(Value::StringArray(strings), vec![Value::from("vertical")]).expect("flip");
         match value {
             Value::StringArray(out) => {
-                assert_eq!(out.data, vec!["b".to_string(), "a".to_string()])
+                assert_eq!(out.data(), vec!["b".to_string(), "a".to_string()])
             }
             other => panic!("expected string array, got {other:?}"),
         }

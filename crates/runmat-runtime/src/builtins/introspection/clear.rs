@@ -10,7 +10,7 @@ use crate::{build_runtime_error, workspace, BuiltinResult};
     binding_variant = "default",
     builtin_path = "crate::builtins::introspection::clear"
 )]
-async fn clear_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn clear_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     if args.is_empty() {
         let detached = workspace::try_detach_selected(&workspace::WorkspaceDetachSelection::All)
             .map_err(clear_flow)?;
@@ -130,11 +130,11 @@ fn collect_clear_targets(arg: &Value, out: &mut Vec<String>) -> BuiltinResult<()
                     "clear: character array inputs must be a row vector or scalar text value",
                 ));
             }
-            out.push(chars.data.iter().collect::<String>().trim().to_string());
+            out.push(chars.data().iter().collect::<String>().trim().to_string());
             Ok(())
         }
         Value::StringArray(array) => {
-            for text in &array.data {
+            for text in array.data() {
                 out.push(text.trim().to_string());
             }
             Ok(())
@@ -204,7 +204,11 @@ mod tests {
                 crate::workspace::BaseWorkspaceService::new(owner.clone()),
             ));
         let context = context.with_service_ports(ports);
-        let result = context.scope(super::clear_builtin(args)).await;
+        let result = context
+            .scope(super::clear_builtin(
+                crate::builtins::common::test_support::builtin_arguments(args),
+            ))
+            .await;
         let remaining = owner.snapshot().expect("read exact workspace").to_values();
         TEST_WORKSPACE.with(|slot| *slot.borrow_mut() = remaining.into_iter().collect());
         result

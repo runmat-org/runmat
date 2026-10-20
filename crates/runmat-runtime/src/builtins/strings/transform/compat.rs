@@ -29,7 +29,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{
-    CharArray, ExactArrayStorage, IntValue, NumericScalar, StringArray, Utf8Text, Value,
+    CellArray, CharArray, ExactArrayStorage, IntValue, NumericScalar, StringArray, Utf8Text, Value,
 };
 
 use crate::builtins::common::map_control_flow_with_builtin;
@@ -236,7 +236,7 @@ fn map_flow(name: &'static str) -> impl Fn(crate::RuntimeError) -> crate::Runtim
     binding_variant = "default",
     builtin_path = "crate::builtins::strings::transform::compat"
 )]
-async fn append_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn append_builtin(rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     if rest.is_empty() {
         return Ok(Value::string(String::new()));
     }
@@ -303,12 +303,12 @@ fn append_text_items(
             AppendOutputKind::String,
         )),
         Value::Cell(cell) => {
-            let mut items = Vec::with_capacity(cell.data.len());
-            for value in &cell.data {
+            let mut items = Vec::with_capacity(cell.data().len());
+            for value in cell.data() {
                 match value {
                     Value::CharArray(array) if array.rows <= 1 || array.cols <= 1 => {
                         items.push(Some(runmat_value::Utf8Text::new(
-                            array.data.iter().collect::<String>(),
+                            array.data().iter().collect::<String>(),
                         )));
                     }
                     _ => {
@@ -328,7 +328,7 @@ fn append_text_items(
             ))
         }
         Value::CharArray(array) if array.rows <= 1 || array.cols <= 1 => {
-            let text = array.data.into_char_iter().collect::<String>();
+            let text = array.data().iter().copied().collect::<String>();
             Ok((
                 text_items(Value::string(text), "append")?,
                 AppendOutputKind::Char,
@@ -421,7 +421,7 @@ async fn deblank_builtin(text: Value) -> BuiltinResult<Value> {
 async fn strjust_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     text: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     if contains_numeric_or_resident_text_input(&text)
         || rest
@@ -470,9 +470,11 @@ async fn splitlines_builtin(text: Value) -> BuiltinResult<Value> {
         .map_err(map_flow("splitlines"))?;
     match text {
         Value::String(text) => strings_from_lines(&text),
-        Value::StringArray(array) if array.data.len() == 1 => strings_from_lines(&array.data[0]),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            strings_from_lines(array.data()[0].as_str())
+        }
         Value::CharArray(array) if array.rows <= 1 => {
-            strings_from_lines(&char_row_to_string_slice(&array.data, array.cols, 0))
+            strings_from_lines(&char_row_to_string_slice(array.data(), array.cols, 0))
         }
         other => {
             let list = text_items(other, "splitlines")?;
@@ -584,7 +586,10 @@ async fn erase_urls_builtin(text: Value) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::strings::transform::compat"
 )]
-async fn erase_punctuation_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn erase_punctuation_builtin(
+    text: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     reject_resident_text_input(
         &text,
         "erasePunctuation",
@@ -654,7 +659,7 @@ fn descriptor_transform_error(
 fn is_host_text_tree(value: &Value) -> bool {
     match value {
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => true,
-        Value::Cell(cell) => cell.data.iter().all(is_host_text_tree),
+        Value::Cell(cell) => cell.data().iter().all(is_host_text_tree),
         _ => false,
     }
 }
@@ -669,7 +674,7 @@ fn ensure_erase_text_extensions(
         Value::CharArray(array) if array.rows > 1 && array.cols > 1 => {
             crate::compatibility::ensure_builtin_extension_enabled(char_matrix, builtin)
         }
-        Value::Cell(cell) if !cell.data.iter().all(is_cellstr_element) => {
+        Value::Cell(cell) if !cell.data().iter().all(is_cellstr_element) => {
             crate::compatibility::ensure_builtin_extension_enabled(broad_cell, builtin)
         }
         _ => Ok(()),
@@ -720,7 +725,7 @@ async fn matches_builtin(text: Value, pattern: Value) -> BuiltinResult<Value> {
 
 pub(super) async fn boundary_transform(
     text: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
     fn_name: &'static str,
     resident_extension: &'static BuiltinExtensionDescriptor,
     char_matrix_extension: &'static BuiltinExtensionDescriptor,
@@ -802,7 +807,7 @@ pub(super) async fn boundary_transform(
 
 pub(super) async fn insert_transform(
     text: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
     fn_name: &'static str,
     after: bool,
 ) -> BuiltinResult<Value> {
@@ -910,7 +915,7 @@ impl TextList {
             }),
             Value::StringArray(array) => Ok(Self {
                 data: array
-                    .data
+                    .data()
                     .iter()
                     .map(|text| text.as_str().to_owned())
                     .collect(),
@@ -921,7 +926,7 @@ impl TextList {
                     vec![String::new()]
                 } else {
                     (0..array.rows)
-                        .map(|row| char_row_to_string_slice(&array.data, array.cols, row))
+                        .map(|row| char_row_to_string_slice(array.data(), array.cols, row))
                         .collect()
                 };
                 Ok(Self {
@@ -935,7 +940,7 @@ impl TextList {
             }
             Value::Cell(cell) => Ok(Self {
                 data: cell
-                    .data
+                    .data()
                     .iter()
                     .map(|value| scalar_text(value, fn_name))
                     .collect::<BuiltinResult<Vec<_>>>()?,
@@ -1005,7 +1010,7 @@ impl BoundaryList {
             }),
             Value::StringArray(array) => Ok(Self {
                 data: array
-                    .data
+                    .data()
                     .iter()
                     .map(|text| Boundary::Text(text.as_str().to_owned()))
                     .collect(),
@@ -1017,7 +1022,7 @@ impl BoundaryList {
                 } else {
                     (0..array.rows)
                         .map(|row| {
-                            Boundary::Text(char_row_to_string_slice(&array.data, array.cols, row))
+                            Boundary::Text(char_row_to_string_slice(array.data(), array.cols, row))
                         })
                         .collect()
                 };
@@ -1031,8 +1036,8 @@ impl BoundaryList {
                 })
             }
             Value::Cell(cell) => {
-                let mut data = Vec::with_capacity(cell.data.len());
-                for value in &cell.data {
+                let mut data = Vec::with_capacity(cell.data().len());
+                for value in cell.data() {
                     data.push(Boundary::Text(scalar_text(value, fn_name)?));
                 }
                 Ok(Self {
@@ -1130,15 +1135,15 @@ fn valid_raw_boundary_form(value: &Value) -> bool {
                 && handle.physical().storage() == runmat_accelerate_api::GpuTensorStorage::Real
         }
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => true,
-        Value::Cell(cell) => cell.data.iter().all(|item| match item {
+        Value::Cell(cell) => cell.data().iter().all(|item| match item {
             Value::String(_) => true,
-            Value::StringArray(array) => array.data.len() == 1,
+            Value::StringArray(array) => array.data().len() == 1,
             Value::CharArray(array) => array.rows <= 1,
             _ => false,
         }),
         Value::Object(object) => {
             object.is_class(runmat_types::standard::PATTERN)
-                && matches!(object.properties.get("Regex"), Some(Value::String(_)))
+                && matches!(object.properties().get("Regex"), Some(Value::String(_)))
                 && !crate::dispatcher::value_contains_gpu(value)
         }
         _ => false,
@@ -1151,7 +1156,7 @@ fn is_multirow_char(value: &Value) -> bool {
 
 fn contains_string_or_nested_cell(value: &Value) -> bool {
     match value {
-        Value::Cell(cell) => cell.data.iter().any(|value| {
+        Value::Cell(cell) => cell.data().iter().any(|value| {
             matches!(
                 value,
                 Value::String(_) | Value::StringArray(_) | Value::Cell(_)
@@ -1164,10 +1169,10 @@ fn contains_string_or_nested_cell(value: &Value) -> bool {
 fn valid_extract_text_input(value: &Value, nested: bool) -> bool {
     match value {
         Value::String(_) => true,
-        Value::StringArray(array) => !nested || array.data.len() == 1,
+        Value::StringArray(array) => !nested || array.data().len() == 1,
         Value::CharArray(array) => !nested || array.rows <= 1,
         Value::Cell(cell) => cell
-            .data
+            .data()
             .iter()
             .all(|value| valid_extract_text_input(value, true)),
         _ => false,
@@ -1177,9 +1182,9 @@ fn valid_extract_text_input(value: &Value, nested: bool) -> bool {
 fn valid_insert_replacement(value: &Value) -> bool {
     match value {
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => true,
-        Value::Cell(cell) => cell.data.iter().all(|item| match item {
+        Value::Cell(cell) => cell.data().iter().all(|item| match item {
             Value::String(_) => true,
-            Value::StringArray(array) => array.data.len() == 1,
+            Value::StringArray(array) => array.data().len() == 1,
             Value::CharArray(array) => array.rows <= 1,
             _ => false,
         }),
@@ -1211,7 +1216,7 @@ fn map_string_array(
     fn_name: &str,
     mut map: impl FnMut(usize, &str) -> BuiltinResult<String>,
 ) -> BuiltinResult<Value> {
-    let StringArray { data, shape, .. } = array;
+    let (data, shape, _, _) = array.into_parts();
     let input: Vec<Utf8Text> = match data.try_into_owned() {
         Ok(values) => values.into_iter().collect(),
         Err(shared) => shared.iter().cloned().collect(),
@@ -1250,7 +1255,7 @@ fn map_text_with_boundaries(
             let rows = (0..array.rows)
                 .map(|row| {
                     map(
-                        &char_row_to_string_slice(&array.data, array.cols, row),
+                        &char_row_to_string_slice(array.data(), array.cols, row),
                         boundaries.at(row),
                     )
                 })
@@ -1259,7 +1264,7 @@ fn map_text_with_boundaries(
         }
         Value::Cell(cell) => {
             let values = cell
-                .data
+                .data()
                 .iter()
                 .enumerate()
                 .map(|(idx, value)| map_text_cell_element(value, boundaries.at(idx), fn_name, map))
@@ -1348,7 +1353,7 @@ fn map_text_with_insertions(
             let rows = (0..array.rows)
                 .map(|row| {
                     insert_one(
-                        &char_row_to_string_slice(&array.data, array.cols, row),
+                        &char_row_to_string_slice(array.data(), array.cols, row),
                         boundaries.at(row),
                         replacements.at(row),
                         after,
@@ -1360,7 +1365,7 @@ fn map_text_with_insertions(
         }
         Value::Cell(cell) => {
             let values = cell
-                .data
+                .data()
                 .iter()
                 .enumerate()
                 .map(|(idx, value)| {
@@ -1410,7 +1415,7 @@ fn map_text_with_replacements(
             let rows = (0..array.rows)
                 .map(|row| {
                     replace_between_one(
-                        &char_row_to_string_slice(&array.data, array.cols, row),
+                        &char_row_to_string_slice(array.data(), array.cols, row),
                         starts.at(row),
                         stops.at(row),
                         replacements.at(row),
@@ -1421,7 +1426,7 @@ fn map_text_with_replacements(
         }
         Value::Cell(cell) => {
             let values = cell
-                .data
+                .data()
                 .iter()
                 .enumerate()
                 .map(|(index, value)| {
@@ -1454,7 +1459,7 @@ fn map_text_cell_replacement(
             let text = if array.rows == 0 {
                 String::new()
             } else {
-                char_row_to_string_slice(&array.data, array.cols, 0)
+                char_row_to_string_slice(array.data(), array.cols, 0)
             };
             replace_between_one(&text, start, stop, replacement)
                 .map(|text| Value::CharArray(CharArray::new_row(&text)))
@@ -1462,12 +1467,13 @@ fn map_text_cell_replacement(
         Value::String(text) => {
             replace_between_one(text, start, stop, replacement).map(Value::string)
         }
-        Value::StringArray(array) if array.data.len() == 1 => {
-            replace_between_one(&array.data[0], start, stop, replacement).map(Value::string)
+        Value::StringArray(array) if array.data().len() == 1 => {
+            replace_between_one(array.data()[0].as_str(), start, stop, replacement)
+                .map(Value::string)
         }
         Value::Cell(cell) => {
             let values = cell
-                .data
+                .data()
                 .iter()
                 .map(|value| map_text_cell_replacement(value, start, stop, replacement))
                 .collect::<BuiltinResult<Vec<_>>>()?;
@@ -1508,7 +1514,7 @@ fn map_text_cell_insertion(
             let text = if array.rows == 0 {
                 String::new()
             } else {
-                char_row_to_string_slice(&array.data, array.cols, 0)
+                char_row_to_string_slice(array.data(), array.cols, 0)
             };
             insert_one(&text, boundary, replacement, after, fn_name)
                 .map(|text| Value::CharArray(CharArray::new_row(&text)))
@@ -1516,12 +1522,17 @@ fn map_text_cell_insertion(
         Value::String(text) => {
             insert_one(text, boundary, replacement, after, fn_name).map(Value::string)
         }
-        Value::StringArray(array) if array.data.len() == 1 => {
-            insert_one(&array.data[0], boundary, replacement, after, fn_name).map(Value::string)
-        }
+        Value::StringArray(array) if array.data().len() == 1 => insert_one(
+            array.data()[0].as_str(),
+            boundary,
+            replacement,
+            after,
+            fn_name,
+        )
+        .map(Value::string),
         Value::Cell(cell) => {
             let values = cell
-                .data
+                .data()
                 .iter()
                 .map(|value| map_text_cell_insertion(value, boundary, replacement, fn_name, after))
                 .collect::<BuiltinResult<Vec<_>>>()?;
@@ -1543,20 +1554,20 @@ fn map_text_cell_element(
 ) -> BuiltinResult<Value> {
     match value {
         Value::String(text) => map(text, boundary).map(Value::string),
-        Value::StringArray(array) if array.data.len() == 1 => {
-            map(&array.data[0], boundary).map(Value::string)
+        Value::StringArray(array) if array.data().len() == 1 => {
+            map(array.data()[0].as_str(), boundary).map(Value::string)
         }
         Value::CharArray(array) if array.rows <= 1 => {
             let text = if array.rows == 0 {
                 String::new()
             } else {
-                char_row_to_string_slice(&array.data, array.cols, 0)
+                char_row_to_string_slice(array.data(), array.cols, 0)
             };
             map(&text, boundary).map(|text| Value::CharArray(CharArray::new_row(&text)))
         }
         Value::Cell(cell) => {
             let values = cell
-                .data
+                .data()
                 .iter()
                 .map(|value| map_text_cell_element(value, boundary, fn_name, map))
                 .collect::<BuiltinResult<Vec<_>>>()?;
@@ -1640,21 +1651,30 @@ fn map_text_preserve(
         Value::StringArray(array) => map_string_array(array, fn_name, |_, text| Ok(map(text))),
         Value::CharArray(array) => {
             let rows = (0..array.rows)
-                .map(|row| map(&char_row_to_string_slice(&array.data, array.cols, row)))
+                .map(|row| map(&char_row_to_string_slice(array.data(), array.cols, row)))
                 .collect::<Vec<_>>();
             char_rows(rows, fn_name)
         }
         Value::Cell(cell) => {
-            let shape = cell.shape().to_vec();
-            let input: Vec<Value> = match cell.data.try_into_owned() {
-                Ok(values) => values.into_iter().collect(),
-                Err(shared) => shared.iter().cloned().collect(),
-            };
-            let values = input
-                .into_iter()
-                .map(|value| map_text_preserve(value, fn_name, map))
-                .collect::<BuiltinResult<Vec<_>>>()?;
-            make_cell_with_shape(values, shape).map_err(|e| transform_error(fn_name, e))
+            let (mut owner, shape, _rows, _cols) = cell.into_parts();
+            if !owner.is_unique() {
+                owner
+                    .make_unique_unbounded()
+                    .map_err(|error| transform_error(fn_name, error.to_string()))?;
+            }
+            let mut values = owner.try_into_owned().map_err(|_| {
+                transform_error(fn_name, "shared admitted Cell requires a prepared output")
+            })?;
+            for value in values.as_mut_slice() {
+                let source = std::mem::replace(value, Value::Num(0.0));
+                *value = map_text_preserve(source, fn_name, map)?;
+            }
+            let owner = values.try_into_storage().map_err(|_| {
+                transform_error(fn_name, "Cell output owner could not be republished")
+            })?;
+            CellArray::from_shared_storage(owner, shape)
+                .map(Value::Cell)
+                .map_err(|error| transform_error(fn_name, error))
         }
         other => Err(transform_error(
             fn_name,

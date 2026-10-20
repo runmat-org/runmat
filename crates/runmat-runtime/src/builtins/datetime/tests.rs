@@ -18,7 +18,7 @@ async fn datetime_subsref(
     payload: Value,
 ) -> crate::BuiltinResult<crate::execution::RootedValue> {
     let subscript = crate::object::indexing::standard_substruct_fixture_from_parts(&kind, payload)?;
-    super::operators::datetime_subsref(obj, subscript).await
+    super::operators::datetime_subsref(None, obj, subscript).await
 }
 
 async fn datetime_subsasgn(
@@ -28,11 +28,11 @@ async fn datetime_subsasgn(
     rhs: Value,
 ) -> crate::BuiltinResult<crate::execution::RootedValue> {
     let subscript = crate::object::indexing::standard_substruct_fixture_from_parts(&kind, payload)?;
-    super::operators::datetime_subsasgn(obj, subscript, rhs).await
+    super::operators::datetime_subsasgn(None, obj, subscript, rhs).await
 }
 
 async fn datetime_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    super::constructor_builtin::datetime_builtin(None, args).await
+    super::constructor_builtin::datetime_builtin_source(None, args).await
 }
 
 fn run_datetime(args: Vec<Value>) -> Value {
@@ -276,7 +276,7 @@ fn month_datetime_name_modes_return_shaped_character_cells() {
         };
         assert_eq!(cell.shape, vec![1, 1]);
         assert_eq!(
-            cell.data,
+            cell.data(),
             vec![Value::CharArray(CharArray::new_row(expected))]
         );
     }
@@ -286,7 +286,7 @@ fn month_datetime_name_modes_return_shaped_character_cells() {
 fn datetime_builds_from_components() {
     let value = run_datetime(vec![Value::Num(2024.0), Value::Num(3.0), Value::Num(14.0)]);
     let object = as_datetime(value);
-    assert!(object.class_name.is(DATETIME_CLASS));
+    assert!(object.class_name().is(DATETIME_CLASS));
     assert_eq!(format_for_object(&object), DEFAULT_DATE_FORMAT);
     let serials = serial_tensor_for_object(&object).expect("serials");
     assert_eq!(serials.materialize_f64().len(), 1);
@@ -381,7 +381,7 @@ fn datetime_date_vectors_cover_all_integer_classes_and_preaccess_gates() {
         );
         let value = run_datetime(vec![integer_tensor(storage, vec![1, 3])]);
         assert_eq!(
-            datetime_string_array(&value).unwrap().unwrap().data,
+            datetime_string_array(&value).unwrap().unwrap().data(),
             vec![if small_year {
                 "02-Jan-0024"
             } else {
@@ -615,16 +615,19 @@ fn wide_integer_serials_are_rejected_before_lossy_conversion() {
 
 #[test]
 fn datetime_parses_text_and_converts_to_strings() {
-    let value = run_datetime(vec![Value::String("2024-03-14 09:26:53".to_string())]);
+    let value = run_datetime(vec![Value::String(
+        "2024-03-14 09:26:53".to_string().into(),
+    )]);
     let rendered = datetime_string_array(&value)
         .expect("string array")
         .expect("datetime strings");
-    assert_eq!(rendered.data, vec!["14-Mar-2024 09:26:53".to_string()]);
+    assert_eq!(rendered.data(), vec!["14-Mar-2024 09:26:53".to_string()]);
 }
 
 #[test]
 fn datetime_missing_serial_renders_as_nat() {
     let value = datetime_object_from_serial_tensor(
+        None,
         Tensor::new(vec![f64::NAN], vec![1, 1]).unwrap(),
         DEFAULT_DATETIME_FORMAT,
     )
@@ -632,7 +635,7 @@ fn datetime_missing_serial_renders_as_nat() {
     let rendered = datetime_string_array(&value)
         .expect("string array")
         .expect("datetime strings");
-    assert_eq!(rendered.data, vec!["NaT".to_string()]);
+    assert_eq!(rendered.data(), vec!["NaT".to_string()]);
     assert_eq!(
         datetime_display_text(&value).expect("display"),
         Some("NaT".to_string())
@@ -641,7 +644,7 @@ fn datetime_missing_serial_renders_as_nat() {
 
 #[test]
 fn datetime_accepts_existing_datetime_input() {
-    let value = run_datetime(vec![Value::String("2024-03-14".to_string())]);
+    let value = run_datetime(vec![Value::String("2024-03-14".to_string().into())]);
     let converted = run_datetime(vec![
         value.clone(),
         Value::from("Format"),
@@ -677,7 +680,7 @@ fn datetime_parses_text_with_input_format() {
         .expect("string array")
         .expect("datetime strings");
     assert_eq!(
-        rendered.data,
+        rendered.data(),
         vec!["2024-03-14".to_string(), "2024-03-15".to_string()]
     );
 }
@@ -706,7 +709,7 @@ fn dateshift_supports_sunday_start_of_week_and_public_month_end() {
         .expect("string array")
         .expect("datetime strings");
     assert_eq!(
-        rendered.data,
+        rendered.data(),
         vec!["2024-03-10".to_string(), "2024-03-17".to_string()]
     );
 
@@ -724,7 +727,7 @@ fn dateshift_supports_sunday_start_of_week_and_public_month_end() {
     let rendered = datetime_string_array(&month_end)
         .expect("string array")
         .expect("datetime strings");
-    assert_eq!(rendered.data, vec!["2024-02-29 00:00:00".to_string()]);
+    assert_eq!(rendered.data(), vec!["2024-02-29 00:00:00".to_string()]);
 }
 
 #[test]
@@ -738,7 +741,7 @@ fn dateshift_rules_follow_current_week_and_boundary_contracts() {
     ))
     .expect("current-week Monday");
     assert_eq!(
-        datetime_string_array(&monday).unwrap().unwrap().data,
+        datetime_string_array(&monday).unwrap().unwrap().data(),
         vec!["11-Mar-2024".to_string()]
     );
 
@@ -750,7 +753,10 @@ fn dateshift_rules_follow_current_week_and_boundary_contracts() {
     ))
     .expect("numeric zero current-week Monday");
     assert_eq!(
-        datetime_string_array(&current_zero).unwrap().unwrap().data,
+        datetime_string_array(&current_zero)
+            .unwrap()
+            .unwrap()
+            .data(),
         vec!["11-Mar-2024".to_string()]
     );
 
@@ -762,7 +768,7 @@ fn dateshift_rules_follow_current_week_and_boundary_contracts() {
     ))
     .expect("next exact boundary");
     assert_eq!(
-        datetime_string_array(&next).unwrap().unwrap().data,
+        datetime_string_array(&next).unwrap().unwrap().data(),
         vec!["01-Apr-2024".to_string()]
     );
 
@@ -784,7 +790,7 @@ fn dateshift_rules_follow_current_week_and_boundary_contracts() {
         ))
         .expect("typed weekday");
         assert_eq!(
-            datetime_string_array(&shifted).unwrap().unwrap().data,
+            datetime_string_array(&shifted).unwrap().unwrap().data(),
             vec!["18-Mar-2024".to_string()]
         );
     }
@@ -906,7 +912,7 @@ fn datetime_date_vectors_normalize_and_day_supports_modern_and_legacy_forms() {
         vec![1, 3],
     )]);
     assert_eq!(
-        datetime_string_array(&datetime).unwrap().unwrap().data,
+        datetime_string_array(&datetime).unwrap().unwrap().data(),
         vec!["01-Jan-2025".to_string()]
     );
     assert_eq!(
@@ -922,10 +928,10 @@ fn datetime_date_vectors_normalize_and_day_supports_modern_and_legacy_forms() {
     let Value::Cell(names) = names else {
         panic!("expected cell names")
     };
-    let Value::CharArray(name) = &names.data[0] else {
+    let Value::CharArray(name) = &names.data()[0] else {
         panic!("expected char name")
     };
-    assert_eq!(name.data.iter().collect::<String>(), "Wed");
+    assert_eq!(name.data().iter().collect::<String>(), "Wed");
     assert_eq!(
         futures::executor::block_on(day_builtin(
             Value::from("2021/28/09"),
@@ -942,8 +948,8 @@ fn datetime_supports_format_assignment() {
     let updated = futures::executor::block_on(datetime_subsasgn(
         value,
         ".".to_string(),
-        Value::String(FORMAT_FIELD.to_string()),
-        Value::String("yyyy-MM-dd".to_string()),
+        Value::String(FORMAT_FIELD.to_string().into()),
+        Value::String("yyyy-MM-dd".to_string().into()),
     ))
     .expect("subsasgn");
     let rendered = datetime_display_text(&updated)
@@ -1010,6 +1016,7 @@ fn datetime_and_duration_interoperate() {
     assert_eq!(delta, Value::Num(1.0));
 
     let duration = crate::builtins::duration::duration_object_from_days_tensor(
+        None,
         Tensor::new(vec![1.0], vec![1, 1]).unwrap(),
         crate::builtins::duration::DEFAULT_DURATION_FORMAT,
     )
@@ -1042,17 +1049,19 @@ fn legacy_date_conversion_and_query_helpers_work() {
     assert_eq!(date_vector.shape(), [1, 6]);
     assert_eq!(&date_vector.materialize_f64()[..3], &[2024.0, 3.0, 14.0]);
 
-    let round_trip =
-        futures::executor::block_on(datenum_builtin(vec![Value::Tensor(date_vector.clone())]))
-            .expect("datenum");
-    assert_eq!(round_trip, Value::Num(serial));
-    let date_only_round_trip = futures::executor::block_on(datenum_builtin(vec![Value::Tensor(
-        Tensor::new(vec![2024.0, 3.0, 14.0], vec![1, 3]).unwrap(),
+    let round_trip = futures::executor::block_on(datenum_builtin_source(vec![Value::Tensor(
+        date_vector.clone(),
     )]))
-    .expect("datenum date vector");
+    .expect("datenum");
+    assert_eq!(round_trip, Value::Num(serial));
+    let date_only_round_trip =
+        futures::executor::block_on(datenum_builtin_source(vec![Value::Tensor(
+            Tensor::new(vec![2024.0, 3.0, 14.0], vec![1, 3]).unwrap(),
+        )]))
+        .expect("datenum date vector");
     assert_eq!(date_only_round_trip, Value::Num(serial));
 
-    let text = futures::executor::block_on(datestr_builtin(
+    let text = futures::executor::block_on(datestr_builtin_source(
         Value::Num(serial),
         vec![Value::from("yyyy-MM-dd")],
     ))
@@ -1060,8 +1069,8 @@ fn legacy_date_conversion_and_query_helpers_work() {
     let Value::CharArray(text) = text else {
         panic!("expected datestr char array");
     };
-    assert_eq!(text.data.iter().collect::<String>(), "2024-03-14");
-    let text_from_datevec = futures::executor::block_on(datestr_builtin(
+    assert_eq!(text.data().iter().collect::<String>(), "2024-03-14");
+    let text_from_datevec = futures::executor::block_on(datestr_builtin_source(
         Value::Tensor(Tensor::new(vec![2024.0, 3.0, 14.0], vec![1, 3]).unwrap()),
         vec![Value::from("yyyy-MM-dd")],
     ))
@@ -1070,12 +1079,13 @@ fn legacy_date_conversion_and_query_helpers_work() {
         panic!("expected datestr char array");
     };
     assert_eq!(
-        text_from_datevec.data.iter().collect::<String>(),
+        text_from_datevec.data().iter().collect::<String>(),
         "2024-03-14"
     );
 
-    let weekday = futures::executor::block_on(weekday_builtin(Value::Num(serial), Vec::new()))
-        .expect("weekday");
+    let weekday =
+        futures::executor::block_on(weekday_builtin_source(Value::Num(serial), Vec::new()))
+            .expect("weekday");
     assert_eq!(weekday, Value::Num(5.0));
     assert_eq!(
         futures::executor::block_on(eomday_builtin(Value::Num(2024.0), Value::Num(2.0)))
@@ -1118,7 +1128,7 @@ fn legacy_datevec_single_output_is_a_six_column_matrix() {
 fn two_by_three_date_vectors_keep_both_rows() {
     let vectors =
         Tensor::new(vec![2024.0, 2024.0, 3.0, 3.0, 14.0, 15.0], vec![2, 3]).expect("date vectors");
-    let serials = futures::executor::block_on(datenum_builtin(vec![Value::Tensor(vectors)]))
+    let serials = futures::executor::block_on(datenum_builtin_source(vec![Value::Tensor(vectors)]))
         .expect("two dates");
     let Value::Tensor(serials) = serials else {
         panic!("two input rows must yield two serial dates");
@@ -1156,8 +1166,9 @@ fn legacy_weekday_names_use_short_char_rows_by_default_and_long_on_request() {
         (vec![Value::from("long")], "Thursday"),
         (vec![Value::from("LONG")], "Thursday"),
     ] {
-        let result = futures::executor::block_on(weekday_builtin(Value::Num(serial), options))
-            .expect("weekday names");
+        let result =
+            futures::executor::block_on(weekday_builtin_source(Value::Num(serial), options))
+                .expect("weekday names");
         let Value::OutputList(outputs) = result else {
             panic!("two outputs expected");
         };
@@ -1165,7 +1176,7 @@ fn legacy_weekday_names_use_short_char_rows_by_default_and_long_on_request() {
         let Value::CharArray(names) = &outputs[1] else {
             panic!("day names must be character rows");
         };
-        assert_eq!(names.data.iter().collect::<String>(), expected);
+        assert_eq!(names.data().iter().collect::<String>(), expected);
     }
 }
 
@@ -1233,7 +1244,7 @@ fn legacy_date_extensions_reject_before_provider_access_in_matlab_mode() {
         Some("RunMat:compatibility:LegacyDatetimeTypedNumericExtension")
     );
 
-    let partial = futures::executor::block_on(datenum_builtin(vec![
+    let partial = futures::executor::block_on(datenum_builtin_source(vec![
         Value::Num(2024.0),
         Value::Num(3.0),
         Value::Num(14.0),
@@ -1258,7 +1269,7 @@ fn legacy_date_extensions_reject_before_provider_access_in_matlab_mode() {
     );
 
     let resident = unregistered_resident(vec![1, 1]);
-    let error = futures::executor::block_on(weekday_builtin(
+    let error = futures::executor::block_on(weekday_builtin_source(
         Value::GpuTensor(resident.handle.clone()),
         Vec::new(),
     ))
@@ -1267,8 +1278,9 @@ fn legacy_date_extensions_reject_before_provider_access_in_matlab_mode() {
         error.identifier(),
         Some("RunMat:compatibility:DatetimeGpuInputExtension")
     );
-    let bound = datetime_object_from_serials(vec![serial], vec![1, 1], DEFAULT_DATETIME_FORMAT)
-        .expect("datetime bound");
+    let bound =
+        datetime_object_from_serials(None, vec![serial], vec![1, 1], DEFAULT_DATETIME_FORMAT)
+            .expect("datetime bound");
     let between_error = futures::executor::block_on(isbetween_builtin(
         Value::GpuTensor(resident.handle.clone()),
         bound.clone(),
@@ -1295,8 +1307,9 @@ fn legacy_date_output_counts_reject_unsupported_requests() {
     }
     {
         let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
-        let err = futures::executor::block_on(weekday_builtin(Value::Num(serial), Vec::new()))
-            .expect_err("weekday has two outputs");
+        let err =
+            futures::executor::block_on(weekday_builtin_source(Value::Num(serial), Vec::new()))
+                .expect_err("weekday has two outputs");
         assert!(err.message().contains("at most two outputs"));
     }
 }
@@ -1311,8 +1324,10 @@ fn datenum_typed_integer_date_vector_reads_exact_storage() {
     )
     .expect("typed date vector");
     let typed_round_trip =
-        futures::executor::block_on(datenum_builtin(vec![Value::Tensor(typed_date_vector)]))
-            .expect("datenum typed date vector");
+        futures::executor::block_on(datenum_builtin_source(vec![Value::Tensor(
+            typed_date_vector,
+        )]))
+        .expect("datenum typed date vector");
     assert_eq!(typed_round_trip, Value::Num(serial));
 }
 
@@ -1322,8 +1337,9 @@ fn datenum_typed_integer_serials_read_exact_storage() {
     let serial = serial_for_date(2024, 3, 14).floor() as u32;
     let scalar = Tensor::new_integer(runmat_value::IntegerStorage::U32(vec![serial]), vec![1, 1])
         .expect("typed serial");
-    let scalar_out = futures::executor::block_on(datenum_builtin(vec![Value::Tensor(scalar)]))
-        .expect("datenum typed scalar serial");
+    let scalar_out =
+        futures::executor::block_on(datenum_builtin_source(vec![Value::Tensor(scalar)]))
+            .expect("datenum typed scalar serial");
     assert_eq!(scalar_out, Value::Num(f64::from(serial)));
 
     let vector = Tensor::new_integer(
@@ -1331,8 +1347,9 @@ fn datenum_typed_integer_serials_read_exact_storage() {
         vec![1, 2],
     )
     .expect("typed serial vector");
-    let vector_out = futures::executor::block_on(datenum_builtin(vec![Value::Tensor(vector)]))
-        .expect("datenum typed vector serial");
+    let vector_out =
+        futures::executor::block_on(datenum_builtin_source(vec![Value::Tensor(vector)]))
+            .expect("datenum typed vector serial");
     let Value::Tensor(vector_out) = vector_out else {
         panic!("expected datenum vector tensor");
     };
@@ -1366,25 +1383,25 @@ fn calendar_duration_helpers_and_datetime_arithmetic_work() {
     let rendered = datetime_string_array(&shifted)
         .expect("string array")
         .expect("datetime strings");
-    assert_eq!(rendered.data, vec!["2024-02-29".to_string()]);
+    assert_eq!(rendered.data(), vec!["2024-02-29".to_string()]);
 
-    let duration = futures::executor::block_on(calendar_duration_builtin(vec![
-        Value::Num(1.0),
-        Value::Num(2.0),
-        Value::Num(3.0),
-    ]))
+    let duration = futures::executor::block_on(calendar_duration_builtin_source(
+        None,
+        vec![Value::Num(1.0), Value::Num(2.0), Value::Num(3.0)],
+    ))
     .expect("calendarDuration");
     let (months, days) = calendar_duration_tensors_from_value(&duration).expect("components");
     assert_eq!(months.materialize_f64(), vec![14.0]);
     assert_eq!(days.materialize_f64(), vec![3.0]);
 
     assert!(futures::executor::block_on(calyears_builtin(Value::Num(f64::MAX))).is_err());
-    assert!(futures::executor::block_on(calendar_duration_builtin(vec![
-        Value::Num(f64::MAX),
-        Value::Num(f64::MAX),
-        Value::Num(0.0),
-    ]))
-    .is_err());
+    assert!(
+        futures::executor::block_on(calendar_duration_builtin_source(
+            None,
+            vec![Value::Num(f64::MAX), Value::Num(f64::MAX), Value::Num(0.0),]
+        ))
+        .is_err()
+    );
 }
 
 #[test]
@@ -1393,7 +1410,7 @@ fn business_day_helpers_use_weekends_and_holidays() {
     let new_year = serial_for_date(2024, 1, 1);
     let friday = serial_for_date(2024, 1, 5);
     let saturday = serial_for_date(2024, 1, 6);
-    let mask = futures::executor::block_on(isbusday_builtin(
+    let mask = futures::executor::block_on(isbusday_builtin_source(
         Value::Tensor(Tensor::new(vec![new_year, friday, saturday], vec![1, 3]).unwrap()),
         Vec::new(),
     ))
@@ -1404,7 +1421,7 @@ fn business_day_helpers_use_weekends_and_holidays() {
     assert_eq!(mask.data, vec![0, 1, 0]);
 
     assert_eq!(
-        futures::executor::block_on(isbusday_builtin(
+        futures::executor::block_on(isbusday_builtin_source(
             Value::Num(friday),
             vec![Value::Num(friday)],
         ))
@@ -1413,7 +1430,7 @@ fn business_day_helpers_use_weekends_and_holidays() {
     );
 
     assert_eq!(
-        futures::executor::block_on(isbusday_builtin(
+        futures::executor::block_on(isbusday_builtin_source(
             Value::Num(saturday),
             vec![
                 Value::Num(f64::NAN),
@@ -1426,7 +1443,7 @@ fn business_day_helpers_use_weekends_and_holidays() {
         Value::Bool(true)
     );
 
-    let business_days = futures::executor::block_on(busdays_builtin(
+    let business_days = futures::executor::block_on(busdays_builtin_source(
         Value::Num(friday),
         Value::Num(friday + 3.0),
         Vec::new(),
@@ -1437,7 +1454,7 @@ fn business_day_helpers_use_weekends_and_holidays() {
     };
     assert_eq!(business_days.materialize_f64(), vec![friday, friday + 3.0]);
 
-    let monthly = futures::executor::block_on(busdays_builtin(
+    let monthly = futures::executor::block_on(busdays_builtin_source(
         Value::Num(serial_for_date(2024, 1, 5)),
         Value::Num(serial_for_date(2024, 3, 8)),
         vec![Value::String("monthly".into())],
@@ -1457,7 +1474,7 @@ fn business_day_helpers_use_weekends_and_holidays() {
     );
 
     assert_eq!(
-        futures::executor::block_on(days252bus_builtin(
+        futures::executor::block_on(days252bus_builtin_source(
             Value::Num(friday),
             Value::Num(friday + 3.0),
             Vec::new(),
@@ -1466,7 +1483,7 @@ fn business_day_helpers_use_weekends_and_holidays() {
         Value::Num(2.0)
     );
     assert_eq!(
-        futures::executor::block_on(daysdif_builtin(
+        futures::executor::block_on(daysdif_builtin_source(
             Value::Num(friday),
             Value::Num(friday + 3.0),
             Vec::new(),
@@ -1477,7 +1494,7 @@ fn business_day_helpers_use_weekends_and_holidays() {
     let typed_basis =
         Tensor::new_integer(runmat_value::IntegerStorage::U8(vec![1]), vec![1, 1]).expect("basis");
     assert_eq!(
-        futures::executor::block_on(daysdif_builtin(
+        futures::executor::block_on(daysdif_builtin_source(
             Value::Num(serial_for_date(2024, 1, 30)),
             Value::Num(serial_for_date(2024, 2, 29)),
             vec![Value::Tensor(typed_basis)],
@@ -1487,7 +1504,7 @@ fn business_day_helpers_use_weekends_and_holidays() {
     );
     let sia_basis = || vec![Value::Num(1.0)];
     assert_eq!(
-        futures::executor::block_on(daysdif_builtin(
+        futures::executor::block_on(daysdif_builtin_source(
             Value::Num(serial_for_date(2023, 2, 28)),
             Value::Num(serial_for_date(2023, 3, 1)),
             sia_basis(),
@@ -1496,7 +1513,7 @@ fn business_day_helpers_use_weekends_and_holidays() {
         Value::Num(1.0)
     );
     assert_eq!(
-        futures::executor::block_on(daysdif_builtin(
+        futures::executor::block_on(daysdif_builtin_source(
             Value::Num(serial_for_date(2023, 2, 28)),
             Value::Num(serial_for_date(2024, 2, 29)),
             sia_basis(),
@@ -1504,20 +1521,20 @@ fn business_day_helpers_use_weekends_and_holidays() {
         .expect("SIA both dates last February"),
         Value::Num(360.0)
     );
-    assert!(futures::executor::block_on(daysdif_builtin(
+    assert!(futures::executor::block_on(daysdif_builtin_source(
         Value::Num(friday),
         Value::Num(friday + 3.0),
         vec![Value::Num(13.0)],
     ))
     .is_err());
-    assert!(futures::executor::block_on(daysdif_builtin(
+    assert!(futures::executor::block_on(daysdif_builtin_source(
         Value::Num(friday),
         Value::Num(friday + 3.0),
         vec![Value::Num(0.5)],
     ))
     .is_err());
     assert_eq!(
-        futures::executor::block_on(fbusdate_builtin(
+        futures::executor::block_on(fbusdate_builtin_source(
             Value::Num(2024.0),
             Value::Num(1.0),
             Vec::new(),
@@ -1526,7 +1543,7 @@ fn business_day_helpers_use_weekends_and_holidays() {
         Value::Num(serial_for_date(2024, 1, 2))
     );
     assert_eq!(
-        futures::executor::block_on(lbusdate_builtin(
+        futures::executor::block_on(lbusdate_builtin_source(
             Value::Num(2024.0),
             Value::Num(6.0),
             Vec::new(),
@@ -1535,7 +1552,7 @@ fn business_day_helpers_use_weekends_and_holidays() {
         Value::Num(serial_for_date(2024, 6, 28))
     );
     assert_eq!(
-        futures::executor::block_on(isbusday_builtin(
+        futures::executor::block_on(isbusday_builtin_source(
             Value::Num(serial_for_date(2021, 12, 31)),
             Vec::new(),
         ))
@@ -1543,7 +1560,7 @@ fn business_day_helpers_use_weekends_and_holidays() {
         Value::Bool(true)
     );
     assert_eq!(
-        futures::executor::block_on(lbusdate_builtin(
+        futures::executor::block_on(lbusdate_builtin_source(
             Value::Num(2021.0),
             Value::Num(12.0),
             Vec::new(),
@@ -1554,7 +1571,7 @@ fn business_day_helpers_use_weekends_and_holidays() {
     let weekend =
         Value::Tensor(Tensor::new(vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], vec![1, 7]).unwrap());
     assert_eq!(
-        futures::executor::block_on(fbusdate_builtin(
+        futures::executor::block_on(fbusdate_builtin_source(
             Value::Num(2003.0),
             Value::Num(3.0),
             vec![
@@ -1565,7 +1582,7 @@ fn business_day_helpers_use_weekends_and_holidays() {
         .expect("Saturday trading"),
         Value::Num(serial_for_date(2003, 3, 1))
     );
-    let datetime_output = futures::executor::block_on(lbusdate_builtin(
+    let datetime_output = futures::executor::block_on(lbusdate_builtin_source(
         Value::Num(2024.0),
         Value::Num(6.0),
         vec![
@@ -1583,14 +1600,14 @@ fn business_day_helpers_use_weekends_and_holidays() {
         vec![serial_for_date(2024, 6, 28)]
     );
 
-    let holidays =
-        futures::executor::block_on(holidays_builtin(vec![Value::Num(2024.0)])).expect("holidays");
+    let holidays = futures::executor::block_on(holidays_builtin_source(vec![Value::Num(2024.0)]))
+        .expect("holidays");
     let serials = serials_from_datetime_value(&holidays).expect("holiday serials");
     assert!(serials
         .materialize_f64()
         .contains(&serial_for_date(2024, 1, 1)));
 
-    let serial_holidays = futures::executor::block_on(holidays_builtin(vec![
+    let serial_holidays = futures::executor::block_on(holidays_builtin_source(vec![
         Value::Num(serial_for_date(2024, 1, 1)),
         Value::Num(serial_for_date(2024, 1, 3)),
     ]))
@@ -1603,7 +1620,7 @@ fn business_day_helpers_use_weekends_and_holidays() {
         vec![serial_for_date(2024, 1, 1)]
     );
 
-    let alternate = futures::executor::block_on(holidays_builtin(vec![
+    let alternate = futures::executor::block_on(holidays_builtin_source(vec![
         Value::Num(serial_for_date(2024, 1, 1)),
         Value::Num(serial_for_date(2024, 1, 31)),
         Value::Tensor(
@@ -1628,7 +1645,7 @@ fn business_day_helpers_use_weekends_and_holidays() {
         vec![serial_for_date(2024, 1, 15)]
     );
 
-    assert!(futures::executor::block_on(fbusdate_builtin(
+    assert!(futures::executor::block_on(fbusdate_builtin_source(
         Value::Num(2024.0),
         Value::Num(2.0),
         vec![Value::Tensor(
@@ -1643,15 +1660,18 @@ fn business_day_helpers_use_weekends_and_holidays() {
 
     let typed_year =
         Tensor::new_integer(runmat_value::IntegerStorage::U16(vec![2024]), vec![1, 1]).unwrap();
-    let holidays = futures::executor::block_on(holidays_builtin(vec![Value::Tensor(typed_year)]))
-        .expect("holidays from typed year");
+    let holidays =
+        futures::executor::block_on(holidays_builtin_source(vec![Value::Tensor(typed_year)]))
+            .expect("holidays from typed year");
     let serials = serials_from_datetime_value(&holidays).expect("holiday serials");
     assert!(serials
         .materialize_f64()
         .contains(&serial_for_date(2024, 1, 1)));
 
     let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
-    assert!(futures::executor::block_on(holidays_builtin(vec![Value::Num(2024.0)])).is_err());
+    assert!(
+        futures::executor::block_on(holidays_builtin_source(vec![Value::Num(2024.0)])).is_err()
+    );
 }
 
 #[test]
@@ -1659,14 +1679,15 @@ fn business_day_extensions_gate_before_resident_access() {
     let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
     let date = Value::Num(serial_for_date(2024, 1, 2));
     let typed = integer_tensor(runmat_value::IntegerStorage::U32(vec![739_253]), vec![1, 1]);
-    let typed_error = futures::executor::block_on(daysdif_builtin(typed, date.clone(), Vec::new()))
-        .expect_err("typed legacy date is an extension");
+    let typed_error =
+        futures::executor::block_on(daysdif_builtin_source(typed, date.clone(), Vec::new()))
+            .expect_err("typed legacy date is an extension");
     assert_eq!(
         typed_error.identifier(),
         Some("RunMat:compatibility:BusinessDayTypedLegacySerialExtension")
     );
 
-    let logical_error = futures::executor::block_on(daysdif_builtin(
+    let logical_error = futures::executor::block_on(daysdif_builtin_source(
         date.clone(),
         date.clone(),
         vec![Value::Bool(true)],
@@ -1678,7 +1699,7 @@ fn business_day_extensions_gate_before_resident_access() {
     );
 
     let allocation = unregistered_resident(vec![1, 1]);
-    let resident_error = futures::executor::block_on(isbusday_builtin(
+    let resident_error = futures::executor::block_on(isbusday_builtin_source(
         Value::GpuTensor(allocation.handle.clone()),
         Vec::new(),
     ))
@@ -1692,7 +1713,7 @@ fn business_day_extensions_gate_before_resident_access() {
     assert_eq!(allocation.probe.retirements(), 1);
 
     let weekend = runmat_value::LogicalArray::new(vec![1, 0, 0, 0, 0, 0, 1], vec![1, 7]).unwrap();
-    assert!(futures::executor::block_on(isbusday_builtin(
+    assert!(futures::executor::block_on(isbusday_builtin_source(
         date,
         vec![
             Value::Tensor(Tensor::new(vec![], vec![0, 0]).unwrap()),
@@ -1709,21 +1730,36 @@ fn every_business_day_entrypoint_rejects_resident_input_before_provider_access()
     let resident = Value::GpuTensor(allocation.handle.clone());
     let date = Value::Num(serial_for_date(2024, 1, 2));
     let cases = [
-        futures::executor::block_on(isbusday_builtin(resident.clone(), Vec::new())),
-        futures::executor::block_on(holidays_builtin(vec![date.clone(), resident.clone()])),
-        futures::executor::block_on(busdays_builtin(date.clone(), resident.clone(), Vec::new())),
-        futures::executor::block_on(days252bus_builtin(
+        futures::executor::block_on(isbusday_builtin_source(resident.clone(), Vec::new())),
+        futures::executor::block_on(holidays_builtin_source(vec![
+            date.clone(),
+            resident.clone(),
+        ])),
+        futures::executor::block_on(busdays_builtin_source(
             date.clone(),
             resident.clone(),
             Vec::new(),
         )),
-        futures::executor::block_on(daysdif_builtin(date.clone(), resident.clone(), Vec::new())),
-        futures::executor::block_on(fbusdate_builtin(
+        futures::executor::block_on(days252bus_builtin_source(
+            date.clone(),
+            resident.clone(),
+            Vec::new(),
+        )),
+        futures::executor::block_on(daysdif_builtin_source(
+            date.clone(),
+            resident.clone(),
+            Vec::new(),
+        )),
+        futures::executor::block_on(fbusdate_builtin_source(
             Value::Num(2024.0),
             resident.clone(),
             Vec::new(),
         )),
-        futures::executor::block_on(lbusdate_builtin(Value::Num(2024.0), resident, Vec::new())),
+        futures::executor::block_on(lbusdate_builtin_source(
+            Value::Num(2024.0),
+            resident,
+            Vec::new(),
+        )),
     ];
     for result in cases {
         assert_eq!(

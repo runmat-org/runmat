@@ -52,30 +52,33 @@ fn recognizes_distributed_cell_identity_without_materialization() {
         function,
         ordinal: 2,
     });
-    let value = Value::Distributed(Box::new(DistributedValueHandle {
-        id: DistributedObjectId::derive(&[b"iscell-value"]),
-        contract: DistributedValueId {
-            function,
-            ordinal: 1,
-        },
-        owner: DistributedOwner::Region(owner),
-        scope_id,
-        generation: 1,
-        pool: PoolHandle {
-            id: PoolId::derive(&[b"iscell-pool"]),
+    let value = Value::Distributed(
+        Box::new(DistributedValueHandle {
+            id: DistributedObjectId::derive(&[b"iscell-value"]),
+            contract: DistributedValueId {
+                function,
+                ordinal: 1,
+            },
+            owner: DistributedOwner::Region(owner),
             scope_id,
             generation: 1,
-        },
-        partition_count: LabCount(2),
-        value: ValueFact::scalar(ValueKindFact::Cell(CellFact {
-            element: Box::new(ValueFact::unknown(DynamicReason::RuntimeValue)),
-            elements: Vec::new(),
-            elements_complete: false,
-        })),
-        global_shape: vec![2, 2],
-        scheme: DistributionScheme::Replicated,
-        materializable: true,
-    }));
+            pool: PoolHandle {
+                id: PoolId::derive(&[b"iscell-pool"]),
+                scope_id,
+                generation: 1,
+            },
+            partition_count: LabCount(2),
+            value: ValueFact::scalar(ValueKindFact::Cell(CellFact {
+                element: Box::new(ValueFact::unknown(DynamicReason::RuntimeValue)),
+                elements: Vec::new(),
+                elements_complete: false,
+            })),
+            global_shape: vec![2, 2],
+            scheme: DistributionScheme::Replicated,
+            materializable: true,
+        })
+        .into(),
+    );
     assert!(run(value));
 }
 

@@ -12,9 +12,11 @@ pub(crate) fn text_scalar(value: &Value) -> Result<String, TextScalarError> {
             if array.rows == 1
                 && crate::builtins::common::shape::effective_rank(&array.shape) <= 2 =>
         {
-            Ok(array.data.iter().collect())
+            Ok(array.data().iter().collect())
         }
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].as_str().to_owned()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(array.data()[0].as_str().to_owned())
+        }
         _ => Err(TextScalarError::NotTextScalar),
     }
 }

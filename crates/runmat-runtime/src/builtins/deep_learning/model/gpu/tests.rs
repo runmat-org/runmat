@@ -1,3 +1,4 @@
+use crate::builtins::deep_learning::arguments::DeepLearningObjectEdit as _;
 use futures::executor::block_on;
 use runmat_accelerate_api::{
     handle_provenance, GpuHandleProvenance, HostNumericDataView, HostNumericTensorView,
@@ -6,13 +7,19 @@ use runmat_accelerate_api::{
 use runmat_value::{CellArray, NumericDType, Tensor, Value};
 
 use crate::builtins::deep_learning::model::plan::axes::AxisPlan;
+use crate::builtins::deep_learning::tests::fully_connected_layer_builtin;
 use crate::builtins::deep_learning::{layers::*, model::*, object};
 
 mod raw_inputs;
 
 fn dense_network() -> crate::execution::RootedValue {
-    let input = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
+    let input = block_on(feature_input_layer_builtin(
+        Value::Num(2.0),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap();
     let dense = block_on(fully_connected_layer_builtin(
+        None,
         Value::Num(1.0),
         vec![
             Value::String("Weights".into()),
@@ -139,15 +146,19 @@ fn explicit_nonsquare_cb_is_transposed_on_provider_and_restored_without_download
                 ("Format", Value::String("CB".into())),
                 ("Labels", Value::String("CB".into())),
             ],
-        );
+        )
+        .expect("fixture object");
         provider.reset_telemetry();
         let network = dense_network();
-        let Value::Object(result) =
-            block_on(forward_builtin(network.value().clone(), input, vec![])).unwrap()
-        else {
+        let Value::Object(result) = block_on(forward_builtin(
+            network.value().clone(),
+            input,
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap() else {
             panic!("dlarray output expected")
         };
-        let Some(Value::GpuTensor(output)) = result.properties.get("Data") else {
+        let Some(Value::GpuTensor(output)) = result.properties().get("Data") else {
             panic!("resident output expected")
         };
         assert_eq!(output.shape(), &[1, 3]);
@@ -157,7 +168,7 @@ fn explicit_nonsquare_cb_is_transposed_on_provider_and_restored_without_download
         );
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
         assert_eq!(
-            result.properties.get("Format"),
+            result.properties().get("Format"),
             Some(&Value::String("CB".into()))
         );
         let gathered =
@@ -190,15 +201,19 @@ fn single_cb_projects_double_parameters_once_and_keeps_native_resident_result() 
                 ("Format", Value::String("CB".into())),
                 ("Labels", Value::String("CB".into())),
             ],
-        );
+        )
+        .expect("fixture object");
         provider.reset_telemetry();
         let network = dense_network();
-        let Value::Object(result) =
-            block_on(forward_builtin(network.value().clone(), input, vec![])).unwrap()
-        else {
+        let Value::Object(result) = block_on(forward_builtin(
+            network.value().clone(),
+            input,
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap() else {
             panic!("dlarray output expected")
         };
-        let Some(Value::GpuTensor(output)) = result.properties.get("Data") else {
+        let Some(Value::GpuTensor(output)) = result.properties().get("Data") else {
             panic!("resident output expected")
         };
         assert_eq!(output.shape(), &[1, 3]);
@@ -218,8 +233,15 @@ fn single_cb_projects_double_parameters_once_and_keeps_native_resident_result() 
 #[test]
 fn cb_softmax_reduces_channels_not_batches() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
-        let input_layer = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
-        let softmax = block_on(softmax_layer_builtin(vec![])).unwrap();
+        let input_layer = block_on(feature_input_layer_builtin(
+            Value::Num(2.0),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap();
+        let softmax = block_on(softmax_layer_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap();
         let network = block_on(dlnetwork_builtin(vec![Value::Cell(
             CellArray::new(vec![input_layer, softmax], 2, 1).unwrap(),
         )]))
@@ -235,13 +257,17 @@ fn cb_softmax_reduces_channels_not_batches() {
                 ("Format", Value::String("CB".into())),
                 ("Labels", Value::String("CB".into())),
             ],
-        );
-        let Value::Object(expected) =
-            block_on(forward_builtin(network.value().clone(), host, vec![])).unwrap()
-        else {
+        )
+        .expect("fixture object");
+        let Value::Object(expected) = block_on(forward_builtin(
+            network.value().clone(),
+            host,
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap() else {
             panic!("host dlarray expected")
         };
-        let Some(Value::Tensor(expected)) = expected.properties.get("Data") else {
+        let Some(Value::Tensor(expected)) = expected.properties().get("Data") else {
             panic!("host tensor expected")
         };
         let handle = provider
@@ -257,14 +283,18 @@ fn cb_softmax_reduces_channels_not_batches() {
                 ("Format", Value::String("CB".into())),
                 ("Labels", Value::String("CB".into())),
             ],
-        );
+        )
+        .expect("fixture object");
         provider.reset_telemetry();
-        let Value::Object(actual) =
-            block_on(forward_builtin(network.value().clone(), resident, vec![])).unwrap()
-        else {
+        let Value::Object(actual) = block_on(forward_builtin(
+            network.value().clone(),
+            resident,
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap() else {
             panic!("resident dlarray expected")
         };
-        let Some(Value::GpuTensor(actual)) = actual.properties.get("Data") else {
+        let Some(Value::GpuTensor(actual)) = actual.properties().get("Data") else {
             panic!("resident tensor expected")
         };
         assert_eq!(actual.shape(), &[2, 3]);
@@ -402,7 +432,11 @@ fn gpu_route_distinguishes_missing_kernel_from_invalid_feature_geometry() {
             input.shape(),
         )
         .unwrap();
-        let sequence = block_on(sequence_input_layer_builtin(Value::Num(3.0), vec![])).unwrap();
+        let sequence = block_on(sequence_input_layer_builtin(
+            Value::Num(3.0),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap();
         let unsupported =
             super::admit_gpu_forward(&[sequence], &input, &axes, &axes, &axes, "forward").unwrap();
         assert!(matches!(
@@ -412,8 +446,15 @@ fn gpu_route_distinguishes_missing_kernel_from_invalid_feature_geometry() {
             ) if identity.is(runmat_builtins::DeepLearningLayerKind::SequenceInput.class())
         ));
 
-        let feature = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
-        let relu = block_on(relu_layer_builtin(vec![])).unwrap();
+        let feature = block_on(feature_input_layer_builtin(
+            Value::Num(2.0),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap();
+        let relu = block_on(relu_layer_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap();
         provider.reset_telemetry();
         let error =
             super::admit_gpu_forward(&[feature, relu], &input, &axes, &axes, &axes, "forward")
@@ -441,12 +482,13 @@ fn gpu_route_keeps_supported_fully_connected_execution_ready() {
         let Value::Object(network) = network_owner.value() else {
             panic!("network object expected")
         };
-        let Some(Value::Cell(layers)) = network.properties.get("Layers") else {
+        let Some(Value::Cell(layers)) = network.properties().get("Layers") else {
             panic!("network layers expected")
         };
         provider.reset_telemetry();
         assert!(matches!(
-            super::admit_gpu_forward(&layers.data, &input, &axes, &axes, &axes, "forward").unwrap(),
+            super::admit_gpu_forward(layers.data(), &input, &axes, &axes, &axes, "forward")
+                .unwrap(),
             super::GpuForwardAdmission::Ready(super::GpuForwardLayout::BatchChannels)
         ));
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
@@ -475,8 +517,15 @@ fn global_pool_requires_whole_route_capability_before_any_provider_effect() {
             &[3, 2],
         )
         .unwrap();
-        let sequence = block_on(sequence_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
-        let pool = block_on(global_average_pooling_1d_layer_builtin(vec![])).unwrap();
+        let sequence = block_on(sequence_input_layer_builtin(
+            Value::Num(2.0),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap();
+        let pool = block_on(global_average_pooling_1d_layer_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap();
         provider.reset_telemetry();
         let result = super::admit_gpu_forward(
             &[sequence, pool],
@@ -533,7 +582,11 @@ fn incompatible_resident_parameter_owner_is_error_before_gpu_effects() {
             input.shape(),
         )
         .unwrap();
-        let feature = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
+        let feature = block_on(feature_input_layer_builtin(
+            Value::Num(2.0),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap();
         let dense = object_with_identity(
             FULLY_CONNECTED_LAYER_CLASS,
             vec![
@@ -544,7 +597,8 @@ fn incompatible_resident_parameter_owner_is_error_before_gpu_effects() {
                     Value::Tensor(Tensor::new(vec![0.0], vec![1, 1]).unwrap()),
                 ),
             ],
-        );
+        )
+        .expect("fixture object");
         provider.reset_telemetry();
         let error =
             super::admit_gpu_forward(&[feature, dense], &input, &axes, &axes, &axes, "forward")
@@ -565,15 +619,17 @@ fn incompatible_resident_parameter_owner_is_error_before_gpu_effects() {
         let Value::Object(network_object) = &mut network else {
             panic!("network object expected")
         };
-        let Some(Value::Cell(layers)) = network_object.properties.get_mut("Layers") else {
+        let Some(Value::Cell(layers)) = network_object.fixture_dl_property_mut("Layers") else {
             panic!("network layers expected")
         };
-        let Value::Object(layer) = &mut layers.data[1] else {
+        let Value::Object(layer) =
+            &mut crate::builtins::deep_learning::tests::fixture_array_mut(layers)[1]
+        else {
             panic!("dense layer expected")
         };
         layer
-            .properties
-            .insert("Weights".into(), Value::GpuTensor(foreign.handle.clone()));
+            .replace_dl_property("Weights", Value::GpuTensor(foreign.handle.clone()))
+            .expect("fixture property");
         let resident_input = object(
             "dlarray",
             vec![
@@ -581,9 +637,15 @@ fn incompatible_resident_parameter_owner_is_error_before_gpu_effects() {
                 ("Format", Value::String("BC".into())),
                 ("Labels", Value::String("BC".into())),
             ],
-        );
+        )
+        .expect("fixture object");
         provider.reset_telemetry();
-        let public_error = block_on(forward_builtin(network, resident_input, vec![])).unwrap_err();
+        let public_error = block_on(forward_builtin(
+            network,
+            resident_input,
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap_err();
         assert_eq!(
             public_error.identifier(),
             Some("RunMat:deepLearning:InvalidInput")

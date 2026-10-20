@@ -5,7 +5,7 @@ use super::super::{error, output};
 
 const IDENTITY: &str = "tempdir";
 
-pub(super) fn run(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub(super) fn run(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &runmat_builtins::TEMPDIR_DESCRIPTOR,
         &runmat_builtins::TEMPDIR_ERROR_TOO_MANY_OUTPUTS,

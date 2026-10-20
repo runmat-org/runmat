@@ -18,7 +18,11 @@ use runmat_value::{CharArray, IntegerStorage, Tensor as BuiltinTensor};
 
 fn dlmread_builtin(path: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let _fs_lock = runmat_filesystem::provider_override_lock();
-    futures::executor::block_on(super::dlmread_builtin(None, path, rest))
+    futures::executor::block_on(super::dlmread_builtin(
+        None,
+        path,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    ))
 }
 
 static UNIQUE_COUNTER: AtomicUsize = AtomicUsize::new(0);

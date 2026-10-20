@@ -69,7 +69,7 @@ async fn textscan_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     input: Value,
     format_spec: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     if matches!(crate::output_count::current_output_count(), Some(n) if n > 1) {
         return Err(textscan_error_with(
@@ -83,7 +83,7 @@ async fn textscan_builtin(
             BUILTIN_NAME,
         )?;
     }
-    let admitted = admission::preflight(runtime.as_ref(), &input, &format_spec, &rest)?;
+    let admitted = admission::preflight(runtime.as_ref(), &input, &format_spec, rest.view())?;
     let input = crate::builtins::io::filetext::cooperation::await_io(
         runtime.as_ref(),
         BUILTIN_NAME,
@@ -94,14 +94,19 @@ async fn textscan_builtin(
     let parsed_format = admitted.format;
     let (repeat, options) = match admitted.controls {
         Some(controls) => controls,
-        None => parse_args(
-            &crate::builtins::io::filetext::cooperation::await_io(
+        None => {
+            let gathered = crate::builtins::io::filetext::cooperation::await_io(
                 runtime.as_ref(),
                 BUILTIN_NAME,
-                gather_rest(rest),
+                rest.try_map_preserving_roots_async(rest.len(), runtime.as_ref(), async |index| {
+                    gather_if_needed_async(&rest[index])
+                        .await
+                        .map_err(map_control_flow)
+                }),
             )
-            .await??,
-        )?,
+            .await??;
+            parse_args(gathered.view())?
+        }
     };
     let mut cooperation = TextscanCooperation::new(runtime.as_ref());
     cooperation.completed(0).await?;
@@ -131,18 +136,6 @@ fn is_typed_integer_value(value: &Value) -> bool {
     matches!(value, Value::Int(_))
         || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
         || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
-}
-
-async fn gather_rest(rest: Vec<Value>) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(rest.len());
-    for value in rest {
-        out.push(
-            gather_if_needed_async(&value)
-                .await
-                .map_err(map_control_flow)?,
-        );
-    }
-    Ok(out)
 }
 
 mod admission;

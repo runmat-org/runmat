@@ -2,16 +2,16 @@ use super::*;
 
 pub(in crate::builtins::stats::summary) async fn sample_distribution(
     distribution: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
     runtime: Option<&crate::context::RuntimeContext>,
 ) -> BuiltinResult<Value> {
     check_fitted_cancellation(runtime, FittedOperation::Sampling)?;
     let selection = DistributionSelection::from_value(FittedOperation::Sampling, &distribution)?;
-    admission::random(&selection, &rest)?;
-    ensure_random_extensions(&selection, &rest).await?;
-    let gpu_source = random_gpu_source(&selection, &rest)?;
+    admission::random(&selection, rest.view())?;
+    ensure_random_extensions(&selection, rest.view()).await?;
+    let gpu_source = random_gpu_source(&selection, rest.view())?;
     let (fit, shape) = match selection {
-        DistributionSelection::Fitted(fit) => (fit, parse_shape_args(&rest).await?),
+        DistributionSelection::Fitted(fit) => (fit, parse_shape_args(rest.view()).await?),
         DistributionSelection::Named(kind) => parse_named_random_args(kind, rest).await?,
     };
     let len = checked_output_len(&shape)?;
@@ -24,7 +24,7 @@ pub(in crate::builtins::stats::summary) async fn sample_distribution(
 
 pub(super) fn random_gpu_source(
     selection: &DistributionSelection,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<Option<GpuTensorHandle>> {
     gpu_helpers::select_resident_output_source(
         rest.iter()
@@ -64,7 +64,7 @@ pub(super) fn finish_random(
 
 pub(super) async fn ensure_random_extensions(
     selection: &DistributionSelection,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<()> {
     for value in rest {
         crate::builtins::common::validation::reject_typed_complex_integer(value, RANDOM_NAME)?;

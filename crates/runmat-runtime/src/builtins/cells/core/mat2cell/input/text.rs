@@ -12,7 +12,7 @@ pub(super) fn string(
     start: &[usize],
     sizes: &[usize],
 ) -> BuiltinResult<Value> {
-    let data = extract::block(&array.data, shape, start, sizes)?;
+    let data = extract::block(array.data(), shape, start, sizes)?;
     if data.len() == 1 {
         return Ok(Value::String(data.into_iter().next().expect("one string")));
     }
@@ -48,7 +48,7 @@ pub(super) fn character(
             .ok_or_else(partition_error)?;
         data.extend_from_slice(
             array
-                .data
+                .data()
                 .get(base..base + columns)
                 .ok_or_else(partition_error)?,
         );

@@ -26,7 +26,12 @@ fn complex_tensor(data: Vec<(f64, f64)>, rows: usize, cols: usize) -> Value {
 fn third_position_algorithm_has_a_typed_admission_route() {
     let a = tensor(vec![1.0, 1.0, 1.0, 0.0, 1.0, 2.0], 3, 2);
     let b = tensor(vec![1.0, 3.0, 5.0], 3, 1);
-    let output = block_on(lscov_builtin(a, b, vec![Value::from("orth")])).unwrap();
+    let output = block_on(lscov_builtin(
+        a,
+        b,
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("orth")]),
+    ))
+    .unwrap();
     let x = match output {
         Value::OutputList(values) => values
             .try_into_owned()
@@ -51,7 +56,12 @@ fn third_position_algorithm_has_a_typed_admission_route() {
 fn rank_one_response_matches_tensor_row_vector_admission() {
     let a = tensor(vec![1.0, 1.0, 1.0, 0.0, 1.0, 2.0], 3, 2);
     let b = Value::Tensor(Tensor::new(vec![1.0, 3.0, 5.0], vec![3]).unwrap());
-    let output = block_on(lscov_builtin(a, b, Vec::new())).unwrap();
+    let output = block_on(lscov_builtin(
+        a,
+        b,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap();
     let Value::Tensor(x) = output else {
         panic!("expected numeric coefficients")
     };
@@ -65,9 +75,12 @@ fn rank_one_response_matches_tensor_row_vector_admission() {
 fn rank_one_design_uses_historical_one_by_n_matrix_geometry() {
     let design = Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![2]).unwrap());
     let response = Value::Tensor(Tensor::new(vec![2.0], vec![1]).unwrap());
-    let Value::Tensor(coefficients) =
-        block_on(lscov_builtin(design, response, Vec::new())).unwrap()
-    else {
+    let Value::Tensor(coefficients) = block_on(lscov_builtin(
+        design,
+        response,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap() else {
         panic!("rank-one design must return a coefficient tensor")
     };
     assert_eq!(coefficients.shape(), &[2, 1]);
@@ -82,19 +95,31 @@ fn dense_rank_boundaries_preserve_design_and_weight_admission() {
     let b = tensor(vec![1.0, 3.0, 5.0], 3, 1);
 
     let rank_zero_design = Value::Tensor(Tensor::new(vec![1.0], Vec::new()).unwrap());
-    let error = block_on(lscov_builtin(rank_zero_design, b.clone(), Vec::new()))
-        .expect_err("rank-zero design has no matrix rows or columns");
+    let error = block_on(lscov_builtin(
+        rank_zero_design,
+        b.clone(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect_err("rank-zero design has no matrix rows or columns");
     assert!(error.message().contains("A must be a nonempty 2-D matrix"));
 
     let rank_zero_weight = Value::Tensor(Tensor::new(vec![1.0], Vec::new()).unwrap());
-    let error = block_on(lscov_builtin(a.clone(), b.clone(), vec![rank_zero_weight]))
-        .expect_err("rank-zero tensor weight is not a vector or covariance matrix");
+    let error = block_on(lscov_builtin(
+        a.clone(),
+        b.clone(),
+        crate::builtins::common::test_support::builtin_arguments(vec![rank_zero_weight]),
+    ))
+    .expect_err("rank-zero tensor weight is not a vector or covariance matrix");
     assert!(error.message().contains("V must be empty, a weight vector"));
 
     let rank_one_weight = Value::Tensor(Tensor::new(vec![1.0; 3], vec![3]).unwrap());
     for weight in [rank_one_weight, Value::Num(1.0)] {
-        let output = block_on(lscov_builtin(a.clone(), b.clone(), vec![weight]))
-            .expect("rank-one and scalar weights remain admitted");
+        let output = block_on(lscov_builtin(
+            a.clone(),
+            b.clone(),
+            crate::builtins::common::test_support::builtin_arguments(vec![weight]),
+        ))
+        .expect("rank-one and scalar weights remain admitted");
         let Value::Tensor(coefficients) = output else {
             panic!("expected numeric coefficients");
         };
@@ -109,8 +134,18 @@ fn empty_nd_weight_is_the_unweighted_fit() {
     let a = tensor(vec![1.0, 1.0, 1.0, 0.0, 1.0, 2.0], 3, 2);
     let b = tensor(vec![1.0, 3.0, 5.0], 3, 1);
     let empty = Value::Tensor(Tensor::new(Vec::new(), vec![0, 2, 3]).unwrap());
-    let baseline = block_on(lscov_builtin(a.clone(), b.clone(), Vec::new())).unwrap();
-    let weighted = block_on(lscov_builtin(a, b, vec![empty])).unwrap();
+    let baseline = block_on(lscov_builtin(
+        a.clone(),
+        b.clone(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap();
+    let weighted = block_on(lscov_builtin(
+        a,
+        b,
+        crate::builtins::common::test_support::builtin_arguments(vec![empty]),
+    ))
+    .unwrap();
     assert_eq!(baseline, weighted);
 }
 
@@ -159,7 +194,14 @@ fn lscov_solves_ordinary_least_squares_outputs() {
     let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
     let a = tensor(vec![1.0, 1.0, 1.0, 0.0, 1.0, 2.0], 3, 2);
     let b = tensor(vec![1.0, 3.0, 5.0], 3, 1);
-    let out = outputs(block_on(lscov_builtin(a, b, Vec::new())).unwrap());
+    let out = outputs(
+        block_on(lscov_builtin(
+            a,
+            b,
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap(),
+    );
     let x = tensor_ref(&out[0]);
     assert_eq!(x.shape(), &[2, 1]);
     assert_close(x.materialize_f64()[0], 1.0);
@@ -175,7 +217,14 @@ fn lscov_accepts_typed_integer_matrices_and_weights() {
     let a = poisoned_int_tensor(IntegerStorage::I16(vec![1, 1, 1, 0, 1, 2]), 3, 2, f64::NAN);
     let b = poisoned_int_tensor(IntegerStorage::I16(vec![1, 3, 5]), 3, 1, f64::NAN);
     let weights = poisoned_int_tensor(IntegerStorage::U16(vec![1, 1, 1]), 3, 1, f64::NAN);
-    let out = outputs(block_on(lscov_builtin(a, b, vec![weights])).unwrap());
+    let out = outputs(
+        block_on(lscov_builtin(
+            a,
+            b,
+            crate::builtins::common::test_support::builtin_arguments(vec![weights]),
+        ))
+        .unwrap(),
+    );
     let x = tensor_ref(&out[0]);
     assert_eq!(x.shape(), &[2, 1]);
     assert_close(x.materialize_f64()[0], 1.0);
@@ -198,7 +247,14 @@ fn lscov_reads_typed_integer_covariance_from_exact_storage() {
         f64::NAN,
     );
     let alg = Value::CharArray(CharArray::new_row("chol"));
-    let out = outputs(block_on(lscov_builtin(a, b, vec![v, alg])).unwrap());
+    let out = outputs(
+        block_on(lscov_builtin(
+            a,
+            b,
+            crate::builtins::common::test_support::builtin_arguments(vec![v, alg]),
+        ))
+        .unwrap(),
+    );
     let x = tensor_ref(&out[0]);
     assert_eq!(x.shape(), &[2, 1]);
     assert!(x.materialize_f64().iter().all(|value| value.is_finite()));
@@ -223,7 +279,14 @@ fn lscov_supports_weight_vector_weighting() {
     let a = tensor(vec![1.0, 1.0, 1.0, 0.0, 1.0, 2.0], 3, 2);
     let b = tensor(vec![1.0, 2.0, 10.0], 3, 1);
     let v = tensor(vec![1.0, 1.0, 100.0], 3, 1);
-    let out = outputs(block_on(lscov_builtin(a, b, vec![v])).unwrap());
+    let out = outputs(
+        block_on(lscov_builtin(
+            a,
+            b,
+            crate::builtins::common::test_support::builtin_arguments(vec![v]),
+        ))
+        .unwrap(),
+    );
     let x = tensor_ref(&out[0]);
     assert_close(x.materialize_f64()[0], -0.3972055888223553);
     assert_close(x.materialize_f64()[1], 5.191616766467066);
@@ -239,7 +302,14 @@ fn lscov_supports_zero_weight_observations() {
     let a = tensor(vec![1.0, 1.0, 1.0, 0.0, 1.0, 2.0], 3, 2);
     let b = tensor(vec![1.0, 3.0, 100.0], 3, 1);
     let w = tensor(vec![1.0, 1.0, 0.0], 3, 1);
-    let out = outputs(block_on(lscov_builtin(a, b, vec![w])).unwrap());
+    let out = outputs(
+        block_on(lscov_builtin(
+            a,
+            b,
+            crate::builtins::common::test_support::builtin_arguments(vec![w]),
+        ))
+        .unwrap(),
+    );
     let x = tensor_ref(&out[0]);
     assert_eq!(x.shape(), &[2, 1]);
     assert_close(x.materialize_f64()[0], 1.0);
@@ -261,7 +331,14 @@ fn lscov_supports_full_covariance_and_chol_algorithm() {
         3,
     );
     let alg = Value::CharArray(CharArray::new_row("chol"));
-    let out = outputs(block_on(lscov_builtin(a, b, vec![v, alg])).unwrap());
+    let out = outputs(
+        block_on(lscov_builtin(
+            a,
+            b,
+            crate::builtins::common::test_support::builtin_arguments(vec![v, alg]),
+        ))
+        .unwrap(),
+    );
     let x = tensor_ref(&out[0]);
     assert_eq!(x.shape(), &[2, 1]);
     assert!(x.materialize_f64().iter().all(|value| value.is_finite()));
@@ -281,8 +358,15 @@ fn lscov_orth_handles_singular_psd_covariance() {
         3,
         3,
     );
-    let alg = Value::String("orth".to_string());
-    let out = outputs(block_on(lscov_builtin(a, b, vec![v, alg])).unwrap());
+    let alg = Value::String("orth".to_string().into());
+    let out = outputs(
+        block_on(lscov_builtin(
+            a,
+            b,
+            crate::builtins::common::test_support::builtin_arguments(vec![v, alg]),
+        ))
+        .unwrap(),
+    );
     let x = tensor_ref(&out[0]);
     assert_close(x.materialize_f64()[0], 1.0);
     assert_close(x.materialize_f64()[1], 2.0);
@@ -294,7 +378,14 @@ fn lscov_supports_matrix_rhs() {
     let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let a = tensor(vec![1.0, 1.0, 1.0, 0.0, 1.0, 2.0], 3, 2);
     let b = tensor(vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0], 3, 2);
-    let out = outputs(block_on(lscov_builtin(a, b, Vec::new())).unwrap());
+    let out = outputs(
+        block_on(lscov_builtin(
+            a,
+            b,
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap(),
+    );
     let x = tensor_ref(&out[0]);
     assert_eq!(x.shape(), &[2, 2]);
     assert_close(x.materialize_f64()[0], 1.0);
@@ -320,7 +411,14 @@ fn lscov_supports_complex_design_and_response() {
         2,
     );
     let b = complex_tensor(vec![(1.0, 1.0), (3.0, 0.0), (5.0, -1.0)], 3, 1);
-    let out = outputs(block_on(lscov_builtin(a, b, Vec::new())).unwrap());
+    let out = outputs(
+        block_on(lscov_builtin(
+            a,
+            b,
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap(),
+    );
     let x = complex_ref(&out[0]);
     assert_eq!(x.shape(), &[2, 1]);
     assert!(x
@@ -337,7 +435,12 @@ fn lscov_rejects_fourth_output_for_matrix_rhs() {
     let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
     let a = tensor(vec![1.0, 1.0, 1.0, 0.0, 1.0, 2.0], 3, 2);
     let b = tensor(vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0], 3, 2);
-    let err = block_on(lscov_builtin(a, b, Vec::new())).unwrap_err();
+    let err = block_on(lscov_builtin(
+        a,
+        b,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap_err();
     assert!(err.message().contains("fourth output S"));
 }
 
@@ -346,7 +449,12 @@ fn lscov_accepts_zero_weights() {
     let a = tensor(vec![1.0, 1.0, 1.0, 0.0, 1.0, 2.0], 3, 2);
     let b = tensor(vec![1.0, 3.0, 5.0], 3, 1);
     let v = tensor(vec![1.0, 0.0, 1.0], 3, 1);
-    block_on(lscov_builtin(a, b, vec![v])).expect("zero weights are allowed");
+    block_on(lscov_builtin(
+        a,
+        b,
+        crate::builtins::common::test_support::builtin_arguments(vec![v]),
+    ))
+    .expect("zero weights are allowed");
 }
 
 #[test]
@@ -354,7 +462,12 @@ fn lscov_rejects_negative_weights() {
     let a = tensor(vec![1.0, 1.0, 1.0, 0.0, 1.0, 2.0], 3, 2);
     let b = tensor(vec![1.0, 3.0, 5.0], 3, 1);
     let v = tensor(vec![1.0, -1.0, 1.0], 3, 1);
-    let err = block_on(lscov_builtin(a, b, vec![v])).unwrap_err();
+    let err = block_on(lscov_builtin(
+        a,
+        b,
+        crate::builtins::common::test_support::builtin_arguments(vec![v]),
+    ))
+    .unwrap_err();
     assert!(err.message().contains("finite nonnegative"));
 }
 
@@ -363,7 +476,14 @@ fn lscov_underdetermined_mse_is_zero() {
     let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let a = tensor(vec![1.0, 0.0, 1.0, 0.0, 1.0, 1.0], 2, 3);
     let b = tensor(vec![1.0, 2.0], 2, 1);
-    let out = outputs(block_on(lscov_builtin(a, b, Vec::new())).unwrap());
+    let out = outputs(
+        block_on(lscov_builtin(
+            a,
+            b,
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap(),
+    );
     assert_eq!(tensor_ref(&out[0]).shape(), &[3, 1]);
     assert_close(tensor_ref(&out[2]).materialize_f64()[0], 0.0);
 }

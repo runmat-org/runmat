@@ -213,9 +213,13 @@ fn cell_row_major_pos_from_linear(
     ca: &runmat_value::CellArray,
     idx: usize,
 ) -> Result<usize, RuntimeError> {
-    if idx == 0 || idx > ca.data.len() {
+    if idx == 0 || idx > ca.data().len() {
         return Err(indexing_error_with_identifier(
-            format!("Cell index {} out of bounds (1 to {})", idx, ca.data.len()),
+            format!(
+                "Cell index {} out of bounds (1 to {})",
+                idx,
+                ca.data().len()
+            ),
             "RunMat:CellIndexOutOfBounds",
         ));
     }
@@ -501,13 +505,13 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
 
             if indices.len() == 1 {
                 let idx = indices[0] as usize;
-                if idx < 1 || idx > array.data.len() {
+                if idx < 1 || idx > array.data().len() {
                     return Err(indexing_error_with_identifier(
-                        format!("Index {} out of bounds (1 to {})", idx, array.data.len()),
+                        format!("Index {} out of bounds (1 to {})", idx, array.data().len()),
                         "RunMat:IndexOutOfBounds",
                     ));
                 }
-                Ok(Value::Symbolic(array.data[idx - 1].clone()))
+                Ok(Value::Symbolic(array.data()[idx - 1].clone()))
             } else if indices.len() == 2 {
                 let row = indices[0] as usize;
                 let col = indices[1] as usize;
@@ -517,7 +521,7 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
                 } else if is_scalar_shape(&array.shape) {
                     vec![1, 1]
                 } else {
-                    array.shape.clone()
+                    array.shape.to_vec()
                 };
                 let rows = shape.first().copied().unwrap_or(1);
                 let cols = shape.get(1).copied().unwrap_or(1);
@@ -536,7 +540,7 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
                 }
 
                 let linear_idx = (row - 1) + (col - 1) * rows;
-                Ok(Value::Symbolic(array.data[linear_idx].clone()))
+                Ok(Value::Symbolic(array.data()[linear_idx].clone()))
             } else {
                 Err(indexing_error(format!(
                     "Symbolic arrays support 1 or 2 indices, got {}",
@@ -550,14 +554,14 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
             }
             if indices.len() == 1 {
                 let idx = positive_integer_index(indices[0], "RunMat:IndexOutOfBounds")?;
-                let total = sa.data.len();
+                let total = sa.data().len();
                 if idx < 1 || idx > total {
                     return Err(indexing_error_with_identifier(
                         format!("Index {idx} out of bounds (1 to {total})"),
                         "RunMat:IndexOutOfBounds",
                     ));
                 }
-                Ok(Value::String(sa.data[idx - 1].clone()))
+                Ok(Value::String(sa.data()[idx - 1].clone()))
             } else if indices.len() == 2 {
                 let row = positive_integer_index(indices[0], "RunMat:IndexOutOfBounds")?;
                 let col = positive_integer_index(indices[1], "RunMat:IndexOutOfBounds")?;
@@ -571,7 +575,7 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
                     ));
                 }
                 let idx = (row - 1) + (col - 1) * rows;
-                Ok(Value::String(sa.data[idx].clone()))
+                Ok(Value::String(sa.data()[idx].clone()))
             } else {
                 Err(indexing_error(format!(
                     "StringArray supports 1 or 2 indices, got {}",
@@ -596,14 +600,18 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
             }
             if indices.len() == 1 {
                 let idx = positive_integer_cell_index(indices[0], "RunMat:CellIndexOutOfBounds")?;
-                if idx < 1 || idx > ca.data.len() {
+                if idx < 1 || idx > ca.data().len() {
                     return Err(indexing_error_with_identifier(
-                        format!("Cell index {} out of bounds (1 to {})", idx, ca.data.len()),
+                        format!(
+                            "Cell index {} out of bounds (1 to {})",
+                            idx,
+                            ca.data().len()
+                        ),
                         "RunMat:CellIndexOutOfBounds",
                     ));
                 }
                 let pos = cell_row_major_pos_from_linear(ca, idx)?;
-                Ok(ca.data[pos].clone())
+                Ok(ca.data()[pos].clone())
             } else if indices.len() == 2 {
                 let row =
                     positive_integer_cell_index(indices[0], "RunMat:CellSubscriptOutOfBounds")?;
@@ -615,7 +623,7 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
                         "RunMat:CellSubscriptOutOfBounds",
                     ));
                 }
-                Ok(ca.data[(row - 1) * ca.cols + (col - 1)].clone())
+                Ok(ca.data()[(row - 1) * ca.cols + (col - 1)].clone())
             } else {
                 Err(indexing_error(format!(
                     "Cell arrays support 1 or 2 indices, got {}",
@@ -1096,17 +1104,17 @@ mod tests {
     fn cell_linear_index_uses_column_major_semantics_for_2d_cells() {
         let cell = CellArray::new(
             vec![
-                Value::String("r1c1".to_string()),
-                Value::String("r1c2".to_string()),
-                Value::String("r2c1".to_string()),
-                Value::String("r2c2".to_string()),
+                Value::String("r1c1".to_string().into()),
+                Value::String("r1c2".to_string().into()),
+                Value::String("r2c1".to_string().into()),
+                Value::String("r2c2".to_string().into()),
             ],
             2,
             2,
         )
         .expect("cell");
         let value = block_on(perform_indexing(&Value::Cell(cell), &[2.0])).expect("cell read");
-        assert_eq!(value, Value::String("r2c1".to_string()));
+        assert_eq!(value, Value::String("r2c1".to_string().into()));
     }
 
     #[test]

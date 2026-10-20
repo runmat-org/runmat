@@ -98,7 +98,7 @@ fn unwrap_error_with_message(
 async fn unwrap_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     value: Value,
-    mut rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let mut cooperation = SignalCooperation::new(runtime.as_ref(), BUILTIN_NAME);
     cooperation.completed(0).await?;
@@ -121,19 +121,45 @@ async fn unwrap_builtin(
             BUILTIN_NAME,
         )?;
     }
-    if let Some(tolerance) = rest.first() {
+    let prepared_tolerance = if let Some(tolerance) = rest.first() {
         let prepared = cooperation
             .prepare_integer_boundary(tolerance, &UNWRAP_INTEGER_TOLERANCE_EXTENSION, "tolerance")
             .await?;
-        if let Some(payload) = prepared.into_resident_payload() {
-            rest[0] = payload.into_value().map_err(|cause| {
-                let mut error = unwrap_error_with_detail(&UNWRAP_ERROR_INVALID_TOLERANCE, cause);
-                error.gpu_gather_retry = crate::GpuGatherRetry::Never;
-                error
-            })?;
-        }
-    }
-    let options = parse_arguments(&rest, &mut cooperation).await?;
+        prepared
+            .into_resident_payload()
+            .map(|payload| {
+                payload.into_value().map_err(|cause| {
+                    let mut error =
+                        unwrap_error_with_detail(&UNWRAP_ERROR_INVALID_TOLERANCE, cause);
+                    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                    error
+                })
+            })
+            .transpose()?
+    } else {
+        None
+    };
+    let rest = if let Some(tolerance) = prepared_tolerance {
+        let source = rest.into_function_arguments();
+        let count = source.len();
+        crate::execution::RootedValues::transform_arguments(
+            &source,
+            count,
+            None,
+            runtime.as_ref(),
+            |index| {
+                Ok(if index == 0 {
+                    tolerance.clone()
+                } else {
+                    source.get(index).expect("unwrap argument index").clone()
+                })
+            },
+        )?
+        .into()
+    } else {
+        rest
+    };
+    let options = parse_arguments(rest.view(), &mut cooperation).await?;
     match prepared_phase.unwrap_or(value) {
         Value::GpuTensor(handle) => unwrap_gpu(handle, options, &mut cooperation).await,
         Value::Complex(_, _) | Value::ComplexTensor(_) => Err(unwrap_error_with_detail(
@@ -151,7 +177,7 @@ struct UnwrapOptions {
 }
 
 async fn parse_arguments(
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     cooperation: &mut SignalCooperation,
 ) -> BuiltinResult<UnwrapOptions> {
     match args.len() {
@@ -381,7 +407,11 @@ pub(crate) mod tests {
     const TOL: f64 = 1.0e-12;
 
     fn unwrap_call(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(unwrap_builtin(None, value, rest))
+        block_on(unwrap_builtin(
+            None,
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     fn as_tensor(value: Value) -> Tensor {

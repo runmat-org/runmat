@@ -1074,7 +1074,7 @@ fn union_char_elements(
         for row in 0..a.rows {
             let linear_idx = row + col * a.rows;
             let data_idx = row * a.cols + col;
-            let ch = a.data[data_idx];
+            let ch = a.data()[data_idx];
             let key = ch as u32;
             match map.entry(key) {
                 Entry::Occupied(_) => {}
@@ -1097,7 +1097,7 @@ fn union_char_elements(
         for row in 0..b.rows {
             let linear_idx = row + col * b.rows;
             let data_idx = row * b.cols + col;
-            let ch = b.data[data_idx];
+            let ch = b.data()[data_idx];
             let key = ch as u32;
             match map.entry(key) {
                 Entry::Occupied(occ) => {
@@ -1147,7 +1147,7 @@ fn union_char_rows(
         let mut row_values = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r * cols + c;
-            row_values.push(a.data[idx]);
+            row_values.push(a.data()[idx]);
         }
         let key = RowCharKey::from_slice(&row_values);
         match map.entry(key) {
@@ -1170,7 +1170,7 @@ fn union_char_rows(
         let mut row_values = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r * cols + c;
-            row_values.push(b.data[idx]);
+            row_values.push(b.data()[idx]);
         }
         let key = RowCharKey::from_slice(&row_values);
         match map.entry(key) {
@@ -1218,7 +1218,7 @@ fn union_string_elements(
     let mut map: HashMap<&str, usize> = HashMap::new();
     let mut order_counter = 0usize;
 
-    for (idx, value) in a.data.iter().enumerate() {
+    for (idx, value) in a.data().iter().enumerate() {
         match map.entry(value.as_str()) {
             Entry::Occupied(_) => {}
             Entry::Vacant(v) => {
@@ -1235,7 +1235,7 @@ fn union_string_elements(
         }
     }
 
-    for (idx, value) in b.data.iter().enumerate() {
+    for (idx, value) in b.data().iter().enumerate() {
         match map.entry(value.as_str()) {
             Entry::Occupied(occ) => {
                 let entry = &mut entries[*occ.get()];
@@ -1288,7 +1288,7 @@ fn union_string_rows(
         let mut row_values = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows_a;
-            row_values.push(&a.data[idx]);
+            row_values.push(&a.data()[idx]);
         }
         let key = RowStringKey(row_values.clone());
         match map.entry(key) {
@@ -1311,7 +1311,7 @@ fn union_string_rows(
         let mut row_values = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows_b;
-            row_values.push(&b.data[idx]);
+            row_values.push(&b.data()[idx]);
         }
         let key = RowStringKey(row_values.clone());
         match map.entry(key) {
@@ -2464,7 +2464,7 @@ pub(crate) mod tests {
             Value::CharArray(arr) => {
                 assert_eq!(arr.rows, 4);
                 assert_eq!(arr.cols, 1);
-                assert_eq!(arr.data, vec!['a', 'm', 'x', 'z']);
+                assert_eq!(arr.data(), vec!['a', 'm', 'x', 'z']);
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -2507,7 +2507,7 @@ pub(crate) mod tests {
             Value::StringArray(arr) => {
                 assert_eq!(arr.shape, vec![3, 2]);
                 assert_eq!(
-                    arr.data,
+                    arr.data(),
                     vec![
                         "alpha".to_string(),
                         "gamma".to_string(),

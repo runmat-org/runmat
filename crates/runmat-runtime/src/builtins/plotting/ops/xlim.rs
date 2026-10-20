@@ -21,26 +21,29 @@ use super::state::{
 )]
 pub fn xlim_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     xlim_with_runtime(runtime.as_ref(), args)
 }
 
 #[cfg(test)]
 pub fn xlim_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    xlim_with_runtime(None, args)
+    xlim_with_runtime(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(args),
+    )
 }
 
 fn xlim_with_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &XLIM_DESCRIPTOR,
         &XLIM_ERROR_TOO_MANY_OUTPUTS,
         "xlim",
     )?;
-    let call = prepare_limit_call(runtime, "xlim", &args, false)?;
+    let call = prepare_limit_call(runtime, "xlim", args.view(), false)?;
 
     if matches!(
         call.command,

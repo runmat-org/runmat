@@ -96,22 +96,20 @@ fn multiple_grouping_vectors_return_one_label_column_each() {
         };
         assert_eq!((labels.rows, labels.cols), (1, 2));
         if cellstr {
-            let Value::Cell(values) = &labels.data[0] else {
+            let Value::Cell(values) = &labels.data()[0] else {
                 panic!("cellstr labels must retain their class");
             };
             assert_eq!((values.rows, values.cols), (2, 1));
-            for (value, expected) in values.data.iter().zip(['a', 'b']) {
-                assert!(
-                    matches!(value, Value::CharArray(chars) if chars.data.as_slice() == [expected])
-                );
+            for (value, expected) in values.data().iter().zip(['a', 'b']) {
+                assert!(matches!(value, Value::CharArray(chars) if chars.data() == [expected]));
             }
         } else {
             assert!(
-                matches!(&labels.data[0], Value::StringArray(values) if values.data == ["a", "b"])
+                matches!(&labels.data()[0], Value::StringArray(values) if values.data() == ["a", "b"])
             );
         }
         assert!(
-            matches!(&labels.data[1], Value::LogicalArray(values) if values.data.as_slice() == [0, 1])
+            matches!(&labels.data()[1], Value::LogicalArray(values) if values.data.as_slice() == [0, 1])
         );
         assert!(
             matches!(&outputs[0], Value::Tensor(values) if values.materialize_f64() == [1.0, 2.0])
@@ -121,14 +119,12 @@ fn multiple_grouping_vectors_return_one_label_column_each() {
                 let Value::Cell(values) = &retained[0] else {
                     panic!("original shared cellstr must remain intact");
                 };
-                for (value, expected) in values.data.iter().zip(['b', 'a', 'b']) {
-                    assert!(
-                        matches!(value, Value::CharArray(chars) if chars.data.as_slice() == [expected])
-                    );
+                for (value, expected) in values.data().iter().zip(['b', 'a', 'b']) {
+                    assert!(matches!(value, Value::CharArray(chars) if chars.data() == [expected]));
                 }
             } else {
                 assert!(
-                    matches!(&retained[0], Value::StringArray(values) if values.data == ["b", "a", "b"])
+                    matches!(&retained[0], Value::StringArray(values) if values.data() == ["b", "a", "b"])
                 );
             }
         }

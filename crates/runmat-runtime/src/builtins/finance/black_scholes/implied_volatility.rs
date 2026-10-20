@@ -6,16 +6,18 @@ use runmat_value::{CellArray, CharArray, StringArray};
 
 #[runmat_macros::runtime_builtin(
     name = "blsimpv",
+    context = true,
     binding_variant = "default",
     builtin_path = "crate::builtins::finance::black_scholes::implied_volatility"
 )]
 pub(super) async fn blsimpv_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     price: Value,
     strike: Value,
     rate: Value,
     time: Value,
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let requested_outputs = crate::output_count::current_output_count();
     if requested_outputs == Some(0) {
@@ -63,7 +65,7 @@ pub(super) async fn blsimpv_builtin(
                 )?;
             }
             if name == "yield" && !is_empty_value(&option[1]) {
-                pricing_values.push(&option[1]);
+                pricing_values.push(option.get(1).expect("validated option pair"));
             }
             if matches!(name.as_str(), "limit" | "tolerance")
                 && !is_empty_value(&option[1])
@@ -81,22 +83,37 @@ pub(super) async fn blsimpv_builtin(
         }
         admission::preflight_numeric_shapes(BLSIMPV, pricing_values)?;
     }
-    let gathered_rest = gather_values(BLSIMPV, rest).await?;
-    let options = ImpvOptions::parse(gathered_rest)?;
-    let values = gather_values(
-        BLSIMPV,
-        vec![
-            price,
-            strike,
-            rate,
-            time,
-            value,
-            options.yield_value.clone(),
-            options.class_value.clone(),
-        ],
-    )
-    .await?;
-    let mut numeric = values;
+    let gathered_rest = rest
+        .try_map_preserving_roots_async(rest.len(), runtime.as_ref(), async |index| {
+            let gather = gather_if_needed_async(&rest[index]);
+            match runtime.as_ref() {
+                Some(runtime) => runtime.scope(gather).await,
+                None => gather.await,
+            }
+            .map_err(|err| with_context(BLSIMPV, err))
+        })
+        .await?;
+    let options = ImpvOptions::parse(gathered_rest.view())?;
+    let fixed = [
+        price,
+        strike,
+        rate,
+        time,
+        value,
+        options.yield_value.clone(),
+        options.class_value.clone(),
+    ];
+    let fixed = crate::call::BuiltinArguments::from_borrowed(&fixed, runtime.as_ref())?;
+    let mut numeric = fixed
+        .try_map_preserving_roots_async(fixed.len(), runtime.as_ref(), async |index| {
+            let gather = gather_if_needed_async(&fixed[index]);
+            match runtime.as_ref() {
+                Some(runtime) => runtime.scope(gather).await,
+                None => gather.await,
+            }
+            .map_err(|err| with_context(BLSIMPV, err))
+        })
+        .await?;
     let class_value = numeric.pop().expect("class value");
     let inputs = BroadcastInputs::from_values(BLSIMPV, numeric, precision::PricingClass::Double)?;
     let classes = ClassInput::from_value(class_value, &inputs.shape, inputs.len)?;
@@ -165,12 +182,12 @@ impl ClassInput {
             }),
             Value::StringArray(array) => {
                 let text_shape = string_array_shape(&array);
-                Self::from_texts(array.data.as_slice(), text_shape, shape, len)
+                Self::from_texts(array.data_owner().as_slice(), text_shape, shape, len)
             }
             Value::CharArray(chars) => {
                 if chars.rows == 1 {
                     Ok(Self {
-                        values: vec![parse_class_text(&chars.data.iter().collect::<String>())?],
+                        values: vec![parse_class_text(&chars.data().iter().collect::<String>())?],
                         is_scalar: true,
                     })
                 } else {
@@ -188,9 +205,9 @@ impl ClassInput {
     }
 
     fn from_cell(cell: CellArray, shape: &[usize], len: usize) -> BuiltinResult<Self> {
-        if cell.data.len() == 1 {
+        if cell.data().len() == 1 {
             return Ok(Self {
-                values: vec![class_from_cell_value(&cell.data[0])?],
+                values: vec![class_from_cell_value(&cell.data()[0])?],
                 is_scalar: true,
             });
         }
@@ -203,7 +220,7 @@ impl ClassInput {
                 &ERROR_INVALID_INPUT,
             ));
         }
-        if cell.data.len() != len {
+        if cell.data().len() != len {
             return Err(error(
                 BLSIMPV,
                 "blsimpv: Class cell length must match nonscalar inputs",
@@ -211,7 +228,7 @@ impl ClassInput {
             ));
         }
         let values = cell
-            .data
+            .data()
             .iter()
             .map(class_from_cell_value)
             .collect::<BuiltinResult<Vec<_>>>()?;
@@ -271,7 +288,7 @@ fn class_from_cell_value(value: &Value) -> BuiltinResult<OptionClass> {
     match value {
         Value::String(text) => parse_class_text(text),
         Value::CharArray(chars) if chars.rows == 1 => {
-            parse_class_text(&chars.data.iter().collect::<String>())
+            parse_class_text(&chars.data().iter().collect::<String>())
         }
         Value::Bool(flag) => Ok(class_from_bool(*flag)),
         Value::LogicalArray(logical) if logical.len() == 1 => {
@@ -306,7 +323,7 @@ fn char_rows(chars: CharArray) -> Vec<String> {
     for row in 0..chars.rows {
         let mut text = String::new();
         for col in 0..chars.cols {
-            text.push(chars.data[row + col * chars.rows]);
+            text.push(chars.data()[row + col * chars.rows]);
         }
         rows.push(text);
     }
@@ -328,7 +345,7 @@ enum ImpvMethod {
 }
 
 impl ImpvOptions {
-    fn parse(args: Vec<Value>) -> BuiltinResult<Self> {
+    fn parse(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<Self> {
         if !args.len().is_multiple_of(2) {
             return Err(error(
                 BLSIMPV,
@@ -509,4 +526,24 @@ fn option_value(params: ImpvParams, volatility: f64) -> f64 {
         OptionClass::Call => result.call,
         OptionClass::Put => result.put,
     }
+}
+#[cfg(test)]
+pub(crate) async fn blsimpv_builtin_source(
+    price: Value,
+    strike: Value,
+    rate: Value,
+    time: Value,
+    value: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    blsimpv_builtin(
+        None,
+        price,
+        strike,
+        rate,
+        time,
+        value,
+        crate::call::BuiltinArguments::from_borrowed(&rest, None)?,
+    )
+    .await
 }

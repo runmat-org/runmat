@@ -69,6 +69,7 @@ fn launch(pool: &RemotePoolDriver) -> runmat_execution_runner::AttemptRequest {
         .unwrap();
     driver
         .handle(DriverCommand::RegisterWorker(WorkerSpec {
+            host: crate::test_support::host_inventory(),
             id: WorkerId::derive(&[b"checkpoint-worker"]),
             pool_id: pool.pool_id,
             resources: inventory(1000),
@@ -90,11 +91,18 @@ async fn committed_download_survives_cold_restore_and_gc_but_pending_download_is
     let reference = object_reference(&pool.value_scope, b"committed-only");
     let worker = ResultObjectWorker {
         spec: WorkerSpec {
+            host: crate::test_support::host_inventory(),
             id: attempt.worker_id,
             pool_id: pool.pool_id,
             resources: inventory(1000),
         },
-        bundle: Arc::new(pool.bundle.to_vec()),
+        bundle: Arc::new(
+            pool.direct_bundle
+                .as_ref()
+                .expect("direct fixture bundle")
+                .bytes
+                .to_vec(),
+        ),
         reference: reference.clone(),
         bytes: Arc::new(b"committed-only".to_vec()),
         corrupt_download: false,
@@ -166,7 +174,13 @@ async fn committed_download_survives_cold_restore_and_gc_but_pending_download_is
         vec![reference.clone()]
     );
     let bytes = pool.checkpoint_object(&reference).unwrap();
-    let bundle = Arc::clone(&pool.bundle);
+    let bundle = Arc::clone(
+        &pool
+            .direct_bundle
+            .as_ref()
+            .expect("direct fixture bundle")
+            .bytes,
+    );
     drop(pool);
     let restored = RemotePoolDriver::restore_checkpoint(
         checkpoint.clone(),
@@ -213,7 +227,13 @@ async fn scoped_descendant_inventory_preserves_typed_aliases_across_restore() {
     let restored = RemotePoolDriver::restore_checkpoint(
         checkpoint.clone(),
         authority(&checkpoint),
-        Arc::clone(&pool.bundle),
+        Arc::clone(
+            &pool
+                .direct_bundle
+                .as_ref()
+                .expect("direct fixture bundle")
+                .bytes,
+        ),
         |reference| pool.checkpoint_object(reference),
     )
     .unwrap();
@@ -264,14 +284,20 @@ async fn missing_inventory_and_oversized_references_fail_before_object_io() {
                             b"resident-node-lease",
                         ]),
                         process_generation: 1,
-                        device_identity: None,
+                        accelerator: None,
                     });
             }
         }
         assert!(RemotePoolDriver::restore_checkpoint(
             damaged,
             authority(&checkpoint),
-            Arc::clone(&pool.bundle),
+            Arc::clone(
+                &pool
+                    .direct_bundle
+                    .as_ref()
+                    .expect("direct fixture bundle")
+                    .bytes
+            ),
             |_| panic!("invalid inventory must fail before IO")
         )
         .is_err());
@@ -312,7 +338,13 @@ async fn elapsed_deadline_is_terminal_before_replacement_worker_registration() {
     let restored = RemotePoolDriver::restore_checkpoint(
         checkpoint.clone(),
         authority(&checkpoint),
-        Arc::clone(&pool.bundle),
+        Arc::clone(
+            &pool
+                .direct_bundle
+                .as_ref()
+                .expect("direct fixture bundle")
+                .bytes,
+        ),
         |_| panic!("no objects"),
     )
     .unwrap();
@@ -326,6 +358,7 @@ async fn elapsed_deadline_is_terminal_before_replacement_worker_registration() {
         .lock()
         .unwrap()
         .handle(DriverCommand::RegisterWorker(WorkerSpec {
+            host: crate::test_support::host_inventory(),
             id: WorkerId::derive(&[b"late-worker"]),
             pool_id: restored.pool_id,
             resources: inventory(1000),
@@ -351,7 +384,13 @@ async fn cold_capture_roundtrip_preserves_ready_tasks_and_streams_verified_objec
     let encoded = checkpoint.encode().unwrap();
     let checkpoint = RemotePoolCheckpoint::decode(&encoded).unwrap();
     let bytes = pool.checkpoint_object(&reference).unwrap();
-    let bundle = Arc::clone(&pool.bundle);
+    let bundle = Arc::clone(
+        &pool
+            .direct_bundle
+            .as_ref()
+            .expect("direct fixture bundle")
+            .bytes,
+    );
     let before = pool.snapshot().tasks[&task.request.id].clone();
     drop(pool);
     let restored = RemotePoolDriver::restore_checkpoint(
@@ -391,6 +430,7 @@ async fn completed_program_and_original_commit_survive_cold_restore_without_disp
             .unwrap();
         driver
             .handle(DriverCommand::RegisterWorker(WorkerSpec {
+                host: crate::test_support::host_inventory(),
                 id: WorkerId::derive(&[b"checkpoint-worker"]),
                 pool_id: pool.pool_id,
                 resources: inventory(1000),
@@ -422,7 +462,13 @@ async fn completed_program_and_original_commit_survive_cold_restore_without_disp
     ));
     let checkpoint = pool.capture_checkpoint(2).unwrap();
     let committed = pool.snapshot().tasks[&task.request.id].committed.clone();
-    let bundle = Arc::clone(&pool.bundle);
+    let bundle = Arc::clone(
+        &pool
+            .direct_bundle
+            .as_ref()
+            .expect("direct fixture bundle")
+            .bytes,
+    );
     drop(pool);
     let restored = RemotePoolDriver::restore_checkpoint(
         checkpoint.clone(),
@@ -478,7 +524,13 @@ async fn authority_and_metadata_substitutions_fail_before_object_reads() {
         assert!(RemotePoolDriver::restore_checkpoint(
             damaged,
             replacement,
-            Arc::clone(&pool.bundle),
+            Arc::clone(
+                &pool
+                    .direct_bundle
+                    .as_ref()
+                    .expect("direct fixture bundle")
+                    .bytes
+            ),
             |_| panic!("invalid authority must fail before reading objects")
         )
         .is_err());
@@ -496,7 +548,13 @@ async fn missing_or_corrupt_checkpoint_objects_never_expose_a_restored_pool() {
         assert!(RemotePoolDriver::restore_checkpoint(
             checkpoint.clone(),
             authority(&checkpoint),
-            Arc::clone(&pool.bundle),
+            Arc::clone(
+                &pool
+                    .direct_bundle
+                    .as_ref()
+                    .expect("direct fixture bundle")
+                    .bytes
+            ),
             |_| if missing {
                 Err(invalid("unavailable"))
             } else {
@@ -515,7 +573,13 @@ async fn restored_waiter_can_attach_before_or_after_authoritative_completion() {
         let restored = RemotePoolDriver::restore_checkpoint(
             checkpoint.clone(),
             authority(&checkpoint),
-            Arc::clone(&pool.bundle),
+            Arc::clone(
+                &pool
+                    .direct_bundle
+                    .as_ref()
+                    .expect("direct fixture bundle")
+                    .bytes,
+            ),
             |_| panic!("no objects"),
         )
         .unwrap();
@@ -559,7 +623,13 @@ async fn rejected_mixed_graph_does_not_consume_restored_waiter() {
     let restored = RemotePoolDriver::restore_checkpoint(
         checkpoint.clone(),
         authority(&checkpoint),
-        Arc::clone(&pool.bundle),
+        Arc::clone(
+            &pool
+                .direct_bundle
+                .as_ref()
+                .expect("direct fixture bundle")
+                .bytes,
+        ),
         |_| panic!("no objects"),
     )
     .unwrap();
@@ -616,7 +686,13 @@ async fn cold_active_attempt_retry_preserves_admission_and_fences_stale_success(
         let _original_waiter = pool.submit(task.clone(), program.clone()).unwrap();
         let old_attempt = launch(&pool);
         let checkpoint = pool.capture_checkpoint(4).unwrap();
-        let bundle = Arc::clone(&pool.bundle);
+        let bundle = Arc::clone(
+            &pool
+                .direct_bundle
+                .as_ref()
+                .expect("direct fixture bundle")
+                .bytes,
+        );
         drop(pool);
 
         let restored = RemotePoolDriver::restore_checkpoint(
@@ -660,6 +736,7 @@ async fn cold_active_attempt_retry_preserves_admission_and_fences_stale_success(
                 .lock()
                 .unwrap()
                 .handle(DriverCommand::RegisterWorker(WorkerSpec {
+                    host: crate::test_support::host_inventory(),
                     id: old_attempt.worker_id,
                     pool_id: restored.pool_id,
                     resources: inventory(1000),
@@ -681,6 +758,7 @@ async fn cold_active_attempt_retry_preserves_admission_and_fences_stale_success(
             .lock()
             .unwrap()
             .handle(DriverCommand::RegisterWorker(WorkerSpec {
+                host: crate::test_support::host_inventory(),
                 id: old_attempt.worker_id,
                 pool_id: restored.pool_id,
                 resources: inventory(1000),
@@ -743,7 +821,7 @@ async fn cold_active_attempt_retry_preserves_admission_and_fences_stale_success(
         let commit = snapshot.tasks[&task.request.id].committed.as_ref().unwrap();
         assert_eq!(commit.attempt_id, new_attempt.id);
         assert_eq!(commit.driver_fence, 51);
-        assert_eq!(commit.resources, accepted.resources);
+        assert_eq!(commit.result.resources(), accepted.resources());
         assert_eq!(snapshot.attempts.len(), 2);
         assert_eq!(snapshot.attempts[&old_attempt.id].state, AttemptState::Lost);
     }

@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use runmat_accelerate_api::{WgpuDeviceAccess, WgpuEmission};
+use std::sync::Arc;
 use std::{any::Any, panic};
 
 use crate::core::{Camera, PlotRenderConfig, PlotRenderer, RenderResult};
@@ -1620,21 +1620,24 @@ mod parity_tests {
         context
             .renderer
             .wgpu_renderer
-            .device
-            .create_texture(&wgpu::TextureDescriptor {
-                label: Some("parity native target"),
-                size: wgpu::Extent3d {
-                    width: context.config.width,
-                    height: context.config.height,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: context.renderer.wgpu_renderer.surface_config.format,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-                view_formats: &[],
+            .access
+            .with_shared(|emission| {
+                emission.device().create_texture(&wgpu::TextureDescriptor {
+                    label: Some("parity native target"),
+                    size: wgpu::Extent3d {
+                        width: context.config.width,
+                        height: context.config.height,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: context.renderer.wgpu_renderer.surface_config.format,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                    view_formats: &[],
+                })
             })
+            .unwrap()
     }
 
     async fn peer(
@@ -1643,8 +1646,7 @@ mod parity_tests {
         theme: &PlotThemeConfig,
     ) -> NativeSurfaceRenderContext {
         let mut peer = NativeSurfaceRenderContext::new(
-            context.renderer.wgpu_renderer.device.clone(),
-            context.renderer.wgpu_renderer.queue.clone(),
+            context.renderer.wgpu_renderer.access.clone(),
             context.config.width,
             context.config.height,
             wgpu::TextureFormat::Rgba8Unorm,
@@ -1677,8 +1679,7 @@ mod parity_tests {
         let seed = create_headless_context(640, 480).await.unwrap();
         // Native Metal/DirectX targets generally use BGRA; the canvas uses RGBA.
         let mut live = NativeSurfaceRenderContext::new(
-            seed.renderer.wgpu_renderer.device.clone(),
-            seed.renderer.wgpu_renderer.queue.clone(),
+            seed.renderer.wgpu_renderer.access.clone(),
             640,
             480,
             wgpu::TextureFormat::Bgra8Unorm,
@@ -1745,7 +1746,8 @@ mod parity_tests {
         for dpr in [1.0, 1.25, 2.0] {
             let width = (640.0 * dpr) as u32;
             let height = (480.0 * dpr) as u32;
-            live.resize(width, height);
+            live.resize(width, height)
+                .expect("resize native parity surface");
             for variant in [ThemeVariant::ModernDark, ThemeVariant::ClassicLight] {
                 let theme = PlotThemeConfig {
                     variant,

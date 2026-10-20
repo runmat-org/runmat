@@ -8,37 +8,52 @@ use crate::builtins::plotting::common::{
 use crate::builtins::plotting::plotting_error;
 use crate::BuiltinResult;
 
-/// Parse surface-like call arguments using MATLAB's X/Y convention:
+/// Decode coordinates without taking ownership authority from the caller.
 /// X indexes columns of Z, Y indexes rows of Z.
-pub fn parse_surface_call_args_matlab_xy(
-    args: Vec<Value>,
+fn decode_surface_coordinates(
+    args: crate::call::FunctionArgumentView<'_>,
     builtin: &'static str,
-) -> BuiltinResult<(Value, Value, Value, Vec<Value>)> {
+) -> BuiltinResult<(Value, Value, Value, usize)> {
     match args.len() {
-        0 => Err(plotting_error(
+        0 | 2 => Err(plotting_error(
             builtin,
             format!("{builtin}: expected Z or X,Y,Z input"),
         )),
         1 => {
-            let z = args.into_iter().next().expect("one arg");
+            let z = args[0].clone();
             let (rows, cols) = inferred_grid_shape(&z, builtin)?;
-            let x = Value::Tensor(default_surface_axis(cols));
-            let y = Value::Tensor(default_surface_axis(rows));
-            Ok((x, y, z, Vec::new()))
+            Ok((
+                Value::Tensor(default_surface_axis(cols)),
+                Value::Tensor(default_surface_axis(rows)),
+                z,
+                1,
+            ))
         }
-        2 => Err(plotting_error(
-            builtin,
-            format!("{builtin}: expected Z or X,Y,Z input"),
-        )),
-        _ => {
-            let mut it = args.into_iter();
-            let x = it.next().expect("x");
-            let y = it.next().expect("y");
-            let z = it.next().expect("z");
-            let rest = it.collect();
-            Ok((x, y, z, rest))
-        }
+        _ => Ok((args[0].clone(), args[1].clone(), args[2].clone(), 3)),
     }
+}
+
+/// Canonical calls retain their original segmented tail, including its roots
+/// even when the logical remainder is empty.
+pub fn parse_surface_call_args_matlab_xy(
+    args: crate::call::BuiltinArguments,
+    builtin: &'static str,
+) -> BuiltinResult<(Value, Value, Value, crate::call::BuiltinArguments)> {
+    let (x, y, z, consumed) = decode_surface_coordinates(args.view(), builtin)?;
+    Ok((x, y, z, args.into_range(consumed..)?))
+}
+
+/// Existing source-only adapter for actual legacy image/mesh registrations.
+/// This is not a managed fallback for canonical argument owners.
+pub fn parse_surface_source_call_args_matlab_xy(
+    args: Vec<Value>,
+    builtin: &'static str,
+) -> BuiltinResult<(Value, Value, Value, Vec<Value>)> {
+    let (x, y, z, consumed) = decode_surface_coordinates(
+        crate::call::FunctionArgumentView::from_slice(&args),
+        builtin,
+    )?;
+    Ok((x, y, z, args.into_iter().skip(consumed).collect()))
 }
 
 /// Parse image-family inputs without confusing `C,Name,Value` with `X,Y,C`.
@@ -66,7 +81,7 @@ pub fn parse_image_call_args(
             rest,
         ));
     }
-    parse_surface_call_args_matlab_xy(args, builtin)
+    parse_surface_source_call_args_matlab_xy(args, builtin)
 }
 
 fn inferred_grid_shape(value: &Value, builtin: &'static str) -> BuiltinResult<(usize, usize)> {
@@ -104,6 +119,16 @@ fn default_surface_axis(len: usize) -> Tensor {
 
 #[cfg(test)]
 mod tests {
+    fn parse_surface_call_args_matlab_xy(
+        args: Vec<Value>,
+        builtin: &'static str,
+    ) -> BuiltinResult<(Value, Value, Value, crate::call::BuiltinArguments)> {
+        super::parse_surface_call_args_matlab_xy(
+            crate::call::BuiltinArguments::from_borrowed(&args, None)?,
+            builtin,
+        )
+    }
+
     use super::*;
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

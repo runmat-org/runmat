@@ -45,7 +45,7 @@ fn run_imread(bytes: &[u8], extension: &str, rest: Vec<Value>) -> Value {
     futures::executor::block_on(imread_builtin(
         None,
         Value::from(path.to_string_lossy().to_string()),
-        rest,
+        crate::builtins::common::test_support::builtin_arguments(rest),
     ))
     .expect("imread")
 }
@@ -75,7 +75,7 @@ fn imread_returns_alpha_as_third_output_for_rgba_png() {
     let result = futures::executor::block_on(imread_builtin(
         None,
         Value::from(path.to_string_lossy().to_string()),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("imread");
     let Value::OutputList(outputs) = result else {
@@ -124,7 +124,7 @@ fn imread_windows_drive_letter_path_is_not_treated_as_url_scheme() {
     let err = futures::executor::block_on(imread_builtin(
         None,
         Value::from("C:/nonexistent/photo.png"),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect_err("expected error for missing file");
     assert_ne!(
@@ -137,15 +137,18 @@ fn imread_windows_drive_letter_path_is_not_treated_as_url_scheme() {
 #[test]
 fn parsed_opaque_and_nonlocal_file_urls_reject_before_filesystem_access() {
     for source in ["mailto:alice@example.com", "ftp://example.test/pixels.png"] {
-        let err =
-            futures::executor::block_on(imread_builtin(None, Value::from(source), Vec::new()))
-                .expect_err("unsupported URL scheme");
+        let err = futures::executor::block_on(imread_builtin(
+            None,
+            Value::from(source),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect_err("unsupported URL scheme");
         assert_eq!(err.identifier(), IMREAD_ERROR_UNSUPPORTED_SCHEME.identifier);
     }
     let err = futures::executor::block_on(imread_builtin(
         None,
         Value::from("file://remote.example/pixels.png"),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect_err("nonlocal file URL");
     assert_eq!(err.identifier(), IMREAD_ERROR_INVALID_FILE_URL.identifier);
@@ -159,7 +162,7 @@ fn imread_respects_explicit_format_hint() {
     let result = futures::executor::block_on(imread_builtin(
         None,
         Value::from(path.to_string_lossy().to_string()),
-        vec![Value::from("png")],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("png")]),
     ))
     .expect("imread");
     assert!(matches!(result, Value::Tensor(_)));
@@ -170,7 +173,7 @@ fn imread_rejects_unknown_format_hint() {
     let err = futures::executor::block_on(imread_builtin(
         None,
         Value::from("missing"),
-        vec![Value::from("not-a-format")],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("not-a-format")]),
     ))
     .expect_err("expected error");
     assert_eq!(err.identifier(), IMREAD_ERROR_UNSUPPORTED_FORMAT.identifier);
@@ -179,15 +182,21 @@ fn imread_rejects_unknown_format_hint() {
 #[test]
 fn output_and_input_arity_reject_before_missing_file_or_provider_work() {
     let _outputs = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
-    let err =
-        futures::executor::block_on(imread_builtin(None, Value::from("missing.png"), Vec::new()))
-            .expect_err("excess outputs must fail before reading");
+    let err = futures::executor::block_on(imread_builtin(
+        None,
+        Value::from("missing.png"),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect_err("excess outputs must fail before reading");
     assert_eq!(err.identifier(), IMREAD_ERROR_TOO_MANY_OUTPUTS.identifier);
     drop(_outputs);
     let err = futures::executor::block_on(imread_builtin(
         None,
         Value::from("missing.png"),
-        vec![Value::from("png"), Value::Num(1.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("png"),
+            Value::Num(1.0),
+        ]),
     ))
     .expect_err("excess inputs must fail before reading");
     assert_eq!(err.identifier(), IMREAD_ERROR_TOO_MANY_INPUTS.identifier);
@@ -195,8 +204,12 @@ fn output_and_input_arity_reject_before_missing_file_or_provider_work() {
 
 #[test]
 fn numeric_filename_does_not_coerce_to_filesystem_path() {
-    let err = futures::executor::block_on(imread_builtin(None, Value::Num(42.0), Vec::new()))
-        .expect_err("numeric filename must reject before reading");
+    let err = futures::executor::block_on(imread_builtin(
+        None,
+        Value::Num(42.0),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .expect_err("numeric filename must reject before reading");
     assert_eq!(err.identifier(), IMREAD_ERROR_INVALID_ARGUMENT.identifier);
 }
 
@@ -285,7 +298,7 @@ fn imread_materializes_multi_outputs_with_empty_colormap() {
     let result = futures::executor::block_on(imread_builtin(
         None,
         Value::from(path.to_string_lossy().to_string()),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("imread");
     let Value::OutputList(outputs) = result else {
@@ -342,7 +355,7 @@ fn imread_fetches_http_url() {
     let result = futures::executor::block_on(imread_builtin(
         Some(runtime),
         Value::from(format!("{url}/image.png")),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("imread");
     let Value::Tensor(tensor) = result else {

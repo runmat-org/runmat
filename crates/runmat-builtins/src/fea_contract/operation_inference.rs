@@ -3,8 +3,8 @@
 
 use super::constructor_inference::host_text;
 use super::identities::{
-    FEA_PLAN_CLASS, FEA_RUN_RESULT_CLASS, FEA_STUDY_CLASS, FEA_SWEEP_CLASS, FEA_TRENDS_CLASS,
-    FEA_VALIDATION_CLASS,
+    FEA_PLAN_CLASS, FEA_RUN_RESULT_CLASS, FEA_STUDY_CLASS, FEA_SWEEP_CLASS, FEA_SWEEP_PLAN_CLASS,
+    FEA_SWEEP_RUN_RESULT_CLASS, FEA_SWEEP_VALIDATION_CLASS, FEA_TRENDS_CLASS, FEA_VALIDATION_CLASS,
 };
 use crate::{
     catalog::{argument_error, finish_fixed},
@@ -35,11 +35,31 @@ impl FeaEvidenceKind {
     }
 }
 
-fn result_object(kind: FeaEvidenceKind) -> ValueFact {
+fn result_object(kind: FeaEvidenceKind, input: Option<&ValueFact>) -> ValueFact {
+    let class = if kind == FeaEvidenceKind::Trends {
+        Some(kind.result_class())
+    } else {
+        match input.map(|value| &value.kind) {
+            Some(ValueKindFact::Unknown) => None,
+            Some(ValueKindFact::Object(object)) => object.runtime_class.as_ref().map(|class| {
+                if class.is(FEA_SWEEP_CLASS) {
+                    match kind {
+                        FeaEvidenceKind::Validate => FEA_SWEEP_VALIDATION_CLASS,
+                        FeaEvidenceKind::Plan => FEA_SWEEP_PLAN_CLASS,
+                        FeaEvidenceKind::Run => FEA_SWEEP_RUN_RESULT_CLASS,
+                        FeaEvidenceKind::Trends => FEA_TRENDS_CLASS,
+                    }
+                } else {
+                    kind.result_class()
+                }
+            }),
+            _ => Some(kind.result_class()),
+        }
+    };
     ValueFact::proven(
         ValueKindFact::Object(ObjectFact {
             class: None,
-            runtime_class: Some(kind.result_class().owned()),
+            runtime_class: class.map(StaticClassIdentity::owned),
             properties: BTreeMap::new(),
             properties_complete: false,
             handle_semantics: Some(false),
@@ -50,7 +70,9 @@ fn result_object(kind: FeaEvidenceKind) -> ValueFact {
 }
 
 fn possible_document(value: &ValueFact) -> bool {
-    if matches!(value.residency, ResidencyFact::Device { .. }) {
+    if matches!(value.residency, ResidencyFact::Device { .. })
+        || matches!(value.shape.element_count(), Some(count) if count != 1)
+    {
         return false;
     }
     match &value.kind {
@@ -62,7 +84,7 @@ fn possible_document(value: &ValueFact) -> bool {
                     .as_ref()
                     .is_none_or(|class| class.is(FEA_STUDY_CLASS) || class.is(FEA_SWEEP_CLASS))
         }
-        _ => host_text(value),
+        _ => false,
     }
 }
 
@@ -101,8 +123,8 @@ pub fn infer_evidence(
                 ));
             }
             if let Some(name) = request.literals.literal_string_at(index) {
-                if super::options::FeaStructuralOption::decode(&name)
-                    != Some(super::options::FeaStructuralOption::WindowSize)
+                if super::options::FeaTrendsOption::decode(&name)
+                    != Some(super::options::FeaTrendsOption::WindowSize)
                 {
                     diagnostics.push(argument_error(
                         "RM-CATALOG-FEA-OPTION",
@@ -136,7 +158,7 @@ pub fn infer_evidence(
         if request.arguments.len() != 1 {
             diagnostics.push(argument_error(
                 "RM-CATALOG-FEA-ARITY",
-                "FEA validation, planning, and solving require exactly one document, study, or sweep",
+                "FEA validation, planning, and solving require exactly one typed study or sweep",
                 request.arguments.len(),
             ));
         }
@@ -144,21 +166,26 @@ pub fn infer_evidence(
             if !possible_document(input) {
                 diagnostics.push(argument_error(
                     "RM-CATALOG-FEA-DOCUMENT",
-                    "FEA operation input must be a host path, fea.Study, or fea.Sweep",
+                    "FEA operation input must be a host fea.Study or fea.Sweep",
                     0,
                 ));
             }
         }
     }
-    finish_fixed(entry, request, result_object(kind), diagnostics)
+    finish_fixed(
+        entry,
+        request,
+        result_object(kind, request.arguments.first()),
+        diagnostics,
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::fea_contract::{
+        descriptors::FEA_TRENDS_DESCRIPTOR,
         descriptors::FEA_VALIDATE_DESCRIPTOR,
-        integer::FEA_TRENDS_DESCRIPTOR,
         operation_entry::{self, OperationEffectProfile, OperationEntryDefinition},
     };
     use crate::{
@@ -197,7 +224,10 @@ mod tests {
     fn document_and_window_shapes_are_conservative() {
         let mut possible_char = ValueFact::unknown(DynamicReason::RuntimeValue);
         possible_char.shape = ShapeFact::from(vec![Some(1), Some(10)]);
-        assert!(possible_document(&possible_char));
+        assert!(!possible_document(&possible_char));
+        assert!(!possible_document(&ValueFact::scalar(
+            ValueKindFact::String
+        )));
         let mut non_scalar = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
             class: NumericClass::UInt64,
             domain: NumericDomain::Real,

@@ -593,9 +593,9 @@ fn value_is_placeholder(graph: &AccelGraph, vid: ValueId) -> bool {
         // authoritative storage (and thus their emptiness) is the typed buffer.
         Value::Tensor(t) => tensor_element_len(t) == 0,
         Value::LogicalArray(l) => l.data.is_empty(),
-        Value::StringArray(sa) => sa.data.is_empty(),
-        Value::CharArray(ca) => ca.data.is_empty(),
-        Value::Cell(cell) => cell.data.is_empty(),
+        Value::StringArray(sa) => sa.data().is_empty(),
+        Value::CharArray(ca) => ca.data().is_empty(),
+        Value::Cell(cell) => cell.data().is_empty(),
         Value::String(s) => s.is_empty(),
         _ => false,
     }
@@ -3646,7 +3646,7 @@ fn match_mean_axes(graph: &AccelGraph, vid: ValueId) -> Option<(NodeId, ValueId,
         let control = match control_value {
             Value::String(text) => MeanControl::from_public_option(text),
             Value::CharArray(chars) if chars.rows == 1 => {
-                MeanControl::from_public_option(&chars.data.iter().collect::<String>())
+                MeanControl::from_public_option(&chars.data().iter().collect::<String>())
             }
             _ => None,
         };

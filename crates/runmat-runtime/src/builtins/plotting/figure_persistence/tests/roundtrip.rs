@@ -12,12 +12,12 @@ fn savefig_round_trips_single_figure() {
     let path = temp_path("single");
     let _ = std::fs::remove_file(&path);
     block_on(savefig_builtin(vec![Value::String(
-        path.to_string_lossy().into_owned(),
+        path.to_string_lossy().into_owned().into(),
     )]))
     .expect("savefig");
     reset_plot_state();
     let value = block_on(openfig_builtin(vec![Value::String(
-        path.to_string_lossy().into_owned(),
+        path.to_string_lossy().into_owned().into(),
     )]))
     .expect("openfig");
     assert!(matches!(value, Value::Num(_)));
@@ -76,12 +76,12 @@ fn savefig_round_trips_exact_native_float_sources_and_surface_hole() {
     let path = temp_path("native_float_sources");
     let _ = std::fs::remove_file(&path);
     block_on(savefig_builtin(vec![Value::String(
-        path.to_string_lossy().into_owned(),
+        path.to_string_lossy().into_owned().into(),
     )]))
     .expect("savefig native sources");
     reset_plot_state();
     let opened = block_on(openfig_builtin(vec![Value::String(
-        path.to_string_lossy().into_owned(),
+        path.to_string_lossy().into_owned().into(),
     )]))
     .expect("openfig native sources");
     assert!(matches!(opened, Value::Num(_)));
@@ -145,13 +145,13 @@ fn savefig_round_trips_multiple_figures() {
     let _ = std::fs::remove_file(&path);
     block_on(savefig_builtin(vec![
         handles,
-        Value::String(path.to_string_lossy().into_owned()),
+        Value::String(path.to_string_lossy().into_owned().into()),
         Value::String("-v7.3".into()),
     ]))
     .expect("savefig multi");
     clear_figure(None).expect("clear");
     let value = block_on(openfig_builtin(vec![
-        Value::String(path.to_string_lossy().into_owned()),
+        Value::String(path.to_string_lossy().into_owned().into()),
         Value::String("new".into()),
         Value::String("invisible".into()),
     ]))
@@ -177,7 +177,7 @@ fn savefig_rejects_typed_integer_handle_arrays_before_io() {
     let _ = std::fs::remove_file(&path);
     let error = block_on(savefig_builtin(vec![
         Value::Tensor(handles),
-        Value::String(path.to_string_lossy().into_owned()),
+        Value::String(path.to_string_lossy().into_owned().into()),
     ]))
     .expect_err("typed integer graphics handles must reject");
     assert_eq!(
@@ -199,12 +199,12 @@ fn hgsave_deduplicates_handles_resolving_to_same_figure() {
     let _ = std::fs::remove_file(&path);
     block_on(hgsave_builtin(vec![
         handles,
-        Value::String(path.to_string_lossy().into_owned()),
+        Value::String(path.to_string_lossy().into_owned().into()),
     ]))
     .expect("hgsave duplicate handles");
     reset_plot_state();
     let value = block_on(hgload_builtin(vec![Value::String(
-        path.to_string_lossy().into_owned(),
+        path.to_string_lossy().into_owned().into(),
     )]))
     .expect("hgload");
     assert!(matches!(value, Value::Num(_)));
@@ -222,7 +222,7 @@ fn saveas_png_uses_renderer_fast_path() {
     let handle = current_figure_handle().as_u32() as f64;
     block_on(saveas_builtin(vec![
         Value::Num(handle),
-        Value::String(path.to_string_lossy().into_owned()),
+        Value::String(path.to_string_lossy().into_owned().into()),
         Value::String("png".into()),
     ]))
     .expect("saveas png");

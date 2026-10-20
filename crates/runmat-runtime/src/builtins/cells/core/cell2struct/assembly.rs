@@ -1,4 +1,4 @@
-use runmat_value::{CellArray, StructArray, StructValue, Value};
+use runmat_value::{CellArray, StructArray, Value};
 
 pub(super) fn build(
     cells: CellArray,
@@ -30,7 +30,7 @@ pub(super) fn build(
         .map_err(|_| super::error::invalid("output shape exceeds platform limits"))?;
     for output_index in 0..output_count {
         let mut coordinates = coordinates(output_index, &output_shape);
-        let mut structure = StructValue::new();
+        let mut structure = runmat_value::UnboundedStructValueBuilder::new();
         for (field_index, field) in fields.iter().enumerate() {
             coordinates[field_dimension] = field_index;
             let input_index = linear_index(&coordinates, &input_shape)?;
@@ -40,6 +40,7 @@ pub(super) fn build(
                 .ok_or_else(|| super::error::invalid("cell storage does not match its shape"))?;
             structure.insert(field.clone(), value);
         }
+        let structure = structure.finish();
         structures.push(structure);
     }
     StructArray::normalize(fields, structures, output_shape).map_err(super::error::invalid)

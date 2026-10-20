@@ -1,4 +1,18 @@
 use super::*;
+async fn webwrite_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    url: Value,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
+    super::webwrite_builtin(
+        runtime,
+        url,
+        crate::execution::RootedValues::new(args)
+            .map_err(|error| error.into_runtime_error())?
+            .into(),
+    )
+    .await
+}
 use runmat_builtins::WEBWRITE_DESCRIPTOR;
 
 #[test]
@@ -62,7 +76,7 @@ fn webwrite_rejects_invalid_known_key_name_before_resident_key_value_or_body_rea
             runmat_accelerate_api::GpuTensorStorage::Real,
         )
         .expect("resident request body");
-    let mut options = StructValue::new();
+    let mut options = runmat_value::UnboundedStructValueBuilder::new();
     options
         .fields
         .insert("KeyName".into(), Value::from("bad\nname"));
@@ -75,7 +89,7 @@ fn webwrite_rejects_invalid_known_key_name_before_resident_key_value_or_body_rea
         Value::from("https://example.test"),
         vec![
             Value::GpuTensor(allocation.handle.clone()),
-            Value::Struct(options),
+            Value::Struct(options.finish()),
         ],
     ))
     .expect_err("invalid header");
@@ -110,7 +124,9 @@ fn request_names_are_prepared_once_across_option_and_query_overloads() {
         Value::from("KeyValue"),
         Value::from("ordinary-query"),
     ];
-    let prepared = preflight_host_arguments(&args, None).unwrap();
+    let prepared =
+        preflight_host_arguments(crate::call::FunctionArgumentView::from_slice(&args), None)
+            .unwrap();
     assert_eq!(
         prepared.pair_fields,
         vec![
@@ -118,7 +134,10 @@ fn request_names_are_prepared_once_across_option_and_query_overloads() {
             Some(RequestOptionName::Query("KeyValue".into())),
         ]
     );
-    let (_, query) = parse_arguments(VecDeque::from(args.to_vec()), None, &prepared).unwrap();
+    let mut owned = crate::execution::RootedValues::new(args.to_vec())
+        .unwrap()
+        .into();
+    let (_, query) = parse_arguments(&mut owned, None, &prepared).unwrap();
     assert_eq!(query, vec![("KeyValue".into(), "ordinary-query".into())]);
 }
 use std::io::{Read, Write};
@@ -292,16 +311,16 @@ fn webwrite_post_values_preserve_exact_integer_vectors() {
 #[test]
 fn webwrite_posts_form_data_by_default() {
     let payload = {
-        let mut st = StructValue::new();
+        let mut st = runmat_value::UnboundedStructValueBuilder::new();
         st.fields.insert("name".to_string(), Value::from("Ada"));
         st.fields.insert("score".to_string(), Value::Num(42.0));
-        st
+        st.finish()
     };
     let opts = {
-        let mut st = StructValue::new();
+        let mut st = runmat_value::UnboundedStructValueBuilder::new();
         st.fields
             .insert("ContentType".to_string(), Value::from("json"));
-        st
+        st.finish()
     };
 
     let (tx, rx) = mpsc::channel();
@@ -344,20 +363,20 @@ fn webwrite_posts_form_data_by_default() {
 #[test]
 fn webwrite_sends_json_when_media_type_json() {
     let payload = {
-        let mut st = StructValue::new();
+        let mut st = runmat_value::UnboundedStructValueBuilder::new();
         st.fields.insert("title".to_string(), Value::from("RunMat"));
         st.fields.insert("stars".to_string(), Value::Num(5.0));
-        st
+        st.finish()
     };
     let opts = {
-        let mut st = StructValue::new();
+        let mut st = runmat_value::UnboundedStructValueBuilder::new();
         st.fields.insert(
             "MediaType".to_string(),
             Value::from("application/json; charset=utf-8"),
         );
         st.fields
             .insert("ContentType".to_string(), Value::from("json"));
-        st
+        st.finish()
     };
 
     let (tx, rx) = mpsc::channel();
@@ -392,23 +411,24 @@ fn webwrite_sends_json_when_media_type_json() {
 #[test]
 fn webwrite_applies_basic_auth_and_custom_headers() {
     let payload = Value::from("");
-    let mut header_struct = StructValue::new();
+    let mut header_struct = runmat_value::UnboundedStructValueBuilder::new();
     header_struct
         .fields
         .insert("X-Test".to_string(), Value::from("yes"));
     header_struct
         .fields
         .insert("Accept".to_string(), Value::from("text/plain"));
-    let mut opts_struct = StructValue::new();
+    let mut opts_struct = runmat_value::UnboundedStructValueBuilder::new();
     opts_struct
         .fields
         .insert("Username".to_string(), Value::from("ada"));
     opts_struct
         .fields
         .insert("Password".to_string(), Value::from("secret"));
-    opts_struct
-        .fields
-        .insert("HeaderFields".to_string(), Value::Struct(header_struct));
+    opts_struct.fields.insert(
+        "HeaderFields".to_string(),
+        Value::Struct(header_struct.finish()),
+    );
     opts_struct
         .fields
         .insert("ContentType".to_string(), Value::from("text"));
@@ -423,8 +443,11 @@ fn webwrite_applies_basic_auth_and_custom_headers() {
         respond_with(stream, "text/plain", b"OK");
     });
 
-    let result = run_webwrite(Value::from(url), vec![payload, Value::Struct(opts_struct)])
-        .expect("webwrite");
+    let result = run_webwrite(
+        Value::from(url),
+        vec![payload, Value::Struct(opts_struct.finish())],
+    )
+    .expect("webwrite");
 
     let headers = rx.recv().expect("headers");
     let headers_lower = headers.to_ascii_lowercase();
@@ -434,7 +457,7 @@ fn webwrite_applies_basic_auth_and_custom_headers() {
 
     match result {
         Value::CharArray(ca) => {
-            let text: String = ca.data.iter().collect();
+            let text: String = ca.data().iter().collect();
             assert_eq!(text, "OK");
         }
         other => panic!("expected char array, got {other:?}"),
@@ -445,15 +468,16 @@ fn webwrite_applies_basic_auth_and_custom_headers() {
 #[test]
 fn webwrite_supports_query_parameters() {
     let payload = Value::Struct(StructValue::new());
-    let mut qp_struct = StructValue::new();
+    let mut qp_struct = runmat_value::UnboundedStructValueBuilder::new();
     qp_struct.fields.insert("page".to_string(), Value::Num(2.0));
     qp_struct
         .fields
         .insert("verbose".to_string(), Value::Bool(true));
-    let mut opts_struct = StructValue::new();
-    opts_struct
-        .fields
-        .insert("QueryParameters".to_string(), Value::Struct(qp_struct));
+    let mut opts_struct = runmat_value::UnboundedStructValueBuilder::new();
+    opts_struct.fields.insert(
+        "QueryParameters".to_string(),
+        Value::Struct(qp_struct.finish()),
+    );
 
     let (tx, rx) = mpsc::channel();
     let url = spawn_server(move |mut stream| {
@@ -464,7 +488,7 @@ fn webwrite_supports_query_parameters() {
 
     let _ = run_webwrite(
         Value::from(url.clone()),
-        vec![payload, Value::Struct(opts_struct)],
+        vec![payload, Value::Struct(opts_struct.finish())],
     )
     .expect("webwrite");
 
@@ -484,7 +508,7 @@ fn webwrite_binary_payload_respected() {
     )
     .unwrap();
     let payload = Value::Tensor(tensor);
-    let mut opts_struct = StructValue::new();
+    let mut opts_struct = runmat_value::UnboundedStructValueBuilder::new();
     opts_struct
         .fields
         .insert("ContentType".to_string(), Value::from("binary"));
@@ -500,8 +524,11 @@ fn webwrite_binary_payload_respected() {
         respond_with(stream, "text/plain", b"OK");
     });
 
-    let _ = run_webwrite(Value::from(url), vec![payload, Value::Struct(opts_struct)])
-        .expect("webwrite");
+    let _ = run_webwrite(
+        Value::from(url),
+        vec![payload, Value::Struct(opts_struct.finish())],
+    )
+    .expect("webwrite");
 
     let (headers, body) = rx.recv().expect("request");
     let headers_lower = headers.to_ascii_lowercase();

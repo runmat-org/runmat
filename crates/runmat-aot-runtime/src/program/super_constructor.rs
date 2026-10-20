@@ -27,11 +27,9 @@ pub(super) fn bind_selected(
     }
     let runtime =
         runtime.with_constructor_receiver_for_method(metadata.class_method_owner.as_ref())?;
-    let caller_origin = FunctionBindingOrigin::from_revision(
-        executor.program_revision(),
-        metadata.portable_id,
-    )
-        .map_err(native_error)?;
+    let caller_origin =
+        FunctionBindingOrigin::from_revision(executor.program_revision(), metadata.portable_id)
+            .map_err(native_error)?;
     let Some(owner) = metadata
         .class_method_owner
         .as_ref()
@@ -86,9 +84,11 @@ pub(super) fn bind_selected(
         .class_method_owner
         .as_ref()
         .ok_or_else(|| native_error("linked superclass constructor lacks a typed owner"))?;
-    let target_origin =
-        FunctionBindingOrigin::from_revision(executor.program_revision(), target_metadata.portable_id)
-            .map_err(native_error)?;
+    let target_origin = FunctionBindingOrigin::from_revision(
+        executor.program_revision(),
+        target_metadata.portable_id,
+    )
+    .map_err(native_error)?;
     let target_function = target.function.0;
     runtime
         .with_retained_super_constructors(

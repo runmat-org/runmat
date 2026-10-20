@@ -101,7 +101,7 @@ async fn extract_between_builtin(
     text: Value,
     start: Value,
     stop: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     if !valid_extract_between_text_input(&text) {
         return Err(extract_between_error(&EXTRACT_BETWEEN_ERROR_INVALID_INPUT));
@@ -146,7 +146,7 @@ async fn extract_between_builtin(
     {
         return Err(extract_between_error(&EXTRACT_BETWEEN_ERROR_OPTION_VALUE));
     }
-    let mode_override = parse_boundaries_option(&rest).await?;
+    let mode_override = parse_boundaries_option(rest.view()).await?;
     let text = gather_if_needed_async(&text).await.map_err(map_flow)?;
     let start = gather_if_needed_async(&start).await.map_err(map_flow)?;
     let stop = gather_if_needed_async(&stop).await.map_err(map_flow)?;
@@ -233,7 +233,7 @@ fn valid_extract_between_text_input(value: &Value) -> bool {
     match value {
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => true,
         Value::Cell(cell) => {
-            for element in &cell.data {
+            for element in cell.data() {
                 if TextCellScalar::from_value(element).is_none() {
                     return false;
                 }
@@ -260,7 +260,7 @@ fn is_numeric_or_resident(value: &Value) -> bool {
 
 fn contains_nested_numeric_or_resident(value: &Value) -> bool {
     match value {
-        Value::Cell(cell) => cell.data.iter().any(|value| {
+        Value::Cell(cell) => cell.data().iter().any(|value| {
             is_numeric_or_resident(value) || contains_nested_numeric_or_resident(value)
         }),
         Value::Struct(value) => value.fields.values().any(|value| {
@@ -276,7 +276,7 @@ fn contains_nested_numeric_or_resident(value: &Value) -> bool {
 fn is_resident_or_contains_resident(value: &Value) -> bool {
     match value {
         Value::GpuTensor(_) => true,
-        Value::Cell(cell) => cell.data.iter().any(is_resident_or_contains_resident),
+        Value::Cell(cell) => cell.data().iter().any(is_resident_or_contains_resident),
         Value::Struct(value) => value.fields.values().any(is_resident_or_contains_resident),
         Value::StructArray(array) => array.any_value(is_resident_or_contains_resident),
         _ => false,
@@ -324,7 +324,9 @@ fn shape_is_scalar_or_same(shape: &[usize], text_shape: &[usize]) -> bool {
         || shape == text_shape
 }
 
-async fn parse_boundaries_option(args: &[Value]) -> BuiltinResult<Option<BoundariesMode>> {
+async fn parse_boundaries_option(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Option<BoundariesMode>> {
     if args.is_empty() {
         return Ok(None);
     }
@@ -364,17 +366,17 @@ async fn parse_boundaries_option(args: &[Value]) -> BuiltinResult<Option<Boundar
 fn value_to_string(value: &Value) -> Option<String> {
     match value {
         Value::String(s) => Some(s.as_str().to_owned()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].as_str().to_owned()),
+        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].as_str().to_owned()),
         Value::CharArray(ca) if ca.rows <= 1 => {
             if ca.rows == 0 {
                 Some(String::new())
             } else {
-                Some(char_row_to_string_slice(&ca.data, ca.cols, 0))
+                Some(char_row_to_string_slice(ca.data(), ca.cols, 0))
             }
         }
         Value::CharArray(_) => None,
-        Value::Cell(cell) if cell.data.len() == 1 => {
-            let element = &cell.data[0];
+        Value::Cell(cell) if cell.data().len() == 1 => {
+            let element = &cell.data()[0];
             value_to_string(element)
         }
         _ => None,
@@ -529,7 +531,7 @@ impl NormalizedText {
             }),
             Value::StringArray(sa) => Ok(Self {
                 data: sa
-                    .data
+                    .data()
                     .iter()
                     .map(|text| text.as_str().to_owned())
                     .collect(),
@@ -543,7 +545,7 @@ impl NormalizedText {
                     data.push(String::new());
                 } else {
                     for row in 0..ca.rows {
-                        data.push(char_row_to_string_slice(&ca.data, ca.cols, row));
+                        data.push(char_row_to_string_slice(ca.data(), ca.cols, row));
                     }
                 }
                 Ok(Self {
@@ -558,9 +560,9 @@ impl NormalizedText {
             }
             Value::Cell(cell) => {
                 let shape = cell.shape.to_vec();
-                let mut data = Vec::with_capacity(cell.data.len());
-                let mut kinds = Vec::with_capacity(cell.data.len());
-                for element in &cell.data {
+                let mut data = Vec::with_capacity(cell.data().len());
+                let mut kinds = Vec::with_capacity(cell.data().len());
+                for element in cell.data() {
                     let scalar = TextCellScalar::from_value(element).ok_or_else(|| {
                         extract_between_error(&EXTRACT_BETWEEN_ERROR_CELL_ELEMENT)
                     })?;
@@ -776,7 +778,7 @@ impl BoundaryText {
             }),
             Value::StringArray(sa) => Ok(Self {
                 data: sa
-                    .data
+                    .data()
                     .iter()
                     .map(|text| text.as_str().to_owned())
                     .collect(),
@@ -785,7 +787,7 @@ impl BoundaryText {
             Value::CharArray(ca) => {
                 let mut data = Vec::with_capacity(ca.rows);
                 for row in 0..ca.rows {
-                    data.push(char_row_to_string_slice(&ca.data, ca.cols, row));
+                    data.push(char_row_to_string_slice(ca.data(), ca.cols, row));
                 }
                 Ok(Self {
                     data,
@@ -794,8 +796,8 @@ impl BoundaryText {
             }
             Value::Cell(cell) => {
                 let shape = cell.shape.to_vec();
-                let mut data = Vec::with_capacity(cell.data.len());
-                for element in &cell.data {
+                let mut data = Vec::with_capacity(cell.data().len());
+                for element in cell.data() {
                     let scalar = TextCellScalar::from_value(element).ok_or_else(|| {
                         extract_between_error(&EXTRACT_BETWEEN_ERROR_CELL_ELEMENT)
                     })?;

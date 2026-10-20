@@ -9,6 +9,6 @@ pub(super) async fn derivative(
     time: f64,
     state: Value,
 ) -> BuiltinResult<crate::execution::RootedValue> {
-    let callback = crate::canonicalize_callback_handle_for_semantic_resolution(handle.clone());
+    let callback = crate::canonicalize_callback_handle_for_semantic_resolution(handle.clone())?;
     crate::call_feval_async_with_outputs(callback, &[Value::Num(time), state], 1).await
 }

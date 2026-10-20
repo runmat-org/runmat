@@ -95,8 +95,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::factor::lu"
 )]
-async fn lu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let eval = evaluate(value, &rest).await?;
+async fn lu_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    let eval = evaluate(value, rest.view()).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Value::output_list(Vec::new()));
@@ -235,7 +238,10 @@ impl Default for PivotMode {
 }
 
 /// Evaluate `lu` while preserving all output forms for later extraction.
-pub async fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<LuEval> {
+pub async fn evaluate(
+    value: Value,
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<LuEval> {
     let pivot_mode = parse_pivot_mode(args)?;
     ensure_lu_extensions(&value).await?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
@@ -459,7 +465,7 @@ fn reject_provider_lu_result(result: ProviderLuResult, mut error: RuntimeError) 
     error
 }
 
-fn parse_pivot_mode(args: &[Value]) -> BuiltinResult<PivotMode> {
+fn parse_pivot_mode(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<PivotMode> {
     if args.is_empty() {
         return Ok(PivotMode::Matrix);
     }
@@ -1278,10 +1284,15 @@ pub(crate) mod tests {
     }
 
     fn lu_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::lu_builtin(value, rest))
+        let rest = crate::execution::RootedValues::new(rest)
+            .map_err(|error| error.into_runtime_error())?;
+        block_on(super::lu_builtin(value, rest.into()))
     }
 
     fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<LuEval> {
-        block_on(super::evaluate(value, args))
+        block_on(super::evaluate(
+            value,
+            crate::call::FunctionArgumentView::from_slice(args),
+        ))
     }
 }

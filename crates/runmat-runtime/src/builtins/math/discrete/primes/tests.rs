@@ -7,7 +7,10 @@ use super::primes_builtin;
 use crate::BuiltinResult;
 
 fn call(value: Value) -> BuiltinResult<Tensor> {
-    match block_on(primes_builtin(value, Vec::new()))? {
+    match block_on(primes_builtin(
+        value,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))? {
         Value::Tensor(tensor) => Ok(tensor),
         other => panic!("expected tensor output, got {other:?}"),
     }
@@ -85,12 +88,16 @@ fn rejects_invalid_values_shapes_and_limits() {
         Value::Bool(true),
         Value::Num(u64::MAX as f64),
     ] {
-        let error = block_on(primes_builtin(value, Vec::new())).expect_err("invalid primes input");
+        let error = block_on(primes_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect_err("invalid primes input");
         assert_eq!(error.identifier(), PRIMES_ERROR_INVALID_INPUT.identifier);
     }
     let error = block_on(primes_builtin(
         Value::Num((MAX_PRIMES_LIMIT + 1) as f64),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect_err("bounded sieve limit");
     assert_eq!(error.identifier(), PRIMES_ERROR_LIMIT.identifier);
@@ -108,7 +115,7 @@ fn rejects_nonscalar_gpu_handle_before_gather() {
     let caller_alias = allocation.handle.clone();
     let error = block_on(primes_builtin(
         Value::GpuTensor(allocation.handle),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect_err("nonscalar GPU handle");
     assert_eq!(error.identifier(), PRIMES_ERROR_INVALID_INPUT.identifier);

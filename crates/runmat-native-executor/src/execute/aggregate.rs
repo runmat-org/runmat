@@ -1,7 +1,7 @@
 use runmat_mir::{MirAggregateElement, MirAggregateKind, MirOperand};
 use runmat_runtime::native::NativeValueRef;
 use runmat_types::{MemberName, QualifiedName};
-use runmat_value::{CellArray, ObjectInstance, StructValue, Value};
+use runmat_value::{CellArray, Value};
 
 use crate::{NativeExecutorError, NativeExecutorResult};
 
@@ -111,27 +111,42 @@ pub(super) fn evaluate(
 pub(super) fn structure(
     state: &mut HostState,
     fields: &[(MemberName, MirOperand)],
-) -> NativeExecutorResult<Value> {
-    let mut structure = StructValue::new();
-    for (name, operand) in fields {
-        structure.insert(name.0.clone(), materialize_operand(state, operand)?);
-    }
-    Ok(Value::Struct(structure))
+) -> NativeExecutorResult<runmat_runtime::execution::RootedValue> {
+    let runtime = state.runtime.clone();
+    // Operand values remain rooted by the native arena while the admitted
+    // collection is initialized and registered. No intermediate Vec is built.
+    let values = runmat_runtime::execution::RootedValues::try_initialize_in_context(
+        fields.len(),
+        &runtime,
+        |index| materialize_operand(state, &fields[index].1),
+    )?;
+    runmat_runtime::execution::construct_struct_in_context(
+        &runtime,
+        fields.iter().map(|(name, _)| name.0.as_str()),
+        values,
+    )
+    .map_err(NativeExecutorError::from)
 }
 
 pub(super) fn object(
     state: &mut HostState,
     class_name: &QualifiedName,
     fields: &[(MemberName, MirOperand)],
-) -> NativeExecutorResult<Value> {
+) -> NativeExecutorResult<runmat_runtime::execution::RootedValue> {
     let class_name = class_name.display_name().ok_or_else(|| {
         NativeExecutorError::Host("object literal has an empty class name".into())
     })?;
-    let mut object = ObjectInstance::new(class_name);
-    for (name, operand) in fields {
-        object
-            .properties
-            .insert(name.0.clone(), materialize_operand(state, operand)?);
-    }
-    Ok(Value::Object(object))
+    let runtime = state.runtime.clone();
+    let values = runmat_runtime::execution::RootedValues::try_initialize_in_context(
+        fields.len(),
+        &runtime,
+        |index| materialize_operand(state, &fields[index].1),
+    )?;
+    runmat_runtime::execution::construct_object_in_context(
+        &runtime,
+        &class_name,
+        fields.iter().map(|(name, _)| name.0.as_str()),
+        values,
+    )
+    .map_err(NativeExecutorError::from)
 }

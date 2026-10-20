@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn getfield_vector_index_selector_reads_typed_integer_storage_exactly() {
-    let mut st = StructValue::new();
+    let mut st = runmat_value::UnboundedStructValueBuilder::new();
     st.fields.insert(
         "values".to_string(),
         Value::Tensor(Tensor::new(vec![10.0, 20.0], vec![1, 2]).unwrap()),
@@ -12,7 +12,7 @@ fn getfield_vector_index_selector_reads_typed_integer_storage_exactly() {
     let index =
         CellArray::new_with_shape(vec![Value::Tensor(selector)], vec![1, 1]).expect("index");
     let result = run_getfield(
-        Value::Struct(st),
+        Value::Struct(st.finish()),
         vec![Value::from("values"), Value::Cell(index)],
     )
     .expect("vector index");
@@ -32,7 +32,7 @@ fn getfield_vector_index_preserves_typed_integer_target_storage() {
         vec![1, 2],
     )
     .expect("typed target");
-    let mut st = StructValue::new();
+    let mut st = runmat_value::UnboundedStructValueBuilder::new();
     st.fields
         .insert("values".to_string(), Value::Tensor(values));
 
@@ -42,7 +42,7 @@ fn getfield_vector_index_preserves_typed_integer_target_storage() {
         CellArray::new_with_shape(vec![Value::Tensor(selector)], vec![1, 1]).expect("index");
 
     let result = run_getfield(
-        Value::Struct(st),
+        Value::Struct(st.finish()),
         vec![Value::from("values"), Value::Cell(index)],
     )
     .expect("vector index");
@@ -66,7 +66,7 @@ fn getfield_vector_index_preserves_typed_integer_target_storage() {
 fn getfield_vector_index_preserves_single_target_storage() {
     let values = Tensor::from_numeric_storage(NumericStorage::F32(vec![1.25, 2.5]), vec![1, 2])
         .expect("single target");
-    let mut st = StructValue::new();
+    let mut st = runmat_value::UnboundedStructValueBuilder::new();
     st.fields
         .insert("values".to_string(), Value::Tensor(values));
     let selector =
@@ -75,7 +75,7 @@ fn getfield_vector_index_preserves_single_target_storage() {
         CellArray::new_with_shape(vec![Value::Tensor(selector)], vec![1, 1]).expect("index");
 
     let result = run_getfield(
-        Value::Struct(st),
+        Value::Struct(st.finish()),
         vec![Value::from("values"), Value::Cell(index)],
     )
     .expect("vector index");
@@ -98,7 +98,7 @@ fn getfield_logical_index_selectors_preserve_integer_target_storage() {
         vec![1, 3],
     )
     .expect("typed target");
-    let mut st = StructValue::new();
+    let mut st = runmat_value::UnboundedStructValueBuilder::new();
     st.fields
         .insert("values".to_string(), Value::Tensor(values));
     let mask = LogicalArray::new(vec![1, 0, 1], vec![1, 3]).expect("logical mask");
@@ -106,7 +106,7 @@ fn getfield_logical_index_selectors_preserve_integer_target_storage() {
         CellArray::new_with_shape(vec![Value::LogicalArray(mask)], vec![1, 1]).expect("index cell");
 
     let result = run_getfield(
-        Value::Struct(st),
+        Value::Struct(st.finish()),
         vec![Value::from("values"), Value::Cell(index)],
     )
     .expect("logical index");
@@ -124,13 +124,13 @@ fn getfield_logical_index_selectors_preserve_integer_target_storage() {
         vec![1, 3],
     )
     .expect("typed target");
-    let mut st = StructValue::new();
+    let mut st = runmat_value::UnboundedStructValueBuilder::new();
     st.fields
         .insert("values".to_string(), Value::Tensor(values));
     let index = CellArray::new_with_shape(vec![Value::Bool(true)], vec![1, 1])
         .expect("scalar logical index");
     let result = run_getfield(
-        Value::Struct(st),
+        Value::Struct(st.finish()),
         vec![Value::from("values"), Value::Cell(index)],
     )
     .expect("short logical index");
@@ -141,13 +141,13 @@ fn getfield_logical_index_selectors_preserve_integer_target_storage() {
         vec![1, 3],
     )
     .expect("typed target");
-    let mut st = StructValue::new();
+    let mut st = runmat_value::UnboundedStructValueBuilder::new();
     st.fields
         .insert("values".to_string(), Value::Tensor(values));
     let index = CellArray::new_with_shape(vec![Value::Bool(false)], vec![1, 1])
         .expect("scalar logical index");
     let result = run_getfield(
-        Value::Struct(st),
+        Value::Struct(st.finish()),
         vec![Value::from("values"), Value::Cell(index)],
     )
     .expect("false logical index");

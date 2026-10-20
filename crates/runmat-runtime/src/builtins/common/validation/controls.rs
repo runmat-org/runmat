@@ -4,7 +4,10 @@ use std::borrow::Cow;
 
 use super::{invalid_argument_error, value_texts, RangeInclusivity, RuntimeError, Value};
 
-pub(super) fn type_names_arg(args: &[Value], index: usize) -> Result<Vec<String>, RuntimeError> {
+pub(super) fn type_names_arg(
+    args: crate::call::FunctionArgumentView<'_>,
+    index: usize,
+) -> Result<Vec<String>, RuntimeError> {
     match args.get(index) {
         Some(value) => {
             value_texts(value).map(|texts| texts.into_iter().map(Cow::into_owned).collect())
@@ -18,12 +21,14 @@ pub(super) fn type_names_arg(args: &[Value], index: usize) -> Result<Vec<String>
 
 pub(super) fn range_inclusivity_arg(
     builtin: &str,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> Result<RangeInclusivity, RuntimeError> {
-    match args {
-        [] => Ok(RangeInclusivity::CLOSED),
-        [flag] => range_inclusivity_single_flag(builtin, text_scalar_arg(builtin, flag)?.as_ref()),
-        [lower, upper] => {
+    match (args.len(), args.get(0), args.get(1)) {
+        (0, _, _) => Ok(RangeInclusivity::CLOSED),
+        (1, Some(flag), _) => {
+            range_inclusivity_single_flag(builtin, text_scalar_arg(builtin, flag)?.as_ref())
+        }
+        (2, Some(lower), Some(upper)) => {
             let lower =
                 range_bound_inclusive_flag(builtin, text_scalar_arg(builtin, lower)?.as_ref())?;
             let upper =

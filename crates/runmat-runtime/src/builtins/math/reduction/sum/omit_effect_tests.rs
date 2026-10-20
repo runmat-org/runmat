@@ -160,7 +160,10 @@ async fn selected_sum(
         None,
         None,
         Value::GpuTensor(source),
-        vec![selector, Value::from("omitnan")],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            selector,
+            Value::from("omitnan"),
+        ]),
     )
     .await
     .map(|owned| owned.value().clone())

@@ -251,33 +251,38 @@ fn vpa_expr(expr: &SymbolicExpr, digits: usize) -> SymbolicExpr {
         SymbolicExpr::Variable(_) | SymbolicExpr::FunctionReference(_, _) => expr.clone(),
         SymbolicExpr::FunctionCall(name, args) => SymbolicExpr::FunctionCall(
             name.clone(),
-            args.iter().map(|arg| vpa_expr(arg, digits)).collect(),
+            runmat_value::ExactArrayStorage::shared_unbounded(
+                args.iter().map(|arg| vpa_expr(arg, digits)).collect(),
+            )
+            .into(),
         ),
         SymbolicExpr::Equation(lhs, rhs) => SymbolicExpr::Equation(
-            Box::new(vpa_expr(lhs, digits)),
-            Box::new(vpa_expr(rhs, digits)),
+            runmat_value::symbolic::SymbolicOwner::new_unbounded(vpa_expr(lhs, digits)),
+            runmat_value::symbolic::SymbolicOwner::new_unbounded(vpa_expr(rhs, digits)),
         ),
         SymbolicExpr::Derivative {
             expr,
             variable,
             order,
         } => SymbolicExpr::Derivative {
-            expr: Box::new(vpa_expr(expr, digits)),
+            expr: runmat_value::symbolic::SymbolicOwner::new_unbounded(vpa_expr(expr, digits)),
             variable: variable.clone(),
             order: *order,
         },
-        SymbolicExpr::Neg(inner) => SymbolicExpr::Neg(Box::new(vpa_expr(inner, digits))),
+        SymbolicExpr::Neg(inner) => SymbolicExpr::Neg(
+            runmat_value::symbolic::SymbolicOwner::new_unbounded(vpa_expr(inner, digits)),
+        ),
         SymbolicExpr::Add(lhs, rhs) => SymbolicExpr::Add(
-            Box::new(vpa_expr(lhs, digits)),
-            Box::new(vpa_expr(rhs, digits)),
+            runmat_value::symbolic::SymbolicOwner::new_unbounded(vpa_expr(lhs, digits)),
+            runmat_value::symbolic::SymbolicOwner::new_unbounded(vpa_expr(rhs, digits)),
         ),
         SymbolicExpr::Sub(lhs, rhs) => SymbolicExpr::Sub(
-            Box::new(vpa_expr(lhs, digits)),
-            Box::new(vpa_expr(rhs, digits)),
+            runmat_value::symbolic::SymbolicOwner::new_unbounded(vpa_expr(lhs, digits)),
+            runmat_value::symbolic::SymbolicOwner::new_unbounded(vpa_expr(rhs, digits)),
         ),
         SymbolicExpr::Mul(lhs, rhs) => SymbolicExpr::Mul(
-            Box::new(vpa_expr(lhs, digits)),
-            Box::new(vpa_expr(rhs, digits)),
+            runmat_value::symbolic::SymbolicOwner::new_unbounded(vpa_expr(lhs, digits)),
+            runmat_value::symbolic::SymbolicOwner::new_unbounded(vpa_expr(rhs, digits)),
         ),
         SymbolicExpr::Div(lhs, rhs) => {
             if let Some(SymbolicExpr::Rational {
@@ -288,8 +293,8 @@ fn vpa_expr(expr: &SymbolicExpr, digits: usize) -> SymbolicExpr {
                 decimal_from_rational(&numerator, &denominator, digits)
             } else {
                 SymbolicExpr::Div(
-                    Box::new(vpa_expr(lhs, digits)),
-                    Box::new(vpa_expr(rhs, digits)),
+                    runmat_value::symbolic::SymbolicOwner::new_unbounded(vpa_expr(lhs, digits)),
+                    runmat_value::symbolic::SymbolicOwner::new_unbounded(vpa_expr(rhs, digits)),
                 )
             }
         }
@@ -298,8 +303,8 @@ fn vpa_expr(expr: &SymbolicExpr, digits: usize) -> SymbolicExpr {
                 decimal_from_f64(value, digits)
             } else {
                 SymbolicExpr::Pow(
-                    Box::new(vpa_expr(lhs, digits)),
-                    Box::new(vpa_expr(rhs, digits)),
+                    runmat_value::symbolic::SymbolicOwner::new_unbounded(vpa_expr(lhs, digits)),
+                    runmat_value::symbolic::SymbolicOwner::new_unbounded(vpa_expr(rhs, digits)),
                 )
             }
         }
@@ -307,7 +312,10 @@ fn vpa_expr(expr: &SymbolicExpr, digits: usize) -> SymbolicExpr {
             if let Some(value) = expr.numeric_constant_value() {
                 decimal_from_f64(value, digits)
             } else {
-                SymbolicExpr::Function(*function, Box::new(vpa_expr(inner, digits)))
+                SymbolicExpr::Function(
+                    *function,
+                    runmat_value::symbolic::SymbolicOwner::new_unbounded(vpa_expr(inner, digits)),
+                )
             }
         }
     }
@@ -327,7 +335,7 @@ fn exact_integer(expr: &SymbolicExpr) -> Option<BigInt> {
         SymbolicExpr::Rational {
             numerator,
             denominator,
-        } if denominator.is_one() => Some(numerator.clone()),
+        } if denominator.is_one() => Some(numerator.as_ref().clone()),
         _ => None,
     }
 }

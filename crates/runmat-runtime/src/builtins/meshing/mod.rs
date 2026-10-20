@@ -313,16 +313,16 @@ mod tests {
         };
         assert_eq!(roles.shape, [4, 1]);
         assert!(roles
-            .data
+            .data()
             .iter()
-            .all(|role| role == &Value::String("exterior".to_string())));
+            .all(|role| role == &Value::String("exterior".to_string().into())));
 
         let Value::Cell(adjacency) = faces.fields.get("adjacent_element_ids").expect("adjacency")
         else {
             panic!("expected adjacency cell");
         };
         assert_eq!(adjacency.shape, [4, 1]);
-        assert!(adjacency.data.iter().all(|ids| {
+        assert!(adjacency.data().iter().all(|ids| {
             matches!(
                 ids,
                 Value::Tensor(tensor)
@@ -337,10 +337,10 @@ mod tests {
             panic!("expected provenance cell");
         };
         assert_eq!(provenance.shape, [4, 1]);
-        let Value::Cell(first_face) = &provenance.data[0] else {
+        let Value::Cell(first_face) = &provenance.data()[0] else {
             panic!("expected per-face provenance cell");
         };
-        let Value::Struct(identity) = &first_face.data[0] else {
+        let Value::Struct(identity) = &first_face.data()[0] else {
             panic!("expected persistent identity struct");
         };
         assert_eq!(
@@ -363,7 +363,7 @@ mod tests {
             panic!("expected region cell");
         };
         assert_eq!(regions.shape, [1, 1]);
-        let Value::Struct(region) = &regions.data[0] else {
+        let Value::Struct(region) = &regions.data()[0] else {
             panic!("expected region struct");
         };
         assert_eq!(
@@ -406,6 +406,6 @@ mod tests {
             &[tetrahedron_mesh_value()],
         ))
         .expect("standard mesh should dispatch meshing.Mesh");
-        assert!(matches!(handle, Value::Num(value) if value > 0.0));
+        assert!(matches!(handle.value(), Value::Num(value) if *value > 0.0));
     }
 }

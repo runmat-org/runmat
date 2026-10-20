@@ -59,13 +59,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::ndgrid"
 )]
-async fn ndgrid_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn ndgrid_builtin(rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     let out_count = crate::output_count::current_output_count();
     if matches!(out_count, Some(0)) {
         return Ok(Value::output_list(Vec::new()));
     }
 
-    let eval = evaluate(&rest, out_count).await?;
+    let eval = evaluate(rest.view(), out_count).await?;
     if let Some(count) = out_count {
         let mut outputs = Vec::with_capacity(count);
         for dim in 0..count {
@@ -78,7 +78,7 @@ async fn ndgrid_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 pub async fn evaluate(
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     requested_outputs: Option<usize>,
 ) -> BuiltinResult<NdgridEval> {
     let parsed = ParsedNdgrid::parse(args, requested_outputs).await?;
@@ -242,7 +242,10 @@ struct ParsedNdgrid {
 }
 
 impl ParsedNdgrid {
-    async fn parse(args: &[Value], requested_outputs: Option<usize>) -> BuiltinResult<Self> {
+    async fn parse(
+        args: crate::call::FunctionArgumentView<'_>,
+        requested_outputs: Option<usize>,
+    ) -> BuiltinResult<Self> {
         if args.is_empty() {
             return Err(ndgrid_error(&NDGRID_ERROR_MISSING_AXIS));
         }
@@ -884,7 +887,10 @@ mod tests {
     use runmat_value::IntegerComplexStorage;
 
     fn eval(args: &[Value], outputs: Option<usize>) -> BuiltinResult<NdgridEval> {
-        block_on(evaluate(args, outputs))
+        block_on(evaluate(
+            crate::call::FunctionArgumentView::from_slice(args),
+            outputs,
+        ))
     }
 
     fn output(eval: &NdgridEval, dim: usize) -> BuiltinResult<Value> {
@@ -893,7 +899,9 @@ mod tests {
 
     fn call(args: Vec<Value>, outputs: Option<usize>) -> BuiltinResult<Value> {
         let _guard = crate::output_count::push_output_count(outputs).expect("output-count scope");
-        block_on(ndgrid_builtin(args))
+        block_on(ndgrid_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
 
     fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Tensor {

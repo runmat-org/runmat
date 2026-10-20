@@ -19,7 +19,7 @@ pub(super) struct KstestOptionPlan {
 }
 
 impl KstestOptionPlan {
-    pub(super) fn admit(rest: Vec<Value>) -> BuiltinResult<Self> {
+    pub(super) fn admit(rest: crate::call::BuiltinArguments) -> BuiltinResult<Self> {
         if !rest.len().is_multiple_of(2) {
             return Err(kstest_invalid_argument(
                 "kstest: name-value options must be supplied in pairs",

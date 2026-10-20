@@ -6,7 +6,8 @@ use runmat_value::{CellArray, ObjectInstance, StringArray, Value};
 use crate::builtins::strings::common::{scalar_text_input, text_input_admission};
 use crate::builtins::strings::text_analytics::documents::{
     document_token_type_with_options, documents_from_object, options_from_document_object,
-    text_analytics_error, tokenized_document_language, DocumentTokenType, TOKENIZED_DOCUMENT_CLASS,
+    replace_document_properties, text_analytics_error, tokenized_document_language,
+    DocumentTokenType, TOKENIZED_DOCUMENT_CLASS,
 };
 use crate::builtins::strings::text_analytics::normalize::english_lemma;
 use crate::{gather_if_needed_async, BuiltinResult};
@@ -22,10 +23,10 @@ pub(in crate::builtins::strings::text_analytics) const LEMMA_DETAILS_PROPERTY: &
 )]
 async fn add_lemma_details_builtin(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    let gathered = gather_args(args).await?;
-    let (documents, options) = parse_args(runtime.as_ref(), gathered)?;
+    let gathered = gather_args(args, runtime.as_ref()).await?;
+    let (documents, options) = parse_args(runtime.as_ref(), gathered.view())?;
     let mut object = tokenized_document_object(documents)?;
     let documents = documents_from_object(&object, "addLemmaDetails")?;
     let stored = lemma_details_from_object(&object, "addLemmaDetails")?;
@@ -41,23 +42,32 @@ async fn add_lemma_details_builtin(
             &document_options,
         )?
     };
-    object
-        .properties
-        .insert(LEMMA_DETAILS_PROPERTY.to_string(), lemmas);
+    let updates = [(LEMMA_DETAILS_PROPERTY, lemmas)];
+    replace_document_properties(
+        runtime.as_ref(),
+        &mut object,
+        updates.iter().map(|(name, value)| (*name, value)),
+        "addLemmaDetails",
+    )?;
     Ok(Value::Object(object))
 }
 
-async fn gather_args(args: Vec<Value>) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(args.len());
-    for arg in args {
-        out.push(gather_if_needed_async(&arg).await.map_err(|err| {
+async fn gather_args(
+    args: crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    if !args.iter().any(crate::dispatcher::value_contains_gpu) {
+        return Ok(args);
+    }
+    args.try_map_preserving_roots_async(args.len(), runtime, async |index| {
+        gather_if_needed_async(&args[index]).await.map_err(|err| {
             text_analytics_error(
                 "addLemmaDetails",
                 format!("addLemmaDetails: failed to gather input: {err}"),
             )
-        })?);
-    }
-    Ok(out)
+        })
+    })
+    .await
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -92,7 +102,7 @@ impl LemmaLanguage {
 
 fn parse_args(
     runtime: Option<&crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<(Value, AddLemmaOptions)> {
     if args.is_empty() {
         return Err(text_analytics_error(
@@ -135,7 +145,7 @@ fn tokenized_document_object(value: Value) -> BuiltinResult<ObjectInstance> {
             "addLemmaDetails",
             format!(
                 "addLemmaDetails: expected tokenizedDocument object, got {}",
-                object.class_name
+                object.class_name()
             ),
         )),
         other => Err(text_analytics_error(
@@ -225,7 +235,7 @@ pub(in crate::builtins::strings::text_analytics) fn lemma_details_from_object(
     object: &ObjectInstance,
     fn_name: &str,
 ) -> BuiltinResult<Option<Vec<Vec<String>>>> {
-    let Some(value) = object.properties.get(LEMMA_DETAILS_PROPERTY) else {
+    let Some(value) = object.properties().get(LEMMA_DETAILS_PROPERTY) else {
         return Ok(None);
     };
     let Value::Cell(cell) = value else {
@@ -240,8 +250,8 @@ pub(in crate::builtins::strings::text_analytics) fn lemma_details_from_object(
             format!("{fn_name}: tokenizedDocument object has invalid LemmaDetails shape"),
         ));
     }
-    let mut out = Vec::with_capacity(cell.data.len());
-    for item in &cell.data {
+    let mut out = Vec::with_capacity(cell.data().len());
+    for item in cell.data() {
         let Value::StringArray(array) = item else {
             return Err(text_analytics_error(
                 fn_name,
@@ -256,7 +266,7 @@ pub(in crate::builtins::strings::text_analytics) fn lemma_details_from_object(
         }
         out.push(
             array
-                .data
+                .data()
                 .iter()
                 .map(|text| text.as_str().to_owned())
                 .collect(),
@@ -291,7 +301,10 @@ mod tests {
     }
 
     fn run_add_lemma(args: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(add_lemma_details_builtin(None, args))
+        futures::executor::block_on(add_lemma_details_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
 
     fn run_token_details(value: Value) -> BuiltinResult<Value> {
@@ -316,7 +329,7 @@ mod tests {
 
     fn string_column(table: &ObjectInstance, name: &str) -> Vec<String> {
         match table_column(table, name) {
-            Value::StringArray(array) => array.data,
+            Value::StringArray(array) => array.data().iter().map(ToString::to_string).collect(),
             other => panic!("expected string column {name}, got {other:?}"),
         }
     }
@@ -388,7 +401,7 @@ mod tests {
             .expect("tokenized"),
         );
         let mut stale = docs.clone();
-        stale.properties.insert(
+        stale.replace_property_unbounded(
             LEMMA_DETAILS_PROPERTY.to_string(),
             Value::Cell(
                 CellArray::new(
@@ -457,9 +470,7 @@ mod tests {
         assert!(err.to_string().contains("unsupported option"));
 
         let mut german = object(docs);
-        german
-            .properties
-            .insert("Language".into(), Value::String("de".into()));
+        german.replace_property_unbounded("Language".into(), Value::String("de".into()));
         let err = run_add_lemma(vec![Value::Object(german)]).expect_err("expected bad language");
         assert!(err.to_string().contains("German lemmatization"));
     }
@@ -470,7 +481,7 @@ mod tests {
         let docs =
             object(run_tokenized(vec![Value::String("dogs ran".into())]).expect("tokenized"));
         let mut malformed = docs.clone();
-        malformed.properties.insert(
+        malformed.replace_property_unbounded(
             LEMMA_DETAILS_PROPERTY.to_string(),
             Value::Cell(
                 CellArray::new(
@@ -493,7 +504,7 @@ mod tests {
             .expect("tokenized"),
         );
         let mut transposed = docs.clone();
-        transposed.properties.insert(
+        transposed.replace_property_unbounded(
             LEMMA_DETAILS_PROPERTY.to_string(),
             Value::Cell(
                 CellArray::new(
@@ -517,7 +528,7 @@ mod tests {
         let docs =
             object(run_tokenized(vec![Value::String("dogs ran".into())]).expect("tokenized"));
         let mut column_entry = docs.clone();
-        column_entry.properties.insert(
+        column_entry.replace_property_unbounded(
             LEMMA_DETAILS_PROPERTY.to_string(),
             Value::Cell(
                 CellArray::new(

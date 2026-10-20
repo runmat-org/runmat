@@ -174,12 +174,13 @@ mod tests {
         );
         let mut cooperation =
             MatCodecCooperation::with_budget(budget, "save", &runmat_builtins::SAVE_ERROR_IO);
-        let strings = Value::StringArray(StringArray {
-            data: vec!["first".into(), "second".into(), "third".into()],
-            shape: vec![1, 3],
-            rows: 1,
-            cols: 3,
-        });
+        let strings = Value::StringArray(
+            StringArray::new(
+                vec!["first".into(), "second".into(), "third".into()],
+                vec![1, 3],
+            )
+            .expect("string row fixture"),
+        );
         let error = block_on(convert_value_with_cooperation(
             strings,
             MatEncodingOwner::Save,

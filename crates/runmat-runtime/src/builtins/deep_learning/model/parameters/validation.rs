@@ -1,13 +1,15 @@
 //! Storage, shape, and format admission before parameter publication.
 use super::*;
+#[cfg(test)]
+use crate::builtins::deep_learning::arguments::DeepLearningObjectEdit as _;
 
 pub(super) fn parameter_data<'a>(
     value: &'a Value,
     function: &'static str,
 ) -> BuiltinResult<&'a Value> {
     match value {
-        Value::Object(object) if object.class_name.is(super::DLARRAY_CLASS) => {
-            object.properties.get("Data").ok_or_else(|| {
+        Value::Object(object) if object.class_name().is(super::DLARRAY_CLASS) => {
+            object.properties().get("Data").ok_or_else(|| {
                 deep_learning_error(
                     function,
                     format!("{function}: dlarray parameter is missing Data"),
@@ -124,8 +126,8 @@ pub(in crate::builtins::deep_learning) fn numeric_payload_shape<'a>(
         }
     };
     if let Value::Object(object) = value {
-        if object.class_name.is(super::DLARRAY_CLASS) {
-            let format = match object.properties.get("Format") {
+        if object.class_name().is(super::DLARRAY_CLASS) {
+            let format = match object.properties().get("Format") {
                 None => "",
                 Some(Value::String(format)) => format.as_str(),
                 _ => {
@@ -135,7 +137,7 @@ pub(in crate::builtins::deep_learning) fn numeric_payload_shape<'a>(
                     ))
                 }
             };
-            let labels = match object.properties.get("Labels") {
+            let labels = match object.properties().get("Labels") {
                 None => format,
                 Some(Value::String(labels)) => labels.as_str(),
                 _ => {
@@ -292,13 +294,15 @@ mod tests {
             validate_parameter(&Value::Bool(false), &shape, ParameterRole::Bias, "test").is_err()
         );
         let mut wrapper = ObjectInstance::new(DLARRAY_CLASS.owned());
-        wrapper.properties.insert("Data".into(), tensor(vec![2, 1]));
         wrapper
-            .properties
-            .insert("Format".into(), Value::String("CU".into()));
+            .replace_dl_property("Data", tensor(vec![2, 1]))
+            .expect("fixture property");
         wrapper
-            .properties
-            .insert("Labels".into(), Value::String("UC".into()));
+            .replace_dl_property("Format", Value::String("CU".into()))
+            .expect("fixture property");
+        wrapper
+            .replace_dl_property("Labels", Value::String("UC".into()))
+            .expect("fixture property");
         assert!(
             validate_parameter(&Value::Object(wrapper), &shape, ParameterRole::Bias, "test")
                 .is_err()

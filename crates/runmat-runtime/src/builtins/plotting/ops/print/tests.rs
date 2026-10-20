@@ -80,8 +80,10 @@ fn print_rejects_unsupported_device() {
 fn nested_container_is_not_materialized_as_a_print_control() {
     let nested = runmat_value::CellArray::new(vec![Value::from("plot.png")], 1, 1)
         .expect("one-cell fixture");
-    let error = preflight_host_arguments(&[Value::Cell(nested)])
-        .expect_err("container is not a scalar text operand");
+    let error = preflight_host_arguments(crate::call::FunctionArgumentView::from_slice(&[
+        Value::Cell(nested),
+    ]))
+    .expect_err("container is not a scalar text operand");
     assert_eq!(error.identifier(), PRINT_ERROR_INVALID_INPUT.identifier);
 }
 
@@ -126,7 +128,7 @@ fn print_adds_png_extension_and_writes_png() {
     block_on(print_builtin_direct(
         None,
         vec![
-            Value::String(stem.to_string_lossy().into_owned()),
+            Value::String(stem.to_string_lossy().into_owned().into()),
             Value::from("-dpng"),
             Value::from("-r75"),
         ],
@@ -160,7 +162,10 @@ fn captured_scene_renders_after_ambient_figure_is_cleared() {
 fn command_style_order_accepts_device_then_filename() {
     let _guard = setup();
     let request = parse_print_args(
-        &[Value::from("-dpng"), Value::from("command_style_name")],
+        crate::call::FunctionArgumentView::from_slice(&[
+            Value::from("-dpng"),
+            Value::from("command_style_name"),
+        ]),
         current_figure_handle(),
     )
     .expect("parse");
@@ -174,7 +179,10 @@ fn command_style_order_accepts_device_then_filename() {
 #[test]
 fn print_appends_png_to_filename_component_only() {
     let request = parse_print_args(
-        &[Value::from("exports/report"), Value::from("-dpng")],
+        crate::call::FunctionArgumentView::from_slice(&[
+            Value::from("exports/report"),
+            Value::from("-dpng"),
+        ]),
         current_figure_handle(),
     )
     .expect("parse");
@@ -194,7 +202,8 @@ fn all_host_text_forms_retain_the_absolute_filename_before_gather() {
     ];
     for control in controls {
         assert_eq!(
-            preflight_host_arguments(&[control]).expect("host preflight"),
+            preflight_host_arguments(crate::call::FunctionArgumentView::from_slice(&[control]))
+                .expect("host preflight"),
             Some(PathBuf::from(filename))
         );
     }
@@ -203,11 +212,11 @@ fn all_host_text_forms_retain_the_absolute_filename_before_gather() {
 #[test]
 fn repeated_resolution_uses_last_token_in_runtime_parser() {
     let request = parse_print_args(
-        &[
+        crate::call::FunctionArgumentView::from_slice(&[
             Value::from("plot.png"),
             Value::from("-r75"),
             Value::from("-r300"),
-        ],
+        ]),
         current_figure_handle(),
     )
     .expect("last resolution wins");
@@ -281,7 +290,7 @@ fn pre_cancelled_public_print_preserves_existing_target() {
 #[test]
 fn print_rejects_directory_like_png_output_path() {
     let request = parse_print_args(
-        &[Value::from("/"), Value::from("-dpng")],
+        crate::call::FunctionArgumentView::from_slice(&[Value::from("/"), Value::from("-dpng")]),
         current_figure_handle(),
     )
     .expect("parse");

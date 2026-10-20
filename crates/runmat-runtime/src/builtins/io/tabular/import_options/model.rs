@@ -1,7 +1,18 @@
 use super::{invalid, selectors, EmptyFieldRule, VariableImportOptions, WhitespaceRule};
 use super::{DELIMITED_IMPORT_CLASS, SPREADSHEET_IMPORT_CLASS, VARIABLE_IMPORT_CLASS};
+use crate::context::{
+    host_allocation::{
+        host_allocation_runtime_error, HostAllocationError, HostAllocationPlan,
+        HostAllocationPolicy, HostAllocationReceipt,
+    },
+    RuntimeContext,
+};
+use crate::execution::{RootedValue, RootedValueLease, RootedValues};
 use crate::BuiltinResult;
-use runmat_value::{CellArray, ObjectInstance, StringArray, StructValue, Value};
+use runmat_value::{
+    CellArray, ExactArrayInitializationError, ExactArrayStorage, SharedShape, StringArray,
+    StructValue, Utf8Text, Value,
+};
 
 const VARIABLE_STORAGE: &str = "__runmat_variable_options";
 const SOURCE_ORIGIN: &str = "__runmat_variable_source_origin";
@@ -38,7 +49,10 @@ impl ImportOptions {
         Ok(options)
     }
 
-    pub(crate) fn decode(value: &Value) -> BuiltinResult<Option<Self>> {
+    pub(crate) fn decode(
+        runtime: Option<&RuntimeContext>,
+        value: &Value,
+    ) -> BuiltinResult<Option<Self>> {
         match value {
             Value::Struct(value) => Self::from_legacy(value.clone()).map(Some),
             Value::Object(value)
@@ -50,18 +64,26 @@ impl ImportOptions {
                 } else {
                     ImportSource::DelimitedText
                 };
-                let mut base = StructValue::new();
                 let mut stored = None;
                 let mut source_origin = None;
-                for (key, property) in &value.properties {
+                for (key, property) in value.properties().iter() {
                     if key == VARIABLE_STORAGE {
                         stored = Some(property);
                     } else if key == SOURCE_ORIGIN {
                         source_origin = Some(decode_source_origin(property)?);
-                    } else {
-                        base.insert(key.clone(), property.clone());
                     }
                 }
+                let fields = value
+                    .properties()
+                    .iter()
+                    .filter(|(key, _)| *key != VARIABLE_STORAGE && *key != SOURCE_ORIGIN);
+                let base = crate::execution::construct_struct_from_fields_in_optional_context(
+                    runtime, fields,
+                )?;
+                let (base, _base_roots) = base.into_value_and_lease();
+                let Value::Struct(base) = base else {
+                    unreachable!("structure constructor publishes Struct")
+                };
                 let mut options = Self::from_parts(source, base, stored)?;
                 options.source_origin = source_origin;
                 Ok(Some(options))
@@ -107,11 +129,11 @@ impl ImportOptions {
             ));
         }
         let variables = if let Some(Value::Cell(stored)) = stored {
-            if stored.data.len() != names.len() {
+            if stored.data().len() != names.len() {
                 return Err(invalid("import options: variable-option count is stale"));
             }
             stored
-                .data
+                .data()
                 .iter()
                 .enumerate()
                 .map(|(index, value)| {
@@ -122,7 +144,7 @@ impl ImportOptions {
                         names[index].clone(),
                         types.get(index).cloned().unwrap_or_else(|| "auto".into()),
                     );
-                    for (name, value) in &fields.fields {
+                    for (name, value) in fields.fields.iter() {
                         variable.apply(name, value)?;
                     }
                     variable.validate()?;
@@ -165,17 +187,13 @@ impl ImportOptions {
         self.source_origin
     }
 
-    pub(crate) fn to_value(&self) -> BuiltinResult<Value> {
+    pub(crate) fn to_value(&self, runtime: Option<&RuntimeContext>) -> BuiltinResult<Value> {
         super::ensure_import_options_classes_registered();
         let class = match self.source {
             ImportSource::DelimitedText => DELIMITED_IMPORT_CLASS,
             ImportSource::Spreadsheet => SPREADSHEET_IMPORT_CLASS,
         };
-        let mut object = ObjectInstance::new(class);
-        for (key, value) in &self.base.fields {
-            object.properties.insert(key.clone(), value.clone());
-        }
-        if let Some(source_origin) = self.source_origin {
+        let source_origin = if let Some(source_origin) = self.source_origin {
             let source_origin = u64::try_from(source_origin).map_err(|_| {
                 invalid("import options: variable source origin exceeds exact metadata range")
             })?;
@@ -184,25 +202,23 @@ impl ImportOptions {
                     "import options: variable source origin exceeds exact metadata range",
                 ));
             }
-            object
-                .properties
-                .insert(SOURCE_ORIGIN.into(), Value::Num(source_origin as f64));
-        }
-        let mut variable_storage = Vec::new();
-        variable_storage
-            .try_reserve_exact(self.variables.len())
-            .map_err(|_| invalid("import options: variable metadata exceeds available memory"))?;
-        for variable in &self.variables {
-            variable_storage.push(Value::Struct(variable_fields(variable)?));
-        }
-        object.properties.insert(
-            VARIABLE_STORAGE.into(),
-            Value::Cell(
-                CellArray::new(variable_storage, 1, self.variables.len())
-                    .map_err(|error| invalid(format!("import options: {error}")))?,
-            ),
-        );
-        Ok(Value::Object(object))
+            Some(Value::Num(source_origin as f64))
+        } else {
+            None
+        };
+        let variable_storage = variable_storage(runtime, &self.variables)?;
+        let properties = self
+            .base
+            .fields
+            .iter()
+            .chain(source_origin.iter().map(|value| (SOURCE_ORIGIN, value)))
+            .chain(std::iter::once((VARIABLE_STORAGE, &variable_storage)));
+        let object = crate::execution::object::construct_object_from_borrowed_fields(
+            runtime,
+            class.display_name(),
+            properties,
+        )?;
+        Ok(object.into_value_and_lease().0)
     }
 
     pub(crate) fn set_options(
@@ -229,7 +245,12 @@ impl ImportOptions {
         Ok(())
     }
 
-    pub(crate) fn set_types(&mut self, selection: &Value, types: &Value) -> BuiltinResult<()> {
+    pub(crate) fn set_types(
+        &mut self,
+        runtime: Option<&RuntimeContext>,
+        selection: &Value,
+        types: &Value,
+    ) -> BuiltinResult<()> {
         let indices = selectors::resolve(selection, &self.names())?;
         let supplied = selectors::text_list(types)?;
         if supplied.len() != 1 && supplied.len() != indices.len() {
@@ -247,17 +268,24 @@ impl ImportOptions {
             }
             proposed[index].type_name = type_name.clone();
         }
-        let names = proposed
+        let types = string_array_value(
+            runtime,
+            proposed.iter().map(|variable| variable.type_name.as_str()),
+            proposed.len(),
+        )?;
+        let fields = self
+            .base
+            .fields
             .iter()
-            .map(|variable| variable.type_name.clone())
-            .collect::<Vec<_>>();
-        self.base.insert(
-            "VariableTypes",
-            Value::StringArray(
-                StringArray::new(names, vec![1, proposed.len()])
-                    .map_err(|error| invalid(format!("setvartype: {error}")))?,
-            ),
-        );
+            .filter(|(name, _)| *name != "VariableTypes")
+            .chain(std::iter::once(("VariableTypes", &types)));
+        let base =
+            crate::execution::construct_struct_from_fields_in_optional_context(runtime, fields)?;
+        let (base, _base_roots) = base.into_value_and_lease();
+        let Value::Struct(base) = base else {
+            unreachable!("structure constructor publishes Struct")
+        };
+        self.base = base;
         self.variables = proposed;
         Ok(())
     }
@@ -276,19 +304,27 @@ impl ImportOptions {
             .collect()
     }
 
-    pub(crate) fn variable_value(variable: &VariableImportOptions) -> BuiltinResult<Value> {
+    pub(crate) fn variable_value(
+        runtime: Option<&RuntimeContext>,
+        variable: &VariableImportOptions,
+    ) -> BuiltinResult<Value> {
         super::ensure_import_options_classes_registered();
-        let mut object = ObjectInstance::new(VARIABLE_IMPORT_CLASS);
-        object
-            .properties
-            .insert("Name".into(), Value::string(variable.name.clone()));
-        object
-            .properties
-            .insert("Type".into(), Value::string(variable.type_name.clone()));
-        for (key, value) in variable_fields(variable)?.fields {
-            object.properties.insert(key, value);
-        }
-        Ok(Value::Object(object))
+        let name = text_value(runtime, &variable.name)?;
+        let type_name = text_value(runtime, &variable.type_name)?;
+        let fields = variable_fields(runtime, variable)?;
+        let (fields, _field_roots) = fields.into_value_and_lease();
+        let Value::Struct(fields) = fields else {
+            unreachable!("variable-field constructor publishes Struct")
+        };
+        let properties = [("Name", &name), ("Type", &type_name)]
+            .into_iter()
+            .chain(fields.fields.iter());
+        let object = crate::execution::object::construct_object_from_borrowed_fields(
+            runtime,
+            VARIABLE_IMPORT_CLASS.display_name(),
+            properties,
+        )?;
+        Ok(object.into_value_and_lease().0)
     }
 }
 
@@ -307,63 +343,284 @@ fn decode_source_origin(value: &Value) -> BuiltinResult<usize> {
         .map_err(|_| invalid("import options: variable source origin exceeds target index range"))
 }
 
-fn variable_fields(variable: &VariableImportOptions) -> BuiltinResult<StructValue> {
-    let mut fields = StructValue::new();
-    if !variable.treat_as_missing.is_empty() {
-        let values = variable
-            .treat_as_missing
-            .iter()
-            .cloned()
-            .collect::<Vec<_>>();
-        fields.insert(
-            "TreatAsMissing",
-            Value::StringArray(
-                StringArray::new(values, vec![1, variable.treat_as_missing.len()])
-                    .map_err(|error| invalid(format!("import options: {error}")))?,
-            ),
-        );
-    }
-    if let Some(separator) = variable.decimal_separator {
-        fields.insert("DecimalSeparator", Value::string(separator.to_string()));
-    }
-    if let Some(separator) = variable.thousands_separator {
-        fields.insert(
-            "ThousandsSeparator",
-            Value::string(separator.map_or_else(String::new, |value| value.to_string())),
-        );
-    }
-    if variable.empty_field_rule != EmptyFieldRule::Missing {
-        fields.insert(
-            "EmptyFieldRule",
-            Value::String(
+fn variable_fields(
+    runtime: Option<&RuntimeContext>,
+    variable: &VariableImportOptions,
+) -> BuiltinResult<RootedValue> {
+    let treat_as_missing = if variable.treat_as_missing.is_empty() {
+        None
+    } else {
+        Some(string_array_value(
+            runtime,
+            variable.treat_as_missing.iter().map(String::as_str),
+            variable.treat_as_missing.len(),
+        )?)
+    };
+    let decimal_separator = variable
+        .decimal_separator
+        .map(|separator| text_value(runtime, &separator.to_string()))
+        .transpose()?;
+    let thousands_separator = variable
+        .thousands_separator
+        .map(|separator| {
+            text_value(
+                runtime,
+                &separator.map_or_else(String::new, |value| value.to_string()),
+            )
+        })
+        .transpose()?;
+    let empty_field_rule = (variable.empty_field_rule != EmptyFieldRule::Missing)
+        .then(|| {
+            text_value(
+                runtime,
                 match variable.empty_field_rule {
                     EmptyFieldRule::Missing => "missing",
                     EmptyFieldRule::Auto => "auto",
                     EmptyFieldRule::Error => "error",
-                }
-                .into(),
-            ),
-        );
-    }
-    if variable.whitespace_rule != WhitespaceRule::Trim {
-        fields.insert(
-            "WhitespaceRule",
-            Value::String(
+                },
+            )
+        })
+        .transpose()?;
+    let whitespace_rule = (variable.whitespace_rule != WhitespaceRule::Trim)
+        .then(|| {
+            text_value(
+                runtime,
                 match variable.whitespace_rule {
                     WhitespaceRule::Trim => "trim",
                     WhitespaceRule::Preserve => "preserve",
+                },
+            )
+        })
+        .transpose()?;
+    let input_format = variable
+        .input_format
+        .as_deref()
+        .map(|format| text_value(runtime, format))
+        .transpose()?;
+    let fields = [
+        treat_as_missing
+            .as_ref()
+            .map(|value| ("TreatAsMissing", value)),
+        decimal_separator
+            .as_ref()
+            .map(|value| ("DecimalSeparator", value)),
+        thousands_separator
+            .as_ref()
+            .map(|value| ("ThousandsSeparator", value)),
+        empty_field_rule
+            .as_ref()
+            .map(|value| ("EmptyFieldRule", value)),
+        whitespace_rule
+            .as_ref()
+            .map(|value| ("WhitespaceRule", value)),
+        variable
+            .fill_value
+            .as_ref()
+            .map(|value| ("FillValue", value)),
+        input_format.as_ref().map(|value| ("InputFormat", value)),
+    ];
+    crate::execution::construct_struct_from_fields_in_optional_context(
+        runtime,
+        fields.into_iter().flatten(),
+    )
+}
+
+fn variable_storage(
+    runtime: Option<&RuntimeContext>,
+    variables: &[VariableImportOptions],
+) -> BuiltinResult<Value> {
+    if !managed(runtime)? {
+        let values = variables
+            .iter()
+            .map(|variable| {
+                variable_fields(None, variable).map(|value| value.into_value_and_lease().0)
+            })
+            .collect::<BuiltinResult<Vec<_>>>()?;
+        return CellArray::new(values, 1, variables.len())
+            .map(Value::Cell)
+            .map_err(|error| invalid(format!("import options: {error}")));
+    }
+    let runtime = runtime.expect("managed output has a selected context");
+    let source_roots = root_variable_sources(runtime, variables)?;
+    let shape = admitted_shape(runtime, &[1, variables.len()])?;
+    let data = RootedValues::try_initialize_in_context(variables.len(), runtime, |index| {
+        variable_fields(Some(runtime), &variables[index])
+            .map(|value| value.into_value_and_lease().0)
+    })?;
+    let value = data.with_owned_output_storage(|data| {
+        CellArray::from_admitted(data, shape)
+            .map(Value::Cell)
+            .map_err(|error| invalid(format!("import options: {error}")))
+    })?;
+    drop(source_roots);
+    Ok(value)
+}
+
+fn root_variable_sources(
+    runtime: &RuntimeContext,
+    variables: &[VariableImportOptions],
+) -> BuiltinResult<RootedValueLease> {
+    let values = variables
+        .iter()
+        .filter_map(|variable| variable.fill_value.as_ref());
+    RootedValueLease::for_values_iterator_in_context(values, runtime)
+}
+
+fn string_array_value<'a>(
+    runtime: Option<&RuntimeContext>,
+    values: impl Iterator<Item = &'a str> + Clone,
+    count: usize,
+) -> BuiltinResult<Value> {
+    if !managed(runtime)? {
+        let values = values.map(str::to_owned).collect::<Vec<_>>();
+        return StringArray::new(values, vec![1, count])
+            .map(Value::StringArray)
+            .map_err(|error| invalid(format!("import options: {error}")));
+    }
+    let runtime = runtime.expect("managed output has a selected context");
+    let mut physical = ExactArrayStorage::<Utf8Text>::requested_bytes(count)
+        .map_err(|source| allocation(runtime, source.into()))?;
+    physical = physical
+        .checked_add(
+            SharedShape::requested_bytes_for_rank(2)
+                .map_err(|source| allocation(runtime, source.into()))?,
+        )
+        .ok_or_else(|| allocation(runtime, HostAllocationError::Overflow))?;
+    let mut claims = usize::from(count != 0) + 1;
+    for value in values.clone() {
+        physical = physical
+            .checked_add(
+                Utf8Text::requested_bytes_for_capacity(value.len())
+                    .map_err(|source| allocation(runtime, source.into()))?,
+            )
+            .ok_or_else(|| allocation(runtime, HostAllocationError::Overflow))?;
+        claims = claims
+            .checked_add(usize::from(!value.is_empty()))
+            .ok_or_else(|| allocation(runtime, HostAllocationError::Overflow))?;
+    }
+    let retained = HostAllocationPlan::retained_exact_output_bytes(
+        u64::try_from(physical).map_err(|_| allocation(runtime, HostAllocationError::Overflow))?,
+        claims,
+    )
+    .map_err(|source| allocation(runtime, source))?;
+    let receipt = HostAllocationReceipt::admit(
+        Some(runtime),
+        HostAllocationPlan::new(0, retained).map_err(|source| allocation(runtime, source))?,
+    )
+    .map_err(|source| allocation(runtime, source))?
+    .ok_or_else(|| allocation(runtime, HostAllocationError::MissingManagedOwner))?;
+    let permit = receipt
+        .output_permit(runtime)
+        .map_err(|source| allocation(runtime, source))?;
+    let mut values = values;
+    let data = ExactArrayStorage::try_initialize(count, &permit, |_| {
+        receipt.checkpoint(runtime)?;
+        let source = values.next().ok_or(HostAllocationError::StaleAuthority)?;
+        Utf8Text::try_copy_str_exact_with(source, &permit, |_| receipt.checkpoint(runtime)).map_err(
+            |error| match error {
+                ExactArrayInitializationError::Allocation(source) => {
+                    HostAllocationError::Numeric(source)
                 }
-                .into(),
+                ExactArrayInitializationError::Element(source) => source,
+            },
+        )
+    })
+    .map_err(|error| match error {
+        ExactArrayInitializationError::Allocation(source) => {
+            allocation(runtime, HostAllocationError::Numeric(source))
+        }
+        ExactArrayInitializationError::Element(source) => allocation(runtime, source),
+    })?;
+    let shape = SharedShape::new_admitted_from_slice(&[1, count], &permit)
+        .map_err(|source| allocation(runtime, source.into()))?;
+    receipt
+        .checkpoint(runtime)
+        .map_err(|source| allocation(runtime, source))?;
+    StringArray::from_admitted(data, shape)
+        .map(Value::StringArray)
+        .map_err(|error| invalid(format!("import options: {error}")))
+}
+
+fn text_value(runtime: Option<&RuntimeContext>, text: &str) -> BuiltinResult<Value> {
+    if !managed(runtime)? {
+        return Ok(Value::string(text));
+    }
+    let runtime = runtime.expect("managed output has a selected context");
+    let physical = Utf8Text::requested_bytes_for_capacity(text.len())
+        .map_err(|source| allocation(runtime, source.into()))?;
+    let retained = HostAllocationPlan::retained_exact_output_bytes(
+        u64::try_from(physical).map_err(|_| allocation(runtime, HostAllocationError::Overflow))?,
+        usize::from(!text.is_empty()),
+    )
+    .map_err(|source| allocation(runtime, source))?;
+    let receipt = HostAllocationReceipt::admit(
+        Some(runtime),
+        HostAllocationPlan::new(0, retained).map_err(|source| allocation(runtime, source))?,
+    )
+    .map_err(|source| allocation(runtime, source))?
+    .ok_or_else(|| allocation(runtime, HostAllocationError::MissingManagedOwner))?;
+    let permit = receipt
+        .output_permit(runtime)
+        .map_err(|source| allocation(runtime, source))?;
+    let value = Utf8Text::try_copy_str_exact_with(text, &permit, |_| receipt.checkpoint(runtime))
+        .map_err(|error| match error {
+        ExactArrayInitializationError::Allocation(source) => {
+            allocation(runtime, HostAllocationError::Numeric(source))
+        }
+        ExactArrayInitializationError::Element(source) => allocation(runtime, source),
+    })?;
+    receipt
+        .checkpoint(runtime)
+        .map_err(|source| allocation(runtime, source))?;
+    Ok(Value::String(value))
+}
+
+fn admitted_shape(runtime: &RuntimeContext, shape: &[usize]) -> BuiltinResult<SharedShape> {
+    let bytes = SharedShape::requested_bytes_for_rank(shape.len())
+        .map_err(|source| allocation(runtime, source.into()))?;
+    let retained = HostAllocationPlan::retained_exact_output_bytes(
+        u64::try_from(bytes).map_err(|_| allocation(runtime, HostAllocationError::Overflow))?,
+        1,
+    )
+    .map_err(|source| allocation(runtime, source))?;
+    let receipt = HostAllocationReceipt::admit(
+        Some(runtime),
+        HostAllocationPlan::new(0, retained).map_err(|source| allocation(runtime, source))?,
+    )
+    .map_err(|source| allocation(runtime, source))?
+    .ok_or_else(|| allocation(runtime, HostAllocationError::MissingManagedOwner))?;
+    let permit = receipt
+        .output_permit(runtime)
+        .map_err(|source| allocation(runtime, source))?;
+    let shape = SharedShape::new_admitted_from_slice(shape, &permit)
+        .map_err(|source| allocation(runtime, source.into()))?;
+    receipt
+        .checkpoint(runtime)
+        .map_err(|source| allocation(runtime, source))?;
+    Ok(shape)
+}
+
+fn managed(runtime: Option<&RuntimeContext>) -> BuiltinResult<bool> {
+    HostAllocationReceipt::policy(runtime)
+        .map(|policy| policy == HostAllocationPolicy::Managed)
+        .map_err(|source| match runtime {
+            Some(runtime) => allocation(runtime, source),
+            None => host_allocation_runtime_error(
+                None,
+                "RunMat:ImportOptions:Allocation",
+                "import-options output policy is unavailable",
+                source,
             ),
-        );
-    }
-    if let Some(value) = &variable.fill_value {
-        fields.insert("FillValue", value.clone());
-    }
-    if let Some(format) = &variable.input_format {
-        fields.insert("InputFormat", Value::string(format.clone()));
-    }
-    Ok(fields)
+        })
+}
+
+fn allocation(runtime: &RuntimeContext, source: HostAllocationError) -> crate::RuntimeError {
+    host_allocation_runtime_error(
+        Some(runtime),
+        "RunMat:ImportOptions:Allocation",
+        "import-options output admission failed",
+        source,
+    )
 }
 
 #[cfg(test)]
@@ -374,11 +631,10 @@ mod source_origin_tests {
     fn serialized_origin_is_exact_and_fits_target_pointer_width() {
         let max_native = u64::try_from(usize::MAX).expect("supported target width");
         let admitted = max_native.min(MAX_EXACT_SOURCE_ORIGIN);
-        let mut object = ObjectInstance::new(DELIMITED_IMPORT_CLASS);
-        object
-            .properties
-            .insert(SOURCE_ORIGIN.into(), Value::Num(admitted as f64));
-        let decoded = ImportOptions::decode(&Value::Object(object.clone()))
+        let mut builder = runmat_value::UnboundedObjectBuilder::new(DELIMITED_IMPORT_CLASS);
+        builder.insert(SOURCE_ORIGIN.into(), Value::Num(admitted as f64));
+        let object = builder.finish();
+        let decoded = ImportOptions::decode(None, &Value::Object(object.clone()))
             .expect("admitted metadata")
             .expect("import options object");
         assert_eq!(
@@ -387,10 +643,12 @@ mod source_origin_tests {
         );
 
         if admitted < MAX_EXACT_SOURCE_ORIGIN {
-            object
-                .properties
-                .insert(SOURCE_ORIGIN.into(), Value::Num((admitted + 1) as f64));
-            assert!(ImportOptions::decode(&Value::Object(object)).is_err());
+            let mut builder = object
+                .into_unbounded_builder()
+                .expect("ordinary test object has no admitted aliases");
+            builder.insert(SOURCE_ORIGIN.into(), Value::Num((admitted + 1) as f64));
+            let object = builder.finish();
+            assert!(ImportOptions::decode(None, &Value::Object(object)).is_err());
         }
     }
 
@@ -398,9 +656,9 @@ mod source_origin_tests {
     fn unrecorded_and_explicit_zero_origins_remain_distinct_on_round_trip() {
         let legacy = ImportOptions::from_legacy(StructValue::new()).unwrap();
         assert_eq!(legacy.source_origin(), None);
-        let legacy_value = legacy.to_value().unwrap();
+        let legacy_value = legacy.to_value(None).unwrap();
         assert_eq!(
-            ImportOptions::decode(&legacy_value)
+            ImportOptions::decode(None, &legacy_value)
                 .unwrap()
                 .unwrap()
                 .source_origin(),
@@ -408,9 +666,9 @@ mod source_origin_tests {
         );
 
         let detected = ImportOptions::from_detected(StructValue::new(), 0).unwrap();
-        let detected_value = detected.to_value().unwrap();
+        let detected_value = detected.to_value(None).unwrap();
         assert_eq!(
-            ImportOptions::decode(&detected_value)
+            ImportOptions::decode(None, &detected_value)
                 .unwrap()
                 .unwrap()
                 .source_origin(),

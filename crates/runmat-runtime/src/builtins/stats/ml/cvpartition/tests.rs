@@ -40,7 +40,13 @@ fn scalar_counts_read_every_integer_storage_variant_not_the_float_mirror() {
 
 fn cv(first: Value, second: Value, rest: Vec<Value>) -> Value {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-    block_on(cvpartition_builtin(first, second, rest)).expect("cvpartition")
+    block_on(cvpartition_builtin(
+        None,
+        first,
+        second,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    ))
+    .expect("cvpartition")
 }
 
 fn logical_output(value: Value) -> LogicalArray {
@@ -72,16 +78,22 @@ fn kfold_partition_exposes_balanced_masks() {
     let Value::Object(object) = &partition else {
         panic!("object");
     };
-    assert_eq!(object.properties.get("NumTestSets"), Some(&Value::Num(3.0)));
     assert_eq!(
-        object.properties.get("TestSize"),
+        object.properties().get("NumTestSets"),
+        Some(&Value::Num(3.0))
+    );
+    assert_eq!(
+        object.properties().get("TestSize"),
         Some(&tensor(vec![2.0, 2.0, 2.0], vec![1, 3]))
     );
 
     let all_test = logical_output(
         block_on(test_builtin(
+            None,
             partition.clone(),
-            vec![Value::String("all".into())],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "all".into(),
+            )]),
         ))
         .expect("test all"),
     );
@@ -105,7 +117,12 @@ fn kfold_partition_exposes_balanced_masks() {
     }
 
     let train1 = logical_output(
-        block_on(training_builtin(partition, vec![Value::Num(1.0)])).expect("training 1"),
+        block_on(training_builtin(
+            None,
+            partition,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
+        ))
+        .expect("training 1"),
     );
     assert_eq!(train1.shape, vec![6, 1]);
     assert_eq!(train1.data.iter().filter(|flag| **flag != 0).count(), 4);
@@ -130,11 +147,25 @@ fn numeric_group_order_keeps_seed_repeatability_and_each_class_covered() {
     };
     random::set_seed(4242).unwrap();
     let first = logical_output(
-        block_on(test_builtin(partition(), vec![Value::String("all".into())])).unwrap(),
+        block_on(test_builtin(
+            None,
+            partition(),
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "all".into(),
+            )]),
+        ))
+        .unwrap(),
     );
     random::set_seed(4242).unwrap();
     let second = logical_output(
-        block_on(test_builtin(partition(), vec![Value::String("all".into())])).unwrap(),
+        block_on(test_builtin(
+            None,
+            partition(),
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "all".into(),
+            )]),
+        ))
+        .unwrap(),
     );
     assert_eq!(first.data, second.data);
     assert_eq!(first.shape, vec![6, 2]);
@@ -168,25 +199,26 @@ fn malformed_host_mask_metadata_rejects_before_resident_index_transfer() {
                 .handle,
         )
     };
-    object
-        .properties
-        .insert("Type".into(), Value::String("not-a-partition".into()));
+    object.replace_property_unbounded("Type".into(), Value::String("not-a-partition".into()));
     let error = block_on(test_builtin(
+        None,
         Value::Object(object.clone()),
-        vec![resident_index()],
+        crate::builtins::common::test_support::builtin_arguments(vec![resident_index()]),
     ))
     .expect_err("invalid type must win before transfer");
     assert_eq!(
         error.identifier(),
         Some("RunMat:cvpartition:InvalidArgument")
     );
-    object
-        .properties
-        .insert("Type".into(), Value::String("holdout".into()));
-    object.properties.remove(ACTIVE_ROWS_PROPERTY);
+    object.replace_property_unbounded("Type".into(), Value::String("holdout".into()));
+    crate::builtins::common::test_support::remove_object_property_unbounded(
+        &mut object,
+        ACTIVE_ROWS_PROPERTY,
+    );
     let error = block_on(training_builtin(
+        None,
         Value::Object(object),
-        vec![resident_index()],
+        crate::builtins::common::test_support::builtin_arguments(vec![resident_index()]),
     ))
     .expect_err("missing active rows must win before transfer");
     assert_eq!(
@@ -208,9 +240,10 @@ fn invalid_host_fold_control_wins_before_resident_observation_transfer() {
             .handle,
     );
     let error = block_on(cvpartition_builtin(
+        None,
         resident,
         Value::String("KFold".into()),
-        vec![Value::Num(1.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
     ))
     .expect_err("invalid KFold control must win before transfer");
     assert_eq!(
@@ -232,14 +265,22 @@ fn test_and_training_typed_indices_follow_compatibility_mode_and_decode_exactly(
 
     {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        let test_error = block_on(test_builtin(partition.clone(), vec![index.clone()]))
-            .expect_err("typed test index must be gated");
+        let test_error = block_on(test_builtin(
+            None,
+            partition.clone(),
+            crate::builtins::common::test_support::builtin_arguments(vec![index.clone()]),
+        ))
+        .expect_err("typed test index must be gated");
         assert_eq!(
             test_error.identifier(),
             TEST_INTEGER_INDEX_EXTENSION.error_identifier
         );
-        let training_error = block_on(training_builtin(partition.clone(), vec![index.clone()]))
-            .expect_err("typed training index must be gated");
+        let training_error = block_on(training_builtin(
+            None,
+            partition.clone(),
+            crate::builtins::common::test_support::builtin_arguments(vec![index.clone()]),
+        ))
+        .expect_err("typed training index must be gated");
         assert_eq!(
             training_error.identifier(),
             TRAINING_INTEGER_INDEX_EXTENSION.error_identifier
@@ -248,10 +289,20 @@ fn test_and_training_typed_indices_follow_compatibility_mode_and_decode_exactly(
 
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let test = logical_output(
-        block_on(test_builtin(partition.clone(), vec![index.clone()])).expect("typed test indices"),
+        block_on(test_builtin(
+            None,
+            partition.clone(),
+            crate::builtins::common::test_support::builtin_arguments(vec![index.clone()]),
+        ))
+        .expect("typed test indices"),
     );
     let training = logical_output(
-        block_on(training_builtin(partition, vec![index])).expect("typed training indices"),
+        block_on(training_builtin(
+            None,
+            partition,
+            crate::builtins::common::test_support::builtin_arguments(vec![index]),
+        ))
+        .expect("typed training indices"),
     );
     assert_eq!(test.shape, vec![8, 2]);
     assert_eq!(training.shape, vec![8, 2]);
@@ -304,7 +355,14 @@ fn holdout_fraction_and_stratification_work() {
             Value::Bool(true),
         ],
     );
-    let test_mask = logical_output(block_on(test_builtin(partition, Vec::new())).expect("test"));
+    let test_mask = logical_output(
+        block_on(test_builtin(
+            None,
+            partition,
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect("test"),
+    );
     assert_eq!(test_mask.shape, vec![4, 1]);
     assert_eq!(test_mask.data.iter().filter(|flag| **flag != 0).count(), 2);
     assert_eq!(
@@ -331,7 +389,14 @@ fn leaveout_and_resubstitution_have_expected_shapes() {
         Vec::new(),
     );
     let all = logical_output(
-        block_on(test_builtin(leaveout, vec![Value::String("all".into())])).expect("leaveout all"),
+        block_on(test_builtin(
+            None,
+            leaveout,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "all".into(),
+            )]),
+        ))
+        .expect("leaveout all"),
     );
     assert_eq!(all.shape, vec![3, 3]);
     assert_eq!(all.data, vec![1, 0, 0, 0, 1, 0, 0, 0, 1]);
@@ -341,7 +406,14 @@ fn leaveout_and_resubstitution_have_expected_shapes() {
         Value::String("Resubstitution".into()),
         Vec::new(),
     );
-    let train = logical_output(block_on(training_builtin(resub, Vec::new())).expect("train"));
+    let train = logical_output(
+        block_on(training_builtin(
+            None,
+            resub,
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect("train"),
+    );
     assert_eq!(train.shape, vec![3, 1]);
     assert_eq!(train.data, vec![1, 1, 1]);
 
@@ -350,7 +422,14 @@ fn leaveout_and_resubstitution_have_expected_shapes() {
         Value::String("Resubstitution".into()),
         Vec::new(),
     );
-    let test = logical_output(block_on(test_builtin(resub, Vec::new())).expect("test"));
+    let test = logical_output(
+        block_on(test_builtin(
+            None,
+            resub,
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect("test"),
+    );
     assert_eq!(test.shape, vec![3, 1]);
     assert_eq!(test.data, vec![1, 1, 1]);
 }
@@ -363,7 +442,14 @@ fn custom_partition_preserves_columns() {
         Vec::new(),
     );
     let all = logical_output(
-        block_on(test_builtin(partition, vec![Value::String("all".into())])).expect("custom all"),
+        block_on(test_builtin(
+            None,
+            partition,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "all".into(),
+            )]),
+        ))
+        .expect("custom all"),
     );
     assert_eq!(all.shape, vec![3, 2]);
     assert_eq!(all.data, vec![1, 0, 0, 1, 0, 1]);
@@ -377,8 +463,14 @@ fn custom_integer_vector_expands_to_test_set_columns() {
         Vec::new(),
     );
     let all = logical_output(
-        block_on(test_builtin(partition, vec![Value::String("all".into())]))
-            .expect("custom integer all"),
+        block_on(test_builtin(
+            None,
+            partition,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "all".into(),
+            )]),
+        ))
+        .expect("custom integer all"),
     );
     assert_eq!(all.shape, vec![4, 2]);
     assert_eq!(all.data, vec![1, 0, 0, 1, 0, 1, 1, 0]);
@@ -393,7 +485,14 @@ fn custom_numeric_singletons_preserve_rank_zero_and_rank_one_masks() {
             tensor(vec![1.0], shape.clone()),
             Vec::new(),
         );
-        let mask = logical_output(block_on(test_builtin(partition, Vec::new())).unwrap());
+        let mask = logical_output(
+            block_on(test_builtin(
+                None,
+                partition,
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+            ))
+            .unwrap(),
+        );
         assert_eq!(mask.shape, vec![1, 1]);
         assert_eq!(mask.data, vec![1]);
 
@@ -402,7 +501,14 @@ fn custom_numeric_singletons_preserve_rank_zero_and_rank_one_masks() {
             cleared_int_tensor(IntegerStorage::U8(vec![0]), shape),
             Vec::new(),
         );
-        let mask = logical_output(block_on(test_builtin(partition, Vec::new())).unwrap());
+        let mask = logical_output(
+            block_on(test_builtin(
+                None,
+                partition,
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+            ))
+            .unwrap(),
+        );
         assert_eq!(mask.shape, vec![1, 1]);
         assert_eq!(mask.data, vec![0]);
     }
@@ -422,7 +528,14 @@ fn numeric_partition_input_preserves_scalar_count_and_rank_one_labels() {
         Vec::new(),
     );
     for partition in [scalar_count, label_vector] {
-        let mask = logical_output(block_on(test_builtin(partition, Vec::new())).unwrap());
+        let mask = logical_output(
+            block_on(test_builtin(
+                None,
+                partition,
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+            ))
+            .unwrap(),
+        );
         assert_eq!(mask.shape, vec![2, 1]);
         assert_eq!(mask.data, vec![1, 1]);
     }
@@ -436,8 +549,14 @@ fn custom_integer_vector_reads_typed_integer_storage_exactly() {
         Vec::new(),
     );
     let all = logical_output(
-        block_on(test_builtin(partition, vec![Value::String("all".into())]))
-            .expect("custom integer all"),
+        block_on(test_builtin(
+            None,
+            partition,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "all".into(),
+            )]),
+        ))
+        .expect("custom integer all"),
     );
     assert_eq!(all.shape, vec![4, 2]);
     assert_eq!(all.data, vec![1, 0, 0, 1, 0, 1, 1, 0]);
@@ -447,14 +566,22 @@ fn custom_integer_vector_reads_typed_integer_storage_exactly() {
         cleared_int_tensor(IntegerStorage::U8(vec![1, 0, 1, 0]), vec![1, 4]),
         Vec::new(),
     );
-    let mask = logical_output(block_on(test_builtin(partition, Vec::new())).expect("test"));
+    let mask = logical_output(
+        block_on(test_builtin(
+            None,
+            partition,
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect("test"),
+    );
     assert_eq!(mask.shape, vec![4, 1]);
     assert_eq!(mask.data, vec![1, 0, 1, 0]);
 
     let err = block_on(cvpartition_builtin(
+        None,
         Value::String("CustomPartition".into()),
         tensor(vec![usize::MAX as f64], vec![1, 1]),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .unwrap_err();
     assert_eq!(err.identifier(), Some("RunMat:cvpartition:InvalidArgument"));
@@ -471,11 +598,21 @@ fn custom_logical_row_vector_is_single_test_set() {
         panic!("object");
     };
     assert_eq!(
-        object.properties.get("NumObservations"),
+        object.properties().get("NumObservations"),
         Some(&Value::Num(4.0))
     );
-    assert_eq!(object.properties.get("NumTestSets"), Some(&Value::Num(1.0)));
-    let mask = logical_output(block_on(test_builtin(partition, Vec::new())).expect("test"));
+    assert_eq!(
+        object.properties().get("NumTestSets"),
+        Some(&Value::Num(1.0))
+    );
+    let mask = logical_output(
+        block_on(test_builtin(
+            None,
+            partition,
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect("test"),
+    );
     assert_eq!(mask.shape, vec![4, 1]);
     assert_eq!(mask.data, vec![1, 0, 1, 0]);
 }
@@ -483,17 +620,19 @@ fn custom_logical_row_vector_is_single_test_set() {
 #[test]
 fn invalid_kfold_rejects_large_and_equal_fold_count() {
     let err = block_on(cvpartition_builtin(
+        None,
         Value::Num(3.0),
         Value::String("KFold".into()),
-        vec![Value::Num(4.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(4.0)]),
     ))
     .unwrap_err();
     assert!(err.message.contains("KFold"));
 
     let err = block_on(cvpartition_builtin(
+        None,
         Value::Num(3.0),
         Value::String("KFold".into()),
-        vec![Value::Num(3.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(3.0)]),
     ))
     .unwrap_err();
     assert!(err.message.contains("KFold"));
@@ -510,8 +649,12 @@ fn selected_fold_vector_returns_one_column_per_index() {
     );
     let selected = logical_output(
         block_on(test_builtin(
+            None,
             partition,
-            vec![tensor(vec![1.0, 3.0], vec![1, 2])],
+            crate::builtins::common::test_support::builtin_arguments(vec![tensor(
+                vec![1.0, 3.0],
+                vec![1, 2],
+            )]),
         ))
         .expect("selected folds"),
     );
@@ -537,8 +680,11 @@ fn missing_numeric_stratification_rows_are_discarded_from_masks() {
     );
     let all_test = logical_output(
         block_on(test_builtin(
+            None,
             partition.clone(),
-            vec![Value::String("all".into())],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "all".into(),
+            )]),
         ))
         .expect("test all"),
     );
@@ -548,8 +694,11 @@ fn missing_numeric_stratification_rows_are_discarded_from_masks() {
 
     let all_train = logical_output(
         block_on(training_builtin(
+            None,
             partition,
-            vec![Value::String("all".into())],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "all".into(),
+            )]),
         ))
         .expect("training all"),
     );
@@ -621,8 +770,12 @@ fn typed_integer_partition_counts_and_indices_are_exact() {
     );
     let selected = logical_output(
         block_on(test_builtin(
+            None,
             partition,
-            vec![cleared_int_tensor(IntegerStorage::U8(vec![3]), vec![1, 1])],
+            crate::builtins::common::test_support::builtin_arguments(vec![cleared_int_tensor(
+                IntegerStorage::U8(vec![3]),
+                vec![1, 1],
+            )]),
         ))
         .unwrap(),
     );
@@ -677,8 +830,13 @@ fn cvpartition_extensions_are_independently_mode_gated() {
     ];
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
     for (first, second, rest, identifier) in cases {
-        let error =
-            block_on(cvpartition_builtin(first, second, rest)).expect_err("strict rejection");
+        let error = block_on(cvpartition_builtin(
+            None,
+            first,
+            second,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
+        .expect_err("strict rejection");
         assert_eq!(error.identifier(), identifier);
     }
 }
@@ -690,8 +848,13 @@ fn scalar_string_array_kind_cannot_bypass_typed_control_gate() {
     );
     let control = cleared_int_tensor(IntegerStorage::U8(vec![2]), vec![1, 1]);
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-    let error = block_on(cvpartition_builtin(Value::Num(6.0), kind, vec![control]))
-        .expect_err("typed control gate");
+    let error = block_on(cvpartition_builtin(
+        None,
+        Value::Num(6.0),
+        kind,
+        crate::builtins::common::test_support::builtin_arguments(vec![control]),
+    ))
+    .expect_err("typed control gate");
     assert_eq!(
         error.identifier(),
         CVPARTITION_INTEGER_CONTROL_EXTENSION.error_identifier
@@ -729,9 +892,10 @@ fn wide_integer_stratification_keys_remain_distinct_and_custom_validation_is_exa
         IntegerStorage::U64(vec![wide as u64, wide as u64 + 1]),
     ] {
         let error = block_on(cvpartition_builtin(
+            None,
             Value::from("CustomPartition"),
             cleared_int_tensor(storage, vec![2, 1]),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect_err("wide custom identifiers reject structurally");
         assert!(error.message().contains("CustomPartition"));
@@ -779,8 +943,13 @@ fn resident_integer_roles_gate_before_gather() {
     ];
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
     for (first, second, rest, identifier) in cases {
-        let error = block_on(cvpartition_builtin(first, second, rest))
-            .expect_err("resident role rejects at extension gate");
+        let error = block_on(cvpartition_builtin(
+            None,
+            first,
+            second,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
+        .expect_err("resident role rejects at extension gate");
         assert_eq!(error.identifier(), identifier);
     }
 }
@@ -792,12 +961,25 @@ fn cvpartition_logical_stratify_is_documented_and_rng_respects_seed() {
         random::set_seed(seed).unwrap();
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let partition = block_on(cvpartition_builtin(
+            None,
             Value::Num(12.0),
             Value::from("KFold"),
-            vec![Value::Num(3.0), Value::from("Stratify"), Value::Bool(false)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(3.0),
+                Value::from("Stratify"),
+                Value::Bool(false),
+            ]),
         ))
         .unwrap();
-        logical_output(block_on(test_builtin(partition, vec![Value::from("all")])).unwrap()).data
+        logical_output(
+            block_on(test_builtin(
+                None,
+                partition,
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::from("all")]),
+            ))
+            .unwrap(),
+        )
+        .data
     };
     let first = call(101);
     let same = call(101);

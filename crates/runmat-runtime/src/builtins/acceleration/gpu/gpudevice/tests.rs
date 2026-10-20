@@ -5,7 +5,9 @@ use runmat_value::{IntegerStorage, NumericStorage, Tensor};
 
 fn call(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-    block_on(gpu_device_builtin(args))
+    block_on(gpu_device_builtin(
+        crate::builtins::common::test_support::builtin_arguments(args),
+    ))
 }
 
 #[test]
@@ -20,8 +22,10 @@ fn gpu_device_without_provider_has_its_own_public_error() {
 fn gpu_device_provider_info_facade_is_gated() {
     test_support::with_test_provider(|_| {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        let error = block_on(gpu_device_builtin(Vec::new()))
-            .expect_err("provider info is a RunMat extension");
+        let error = block_on(gpu_device_builtin(
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect_err("provider info is a RunMat extension");
         assert_eq!(
             error.identifier(),
             Some("RunMat:compatibility:GpuDeviceProviderInfoExtension")
@@ -33,8 +37,13 @@ fn gpu_device_provider_info_facade_is_gated() {
 fn logical_extension_gate_keeps_runtime_precedence_over_arity() {
     let _guard = test_support::accel_test_lock();
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-    let error = block_on(gpu_device_builtin(vec![Value::Bool(true), Value::Num(1.0)]))
-        .expect_err("logical selector extension must be checked first");
+    let error = block_on(gpu_device_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Bool(true),
+            Value::Num(1.0),
+        ]),
+    ))
+    .expect_err("logical selector extension must be checked first");
     assert_eq!(
         error.identifier(),
         Some("RunMat:compatibility:GpuDeviceLogicalSelectorExtension")
@@ -286,7 +295,7 @@ fn gpu_device_wgpu_reports_metadata() {
                 if *supports_double {
                     assert_eq!(
                         info.fields.get("precision"),
-                        Some(&Value::String("double".to_string()))
+                        Some(&Value::String("double".to_string().into()))
                     );
                 }
             }

@@ -38,11 +38,14 @@ pub(super) async fn dispatch(
     match instr {
         Instr::CreateSemanticFuture(function, arg_count, out_count) => {
             let arguments = crate::call::builtins::collect_call_args(stack, *arg_count)?;
-            stack.try_push(Value::Future(tasks::create_future(
-                execution,
-                tasks::semantic_descriptor(*function, *out_count, arguments),
-                function_registry,
-            )?))?;
+            stack.try_push(Value::Future(
+                tasks::create_future(
+                    execution,
+                    tasks::semantic_descriptor(*function, *out_count, arguments),
+                    function_registry,
+                )?
+                .into(),
+            ))?;
         }
         // External futures keep the retained target's original function ID.
         Instr::CreateSemanticFutureExpandMultiOutput(function, specs, out_count)
@@ -55,11 +58,14 @@ pub(super) async fn dispatch(
             )
             .await?;
             arguments.with_unbounded_values(|arguments| {
-                stack.try_push(Value::Future(tasks::create_future(
-                    execution,
-                    tasks::semantic_descriptor(*function, *out_count, arguments),
-                    function_registry,
-                )?))?;
+                stack.try_push(Value::Future(
+                    tasks::create_future(
+                        execution,
+                        tasks::semantic_descriptor(*function, *out_count, arguments),
+                        function_registry,
+                    )?
+                    .into(),
+                ))?;
                 Ok::<_, RuntimeError>(())
             })??;
         }
@@ -108,14 +114,14 @@ pub(super) async fn dispatch(
             let arguments = crate::call::builtins::collect_call_args(stack, *arg_count)?;
             stack.try_push(runmat_runtime::parallel::pool::ensure(
                 &execution.runtime,
-                &arguments,
+                runmat_runtime::call::FunctionArgumentView::from_slice(&arguments),
             )?)?;
         }
         Instr::CurrentPool(arg_count) => {
             let arguments = crate::call::builtins::collect_call_args(stack, *arg_count)?;
             stack.try_push(runmat_runtime::parallel::pool::current(
                 &execution.runtime,
-                &arguments,
+                runmat_runtime::call::FunctionArgumentView::from_slice(&arguments),
             )?)?;
         }
         Instr::ExecuteParfor {

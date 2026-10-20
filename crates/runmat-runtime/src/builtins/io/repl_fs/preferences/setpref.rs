@@ -17,7 +17,7 @@ use crate::BuiltinResult;
 )]
 pub(in crate::builtins::io::repl_fs) async fn setpref_builtin(
     runtime: Option<RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &SETPREF_DESCRIPTOR,
@@ -41,9 +41,10 @@ pub(in crate::builtins::io::repl_fs) async fn setpref_builtin(
     let entries = match names {
         PreferenceNames::Scalar(name) => vec![(name, args[2].clone())],
         PreferenceNames::Array { names, shape } => match &args[2] {
-            Value::Cell(values) if values.shape == shape => {
-                names.into_iter().zip(values.data.iter().cloned()).collect()
-            }
+            Value::Cell(values) if values.shape == shape => names
+                .into_iter()
+                .zip(values.data().iter().cloned())
+                .collect(),
             _ => {
                 return Err(error(
                     "setpref",

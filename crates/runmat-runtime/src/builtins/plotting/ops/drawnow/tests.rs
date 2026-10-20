@@ -100,7 +100,9 @@ fn all_controls_preserve_distinct_rate_and_callback_requests() {
                 GraphicsCallbackPolicy::Defer => GraphicsCallbackReceipt::Deferred,
             },
         });
-        let arguments = tokens.into_iter().map(Value::from).collect();
+        let arguments = crate::builtins::common::test_support::builtin_arguments(
+            tokens.into_iter().map(Value::from).collect(),
+        );
         assert_eq!(
             block_on(drawnow_builtin(Some(runtime), Some(0), arguments)).unwrap(),
             Value::output_list(Vec::new())
@@ -116,16 +118,25 @@ fn no_figure_still_requires_processed_callbacks_and_no_service_is_not_success() 
         callbacks: GraphicsCallbackReceipt::Processed,
     });
     assert_eq!(
-        block_on(drawnow_builtin(Some(runtime), Some(0), vec![])).unwrap(),
+        block_on(drawnow_builtin(
+            Some(runtime),
+            Some(0),
+            crate::builtins::common::test_support::builtin_arguments(vec![])
+        ))
+        .unwrap(),
         Value::output_list(Vec::new())
     );
     assert_eq!(requests.borrow().len(), 1);
 
     let absent = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()));
     assert_eq!(
-        block_on(drawnow_builtin(Some(absent), Some(0), vec![]))
-            .unwrap_err()
-            .identifier(),
+        block_on(drawnow_builtin(
+            Some(absent),
+            Some(0),
+            crate::builtins::common::test_support::builtin_arguments(vec![])
+        ))
+        .unwrap_err()
+        .identifier(),
         Some(crate::context::RuntimeCapabilityError::IDENTIFIER)
     );
 }
@@ -137,16 +148,20 @@ fn output_and_invalid_controls_precede_host_submission() {
         callbacks: GraphicsCallbackReceipt::Processed,
     });
     assert_eq!(
-        block_on(drawnow_builtin(Some(runtime.clone()), Some(2), vec![]))
-            .unwrap_err()
-            .identifier(),
+        block_on(drawnow_builtin(
+            Some(runtime.clone()),
+            Some(2),
+            crate::builtins::common::test_support::builtin_arguments(vec![])
+        ))
+        .unwrap_err()
+        .identifier(),
         DRAWNOW_ERROR_TOO_MANY_OUTPUTS.identifier
     );
     assert_eq!(
         block_on(drawnow_builtin(
             Some(runtime),
             Some(0),
-            vec![Value::from("bogus")]
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from("bogus")])
         ))
         .unwrap_err()
         .identifier(),
@@ -161,12 +176,21 @@ fn unpolled_public_future_does_not_submit_and_status_is_explicit() {
         presentation: GraphicsPresentation::NoFigure,
         callbacks: GraphicsCallbackReceipt::Processed,
     });
-    let future = drawnow_builtin(Some(runtime.clone()), Some(0), vec![]);
+    let future = drawnow_builtin(
+        Some(runtime.clone()),
+        Some(0),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    );
     drop(future);
     assert_eq!(calls.get(), 0);
 
     assert_eq!(
-        block_on(drawnow_builtin(Some(runtime), Some(1), vec![])).unwrap(),
+        block_on(drawnow_builtin(
+            Some(runtime),
+            Some(1),
+            crate::builtins::common::test_support::builtin_arguments(vec![])
+        ))
+        .unwrap(),
         Value::Bool(true)
     );
     assert_eq!(calls.get(), 1);
@@ -194,7 +218,7 @@ fn host_callback_policy_violations_preserve_published_effect_cause() {
         let error = block_on(drawnow_builtin(
             Some(runtime),
             Some(0),
-            vec![Value::from(control)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from(control)]),
         ))
         .expect_err("wrong callback receipt must fail closed");
         assert_eq!(
@@ -284,7 +308,11 @@ fn pending_cancellation_preserves_exact_effect_disposition_and_retires_operation
                 disposition,
             })),
         );
-        let mut call = Box::pin(drawnow_builtin(Some(runtime), Some(0), vec![]));
+        let mut call = Box::pin(drawnow_builtin(
+            Some(runtime),
+            Some(0),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ));
         let waker = futures::task::noop_waker();
         let mut context = Context::from_waker(&waker);
         assert!(call.as_mut().poll(&mut context).is_pending());
@@ -382,7 +410,12 @@ fn terminal_host_error_keeps_original_diagnostic_and_published_effect() {
         .with_identifier("Host:FrameFailure")
         .build();
     let runtime = terminal_runtime(Err(original), GraphicsFlushDisposition::Published, None);
-    let error = block_on(drawnow_builtin(Some(runtime), Some(0), vec![])).unwrap_err();
+    let error = block_on(drawnow_builtin(
+        Some(runtime),
+        Some(0),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap_err();
     assert_eq!(error.identifier(), Some("Host:FrameFailure"));
     assert_eq!(error.message, "host frame failed");
     assert_eq!(
@@ -401,7 +434,12 @@ fn invalid_published_receipt_preserves_effect_without_replay() {
         GraphicsFlushDisposition::Published,
         None,
     );
-    let error = block_on(drawnow_builtin(Some(runtime), Some(0), vec![])).unwrap_err();
+    let error = block_on(drawnow_builtin(
+        Some(runtime),
+        Some(0),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap_err();
     assert_eq!(
         error.identifier(),
         runmat_builtins::DRAWNOW_ERROR_PRESENTATION.identifier
@@ -422,7 +460,7 @@ fn invalid_published_receipt_preserves_effect_without_replay() {
     let error = block_on(drawnow_builtin(
         Some(runtime),
         Some(0),
-        vec![Value::from("update")],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("update")]),
     ))
     .unwrap_err();
     assert_eq!(
@@ -449,7 +487,7 @@ fn update_busy_deferral_is_distinct_from_rate_limiting() {
         block_on(drawnow_builtin(
             Some(runtime),
             Some(0),
-            vec![Value::from("update")]
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from("update")])
         ))
         .unwrap(),
         Value::output_list(Vec::new())
@@ -473,7 +511,11 @@ fn terminal_success_and_error_win_same_poll_cancellation() {
             GraphicsFlushDisposition::Published,
             Some(cancellation.clone()),
         );
-        let outcome = block_on(drawnow_builtin(Some(runtime), Some(0), vec![]));
+        let outcome = block_on(drawnow_builtin(
+            Some(runtime),
+            Some(0),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ));
         assert!(cancellation.token().is_cancelled());
         match outcome {
             Ok(value) => assert_eq!(value, Value::output_list(Vec::new())),

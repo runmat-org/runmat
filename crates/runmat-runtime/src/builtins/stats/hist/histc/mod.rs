@@ -29,7 +29,11 @@ const MAX_DIMENSION_ARGUMENT: usize = runmat_builtins::HISTC_MAX_DIMENSION;
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::hist::histc"
 )]
-async fn histc_builtin(x: Value, binranges: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn histc_builtin(
+    x: Value,
+    binranges: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if crate::output_count::current_output_count().is_some_and(|count| count > 2) {
         return Err(invalid_argument("histc: too many output arguments"));
     }
@@ -41,10 +45,10 @@ async fn histc_builtin(x: Value, binranges: Value, rest: Vec<Value>) -> BuiltinR
             _ => None,
         })
         .collect();
-    let dim = match rest.as_slice() {
-        [] => None,
-        [value] => Some(
-            tensor::dimension_from_value_async(value, NAME, false)
+    let dim = match rest.len() {
+        0 => None,
+        1 => Some(
+            tensor::dimension_from_value_async(&rest[0], NAME, false)
                 .await
                 .map_err(invalid_argument)?
                 .ok_or_else(|| invalid_argument("histc: dim must be numeric"))

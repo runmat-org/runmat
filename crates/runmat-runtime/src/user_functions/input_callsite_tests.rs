@@ -38,7 +38,10 @@ fn dynamic_probe_returns_the_same_argument_owner_and_keeps_selected_outcomes_ter
     let payload = text.as_ptr();
     let first = futures::executor::block_on(try_load_and_call_dynamic_function(
         "late".into(),
-        vec![Value::String(text)],
+        crate::call::RootedFunctionArguments::ordinary(
+            crate::execution::RootedValues::in_context(vec![Value::String(text.into())], &runtime)
+                .expect("root the original argument"),
+        ),
         0,
         DynamicFunctionLoadPhase::BeforeSemantic,
         None,
@@ -46,7 +49,8 @@ fn dynamic_probe_returns_the_same_argument_owner_and_keeps_selected_outcomes_ter
     let ControlFlow::Continue(arguments) = first else {
         panic!("missing source returns its original arguments");
     };
-    let [Value::String(text)] = arguments.as_slice() else {
+    assert_eq!(arguments.len(), 1);
+    let Some(Value::String(text)) = arguments.first() else {
         panic!("original string argument retained");
     };
     assert_eq!(text.as_ptr(), payload);
@@ -68,7 +72,10 @@ fn dynamic_probe_returns_the_same_argument_owner_and_keeps_selected_outcomes_ter
     );
     let error = futures::executor::block_on(try_load_and_call_dynamic_function(
         "late".into(),
-        Vec::new(),
+        crate::call::RootedFunctionArguments::ordinary(
+            crate::execution::RootedValues::in_context(Vec::new(), &runtime)
+                .expect("root the selected loader arguments"),
+        ),
         0,
         DynamicFunctionLoadPhase::RegisteredConstructorSource(
             runmat_types::ClassIdentity::new("SelectedCtor").expect("class identity"),

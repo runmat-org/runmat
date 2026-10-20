@@ -2,6 +2,13 @@ use super::*;
 use runmat_accelerate_api::{HostIntegerDataOwned, IntegerElementType};
 use runmat_value::{IntegerStorage, Tensor};
 
+async fn deal_builtin_registered(values: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let values = crate::execution::RootedValues::new(values)
+        .expect("ordinary deal WGPU fixture arguments")
+        .into();
+    super::deal_builtin_registered(None, values).await
+}
+
 #[test]
 fn deal_wgpu_resident_integer_aliases_when_a_device_is_available() {
     check_wgpu_resident_aliases(false);
@@ -63,7 +70,7 @@ fn check_wgpu_resident_aliases(require_device: bool) {
             let Value::Cell(cell) = output else {
                 panic!("nested resident output");
             };
-            let Value::GpuTensor(alias) = &cell.data[0] else {
+            let Value::GpuTensor(alias) = &cell.data()[0] else {
                 panic!("resident alias");
             };
             assert!(alias.shares_allocation_with(&handle));

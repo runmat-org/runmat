@@ -293,7 +293,7 @@ fn encode_host_value(
             };
             Ok(PythonWireValue::Foreign(PythonRemoteReference {
                 id,
-                type_identity: reference.type_identity,
+                type_identity: reference.type_identity.clone(),
                 ownership: reference.ownership,
                 affinity: reference.affinity,
                 lifetime: reference.lifetime,
@@ -576,7 +576,7 @@ impl RemoteResources {
                 continue;
             };
             self.identities.remove(&(
-                reference.host_identity,
+                reference.host_identity.clone(),
                 reference.handle,
                 reference.generation,
             ));

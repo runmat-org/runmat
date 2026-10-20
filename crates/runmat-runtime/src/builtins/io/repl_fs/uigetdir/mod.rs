@@ -63,14 +63,14 @@ fn host_io_error(source: std::io::Error) -> RuntimeError {
 )]
 async fn uigetdir_builtin(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &UIGETDIR_DESCRIPTOR,
         &UIGETDIR_ERROR_TOO_MANY_OUTPUTS,
         NAME,
     )?;
-    let options = parse_options(&args)?;
+    let options = parse_options(args.view())?;
     let request = runmat_filesystem::resolve_directory_dialog_request(&options.request)
         .map_err(host_io_error)?;
     let selection = crate::context::select_directory(runtime.as_ref(), request)
@@ -79,7 +79,7 @@ async fn uigetdir_builtin(
     outputs_for_selection(selection)
 }
 
-fn parse_options(args: &[Value]) -> BuiltinResult<UigetdirOptions> {
+fn parse_options(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<UigetdirOptions> {
     if args.len() > 2 {
         return Err(invalid_argument("expected startPath and title"));
     }

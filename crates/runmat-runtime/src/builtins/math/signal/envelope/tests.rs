@@ -26,7 +26,11 @@ fn call(value: Value, rest: Vec<Value>, outputs: Option<usize>) -> BuiltinResult
     let _guard = outputs
         .map(|count| crate::output_count::push_output_count(Some(count)))
         .expect("output-count scope");
-    block_on(envelope_builtin(None, value, rest))
+    block_on(envelope_builtin(
+        None,
+        value,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    ))
 }
 
 fn tensor_data(value: Value) -> Vec<f64> {
@@ -286,7 +290,7 @@ fn rms_envelope_uses_centered_window() {
     let outputs = output_list(
         call(
             row(vec![0.0, 3.0, 4.0, 0.0]),
-            vec![Value::Num(3.0), Value::String("rms".to_string())],
+            vec![Value::Num(3.0), Value::String("rms".to_string().into())],
             Some(2),
         )
         .expect("envelope"),
@@ -302,7 +306,7 @@ fn peak_envelope_interpolates_extrema() {
     let outputs = output_list(
         call(
             row(vec![0.0, 2.0, 0.0, -1.0, 0.0, 3.0, 0.0]),
-            vec![Value::Num(2.0), Value::String("peak".to_string())],
+            vec![Value::Num(2.0), Value::String("peak".to_string().into())],
             Some(2),
         )
         .expect("envelope"),
@@ -463,7 +467,10 @@ fn analytic_filter_length_uses_fir_path() {
     let fir = tensor_data(
         call(
             row(values),
-            vec![Value::Num(5.0), Value::String("analytic".to_string())],
+            vec![
+                Value::Num(5.0),
+                Value::String("analytic".to_string().into()),
+            ],
             None,
         )
         .expect("envelope"),
@@ -538,7 +545,10 @@ fn analytic_fir_envelope_wgpu_stays_resident_and_matches_cpu() {
     assert_gpu_envelope_matches_cpu(
         values,
         vec![8, 1],
-        vec![Value::Num(5.0), Value::String("analytic".to_string())],
+        vec![
+            Value::Num(5.0),
+            Value::String("analytic".to_string().into()),
+        ],
     );
 }
 
@@ -549,7 +559,7 @@ fn rms_envelope_wgpu_stays_resident_and_matches_cpu() {
     assert_gpu_envelope_matches_cpu(
         values,
         vec![4, 2],
-        vec![Value::Num(3.0), Value::String("rms".to_string())],
+        vec![Value::Num(3.0), Value::String("rms".to_string().into())],
     );
 }
 
@@ -564,7 +574,7 @@ fn too_many_outputs_has_stable_identifier() {
 fn invalid_method_has_stable_identifier() {
     let err = call(
         row(vec![1.0, 2.0, 3.0]),
-        vec![Value::Num(3.0), Value::String("bad".to_string())],
+        vec![Value::Num(3.0), Value::String("bad".to_string().into())],
         None,
     )
     .expect_err("invalid method should fail");

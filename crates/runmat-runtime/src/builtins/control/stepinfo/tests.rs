@@ -3,25 +3,23 @@ use futures::executor::block_on;
 use runmat_value::{CharArray, IntegerStorage, ObjectInstance, Tensor};
 
 fn run(input: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    block_on(stepinfo_builtin(input, rest))
+    block_on(stepinfo_builtin(
+        None,
+        input,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    ))
 }
 fn samples(values: Vec<f64>) -> Value {
     Value::Tensor(Tensor::new(values.clone(), vec![1, values.len()]).unwrap())
 }
 fn tf_model(numerator: Value, denominator: Value) -> Value {
     let mut object = ObjectInstance::new("tf".to_string());
-    object.properties.insert("Numerator".into(), numerator);
-    object.properties.insert("Denominator".into(), denominator);
-    object
-        .properties
-        .insert("Variable".into(), Value::CharArray(CharArray::new_row("s")));
-    object.properties.insert("Ts".into(), Value::Num(0.0));
-    object
-        .properties
-        .insert("InputDelay".into(), Value::Num(0.0));
-    object
-        .properties
-        .insert("OutputDelay".into(), Value::Num(0.0));
+    object.replace_property_unbounded("Numerator".into(), numerator);
+    object.replace_property_unbounded("Denominator".into(), denominator);
+    object.replace_property_unbounded("Variable".into(), Value::CharArray(CharArray::new_row("s")));
+    object.replace_property_unbounded("Ts".into(), Value::Num(0.0));
+    object.replace_property_unbounded("InputDelay".into(), Value::Num(0.0));
+    object.replace_property_unbounded("OutputDelay".into(), Value::Num(0.0));
     Value::Object(object)
 }
 fn field(value: &Value, name: &str) -> f64 {

@@ -181,7 +181,9 @@ fn exact_owner_is_used_instead_of_active_provider_and_discard_releases_result() 
         let result = block_on(pagefun_builtin(
             Value::FunctionHandle("mtimes".into()),
             Value::GpuTensor(input.clone()),
-            vec![Value::GpuTensor(input.clone())],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(
+                input.clone(),
+            )]),
         ))
         .unwrap();
         if count == 0 {

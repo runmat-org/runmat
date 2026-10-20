@@ -2,6 +2,7 @@
 use runmat_builtins::SET_DESCRIPTOR;
 use runmat_builtins::{BuiltinErrorDescriptor, SET_ERROR_INTERNAL, SET_ERROR_INVALID_ARGUMENT};
 use runmat_macros::runtime_builtin;
+#[cfg(test)]
 use runmat_value::Value;
 
 use super::properties::resolve_plot_handle;
@@ -53,19 +54,25 @@ fn map_set_error(err: RuntimeError) -> RuntimeError {
 )]
 pub async fn set_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<String> {
     set_builtin_with_runtime(runtime.as_ref(), args).await
 }
 
 #[cfg(test)]
 pub async fn set_builtin_async(args: Vec<Value>) -> crate::BuiltinResult<String> {
-    set_builtin_with_runtime(None, args).await
+    set_builtin_with_runtime(
+        None,
+        crate::execution::RootedValues::new(args)
+            .map_err(crate::execution::ExecutionServiceError::into_runtime_error)?
+            .into(),
+    )
+    .await
 }
 
 async fn set_builtin_with_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<String> {
     if args.len() < 3 || args.len().is_multiple_of(2) {
         return Err(set_error_with_detail(
@@ -76,7 +83,7 @@ async fn set_builtin_with_runtime(
     if let Some(()) = super::zoom::set_zoom_object_properties_in_context(
         runtime,
         &args[0],
-        &args[1..],
+        args.view().range(1..)?,
         BUILTIN_NAME,
     )? {
         return Ok("ok".to_string());
@@ -84,7 +91,7 @@ async fn set_builtin_with_runtime(
     if let Some(()) = super::pan::set_pan_object_properties_in_context(
         runtime,
         &args[0],
-        &args[1..],
+        args.view().range(1..)?,
         BUILTIN_NAME,
     )? {
         return Ok("ok".to_string());
@@ -92,7 +99,7 @@ async fn set_builtin_with_runtime(
     if let Some(()) = super::datacursormode::set_data_cursor_object_properties_in_context(
         runtime,
         &args[0],
-        &args[1..],
+        args.view().range(1..)?,
         BUILTIN_NAME,
     )? {
         return Ok("ok".to_string());
@@ -100,7 +107,7 @@ async fn set_builtin_with_runtime(
     if let Some(()) = super::properties::set_receiver_properties_with_runtime(
         runtime,
         &args[0],
-        &args[1..],
+        args.view().range(1..)?,
         BUILTIN_NAME,
     )
     .await
@@ -109,9 +116,14 @@ async fn set_builtin_with_runtime(
         return Ok("ok".to_string());
     }
     let handle = resolve_plot_handle(&args[0], BUILTIN_NAME).map_err(map_set_error)?;
-    super::properties::set_properties_async_with_runtime(runtime, handle, &args[1..], BUILTIN_NAME)
-        .await
-        .map_err(map_set_error)?;
+    super::properties::set_properties_async_with_runtime(
+        runtime,
+        handle,
+        args.view().range(1..)?,
+        BUILTIN_NAME,
+    )
+    .await
+    .map_err(map_set_error)?;
     Ok("ok".to_string())
 }
 
@@ -199,10 +211,21 @@ mod tests {
     fn interaction_control_properties_share_scalar_text_name_boundary() {
         let _guard = setup();
         let controls = [
-            crate::builtins::plotting::zoom::zoom_builtin(Vec::new()).expect("zoom object"),
-            crate::builtins::plotting::pan::pan_builtin(Vec::new()).expect("pan object"),
-            crate::builtins::plotting::datacursormode::datacursormode_builtin(Vec::new())
-                .expect("data cursor object"),
+            crate::builtins::plotting::zoom::zoom_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+            )
+            .expect("zoom object"),
+            crate::builtins::plotting::pan::pan_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+            )
+            .expect("pan object"),
+            crate::builtins::plotting::datacursormode::datacursormode_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+            )
+            .expect("data cursor object"),
         ];
         for control in controls {
             let scalar_name = || {
@@ -256,7 +279,10 @@ mod tests {
     #[test]
     fn set_updates_text_handle_properties() {
         let _guard = setup();
-        let h = title_builtin(vec![Value::String("Signal".into())]).unwrap();
+        let h = title_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::String("Signal".into())],
+        ))
+        .unwrap();
         set_builtin(vec![
             Value::Num(h),
             Value::String("String".into()),
@@ -275,7 +301,10 @@ mod tests {
     #[test]
     fn set_updates_extended_text_and_legend_properties() {
         let _guard = setup();
-        let h = title_builtin(vec![Value::String("Signal".into())]).unwrap();
+        let h = title_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::String("Signal".into())],
+        ))
+        .unwrap();
         set_builtin(vec![
             Value::Num(h),
             Value::String("FontWeight".into()),
@@ -301,7 +330,10 @@ mod tests {
         );
         let figure = crate::builtins::plotting::import_figure(figure);
         let ax = crate::builtins::plotting::state::encode_axes_handle(figure, 0);
-        let legend = legend_builtin(vec![Value::Num(ax)]).unwrap();
+        let legend = legend_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::Num(ax)],
+        ))
+        .unwrap();
         set_builtin(vec![
             Value::Num(legend),
             Value::String("FontWeight".into()),
@@ -336,7 +368,10 @@ mod tests {
         );
         let figure = crate::builtins::plotting::import_figure(figure);
         let ax = crate::builtins::plotting::state::encode_axes_handle(figure, 0);
-        let legend = legend_builtin(vec![Value::Num(ax)]).unwrap();
+        let legend = legend_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::Num(ax)],
+        ))
+        .unwrap();
 
         set_builtin(vec![
             Value::Num(legend),
@@ -356,7 +391,10 @@ mod tests {
     #[test]
     fn set_updates_axes_handle_alias_properties() {
         let _guard = setup();
-        let h = title_builtin(vec![Value::String("Signal".into())]).unwrap();
+        let h = title_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::String("Signal".into())],
+        ))
+        .unwrap();
         let (figure, axes, _) =
             crate::builtins::plotting::state::decode_plot_object_handle(h).unwrap();
         let ax = crate::builtins::plotting::state::encode_axes_handle(figure, axes);
@@ -583,7 +621,10 @@ mod tests {
     #[test]
     fn set_rejects_invalid_property_assignments() {
         let _guard = setup();
-        let h = title_builtin(vec![Value::String("Signal".into())]).unwrap();
+        let h = title_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::String("Signal".into())],
+        ))
+        .unwrap();
         let err = set_builtin(vec![
             Value::Num(h),
             Value::String("Bogus".into()),

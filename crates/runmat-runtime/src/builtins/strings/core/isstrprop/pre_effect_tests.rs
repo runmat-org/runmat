@@ -26,7 +26,10 @@ fn known_invalid_controls_reject_before_resident_download_and_keep_borrowed_inpu
                 None,
                 Value::GpuTensor(handle.clone()),
                 Value::String("unknown-category".into()),
-                vec![Value::String("not-an-option".into()), Value::Num(2.0)],
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::String("not-an-option".into()),
+                    Value::Num(2.0),
+                ]),
             ))
             .expect_err("explicit resident extension owns the strict-mode rejection");
             assert_eq!(
@@ -57,7 +60,7 @@ fn known_invalid_controls_reject_before_resident_download_and_keep_borrowed_inpu
                 None,
                 Value::GpuTensor(handle.clone()),
                 Value::String(category.into()),
-                rest,
+                crate::builtins::common::test_support::builtin_arguments(rest),
             ))
             .expect_err("invalid host-known control");
             assert!(error.message().contains(diagnostic));
@@ -77,7 +80,7 @@ fn known_invalid_controls_reject_before_resident_download_and_keep_borrowed_inpu
             None,
             Value::GpuTensor(handle.clone()),
             Value::String("alpha".into()),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect("valid resident character-code classification");
         assert_eq!(

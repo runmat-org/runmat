@@ -21,7 +21,7 @@ fn pagefun_gpu_roundtrip_mtimes() {
         let result = pagefun_impl(
             Value::FunctionHandle("mtimes".into()),
             Value::GpuTensor(lhs),
-            vec![Value::GpuTensor(rhs)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(rhs)]),
         );
         let result = block_on(result).expect("pagefun");
 
@@ -45,7 +45,7 @@ fn pagefun_mixed_gpu_host_inputs_return_gpu_results() {
         let result = block_on(pagefun_impl(
             Value::FunctionHandle("mtimes".into()),
             Value::GpuTensor(lhs),
-            vec![Value::Tensor(rhs)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(rhs)]),
         ))
         .expect("mixed pagefun");
         assert!(
@@ -71,7 +71,7 @@ fn pagefun_mixed_complex_gpu_host_inputs_return_complex_gpu_results() {
         let result = block_on(pagefun_impl(
             Value::FunctionHandle("mtimes".into()),
             Value::GpuTensor(lhs),
-            vec![Value::Tensor(rhs)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(rhs)]),
         ))
         .expect("mixed complex pagefun");
         let Value::GpuTensor(handle) = result else {
@@ -134,7 +134,9 @@ fn pagefun_wgpu_mtimes_batches() {
     let builtin_value = pagefun_impl(
         Value::FunctionHandle("mtimes".into()),
         Value::GpuTensor(lhs_handle.clone()),
-        vec![Value::GpuTensor(rhs_handle.clone())],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(
+            rhs_handle.clone(),
+        )]),
     );
     let builtin_value = block_on(builtin_value).expect("pagefun builtin on GPU");
     let builtin_tensor = test_support::gather(builtin_value).expect("gather builtin");
@@ -142,7 +144,7 @@ fn pagefun_wgpu_mtimes_batches() {
     let expected_value = pagefun_impl(
         Value::FunctionHandle("mtimes".into()),
         Value::Tensor(lhs.clone()),
-        vec![Value::Tensor(rhs.clone())],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(rhs.clone())]),
     );
     let expected_value = block_on(expected_value).expect("pagefun host baseline");
     let expected_tensor = match expected_value {

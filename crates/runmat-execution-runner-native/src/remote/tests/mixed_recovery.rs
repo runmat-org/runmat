@@ -51,7 +51,7 @@ async fn mixed_recovery_uses_exact_encryption_purposes_and_reencrypts_alias_chan
     let effectful_request = ProgramExecutionRequest {
         console: None,
         environment: runmat_execution::EnvironmentSnapshot::default(),
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         artifact: ProgramArtifact::materialize(
             &effectful_recipe,
             ExecutableForm::InterpreterBytecodeV1,
@@ -59,7 +59,13 @@ async fn mixed_recovery_uses_exact_encryption_purposes_and_reencrypts_alias_chan
         )
         .unwrap(),
         recipe: effectful_recipe,
-        function: 0,
+        callable: runmat_execution::ProgramCallable::semantic(
+            runmat_execution::ProgramFunctionId(0),
+            None,
+        ),
+        context: runmat_execution::ProgramInvocationContext::Direct,
+        assignment: None,
+        job_id: None,
         arguments: Vec::new(),
         requested_outputs: 1,
     };
@@ -70,11 +76,17 @@ async fn mixed_recovery_uses_exact_encryption_purposes_and_reencrypts_alias_chan
     let request = ProgramExecutionRequest {
         console: None,
         environment: runmat_execution::EnvironmentSnapshot::default(),
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         artifact: ProgramArtifact::materialize(&recipe, ExecutableForm::AnalysisWorkload, vec![1])
             .unwrap(),
         recipe,
-        function: 0,
+        callable: runmat_execution::ProgramCallable::semantic(
+            runmat_execution::ProgramFunctionId(0),
+            Some("analysis_workload".into()),
+        ),
+        context: runmat_execution::ProgramInvocationContext::Direct,
+        assignment: None,
+        job_id: None,
         arguments: Vec::new(),
         requested_outputs: 1,
     };
@@ -187,11 +199,17 @@ async fn scheduler_and_physical_roots_survive_one_serialized_publication_sequenc
     let request = ProgramExecutionRequest {
         console: None,
         environment: runmat_execution::EnvironmentSnapshot::default(),
-        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+        schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         artifact: ProgramArtifact::materialize(&recipe, ExecutableForm::AnalysisWorkload, vec![1])
             .unwrap(),
         recipe,
-        function: 0,
+        callable: runmat_execution::ProgramCallable::semantic(
+            runmat_execution::ProgramFunctionId(0),
+            Some("analysis_workload".into()),
+        ),
+        context: runmat_execution::ProgramInvocationContext::Direct,
+        assignment: None,
+        job_id: None,
         arguments: Vec::new(),
         requested_outputs: 1,
     };

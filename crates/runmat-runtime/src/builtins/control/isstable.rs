@@ -51,7 +51,7 @@ async fn isstable_builtin(sys: Value) -> BuiltinResult<Value> {
         Value::Object(object) => {
             return Err(crate::build_runtime_error(format!(
                 "isstable: unsupported model class '{}'; only SISO tf objects are supported",
-                object.class_name
+                object.class_name()
             ))
             .with_builtin("isstable")
             .with_identifier(
@@ -89,15 +89,11 @@ mod tests {
 
     fn raw_tf(numerator: Value, denominator: Value) -> ObjectInstance {
         let mut object = ObjectInstance::new(TF_CLASS.to_string());
-        object.properties.insert("Numerator".into(), numerator);
-        object.properties.insert("Denominator".into(), denominator);
-        object.properties.insert("Ts".into(), Value::Num(0.0));
-        object
-            .properties
-            .insert("InputDelay".into(), Value::Num(0.0));
-        object
-            .properties
-            .insert("OutputDelay".into(), Value::Num(0.0));
+        object.replace_property_unbounded("Numerator".into(), numerator);
+        object.replace_property_unbounded("Denominator".into(), denominator);
+        object.replace_property_unbounded("Ts".into(), Value::Num(0.0));
+        object.replace_property_unbounded("InputDelay".into(), Value::Num(0.0));
+        object.replace_property_unbounded("OutputDelay".into(), Value::Num(0.0));
         object
     }
 
@@ -227,17 +223,14 @@ mod tests {
                 crate::builtins::common::gpu_helpers::upload_tensor(provider, &denominator)
                     .expect("upload denominator");
             let mut valid = ObjectInstance::new(TF_CLASS.to_string());
-            valid.properties.insert("Numerator".into(), Value::Num(1.0));
-            valid
-                .properties
-                .insert("Denominator".into(), Value::GpuTensor(resident.clone()));
-            valid.properties.insert("Ts".into(), Value::Num(0.0));
-            valid
-                .properties
-                .insert("InputDelay".into(), Value::Num(0.0));
-            valid
-                .properties
-                .insert("OutputDelay".into(), Value::Num(0.0));
+            valid.replace_property_unbounded("Numerator".into(), Value::Num(1.0));
+            valid.replace_property_unbounded(
+                "Denominator".into(),
+                Value::GpuTensor(resident.clone()),
+            );
+            valid.replace_property_unbounded("Ts".into(), Value::Num(0.0));
+            valid.replace_property_unbounded("InputDelay".into(), Value::Num(0.0));
+            valid.replace_property_unbounded("OutputDelay".into(), Value::Num(0.0));
             provider.reset_telemetry();
             assert_eq!(
                 block_on(isstable_builtin(Value::Object(valid))).unwrap(),
@@ -246,9 +239,10 @@ mod tests {
             assert!(provider.telemetry_snapshot().download_bytes > 0);
 
             let mut unsupported = ObjectInstance::new("ss");
-            unsupported
-                .properties
-                .insert("Denominator".into(), Value::GpuTensor(resident.clone()));
+            unsupported.replace_property_unbounded(
+                "Denominator".into(),
+                Value::GpuTensor(resident.clone()),
+            );
             provider.reset_telemetry();
             let error = block_on(isstable_builtin(Value::Object(unsupported)))
                 .expect_err("unsupported object class");
@@ -261,9 +255,10 @@ mod tests {
             // Exercise the shared parser directly: other callers need the
             // same class-before-gather behavior as isstable's entrypoint.
             let mut unsupported = ObjectInstance::new("ss");
-            unsupported
-                .properties
-                .insert("Denominator".into(), Value::GpuTensor(resident.clone()));
+            unsupported.replace_property_unbounded(
+                "Denominator".into(),
+                Value::GpuTensor(resident.clone()),
+            );
             provider.reset_telemetry();
             let error = block_on(TfModel::from_value_async(
                 Value::Object(unsupported),
@@ -285,9 +280,7 @@ mod tests {
             let resident =
                 crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor).unwrap();
             let mut model = raw_tf(Value::Num(1.0), Value::Num(1.0));
-            model
-                .properties
-                .insert("Unrelated".into(), Value::GpuTensor(resident));
+            model.replace_property_unbounded("Unrelated".into(), Value::GpuTensor(resident));
             provider.reset_telemetry();
             assert_eq!(
                 block_on(isstable_builtin(Value::Object(model))).unwrap(),
@@ -304,7 +297,9 @@ mod tests {
             let resident =
                 crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor).unwrap();
             let mut model = raw_tf(Value::Num(1.0), Value::GpuTensor(resident));
-            model.properties.remove("Ts");
+            crate::builtins::common::test_support::remove_object_property_unbounded(
+                &mut model, "Ts",
+            );
             provider.reset_telemetry();
             let error = block_on(isstable_builtin(Value::Object(model)))
                 .expect_err("missing required model property");
@@ -339,9 +334,7 @@ mod tests {
     #[test]
     fn shared_parser_errors_remain_declared_for_malformed_models() {
         let mut bad_scalar = raw_tf(Value::Num(1.0), Value::Num(1.0));
-        bad_scalar
-            .properties
-            .insert("Ts".into(), Value::String("invalid".into()));
+        bad_scalar.replace_property_unbounded("Ts".into(), Value::String("invalid".into()));
         let error = block_on(isstable_builtin(Value::Object(bad_scalar))).unwrap_err();
         assert_eq!(
             error.identifier.as_deref(),
@@ -349,9 +342,7 @@ mod tests {
         );
 
         let mut bad_variable = raw_tf(Value::Num(1.0), Value::Num(1.0));
-        bad_variable
-            .properties
-            .insert("Variable".into(), Value::String("invalid".into()));
+        bad_variable.replace_property_unbounded("Variable".into(), Value::String("invalid".into()));
         let error = block_on(isstable_builtin(Value::Object(bad_variable))).unwrap_err();
         assert_eq!(
             error.identifier.as_deref(),
@@ -359,9 +350,7 @@ mod tests {
         );
 
         let mut bad_pairing = raw_tf(Value::Num(1.0), Value::Num(1.0));
-        bad_pairing
-            .properties
-            .insert("Variable".into(), Value::String("z".into()));
+        bad_pairing.replace_property_unbounded("Variable".into(), Value::String("z".into()));
         let error = block_on(isstable_builtin(Value::Object(bad_pairing))).unwrap_err();
         assert_eq!(
             error.identifier.as_deref(),

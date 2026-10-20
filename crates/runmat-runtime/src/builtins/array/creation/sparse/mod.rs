@@ -50,13 +50,13 @@ fn sparse_error(
     binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::sparse"
 )]
-async fn sparse_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn sparse_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &SPARSE_DESCRIPTOR,
         &SPARSE_ERROR_INVALID_INPUT,
         NAME,
     )?;
-    reject_disabled_integer_sparse_constructor(&args)?;
+    reject_disabled_integer_sparse_constructor(args.view())?;
     constructor::prepare(args)?
         .execute()
         .await
@@ -68,8 +68,8 @@ async fn sparse_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::sparse"
 )]
-fn speye_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let (rows, cols, dtype) = parse_speye_shape(&args)?;
+fn speye_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    let (rows, cols, dtype) = parse_speye_shape(args.view())?;
     Ok(Value::SparseTensor(sparse_identity(rows, cols, dtype)?))
 }
 
@@ -130,11 +130,15 @@ async fn spones_builtin(value: Value) -> BuiltinResult<Value> {
 #[runtime_builtin(
     name = "sprand",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::array::creation::sparse"
 )]
-async fn sprand_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn sprand_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if matches!(args.len(), 3 | 4) {
-        for value in &args[..2] {
+        for value in args.view().range(..2)? {
             if crate::builtins::common::validation::value_has_native_integer_class(value) {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &SPRAND_INTEGER_CONTROL_EXTENSION,
@@ -142,7 +146,7 @@ async fn sprand_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
                 )?;
             }
         }
-        for value in &args[2..] {
+        for value in args.view().range(2..)? {
             crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
                 value,
                 &SPRAND_INTEGER_CONTROL_EXTENSION,
@@ -152,21 +156,25 @@ async fn sprand_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             .await?;
         }
     }
-    let mut gathered = Vec::with_capacity(args.len());
-    for arg in args {
-        gathered.push(gpu_helpers::gather_value_async(&arg).await?);
-    }
-    let mut turn =
-        random::acquire_turn(crate::context::legacy::active().as_ref(), "sprand").await?;
+    let gathered = args
+        .try_map_preserving_roots_async(args.len(), runtime.as_ref(), |index| {
+            gpu_helpers::gather_value_async(&args[index])
+        })
+        .await?;
+    let mut turn = random::acquire_turn(runtime.as_ref(), "sprand").await?;
     Ok(Value::SparseTensor(sprand_sparse(&mut turn, gathered)?))
 }
 
 #[runtime_builtin(
     name = "spdiags",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::array::creation::sparse"
 )]
-async fn spdiags_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn spdiags_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if let Some(data) = args.first() {
         if crate::builtins::common::validation::value_has_native_integer_class(data) {
             crate::compatibility::ensure_builtin_extension_enabled(
@@ -191,7 +199,7 @@ async fn spdiags_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             )?;
         }
     } else if args.len() == 4 {
-        for dimension in &args[2..] {
+        for dimension in args.view().range(2..)? {
             if crate::builtins::common::validation::value_has_native_integer_class(dimension) {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &SPDIAGS_INTEGER_CONTROL_EXTENSION,
@@ -200,18 +208,21 @@ async fn spdiags_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             }
         }
     }
-    let mut gathered = Vec::with_capacity(args.len());
-    for arg in args {
-        gathered.push(gpu_helpers::gather_value_async(&arg).await?);
-    }
+    let gathered = args
+        .try_map_preserving_roots_async(args.len(), runtime.as_ref(), |index| {
+            gpu_helpers::gather_value_async(&args[index])
+        })
+        .await?;
     spdiags_value(gathered)
 }
 
-fn reject_disabled_integer_sparse_constructor(args: &[Value]) -> BuiltinResult<()> {
-    let integer_payload = match args {
-        [value] => value_is_real_integer(value),
-        [_, _, value] if keyword_of(value).is_none() => value_is_real_integer(value),
-        [_, _, value, _, _] | [_, _, value, _, _, _] => value_is_real_integer(value),
+fn reject_disabled_integer_sparse_constructor(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
+    let integer_payload = match args.len() {
+        1 => value_is_real_integer(&args[0]),
+        3 if keyword_of(&args[2]).is_none() => value_is_real_integer(&args[2]),
+        5 | 6 => value_is_real_integer(&args[2]),
         _ => false,
     };
     if integer_payload {
@@ -230,19 +241,21 @@ fn value_is_real_integer(value: &Value) -> bool {
     }
 }
 
-fn parse_speye_shape(args: &[Value]) -> BuiltinResult<(usize, usize, MatrixClass)> {
+fn parse_speye_shape(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<(usize, usize, MatrixClass)> {
     let mut args = args;
     let mut class = MatrixClass::Floating(NumericDType::F64);
-    if let Some((last, rest)) = args.split_last() {
+    if let Some(last) = args.last() {
         if keyword_of(last).is_some() {
             class = sparse_storage_class(last, "speye")?;
-            args = rest;
+            args = args.range(..args.len() - 1)?;
         }
     }
 
-    let shape = match args {
-        [] => Ok((1, 1)),
-        [n] => match n {
+    let shape = match args.len() {
+        0 => Ok((1, 1)),
+        1 => match &args[0] {
             Value::Tensor(tensor)
                 if is_vector_shape(tensor.shape())
                     && tensor_utils::tensor_element_len(tensor) == 2 =>
@@ -279,13 +292,13 @@ fn parse_speye_shape(args: &[Value]) -> BuiltinResult<(usize, usize, MatrixClass
                 Ok((rows, cols))
             }
             _ => {
-                let size = parse_speye_size_value(n, "n")?;
+                let size = parse_speye_size_value(&args[0], "n")?;
                 Ok((size, size))
             }
         },
-        [m, n] => Ok((
-            parse_speye_size_value(m, "m")?,
-            parse_speye_size_value(n, "n")?,
+        2 => Ok((
+            parse_speye_size_value(&args[0], "m")?,
+            parse_speye_size_value(&args[1], "n")?,
         )),
         _ => Err(sparse_error(
             &SPARSE_ERROR_INVALID_INPUT,
@@ -498,7 +511,7 @@ fn nonzeros_value(value: &Value) -> BuiltinResult<Value> {
         }
         Value::CharArray(array) => {
             let data = array
-                .data
+                .data()
                 .iter()
                 .copied()
                 .filter(|value| *value != '\0')
@@ -608,7 +621,7 @@ fn sparse_pattern_from_value(value: Value) -> BuiltinResult<SparseTensor> {
 
 fn sprand_sparse(
     turn: &mut random::RandomTurn,
-    mut args: Vec<Value>,
+    mut args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<SparseTensor> {
     let dtype = take_optional_sparse_float_typename(&mut args, "sprand")?;
     let sparse = match args.len() {
@@ -646,7 +659,7 @@ fn sprand_sparse(
 }
 
 fn take_optional_sparse_float_typename(
-    args: &mut Vec<Value>,
+    args: &mut crate::call::BuiltinArguments,
     label: &str,
 ) -> BuiltinResult<NumericDType> {
     if args.last().and_then(keyword_of).is_none() {
@@ -1153,7 +1166,7 @@ fn add_integer_entry(
     Ok(())
 }
 
-fn spdiags_value(args: Vec<Value>) -> BuiltinResult<Value> {
+fn spdiags_value(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     match args.len() {
         1 => {
             if let Some(matrix) = integer_extraction_matrix_from_value(&args[0], "spdiags") {
@@ -2976,11 +2989,23 @@ pub(crate) mod tests {
     use runmat_value::IntValue;
 
     fn sparse_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::sparse_builtin(args))
+        block_on(super::sparse_builtin(
+            crate::execution::RootedValues::new(args)
+                .map_err(crate::execution::ExecutionServiceError::into_runtime_error)?
+                .into(),
+        ))
     }
 
     fn nonzeros_builtin(value: Value) -> BuiltinResult<Value> {
         block_on(super::nonzeros_builtin(value))
+    }
+
+    fn fixture_speye_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+        super::speye_builtin(
+            crate::execution::RootedValues::new(args)
+                .map_err(crate::execution::ExecutionServiceError::into_runtime_error)?
+                .into(),
+        )
     }
 
     fn spones_builtin(value: Value) -> BuiltinResult<Value> {
@@ -2988,11 +3013,21 @@ pub(crate) mod tests {
     }
 
     fn sprand_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::sprand_builtin(args))
+        block_on(super::sprand_builtin(
+            None,
+            crate::execution::RootedValues::new(args)
+                .map_err(crate::execution::ExecutionServiceError::into_runtime_error)?
+                .into(),
+        ))
     }
 
     fn spdiags_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::spdiags_builtin(args))
+        block_on(super::spdiags_builtin(
+            None,
+            crate::execution::RootedValues::new(args)
+                .map_err(crate::execution::ExecutionServiceError::into_runtime_error)?
+                .into(),
+        ))
     }
 
     fn expect_sparse(value: Value) -> SparseTensor {
@@ -3198,7 +3233,7 @@ pub(crate) mod tests {
         let shape =
             Tensor::new_integer(IntegerStorage::U64(vec![large, 1]), vec![1, 2]).expect("shape");
         let sparse =
-            expect_sparse(super::speye_builtin(vec![Value::Tensor(shape)]).expect("speye"));
+            expect_sparse(fixture_speye_builtin(vec![Value::Tensor(shape)]).expect("speye"));
         assert_eq!(sparse.shape(), vec![large as usize, 1]);
         assert_eq!(sparse.nnz(), 1);
         assert_eq!(sparse.get(0, 0), Some(1.0));
@@ -3206,7 +3241,7 @@ pub(crate) mod tests {
         let negative =
             Tensor::new_integer(IntegerStorage::I64(vec![-3]), vec![1, 1]).expect("negative");
         let empty =
-            expect_sparse(super::speye_builtin(vec![Value::Tensor(negative)]).expect("speye"));
+            expect_sparse(fixture_speye_builtin(vec![Value::Tensor(negative)]).expect("speye"));
         assert_eq!(empty.shape(), vec![0, 0]);
         assert_eq!(empty.nnz(), 0);
     }
@@ -3343,7 +3378,7 @@ pub(crate) mod tests {
         let characters = CharArray::new(vec!['a', '\0', 'z'], 1, 3).expect("character array");
         let output = nonzeros_builtin(Value::CharArray(characters)).expect("character nonzeros");
         assert!(
-            matches!(output, Value::CharArray(array) if array.shape == vec![2, 1] && array.data == vec!['a', 'z'])
+            matches!(output, Value::CharArray(array) if array.shape == vec![2, 1] && array.data() == vec!['a', 'z'])
         );
 
         let logical = LogicalArray::new(vec![1, 0, 1], vec![3, 1]).expect("logical array");
@@ -3695,7 +3730,7 @@ pub(crate) mod tests {
             sparse_builtin(vec![
                 Value::Num(3.0),
                 Value::Num(4.0),
-                Value::String("single".to_string()),
+                Value::String("single".to_string().into()),
             ])
             .expect("typed empty sparse"),
         );
@@ -3703,8 +3738,11 @@ pub(crate) mod tests {
         assert_eq!(empty.numeric_dtype(), Some(NumericDType::F32));
 
         let eye = expect_sparse(
-            super::speye_builtin(vec![Value::Num(3.0), Value::String("single".to_string())])
-                .expect("single speye"),
+            fixture_speye_builtin(vec![
+                Value::Num(3.0),
+                Value::String("single".to_string().into()),
+            ])
+            .expect("single speye"),
         );
         assert_eq!(eye.numeric_dtype(), Some(NumericDType::F32));
         assert_eq!(eye.as_f32_slice(), Some(&[1.0, 1.0, 1.0][..]));
@@ -3714,7 +3752,7 @@ pub(crate) mod tests {
                 Value::Num(2.0),
                 Value::Num(3.0),
                 Value::Num(0.0),
-                Value::String("single".to_string()),
+                Value::String("single".to_string().into()),
             ])
             .expect("single sprand"),
         );
@@ -3733,7 +3771,7 @@ pub(crate) mod tests {
             sparse_builtin(vec![
                 Value::Num(3.0),
                 Value::Num(4.0),
-                Value::String("logical".to_string()),
+                Value::String("logical".to_string().into()),
             ])
             .expect("logical empty sparse"),
         );
@@ -3742,8 +3780,11 @@ pub(crate) mod tests {
         assert_eq!(empty.nnz(), 0);
 
         let eye = expect_sparse(
-            super::speye_builtin(vec![Value::Num(3.0), Value::String("logical".to_string())])
-                .expect("logical speye"),
+            fixture_speye_builtin(vec![
+                Value::Num(3.0),
+                Value::String("logical".to_string().into()),
+            ])
+            .expect("logical speye"),
         );
         assert!(eye.is_logical());
         assert_eq!(eye.col_ptrs, vec![0, 1, 2, 3]);
@@ -3753,7 +3794,7 @@ pub(crate) mod tests {
             Value::Num(2.0),
             Value::Num(3.0),
             Value::Num(0.5),
-            Value::String("logical".to_string()),
+            Value::String("logical".to_string().into()),
         ])
         .expect_err("sprand logical typename is not documented");
         assert!(err.message().contains("double"));
@@ -3866,7 +3907,9 @@ pub(crate) mod tests {
                 sparse_builtin(vec![resident.clone()]).expect_err("output count before readback");
             assert_eq!(error.identifier(), SPARSE_ERROR_INVALID_INPUT.identifier);
         }
-        let future = super::sparse_builtin(vec![resident]);
+        let future = super::sparse_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![resident]),
+        );
         drop(future);
         let owner = Box::leak(Box::new(PendingOwner {
             allocations: owner,
@@ -3874,9 +3917,11 @@ pub(crate) mod tests {
         }));
         // SAFETY: this namespace's provider remains alive for the test process.
         unsafe { runmat_accelerate_api::register_device_provider(owner) };
-        let mut future = Box::pin(super::sparse_builtin(vec![Value::GpuTensor(
-            allocation.handle.clone(),
-        )]));
+        let mut future = Box::pin(super::sparse_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(
+                allocation.handle.clone(),
+            )]),
+        ));
         let waker = futures::task::noop_waker();
         let mut context = Context::from_waker(&waker);
         assert!(matches!(future.as_mut().poll(&mut context), Poll::Pending));
@@ -3986,14 +4031,14 @@ pub(crate) mod tests {
 
     #[test]
     fn speye_supports_square_rectangular_vector_and_negative_sizes() {
-        let square = expect_sparse(super::speye_builtin(vec![Value::Num(3.0)]).expect("speye"));
+        let square = expect_sparse(fixture_speye_builtin(vec![Value::Num(3.0)]).expect("speye"));
         assert_eq!(square.shape(), vec![3, 3]);
         assert_eq!(square.col_ptrs, vec![0, 1, 2, 3]);
         assert_eq!(square.row_indices, vec![0, 1, 2]);
         assert_eq!(square.materialize_f64(), vec![1.0, 1.0, 1.0]);
 
         let rect = expect_sparse(
-            super::speye_builtin(vec![Value::Num(2.0), Value::Num(4.0)]).expect("speye"),
+            fixture_speye_builtin(vec![Value::Num(2.0), Value::Num(4.0)]).expect("speye"),
         );
         assert_eq!(rect.shape(), vec![2, 4]);
         assert_eq!(rect.get(0, 0), Some(1.0));
@@ -4002,12 +4047,12 @@ pub(crate) mod tests {
 
         let shape = Tensor::new(vec![4.0, 2.0], vec![1, 2]).unwrap();
         let from_shape =
-            expect_sparse(super::speye_builtin(vec![Value::Tensor(shape)]).expect("speye"));
+            expect_sparse(fixture_speye_builtin(vec![Value::Tensor(shape)]).expect("speye"));
         assert_eq!(from_shape.shape(), vec![4, 2]);
         assert_eq!(from_shape.nnz(), 2);
 
         let empty =
-            expect_sparse(super::speye_builtin(vec![Value::Num(-5.0)]).expect("speye negative"));
+            expect_sparse(fixture_speye_builtin(vec![Value::Num(-5.0)]).expect("speye negative"));
         assert_eq!(empty.shape(), vec![0, 0]);
         assert_eq!(empty.nnz(), 0);
     }

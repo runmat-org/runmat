@@ -194,8 +194,8 @@ mod tests {
                 Some(true)
             );
             drop(alias);
-            let mut holder = runmat_value::ObjectInstance::new("Holder");
-            holder.properties.insert(
+            let mut holder = runmat_value::UnboundedObjectBuilder::new("Holder");
+            holder.insert(
                 "nested".into(),
                 Value::HandleObject(runmat_value::HandleRef {
                     class_name: "Probe".into(),
@@ -203,7 +203,7 @@ mod tests {
                     valid: true,
                 }),
             );
-            let nested = crate::gc_allocate_rooted(Value::Object(holder)).unwrap();
+            let nested = crate::gc_allocate_rooted(Value::Object(holder.finish())).unwrap();
             assert_eq!(
                 crate::gc_is_reachable_excluding(target, &[excluded]),
                 Some(true)

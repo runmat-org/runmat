@@ -75,10 +75,10 @@ impl DataProvenance {
 
 fn effective_data(mut value: &Value) -> Option<&Value> {
     while let Value::Object(object) = value {
-        if !object.class_name.is(DLARRAY_CLASS) {
+        if !object.class_name().is(DLARRAY_CLASS) {
             return None;
         }
-        value = object.properties.get("Data")?;
+        value = object.properties().get("Data")?;
     }
     Some(value)
 }

@@ -112,9 +112,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::range"
 )]
-async fn range_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    ensure_compatibility(&value, &rest)?;
-    let (dim_selection, nan_mode) = parse_arguments(&rest)?;
+async fn range_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    ensure_compatibility(&value, rest.view())?;
+    let (dim_selection, nan_mode) = parse_arguments(rest.view())?;
     if matches!(value, Value::GpuTensor(_))
         && matches!(dim_selection, DimSelection::All | DimSelection::Vec(_))
     {
@@ -142,7 +145,10 @@ fn is_real_typed_integer_value(value: &Value) -> bool {
         )
 }
 
-fn ensure_compatibility(value: &Value, rest: &[Value]) -> crate::BuiltinResult<()> {
+fn ensure_compatibility(
+    value: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<()> {
     if is_real_typed_integer_value(value) {
         crate::compatibility::ensure_builtin_extension_enabled(&INTEGER_DATA_EXTENSION, "range")?;
     }
@@ -183,7 +189,9 @@ struct ResolvedDims {
     dims_out_of_bounds: Vec<usize>,
 }
 
-fn parse_arguments(args: &[Value]) -> crate::BuiltinResult<(DimSelection, NanMode)> {
+fn parse_arguments(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<(DimSelection, NanMode)> {
     let mut selection = DimSelection::Auto;
     let mut nan_mode = NanMode::Omit;
     let mut selection_set = false;
@@ -244,12 +252,12 @@ fn parse_arguments(args: &[Value]) -> crate::BuiltinResult<(DimSelection, NanMod
 fn parse_nan_flag(value: &Value) -> crate::BuiltinResult<Option<NanMode>> {
     let text = match value {
         Value::String(s) => Some(std::borrow::Cow::Borrowed(s.as_str())),
-        Value::StringArray(sa) if sa.data.len() == 1 => {
-            Some(std::borrow::Cow::Borrowed(sa.data[0].as_str()))
+        Value::StringArray(sa) if sa.data().len() == 1 => {
+            Some(std::borrow::Cow::Borrowed(sa.data()[0].as_str()))
         }
-        Value::CharArray(ca) if ca.rows == 1 => {
-            Some(std::borrow::Cow::Owned(ca.data.iter().collect::<String>()))
-        }
+        Value::CharArray(ca) if ca.rows == 1 => Some(std::borrow::Cow::Owned(
+            ca.data().iter().collect::<String>(),
+        )),
         _ => None,
     };
     let Some(text) = text else {
@@ -266,12 +274,12 @@ fn parse_nan_flag(value: &Value) -> crate::BuiltinResult<Option<NanMode>> {
 fn is_all_flag(value: &Value) -> crate::BuiltinResult<bool> {
     let text = match value {
         Value::String(s) => Some(std::borrow::Cow::Borrowed(s.as_str())),
-        Value::StringArray(sa) if sa.data.len() == 1 => {
-            Some(std::borrow::Cow::Borrowed(sa.data[0].as_str()))
+        Value::StringArray(sa) if sa.data().len() == 1 => {
+            Some(std::borrow::Cow::Borrowed(sa.data()[0].as_str()))
         }
-        Value::CharArray(ca) if ca.rows == 1 => {
-            Some(std::borrow::Cow::Owned(ca.data.iter().collect::<String>()))
-        }
+        Value::CharArray(ca) if ca.rows == 1 => Some(std::borrow::Cow::Owned(
+            ca.data().iter().collect::<String>(),
+        )),
         _ => None,
     };
     Ok(text
@@ -848,7 +856,10 @@ pub(crate) mod tests {
 
     fn range_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        block_on(super::range_builtin(value, rest))
+        block_on(super::range_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
     use runmat_accelerate_api::HostTensorView;
     use runmat_value::{IntValue, IntegerStorage};
@@ -888,7 +899,11 @@ pub(crate) mod tests {
         };
         {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-            let error = block_on(super::range_builtin(integer_data(), Vec::new())).unwrap_err();
+            let error = block_on(super::range_builtin(
+                integer_data(),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+            ))
+            .unwrap_err();
             assert_eq!(
                 error.identifier(),
                 Some("RunMat:compatibility:RangeIntegerDataExtension")
@@ -896,7 +911,9 @@ pub(crate) mod tests {
             let floating = Value::Tensor(Tensor::new(vec![1.0, 9.0], vec![2, 1]).unwrap());
             let error = block_on(super::range_builtin(
                 floating,
-                vec![Value::Int(IntValue::U8(1))],
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(
+                    IntValue::U8(1),
+                )]),
             ))
             .unwrap_err();
             assert_eq!(
@@ -913,8 +930,13 @@ pub(crate) mod tests {
         {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
             let floating = Value::Tensor(Tensor::new(vec![1.0, 9.0], vec![2, 1]).unwrap());
-            let error =
-                block_on(super::range_builtin(floating, vec![Value::from("omitnan")])).unwrap_err();
+            let error = block_on(super::range_builtin(
+                floating,
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::from(
+                    "omitnan",
+                )]),
+            ))
+            .unwrap_err();
             assert_eq!(
                 error.identifier(),
                 Some("RunMat:compatibility:RangeExplicitNanflagExtension")
@@ -927,7 +949,7 @@ pub(crate) mod tests {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
             let error = block_on(super::range_builtin(
                 Value::GpuTensor(handle.clone()),
-                vec![Value::from("all")],
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::from("all")]),
             ))
             .unwrap_err();
             assert_eq!(

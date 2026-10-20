@@ -25,7 +25,7 @@ pub(super) fn preflight(system: &Value, frequency: Option<&Value>) -> BuiltinRes
     preflight_model_operand(system, BUILTIN_NAME)?;
     for name in NUMERIC_PROPERTIES {
         let value = object
-            .properties
+            .properties()
             .get(name)
             .expect("preflight required property");
         gate_numeric_role(value)?;
@@ -34,7 +34,7 @@ pub(super) fn preflight(system: &Value, frequency: Option<&Value>) -> BuiltinRes
         }
     }
     if object
-        .properties
+        .properties()
         .get("Variable")
         .is_some_and(|value| matches!(value, Value::GpuTensor(_)))
     {
@@ -53,7 +53,7 @@ pub(super) fn preflight(system: &Value, frequency: Option<&Value>) -> BuiltinRes
     }
     for name in ["InputDelay", "OutputDelay"] {
         if let Some(value) = object
-            .properties
+            .properties()
             .get(name)
             .filter(|value| !matches!(value, Value::GpuTensor(_)))
         {
@@ -70,22 +70,41 @@ pub(super) fn preflight(system: &Value, frequency: Option<&Value>) -> BuiltinRes
     Ok(())
 }
 
-pub(super) async fn parse_model(value: Value) -> BuiltinResult<TfModel> {
+pub(super) async fn parse_model(
+    runtime: Option<&crate::context::RuntimeContext>,
+    value: Value,
+) -> BuiltinResult<TfModel> {
     let Value::Object(mut object) = value else {
         unreachable!("preflight requires tf object")
     };
     for name in NUMERIC_PROPERTIES {
         if object
-            .properties
+            .properties()
             .get(name)
             .is_some_and(|value| matches!(value, Value::GpuTensor(_)))
         {
             let gathered = crate::dispatcher::gather_if_needed_async(
-                object.properties.get(name).expect("required"),
+                object.properties().get(name).expect("required"),
             )
             .await?;
             exact_integer(&gathered, name)?;
-            object.properties.insert(name.into(), gathered);
+            crate::execution::object::replacement::replace_property(
+                runtime,
+                &mut object,
+                name,
+                gathered,
+                |detail, source| {
+                    crate::build_runtime_error(format!("{BUILTIN_NAME}: {detail}"))
+                        .with_builtin(BUILTIN_NAME)
+                        .with_source(source)
+                        .build()
+                },
+                |detail| {
+                    crate::build_runtime_error(detail)
+                        .with_builtin(BUILTIN_NAME)
+                        .build()
+                },
+            )?;
         }
     }
     let model = TfModel::from_value_async(Value::Object(object), BUILTIN_NAME).await?;

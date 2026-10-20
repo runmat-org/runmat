@@ -3,11 +3,11 @@ use runmat_value::{IntValue, IntegerStorage, LogicalArray, Tensor};
 
 #[test]
 fn empty_square_rectangular_and_nd_shapes_are_exact() {
-    assert!(output(Vec::new(), &[0, 0]).data.is_empty());
-    assert_eq!(output(vec![Value::Num(3.0)], &[3, 3]).data.len(), 9);
+    assert!(output(Vec::new(), &[0, 0]).data().is_empty());
+    assert_eq!(output(vec![Value::Num(3.0)], &[3, 3]).data().len(), 9);
     assert_eq!(
         output(vec![Value::Num(2.0), Value::Num(4.0)], &[2, 4])
-            .data
+            .data()
             .len(),
         8
     );
@@ -16,7 +16,7 @@ fn empty_square_rectangular_and_nd_shapes_are_exact() {
             vec![Value::Num(2.0), Value::Num(3.0), Value::Num(4.0)],
             &[2, 3, 4]
         )
-        .data
+        .data()
         .len(),
         24
     );
@@ -81,7 +81,7 @@ fn invalid_size_representations_are_structured_errors() {
 #[test]
 fn compatible_elements_are_independent_empty_double_arrays() {
     let cells = output(vec![Value::Num(2.0)], &[2, 2]);
-    for value in cells.data {
+    for value in cells.data() {
         let Value::Tensor(value) = value else {
             panic!("expected double empty")
         };

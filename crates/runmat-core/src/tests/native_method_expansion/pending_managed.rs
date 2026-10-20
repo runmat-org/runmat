@@ -55,8 +55,8 @@ fn take_temporary_target() -> runmat_gc::GcHandle {
     else {
         panic!("the managed target must contain the authored object")
     };
-    assert_eq!(object.class_name, expected_class);
-    assert_eq!(object.properties.get("x"), Some(&Value::Num(7.0)));
+    assert_eq!(object.class_name(), &expected_class);
+    assert_eq!(object.properties().get("x"), Some(&Value::Num(7.0)));
     runmat_runtime::workspace::session::store_global_named(
         "pending_handle_witness",
         Value::Num(0.0),

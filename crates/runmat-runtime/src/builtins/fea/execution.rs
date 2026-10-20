@@ -446,10 +446,12 @@ mod tests {
     #[test]
     fn study_rejects_retired_string_execution_options() {
         for option in ["Backend", "Requirement", "FormulationRequirement"] {
-            let error = super::super::modeling::StudyConstructorOptions::parse(&[
-                Value::String(option.to_string()),
-                Value::String("cpu".to_string()),
-            ])
+            let error = super::super::modeling::StudyConstructorOptions::parse(
+                crate::call::FunctionArgumentView::from_slice(&[
+                    Value::String(option.to_string().into()),
+                    Value::String("cpu".to_string().into()),
+                ]),
+            )
             .unwrap_err();
             assert!(
                 error.to_string().contains("unsupported fea.study option"),

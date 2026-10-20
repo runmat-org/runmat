@@ -428,7 +428,7 @@ pub(crate) mod tests {
     }
 
     fn cell_to_vec(cell: &runmat_value::CellArray) -> Vec<Value> {
-        cell.data.clone()
+        cell.data().to_vec()
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -497,7 +497,7 @@ pub(crate) mod tests {
         let Value::Cell(result) = result else {
             panic!("expected subscript outputs");
         };
-        assert_eq!(result.data, vec![Value::Num(1.0), Value::Num(5.0)]);
+        assert_eq!(result.data(), vec![Value::Num(1.0), Value::Num(5.0)]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -687,7 +687,7 @@ pub(crate) mod tests {
         let Value::Cell(result) = result else {
             panic!("expected subscript outputs");
         };
-        assert_eq!(result.data, vec![Value::Num(1.0), Value::Num(5.0)]);
+        assert_eq!(result.data(), vec![Value::Num(1.0), Value::Num(5.0)]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

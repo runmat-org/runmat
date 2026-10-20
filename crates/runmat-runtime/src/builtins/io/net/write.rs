@@ -90,7 +90,7 @@ pub(super) async fn write_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     client: Value,
     data: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     ensure_write_extensions(&data)?;
     let datatype = preflight_datatype(rest)?;

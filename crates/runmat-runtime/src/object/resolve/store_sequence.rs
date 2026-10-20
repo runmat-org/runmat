@@ -60,17 +60,21 @@ async fn store_member_sequence_traced_in_scope(
     values: Vec<Value>,
     caller_function_name: Option<&str>,
 ) -> Result<RootedValue, RuntimeError> {
-    let _inputs_root = root_assignment_inputs(&base, &values)?;
+    let _inputs_root = match runtime {
+        Some(runtime) => RootedValueLease::for_value_slices_in_context(
+            &[std::slice::from_ref(&base), &values],
+            runtime,
+        )?,
+        None => root_assignment_inputs(&base, &values)?,
+    };
     match base {
-        Value::StructArray(array) => {
-            RootedValue::new(crate::aggregate::structure::assign_member_values(
-                array,
-                field,
-                values,
-                runmat_gc::gc_record_write,
-            )?)
-            .map_err(|error| error.into_runtime_error())
-        }
+        Value::StructArray(array) => crate::aggregate::structure::assign_member_values(
+            runtime,
+            array,
+            field,
+            values,
+            runmat_gc::gc_record_write,
+        ),
         Value::ObjectArray(array) => {
             if values.len() != array.len() {
                 return Err(mex(
@@ -110,13 +114,28 @@ async fn store_member_sequence_traced_in_scope(
             let Value::ObjectArray(array) = aggregate else {
                 unreachable!("aggregate was constructed as an object array")
             };
-            let class_name = array.class_name().clone();
-            let shape = array.shape().to_vec();
-            let selected_provenance = array.selected_provenance().to_vec();
-            let unselected_provenance = array.has_unselected_provenance();
-            let mut updated = Vec::with_capacity(values.len());
-            let roots = crate::call::arguments::roots::ExpansionRoots::new()?;
-            for (element, value) in array.into_data().into_iter().zip(values) {
+            let mut child_roots = match runtime {
+                Some(runtime) => crate::execution::RootedValueChildren::in_context(runtime)
+                    .map_err(|source| {
+                        crate::context::host_allocation::host_allocation_runtime_error(
+                            Some(runtime),
+                            "RunMat:ObjectArray:Allocation",
+                            "object-array output roots admission failed",
+                            source,
+                        )
+                    })?,
+                None => crate::execution::RootedValueChildren::new(),
+            };
+            let mut output =
+                crate::execution::object_array::ObjectArrayConstruction::new_retaining_shape(
+                    runtime,
+                    crate::execution::object_array::Class::Owner(array.class_name_owner()),
+                    array.len(),
+                    array.shape_owner(),
+                    array.selected_provenance().iter(),
+                    array.has_unselected_provenance(),
+                )?;
+            for (element, value) in array.data().iter().cloned().zip(values) {
                 let selected = match runtime {
                     Some(runtime) => {
                         store_member_traced_in_context(
@@ -140,22 +159,19 @@ async fn store_member_sequence_traced_in_scope(
                         .await?
                     }
                 };
-                selected.with_owned(|value| {
-                    roots.retain_values(std::slice::from_ref(&value));
-                    updated.push(value);
-                });
+                let child = crate::execution::RootedValueMember::from_rooted(selected)
+                    .into_child(&mut child_roots)
+                    .map_err(|source| {
+                        crate::context::host_allocation::host_allocation_runtime_error(
+                            runtime,
+                            "RunMat:ObjectArray:Allocation",
+                            "object-array output roots admission failed",
+                            source,
+                        )
+                    })?;
+                output.push(child)?;
             }
-            let mut result = runmat_value::ObjectArray::new(class_name, updated, shape)
-                .map_err(RuntimeError::from)?;
-            if result.is_empty() {
-                result = result
-                    .with_selected_provenance(selected_provenance)
-                    .map_err(RuntimeError::from)?;
-                if unselected_provenance {
-                    result = result.with_unselected_provenance();
-                }
-            }
-            RootedValue::new(Value::ObjectArray(result)).map_err(|error| error.into_runtime_error())
+            output.finish()
         }
         base if values.len() == 1 => {
             let value = values.into_iter().next().expect("validated singleton");

@@ -8,7 +8,11 @@ mod provider_route;
 const TOL: f64 = 1.0e-12;
 
 fn hilbert_call(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    block_on(hilbert_builtin(None, value, rest))
+    block_on(hilbert_builtin(
+        None,
+        value,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    ))
 }
 
 fn as_complex_tensor(value: Value) -> HostComplexTensor {

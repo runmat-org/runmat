@@ -1,6 +1,9 @@
-use crate::workspace::{WorkspaceCaptureRequest, WorkspaceSnapshot, WorkspacePublicationRequest, WorkspacePublicationOutcome};
 use crate::data_contract::{
     DataChunkUploadRequest, DataChunkUploadTarget, DataManifestDescriptor, DataManifestRequest,
+};
+use crate::workspace::{
+    WorkspaceCaptureRequest, WorkspacePublicationOutcome, WorkspacePublicationRequest,
+    WorkspaceSnapshot,
 };
 use crate::{
     AtomicCreateResult, DirEntry, FileHandle, FsFileType, FsMetadata, FsProvider, OpenFlags,
@@ -208,18 +211,36 @@ impl RemoteInner {
         Err(io::Error::other("request retries exhausted"))
     }
 
-    fn workspace_request<I: Serialize, O: serde::de::DeserializeOwned>(&self, route: &str, request: &I) -> io::Result<O> {
+    fn workspace_request<I: Serialize, O: serde::de::DeserializeOwned>(
+        &self,
+        route: &str,
+        request: &I,
+    ) -> io::Result<O> {
         let bytes = super::workspace_wire::encode(request)?;
-        let response = handle_error(self.request(reqwest::Method::POST, route, &[])
-            .header(reqwest::header::CONTENT_TYPE, "application/cbor")
-            .header(reqwest::header::ACCEPT, "application/cbor")
-            .body(bytes).send().map_err(map_http_err)?)?;
-        if response.headers().get(reqwest::header::CONTENT_TYPE).and_then(|value| value.to_str().ok())
-            .and_then(|value| value.split(';').next()) != Some("application/cbor") {
-            return Err(io::Error::new(ErrorKind::InvalidData, "invalid workspace response content type"));
+        let response = handle_error(
+            self.request(reqwest::Method::POST, route, &[])
+                .header(reqwest::header::CONTENT_TYPE, "application/cbor")
+                .header(reqwest::header::ACCEPT, "application/cbor")
+                .body(bytes)
+                .send()
+                .map_err(map_http_err)?,
+        )?;
+        if response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.split(';').next())
+            != Some("application/cbor")
+        {
+            return Err(io::Error::new(
+                ErrorKind::InvalidData,
+                "invalid workspace response content type",
+            ));
         }
         let mut bytes = Vec::new();
-        response.take(super::workspace_wire::MAX_WIRE_BYTES as u64 + 1).read_to_end(&mut bytes)?;
+        response
+            .take(super::workspace_wire::MAX_WIRE_BYTES as u64 + 1)
+            .read_to_end(&mut bytes)?;
         super::workspace_wire::decode(&bytes)
     }
 
@@ -1245,16 +1266,28 @@ impl FsProvider for RemoteFsProvider {
         self.upload_entire_file(&normalized, data, false)
     }
 
-    async fn capture_workspace(&self, request: WorkspaceCaptureRequest) -> io::Result<WorkspaceSnapshot> {
-        self.inner.workspace_request("/collaboration/workspace/capture", &request)
+    async fn capture_workspace(
+        &self,
+        request: WorkspaceCaptureRequest,
+    ) -> io::Result<WorkspaceSnapshot> {
+        self.inner
+            .workspace_request("/collaboration/workspace/capture", &request)
     }
 
-    async fn lookup_workspace_publication(&self, request: &WorkspacePublicationRequest) -> io::Result<Option<WorkspacePublicationOutcome>> {
-        self.inner.workspace_request("/collaboration/workspace/lookup", request)
+    async fn lookup_workspace_publication(
+        &self,
+        request: &WorkspacePublicationRequest,
+    ) -> io::Result<Option<WorkspacePublicationOutcome>> {
+        self.inner
+            .workspace_request("/collaboration/workspace/lookup", request)
     }
 
-    async fn publish_workspace(&self, request: WorkspacePublicationRequest) -> io::Result<WorkspacePublicationOutcome> {
-        self.inner.workspace_request("/collaboration/workspace/publish", &request)
+    async fn publish_workspace(
+        &self,
+        request: WorkspacePublicationRequest,
+    ) -> io::Result<WorkspacePublicationOutcome> {
+        self.inner
+            .workspace_request("/collaboration/workspace/publish", &request)
     }
 
     async fn publish_output(

@@ -192,10 +192,10 @@ fn default_unsupported_hook_computes_host_indices_then_restores_exact_double_own
     let dims = Value::Tensor(Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap());
     let result = futures::executor::block_on(super::super::sub2ind_builtin(
         dims,
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::GpuTensor(rows.clone()),
             Value::GpuTensor(columns.clone()),
-        ],
+        ]),
     ))
     .expect("typed default Unsupported must admit host computation");
     let Value::GpuTensor(output) = result else {
@@ -395,10 +395,10 @@ fn mixed_resident_owners_keep_host_computation_without_ambient_reupload() {
         .unwrap();
     let selected = source(
         &Value::Num(2.0),
-        &[
+        crate::call::FunctionArgumentView::from_slice(&[
             Value::GpuTensor(left.handle.clone()),
             Value::GpuTensor(right.handle.clone()),
-        ],
+        ]),
     );
     assert!(
         selected.is_none(),

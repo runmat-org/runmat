@@ -13,11 +13,11 @@ pub(super) async fn get_object_field(
     name: &str,
 ) -> BuiltinResult<RootedValue> {
     if let Some(projection) = crate::class_registry::checked_receiver_projection(obj)? {
-        let property = projection.receiver_property(&obj.class_name, &name.into());
+        let property = projection.receiver_property(obj.class_name(), &name.into());
         if let Some((prop, owner)) = &property {
             if prop.is_static {
                 return Err(errors::with_message(
-                    format!("You cannot access the static property '{}' through an instance of class '{}'.", name, obj.class_name),
+                    format!("You cannot access the static property '{}' through an instance of class '{}'.", name, obj.class_name()),
                     &GETFIELD_ERROR_OBJECT_PROPERTY,
                 ));
             }
@@ -28,12 +28,13 @@ pub(super) async fn get_object_field(
             ) {
                 return Err(private_access(format!(
                     "You cannot get the '{}' property of '{}' class.",
-                    name, obj.class_name
+                    name,
+                    obj.class_name()
                 )));
             }
             if prop.is_dependent {
                 let getter = object_property_getter_name(name);
-                if projection.receiver_declares_method(&obj.class_name, &getter.as_str().into()) {
+                if projection.receiver_declares_method(obj.class_name(), &getter.as_str().into()) {
                     let outputs = match runtime {
                         Some(runtime) => crate::object::dispatch::call_object_property_getter_with_outputs_in_context(
                             runtime, Value::Object(obj.clone()), name, 1,
@@ -58,31 +59,38 @@ pub(super) async fn get_object_field(
                         |error| error.into_runtime_error(),
                     );
                 }
-                if let Some(value) = obj.properties.get(&format!("{name}_backing")) {
-                    return RootedValue::new(value.clone())
-                        .map_err(|error| error.into_runtime_error());
+                if let Some(value) = obj.properties().get(&format!("{name}_backing")) {
+                    return crate::builtins::structs::core::construction::root(
+                        runtime,
+                        value.clone(),
+                    );
                 }
             }
         }
         if let Some(value) = dynamicprops::dynamic_property_read(obj, name)? {
-            return RootedValue::new(value).map_err(|error| error.into_runtime_error());
+            return crate::builtins::structs::core::construction::root(runtime, value);
         }
-        if let Some(value) = obj.properties.get(name) {
-            return RootedValue::new(value.clone()).map_err(|error| error.into_runtime_error());
+        if let Some(value) = obj.properties().get(name) {
+            return crate::builtins::structs::core::construction::root(runtime, value.clone());
         }
         return Err(errors::with_message(
-            format!("Undefined property '{}' for class {}", name, obj.class_name),
+            format!(
+                "Undefined property '{}' for class {}",
+                name,
+                obj.class_name()
+            ),
             &GETFIELD_ERROR_OBJECT_PROPERTY,
         ));
     }
     if let Some((prop, _owner)) =
-        crate::class_registry::lookup_property(&obj.class_name, &name.into())
+        crate::class_registry::lookup_property(obj.class_name(), &name.into())
     {
         if prop.is_static {
             return Err(errors::with_message(
                 format!(
                     "You cannot access the static property '{}' through an instance of class '{}'.",
-                    name, obj.class_name
+                    name,
+                    obj.class_name()
                 ),
                 &GETFIELD_ERROR_OBJECT_PROPERTY,
             ));
@@ -90,7 +98,8 @@ pub(super) async fn get_object_field(
         if prop.get_access == MemberAccess::Private {
             return Err(private_access(format!(
                 "You cannot get the '{}' property of '{}' class.",
-                name, obj.class_name
+                name,
+                obj.class_name()
             )));
         }
         if prop.is_dependent {
@@ -109,36 +118,42 @@ pub(super) async fn get_object_field(
                 }
                 Err(_) => {}
             }
-            if let Some(value) = obj.properties.get(&format!("{name}_backing")) {
-                return RootedValue::new(value.clone()).map_err(|error| error.into_runtime_error());
+            if let Some(value) = obj.properties().get(&format!("{name}_backing")) {
+                return crate::builtins::structs::core::construction::root(runtime, value.clone());
             }
         }
     }
     if let Some(value) = dynamicprops::dynamic_property_read(obj, name)? {
-        return RootedValue::new(value).map_err(|error| error.into_runtime_error());
+        return crate::builtins::structs::core::construction::root(runtime, value);
     }
-    if let Some(value) = obj.properties.get(name) {
-        return RootedValue::new(value.clone()).map_err(|error| error.into_runtime_error());
+    if let Some(value) = obj.properties().get(name) {
+        return crate::builtins::structs::core::construction::root(runtime, value.clone());
     }
     if let Some((prop, _owner)) =
-        crate::class_registry::lookup_property(&obj.class_name, &name.into())
+        crate::class_registry::lookup_property(obj.class_name(), &name.into())
     {
         if prop.get_access == MemberAccess::Private {
             return Err(private_access(format!(
                 "You cannot get the '{}' property of '{}' class.",
-                name, obj.class_name
+                name,
+                obj.class_name()
             )));
         }
         return Err(errors::with_message(
             format!(
                 "No public property '{}' for class '{}'.",
-                name, obj.class_name
+                name,
+                obj.class_name()
             ),
             &GETFIELD_ERROR_OBJECT_PROPERTY,
         ));
     }
     Err(errors::with_message(
-        format!("Undefined property '{}' for class {}", name, obj.class_name),
+        format!(
+            "Undefined property '{}' for class {}",
+            name,
+            obj.class_name()
+        ),
         &GETFIELD_ERROR_OBJECT_PROPERTY,
     ))
 }

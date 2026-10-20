@@ -34,12 +34,15 @@ async fn value_to_tensor(name: &str, value: Value) -> BuiltinResult<Tensor> {
         .map_err(|err| descriptive_error(name, format!("{name}: {err}")))
 }
 
-async fn gather_rest(name: &str, rest: Vec<Value>) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(rest.len());
-    for value in rest {
-        out.push(gathered(value, name).await?);
-    }
-    Ok(out)
+async fn gather_rest(
+    name: &str,
+    rest: crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    rest.try_map_preserving_roots_async(rest.len(), runtime, |index| {
+        gathered(rest[index].clone(), name)
+    })
+    .await
 }
 
 fn first_non_singleton(shape: &[usize]) -> usize {
@@ -86,14 +89,13 @@ async fn dims_from_value(name: &str, value: &Value) -> BuiltinResult<Vec<usize>>
 
 async fn parse_reduce_options(
     name: &str,
-    rest: Vec<Value>,
+    rest: crate::call::FunctionArgumentView<'_>,
     default_nanflag: NanFlag,
 ) -> BuiltinResult<ReduceOptions> {
-    let rest = gather_rest(name, rest).await?;
     let mut axes = Axes::Default;
     let mut nanflag = default_nanflag;
-    for arg in rest {
-        if let Some(keyword) = keyword_of(&arg) {
+    for arg in rest.iter() {
+        if let Some(keyword) = keyword_of(arg) {
             match MomentControl::from_public_option(&keyword) {
                 Some(MomentControl::All) => axes = Axes::All,
                 Some(MomentControl::Missing(policy)) => nanflag = policy,
@@ -105,7 +107,7 @@ async fn parse_reduce_options(
                 }
             }
         } else {
-            axes = Axes::Dims(dims_from_value(name, &arg).await?);
+            axes = Axes::Dims(dims_from_value(name, arg).await?);
         }
     }
     Ok(ReduceOptions { axes, nanflag })
@@ -113,11 +115,12 @@ async fn parse_reduce_options(
 
 async fn parse_flagged_options(
     name: &str,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
     default_flag: usize,
     default_nanflag: NanFlag,
+    runtime: Option<&crate::context::RuntimeContext>,
 ) -> BuiltinResult<(usize, ReduceOptions)> {
-    let rest = gather_rest(name, rest).await?;
+    let rest = gather_rest(name, rest, runtime).await?;
     let mut flag = default_flag;
     let mut start = 0usize;
     if let Some(first) = rest.first() {
@@ -132,12 +135,7 @@ async fn parse_flagged_options(
             }
         }
     }
-    let options = parse_reduce_options(
-        name,
-        rest.into_iter().skip(start).collect(),
-        default_nanflag,
-    )
-    .await?;
+    let options = parse_reduce_options(name, rest.view().range(start..)?, default_nanflag).await?;
     Ok((flag, options))
 }
 
@@ -274,7 +272,7 @@ fn is_typed_integer_numeric_value(value: &Value) -> bool {
 fn ensure_floating_stat_integer_extensions(
     name: &str,
     value: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     data_extension: &BuiltinExtensionDescriptor,
     control_extension: &BuiltinExtensionDescriptor,
 ) -> BuiltinResult<()> {
@@ -287,7 +285,7 @@ fn ensure_floating_stat_integer_extensions(
     Ok(())
 }
 
-fn rest_requests_multi_axis(rest: &[Value]) -> bool {
+fn rest_requests_multi_axis(rest: crate::call::FunctionArgumentView<'_>) -> bool {
     rest.iter().any(|value| {
         keyword_of(value).is_some_and(|keyword| keyword == "all")
             || matches!(value, Value::Tensor(tensor) if tensor::tensor_element_len(tensor) > 1)
@@ -298,7 +296,7 @@ fn rest_requests_multi_axis(rest: &[Value]) -> bool {
 fn ensure_gpu_multi_axis_extension(
     name: &str,
     value: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     extension: &BuiltinExtensionDescriptor,
 ) -> BuiltinResult<()> {
     if matches!(value, Value::GpuTensor(_)) && rest_requests_multi_axis(rest) {
@@ -307,7 +305,10 @@ fn ensure_gpu_multi_axis_extension(
     Ok(())
 }
 
-fn ensure_mad_integer_extensions(value: &Value, rest: &[Value]) -> BuiltinResult<()> {
+fn ensure_mad_integer_extensions(
+    value: &Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     if is_real_typed_integer_value(value) {
         crate::compatibility::ensure_builtin_extension_enabled(&MAD_INTEGER_DATA_EXTENSION, "mad")?;
     }
@@ -382,29 +383,42 @@ fn kurtosis_slice(values: &[f64], flag: usize) -> f64 {
 async fn flagged_reduce_builtin<F>(
     name: &str,
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
     default_flag: usize,
     default_nanflag: NanFlag,
     op: F,
+    runtime: Option<&crate::context::RuntimeContext>,
 ) -> BuiltinResult<Value>
 where
     F: Fn(&[f64], usize) -> f64,
 {
     let input = value_to_tensor(name, value).await?;
-    let (flag, options) = parse_flagged_options(name, rest, default_flag, default_nanflag).await?;
+    let (flag, options) =
+        parse_flagged_options(name, rest, default_flag, default_nanflag, runtime).await?;
     reduce_tensor(name, input, options, |slice| op(slice, flag))
 }
 
 pub mod mad {
     use super::*;
+    #[cfg(test)]
+    pub(crate) async fn mad_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let rest = crate::execution::RootedValues::new(rest)
+            .map_err(|error| error.into_runtime_error())?;
+        mad_builtin_registered(None, value, rest.into()).await
+    }
 
     #[runtime_builtin(
         name = "mad",
         binding_variant = "default",
+        context = true,
         builtin_path = "crate::builtins::stats::summary::descriptive::flagged::mad"
     )]
-    pub(crate) async fn mad_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        super::ensure_mad_integer_extensions(&value, &rest)?;
+    pub(crate) async fn mad_builtin_registered(
+        runtime: Option<crate::context::RuntimeContext>,
+        value: Value,
+        rest: crate::call::BuiltinArguments,
+    ) -> BuiltinResult<Value> {
+        super::ensure_mad_integer_extensions(&value, rest.view())?;
         super::flagged_reduce_builtin(
             "mad",
             value,
@@ -412,6 +426,7 @@ pub mod mad {
             0,
             super::NanFlag::Omit,
             super::mad_slice,
+            runtime.as_ref(),
         )
         .await
     }
@@ -419,24 +434,35 @@ pub mod mad {
 
 pub mod skewness {
     use super::*;
+    #[cfg(test)]
+    pub(crate) async fn skewness_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let rest = crate::execution::RootedValues::new(rest)
+            .map_err(|error| error.into_runtime_error())?;
+        skewness_builtin_registered(None, value, rest.into()).await
+    }
 
     #[runtime_builtin(
         name = "skewness",
         binding_variant = "default",
+        context = true,
         builtin_path = "crate::builtins::stats::summary::descriptive::flagged::skewness"
     )]
-    pub(crate) async fn skewness_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    pub(crate) async fn skewness_builtin_registered(
+        runtime: Option<crate::context::RuntimeContext>,
+        value: Value,
+        rest: crate::call::BuiltinArguments,
+    ) -> BuiltinResult<Value> {
         super::ensure_floating_stat_integer_extensions(
             "skewness",
             &value,
-            &rest,
+            rest.view(),
             &SKEWNESS_INTEGER_DATA_EXTENSION,
             &SKEWNESS_INTEGER_CONTROL_EXTENSION,
         )?;
         super::ensure_gpu_multi_axis_extension(
             "skewness",
             &value,
-            &rest,
+            rest.view(),
             &SKEWNESS_GPU_MULTI_AXIS_EXTENSION,
         )?;
         super::flagged_reduce_builtin(
@@ -446,6 +472,7 @@ pub mod skewness {
             1,
             super::NanFlag::Omit,
             super::skewness_slice,
+            runtime.as_ref(),
         )
         .await
     }
@@ -453,24 +480,35 @@ pub mod skewness {
 
 pub mod kurtosis {
     use super::*;
+    #[cfg(test)]
+    pub(crate) async fn kurtosis_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let rest = crate::execution::RootedValues::new(rest)
+            .map_err(|error| error.into_runtime_error())?;
+        kurtosis_builtin_registered(None, value, rest.into()).await
+    }
 
     #[runtime_builtin(
         name = "kurtosis",
         binding_variant = "default",
+        context = true,
         builtin_path = "crate::builtins::stats::summary::descriptive::flagged::kurtosis"
     )]
-    pub(crate) async fn kurtosis_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    pub(crate) async fn kurtosis_builtin_registered(
+        runtime: Option<crate::context::RuntimeContext>,
+        value: Value,
+        rest: crate::call::BuiltinArguments,
+    ) -> BuiltinResult<Value> {
         super::ensure_floating_stat_integer_extensions(
             "kurtosis",
             &value,
-            &rest,
+            rest.view(),
             &KURTOSIS_INTEGER_DATA_EXTENSION,
             &KURTOSIS_INTEGER_CONTROL_EXTENSION,
         )?;
         super::ensure_gpu_multi_axis_extension(
             "kurtosis",
             &value,
-            &rest,
+            rest.view(),
             &KURTOSIS_GPU_MULTI_AXIS_EXTENSION,
         )?;
         super::flagged_reduce_builtin(
@@ -480,6 +518,7 @@ pub mod kurtosis {
             1,
             super::NanFlag::Omit,
             super::kurtosis_slice,
+            runtime.as_ref(),
         )
         .await
     }

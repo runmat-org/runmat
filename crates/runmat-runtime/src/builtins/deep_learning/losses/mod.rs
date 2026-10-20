@@ -10,9 +10,7 @@ use runmat_value::{NumericDType, Tensor, Value};
 
 use crate::{builtins::common::tensor, BuiltinResult};
 
-use super::{
-    deep_learning_error, gather_args, numeric_scalar, object, parse_name_values, scalar_text,
-};
+use super::{deep_learning_error, gather_args, numeric_scalar, object, scalar_text};
 
 mod admission;
 mod format;
@@ -45,12 +43,14 @@ mod tests;
 #[runtime_builtin(
     name = "crossentropy",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::deep_learning::losses"
 )]
 pub(super) async fn crossentropy_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     predictions: Value,
     targets: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     super::errors::admit_single_output(
         "crossentropy",
@@ -59,7 +59,10 @@ pub(super) async fn crossentropy_builtin(
     let positional_weights = rest
         .first()
         .is_some_and(|value| !is_crossentropy_option_name(value));
-    let options = &rest[usize::from(positional_weights)..];
+    let options = rest
+        .view()
+        .range(usize::from(positional_weights)..)
+        .expect("crossentropy option suffix");
     let integer_data =
         crate::builtins::common::validation::value_has_native_integer_class(&predictions)
             || crate::builtins::common::validation::value_has_native_integer_class(&targets)
@@ -88,7 +91,7 @@ pub(super) async fn crossentropy_builtin(
             "crossentropy",
         )?;
     }
-    admission::preflight_host_decidable(&predictions, &targets, &rest)?;
+    admission::preflight_host_decidable(&predictions, &targets, rest.view())?;
     let explicit_gpu_input = std::iter::once(&predictions)
         .chain(std::iter::once(&targets))
         .chain(rest.iter())
@@ -102,14 +105,19 @@ pub(super) async fn crossentropy_builtin(
         return Err(explicit_gpu_fallback_error());
     }
     let (predictions, targets) = if has_gpu {
-        if let Some(value) = try_crossentropy_gpu(&predictions, &targets, &rest).await? {
+        if let Some(value) = try_crossentropy_gpu(&predictions, &targets, rest.view()).await? {
             return Ok(value);
         }
         if explicit_gpu_input {
             return Err(explicit_gpu_fallback_error());
         }
-        let mut gathered = gather_args(vec![predictions, targets]).await?;
-        (gathered.remove(0), gathered.remove(0))
+        let pair = [predictions, targets];
+        let pair = crate::call::BuiltinArguments::from_borrowed(&pair, runtime.as_ref())?;
+        let mut gathered = gather_args(pair, runtime.as_ref()).await?;
+        (
+            gathered.pop_front().expect("prediction slot"),
+            gathered.pop_front().expect("target slot"),
+        )
     } else {
         (predictions, targets)
     };
@@ -128,16 +136,19 @@ pub(super) async fn crossentropy_builtin(
             "crossentropy: predictions and targets must not be empty",
         ));
     }
-    let mut args = gather_args(rest).await?;
+    let mut args = gather_args(rest, runtime.as_ref()).await?;
     let weights = if args
         .first()
         .is_some_and(|value| !is_crossentropy_option_name(value))
     {
-        Some(LossWeights::parse(&args.remove(0), "weights")?)
+        Some(LossWeights::parse(
+            &args.pop_front().expect("positional weights"),
+            "weights",
+        )?)
     } else {
         None
     };
-    let options = CrossentropyOptions::from_args(args, &predictions, weights)?;
+    let options = CrossentropyOptions::from_args(args.view(), &predictions, weights)?;
     require_loss_payload_compatible(&predictions, &targets, options.data_format.as_ref())?;
 
     let mask = options.mask_values(&predictions)?;

@@ -68,14 +68,19 @@ fn setter(class: &mut RuntimeClass, function: &str) {
 }
 
 fn new_handle(name: &str) -> HandleRef {
-    let mut object = ObjectInstance::new(name);
-    object.properties.insert("Value".into(), Value::Num(1.0));
-    object
-        .properties
-        .insert("Other".into(), Value::Num(f64::NAN));
+    new_handle_configured(name, |_| {})
+}
+fn new_handle_configured(
+    name: &str,
+    configure: impl FnOnce(&mut runmat_value::UnboundedObjectBuilder),
+) -> HandleRef {
+    let mut object = runmat_value::UnboundedObjectBuilder::new(name);
+    object.insert("Value".into(), Value::Num(1.0));
+    object.insert("Other".into(), Value::Num(f64::NAN));
+    configure(&mut object);
     HandleRef {
         class_name: name.into(),
-        target: runmat_gc::gc_allocate(Value::Object(object)).unwrap(),
+        target: runmat_gc::gc_allocate(Value::Object(object.finish())).unwrap(),
         valid: true,
     }
 }
@@ -85,7 +90,7 @@ fn property(handle: &HandleRef, name: &str) -> Value {
         let Value::Object(object) = value else {
             panic!("handle target")
         };
-        object.properties[name].clone()
+        object.properties()[name].clone()
     })
     .unwrap()
 }
@@ -312,7 +317,7 @@ fn dependent_value_setter_still_returns_one_replacement() {
                 let Value::Object(mut object) = args[0].clone() else {
                     panic!("value receiver")
                 };
-                object.properties.insert("Value".into(), args[1].clone());
+                object.replace_property_unbounded("Value".into(), args[1].clone());
                 Box::pin(async move {
                     let sequence =
                         runmat_runtime::sequence::single_value_sequence(Value::Object(object))?;
@@ -334,7 +339,7 @@ fn dependent_value_setter_still_returns_one_replacement() {
         let Value::Object(object) = result.value() else {
             panic!("replacement value")
         };
-        assert_eq!(object.properties["Value"], Value::Num(8.0));
+        assert_eq!(object.properties()["Value"], Value::Num(8.0));
     }));
 }
 
@@ -359,24 +364,19 @@ fn dynamic_stores_and_private_setter_admission_use_registered_metadata() {
             let _invoker = runmat_runtime::user_functions::install_semantic_function_invoker(Some(
                 Arc::new(|_, _, _| panic!("private setter must not execute")),
             ));
-            let handle = new_handle("Restricted");
-            runmat_gc::gc_with_value_mut(&handle.target, |value| {
-                let Value::Object(object) = value else {
-                    panic!("target")
-                };
+            let handle = new_handle_configured("Restricted", |object| {
                 for name in ["Dynamic", "PrivateDynamic", "ProtectedDynamic"] {
                     let mut property =
-                        runmat_value::DynamicPropertyDef::new(name.into(), "Restricted".into());
+                        runmat_value::DynamicPropertyDef::new(name.into(), "Restricted");
                     property.set_access = match name {
                         "PrivateDynamic" => MemberAccess::Private,
                         "ProtectedDynamic" => MemberAccess::Protected,
                         _ => MemberAccess::Public,
                     };
-                    object.insert_dynamic_property(name.into(), property);
-                    object.properties.insert(name.into(), Value::Num(0.0));
+                    object.insert_dynamic(name.into(), property);
+                    object.insert(name.into(), Value::Num(0.0));
                 }
-            })
-            .unwrap();
+            });
             store_member(
                 Value::HandleObject(handle.clone()),
                 "Dynamic".into(),
@@ -498,8 +498,8 @@ fn dependent_property_without_setter_never_creates_backing_storage() {
                 let Value::Object(object) = value else {
                     panic!("target")
                 };
-                assert!(!object.properties.contains_key("Dependent"));
-                assert_eq!(object.properties["Value"], Value::Num(1.0));
+                assert!(!object.properties().contains_key("Dependent"));
+                assert_eq!(object.properties()["Value"], Value::Num(1.0));
             })
             .unwrap();
         }));
@@ -543,7 +543,7 @@ fn overloaded_assignment_runs_once_and_listener_writes_remain_unsupported() {
                         panic!("original overloaded receiver")
                     };
                     assert_eq!(receiver.target, expected);
-                    assert_eq!(args.last(), Some(&Value::Num(7.0)));
+                    assert_eq!(args.iter().next_back(), Some(&Value::Num(7.0)));
                     let result = args[0].clone();
                     Box::pin(async move {
                         let sequence = runmat_runtime::sequence::single_value_sequence(result)?;

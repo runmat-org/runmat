@@ -228,7 +228,7 @@ pub(super) async fn materialize(kind: ReductionKind, value: Value) -> BuiltinRes
             })
         }
         Value::CharArray(chars) if kind == ReductionKind::RootMeanSquare => {
-            let shape = preserved_shape(&chars.shape, chars.data.len());
+            let shape = preserved_shape(&chars.shape, chars.data().len());
             let points = chars
                 .to_column_major()
                 .into_iter()

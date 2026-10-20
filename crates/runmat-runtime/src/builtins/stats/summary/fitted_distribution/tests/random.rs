@@ -15,7 +15,10 @@ fn canonical_random_binding_uses_invocation_cancellation() {
     let error = block_on(random_builtin_registered(
         Some(runtime),
         Value::from("Poisson"),
-        vec![Value::Num(3.0), Value::Num(4.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(3.0),
+            Value::Num(4.0),
+        ]),
     ))
     .unwrap_err();
     assert_eq!(error.identifier(), Some("Invocation:Cancelled"));
@@ -68,7 +71,7 @@ fn random_dimension_product_overflow_is_an_error_not_a_panic() {
     let fitted = block_on(fitdist_builtin(
         vec_tensor(&[1.0, 2.0, 3.0]),
         Value::String("Normal".into()),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect("fitted object");
     let error = block_on(random_builtin(

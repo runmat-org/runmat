@@ -55,7 +55,7 @@ pub(super) fn exception_field(exception: &MException, name: &str) -> BuiltinResu
     }
 }
 
-fn exception_stack_to_value(stack: &[String]) -> BuiltinResult<Value> {
+fn exception_stack_to_value(stack: &[runmat_value::Utf8Text]) -> BuiltinResult<Value> {
     let values = stack.iter().cloned().map(Value::string).collect();
     make_cell_with_shape(values, vec![stack.len(), 1])
         .map_err(|error| errors::internal(format!("getfield: {error}")))

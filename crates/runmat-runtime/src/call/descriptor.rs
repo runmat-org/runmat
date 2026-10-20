@@ -67,7 +67,7 @@ impl CallableCallKind {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CallableMetadata {
     pub call_kind: CallableCallKind,
-    pub display_name: Option<String>,
+    pub display_name: Option<runmat_value::Utf8Text>,
     pub source_id: Option<runmat_types::SourceId>,
     pub source_ref: Option<crate::source_context::RuntimeSourceRef>,
     pub source_invocation: Option<crate::context::RuntimeInvocationArity>,
@@ -90,7 +90,7 @@ impl Default for CallableMetadata {
 }
 
 impl CallableMetadata {
-    fn feval(display_name: Option<String>) -> Self {
+    fn feval(display_name: Option<runmat_value::Utf8Text>) -> Self {
         Self {
             call_kind: CallableCallKind::Feval,
             display_name,
@@ -329,6 +329,19 @@ impl CallableDescriptor {
                         // display-name owner.
                         metadata: CallableMetadata::feval(None),
                     }
+                } else if let Some(function) =
+                    function_resolver.resolve_function(&closure.function_name)
+                {
+                    Self {
+                        target: CallableTarget::CapturedResolved {
+                            identity: CallableIdentity::BoundFunction(function),
+                            fallback_policy: CallableFallbackPolicy::None,
+                            closure: retained,
+                        },
+                        args: Vec::new(),
+                        requested_outputs,
+                        metadata: CallableMetadata::feval(None),
+                    }
                 } else {
                     Self {
                         target: CallableTarget::RetainedFevalForward(
@@ -349,9 +362,15 @@ impl CallableDescriptor {
                         metadata: CallableMetadata::feval(None),
                     },
                     None => Self {
-                        target: CallableTarget::RetainedFevalForward(
-                            RetainedCallableValue::from_read_lease(owner),
-                        ),
+                        target: match function_resolver.resolve_function(name.name()) {
+                            Some(function) => CallableTarget::Resolved {
+                                identity: CallableIdentity::BoundFunction(function),
+                                fallback_policy: CallableFallbackPolicy::None,
+                            },
+                            None => CallableTarget::RetainedFevalForward(
+                                RetainedCallableValue::from_read_lease(owner),
+                            ),
+                        },
                         args: Vec::new(),
                         requested_outputs,
                         metadata: CallableMetadata::feval(None),
@@ -435,7 +454,7 @@ impl CallableDescriptor {
 
     fn resolved_inner(
         identity: CallableIdentity,
-        display_name: Option<String>,
+        display_name: Option<runmat_value::Utf8Text>,
         fallback_policy: CallableFallbackPolicy,
         args: Vec<Value>,
         requested_outputs: usize,
@@ -444,7 +463,7 @@ impl CallableDescriptor {
         metadata.display_name = metadata
             .display_name
             .or(display_name)
-            .or_else(|| strict_callable_display_name(&identity));
+            .or_else(|| strict_callable_display_name(&identity).map(Into::into));
         Self {
             target: CallableTarget::Resolved {
                 identity,
@@ -458,7 +477,7 @@ impl CallableDescriptor {
 
     fn feval_bound(
         binding: runmat_value::BoundFunctionBinding,
-        name: String,
+        name: runmat_value::Utf8Text,
         args: Vec<Value>,
         requested_outputs: usize,
     ) -> Self {
@@ -477,6 +496,7 @@ impl CallableDescriptor {
         args: Vec<Value>,
         requested_outputs: usize,
     ) -> Self {
+        let name: runmat_value::Utf8Text = name.into();
         Self::resolved_inner(
             identity,
             Some(name.clone()),
@@ -494,7 +514,7 @@ impl CallableDescriptor {
         function_resolver: &impl FunctionNameResolver,
     ) -> Self {
         if let Some(binding) = function_resolver.resolve_bound_function(&name) {
-            return Self::feval_bound(binding, name, args, requested_outputs);
+            return Self::feval_bound(binding, name.into(), args, requested_outputs);
         }
         let (identity, fallback_policy) = Self::resolve_named_target(&name, function_resolver);
         Self::feval_resolved_name(identity, name, fallback_policy, args, requested_outputs)
@@ -574,7 +594,7 @@ impl CallableDescriptor {
                 Self::feval_forward(Value::String(text), args, requested_outputs)
             }
             Value::CharArray(ca) if ca.rows == 1 => {
-                let text: String = ca.data.iter().collect();
+                let text: String = ca.data().iter().collect();
                 if Self::is_at_prefixed_text(&text) {
                     return Self::feval_forward(Value::CharArray(ca), args, requested_outputs);
                 }
@@ -583,11 +603,11 @@ impl CallableDescriptor {
                 }
                 Self::feval_forward(Value::CharArray(ca), args, requested_outputs)
             }
-            Value::StringArray(sa) if sa.data.len() == 1 => {
-                if Self::is_at_prefixed_text(&sa.data[0]) {
+            Value::StringArray(sa) if sa.data().len() == 1 => {
+                if Self::is_at_prefixed_text(&sa.data()[0]) {
                     return Self::feval_forward(Value::StringArray(sa), args, requested_outputs);
                 }
-                if let Some(name) = Self::parse_handle_name(&sa.data[0]) {
+                if let Some(name) = Self::parse_handle_name(&sa.data()[0]) {
                     return Self::feval_named(name, args, requested_outputs, function_resolver);
                 }
                 Self::feval_forward(Value::StringArray(sa), args, requested_outputs)
@@ -755,7 +775,7 @@ async fn call_builtin_with_requested_outputs(
 async fn forward_named_fallback(
     runtime: Option<&crate::context::RuntimeContext>,
     name: String,
-    args: crate::execution::RootedValues,
+    args: impl Into<crate::call::BuiltinArguments>,
     requested_outputs: usize,
     callsite: Option<crate::callsite::CallsiteInfo>,
     source_ref: Option<crate::source_context::RuntimeSourceRef>,
@@ -763,9 +783,9 @@ async fn forward_named_fallback(
 ) -> Result<crate::execution::RootedValueSequence, RuntimeError> {
     let invoke = crate::callsite::with_callsite(
         callsite,
-        crate::dispatcher::try_call_builtin_sequence_async_with_outputs(
+        crate::dispatcher::try_call_retained_builtin_sequence_with_outputs(
             &name,
-            &args,
+            args.into(),
             requested_outputs,
             runtime,
         ),
@@ -792,14 +812,37 @@ async fn forward_named_fallback(
 
 #[path = "descriptor/execution.rs"]
 mod execution;
-pub(crate) use execution::try_execute_retained_bound_closure_in_context;
+pub(crate) use execution::invoke_selected_retained_closure;
 
 #[path = "descriptor/resolved_execution.rs"]
 mod resolved_execution;
 
 #[path = "descriptor/repeatable.rs"]
 mod repeatable;
-pub(crate) use repeatable::RepeatableCallable;
+pub use repeatable::RepeatableCallable;
+
+/// Execute an exact selected method binding with a new callee's supplied
+/// inputs, retaining the original argument forest through normalization.
+pub(crate) async fn execute_retained_bound_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    binding: runmat_value::BoundFunctionBinding,
+    args: crate::call::BuiltinArguments,
+    requested_outputs: usize,
+    call_kind: CallableCallKind,
+) -> Result<crate::execution::RootedValueSequence, crate::RuntimeError> {
+    execution::invoke_bound(
+        runtime,
+        binding,
+        args.into_supplied_function_arguments(runtime)?,
+        requested_outputs,
+        CallableMetadata {
+            call_kind,
+            ..CallableMetadata::default()
+        },
+        None,
+    )
+    .await
+}
 
 pub fn execute_callable_descriptor(
     descriptor: CallableDescriptor,

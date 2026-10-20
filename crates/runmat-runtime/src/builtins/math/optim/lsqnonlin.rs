@@ -62,20 +62,22 @@ fn map_error(err: RuntimeError, fallback: &'static BuiltinErrorDescriptor) -> Ru
 async fn lsqnonlin_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
     first: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     lsqnonlin_in_runtime(runtime.as_ref(), first, rest).await
 }
 
 #[cfg(test)]
 async fn lsqnonlin_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    lsqnonlin_in_runtime(None, first, rest).await
+    let rest =
+        crate::execution::RootedValues::new(rest).map_err(|error| error.into_runtime_error())?;
+    lsqnonlin_in_runtime(None, first, rest.into()).await
 }
 
 async fn lsqnonlin_in_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
     first: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     validate_requested_outputs()?;
     let mut cooperation = crate::builtins::math::optim::common::ScalarCooperation::new(
@@ -83,7 +85,9 @@ async fn lsqnonlin_in_runtime(
         runtime,
     );
     cooperation.completed(0).await?;
-    let parsed = ParsedProblem::parse(first, rest)
+    let _option_sources = rest.fork();
+    let first_source = crate::execution::RootedValue::in_optional_context(first, runtime)?;
+    let parsed = ParsedProblem::parse(first_source.value().clone(), rest)
         .await
         .map_err(|err| map_error(err, &LSQNONLIN_ERROR_INVALID_ARGUMENT))?;
     let ParsedProblem {
@@ -93,11 +97,12 @@ async fn lsqnonlin_in_runtime(
         ub,
         options,
     } = parsed;
-    let options = crate::builtins::math::optim::common::prepare_solver_options(
+    let prepared_options = crate::builtins::math::optim::common::prepare_solver_options(
         runmat_builtins::OptimSolver::Lsqnonlin,
         options,
         None,
         None,
+        runtime,
         &mut cooperation,
     )
     .await
@@ -106,8 +111,11 @@ async fn lsqnonlin_in_runtime(
         .await
         .map_err(|err| map_error(err, &LSQNONLIN_ERROR_INVALID_INPUT))?;
     let n = guess.values.len();
-    let options = LsqOptions::from_struct(options.as_ref(), n)
-        .map_err(|err| map_error(err, &LSQNONLIN_ERROR_INVALID_ARGUMENT))?;
+    let options = LsqOptions::from_struct(
+        prepared_options.as_ref().map(|options| options.structure()),
+        n,
+    )
+    .map_err(|err| map_error(err, &LSQNONLIN_ERROR_INVALID_ARGUMENT))?;
     let bounds = ParsedProblem::bounds_from_values(lb, ub, n, &mut cooperation)
         .await
         .map_err(|err| map_error(err, &LSQNONLIN_ERROR_INVALID_ARGUMENT))?;
@@ -156,7 +164,7 @@ struct ParsedProblem {
 }
 
 impl ParsedProblem {
-    async fn parse(first: Value, rest: Vec<Value>) -> BuiltinResult<Self> {
+    async fn parse(first: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Self> {
         if rest.is_empty() {
             if let Value::Struct(problem) = first {
                 return Self::from_problem_struct(problem);
@@ -165,15 +173,20 @@ impl ParsedProblem {
         Self::from_function_args(first, rest).await
     }
 
-    async fn from_function_args(function: Value, mut rest: Vec<Value>) -> BuiltinResult<Self> {
+    async fn from_function_args(
+        function: Value,
+        rest: crate::call::BuiltinArguments,
+    ) -> BuiltinResult<Self> {
         if rest.is_empty() {
             return Err(lsq_error_with_detail(
                 &LSQNONLIN_ERROR_INVALID_ARGUMENT,
                 "lsqnonlin: expected initial guess x0",
             ));
         }
-        let x0 = rest.remove(0);
-        match rest.len() {
+        let remaining = rest.len() - 1;
+        let mut values = rest.into_iter();
+        let x0 = values.next().expect("initial guess was checked above");
+        match remaining {
             0 => Ok(Self {
                 function,
                 x0,
@@ -182,7 +195,6 @@ impl ParsedProblem {
                 options: None,
             }),
             2 | 3 => {
-                let mut values = rest.into_iter();
                 let lb = values.next();
                 let ub = values.next();
                 let options = parse_options(values.next())?;
@@ -195,7 +207,6 @@ impl ParsedProblem {
                 })
             }
             6..=8 => {
-                let mut values = rest.into_iter();
                 let lb = values.next();
                 let ub = values.next();
                 let a = values.next();
@@ -352,10 +363,10 @@ fn has_nonempty_problem_field(problem: &StructValue, name: &str) -> bool {
 fn string_scalar(label: &str, value: &Value) -> BuiltinResult<String> {
     match value {
         Value::String(value) => Ok(value.as_str().to_owned()),
-        Value::StringArray(values) if values.data.len() == 1 => {
-            Ok(values.data[0].as_str().to_owned())
+        Value::StringArray(values) if values.data().len() == 1 => {
+            Ok(values.data()[0].as_str().to_owned())
         }
-        Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data.iter().collect()),
+        Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data().iter().collect()),
         other => Err(lsq_error_with_detail(
             &LSQNONLIN_ERROR_INVALID_ARGUMENT,
             format!("{label} must be a character vector or string scalar, got {other:?}"),
@@ -714,7 +725,7 @@ fn tensor_value(values: Vec<f64>, shape: Vec<usize>) -> BuiltinResult<Value> {
 }
 
 fn output_struct(result: &LeastSquaresResult, algorithm: &str) -> StructValue {
-    let mut fields = StructValue::new();
+    let mut fields = runmat_value::UnboundedStructValueBuilder::new();
     fields.insert("iterations", Value::Num(result.iterations as f64));
     fields.insert("funcCount", Value::Num(result.func_count as f64));
     fields.insert("firstorderopt", Value::Num(result.first_order_optimality));
@@ -726,7 +737,7 @@ fn output_struct(result: &LeastSquaresResult, algorithm: &str) -> StructValue {
     );
     fields.insert("algorithm", Value::from(algorithm));
     fields.insert("message", Value::from(result.message.clone()));
-    fields
+    fields.finish()
 }
 
 async fn lambda_struct(
@@ -752,10 +763,10 @@ async fn lambda_struct(
             upper[i] = (-gradient[i]).max(0.0);
         }
     }
-    let mut fields = StructValue::new();
+    let mut fields = runmat_value::UnboundedStructValueBuilder::new();
     fields.insert("lower", multiplier_value(lower, x_shape, x_scalar)?);
     fields.insert("upper", multiplier_value(upper, x_shape, x_scalar)?);
-    Ok(fields)
+    Ok(fields.finish())
 }
 
 fn multiplier_value(values: Vec<f64>, x_shape: &[usize], x_scalar: bool) -> BuiltinResult<Value> {

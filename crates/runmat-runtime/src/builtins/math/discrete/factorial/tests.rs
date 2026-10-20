@@ -13,6 +13,7 @@ mod cases {
     use runmat_value::{IntValue, IntegerStorage, LogicalArray, NumericStorage, Tensor};
 
     fn factorial_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+        let rest = crate::call::BuiltinArguments::from_borrowed(&rest, None)?;
         block_on(super::factorial_builtin(value, rest))
     }
 

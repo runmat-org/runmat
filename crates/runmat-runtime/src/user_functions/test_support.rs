@@ -99,27 +99,12 @@ pub fn install_bound_forwarders(
             assert!(expected.contains(&binding), "wrong exact callback owner");
             let invoker = super::current_semantic_function_invoker()
                 .expect("numeric fixture invoker in same runtime");
-            let materialized = if arguments.capture_count() == 0 {
-                None
-            } else {
-                match arguments.materialize_legacy_contiguous(Some(&runtime)) {
-                    Ok(values) => Some(values),
-                    Err(error) => return Box::pin(async move { Err(error) }),
-                }
-            };
-            let future = invoker(
+            invoker(
                 Some(runtime),
                 binding.function,
-                materialized
-                    .as_deref()
-                    .unwrap_or_else(|| arguments.supplied()),
+                arguments,
                 requested_outputs,
-            );
-            Box::pin(async move {
-                let _arguments = arguments;
-                let _materialized = materialized;
-                future.await
-            })
+            )
         },
     ))
     .expect("test bound-forwarder projection")

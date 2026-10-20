@@ -20,7 +20,7 @@ fn forced_native_recursive_persistent_output_returns_latest_canonical_value() {
         for (depth, expected) in [(2.0, 3.0), (1.0, 5.0)] {
             let invocation = crate::ProcedureInvocation {
                 target: crate::ProcedureTarget::Function("nativePersistentReturn".into()),
-                arguments: vec![runmat_value::Value::Num(depth)],
+                arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Num(depth)]),
                 requested_outputs: 1,
             };
             let baseline = block_on(interpreted.invoke_executable(
@@ -49,7 +49,7 @@ fn forced_native_recursive_persistent_output_returns_latest_canonical_value() {
         }
         let invocation = crate::ProcedureInvocation {
             target: crate::ProcedureTarget::Function("nativePersistentReturn".into()),
-            arguments: vec![runmat_value::Value::Num(0.0)],
+            arguments: crate::ProcedureArguments::Source(vec![runmat_value::Value::Num(0.0)]),
             requested_outputs: 1,
         };
         let after_clear = block_on(interpreted.invoke_executable(

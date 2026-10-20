@@ -30,7 +30,10 @@ enum DecodedOption {
 }
 
 impl ScatterhistOptionPlan {
-    pub(super) fn admit(args: Vec<Value>, observations: usize) -> BuiltinResult<Self> {
+    pub(super) fn admit(
+        args: crate::call::BuiltinArguments,
+        observations: usize,
+    ) -> BuiltinResult<Self> {
         if !args.len().is_multiple_of(2) {
             return Err(invalid("scatterhist: name-value options must be paired"));
         }

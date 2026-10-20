@@ -107,7 +107,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::zeros"
 )]
-async fn zeros_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn zeros_builtin(rest: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     let parsed = ParsedZeros::parse(rest).await?;
     build_output(parsed).await
 }
@@ -158,7 +158,7 @@ fn parse_class_keyword(keyword: &str) -> Option<ParsedClassKeyword> {
 }
 
 impl ParsedZeros {
-    async fn parse(args: Vec<Value>) -> crate::BuiltinResult<Self> {
+    async fn parse(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Self> {
         let mut dims: Vec<usize> = Vec::new();
         let mut saw_dims_arg = false;
         let mut shape_source: Option<Vec<usize>> = None;
@@ -585,9 +585,9 @@ fn log_zeros_fallback(shape: &[usize], dtype: NumericDType, reason: &str) {
 fn keyword_of(value: &Value) -> Option<String> {
     match value {
         Value::String(s) => Some(s.to_ascii_lowercase()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].to_ascii_lowercase()),
+        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].to_ascii_lowercase()),
         Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data.iter().collect();
+            let text: String = ca.data().iter().collect();
             Some(text.to_ascii_lowercase())
         }
         _ => None,
@@ -664,7 +664,10 @@ pub(crate) mod tests {
     #[test]
     fn zeros_default_scalar() {
         let _guard = clear_accel_provider_state();
-        let result = block_on(zeros_builtin(Vec::new())).expect("zeros");
+        let result = block_on(zeros_builtin(
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect("zeros");
         assert_eq!(result, Value::Num(0.0));
     }
 
@@ -701,11 +704,13 @@ pub(crate) mod tests {
         // SAFETY: the leaked fixture has a unique immutable device id.
         unsafe { runmat_accelerate_api::register_device_provider(provider) };
         let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
-        let error = block_on(zeros_builtin(vec![
-            Value::Num(2.0),
-            Value::Num(2.0),
-            Value::from("gpuArray"),
-        ]))
+        let error = block_on(zeros_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(2.0),
+                Value::Num(2.0),
+                Value::from("gpuArray"),
+            ]),
+        ))
         .expect_err("malformed explicit provider result");
         assert!(error.message().contains("invalid constructor result"));
         assert_eq!(
@@ -725,7 +730,10 @@ pub(crate) mod tests {
     fn zeros_square_from_single_dimension() {
         let _guard = clear_accel_provider_state();
         let args = vec![Value::Num(3.0)];
-        let result = block_on(zeros_builtin(args)).expect("zeros");
+        let result = block_on(zeros_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect("zeros");
         let tensor = test_support::gather(result).expect("gather tensor");
         assert_eq!(tensor.shape(), &[3, 3]);
         assert!(tensor.materialize_f64().iter().all(|&x| x == 0.0));
@@ -736,7 +744,10 @@ pub(crate) mod tests {
     fn zeros_rectangular_from_dims() {
         let _guard = clear_accel_provider_state();
         let args = vec![Value::Num(2.0), Value::Num(4.0)];
-        let result = block_on(zeros_builtin(args)).expect("zeros");
+        let result = block_on(zeros_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect("zeros");
         let tensor = test_support::gather(result).expect("gather tensor");
         assert_eq!(tensor.shape(), &[2, 4]);
         assert_eq!(tensor.len(), 8);
@@ -748,7 +759,10 @@ pub(crate) mod tests {
         let _guard = clear_accel_provider_state();
         let size_vec = Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap();
         let args = vec![Value::Tensor(size_vec)];
-        let result = block_on(zeros_builtin(args)).expect("zeros");
+        let result = block_on(zeros_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect("zeros");
         let tensor = test_support::gather(result).expect("gather tensor");
         assert_eq!(tensor.shape(), &[2, 3]);
     }
@@ -758,7 +772,10 @@ pub(crate) mod tests {
     fn zeros_logical_output() {
         let _guard = clear_accel_provider_state();
         let args = vec![Value::Num(2.0), Value::Num(2.0), Value::from("logical")];
-        let result = block_on(zeros_builtin(args)).expect("zeros");
+        let result = block_on(zeros_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect("zeros");
         match result {
             Value::LogicalArray(logical) => {
                 assert_eq!(logical.shape, vec![2, 2]);
@@ -775,7 +792,10 @@ pub(crate) mod tests {
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let args = vec![Value::Tensor(tensor)];
-        let result = block_on(zeros_builtin(args)).expect("zeros");
+        let result = block_on(zeros_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect("zeros");
         let tensor = test_support::gather(result).expect("gather tensor");
         assert_eq!(tensor.shape(), &[2, 2]);
         assert!(tensor.materialize_f64().iter().all(|&x| x == 0.0));
@@ -790,7 +810,10 @@ pub(crate) mod tests {
             Value::from("like"),
             Value::Complex(1.0, 2.0),
         ];
-        let result = block_on(zeros_builtin(args)).expect("zeros");
+        let result = block_on(zeros_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect("zeros");
         match result {
             Value::ComplexTensor(t) => {
                 assert_eq!(t.shape(), &[3, 3]);
@@ -814,11 +837,13 @@ pub(crate) mod tests {
             vec![1, 2],
         )
         .expect("typed complex tensor");
-        let result = block_on(zeros_builtin(vec![
-            Value::Num(2.0),
-            Value::from("like"),
-            Value::ComplexTensor(prototype),
-        ]))
+        let result = block_on(zeros_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(2.0),
+                Value::from("like"),
+                Value::ComplexTensor(prototype),
+            ]),
+        ))
         .expect("zeros like");
         let Value::ComplexTensor(output) = result else {
             panic!("expected typed complex output");
@@ -847,7 +872,10 @@ pub(crate) mod tests {
             Value::from("like"),
             Value::Tensor(proto),
         ];
-        let result = block_on(zeros_builtin(args)).expect("zeros");
+        let result = block_on(zeros_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect("zeros");
         let tensor = test_support::gather(result).expect("gather tensor");
         assert_eq!(tensor.shape(), &[2, 3]);
         assert!(tensor.materialize_f64().iter().all(|&x| x == 0.0));
@@ -859,7 +887,10 @@ pub(crate) mod tests {
         let _guard = clear_accel_provider_state();
         let proto = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let args = vec![Value::from("like"), Value::Tensor(proto)];
-        let result = block_on(zeros_builtin(args)).expect("zeros");
+        let result = block_on(zeros_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect("zeros");
         let tensor = test_support::gather(result).expect("gather tensor");
         assert_eq!(tensor.shape(), &[2, 2]);
         assert!(tensor.materialize_f64().iter().all(|&x| x == 0.0));
@@ -881,10 +912,12 @@ pub(crate) mod tests {
 
         for storage in storages {
             let prototype = Tensor::new_integer(storage.clone(), vec![1, 2]).expect("prototype");
-            let result = block_on(zeros_builtin(vec![
-                Value::from("like"),
-                Value::Tensor(prototype),
-            ]))
+            let result = block_on(zeros_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::from("like"),
+                    Value::Tensor(prototype),
+                ]),
+            ))
             .expect("zeros like");
             let Value::Tensor(output) = result else {
                 panic!("expected integer tensor");
@@ -893,11 +926,13 @@ pub(crate) mod tests {
             assert_eq!(output.integer_storage(), Some(&storage.zeros_like(2)));
         }
 
-        let result = block_on(zeros_builtin(vec![
-            Value::Num(2.0),
-            Value::from("like"),
-            Value::Int(IntValue::I64(i64::MAX)),
-        ]))
+        let result = block_on(zeros_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(2.0),
+                Value::from("like"),
+                Value::Int(IntValue::I64(i64::MAX)),
+            ]),
+        ))
         .expect("integer scalar prototype");
         let Value::Tensor(output) = result else {
             panic!("expected int64 tensor");
@@ -923,11 +958,13 @@ pub(crate) mod tests {
         ];
 
         for (class_name, expected) in cases {
-            let result = block_on(zeros_builtin(vec![
-                Value::Num(2.0),
-                Value::Num(3.0),
-                Value::from(class_name),
-            ]))
+            let result = block_on(zeros_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(2.0),
+                    Value::Num(3.0),
+                    Value::from(class_name),
+                ]),
+            ))
             .expect("zeros integer class");
             let Value::Tensor(output) = result else {
                 panic!("expected integer tensor for {class_name}");
@@ -945,11 +982,13 @@ pub(crate) mod tests {
             ("SiNgLe", NumericDType::F32),
             ("UINT64", NumericDType::U64),
         ] {
-            let result = block_on(zeros_builtin(vec![
-                Value::Num(2.0),
-                Value::Num(2.0),
-                Value::from(spelling),
-            ]))
+            let result = block_on(zeros_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(2.0),
+                    Value::Num(2.0),
+                    Value::from(spelling),
+                ]),
+            ))
             .expect("canonical class option");
             let value = test_support::gather(result).expect("host value");
             assert_eq!(value.numeric_dtype(), expected);
@@ -976,7 +1015,10 @@ pub(crate) mod tests {
             Value::from("like"),
             Value::SparseTensor(proto),
         ];
-        let result = block_on(zeros_builtin(args)).expect("zeros");
+        let result = block_on(zeros_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect("zeros");
         match result {
             Value::SparseTensor(sparse) => {
                 assert_eq!(sparse.rows, 3);
@@ -995,7 +1037,10 @@ pub(crate) mod tests {
         let _guard = clear_accel_provider_state();
         let proto = SparseTensor::zeros(2, 5);
         let args = vec![Value::from("like"), Value::SparseTensor(proto)];
-        let result = block_on(zeros_builtin(args)).expect("zeros");
+        let result = block_on(zeros_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect("zeros");
         match result {
             Value::SparseTensor(sparse) => {
                 assert_eq!(sparse.shape(), vec![2, 5]);
@@ -1013,12 +1058,14 @@ pub(crate) mod tests {
         let _guard = clear_accel_provider_state();
         let proto =
             SparseTensor::new_f32(2, 2, vec![0, 1, 1], vec![0], vec![1.25]).expect("single sparse");
-        let result = block_on(zeros_builtin(vec![
-            Value::Num(3.0),
-            Value::Num(4.0),
-            Value::from("like"),
-            Value::SparseTensor(proto),
-        ]))
+        let result = block_on(zeros_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(3.0),
+                Value::Num(4.0),
+                Value::from("like"),
+                Value::SparseTensor(proto),
+            ]),
+        ))
         .expect("zeros");
         let Value::SparseTensor(sparse) = result else {
             panic!("expected sparse tensor");
@@ -1033,7 +1080,10 @@ pub(crate) mod tests {
     fn zeros_empty_input_returns_empty_matrix() {
         let _guard = clear_accel_provider_state();
         let empty = Tensor::new(Vec::<f64>::new(), vec![0, 0]).unwrap();
-        let result = block_on(zeros_builtin(vec![Value::Tensor(empty)])).expect("zeros");
+        let result = block_on(zeros_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(empty)]),
+        ))
+        .expect("zeros");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape(), &[0, 0]);
@@ -1054,7 +1104,10 @@ pub(crate) mod tests {
             Value::from("like"),
             Value::Tensor(proto),
         ];
-        assert!(block_on(zeros_builtin(args)).is_err());
+        assert!(block_on(zeros_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args)
+        ))
+        .is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1069,7 +1122,10 @@ pub(crate) mod tests {
                 Value::from("like"),
                 Value::GpuTensor(handle),
             ];
-            let result = block_on(zeros_builtin(args)).expect("zeros");
+            let result = block_on(zeros_builtin(
+                crate::builtins::common::test_support::builtin_arguments(args),
+            ))
+            .expect("zeros");
             match result {
                 Value::GpuTensor(gpu) => {
                     assert_eq!(gpu.shape(), vec![2, 2]);
@@ -1098,7 +1154,10 @@ pub(crate) mod tests {
                 Value::from("like"),
                 Value::GpuTensor(prototype),
             ];
-            let result = block_on(zeros_builtin(args)).expect("zeros integer gpu like");
+            let result = block_on(zeros_builtin(
+                crate::builtins::common::test_support::builtin_arguments(args),
+            ))
+            .expect("zeros integer gpu like");
             let Value::GpuTensor(handle) = result else {
                 panic!("expected resident gpuArray");
             };
@@ -1125,12 +1184,14 @@ pub(crate) mod tests {
                 ("uint64", None, Some(IntegerElementType::U64), false),
                 ("logical", None, None, true),
             ] {
-                let result = block_on(zeros_builtin(vec![
-                    Value::Num(2.0),
-                    Value::Num(3.0),
-                    Value::from(class),
-                    Value::from("gpuArray"),
-                ]))
+                let result = block_on(zeros_builtin(
+                    crate::builtins::common::test_support::builtin_arguments(vec![
+                        Value::Num(2.0),
+                        Value::Num(3.0),
+                        Value::from(class),
+                        Value::from("gpuArray"),
+                    ]),
+                ))
                 .expect("typed GPU zeros");
                 let Value::GpuTensor(handle) = result else {
                     panic!("explicit GPU constructor must stay resident");
@@ -1148,10 +1209,12 @@ pub(crate) mod tests {
                 );
                 assert_eq!(runmat_accelerate_api::handle_is_logical(&handle), logical);
             }
-            let default = block_on(zeros_builtin(vec![
-                Value::Num(2.0),
-                Value::from("gpuArray"),
-            ]))
+            let default = block_on(zeros_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(2.0),
+                    Value::from("gpuArray"),
+                ]),
+            ))
             .expect("default GPU zeros");
             let Value::GpuTensor(default) = default else {
                 panic!("default GPU zeros must stay resident");
@@ -1185,7 +1248,10 @@ pub(crate) mod tests {
                 Value::from("gpuArray"),
             ],
         ] {
-            let error = block_on(zeros_builtin(args)).expect_err("conflicting class controls");
+            let error = block_on(zeros_builtin(
+                crate::builtins::common::test_support::builtin_arguments(args),
+            ))
+            .expect_err("conflicting class controls");
             assert!(error.to_string().contains("class"));
         }
     }
@@ -1233,10 +1299,12 @@ pub(crate) mod tests {
     #[test]
     fn default_gpu_class_never_falls_back_to_preferred_single() {
         test_support::with_f32_test_provider(|_| {
-            let result = block_on(zeros_builtin(vec![
-                Value::Num(2.0),
-                Value::from("gpuArray"),
-            ]));
+            let result = block_on(zeros_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(2.0),
+                    Value::from("gpuArray"),
+                ]),
+            ));
             assert!(
                 result.is_err(),
                 "F32-only provider must not publish single for default double request"
@@ -1250,7 +1318,10 @@ pub(crate) mod tests {
             Tensor::new_integer(IntegerStorage::U16(vec![2, 3]), vec![2, 1]).expect("column size"),
         );
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let error = block_on(zeros_builtin(vec![size.clone()])).expect_err("strict gate");
+        let error = block_on(zeros_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![size.clone()]),
+        ))
+        .expect_err("strict gate");
         assert_eq!(
             error.identifier(),
             Some("RunMat:compatibility:ZerosColumnSizeVectorExtension")
@@ -1258,8 +1329,13 @@ pub(crate) mod tests {
         drop(_strict);
 
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let output = test_support::gather(block_on(zeros_builtin(vec![size])).expect("extension"))
-            .expect("gather output");
+        let output = test_support::gather(
+            block_on(zeros_builtin(
+                crate::builtins::common::test_support::builtin_arguments(vec![size]),
+            ))
+            .expect("extension"),
+        )
+        .expect("gather output");
         assert_eq!(output.shape(), &[2, 3]);
     }
 

@@ -103,7 +103,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::solve::cond"
 )]
-async fn cond_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn cond_builtin(value: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     if rest.iter().any(is_typed_integer_norm_value) {
         crate::compatibility::ensure_builtin_extension_enabled(&COND_INTEGER_NORM_EXTENSION, NAME)?;
     }
@@ -113,7 +113,7 @@ async fn cond_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     {
         crate::compatibility::ensure_builtin_extension_enabled(&COND_LOGICAL_NORM_EXTENSION, NAME)?;
     }
-    let norm = parse_norm_argument(&rest)?;
+    let norm = parse_norm_argument(rest.view())?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, NAME)?;
     ensure_cond_input_policy(&value)?;
     let single_output = matches!(&value, Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32)
@@ -534,7 +534,7 @@ fn singular_value_cond(singular_values: &[f64]) -> f64 {
     }
 }
 
-fn parse_norm_argument(args: &[Value]) -> BuiltinResult<CondNorm> {
+fn parse_norm_argument(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<CondNorm> {
     match args.len() {
         0 => Ok(CondNorm::Two),
         1 => parse_norm_value(&args[0]),
@@ -1043,6 +1043,9 @@ pub(crate) mod tests {
     }
 
     fn cond_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::cond_builtin(value, rest))
+        block_on(super::cond_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 }

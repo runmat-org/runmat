@@ -102,7 +102,7 @@ async fn fix_table(object: ObjectInstance) -> BuiltinResult<RootedValue> {
         .map_err(|err| builtin_error_with_detail(&FIX_ERROR_INVALID_INPUT, err.message))?;
     let mut names = Vec::with_capacity(variables.fields.len());
     let mut rounded = RootedValuesBuilder::with_capacity(variables.fields.len());
-    for (name, value) in variables.fields {
+    for (name, value) in variables.into_fields_unbounded() {
         crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
         let value = match value {
             Value::GpuTensor(handle) => fix_gpu(handle).await?,

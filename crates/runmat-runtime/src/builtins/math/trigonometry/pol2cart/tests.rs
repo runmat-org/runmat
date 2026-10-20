@@ -93,7 +93,13 @@ use crate::builtins::common::test_support;
 const EPS: f64 = 1.0e-12;
 
 fn call(theta: Value, rho: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    block_on(super::pol2cart_builtin(None, theta, rho, rest)).map(|owned| owned.value().clone())
+    block_on(super::pol2cart_builtin(
+        None,
+        theta,
+        rho,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    ))
+    .map(|owned| owned.value().clone())
 }
 
 fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Tensor {

@@ -3,7 +3,7 @@ use super::super::*;
 #[test]
 fn getfield_textual_index_and_object_family_extensions_are_mode_gated() {
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-    let mut st = StructValue::new();
+    let mut st = runmat_value::UnboundedStructValueBuilder::new();
     st.fields.insert(
         "values".to_string(),
         Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).expect("tensor")),
@@ -14,7 +14,7 @@ fn getfield_textual_index_and_object_family_extensions_are_mode_gated() {
     )
     .expect("index cell");
     let err = run_getfield(
-        Value::Struct(st),
+        Value::Struct(st.finish()),
         vec![Value::from("values"), Value::Cell(index)],
     )
     .expect_err("textual index extension");
@@ -24,9 +24,7 @@ fn getfield_textual_index_and_object_family_extensions_are_mode_gated() {
     );
 
     let mut object = ObjectInstance::new("TestClass".to_string());
-    object
-        .properties
-        .insert("value".to_string(), Value::Num(1.0));
+    object.replace_property_unbounded("value".to_string(), Value::Num(1.0));
     let err = run_getfield(Value::Object(object), vec![Value::from("value")])
         .expect_err("object extension");
     assert_eq!(
@@ -40,7 +38,7 @@ fn getfield_textual_index_and_object_family_extensions_are_mode_gated() {
 fn getfield_object_property() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     let mut obj = ObjectInstance::new("TestClass".to_string());
-    obj.properties.insert("value".to_string(), Value::Num(7.0));
+    obj.replace_property_unbounded("value".to_string(), Value::Num(7.0));
     let result = run_getfield(Value::Object(obj), vec![Value::from("value")]).expect("object");
     assert_eq!(result.value(), &Value::Num(7.0));
 }
@@ -72,8 +70,7 @@ fn getfield_dependent_property_invokes_getter() {
     crate::class_registry::register_class(def);
 
     let mut obj = ObjectInstance::new(class_name.to_string());
-    obj.properties
-        .insert("p_backing".to_string(), Value::Num(42.0));
+    obj.replace_property_unbounded("p_backing".to_string(), Value::Num(42.0));
 
     let result = run_getfield(Value::Object(obj), vec![Value::from("p")]).expect("dependent");
     assert_eq!(result.value(), &Value::Num(42.0));
@@ -116,8 +113,7 @@ fn getfield_inherited_dependent_property_uses_parent_metadata() {
     });
 
     let mut obj = ObjectInstance::new(child_name.to_string());
-    obj.properties
-        .insert("p_backing".to_string(), Value::Num(17.0));
+    obj.replace_property_unbounded("p_backing".to_string(), Value::Num(17.0));
 
     let result =
         run_getfield(Value::Object(obj), vec![Value::from("p")]).expect("inherited dependent");

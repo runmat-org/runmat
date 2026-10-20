@@ -24,7 +24,7 @@ fn current_bound_nested_and_escaped_handles_enter_native_with_their_activation()
         &unit,
         ProcedureInvocation {
             target: ProcedureTarget::Function("nativeBoundLexical".into()),
-            arguments: vec![Value::Num(4.0)],
+            arguments: crate::ProcedureArguments::Source(vec![Value::Num(4.0)]),
             requested_outputs: 3,
         },
         &InvocationControl::default().force_generic_native(),
@@ -89,7 +89,7 @@ end
                 &unit,
                 ProcedureInvocation {
                     target: ProcedureTarget::Function("nativeMutableEscaped".into()),
-                    arguments: Vec::new(),
+                    arguments: crate::ProcedureArguments::Source(Vec::new()),
                     requested_outputs: 1,
                 },
                 &InvocationControl::default().force_generic_native(),
@@ -116,7 +116,7 @@ fn undefined_indexed_root_completes_in_forced_generic_native_with_vm_parity() {
     let unit = block_on(session.compile_executable_unit(source, None)).expect("compile unit");
     let invocation = ProcedureInvocation {
         target: ProcedureTarget::Function("nativeUndefinedIndexRoot".into()),
-        arguments: Vec::new(),
+        arguments: crate::ProcedureArguments::Source(Vec::new()),
         requested_outputs: 1,
     };
     let vm = block_on(session.invoke_executable(
@@ -149,7 +149,7 @@ fn prepared_multi_output_initializes_undefined_indexed_root_with_vm_parity() {
     let unit = block_on(session.compile_executable_unit(source, None)).expect("compile unit");
     let invocation = ProcedureInvocation {
         target: ProcedureTarget::Function("nativePreparedIndexRoot".into()),
-        arguments: Vec::new(),
+        arguments: crate::ProcedureArguments::Source(Vec::new()),
         requested_outputs: 2,
     };
     let vm = block_on(session.invoke_executable(
@@ -183,7 +183,7 @@ fn absent_brace_root_completes_in_forced_native_with_vm_parity() {
     let unit = block_on(session.compile_executable_unit(source, None)).expect("compile unit");
     let invocation = ProcedureInvocation {
         target: ProcedureTarget::Function("nativeAbsentBraceRoot".into()),
-        arguments: vec![Value::Num(9.0)],
+        arguments: crate::ProcedureArguments::Source(vec![Value::Num(9.0)]),
         requested_outputs: 3,
     };
     let vm = block_on(session.invoke_executable(
@@ -258,7 +258,7 @@ fn declared_persistent_brace_root_requires_cell_in_vm_and_forced_native() {
             &unit,
             ProcedureInvocation {
                 target: ProcedureTarget::Function("nativeFreshPersistentBrace".into()),
-                arguments: Vec::new(),
+                arguments: crate::ProcedureArguments::Source(Vec::new()),
                 requested_outputs: 2,
             },
             &control,
@@ -282,7 +282,7 @@ fn declared_persistent_brace_root_requires_cell_in_vm_and_forced_native() {
             &initialized,
             ProcedureInvocation {
                 target: ProcedureTarget::Function("nativeInitializedPersistentBrace".into()),
-                arguments: Vec::new(),
+                arguments: crate::ProcedureArguments::Source(Vec::new()),
                 requested_outputs: 2,
             },
             &control,

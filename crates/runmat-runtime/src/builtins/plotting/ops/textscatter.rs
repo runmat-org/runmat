@@ -14,7 +14,7 @@ use runmat_plot::plots::figure::PlotElement;
 use runmat_plot::plots::scatter::MarkerStyle;
 use runmat_plot::plots::NumericPlotData;
 use runmat_plot::plots::{Figure, Scatter3Plot, ScatterPlot, TextStyle};
-use runmat_value::{StringArray, StructValue, Tensor, Value};
+use runmat_value::{StringArray, Tensor, Value};
 
 use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::op_common::{apply_axes_target, split_leading_axes_handle};
@@ -616,25 +616,25 @@ fn labels_from_value(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<
     match value {
         Value::String(text) => Ok(vec![text.as_str().to_owned()]),
         Value::StringArray(array) => Ok(array
-            .data
+            .data()
             .iter()
             .map(|text| text.as_str().to_owned())
             .collect()),
-        Value::CharArray(chars) if chars.rows == 1 => Ok(vec![chars.data.iter().collect()]),
+        Value::CharArray(chars) if chars.rows == 1 => Ok(vec![chars.data().iter().collect()]),
         Value::CharArray(chars) => {
             let mut labels = Vec::with_capacity(chars.rows);
             for row in 0..chars.rows {
                 let mut text = String::new();
                 for col in 0..chars.cols {
-                    text.push(chars.data[row * chars.cols + col]);
+                    text.push(chars.data()[row * chars.cols + col]);
                 }
                 labels.push(text.trim_end().to_string());
             }
             Ok(labels)
         }
         Value::Cell(cell) => {
-            let mut labels = Vec::with_capacity(cell.data.len());
-            for value in &cell.data {
+            let mut labels = Vec::with_capacity(cell.data().len());
+            for value in cell.data() {
                 let text = value_as_string(value).ok_or_else(|| {
                     textscatter_error(builtin, "cell labels must contain text scalars")
                 })?;
@@ -889,7 +889,7 @@ pub(crate) fn get_textscatter_property(
 ) -> BuiltinResult<Value> {
     match property.map(canonical_key).as_deref() {
         None => {
-            let mut st = StructValue::new();
+            let mut st = runmat_value::UnboundedStructValueBuilder::new();
             st.insert("Type", Value::String("textscatter".into()));
             st.insert(
                 "Parent",
@@ -916,7 +916,7 @@ pub(crate) fn get_textscatter_property(
                 "Visible",
                 Value::String(if state.visible { "on" } else { "off" }.into()),
             );
-            Ok(Value::Struct(st))
+            Ok(Value::Struct(st.finish()))
         }
         Some("type") => Ok(Value::String("textscatter".into())),
         Some("parent") => Ok(Value::Num(
@@ -1924,7 +1924,10 @@ mod tests {
         let Value::StringArray(labels) = labels else {
             panic!("expected string array labels");
         };
-        assert_eq!(labels.data, vec!["new-a".to_string(), "new-b".to_string()]);
+        assert_eq!(
+            labels.data(),
+            vec!["new-a".to_string(), "new-b".to_string()]
+        );
         let fig = clone_figure(current_figure_handle()).unwrap();
         assert_eq!(fig.axes_text_annotations(0)[0].text, "new-a");
     }

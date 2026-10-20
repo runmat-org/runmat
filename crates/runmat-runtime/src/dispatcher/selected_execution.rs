@@ -1,8 +1,8 @@
 //! Execution after implementation selection, shared by normal and admitted calls.
 use super::*;
+use crate::call::BuiltinArguments;
 
-/// The old inventory remains separate until its L23 removal. Canonical
-/// implementations have exactly one context-bearing ABI.
+/// Legacy inventory remains an explicit ordinary-only adapter.
 #[derive(Clone, Copy)]
 pub(super) enum SelectedImplementation {
     Canonical(crate::builtin::RuntimeBuiltinBinding),
@@ -10,16 +10,16 @@ pub(super) enum SelectedImplementation {
 }
 
 impl SelectedImplementation {
-    fn invoke(
+    fn invoke_retained(
         self,
-        args: &[Value],
+        args: BuiltinArguments,
         context: Option<crate::context::RuntimeContext>,
         requested_outputs: Option<usize>,
         observation: Option<direct_call_observation::CallAdmissionSink>,
     ) -> crate::builtin::RuntimeBuiltinFuture {
         match self {
             Self::Canonical(binding) => (binding.implementation)(
-                crate::builtin::RuntimeBuiltinInvocation::new(
+                crate::builtin::RuntimeBuiltinInvocation::retained(
                     args,
                     context.map(|context| {
                         context.with_vm_fusion_selected_binding(Some(binding.identity))
@@ -28,22 +28,46 @@ impl SelectedImplementation {
                 )
                 .with_call_observation(observation),
             ),
-            Self::Legacy(implementation) => {
-                let future = implementation(args);
-                Box::pin(async move {
-                    let sequence =
-                        crate::call::arguments::adapt_legacy_builtin_result(future.await?)?;
-                    crate::execution::RootedValueSequence::new(sequence)
-                        .map_err(|error| error.into_runtime_error())
-                })
-            }
+            Self::Legacy(implementation) => Box::pin(async move {
+                let ordinary = args.materialize_legacy_contiguous(context.as_ref())?;
+                let sequence = crate::call::arguments::adapt_legacy_builtin_result(
+                    implementation(&ordinary).await?,
+                )?;
+                let result = crate::execution::RootedValueSequence::new(sequence)
+                    .map_err(|error| error.into_runtime_error());
+                drop(ordinary);
+                drop(args);
+                result
+            }),
         }
     }
 }
 
+/// Borrowed API retained solely for embedding and direct test fixtures.
+#[cfg(test)]
 pub(super) async fn execute(
     implementation: SelectedImplementation,
     execution: &[Value],
+    context: Option<crate::context::RuntimeContext>,
+    requested_outputs: Option<usize>,
+    observation: Option<&direct_call_observation::CallObservation>,
+    authority: Option<direct_call_observation::RegistrationAuthority>,
+) -> Result<crate::execution::RootedValueSequence, RuntimeError> {
+    let args = BuiltinArguments::from_borrowed(execution, context.as_ref())?;
+    execute_retained(
+        implementation,
+        args,
+        context,
+        requested_outputs,
+        observation,
+        authority,
+    )
+    .await
+}
+
+pub(super) async fn execute_retained(
+    implementation: SelectedImplementation,
+    execution: BuiltinArguments,
     context: Option<crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
     observation: Option<&direct_call_observation::CallObservation>,
@@ -55,12 +79,12 @@ pub(super) async fn execute(
         }
         _ => None,
     };
-    let result = match implementation
-        .invoke(execution, context.clone(), requested_outputs, sink)
+    match implementation
+        .invoke_retained(execution.fork(), context.clone(), requested_outputs, sink)
         .await
     {
-        Ok(result) => result,
-        Err(error) if should_retry_with_gpu_gather(&error, execution) => {
+        Ok(result) => Ok(result),
+        Err(error) if should_retry_with_gpu_gather_values(&error, execution.iter()) => {
             if let Some(observation) = observation {
                 observation.invalidate_retry();
             }
@@ -69,18 +93,33 @@ pub(super) async fn execute(
             {
                 recorder.execution_disposition(runmat_accelerate_api::observation::ProviderExecutionDisposition::SharedRuntimeFallback);
             }
-            match gather_args_for_retry_async(execution).await? {
-                Some(gathered) => {
-                    implementation
-                        .invoke(&gathered, context, requested_outputs, None)
-                        .await?
-                }
-                None => return Err(error),
-            }
+            // Gather changes numeric backings, not GC identities. Build each
+            // successor directly in its final admitted slot and retain the
+            // original registration forest through all suspended downloads.
+            let preparation = execution.try_map_preserving_roots_async(
+                execution.len(),
+                context.as_ref(),
+                |index| {
+                    let value = &execution[index];
+                    async move {
+                        if value_contains_gpu(value) {
+                            gather_if_needed_async(value).await
+                        } else {
+                            Ok(value.clone())
+                        }
+                    }
+                },
+            );
+            let gathered = match &context {
+                Some(context) => context.scope(preparation).await?,
+                None => preparation.await?,
+            };
+            implementation
+                .invoke_retained(gathered, context, requested_outputs, None)
+                .await
         }
-        Err(error) => return Err(error),
-    };
-    Ok(result)
+        Err(error) => Err(error),
+    }
 }
 
 #[cfg(test)]

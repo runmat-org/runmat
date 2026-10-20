@@ -237,7 +237,7 @@ fn replace_string_scalar(text: &str, spec: &ReplacementSpec<'_>) -> String {
 }
 
 fn replace_string_array(array: StringArray, spec: &ReplacementSpec<'_>) -> BuiltinResult<Value> {
-    let StringArray { data, shape, .. } = array;
+    let (data, shape, _, _) = array.into_parts();
     let mut replaced = Vec::with_capacity(data.len());
     let input: Vec<runmat_value::Utf8Text> = match data.try_into_owned() {
         Ok(values) => values.into_iter().collect(),
@@ -261,20 +261,10 @@ fn replace_string_array(array: StringArray, spec: &ReplacementSpec<'_>) -> Built
 }
 
 fn replace_char_array(array: CharArray, spec: &ReplacementSpec<'_>) -> BuiltinResult<Value> {
-    let CharArray {
-        data,
-        shape,
-        rows,
-        cols,
-    } = array;
-    if rows == 0 {
-        return Ok(Value::CharArray(CharArray {
-            data,
-            shape,
-            rows,
-            cols,
-        }));
+    if array.rows == 0 {
+        return Ok(Value::CharArray(array));
     }
+    let (data, _, rows, cols) = array.into_parts();
 
     let mut replaced_rows = Vec::with_capacity(rows);
     let mut target_cols = 0usize;
@@ -303,9 +293,7 @@ fn replace_char_array(array: CharArray, spec: &ReplacementSpec<'_>) -> BuiltinRe
 }
 
 fn replace_cell_array(cell: CellArray, spec: &ReplacementSpec<'_>) -> BuiltinResult<Value> {
-    let CellArray {
-        data, rows, cols, ..
-    } = cell;
+    let (data, _, rows, cols) = cell.into_parts();
     let mut replaced = Vec::with_capacity(rows * cols);
     for row in 0..rows {
         for col in 0..cols {
@@ -322,8 +310,8 @@ fn replace_cell_array(cell: CellArray, spec: &ReplacementSpec<'_>) -> BuiltinRes
 fn replace_cell_element(value: &Value, spec: &ReplacementSpec<'_>) -> BuiltinResult<Value> {
     match value {
         Value::String(text) => Ok(Value::string(replace_string_scalar(text.as_str(), spec))),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(Value::string(replace_string_scalar(
-            sa.data[0].as_str(),
+        Value::StringArray(sa) if sa.data().len() == 1 => Ok(Value::string(replace_string_scalar(
+            sa.data()[0].as_str(),
             spec,
         ))),
         Value::CharArray(ca) if ca.rows <= 1 => replace_char_array(ca.clone(), spec),
@@ -356,7 +344,7 @@ fn extract_text_list<'a>(
     match value {
         Value::String(text) => Ok(vec![std::borrow::Cow::Borrowed(text.as_str())]),
         Value::StringArray(array) => Ok(array
-            .data
+            .data()
             .iter()
             .map(|text| std::borrow::Cow::Borrowed(text.as_str()))
             .collect()),
@@ -367,7 +355,7 @@ fn extract_text_list<'a>(
                 let mut entries = Vec::with_capacity(array.rows);
                 for row in 0..array.rows {
                     entries.push(std::borrow::Cow::Owned(char_row_to_string_slice(
-                        &array.data,
+                        array.data(),
                         array.cols,
                         row,
                     )));
@@ -376,19 +364,21 @@ fn extract_text_list<'a>(
             }
         }
         Value::Cell(cell) => {
-            let mut entries = Vec::with_capacity(cell.data.len());
-            for element in &cell.data {
+            let mut entries = Vec::with_capacity(cell.data().len());
+            for element in cell.data() {
                 match element {
                     Value::String(text) => entries.push(std::borrow::Cow::Borrowed(text.as_str())),
-                    Value::StringArray(sa) if sa.data.len() == 1 => {
-                        entries.push(std::borrow::Cow::Borrowed(sa.data[0].as_str()));
+                    Value::StringArray(sa) if sa.data().len() == 1 => {
+                        entries.push(std::borrow::Cow::Borrowed(sa.data()[0].as_str()));
                     }
                     Value::CharArray(ca) if ca.rows <= 1 => {
                         if ca.rows == 0 {
                             entries.push(std::borrow::Cow::Borrowed(""));
                         } else {
                             entries.push(std::borrow::Cow::Owned(char_row_to_string_slice(
-                                &ca.data, ca.cols, 0,
+                                ca.data(),
+                                ca.cols,
+                                0,
                             )));
                         }
                     }
@@ -507,7 +497,7 @@ pub(crate) mod tests {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![3, 1]);
                 assert_eq!(
-                    sa.data,
+                    sa.data(),
                     vec![
                         String::from("device"),
                         String::from("device"),
@@ -534,7 +524,7 @@ pub(crate) mod tests {
                 assert_eq!(out.rows, 1);
                 assert_eq!(out.cols, 6);
                 let expected: Vec<char> = "tensor".chars().collect();
-                assert_eq!(out.data, expected);
+                assert_eq!(out.data(), expected);
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -555,7 +545,7 @@ pub(crate) mod tests {
                 assert_eq!(out.rows, 2);
                 assert_eq!(out.cols, 5);
                 let expected: Vec<char> = vec!['a', 'b', 'e', 't', 'a', 'c', 'd', ' ', ' ', ' '];
-                assert_eq!(out.data, expected);
+                assert_eq!(out.data(), expected);
             }
             other => panic!("expected char array, got {other:?}"),
         }

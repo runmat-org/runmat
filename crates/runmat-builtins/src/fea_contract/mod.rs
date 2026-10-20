@@ -14,3 +14,5 @@ pub mod options;
 pub mod parameters;
 pub mod result_inference;
 pub mod results_option;
+
+pub mod errors;

@@ -46,8 +46,8 @@ pub(in crate::session) use dynamic_admission::{
     selected_static_imports, static_capture, SelectedStaticTarget,
 };
 pub(super) use selected_graph::{
-    SelectedGraphPrimary, SelectedGraphPublication, SelectedGraphSelection, SelectedGraphSnapshot,
-    SelectedGraphSource,
+    SelectedGraphCodeSource, SelectedGraphPrimary, SelectedGraphPublication,
+    SelectedGraphSelection, SelectedGraphSnapshot, SelectedGraphSource,
 };
 
 pub(super) use callable_artifacts::{

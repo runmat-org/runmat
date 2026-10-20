@@ -50,7 +50,7 @@ pub(super) fn cast_host_value(value: Value, target: IntegerClass) -> Result<Valu
             array.class_name().to_string(),
         ))),
         Value::Object(object) => Err(CastError::Unsupported(UnsupportedValueKind::Object(
-            object.class_name.to_string(),
+            object.class_name().to_string(),
         ))),
         Value::HandleObject(handle) => Err(CastError::Unsupported(UnsupportedValueKind::Object(
             handle.class_name.to_string(),

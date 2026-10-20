@@ -7,14 +7,14 @@ fn manually_constructed_keyword_bundle_cannot_coerce_nontext_names() {
         Value::Num(1.0),
         Value::Int(runmat_value::IntValue::I64(1)),
         Value::Bool(true),
-        Value::String(String::new()),
+        Value::String(String::new().into()),
     ] {
         let mut bundle = ObjectInstance::new(runmat_types::standard::PYTHON_ARGUMENTS);
-        bundle.properties.insert(
+        bundle.replace_property_unbounded(
             "Names".into(),
             Value::Cell(CellArray::new(vec![name], 1, 1).unwrap()),
         );
-        bundle.properties.insert(
+        bundle.replace_property_unbounded(
             "Values".into(),
             Value::Cell(CellArray::new(vec![Value::Num(2.0)], 1, 1).unwrap()),
         );
@@ -27,11 +27,11 @@ fn manually_constructed_keyword_bundle_cannot_coerce_nontext_names() {
 fn keyword_bundle_accepts_effective_character_row_without_coercing_values() {
     let mut bundle = ObjectInstance::new(runmat_types::standard::PYTHON_ARGUMENTS);
     let row = runmat_value::CharArray::new_with_shape(vec!['x'], vec![1, 1, 1]).unwrap();
-    bundle.properties.insert(
+    bundle.replace_property_unbounded(
         "Names".into(),
         Value::Cell(CellArray::new(vec![Value::CharArray(row)], 1, 1).unwrap()),
     );
-    bundle.properties.insert(
+    bundle.replace_property_unbounded(
         "Values".into(),
         Value::Cell(CellArray::new(vec![Value::Bool(true)], 1, 1).unwrap()),
     );

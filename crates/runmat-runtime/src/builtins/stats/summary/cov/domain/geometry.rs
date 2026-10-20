@@ -174,9 +174,11 @@ mod tests {
     fn covariance_preserves_rank_zero_and_rank_one_observation_roles() {
         for shape in [Vec::new(), vec![1]] {
             let input = Value::Tensor(Tensor::new(vec![7.0], shape).unwrap());
-            let Value::Tensor(output) =
-                block_on(super::super::super::cov_builtin(input, Vec::new())).unwrap()
-            else {
+            let Value::Tensor(output) = block_on(super::super::super::cov_builtin(
+                input,
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+            ))
+            .unwrap() else {
                 panic!("expected covariance tensor");
             };
             assert_eq!(output.shape(), &[1, 1]);
@@ -184,9 +186,11 @@ mod tests {
         }
         let left = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).unwrap());
         let right = Value::Tensor(Tensor::new(vec![2.0, 4.0, 6.0], vec![3, 1]).unwrap());
-        let Value::Tensor(output) =
-            block_on(super::super::super::cov_builtin(left, vec![right])).unwrap()
-        else {
+        let Value::Tensor(output) = block_on(super::super::super::cov_builtin(
+            left,
+            crate::builtins::common::test_support::builtin_arguments(vec![right]),
+        ))
+        .unwrap() else {
             panic!("expected paired covariance tensor");
         };
         assert_eq!(output.shape(), &[2, 2]);

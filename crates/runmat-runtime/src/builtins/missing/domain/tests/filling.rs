@@ -24,7 +24,8 @@ fn logical_nd_input_preserves_carrier_and_returns_shape_matched_mask() {
             &runmat_builtins::FILLMISSING_CATALOG_ENTRY,
             &request,
         );
-        let options = FillOptions::parse(vec![method]).unwrap();
+        let options =
+            FillOptions::parse(crate::call::FunctionArgumentView::from_slice(&[method])).unwrap();
         let (output, mask) =
             super::super::filling::fill_missing_value(None, input.clone(), &options).unwrap();
         assert_eq!(output, input);
@@ -47,7 +48,10 @@ fn logical_nd_input_preserves_carrier_and_returns_shape_matched_mask() {
 fn empty_nd_string_input_preserves_shape_and_mask_geometry() {
     let shape = vec![2, 0, 3];
     let input = Value::StringArray(StringArray::new(vec![], shape.clone()).unwrap());
-    let options = FillOptions::parse(vec![Value::from("previous")]).unwrap();
+    let options = FillOptions::parse(crate::call::FunctionArgumentView::from_slice(&[
+        Value::from("previous"),
+    ]))
+    .unwrap();
     let (output, mask) =
         super::super::filling::fill_missing_value(None, input.clone(), &options).unwrap();
     assert_eq!(output, input);
@@ -77,7 +81,11 @@ fn scalar_mask_catalog_storage_matches_live_runtime_fact() {
     };
     let inferred =
         runmat_builtins::infer_catalog_call(&runmat_builtins::FILLMISSING_CATALOG_ENTRY, &request);
-    let options = FillOptions::parse(vec![method, replacement]).unwrap();
+    let options = FillOptions::parse(crate::call::FunctionArgumentView::from_slice(&[
+        method,
+        replacement,
+    ]))
+    .unwrap();
     let (_, mask) = super::super::filling::fill_missing_value(None, input, &options).unwrap();
     let live = crate::value_fact::value_fact(&Value::LogicalArray(mask));
     assert_eq!(inferred.outputs[1].kind, live.kind);
@@ -88,17 +96,31 @@ fn scalar_mask_catalog_storage_matches_live_runtime_fact() {
 #[test]
 fn fillmissing_supports_constant_previous_and_linear() {
     let value = tensor(vec![1.0, f64::NAN, 3.0], vec![3, 1]);
-    let result = block_on(fillmissing_builtin(value, vec![Value::from("linear")])).unwrap();
+    let result = block_on(fillmissing_builtin(
+        None,
+        value,
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("linear")]),
+    ))
+    .unwrap();
     assert!(matches!(result, Value::Tensor(t) if t.materialize_f64() == vec![1.0, 2.0, 3.0]));
 
     let value = tensor(vec![1.0, f64::NAN, 3.0], vec![1, 3]);
-    let result = block_on(fillmissing_builtin(value, vec![Value::from("linear")])).unwrap();
+    let result = block_on(fillmissing_builtin(
+        None,
+        value,
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("linear")]),
+    ))
+    .unwrap();
     assert!(matches!(result, Value::Tensor(t) if t.materialize_f64() == vec![1.0, 2.0, 3.0]));
 
     let value = tensor(vec![1.0, f64::NAN, f64::NAN], vec![3, 1]);
     let result = block_on(fillmissing_builtin(
+        None,
         value,
-        vec![Value::from("constant"), Value::Num(9.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("constant"),
+            Value::Num(9.0),
+        ]),
     ))
     .unwrap();
     assert!(matches!(result, Value::Tensor(t) if t.materialize_f64() == vec![1.0, 9.0, 9.0]));
@@ -114,8 +136,11 @@ fn fillmissing_rejects_invalid_method_before_resident_download() {
         )
         .unwrap();
     let error = block_on(fillmissing_builtin(
+        None,
         Value::GpuTensor(allocation.handle.clone()),
-        vec![Value::from("not-a-fill-method")],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from(
+            "not-a-fill-method",
+        )]),
     ))
     .expect_err("invalid method must be admitted before provider work");
     assert_eq!(error.identifier(), Some("RunMat:missing:InvalidArgument"));
@@ -127,14 +152,22 @@ fn fillmissing_rejects_invalid_method_before_resident_download() {
 #[test]
 fn fillmissing_scalar_constant_replacement_preserves_selected_value_class() {
     let missing = block_on(fillmissing_builtin(
+        None,
         Value::Num(f64::NAN),
-        vec![Value::from("constant"), Value::Bool(true)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("constant"),
+            Value::Bool(true),
+        ]),
     ))
     .unwrap();
     assert!(matches!(missing, Value::Bool(true)));
     let present = block_on(fillmissing_builtin(
+        None,
         Value::Num(2.0),
-        vec![Value::from("constant"), Value::Bool(true)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("constant"),
+            Value::Bool(true),
+        ]),
     ))
     .unwrap();
     assert!(matches!(present, Value::Num(2.0)));
@@ -151,8 +184,12 @@ fn fillmissing_rejects_more_than_two_outputs_before_resident_download() {
         .unwrap();
     let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let error = block_on(fillmissing_builtin(
+        None,
         Value::GpuTensor(allocation.handle.clone()),
-        vec![Value::from("constant"), Value::Num(0.0)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("constant"),
+            Value::Num(0.0),
+        ]),
     ))
     .expect_err("fillmissing has at most two outputs");
     assert_eq!(error.identifier(), Some("RunMat:missing:InvalidArgument"));
@@ -166,7 +203,11 @@ fn fillmissing_typed_integer_tensor_preserves_storage_and_reports_no_missing() {
     let expected = IntegerStorage::I32(vec![10, 20, 30]);
     let input = Tensor::new_integer(expected.clone(), vec![3, 1]).expect("integer tensor");
 
-    let options = FillOptions::parse(vec![Value::from("constant"), Value::Num(0.0)]).unwrap();
+    let options = FillOptions::parse(crate::call::FunctionArgumentView::from_slice(&[
+        Value::from("constant"),
+        Value::Num(0.0),
+    ]))
+    .unwrap();
     let result = fill_missing_tensor(input, &options).unwrap();
 
     match result {
@@ -196,8 +237,12 @@ fn fillmissing_integer_data_is_gated_and_all_classes_are_exact_noops() {
         {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
             let error = block_on(fillmissing_builtin(
+                None,
                 input.clone(),
-                vec![Value::from("constant"), Value::Num(0.0)],
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::from("constant"),
+                    Value::Num(0.0),
+                ]),
             ))
             .expect_err("strict integer fillmissing");
             assert_eq!(
@@ -208,8 +253,12 @@ fn fillmissing_integer_data_is_gated_and_all_classes_are_exact_noops() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let output = block_on(fillmissing_builtin(
+            None,
             input,
-            vec![Value::from("constant"), Value::Num(0.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("constant"),
+                Value::Num(0.0),
+            ]),
         ))
         .expect("RunMat integer fillmissing");
         let Value::OutputList(values) = output else {
@@ -244,13 +293,17 @@ fn fillmissing_text_neighbors_preserve_nd_lines_and_mask_shape() {
             shape.clone(),
         )
         .unwrap();
-        let options = FillOptions::parse(vec![Value::from(method), Value::Num(3.0)]).unwrap();
+        let options = FillOptions::parse(crate::call::FunctionArgumentView::from_slice(&[
+            Value::from(method),
+            Value::Num(3.0),
+        ]))
+        .unwrap();
         let (output, mask) = fill_missing_string_array(None, input, &options).unwrap();
         let Value::StringArray(output) = output else {
             panic!("expected string array")
         };
         assert_eq!(
-            output.data,
+            output.data(),
             ["a", "b", middle[0], middle[1], "c", "d"].map(str::to_owned)
         );
         assert_eq!(output.shape, shape);
@@ -298,23 +351,27 @@ fn fillmissing_text_neighbors_preserve_nd_lines_and_mask_shape() {
         shape.clone(),
     )
     .unwrap();
-    let options = FillOptions::parse(vec![Value::from("nearest"), Value::Num(3.0)]).unwrap();
+    let options = FillOptions::parse(crate::call::FunctionArgumentView::from_slice(&[
+        Value::from("nearest"),
+        Value::Num(3.0),
+    ]))
+    .unwrap();
     let (output, mask) = fill_missing_string_array(Some(&context), input, &options).unwrap();
     let Value::StringArray(output) = output else {
         panic!("expected string array")
     };
     assert_eq!(
         output
-            .data
+            .data()
             .iter()
             .map(|value| value.as_str())
             .collect::<Vec<_>>(),
         ["a", "b", "a", "b", "c", "d"]
     );
-    assert!(output.data.iter().all(|value| value.has_retained_claim()));
+    assert!(output.data().iter().all(|value| value.has_retained_claim()));
     assert_eq!(mask.data, vec![0, 0, 1, 1, 0, 0]);
     assert!(ledger.snapshot().live_reserved_bytes > 0);
-    let unique_outer = output.data.as_slice().as_ptr();
+    let unique_outer = output.data().as_ptr();
     let indicator = super::super::standardize::indicator_set(&Value::from("a")).unwrap();
     let Value::StringArray(unique) = super::super::standardize::standardize_missing_value(
         Some(&context),
@@ -324,10 +381,10 @@ fn fillmissing_text_neighbors_preserve_nd_lines_and_mask_shape() {
     .unwrap() else {
         panic!("expected standardized array")
     };
-    assert_eq!(unique.data.as_slice().as_ptr(), unique_outer);
-    assert_eq!(unique.data[0].as_str(), MISSING_TEXT);
+    assert_eq!(unique.data().as_ptr(), unique_outer);
+    assert_eq!(unique.data()[0].as_str(), MISSING_TEXT);
     let alias = unique.clone();
-    let shared_outer = unique.data.as_slice().as_ptr();
+    let shared_outer = unique.data().as_ptr();
     let indicator = super::super::standardize::indicator_set(&Value::from("b")).unwrap();
     let Value::StringArray(replaced) = super::super::standardize::standardize_missing_value(
         Some(&context),
@@ -337,9 +394,9 @@ fn fillmissing_text_neighbors_preserve_nd_lines_and_mask_shape() {
     .unwrap() else {
         panic!("expected shared replacement")
     };
-    assert_ne!(replaced.data.as_slice().as_ptr(), shared_outer);
-    assert_eq!(alias.data[1].as_str(), "b");
-    assert_eq!(replaced.data[1].as_str(), MISSING_TEXT);
+    assert_ne!(replaced.data().as_ptr(), shared_outer);
+    assert_eq!(alias.data()[1].as_str(), "b");
+    assert_eq!(replaced.data()[1].as_str(), MISSING_TEXT);
     drop(replaced);
     drop(alias);
     drop(mask);
@@ -348,7 +405,10 @@ fn fillmissing_text_neighbors_preserve_nd_lines_and_mask_shape() {
 
 #[test]
 fn fillmissing_nearest_uses_original_neighbors_and_previous_on_ties() {
-    let options = FillOptions::parse(vec![Value::from("nearest")]).unwrap();
+    let options = FillOptions::parse(crate::call::FunctionArgumentView::from_slice(&[
+        Value::from("nearest"),
+    ]))
+    .unwrap();
     for shape in [vec![7, 1], vec![1, 7]] {
         let input = Tensor::new(
             vec![f64::NAN, 1.0, f64::NAN, f64::NAN, f64::NAN, 5.0, f64::NAN],
@@ -379,7 +439,11 @@ fn fillmissing_nearest_uses_original_neighbors_and_previous_on_ties() {
 
 #[test]
 fn fillmissing_integer_noop_preserves_nd_and_empty_mask_shapes() {
-    let options = FillOptions::parse(vec![Value::from("constant"), Value::Num(0.0)]).unwrap();
+    let options = FillOptions::parse(crate::call::FunctionArgumentView::from_slice(&[
+        Value::from("constant"),
+        Value::Num(0.0),
+    ]))
+    .unwrap();
     for shape in [vec![2, 1, 2], vec![1, 1, 4], vec![2, 0, 3]] {
         let count = shape.iter().product();
         let storage = IntegerStorage::U64(vec![u64::MAX; count]);
@@ -399,7 +463,11 @@ fn fillmissing_integer_noop_preserves_nd_and_empty_mask_shapes() {
 fn fillmissing_constant_preserves_nd_values_and_mask_shape() {
     let shape = vec![2, 1, 2];
     let input = Tensor::new(vec![1.0, f64::NAN, f64::NAN, 4.0], shape.clone()).unwrap();
-    let options = FillOptions::parse(vec![Value::from("constant"), Value::Num(7.0)]).unwrap();
+    let options = FillOptions::parse(crate::call::FunctionArgumentView::from_slice(&[
+        Value::from("constant"),
+        Value::Num(7.0),
+    ]))
+    .unwrap();
     let (output, mask) = fill_missing_tensor(input, &options).unwrap();
     let Value::Tensor(output) = output else {
         panic!("floating input must retain its tensor carrier");
@@ -418,8 +486,12 @@ fn fillmissing_preserves_rank_zero_and_rank_one_tensor_shapes() {
         (vec![2], vec![f64::NAN, 3.0], vec![7.0, 3.0]),
     ] {
         let result = block_on(fillmissing_builtin(
+            None,
             Value::Tensor(Tensor::new(data, shape.clone()).unwrap()),
-            vec![Value::from("constant"), Value::Num(7.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("constant"),
+                Value::Num(7.0),
+            ]),
         ))
         .expect("fillmissing should preserve full-rank tensor geometry");
         let Value::Tensor(output) = result else {
@@ -451,7 +523,10 @@ fn fillmissing_numeric_methods_traverse_each_matrix_and_nd_line_independently() 
                 expected.extend([base, base + delta, base + 2.0]);
                 expected_mask.extend([0, 1, 0]);
             }
-            let options = FillOptions::parse(vec![Value::from(method)]).unwrap();
+            let options = FillOptions::parse(crate::call::FunctionArgumentView::from_slice(&[
+                Value::from(method),
+            ]))
+            .unwrap();
             let (output, mask) =
                 fill_missing_tensor(Tensor::new(input, shape.clone()).unwrap(), &options).unwrap();
             let Value::Tensor(output) = output else {
@@ -462,7 +537,11 @@ fn fillmissing_numeric_methods_traverse_each_matrix_and_nd_line_independently() 
             assert_eq!(mask.shape, shape);
             assert_eq!(mask.data, expected_mask);
         }
-        let options = FillOptions::parse(vec![Value::from(method), Value::Num(3.0)]).unwrap();
+        let options = FillOptions::parse(crate::call::FunctionArgumentView::from_slice(&[
+            Value::from(method),
+            Value::Num(3.0),
+        ]))
+        .unwrap();
         let shape = vec![2, 2, 3];
         let input = vec![
             1.0,
@@ -522,8 +601,12 @@ fn fillmissing_integer_table_variable_and_nested_cell_are_aggregate_gated() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
     for aggregate in [table, nested] {
         let error = block_on(fillmissing_builtin(
+            None,
             aggregate,
-            vec![Value::from("constant"), Value::Num(0.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("constant"),
+                Value::Num(0.0),
+            ]),
         ))
         .expect_err("strict aggregate integer fillmissing");
         assert_eq!(
@@ -555,8 +638,12 @@ fn fillmissing_nested_resident_integer_is_gated_before_provider_access() {
         );
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = block_on(fillmissing_builtin(
+            None,
             nested,
-            vec![Value::from("constant"), Value::Num(0.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("constant"),
+                Value::Num(0.0),
+            ]),
         ))
         .expect_err("strict nested resident integer fillmissing");
         assert_eq!(
@@ -581,7 +668,11 @@ fn fillmissing_rejects_complex_and_sparse_arrays_instead_of_aggregate_replacemen
     let complex = Value::ComplexTensor(
         runmat_value::ComplexTensor::new(vec![(f64::NAN, 0.0)], vec![1, 1]).unwrap(),
     );
-    let options = FillOptions::parse(vec![Value::from("constant"), Value::Num(0.0)]).unwrap();
+    let options = FillOptions::parse(crate::call::FunctionArgumentView::from_slice(&[
+        Value::from("constant"),
+        Value::Num(0.0),
+    ]))
+    .unwrap();
     let error =
         fill_missing_value(None, complex, &options).expect_err("complex arrays are unsupported");
     assert!(error.message().contains("complex arrays are not supported"));
@@ -597,7 +688,12 @@ fn fillmissing_rejects_complex_and_sparse_arrays_instead_of_aggregate_replacemen
 #[test]
 fn fillmissing_nearest_uses_original_neighbors() {
     let value = tensor(vec![1.0, f64::NAN, f64::NAN, 4.0], vec![1, 4]);
-    let result = block_on(fillmissing_builtin(value, vec![Value::from("nearest")])).unwrap();
+    let result = block_on(fillmissing_builtin(
+        None,
+        value,
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("nearest")]),
+    ))
+    .unwrap();
     assert!(matches!(result, Value::Tensor(t) if t.materialize_f64() == vec![1.0, 1.0, 4.0, 4.0]));
 }
 
@@ -605,7 +701,12 @@ fn fillmissing_nearest_uses_original_neighbors() {
 fn fillmissing_mask_marks_only_entries_actually_filled() {
     let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let value = tensor(vec![f64::NAN, 2.0, 3.0], vec![3, 1]);
-    let output = block_on(fillmissing_builtin(value, vec![Value::from("previous")])).unwrap();
+    let output = block_on(fillmissing_builtin(
+        None,
+        value,
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("previous")]),
+    ))
+    .unwrap();
     let Value::OutputList(values) = output else {
         panic!("expected output list");
     };
@@ -616,12 +717,13 @@ fn fillmissing_mask_marks_only_entries_actually_filled() {
 fn fillmissing_rejects_unknown_options() {
     let value = tensor(vec![1.0, f64::NAN], vec![1, 2]);
     let result = block_on(fillmissing_builtin(
+        None,
         value,
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("constant"),
             Value::Num(0.0),
             Value::from("bogus"),
-        ],
+        ]),
     ));
     assert!(result.is_err());
 }

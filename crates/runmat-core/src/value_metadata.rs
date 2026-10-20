@@ -36,7 +36,7 @@ pub fn matlab_class_name(value: &Value) -> String {
         // but handle it defensively for completeness.
         Value::OutputList(_) => "OutputList".to_string(),
         Value::ObjectArray(array) => array.class_name().to_string(),
-        Value::Object(obj) => obj.class_name.to_string(),
+        Value::Object(obj) => obj.class_name().to_string(),
         Value::ClassRef(_) => "meta.class".to_string(),
         Value::MException(_) => "MException".to_string(),
         Value::Future(_) => "parallel.Future".to_string(),
@@ -58,15 +58,15 @@ pub fn value_shape(value: &Value) -> Option<Vec<usize>> {
         | Value::Complex(_, _)
         | Value::Symbolic(_)
         | Value::Foreign(_) => Some(vec![1, 1]),
-        Value::SymbolicArray(arr) => Some(arr.shape.clone()),
+        Value::SymbolicArray(arr) => Some(arr.shape.to_vec()),
         Value::LogicalArray(arr) => Some(arr.shape.as_slice().to_vec()),
-        Value::StringArray(sa) => Some(sa.shape.clone()),
+        Value::StringArray(sa) => Some(sa.shape.to_vec()),
         Value::String(s) => Some(vec![1, s.chars().count()]),
-        Value::CharArray(ca) => Some(ca.shape.clone()),
+        Value::CharArray(ca) => Some(ca.shape.to_vec()),
         Value::Tensor(t) => Some(t.shape().to_vec()),
         Value::SparseTensor(s) => Some(vec![s.rows, s.cols]),
         Value::ComplexTensor(t) => Some(t.shape().to_vec()),
-        Value::Cell(ca) => Some(ca.shape.clone()),
+        Value::Cell(ca) => Some(ca.shape.to_vec()),
         Value::StructArray(array) => Some(array.shape().to_vec()),
         Value::GpuTensor(handle) => Some(handle.shape().to_vec()),
         Value::Distributed(handle) => handle
@@ -79,7 +79,7 @@ pub fn value_shape(value: &Value) -> Option<Vec<usize>> {
         Value::Composite(_) => Some(vec![1, 1]),
         Value::ObjectArray(array) => Some(array.shape().to_vec()),
         Value::Object(obj) if obj.is_class(runmat_types::standard::DATETIME) => {
-            match obj.properties.get("__serial") {
+            match obj.properties().get("__serial") {
                 Some(Value::Tensor(tensor)) => Some(tensor.shape().to_vec()),
                 Some(Value::Num(_)) => Some(vec![1, 1]),
                 _ => None,
@@ -129,11 +129,11 @@ pub fn approximate_size_bytes(value: &Value) -> Option<u64> {
             .saturating_mul(t.numeric_dtype().byte_size() as u64)
             .saturating_mul(2),
         Value::String(s) => s.len() as u64,
-        Value::StringArray(sa) => sa.data.iter().map(|s| s.len() as u64).sum(),
-        Value::CharArray(ca) => ca.data.len() as u64,
+        Value::StringArray(sa) => sa.data().iter().map(|s| s.len() as u64).sum(),
+        Value::CharArray(ca) => ca.data().len() as u64,
         Value::Symbolic(expr) => expr.to_string().len() as u64,
         Value::SymbolicArray(arr) => arr
-            .data
+            .data()
             .iter()
             .map(|expr| expr.to_string().len() as u64)
             .sum(),
@@ -267,8 +267,7 @@ mod tests {
     use super::*;
     use runmat_value::{
         ComplexTensor, ForeignAffinity, ForeignLifetime, ForeignOwnership, ForeignRef,
-        ForeignResourceKey, ForeignTypeIdentity, IntegerStorage, NumericDType, ObjectInstance,
-        Tensor,
+        ForeignResourceKey, ForeignTypeIdentity, IntegerStorage, NumericDType, Tensor,
     };
 
     #[test]
@@ -336,13 +335,16 @@ mod tests {
 
     #[test]
     fn datetime_object_shape_comes_from_internal_serial_tensor() {
-        let mut object = ObjectInstance::new("datetime".to_string());
-        object.properties.insert(
+        let mut object = runmat_value::UnboundedObjectBuilder::new("datetime");
+        object.insert(
             "__serial".to_string(),
             Value::Tensor(Tensor::new(vec![739351.0, 739352.0], vec![2, 1]).expect("tensor")),
         );
 
-        assert_eq!(value_shape(&Value::Object(object)), Some(vec![2, 1]));
+        assert_eq!(
+            value_shape(&Value::Object(object.finish())),
+            Some(vec![2, 1])
+        );
     }
 
     #[test]

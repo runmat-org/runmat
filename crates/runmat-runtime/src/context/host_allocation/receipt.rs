@@ -1,10 +1,9 @@
 use std::fmt;
 use std::sync::{
-    atomic::{AtomicBool, AtomicU64, Ordering},
+    atomic::{AtomicBool, Ordering},
     Arc,
 };
 
-use runmat_execution::cancellation::CancellationToken;
 use runmat_execution::resource::{
     ProviderHostMetadataAdmission, ProviderHostMetadataError, RetainedHostAllocationClaim,
     RetainedHostViewError, RetainedHostViewGrant, RetainedHostViewIssuer,
@@ -14,6 +13,7 @@ use runmat_value::{
     ExactHostTensorAllocation, NumericDType,
 };
 
+use super::checkpoint::{AllocationOwnerState, HostAllocationCheckpoint};
 use super::{
     AlignedHostWorkspace, HostAllocationPlan, HostComplexWorkspace, HostNumericWorkspace,
     HostTypedElement, HostTypedWorkspace,
@@ -135,24 +135,13 @@ impl ResolvedHostAllocationPolicy {
 #[derive(Clone)]
 pub(super) struct AllocationFence {
     active: Arc<AtomicBool>,
-    ledger: ManagedHostEffectLedger,
-    epoch: u64,
-    cancellation: CancellationToken,
-    generation_owner: Arc<AtomicU64>,
-    generation: u64,
+    owner: AllocationOwnerState,
 }
 
 impl AllocationFence {
     pub(super) fn check(&self) -> Result<(), HostAllocationError> {
-        if self.cancellation.is_cancelled() {
-            return Err(HostAllocationError::Cancelled);
-        }
-        let snapshot = self.ledger.snapshot();
-        if !self.active.load(Ordering::Acquire)
-            || self.generation_owner.load(Ordering::Acquire) != self.generation
-            || !snapshot.current
-            || snapshot.epoch != self.epoch
-        {
+        self.owner.check()?;
+        if !self.active.load(Ordering::Acquire) {
             return Err(HostAllocationError::StaleAuthority);
         }
         Ok(())
@@ -162,8 +151,7 @@ impl AllocationFence {
 /// One ordinary host call's actual managed scratch and output precharges.
 /// Exact returned-value claims outlive this receipt until their storage drops.
 pub struct HostAllocationReceipt {
-    runtime: RuntimeContext,
-    ledger: ManagedHostEffectLedger,
+    checkpoint: HostAllocationCheckpoint,
     stage: Arc<ManagedHostEffectStageReservation>,
     output: HostOutputPermit,
     fence: AllocationFence,
@@ -380,8 +368,8 @@ impl HostAllocationReceipt {
         let issuer_claim = self.output.reserve_exact(issuer_bytes)?;
         self.checkpoint(runtime)?;
         let issuer = Arc::new(ManagedViewIssuer {
-            ledger: self.ledger.clone(),
-            epoch: self.fence.epoch,
+            ledger: self.checkpoint.owner.ledger.clone(),
+            epoch: self.checkpoint.owner.epoch,
             _own_metadata_claim: issuer_claim,
         });
         self.checkpoint(runtime)?;
@@ -402,25 +390,21 @@ impl HostAllocationReceipt {
         runtime: Option<&RuntimeContext>,
         plan: HostAllocationPlan,
     ) -> Result<Option<Self>, HostAllocationError> {
-        let (ledger, epoch) = match ResolvedHostAllocationPolicy::for_runtime(runtime)? {
-            ResolvedHostAllocationPolicy::Unbounded => return Ok(None),
-            ResolvedHostAllocationPolicy::Managed { ledger, epoch } => (ledger, epoch),
+        let Some(checkpoint) = Self::capture_owner(runtime)? else {
+            return Ok(None);
         };
         let runtime = runtime.expect("managed allocation policy has a runtime");
-        let stage = ledger.reserve_stage(plan.scratch_peak_bytes())?;
+        let stage = checkpoint
+            .owner
+            .ledger
+            .reserve_stage(plan.scratch_peak_bytes())?;
         let headroom = stage.reserve_output_headroom(plan.retained_output_bytes())?;
-        let (generation_owner, generation) = runtime.host_effect_session_generation();
         let fence = AllocationFence {
             active: Arc::new(AtomicBool::new(true)),
-            ledger: ledger.clone(),
-            epoch,
-            cancellation: runtime.cancellation(),
-            generation_owner,
-            generation,
+            owner: checkpoint.owner.clone(),
         };
         let receipt = Self {
-            runtime: runtime.clone(),
-            ledger,
+            checkpoint,
             stage,
             output: HostOutputPermit {
                 headroom,
@@ -433,28 +417,36 @@ impl HostAllocationReceipt {
     }
 
     pub fn checkpoint(&self, runtime: &RuntimeContext) -> Result<(), HostAllocationError> {
-        self.fence.check()?;
-        if self.runtime.local_identity() != runtime.local_identity()
-            || !self
-                .runtime
-                .cancellation()
-                .same_generation(&runtime.cancellation())
-        {
-            return Err(HostAllocationError::StaleAuthority);
-        }
-        let parallel = runtime
-            .service_ports()
-            .parallel()
-            .ok_or(HostAllocationError::StaleAuthority)?;
-        let owner = parallel
-            .managed_host_effect_ledger()
-            .ok_or(HostAllocationError::StaleAuthority)?;
-        if !owner.same_owner(&self.ledger)
-            || parallel.placement_resources().epoch != self.fence.epoch
-        {
-            return Err(HostAllocationError::StaleAuthority);
-        }
+        self.checkpoint.check(runtime)?;
         self.fence.check()
+    }
+
+    /// Capture only the original owner identity. This allocates nothing and
+    /// carries neither a live stage nor any allocation capability. It remains
+    /// useful after a particular receipt retires, but not after owner rotation.
+    pub(crate) fn capture_owner(
+        runtime: Option<&RuntimeContext>,
+    ) -> Result<Option<HostAllocationCheckpoint>, HostAllocationError> {
+        let (ledger, epoch) = match ResolvedHostAllocationPolicy::for_runtime(runtime)? {
+            ResolvedHostAllocationPolicy::Unbounded => return Ok(None),
+            ResolvedHostAllocationPolicy::Managed { ledger, epoch } => (ledger, epoch),
+        };
+        let runtime = runtime.expect("managed allocation policy has a runtime");
+        let (generation_owner, generation) = runtime.host_effect_session_generation();
+        let checkpoint = HostAllocationCheckpoint {
+            context: runtime
+                .capture_host_allocation_context()
+                .ok_or(HostAllocationError::StaleAuthority)?,
+            owner: AllocationOwnerState {
+                ledger,
+                epoch,
+                cancellation: runtime.cancellation(),
+                generation_owner,
+                generation,
+            },
+        };
+        checkpoint.check(runtime)?;
+        Ok(Some(checkpoint))
     }
 
     /// Reassign settled, unclaimed scratch precharge to this receipt's
@@ -470,16 +462,19 @@ impl HostAllocationReceipt {
         bytes: u64,
     ) -> Result<(), HostAllocationError> {
         self.checkpoint(runtime)?;
-        self.output
-            .headroom
-            .transfer_settled_stage_bytes(&self.stage, bytes, self.fence.epoch)?;
+        self.output.headroom.transfer_settled_stage_bytes(
+            &self.stage,
+            bytes,
+            self.checkpoint.owner.epoch,
+        )?;
         self.checkpoint(runtime)
     }
 
     /// Revalidate a held continuation against the exact context captured at
     /// admission. No caller-supplied context can substitute a newer session.
     pub fn checkpoint_captured(&self) -> Result<(), HostAllocationError> {
-        self.checkpoint(&self.runtime)
+        self.checkpoint.check_captured()?;
+        self.fence.check()
     }
 
     /// Allocates one aligned, zero-initialized workspace inside the precharged

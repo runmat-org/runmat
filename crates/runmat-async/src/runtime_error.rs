@@ -1,6 +1,4 @@
 use std::error::Error as StdError;
-#[cfg(target_arch = "wasm32")]
-use std::rc::Rc;
 use std::sync::Arc;
 
 use miette::SourceSpan;
@@ -18,11 +16,20 @@ pub type RuntimeErrorSource = dyn StdError + Send + Sync + 'static;
 #[cfg(target_arch = "wasm32")]
 pub type RuntimeErrorSource = dyn StdError + 'static;
 
-/// Exact caught-error ownership follows the executor's sharing boundary.
-#[cfg(not(target_arch = "wasm32"))]
-pub type RuntimeErrorOwner = Arc<RuntimeError>;
-#[cfg(target_arch = "wasm32")]
-pub type RuntimeErrorOwner = Rc<RuntimeError>;
+#[path = "runtime_error/owner.rs"]
+mod owner;
+pub use owner::RuntimeErrorOwner;
+
+#[path = "runtime_error/diagnostic.rs"]
+mod diagnostic;
+pub use diagnostic::{
+    DiagnosticConstructionError, DiagnosticCopyProgress, RuntimeDiagnosticConstruction,
+    RuntimeDiagnosticField, RuntimeDiagnosticLayout,
+};
+
+#[path = "runtime_error/diagnostic_text.rs"]
+mod diagnostic_text;
+pub use diagnostic_text::{DiagnosticText, DiagnosticTextCopy};
 
 #[path = "runtime_error/allocation.rs"]
 mod allocation;
@@ -58,25 +65,32 @@ pub struct CallFrame {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CallFrameDiagnosticSource {
     Local {
-        display_name: Arc<str>,
-        text: Arc<str>,
+        display_name: DiagnosticText,
+        text: DiagnosticText,
     },
     Detached {
-        display_name: Arc<str>,
+        display_name: DiagnosticText,
         line: u64,
         column: u64,
     },
     DetachedUnknown {
-        display_name: Arc<str>,
+        display_name: DiagnosticText,
     },
 }
 
 impl CallFrameDiagnosticSource {
     pub fn new(display_name: Arc<str>, text: Arc<str>) -> Self {
-        Self::Local { display_name, text }
+        Self::Local {
+            display_name: display_name.into(),
+            text: text.into(),
+        }
     }
 
     pub fn detached(display_name: Arc<str>, line: u64, column: u64) -> Self {
+        Self::detached_from_text_owner(display_name.into(), line, column)
+    }
+
+    pub fn detached_from_text_owner(display_name: DiagnosticText, line: u64, column: u64) -> Self {
         Self::Detached {
             display_name,
             line,
@@ -85,6 +99,10 @@ impl CallFrameDiagnosticSource {
     }
 
     pub fn detached_unknown(display_name: Arc<str>) -> Self {
+        Self::detached_unknown_from_text_owner(display_name.into())
+    }
+
+    pub fn detached_unknown_from_text_owner(display_name: DiagnosticText) -> Self {
         Self::DetachedUnknown { display_name }
     }
 

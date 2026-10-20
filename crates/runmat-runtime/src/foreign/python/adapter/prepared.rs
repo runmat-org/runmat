@@ -189,7 +189,7 @@ fn rooted_split_file_inputs(
                 ));
             };
             let script_arguments = values
-                .data
+                .data()
                 .iter()
                 .map(|value| {
                     crate::builtins::common::validation::value_text_scalar_string(value)

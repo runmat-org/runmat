@@ -48,7 +48,7 @@ pub(in crate::execute) fn observed_state(probe: &Rc<Probe>) -> HostState {
     let (mut state, _) = HostState::new(HostStateInput {
         functions: Arc::new(vec![function.clone()]),
         function,
-        inputs: crate::execute::state::NativeFunctionInputs::Legacy(vec![]),
+        inputs: crate::execute::state::NativeFunctionInputs::legacy(vec![]),
         requested_outputs: 0,
         runtime: runtime.clone(),
         program_capture: None,

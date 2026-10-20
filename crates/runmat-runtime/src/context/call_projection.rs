@@ -928,7 +928,10 @@ mod tests {
                 verify();
                 let output = user_functions::try_load_and_call_dynamic_function(
                     "late".into(),
-                    Vec::new(),
+                    crate::call::RootedFunctionArguments::ordinary(
+                        crate::execution::RootedValues::in_context(Vec::new(), &selected_runtime)
+                            .expect("root the selected loader arguments"),
+                    ),
                     1,
                     DynamicFunctionLoadPhase::AfterSemantic,
                     None,

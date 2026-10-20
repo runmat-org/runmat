@@ -100,7 +100,7 @@ async fn ode15s_builtin_registered(
     function: Value,
     tspan: Value,
     y0: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     ode15s_in_runtime(runtime.as_ref(), function, tspan, y0, rest).await
 }
@@ -110,7 +110,7 @@ async fn ode15s_builtin(
     function: Value,
     tspan: Value,
     y0: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     ode15s_in_runtime(None, function, tspan, y0, rest).await
 }
@@ -120,7 +120,7 @@ async fn ode15s_in_runtime(
     function: Value,
     tspan: Value,
     y0: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     check_cancellation(NAME, runtime)?;
     if rest.len() > 1 {
@@ -149,7 +149,7 @@ async fn ode15s_in_runtime(
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_value::{StructValue, Tensor};
+    use runmat_value::Tensor;
     use std::sync::Arc;
 
     #[test]
@@ -182,7 +182,7 @@ mod tests {
             Value::FunctionHandle("stiff_decay".into()),
             Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap()),
             Value::Num(1.0),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         )))
         .unwrap();
 
@@ -223,7 +223,7 @@ mod tests {
         )))
         .expect("call-port scope");
         drop(entry);
-        let mut options = StructValue::new();
+        let mut options = runmat_value::UnboundedStructValueBuilder::new();
         options.insert("RelTol", Value::Num(1.0e6));
         options.insert("AbsTol", Value::Num(1.0e6));
         options.insert("InitialStep", Value::Num(0.1));
@@ -234,7 +234,9 @@ mod tests {
             Value::FunctionHandle("very_stiff_decay".into()),
             Value::Tensor(Tensor::new(vec![0.0, 0.1], vec![1, 2]).unwrap()),
             Value::Num(1.0),
-            vec![Value::Struct(options)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Struct(
+                options.finish(),
+            )]),
         )))
         .unwrap();
 
@@ -276,7 +278,7 @@ mod tests {
             crate::user_functions::test_support::exact_local_value("ode_stiff_decay", binding),
             Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap()),
             Value::Num(1.0),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .unwrap();
 
@@ -298,7 +300,10 @@ mod tests {
             Value::FunctionHandle("stiff_decay".into()),
             Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap()),
             Value::Num(1.0),
-            vec![Value::Num(1.0), Value::Num(2.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(1.0),
+                Value::Num(2.0),
+            ]),
         ))
         .expect_err("expected too many inputs error");
         assert_eq!(err.identifier(), ODE15S_ERROR_INVALID_ARGUMENT.identifier);

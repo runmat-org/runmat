@@ -290,7 +290,7 @@ async fn execute_shared_meshing(
                 }
                 super::exact_meshing::RemoteExactMeshingComposition::Terminal(terminal) => {
                     SharedMeshingOutcome::Terminal(super::exact_structural_study::composition(
-                        terminal,
+                        *terminal,
                     ))
                 }
             };

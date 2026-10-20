@@ -1,11 +1,13 @@
 //! Shared, typed static facts for the FEA object-constructor family.
 
-use super::options::FeaStructuralOption;
+use super::options::{FeaMaterialAssignmentOption, FeaModelOption, FeaStudyOption, FeaSweepOption};
 use crate::{
     catalog::{argument_error, finish_fixed},
     BuiltinCatalogEntry,
 };
-use runmat_types::{CallInference, CallRequest, ResidencyFact, StaticClassIdentity, ValueKindFact};
+use runmat_types::{
+    CallInference, CallRequest, ResidencyFact, StaticClassIdentity, ValueFact, ValueKindFact,
+};
 
 mod facts;
 mod kind;
@@ -14,22 +16,23 @@ pub(crate) use facts::host_text;
 use facts::{object_result, possible_host_study};
 pub use kind::FeaConstructorKind;
 
+fn known_steps_nonempty(value: &ValueFact) -> Option<bool> {
+    match &value.kind {
+        ValueKindFact::Cell(_) => value.shape.element_count().map(|count| count != 0),
+        ValueKindFact::Object(_) if value.shape.element_count() == Some(1) => Some(true),
+        _ => None,
+    }
+}
+
 pub fn infer_constructor(
     request: &CallRequest,
     entry: &BuiltinCatalogEntry,
     kind: FeaConstructorKind,
 ) -> CallInference {
     let mut diagnostics = Vec::new();
-    let path_study = kind == FeaConstructorKind::Study && request.arguments.len() == 1;
-    let positional = if path_study { 1 } else { kind.positional() };
-    let arity_valid = if kind.is_document_load() || path_study {
-        request.arguments.len() == 1
-    } else if kind == FeaConstructorKind::Step {
-        request.arguments.len() == 2
-    } else {
-        request.arguments.len() >= positional
-            && (request.arguments.len() - positional).is_multiple_of(2)
-    };
+    let positional = kind.positional();
+    let arity_valid = request.arguments.len() >= positional
+        && (request.arguments.len() - positional).is_multiple_of(2);
     if !arity_valid {
         diagnostics.push(argument_error(
             "RM-CATALOG-FEA-ARITY",
@@ -38,12 +41,7 @@ pub fn infer_constructor(
         ));
     }
     for index in 0..request.arguments.len().min(positional) {
-        if matches!(
-            kind,
-            FeaConstructorKind::Model | FeaConstructorKind::Study | FeaConstructorKind::AuthorStudy
-        ) && index == 1
-            && !path_study
-        {
+        if matches!(kind, FeaConstructorKind::Model | FeaConstructorKind::Study) && index == 1 {
             let input = &request.arguments[index];
             let valid = match &input.kind {
                 ValueKindFact::Unknown => true,
@@ -61,21 +59,31 @@ pub fn infer_constructor(
                     index,
                 ));
             }
-        } else if kind == FeaConstructorKind::AuthorStudy && index == 2 {
-            let summary = &request.arguments[index];
-            if matches!(summary.residency, ResidencyFact::Device { .. })
-                || !matches!(
-                    &summary.kind,
-                    ValueKindFact::Unknown
-                        | ValueKindFact::Struct(_)
-                        | ValueKindFact::Object(_)
-                        | ValueKindFact::String
-                        | ValueKindFact::Character
-                )
-            {
+        } else if (kind == FeaConstructorKind::Study && index == 2)
+            || kind == FeaConstructorKind::MaterialAssignment
+        {
+            let class = if kind == FeaConstructorKind::Study {
+                StaticClassIdentity::new("fea.Model")
+            } else if index == 0 {
+                StaticClassIdentity::new("fea.PropertyRegionTarget")
+            } else {
+                StaticClassIdentity::new("fea.Material")
+            };
+            let input = &request.arguments[index];
+            let valid = !matches!(input.residency, ResidencyFact::Device { .. })
+                && !matches!(input.shape.element_count(), Some(count) if count != 1)
+                && match &input.kind {
+                    ValueKindFact::Unknown => true,
+                    ValueKindFact::Object(object) => object
+                        .runtime_class
+                        .as_ref()
+                        .is_none_or(|identity| identity.is(class)),
+                    _ => false,
+                };
+            if !valid {
                 diagnostics.push(argument_error(
-                    "RM-CATALOG-FEA-AUTHORING-SUMMARY",
-                    "fea.authorStudy requires a host mesh-authoring summary object or JSON text",
+                    "RM-CATALOG-FEA-COMPONENT",
+                    "FEA constructor requires its typed host model, property-region target, or material",
                     index,
                 ));
             }
@@ -104,14 +112,44 @@ pub fn infer_constructor(
             ));
         }
     }
-    if !kind.is_document_load() && !path_study && kind != FeaConstructorKind::Step {
+    {
         let mut all_option_names_known = true;
-        let mut has_profile = false;
+        // Runtime replaces Steps on every occurrence; an unknown later name
+        // could replace them too. Presence alone does not prove nonemptiness.
+        let mut effective_steps_nonempty = Some(false);
+        let mut has_sequence = false;
         for index in (positional..request.arguments.len()).step_by(2) {
             match request.literals.literal_string_at(index) {
                 Some(name) => {
-                    if FeaStructuralOption::decode(&name) == Some(FeaStructuralOption::Profile) {
-                        has_profile = true;
+                    let supported = match kind {
+                        FeaConstructorKind::Study => FeaStudyOption::decode(&name).is_some(),
+                        FeaConstructorKind::Model => match FeaModelOption::decode(&name) {
+                            Some(FeaModelOption::Steps) => {
+                                effective_steps_nonempty = request
+                                    .arguments
+                                    .get(index + 1)
+                                    .and_then(known_steps_nonempty);
+                                true
+                            }
+                            Some(FeaModelOption::Sequence) => {
+                                has_sequence = true;
+                                true
+                            }
+                            Some(_) => true,
+                            None => false,
+                        },
+                        FeaConstructorKind::MaterialAssignment => {
+                            FeaMaterialAssignmentOption::decode(&name).is_some()
+                        }
+                        FeaConstructorKind::Sweep => FeaSweepOption::decode(&name).is_some(),
+                        _ => true,
+                    };
+                    if !supported {
+                        diagnostics.push(argument_error(
+                            "RM-CATALOG-FEA-OPTION",
+                            "unsupported option for this typed FEA constructor",
+                            index,
+                        ));
                     }
                 }
                 None => all_option_names_known = false,
@@ -136,8 +174,8 @@ pub fn infer_constructor(
                         .literals
                         .literal_string_at(index)
                         .as_deref()
-                        .and_then(FeaStructuralOption::decode)
-                        == Some(FeaStructuralOption::FailFast)
+                        .and_then(FeaSweepOption::decode)
+                        == Some(FeaSweepOption::FailFast)
                     && (!matches!(value.kind, ValueKindFact::Logical | ValueKindFact::Unknown)
                         || matches!(value.shape.element_count(), Some(count) if count != 1))
                 {
@@ -149,26 +187,20 @@ pub fn infer_constructor(
                 }
             }
         }
-        if matches!(
-            kind,
-            FeaConstructorKind::Model | FeaConstructorKind::Study | FeaConstructorKind::AuthorStudy
-        ) && all_option_names_known
-            && !has_profile
+        if kind == FeaConstructorKind::Model
+            && all_option_names_known
+            && ((effective_steps_nonempty == Some(true) && has_sequence)
+                || (effective_steps_nonempty == Some(false) && !has_sequence))
         {
             diagnostics.push(argument_error(
-                "RM-CATALOG-FEA-PROFILE",
-                "FEA model and study authoring constructors require a Profile option",
+                "RM-CATALOG-FEA-SEQUENCE",
+                "fea.model requires exactly one of Sequence or Steps",
                 positional,
             ));
         }
     }
     // Literal facts here do not certify nested typed component payloads or geometry.
-    finish_fixed(
-        entry,
-        request,
-        object_result(kind, kind.is_document_load() || path_study),
-        diagnostics,
-    )
+    finish_fixed(entry, request, object_result(kind), diagnostics)
 }
 
 #[cfg(test)]

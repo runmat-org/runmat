@@ -6,7 +6,7 @@ use test_helpers::execute_source;
 fn is_char_row(value: &runmat_value::Value, text: &str) -> bool {
     matches!(value, runmat_value::Value::CharArray(chars)
         if chars.shape() == [1, text.chars().count()]
-            && chars.data.iter().copied().eq(text.chars()))
+            && chars.data().iter().copied().eq(text.chars()))
 }
 
 #[test]
@@ -106,8 +106,8 @@ fn dot_access_identifier_and_message() {
     let has_msg = vars.iter().any(|v| {
         matches!(v, runmat_value::Value::CharArray(chars)
             if chars.shape().first() == Some(&1)
-                && !chars.data.is_empty()
-                && !chars.data.iter().copied().eq("RunMat:IndexOutOfBounds".chars()))
+                && !chars.data().is_empty()
+                && !chars.data().iter().copied().eq("RunMat:IndexOutOfBounds".chars()))
     });
     assert!(
         has_id,

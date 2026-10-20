@@ -98,9 +98,9 @@ async fn conv_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     a: Value,
     b: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
-    let mode = parse_mode(&rest)?;
+    let mode = parse_mode(rest.view())?;
     admit_conv_operand(&a)?;
     admit_conv_operand(&b)?;
     let mut cooperation = SignalCooperation::new(runtime.as_ref(), BUILTIN_NAME);
@@ -365,7 +365,7 @@ struct ConvInput {
     hint: OrientationHint,
 }
 
-fn parse_mode(args: &[Value]) -> BuiltinResult<ConvMode> {
+fn parse_mode(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<ConvMode> {
     match args.len() {
         0 => Ok(ConvMode::Full),
         1 => {
@@ -1568,7 +1568,7 @@ pub(crate) mod tests {
             Some(runtime),
             Value::Num(1.0),
             Value::Num(2.0),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect_err("cancelled invocation");
         assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
@@ -1577,6 +1577,11 @@ pub(crate) mod tests {
     }
 
     fn conv_builtin(a: Value, b: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::conv_builtin(None, a, b, rest))
+        block_on(super::conv_builtin(
+            None,
+            a,
+            b,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 }

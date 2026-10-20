@@ -42,6 +42,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::strings::transform::insertbefore"
 )]
-pub(super) async fn insert_before_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn insert_before_builtin(
+    text: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     insert_transform(text, rest, "insertBefore", false).await
 }

@@ -23,7 +23,11 @@ fn error_message(err: crate::RuntimeError) -> String {
 }
 
 fn run_getfield(base: Value, rest: Vec<Value>) -> BuiltinResult<crate::execution::RootedValue> {
-    futures::executor::block_on(getfield_builtin(None, base, rest))
+    futures::executor::block_on(getfield_builtin(
+        None,
+        base,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    ))
 }
 
 mod aggregate_indexing;

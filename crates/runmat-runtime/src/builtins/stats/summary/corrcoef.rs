@@ -96,7 +96,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::summary::corrcoef"
 )]
-async fn corrcoef_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn corrcoef_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let _argument_sources = rest.fork();
     let args = CorrcoefArgs::parse(value, rest)?;
     ensure_corrcoef_extensions(&args)?;
     admit_corrcoef_inputs(&args)?;

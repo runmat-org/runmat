@@ -1,7 +1,8 @@
 use super::*;
+use runmat_value::ObjectInstance;
 
 pub(super) fn terms_from_object(object: &ObjectInstance) -> BuiltinResult<Vec<Vec<u32>>> {
-    let tensor = match object.properties.get("__RunMatTerms") {
+    let tensor = match object.properties().get("__RunMatTerms") {
         Some(Value::Tensor(tensor)) => tensor,
         _ => return Err(predict_invalid("predict: model is missing term metadata")),
     };
@@ -22,7 +23,7 @@ pub(super) fn terms_from_object(object: &ObjectInstance) -> BuiltinResult<Vec<Ve
 }
 
 pub(super) fn numeric_property(object: &ObjectInstance, name: &str) -> BuiltinResult<Vec<f64>> {
-    match object.properties.get(name) {
+    match object.properties().get(name) {
         Some(Value::Tensor(tensor)) => Ok(tensor::tensor_values_f64(tensor)),
         Some(Value::Num(value)) => Ok(vec![*value]),
         _ => Err(predict_invalid(format!(
@@ -32,7 +33,7 @@ pub(super) fn numeric_property(object: &ObjectInstance, name: &str) -> BuiltinRe
 }
 
 pub(super) fn matrix_property(object: &ObjectInstance, name: &str) -> BuiltinResult<Vec<f64>> {
-    match object.properties.get(name) {
+    match object.properties().get(name) {
         Some(Value::Tensor(tensor))
             if fitlm_matrix_dimensions(tensor).0 == fitlm_matrix_dimensions(tensor).1 =>
         {
@@ -45,7 +46,7 @@ pub(super) fn matrix_property(object: &ObjectInstance, name: &str) -> BuiltinRes
 }
 
 pub(super) fn numeric_scalar_property(object: &ObjectInstance, name: &str) -> BuiltinResult<f64> {
-    match object.properties.get(name) {
+    match object.properties().get(name) {
         Some(Value::Num(value)) => Ok(*value),
         Some(Value::Tensor(tensor)) if tensor::is_scalar_tensor(tensor) => {
             Ok(tensor::tensor_values_f64(tensor)[0])
@@ -57,14 +58,14 @@ pub(super) fn numeric_scalar_property(object: &ObjectInstance, name: &str) -> Bu
 }
 
 pub(super) fn string_property(object: &ObjectInstance, name: &str) -> BuiltinResult<Vec<String>> {
-    match object.properties.get(name) {
+    match object.properties().get(name) {
         Some(Value::StringArray(array)) => Ok(array
-            .data
+            .data()
             .iter()
             .map(|text| text.as_str().to_owned())
             .collect()),
         Some(Value::Cell(cell)) => cell
-            .data
+            .data()
             .iter()
             .map(|value| {
                 scalar_text(value)
@@ -249,8 +250,8 @@ pub(super) fn scalar_text(value: &Value) -> Option<std::borrow::Cow<'_, str>> {
     match value {
         Value::String(text) => Some(std::borrow::Cow::Borrowed(text.as_str())),
         Value::CharArray(chars) => Some(std::borrow::Cow::Owned(chars_to_string(chars))),
-        Value::StringArray(array) if array.data.len() == 1 => array
-            .data
+        Value::StringArray(array) if array.data().len() == 1 => array
+            .data()
             .first()
             .map(|text| std::borrow::Cow::Borrowed(text.as_str())),
         _ => None,
@@ -262,12 +263,12 @@ pub(super) fn text_list(value: &Value, name: &str) -> BuiltinResult<Vec<String>>
         Value::String(text) => Ok(vec![text.as_str().to_owned()]),
         Value::CharArray(chars) => Ok(vec![chars_to_string(chars)]),
         Value::StringArray(array) => Ok(array
-            .data
+            .data()
             .iter()
             .map(|text| text.as_str().to_owned())
             .collect()),
         Value::Cell(cell) => cell
-            .data
+            .data()
             .iter()
             .map(|value| {
                 scalar_text(value)
@@ -282,7 +283,7 @@ pub(super) fn text_list(value: &Value, name: &str) -> BuiltinResult<Vec<String>>
 }
 
 fn chars_to_string(chars: &CharArray) -> String {
-    chars.data.iter().collect()
+    chars.data().iter().collect()
 }
 
 pub(super) fn columns_to_tensor(columns: Vec<Vec<f64>>) -> BuiltinResult<Tensor> {

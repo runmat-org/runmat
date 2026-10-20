@@ -184,7 +184,7 @@ pub(super) fn class_priors(
 }
 
 pub(super) fn parse_fit_options(
-    values: &[Value],
+    values: crate::call::FunctionArgumentView<'_>,
     names: Vec<PreparedOption>,
     index_offset: usize,
     options: &mut FitOptions,

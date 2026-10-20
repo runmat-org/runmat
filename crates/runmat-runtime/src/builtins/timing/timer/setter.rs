@@ -24,25 +24,7 @@ pub(super) async fn set_timer_property(
     // Preparation may suspend or reenter the host. Validate the live handle
     // and its current running policy before publishing only this property.
     admit_handle(&runtime, handle, property)?;
-    let old = runmat_gc::gc_with_value_mut(&handle.target, |target| {
-        let Value::Object(object) = target else {
-            return Err(timer_error(
-                &TIMER_ERROR_INVALID_HANDLE,
-                "timer: handle target is not an object",
-            ));
-        };
-        runmat_gc::gc_record_handle_write(&handle.target, &normalized);
-        Ok(object
-            .properties
-            .insert(property.name().to_string(), normalized))
-    })
-    .map_err(|error| {
-        crate::build_runtime_error(format!("timer: cannot update handle: {error}"))
-            .with_source(error)
-            .build()
-    })??;
-    // Destruction can reenter other owners; the managed borrow has ended.
-    drop(old);
+    set_property(&runtime, handle, property.name(), normalized)?;
     Ok(receiver)
 }
 
@@ -67,13 +49,13 @@ pub(super) async fn set_timer_property_object(
             ),
         ));
     };
-    if !object.class_name.is(TIMER_CLASS) {
+    if !object.class_name().is(TIMER_CLASS) {
         return Err(timer_error(
             &TIMER_ERROR_INVALID_HANDLE,
             format!(
                 "timer: set.{} requires timer object receiver, got '{}'",
                 property.name(),
-                object.class_name
+                object.class_name()
             ),
         ));
     }
@@ -87,7 +69,7 @@ pub(super) async fn set_timer_property_object(
         ));
     }
     let prepared = arguments::prepare_timer_setter_value(runtime.as_ref(), property, value).await?;
-    apply_name_value_pairs(&mut object, &[prepared], false)?;
+    apply_name_value_pairs(runtime.as_ref(), &mut object, &[prepared], false)?;
     Ok(Value::Object(object))
 }
 

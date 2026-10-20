@@ -8,7 +8,7 @@ use runmat_builtins::{
     TTEST2_INTEGER_SAMPLE_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{LogicalArray, StructValue, Tensor, Value};
+use runmat_value::{LogicalArray, Tensor, Value};
 
 use crate::builtins::common::tensor;
 use crate::builtins::common::validation::value_contains_explicit_gpu as kstest_value_contains_explicit_gpu;
@@ -70,8 +70,13 @@ fn internal_error(message: impl Into<String>) -> RuntimeError {
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::summary::hypothesis"
 )]
-pub(crate) async fn ttest2_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(crate) async fn ttest2_builtin(
+    x: Value,
+    y: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     ensure_ttest2_sample_extension(&x, &y)?;
+    let _control_sources = rest.fork();
     let options = Ttest2OptionPlan::admit(rest)?;
     if crate::output_count::current_output_count().is_some_and(|count| count > 4) {
         return Err(invalid_argument(
@@ -95,7 +100,11 @@ pub(crate) async fn ttest2_builtin(x: Value, y: Value, rest: Vec<Value>) -> Buil
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::summary::hypothesis"
 )]
-pub(crate) async fn kstest_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(crate) async fn kstest_builtin(
+    x: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let _control_sources = rest.fork();
     let options = KstestOptionPlan::admit(rest)?;
     ensure_kstest_sample_extension(&x)?;
     options.ensure_extensions(&x)?;

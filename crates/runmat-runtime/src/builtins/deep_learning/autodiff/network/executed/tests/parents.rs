@@ -32,10 +32,12 @@ fn replace_parent(net: &Value, role: ParentRole, replacement: Value) -> Value {
             .position(|row| row.key.role == role)
             .unwrap(),
     };
-    let Some(Value::Cell(column)) = variables.fields.get_mut("Value") else {
+    let Some(Value::Cell(column)) =
+        crate::builtins::deep_learning::tests::fixture_field_mut(&mut variables, "Value")
+    else {
         panic!("Value column")
     };
-    column.data[index] = replacement;
+    crate::builtins::deep_learning::tests::fixture_array_mut(column)[index] = replacement;
     let updated = crate::builtins::table::table_replace_variables_like(object, variables).unwrap();
     match role {
         ParentRole::Learnable(_) => block_on(model::set_learnables_builtin(net.clone(), updated)),
@@ -58,7 +60,9 @@ fn squared_joint_loss(outputs: impl IntoIterator<Item = Value>) -> Value {
         .map(|output| {
             dlarray_sum_builtin(
                 dlarray_times_builtin(output.clone(), output).unwrap(),
-                vec![Value::String("all".into())],
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                    "all".into(),
+                )]),
             )
             .unwrap()
         })
@@ -90,10 +94,18 @@ fn two_recurrent_traces_share_one_upstream_parent_without_losing_either_adjoint(
         let second_record = record_for(&second_outputs[0], &tape);
         assert!(!Rc::ptr_eq(&first_record, &second_record));
         let loss = squared_joint_loss(first_outputs.into_iter().chain(second_outputs));
-        let gradient = block_on(dlgradient_direct(loss.clone(), vec![x.clone()])).unwrap();
+        let gradient = block_on(dlgradient_direct(
+            loss.clone(),
+            crate::builtins::common::test_support::builtin_arguments(vec![x.clone()]),
+        ))
+        .unwrap();
         assert_eq!(first_record.reverse_calls.get(), 1);
         assert_eq!(second_record.reverse_calls.get(), 1);
-        let repeated = block_on(dlgradient_direct(loss, vec![x])).unwrap();
+        let repeated = block_on(dlgradient_direct(
+            loss,
+            crate::builtins::common::test_support::builtin_arguments(vec![x]),
+        ))
+        .unwrap();
         assert_eq!(first_record.reverse_calls.get(), 2);
         assert_eq!(second_record.reverse_calls.get(), 2);
         assert_eq!(tensor(&gradient), tensor(&repeated));
@@ -133,6 +145,7 @@ fn aliased_input_and_initial_hidden_state_accumulate_to_one_parent() {
                 ("Labels", Value::String("CT".into())),
             ],
         )
+        .expect("fixture object")
     };
     let data = vec![0.3, -0.4];
     let analytic = {
@@ -152,7 +165,11 @@ fn aliased_input_and_initial_hidden_state_accumulate_to_one_parent() {
             "input and HiddenState must retain the same tape parent"
         );
         let loss = squared_joint_loss(outputs);
-        let gradient = block_on(dlgradient_direct(loss, vec![x])).unwrap();
+        let gradient = block_on(dlgradient_direct(
+            loss,
+            crate::builtins::common::test_support::builtin_arguments(vec![x]),
+        ))
+        .unwrap();
         assert_eq!(record.reverse_calls.get(), 1);
         tensor(&gradient).materialize_f64()
     };
@@ -214,7 +231,9 @@ fn prepared_single_reverse_restores_each_double_learnable_and_initial_state_pare
             let mut losses = outputs.into_iter().map(|output| {
                 dlarray_sum_builtin(
                     dlarray_times_builtin(output.clone(), output).unwrap(),
-                    vec![Value::String("all".into())],
+                    crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                        "all".into(),
+                    )]),
                 )
                 .unwrap()
             });
@@ -226,8 +245,13 @@ fn prepared_single_reverse_restores_each_double_learnable_and_initial_state_pare
             targets
                 .into_iter()
                 .map(|(role, target)| {
-                    let gradient =
-                        block_on(dlgradient_direct(loss.clone(), vec![target.clone()])).unwrap();
+                    let gradient = block_on(dlgradient_direct(
+                        loss.clone(),
+                        crate::builtins::common::test_support::builtin_arguments(vec![
+                            target.clone()
+                        ]),
+                    ))
+                    .unwrap();
                     assert_eq!(tensor(&gradient).numeric_dtype(), NumericDType::F64);
                     assert_eq!(tensor(&gradient).shape(), tensor(&target).shape());
                     (role, tensor(&target).clone(), tensor(&gradient).clone())

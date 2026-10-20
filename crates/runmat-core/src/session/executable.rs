@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 mod selection;
+mod selected_product;
 #[cfg(not(target_arch = "wasm32"))]
 mod ready_route;
 
@@ -30,6 +31,12 @@ pub(super) enum TieredInteractiveInvocation {
 struct NativeProcedureTarget<'a> {
     function: runmat_hir::FunctionId,
     name: &'a str,
+}
+
+struct ProcedureCall {
+    arguments: runmat_runtime::call::BuiltinArguments,
+    requested_outputs: usize,
+    lexical_environment: Option<runmat_value::LexicalEnvironment>,
 }
 
 impl RunMatSession {
@@ -98,9 +105,13 @@ impl RunMatSession {
         runtime: &runmat_runtime::context::RuntimeContext,
         runtime_functions: &runmat_vm::FunctionRegistry,
         preferred_function: Option<&str>,
-        arguments: Vec<Value>,
-        requested_outputs: usize,
+        call: ProcedureCall,
     ) -> std::result::Result<runmat_runtime::execution::RootedValueSequence, RuntimeError> {
+        let ProcedureCall {
+            arguments,
+            requested_outputs,
+            lexical_environment,
+        } = call;
         let published = self
             .generic_native_cache
             .resolve_or_compile(unit, preferred_function)?;
@@ -111,6 +122,7 @@ impl RunMatSession {
                 osr: None,
                 preferred_function,
                 arguments,
+                lexical_environment,
                 requested_outputs,
                 runtime: runtime.clone(),
                 dynamic_admission: Some(self.source_evaluator.dynamic_admission_port()),
@@ -254,7 +266,7 @@ impl RunMatSession {
             crate::generic_native::placement::ReadyInvocation {
                 unit,
                 preferred_function: None,
-                arguments: &[],
+                arguments: runmat_runtime::call::FunctionArgumentView::from_slice(&[]),
                 requested_outputs: 0,
                 profile: profile.map(|profile| profile.digest),
             },
@@ -274,7 +286,11 @@ impl RunMatSession {
                 published,
                 osr,
                 preferred_function: None,
-                arguments: Vec::new(),
+                arguments: runmat_runtime::call::BuiltinArguments::from_borrowed(
+                    &[],
+                    Some(runtime),
+                )?,
+                lexical_environment: None,
                 requested_outputs: 0,
                 runtime: runtime.clone(),
                 dynamic_admission: Some(self.source_evaluator.dynamic_admission_port()),
@@ -369,7 +385,7 @@ impl RunMatSession {
             crate::generic_native::placement::ReadyInvocation {
                 unit,
                 preferred_function: None,
-                arguments: &[],
+                arguments: runmat_runtime::call::FunctionArgumentView::from_slice(&[]),
                 requested_outputs: 0,
                 profile: profile.as_ref().map(|profile| profile.digest),
             },
@@ -388,7 +404,11 @@ impl RunMatSession {
                         published,
                         osr,
                         preferred_function: None,
-                        arguments: Vec::new(),
+                        arguments: runmat_runtime::call::BuiltinArguments::from_borrowed(
+                            &[],
+                            Some(runtime),
+                        )?,
+                        lexical_environment: None,
                         requested_outputs: 0,
                         runtime: runtime.clone(),
                         dynamic_admission: Some(self.source_evaluator.dynamic_admission_port()),
@@ -464,10 +484,14 @@ impl RunMatSession {
         runtime: &runmat_runtime::context::RuntimeContext,
         runtime_bytecode: &runmat_vm::Bytecode,
         target: NativeProcedureTarget<'_>,
-        arguments: Vec<Value>,
-        requested_outputs: usize,
+        call: ProcedureCall,
     ) -> std::result::Result<runmat_runtime::execution::RootedValueSequence, RuntimeError> {
         let NativeProcedureTarget { function, name } = target;
+        let ProcedureCall {
+            arguments,
+            requested_outputs,
+            lexical_environment,
+        } = call;
         if !self.native_tiering_enabled {
             return self
                 .invoke_procedure_interpreted(
@@ -475,12 +499,21 @@ impl RunMatSession {
                     runtime,
                     runtime_bytecode,
                     function,
-                    arguments,
-                    requested_outputs,
+                    ProcedureCall {
+                        arguments,
+                        requested_outputs,
+                        lexical_environment,
+                    },
                 )
                 .await;
         }
-        let profile = self.generic_native_cache.representation_profile(&arguments);
+        let profile = {
+            // Specialization guards describe the callee's explicit inputs,
+            // not its separately retained closure capture prefix.
+            let retained = arguments.fork().into_function_arguments();
+            self.generic_native_cache
+                .representation_profile_from_values(retained.supplied().iter())
+        };
         let started = std::time::Instant::now();
         let route_admission = if self.generic_native_cache.has_retained_entries() {
             crate::generic_native::placement::ReadyRouteAdmission::prepare(runtime)?
@@ -514,7 +547,7 @@ impl RunMatSession {
             crate::generic_native::placement::ReadyInvocation {
                 unit,
                 preferred_function: Some(name),
-                arguments: &arguments,
+                arguments: arguments.view(),
                 requested_outputs,
                 profile: profile.as_ref().map(|profile| profile.digest),
             },
@@ -534,6 +567,7 @@ impl RunMatSession {
                         osr,
                         preferred_function: Some(name),
                         arguments,
+                        lexical_environment,
                         requested_outputs,
                         runtime: runtime.clone(),
                         dynamic_admission: Some(self.source_evaluator.dynamic_admission_port()),
@@ -568,8 +602,11 @@ impl RunMatSession {
                         runtime,
                         runtime_bytecode,
                         function,
-                        arguments,
-                        requested_outputs,
+                        ProcedureCall {
+                            arguments,
+                            requested_outputs,
+                            lexical_environment,
+                        },
                     )
                     .await,
                     BTreeMap::new(),
@@ -617,13 +654,10 @@ impl RunMatSession {
         invocation: crate::ProcedureInvocation,
         control: &'a crate::InvocationControl,
     ) -> impl std::future::Future<Output = CoveredInvocationResult> + 'a {
-        let argument_roots = self.root_invocation_arguments(&invocation, control);
+        let coverage = runmat_runtime::coverage::CoverageSession::start(&self.runtime_context);
+        let invocation = self.invoke_rooted_executable(unit, invocation, control);
         async move {
-            let argument_roots = argument_roots?;
-            let coverage = runmat_runtime::coverage::CoverageSession::start(&self.runtime_context);
-            let value = self
-                .invoke_rooted_executable(unit, invocation, control, argument_roots)
-                .await?;
+            let value = invocation.await?;
             let program_revision = unit.revision().program_revision.canonical_identity();
             let fragment = unit
                 .coverage_plan()
@@ -647,21 +681,17 @@ impl RunMatSession {
         // Acquire roots at construction, not at the future's first poll. An
         // embedding may retire its own roots as soon as this future owns the
         // arguments, or retain/drop that future without polling it.
-        let argument_roots = self.root_invocation_arguments(&invocation, control);
-        async move {
-            self.invoke_rooted_executable(unit, invocation, control, argument_roots?)
-                .await
-        }
+        self.invoke_rooted_executable(unit, invocation, control)
     }
 
-    fn root_invocation_arguments(
-        &self,
-        invocation: &crate::ProcedureInvocation,
+    fn admit_invocation_arguments(
+        invocation: crate::ProcedureInvocation,
         control: &crate::InvocationControl,
-    ) -> std::result::Result<runmat_runtime::execution::RootedValueLease, RunError> {
-        ensure_invocation_allowed(control, &self.runtime_context)?;
-        runmat_runtime::execution::RootedValueLease::for_values(invocation.arguments.iter())
-            .map_err(|error| RunError::Runtime(error.into_runtime_error()))
+        runtime: &runmat_runtime::context::RuntimeContext,
+    ) -> std::result::Result<crate::executable::AdmittedProcedureInvocation, RunError> {
+        ensure_invocation_allowed(control, runtime)?;
+        let _scope = runtime.enter();
+        invocation.admit(runtime).map_err(RunError::Runtime)
     }
 
     fn invoke_rooted_executable<'a>(
@@ -669,18 +699,25 @@ impl RunMatSession {
         unit: &'a crate::ExecutableUnit,
         invocation: crate::ProcedureInvocation,
         control: &'a crate::InvocationControl,
-        argument_roots: runmat_runtime::execution::RootedValueLease,
     ) -> impl std::future::Future<Output = InvocationResult> + 'a {
         // Reentrant execution (including runtests) must not embed another
         // complete executable state in every caller's async frame. Pin that
         // state once, retaining the same arguments and roots without copying.
-        let runtime = self.runtime_context.clone();
-        let admitted = ensure_invocation_allowed(control, &runtime).and_then(|()| {
+        // Capture the caller before this session's root binding can mask it.
+        // Keep this owner through the outer receipt's publication checkpoint.
+        let cancellation = control.cancellation();
+        let admission = self.admit_execution(cancellation.as_ref());
+        let original_cancellation = admission.token();
+        let runtime = self
+            .runtime_context
+            .clone()
+            .with_cancellation_token(admission.token());
+        let invocation = Self::admit_invocation_arguments(invocation, control, &runtime);
+        let admitted = invocation.and_then(|invocation| {
             runmat_runtime::execution::admit_executable_sequence_with_error(
                 &runtime,
                 executable_continuation_error,
                 async move {
-                    let _argument_roots = argument_roots;
                     #[cfg(not(target_arch = "wasm32"))]
                     {
                         let local_tasks = self.local_tasks.clone();
@@ -697,13 +734,21 @@ impl RunMatSession {
                 },
             )
         });
-        async move { admitted?.await }
+        async move {
+            let result = match admitted {
+                Ok(future) => future.await,
+                Err(error) => Err(error),
+            }
+            .map_err(|error| present_executable_control_failure(error, &original_cancellation));
+            drop(admission);
+            result
+        }
     }
 
     async fn invoke_executable_with_cleanup(
         &mut self,
         unit: &crate::ExecutableUnit,
-        invocation: crate::ProcedureInvocation,
+        invocation: crate::executable::AdmittedProcedureInvocation,
         control: &crate::InvocationControl,
     ) -> std::result::Result<runmat_runtime::execution::RootedValueSequence, RunError> {
         let profiling_root = self.admit_command_profiling();
@@ -727,7 +772,7 @@ impl RunMatSession {
     async fn invoke_executable_and_cleanup(
         &mut self,
         unit: &crate::ExecutableUnit,
-        invocation: crate::ProcedureInvocation,
+        invocation: crate::executable::AdmittedProcedureInvocation,
         control: &crate::InvocationControl,
     ) -> std::result::Result<runmat_runtime::execution::RootedValueSequence, RunError> {
         let mut result = self
@@ -757,48 +802,19 @@ impl RunMatSession {
     async fn invoke_executable_inner(
         &mut self,
         unit: &crate::ExecutableUnit,
-        invocation: crate::ProcedureInvocation,
+        invocation: crate::executable::AdmittedProcedureInvocation,
         control: &crate::InvocationControl,
     ) -> std::result::Result<runmat_runtime::execution::RootedValueSequence, RunError> {
-        let _admission = self.admit_execution(control.cancellation());
         ensure_invocation_allowed(control, &self.runtime_context)?;
         self.ensure_user_path_hydrated().await?;
         let runtime = self.execution_runtime_context(unit.revision().program_revision.clone());
         let runtime = unit
             .bind_runtime_sources(runtime)
             .map_err(|error| runtime_error("RunMat:ExecutableSourceIdentity", error))?;
-        let runtime_bytecode = unit
+        let mut runtime_bytecode = unit
             .runtime_bytecode(&runtime)
             .map_err(|error| runtime_error("RunMat:ExecutableSourceIdentity", error))?;
-        let current_functions = runtime_bytecode
-            .function_registry
-            .functions
-            .keys()
-            .copied()
-            .collect();
-        let selected = super::source_evaluation::SelectedGraphPrimary::new(
-            super::source_evaluation::SelectedGraphSource {
-                unit: Rc::new(unit.clone()),
-                primary_source: unit
-                    .source_map()
-                    .entries()
-                    .first()
-                    .map(|entry| entry.source_id),
-                already_published: None,
-            },
-            &runtime,
-            runtime_bytecode.function_registry.clone(),
-            super::source_evaluation::SelectedGraphPublication::new(
-                &runtime_bytecode.function_registry,
-                &std::collections::HashSet::new(),
-            ),
-            super::source_evaluation::SelectedGraphSelection {
-                current_functions,
-                interop: runmat_types::InteropManifest::empty(),
-                static_targets: Vec::new(),
-            },
-        )
-        .map_err(|error| runtime_error("RunMat:ExecutableSourceIdentity", error))?;
+        let selected = self.prepare_executable_graph(unit, &runtime, &mut runtime_bytecode)?;
         let runtime = runtime
             .without_selected_graph_program()
             .with_selected_graph_program(super::source_evaluation::SelectedGraphSnapshot::program(
@@ -827,7 +843,7 @@ impl RunMatSession {
     async fn invoke_executable_in_context(
         &mut self,
         unit: &crate::ExecutableUnit,
-        invocation: crate::ProcedureInvocation,
+        invocation: crate::executable::AdmittedProcedureInvocation,
         control: &crate::InvocationControl,
         runtime: &runmat_runtime::context::RuntimeContext,
         runtime_bytecode: &runmat_vm::Bytecode,
@@ -932,16 +948,20 @@ impl RunMatSession {
         runtime: &runmat_runtime::context::RuntimeContext,
         runtime_bytecode: &runmat_vm::Bytecode,
         function: runmat_hir::FunctionId,
-        arguments: Vec<Value>,
-        requested_outputs: usize,
+        call: ProcedureCall,
     ) -> std::result::Result<runmat_runtime::execution::RootedValueSequence, RuntimeError> {
-        runmat_vm::invoke_semantic_function_value_with_dynamic_admission_in_context(
+        let ProcedureCall {
+            arguments,
+            requested_outputs,
+            lexical_environment,
+        } = call;
+        runmat_vm::invoke_semantic_function_with_rooted_arguments_and_dynamic_admission_in_context(
             function.0,
-            &arguments,
+            arguments.into_function_arguments(),
             requested_outputs,
             &runtime_bytecode.function_registry,
             runtime.clone(),
-            None,
+            lexical_environment,
             self.source_evaluator.dynamic_admission_port(),
         )
         .await
@@ -952,24 +972,24 @@ fn ensure_invocation_allowed(
     control: &crate::InvocationControl,
     runtime: &runmat_runtime::context::RuntimeContext,
 ) -> std::result::Result<(), RunError> {
-    if control.is_cancelled() || runtime.is_cancelled() {
-        return Err(runtime_error(
-            "RunMat:ExecutionCancelled",
-            "executable invocation was cancelled",
-        ));
+    let mut cancellation = runtime.cancellation();
+    if let Some(control) = control.cancellation() {
+        cancellation = cancellation.or(&control);
     }
-    if control.deadline_elapsed()
-        || matches!(
-            runmat_runtime::interrupt::stop_reason(),
-            Some(runmat_execution::CancellationReason::Deadline)
-        )
-    {
-        return Err(runtime_error(
+    if let Some(parent) = runmat_runtime::interrupt::current_interrupt() {
+        cancellation = cancellation.or(&parent);
+    }
+    match cancellation.stop_reason() {
+        Some(runmat_execution::CancellationReason::Deadline) => Err(runtime_error(
             "RunMat:ExecutionDeadline",
             "executable invocation deadline elapsed",
-        ));
+        )),
+        Some(_) => Err(runtime_error(
+            "RunMat:ExecutionCancelled",
+            "executable invocation was cancelled",
+        )),
+        None => Ok(()),
     }
-    Ok(())
 }
 
 fn executable_continuation_error(
@@ -1000,6 +1020,43 @@ fn executable_continuation_error(
             .with_source(cause)
             .build(),
     )
+}
+
+/// Host allocation checkpoints carry a typed cancellation cause but not its
+/// reason. Present the original invocation token's reason without rewriting a
+/// language failure, dropping its diagnostic owner, or weakening the receipt.
+fn present_executable_control_failure(
+    error: RunError,
+    original: &runmat_execution::CancellationToken,
+) -> RunError {
+    use runmat_runtime::context::host_allocation::HostAllocationError;
+    use runmat_runtime::context::host_effect::HostEffectAllocationError;
+
+    let RunError::Runtime(cause) = error else {
+        return error;
+    };
+    let checkpoint_cancelled = std::error::Error::source(&cause)
+        .and_then(|source| source.downcast_ref::<HostAllocationError>())
+        .is_some_and(|source| {
+            matches!(
+                source,
+                HostAllocationError::Cancelled
+                    | HostAllocationError::Resource(HostEffectAllocationError::Cancelled)
+            )
+        });
+    if checkpoint_cancelled
+        && cause.identifier() == Some("RunMat:ExecutionCancelled")
+        && original.stop_reason() == Some(runmat_execution::CancellationReason::Deadline)
+    {
+        RunError::Runtime(
+            build_runtime_error("executable invocation deadline elapsed")
+                .with_identifier("RunMat:ExecutionDeadline")
+                .with_source(cause)
+                .build(),
+        )
+    } else {
+        RunError::Runtime(cause)
+    }
 }
 
 fn runtime_error(identifier: &'static str, message: impl Into<String>) -> RunError {

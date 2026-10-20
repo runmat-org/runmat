@@ -15,14 +15,15 @@ pub(super) enum PathInputs {
 }
 
 pub(super) fn parse(
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     builtin: &'static str,
     arity_error: &'static BuiltinErrorDescriptor,
     path_error: &'static BuiltinErrorDescriptor,
 ) -> BuiltinResult<PathInputs> {
-    let [input] = args else {
+    if args.len() != 1 {
         return Err(descriptor_error(arity_error, builtin));
     };
+    let input = args.first().expect("validated single input");
     match input {
         Value::String(text) => Ok(PathInputs::Scalar(path(text, builtin)?)),
         Value::CharArray(chars) if character_is_row(chars) => {
@@ -30,7 +31,7 @@ pub(super) fn parse(
         }
         Value::StringArray(array) => Ok(PathInputs::Shaped {
             paths: array
-                .data
+                .data()
                 .iter()
                 .map(|text| path(text, builtin))
                 .collect::<BuiltinResult<_>>()?,
@@ -64,7 +65,7 @@ fn path(text: &str, builtin: &'static str) -> BuiltinResult<PathBuf> {
 
 fn character_row(chars: &CharArray) -> String {
     chars
-        .data
+        .data()
         .iter()
         .take(chars.cols)
         .collect::<String>()

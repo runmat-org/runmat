@@ -107,11 +107,11 @@ impl NativeOptimizer {
             let data = match value {
                 Value::Object(object)
                     if object
-                        .class_name
+                        .class_name()
                         .is(crate::builtins::deep_learning::DLARRAY_CLASS) =>
                 {
                     object
-                        .properties
+                        .properties()
                         .get("Data")
                         .ok_or_else(|| fail(function, "parameter dlarray is missing Data"))?
                 }

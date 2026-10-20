@@ -17,17 +17,18 @@ fn wide_integer_scalar_gain_uses_model_arithmetic_rounding() {
 
 #[test]
 fn named_channels_accept_string_and_cell_property_vectors() {
-    let mut object = ObjectInstance::new("ss".to_owned());
-    object.properties.insert(
+    let mut object = runmat_value::UnboundedObjectBuilder::new("ss");
+    object.insert(
         "InputName".into(),
         Value::StringArray(StringArray::new_2d(vec!["alpha".into(), "beta".into()], 1, 2).unwrap()),
     );
-    object.properties.insert(
+    object.insert(
         "OutputName".into(),
         Value::Cell(
             CellArray::new(vec![Value::CharArray(CharArray::new_row("gamma"))], 1, 1).unwrap(),
         ),
     );
+    let object = object.finish();
     assert_eq!(
         names(&object, "InputName", 2).unwrap(),
         vec!["alpha".to_owned(), "beta".to_owned()]

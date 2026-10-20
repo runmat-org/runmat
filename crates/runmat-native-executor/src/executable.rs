@@ -46,10 +46,7 @@ impl NativeExecutable {
         })
     }
 
-    pub fn entrypoint(
-        &self,
-        function: FunctionId,
-    ) -> NativeExecutorResult<NativeEntryPoint> {
+    pub fn entrypoint(&self, function: FunctionId) -> NativeExecutorResult<NativeEntryPoint> {
         self.entrypoints.get(&function).copied().ok_or_else(|| {
             NativeExecutorError::Executable(format!(
                 "compiled function {} is unavailable",

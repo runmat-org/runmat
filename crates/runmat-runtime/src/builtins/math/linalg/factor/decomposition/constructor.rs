@@ -1,44 +1,47 @@
 use super::*;
 
-pub(super) async fn parse_constructor(args: Vec<Value>) -> BuiltinResult<DecompositionSpec> {
+pub(super) async fn parse_constructor(
+    args: crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<DecompositionSpec> {
     if args.is_empty() {
         return Err(invalid("decomposition: expected coefficient matrix"));
     }
-    let host_args = gather_values(args).await?;
-    let mut iter = host_args.into_iter();
-    let raw_matrix = iter
-        .next()
+    let mut host_args = gather_values(args, runtime).await?;
+    let raw_matrix = host_args
+        .pop_front()
         .ok_or_else(|| invalid("decomposition: expected coefficient matrix"))?;
     let (matrix, is_sparse) = normalize_matrix(raw_matrix)?;
     let mut decomp_type = DecompositionType::Auto;
     let mut triangular_flag: Option<TriangularFlag> = None;
-    let mut options = Vec::new();
+    let mut option_start = 0usize;
 
-    if let Some(next) = iter.next() {
-        if let Some(text) = text_from_value(&next) {
+    if let Some(next) = host_args.first() {
+        if let Some(text) = text_from_value(next) {
             if is_decomposition_type(&text) {
                 decomp_type = parse_decomposition_type(&text)?;
-                if let Some(candidate) = iter.next() {
-                    if let Some(flag) = text_from_value(&candidate)
+                option_start = 1;
+                if let Some(candidate) = host_args.get(1) {
+                    if let Some(flag) = text_from_value(candidate)
                         .and_then(|value| parse_triangular_flag(&value).ok())
                     {
                         triangular_flag = Some(flag);
-                    } else {
-                        options.push(candidate);
+                        option_start = 2;
                     }
                 }
             } else if is_decomposition_option(&text) {
-                options.push(next);
+                option_start = 0;
             } else {
                 return Err(parse_decomposition_type(&text).unwrap_err());
             }
-        } else {
-            options.push(next);
         }
     }
-    options.extend(iter);
 
-    let (check_condition, rank_tolerance) = parse_options(&options)?;
+    let options = host_args
+        .view()
+        .range(option_start..)
+        .expect("bounded decomposition option range");
+    let (check_condition, rank_tolerance) = parse_options(options)?;
     let matrix = apply_constructor_structure(matrix, decomp_type, triangular_flag)?;
     let decomp_type = if decomp_type == DecompositionType::Auto {
         infer_decomposition_type(&matrix)
@@ -61,21 +64,28 @@ pub(super) async fn parse_constructor(args: Vec<Value>) -> BuiltinResult<Decompo
     })
 }
 
-pub(super) async fn gather_values(args: Vec<Value>) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(args.len());
-    for value in args {
-        out.push(
-            crate::dispatcher::gather_if_needed_async(&value)
-                .await
-                .map_err(|err| {
-                    build_runtime_error(err.message())
-                        .with_builtin(NAME)
-                        .with_source(err)
-                        .build()
-                })?,
-        );
+pub(super) async fn gather_values(
+    args: crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    let mut resident = false;
+    for value in &args {
+        crate::dispatcher::try_visit_gathered_gpu_handles(value, &mut |_| resident = true)?;
     }
-    Ok(out)
+    if !resident {
+        return Ok(args);
+    }
+    args.try_map_preserving_roots_async(args.len(), runtime, async |index| {
+        crate::dispatcher::gather_if_needed_async(&args[index])
+            .await
+            .map_err(|err| {
+                build_runtime_error(err.message())
+                    .with_builtin(NAME)
+                    .with_source(err)
+                    .build()
+            })
+    })
+    .await
 }
 
 pub(super) fn normalize_matrix(value: Value) -> BuiltinResult<(Value, bool)> {
@@ -138,7 +148,9 @@ pub(super) fn validate_matrix_shape(shape: &[usize]) -> BuiltinResult<()> {
     Ok(())
 }
 
-pub(super) fn parse_options(args: &[Value]) -> BuiltinResult<(bool, Option<f64>)> {
+pub(super) fn parse_options(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<(bool, Option<f64>)> {
     let mut check_condition = true;
     let mut rank_tolerance = None;
     let mut idx = 0usize;

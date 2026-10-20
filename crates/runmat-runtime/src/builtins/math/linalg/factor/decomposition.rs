@@ -168,9 +168,13 @@ fn ensure_decomposition_class_registered() {
 #[runtime_builtin(
     name = "decomposition",
     binding_variant = "default",
-    builtin_path = "crate::builtins::math::linalg::factor::decomposition"
+    builtin_path = "crate::builtins::math::linalg::factor::decomposition",
+    context = true
 )]
-async fn decomposition_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn decomposition_builtin_context(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     validate_output_count()?;
     if args
         .iter()
@@ -181,13 +185,13 @@ async fn decomposition_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             NAME,
         )?;
     }
-    if has_integer_check_condition(&args) {
+    if has_integer_check_condition(args.view()) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &DECOMPOSITION_INTEGER_CHECK_CONDITION_EXTENSION,
             NAME,
         )?;
     }
-    if has_integer_named_option(&args, "RankTolerance") {
+    if has_integer_named_option(args.view(), "RankTolerance") {
         crate::compatibility::ensure_builtin_extension_enabled(
             &DECOMPOSITION_INTEGER_RANK_TOLERANCE_EXTENSION,
             NAME,
@@ -200,18 +204,24 @@ async fn decomposition_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         )?;
     }
     ensure_decomposition_class_registered();
-    let spec = parse_constructor(args).await?;
+    let spec = parse_constructor(args, runtime.as_ref()).await?;
     Ok(Value::Object(spec_to_object(&spec)?))
 }
 
-fn has_integer_check_condition(args: &[Value]) -> bool {
+#[cfg(test)]
+async fn decomposition_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    decomposition_builtin_context(None, args).await
+}
+
+fn has_integer_check_condition(args: crate::call::FunctionArgumentView<'_>) -> bool {
     has_integer_named_option(args, "CheckCondition")
 }
 
-fn has_integer_named_option(args: &[Value], option: &str) -> bool {
-    args.windows(2).any(|pair| {
-        text_from_value(&pair[0]).is_some_and(|name| name.eq_ignore_ascii_case(option))
-            && is_integer_value(&pair[1])
+fn has_integer_named_option(args: crate::call::FunctionArgumentView<'_>, option: &str) -> bool {
+    (0..args.len().saturating_sub(1)).any(|index| {
+        text_from_value(args.get(index).expect("bounded option index"))
+            .is_some_and(|name| name.eq_ignore_ascii_case(option))
+            && is_integer_value(args.get(index + 1).expect("bounded option value index"))
     })
 }
 

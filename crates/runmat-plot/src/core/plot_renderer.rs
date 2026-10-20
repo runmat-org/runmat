@@ -1190,11 +1190,18 @@ impl PlotRenderer {
                     && matches!(plot, crate::plots::PlotElement::Mesh(_))
             })
         });
-        let fixed_aspect = meta.is_some_and(|m| m.axis_equal || m.data_aspect_ratio_mode == "manual");
+        let fixed_aspect =
+            meta.is_some_and(|m| m.axis_equal || m.data_aspect_ratio_mode == "manual");
         if fixed_aspect || has_geometry_mesh {
             return Vec3::splat(1.0 / largest);
         }
-        let axis = |extent: f32| if extent > largest * 1.0e-6 { 1.0 / extent } else { 1.0 / largest };
+        let axis = |extent: f32| {
+            if extent > largest * 1.0e-6 {
+                1.0 / extent
+            } else {
+                1.0 / largest
+            }
+        };
         Vec3::new(axis(size.x), axis(size.y), axis(size.z))
     }
 
@@ -2602,7 +2609,8 @@ impl PlotRenderer {
 
             // Dynamic tick marks on the origin triad (major step only). Labels are drawn in the
             // overlay so they stay crisp; these marks provide a depth-correct anchor in the scene.
-            self.world_axis_triads.insert(axes_index, (axis_steps, axis_lens));
+            self.world_axis_triads
+                .insert(axes_index, (axis_steps, axis_lens));
             let max_ticks = 6usize;
             let mut add_ticks = |axis: Vec3, perp: Vec3, step: f64, axis_len: f32, col: Vec4| {
                 if step <= 0.0 {
@@ -4186,7 +4194,12 @@ impl PlotRenderer {
     pub fn reference_line_labels_for_axes(
         &self,
         axes_index: usize,
-    ) -> Vec<(crate::plots::ReferenceLineOrientation, f64, String, Option<glam::Vec4>)> {
+    ) -> Vec<(
+        crate::plots::ReferenceLineOrientation,
+        f64,
+        String,
+        Option<glam::Vec4>,
+    )> {
         self.last_figure
             .as_ref()
             .map(|f| f.reference_line_labels_for_axes(axes_index))
@@ -4298,7 +4311,8 @@ impl PlotRenderer {
     /// (`axis equal`, `daspect`); `None` when the box stretches to fill.
     pub fn overlay_plot_box_aspect_for_axes(&self, axes_index: usize) -> Option<f64> {
         let meta = self.last_figure.as_ref()?.axes_metadata(axes_index)?;
-        if !(meta.axis_equal || meta.data_aspect_ratio_mode == "manual") || meta.x_log || meta.y_log {
+        if !(meta.axis_equal || meta.data_aspect_ratio_mode == "manual") || meta.x_log || meta.y_log
+        {
             return None;
         }
         let (x_min, x_max, y_min, y_max) = self.display_bounds_for_axes(axes_index)?;

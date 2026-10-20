@@ -7,9 +7,10 @@ pub(super) fn reject_and_retry(
     identity: AnalysisStudyCompletionIdentity,
     store: &FilesystemAnalysisArtifactStore,
 ) -> runmat_runtime::analysis::PreparedStudyPublication {
-    let cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let cancellation = runmat_execution::cancellation::CancellationSource::new();
+    cancellation.cancel(runmat_execution::CancellationReason::User);
     {
-        let _guard = runmat_runtime::interrupt::replace_interrupt(Some(cancelled));
+        let _guard = runmat_runtime::interrupt::replace_interrupt(Some(cancellation.token()));
         assert!(prepared.publish_without_function_execution().is_err());
         assert!(
             store.list_run_metadata().unwrap().is_empty(),

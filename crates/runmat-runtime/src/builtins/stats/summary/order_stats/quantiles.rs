@@ -303,7 +303,7 @@ enum QuantileMethod {
 pub(super) async fn parse_quantile_args(
     name: &str,
     input: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
     unit: QuantileRequestUnit,
 ) -> BuiltinResult<QuantileArgs> {
     if rest.is_empty() {

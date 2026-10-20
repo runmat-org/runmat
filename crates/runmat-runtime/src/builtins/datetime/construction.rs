@@ -123,10 +123,16 @@ fn component_shape(tensor: &Tensor) -> Vec<usize> {
     }
 }
 
-pub(super) fn build_from_components(
-    args: Vec<Value>,
+pub(super) fn build_from_components<A>(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: A,
     format: Option<String>,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<Value>
+where
+    A: IntoIterator<Item = Value>,
+    A::IntoIter: ExactSizeIterator,
+{
+    let args = args.into_iter();
     let labels = [
         "year",
         "month",
@@ -138,7 +144,7 @@ pub(super) fn build_from_components(
     ];
     let input_count = args.len();
     let mut arrays = Vec::with_capacity(args.len());
-    for (idx, arg) in args.into_iter().enumerate() {
+    for (idx, arg) in args.enumerate() {
         arrays.push(component_tensor(arg, labels[idx])?);
     }
     while arrays.len() < 7 {
@@ -174,7 +180,7 @@ pub(super) fn build_from_components(
     } else {
         DEFAULT_DATE_FORMAT.to_string()
     };
-    datetime_object_from_serials(serials, shape, default_format)
+    datetime_object_from_serials(runtime, serials, shape, default_format)
 }
 
 pub(super) fn serial_from_normalized_components(
@@ -264,6 +270,7 @@ pub(super) fn round_integral_component(value: f64, label: &str) -> BuiltinResult
 }
 
 pub(super) fn build_from_date_vectors(
+    runtime: Option<&crate::context::RuntimeContext>,
     value: Value,
     format: Option<String>,
 ) -> BuiltinResult<Value> {
@@ -297,6 +304,7 @@ pub(super) fn build_from_date_vectors(
         )?);
     }
     datetime_object_from_serials(
+        runtime,
         serials,
         vec![rows, 1],
         format.unwrap_or_else(|| {
@@ -311,11 +319,13 @@ pub(super) fn build_from_date_vectors(
 }
 
 pub(super) fn numeric_value_to_datetime(
+    runtime: Option<&crate::context::RuntimeContext>,
     value: Value,
     format: Option<String>,
 ) -> BuiltinResult<Value> {
     let serials = serial_tensor_from_value(value, "datetime")?;
     datetime_object_from_serial_tensor(
+        runtime,
         serials,
         format.unwrap_or_else(|| DEFAULT_DATETIME_FORMAT.to_string()),
     )

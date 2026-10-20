@@ -27,7 +27,10 @@ fn analysis_completion_requires_original_commit_and_terminal_inventory() {
     assert_eq!(completed.evidence, original);
     assert_eq!(completed.attempt, Some(success.clone()));
     let mut substituted = success;
-    substituted.resources = None;
+    let AttemptSuccess::Values { resources, .. } = &mut substituted else {
+        panic!("value accounting fixture")
+    };
+    *resources = None;
     assert!(AnalysisTaskCompletion::new(original.clone(), Ok(substituted)).is_err());
     let delivery =
         AnalysisTaskCompletion::new(original.clone(), Err("original storage failure".into()))

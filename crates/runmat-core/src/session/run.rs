@@ -197,7 +197,10 @@ impl RunMatSession {
     > {
         self.runtime_context = self.runtime_context.clone().with_fresh_plot_receipts();
         self.configure_runtime_context();
-        let runtime = self.runtime_context.clone();
+        let runtime = self
+            .runtime_context
+            .clone()
+            .with_cancellation_token(self.runtime_context.cancellation());
         runtime.scope(self.run_in_context(input)).await
     }
 
@@ -289,6 +292,7 @@ impl RunMatSession {
         &mut self,
         request: crate::abi::ExecutionRequest,
     ) -> crate::abi::ExecutionResponse {
+        let _admission = self.admit_execution(None);
         #[cfg(not(target_arch = "wasm32"))]
         {
             let local_tasks = self.local_tasks.clone();
@@ -408,7 +412,6 @@ impl RunMatSession {
         &mut self,
         request: crate::abi::ExecutionRequest,
     ) -> crate::abi::ExecutionResponse {
-        let _admission = self.admit_execution(None);
         let requested_outputs = request.requested_outputs;
         let source_input = request.source.clone();
         if let Err(error) = self.ensure_user_path_hydrated().await {

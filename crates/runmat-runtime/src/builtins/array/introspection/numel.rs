@@ -45,7 +45,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::array::introspection::numel"
 )]
-async fn numel_builtin(value: Value, selectors: Vec<Value>) -> BuiltinResult<Value> {
+async fn numel_builtin(
+    value: Value,
+    selectors: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     reject_excess_outputs()?;
     let dimensions = VisibleDimensions::from_value(&value)
         .await
@@ -57,7 +60,7 @@ async fn numel_builtin(value: Value, selectors: Vec<Value>) -> BuiltinResult<Val
             &runmat_builtins::NUMEL_DIMENSIONS_EXTENSION,
             NUMEL_CATALOG_ENTRY.identity.name,
         )?;
-        let selectors = parse_dimension_arguments(&selectors, EmptySelectorPolicy::Reject)
+        let selectors = parse_dimension_arguments(selectors.view(), EmptySelectorPolicy::Reject)
             .map_err(selector_error)?;
         dimensions.selected_product(selectors.values())
     }
@@ -118,6 +121,9 @@ mod tests {
     use runmat_value::{CellArray, CharArray, IntegerStorage, Tensor};
 
     fn call(value: Value, selectors: Vec<Value>) -> BuiltinResult<Value> {
+        let selectors = crate::execution::RootedValues::new(selectors)
+            .expect("ordinary numel fixture arguments")
+            .into();
         block_on(numel_builtin(value, selectors))
     }
 

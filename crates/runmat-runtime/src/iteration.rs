@@ -164,19 +164,18 @@ fn gather_object_array(value: &ObjectArray, plan: &IndexPlan) -> Result<Value, R
             crate::runtime_error::semantic_error("IndexOutOfBounds", "Index out of bounds")
         });
     }
-    let indices = plan
-        .indices
-        .iter()
-        .map(|index| *index as usize)
-        .collect::<Vec<_>>();
-    value
-        .select_linear(&indices, plan.output_shape.clone())
-        .map(Value::ObjectArray)
-        .map_err(shape_error)
+    let context = crate::context::legacy::active();
+    crate::execution::object_array::select(
+        value,
+        plan.indices.iter().map(|&index| index as usize),
+        &plan.output_shape,
+        context.as_ref(),
+    )
+    .map(|output| output.with_owned(|value| value))
 }
 
 fn gather_symbolic(value: &SymbolicArray, plan: &IndexPlan) -> Result<Value, RuntimeError> {
-    let data = gather(&value.data, plan, "symbolic")?;
+    let data = gather(value.data(), plan, "symbolic")?;
     SymbolicArray::new(data, plan.output_shape.clone())
         .map(Value::SymbolicArray)
         .map_err(shape_error)

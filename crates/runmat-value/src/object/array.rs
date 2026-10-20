@@ -40,6 +40,35 @@ pub struct ObjectArray {
 }
 
 impl ObjectArray {
+    /// Explicit ordinary publication retaining existing immutable storage.
+    /// This validates the same class/kind invariant as the owned admission
+    /// machine; it never turns an unpublished owned Vec into a hidden clone.
+    pub fn from_shared_storage_unbounded(
+        class_name: impl Into<SharedClassIdentity>,
+        data: OutputListStorage,
+        shape: SharedShape,
+    ) -> Result<Self, String> {
+        if !data.is_shallow_clone() {
+            return Err("object array requires shared slot storage".into());
+        }
+        if shape.len() < 2
+            || shape.iter().try_fold(1usize, |n, &d| n.checked_mul(d)) != Some(data.len())
+        {
+            return Err("object array shape differs from its element count".into());
+        }
+        let class_name = class_name.into();
+        let mut kind = None;
+        for child in &data {
+            admission::validate_value(child, class_name.as_identity(), &mut kind)?;
+        }
+        Ok(Self {
+            class_name,
+            data,
+            shape,
+            selected_provenance: ExactArrayStorage::empty(),
+            unselected_provenance: false,
+        })
+    }
     pub fn new(
         class_name: impl Into<SharedClassIdentity>,
         data: Vec<Value>,

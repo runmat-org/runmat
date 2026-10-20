@@ -130,7 +130,7 @@ async fn minus_builtin(
     runtime: Option<RuntimeContext>,
     lhs: Value,
     rhs: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<RootedValue> {
     let _inputs = RootedValueLease::for_values([&lhs, &rhs].into_iter().chain(rest.iter()))
         .map_err(|cause| cause.into_runtime_error())?;
@@ -148,7 +148,7 @@ async fn minus_builtin(
         return Err(builtin_error("complex integer arithmetic is not supported"));
     }
     reject_integer_logical_operands(&lhs, &rhs, BUILTIN_NAME).map_err(builtin_error)?;
-    let template = parse_output_template(OUTPUT_PROTOTYPE_CONTEXT, &rest)?;
+    let template = parse_output_template(OUTPUT_PROTOTYPE_CONTEXT, rest.view())?;
     if matches!(template, OutputTemplate::Like(_)) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &MINUS_LIKE_EXTENSION,

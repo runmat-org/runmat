@@ -409,7 +409,7 @@ async fn tensor_from_value(value: Value) -> crate::BuiltinResult<Tensor> {
 fn parse_labels(value: Value, value_len: usize) -> crate::BuiltinResult<PieLabelsArg> {
     match value {
         Value::StringArray(arr) => Ok(PieLabelsArg::Explicit(
-            arr.data
+            arr.data()
                 .iter()
                 .map(|text| text.as_str().to_owned())
                 .collect(),

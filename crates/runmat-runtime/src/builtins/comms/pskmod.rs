@@ -49,7 +49,11 @@ fn pskmod_error(message: impl Into<String>) -> RuntimeError {
     binding_variant = "default",
     builtin_path = "crate::builtins::comms::pskmod"
 )]
-async fn pskmod_builtin(x: Value, m: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn pskmod_builtin(
+    x: Value,
+    m: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     let order = parse_modulation_order(&m)?;
     if is_typed_integer_value(&m) {
         crate::compatibility::ensure_builtin_extension_enabled(
@@ -57,7 +61,7 @@ async fn pskmod_builtin(x: Value, m: Value, rest: Vec<Value>) -> BuiltinResult<V
             NAME,
         )?;
     }
-    let options = ParsedOptions::parse(&rest, order)?;
+    let options = ParsedOptions::parse(rest.view(), order)?;
     if options.integer_phase_extension {
         crate::compatibility::ensure_builtin_extension_enabled(
             &PSKMOD_INTEGER_PHASE_EXTENSION,
@@ -246,7 +250,7 @@ enum OutputDType {
 }
 
 impl ParsedOptions {
-    fn parse(args: &[Value], order: usize) -> BuiltinResult<Self> {
+    fn parse(args: crate::call::FunctionArgumentView<'_>, order: usize) -> BuiltinResult<Self> {
         let mut phase_offset = 0.0;
         let mut mapping = SymbolMapping::Gray;
         let mut input_type = InputType::Integer;
@@ -842,8 +846,8 @@ fn value_as_bool(value: &Value, name: &str) -> BuiltinResult<bool> {
 fn value_as_string(value: &Value) -> Option<runmat_value::Utf8Text> {
     match value {
         Value::String(s) => Some(s.clone()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect::<String>().into()),
+        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].clone()),
+        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data().iter().collect::<String>().into()),
         _ => None,
     }
 }

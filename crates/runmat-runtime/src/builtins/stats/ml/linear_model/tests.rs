@@ -1,6 +1,6 @@
 use super::*;
 use futures::executor::block_on;
-use runmat_value::IntegerStorage;
+use runmat_value::{IntegerStorage, ObjectInstance};
 
 fn tensor_value(data: Vec<f64>, rows: usize, cols: usize) -> Value {
     Value::Tensor(Tensor::new(data, vec![rows, cols]).unwrap())

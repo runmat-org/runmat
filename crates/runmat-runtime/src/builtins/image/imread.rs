@@ -82,7 +82,7 @@ where
 async fn imread_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     source: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let requested_outputs = crate::output_count::current_output_count();
     if requested_outputs.is_some_and(|count| count > 3) {
@@ -99,9 +99,9 @@ async fn imread_builtin(
         ));
     }
 
-    let format_hint = match rest.as_slice() {
-        [] => None,
-        [format] => Some(parse_format_hint(&string_arg("format", format)?)?),
+    let format_hint = match (rest.len(), rest.first()) {
+        (0, _) => None,
+        (1, Some(format)) => Some(parse_format_hint(&string_arg("format", format)?)?),
         _ => return Err(imread_error(&IMREAD_ERROR_TOO_MANY_INPUTS)),
     };
 

@@ -4,6 +4,7 @@ use crate::context::{
     RuntimeServicePorts,
 };
 use runmat_filesystem::{self as fs, FsProvider};
+use runmat_value::StructValue;
 use std::{rc::Rc, sync::Arc};
 
 fn fixture_root() -> std::path::PathBuf {
@@ -60,19 +61,20 @@ fn handle_controls_do_not_alias_same_shape_literals_or_certify_unknown_payloads(
         handle_admission::input(&first_slice).identity_digest,
         handle_admission::input(&second_slice).identity_digest
     );
-    let mut options = StructValue::new();
+    let mut options = runmat_value::UnboundedStructValueBuilder::new();
     options.insert("if_manifest", Value::String("revision-1".into()));
-    assert!(handle_admission::input(&Value::Struct(options))
+    assert!(handle_admission::input(&Value::Struct(options.finish()))
         .identity_digest
         .is_some());
     assert!(
-        handle_admission::input(&Value::String("x".repeat(1_048_577)))
+        handle_admission::input(&Value::String("x".repeat(1_048_577).into()))
             .identity_digest
             .is_none(),
         "oversized scalar text cannot monopolize admission"
     );
-    let nested =
-        Value::Cell(CellArray::new(vec![Value::String("x".repeat(1_048_577))], 1, 1).unwrap());
+    let nested = Value::Cell(
+        CellArray::new(vec![Value::String("x".repeat(1_048_577).into())], 1, 1).unwrap(),
+    );
     assert!(handle_admission::input(&nested).identity_digest.is_none());
     let huge_chars =
         Value::CharArray(runmat_value::CharArray::new(vec!['x'; 4_097], 1, 4_097).unwrap());
@@ -80,10 +82,14 @@ fn handle_controls_do_not_alias_same_shape_literals_or_certify_unknown_payloads(
         .identity_digest
         .is_none());
     let mut whole_call = super::super::handle_identity::HashBudget::new();
-    let first =
-        handle_admission::input_with_budget(&Value::String("a".repeat(600_000)), &mut whole_call);
-    let second =
-        handle_admission::input_with_budget(&Value::String("b".repeat(600_000)), &mut whole_call);
+    let first = handle_admission::input_with_budget(
+        &Value::String("a".repeat(600_000).into()),
+        &mut whole_call,
+    );
+    let second = handle_admission::input_with_budget(
+        &Value::String("b".repeat(600_000).into()),
+        &mut whole_call,
+    );
     assert!(first.identity_digest.is_some());
     assert!(
         second.identity_digest.is_none(),
@@ -116,19 +122,22 @@ fn ignored_trailing_receiver_controls_reject_before_storage_or_queue_effects() {
     let root = fixture_root();
     let provider = Arc::new(fs::MemoryFsProvider::with_current_dir(&root));
     let _provider = fs::replace_provider(provider.clone() as Arc<dyn FsProvider>);
-    let mut meta = StructValue::new();
+    let mut meta = runmat_value::UnboundedStructValueBuilder::new();
     meta.insert("dtype", Value::String("f64".into()));
     meta.insert(
         "shape",
         Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap()),
     );
-    let mut arrays = StructValue::new();
-    arrays.insert("sample", Value::Struct(meta));
-    let mut schema = StructValue::new();
-    schema.insert("arrays", Value::Struct(arrays));
+    let mut arrays = runmat_value::UnboundedStructValueBuilder::new();
+    arrays.insert("sample", Value::Struct(meta.finish()));
+    let mut schema = runmat_value::UnboundedStructValueBuilder::new();
+    schema.insert("arrays", Value::Struct(arrays.finish()));
     let dataset = call_builtin(
         "data.create",
-        &[Value::String("arity.data".into()), Value::Struct(schema)],
+        &[
+            Value::String("arity.data".into()),
+            Value::Struct(schema.finish()),
+        ],
     )
     .unwrap();
     let array = call_builtin(
@@ -244,13 +253,16 @@ fn finite_uncertified_receiver_write_rejects_before_mutation() {
     let root = fixture_root();
     let provider = Arc::new(fs::MemoryFsProvider::with_current_dir(&root));
     let _provider = fs::replace_provider(provider.clone() as Arc<dyn FsProvider>);
-    let mut schema = StructValue::new();
+    let mut schema = runmat_value::UnboundedStructValueBuilder::new();
     schema
         .fields
         .insert("arrays".into(), Value::Struct(StructValue::new()));
     let dataset = call_builtin(
         "data.create",
-        &[Value::String("owned.data".into()), Value::Struct(schema)],
+        &[
+            Value::String("owned.data".into()),
+            Value::Struct(schema.finish()),
+        ],
     )
     .expect("context-free embedding creates a process-local managed handle");
     let before = provider
@@ -287,14 +299,17 @@ fn session_issued_dataset_survives_later_invocation_but_rejects_foreign_session(
     let provider = Arc::new(fs::MemoryFsProvider::with_current_dir(fixture_root()));
     let _provider = fs::replace_provider(provider as Arc<dyn FsProvider>);
     let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()));
-    let mut schema = StructValue::new();
+    let mut schema = runmat_value::UnboundedStructValueBuilder::new();
     schema
         .fields
         .insert("arrays".into(), Value::Struct(StructValue::new()));
     let dataset = futures::executor::block_on(crate::call_builtin_async_in_context(
         &runtime,
         "data.create",
-        &[Value::String("session.data".into()), Value::Struct(schema)],
+        &[
+            Value::String("session.data".into()),
+            Value::Struct(schema.finish()),
+        ],
     ))
     .expect("session-issued Dataset");
     let next_invocation = runtime

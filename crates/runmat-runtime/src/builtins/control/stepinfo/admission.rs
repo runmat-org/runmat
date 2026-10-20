@@ -23,7 +23,10 @@ pub(super) struct Request {
     pub(super) threshold: Value,
 }
 
-pub(super) fn preflight(input: Value, rest: Vec<Value>) -> BuiltinResult<Request> {
+pub(super) fn preflight(
+    input: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Request> {
     let is_model = matches!(input, Value::Object(_));
     let mut index = 0;
     let form = if is_model {
@@ -72,7 +75,7 @@ pub(super) fn preflight(input: Value, rest: Vec<Value>) -> BuiltinResult<Request
     if is_model && rest.first().is_some_and(|value| !is_option_name(value)) {
         return Err(error("stepinfo(sys) accepts only name-value options"));
     }
-    let threshold = parse_options(&rest, index)?;
+    let threshold = parse_options(rest.view(), index)?;
     Ok(Request { form, threshold })
 }
 
@@ -84,12 +87,19 @@ fn host_vector(value: &Value, role: &str) -> BuiltinResult<Option<Vec<f64>>> {
     }
 }
 
-fn parse_options(rest: &[Value], start: usize) -> BuiltinResult<Value> {
+fn parse_options(
+    rest: crate::call::FunctionArgumentView<'_>,
+    start: usize,
+) -> BuiltinResult<Value> {
     if !(rest.len() - start).is_multiple_of(2) {
         return Err(error("name-value options must come in pairs"));
     }
     let mut threshold = Value::Num(DEFAULT_SETTLING_THRESHOLD);
-    for pair in rest[start..].chunks_exact(2) {
+    for pair in rest
+        .range(start..)
+        .expect("stepinfo option suffix")
+        .chunks_exact(2)
+    {
         let name = scalar_text(&pair[0], "option name", BUILTIN_NAME)?;
         if !name.trim().eq_ignore_ascii_case("SettlingTimeThreshold") {
             return Err(error(format!("unsupported option '{name}'")));

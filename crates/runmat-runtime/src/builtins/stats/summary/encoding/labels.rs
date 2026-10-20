@@ -47,7 +47,7 @@ pub(super) fn labels_from_value(name: EncodingBuiltin, value: Value) -> BuiltinR
         }),
         Value::StringArray(array) => Ok(LabelArray {
             labels: array
-                .data
+                .data()
                 .iter()
                 .map(|text| text_label(text.as_str().to_owned()))
                 .collect(),
@@ -62,8 +62,8 @@ pub(super) fn labels_from_value(name: EncodingBuiltin, value: Value) -> BuiltinR
             categories: None,
         }),
         Value::Cell(cell) => {
-            let mut labels = Vec::with_capacity(cell.data.len());
-            for item in cell.data.iter() {
+            let mut labels = Vec::with_capacity(cell.data().len());
+            for item in cell.data().iter() {
                 labels.push(text_label(scalar_text(item, name, name.name())?));
             }
             Ok(LabelArray {
@@ -118,25 +118,13 @@ pub(super) fn dummyvar_groups(value: Value) -> BuiltinResult<Vec<LabelArray>> {
             Ok(groups)
         }
         Value::Cell(cell) if cell.rows == 1 || cell.cols == 1 => {
-            if cell.rows == 1 && cell.cols > 1 && cell.data.iter().any(is_grouping_container) {
+            if cell.rows == 1 && cell.cols > 1 && cell.data().iter().any(is_grouping_container) {
                 let mut groups = Vec::with_capacity(cell.cols);
-                let values = cell
-                    .data
-                    .try_into_owned()
-                    .map_err(|_| {
-                        invalid(
-                            EncodingBuiltin::Dummyvar,
-                            "dummyvar: shared grouping Cell requires admitted replacement",
-                        )
-                    })?
-                    .try_into_unbounded_vec()
-                    .map_err(|_| {
-                        invalid(
-                            EncodingBuiltin::Dummyvar,
-                            "dummyvar: admitted grouping Cell requires admitted output",
-                        )
-                    })?;
-                for value in values {
+                let (values, _shape, _rows, _cols) = cell.into_parts();
+                // Keep the original physical storage and its claims throughout
+                // the read traversal; cloning each published Value retains its
+                // original payload owner without an escaping bare Value Vec.
+                for value in values.iter().cloned() {
                     groups.push(labels_from_value(EncodingBuiltin::Dummyvar, value)?);
                 }
                 Ok(groups)
@@ -398,12 +386,12 @@ pub(super) fn is_grouping_container(value: &Value) -> bool {
     match value {
         Value::Tensor(tensor) => tensor::tensor_element_len(tensor) > 1,
         Value::LogicalArray(array) => array.data.len() > 1,
-        Value::StringArray(array) => array.data.len() > 1,
+        Value::StringArray(array) => array.data().len() > 1,
         Value::CharArray(array) => array.rows > 1,
-        Value::Cell(cell) => cell.data.len() > 1,
+        Value::Cell(cell) => cell.data().len() > 1,
         Value::Object(object) if object.is_class(runmat_types::standard::CATEGORICAL) => {
             matches!(
-                object.properties.get("Codes"),
+                object.properties().get("Codes"),
                 Some(Value::Tensor(tensor)) if tensor::tensor_element_len(tensor) > 1
             )
         }
@@ -422,7 +410,7 @@ pub(super) fn char_rows(array: &CharArray) -> Vec<String> {
     let mut rows = Vec::with_capacity(array.rows);
     for row in 0..array.rows {
         let start = row * array.cols;
-        rows.push(array.data[start..start + array.cols].iter().collect());
+        rows.push(array.data()[start..start + array.cols].iter().collect());
     }
     rows
 }
@@ -434,8 +422,10 @@ pub(super) fn scalar_text(
 ) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.as_str().to_owned()),
-        Value::CharArray(chars) => Ok(chars.data.iter().collect()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].as_str().to_owned()),
+        Value::CharArray(chars) => Ok(chars.data().iter().collect()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(array.data()[0].as_str().to_owned())
+        }
         other => Err(invalid(
             builtin,
             format!("{context}: expected string scalar, got {other:?}"),
@@ -459,7 +449,7 @@ pub(super) fn format_number(value: f64) -> String {
 }
 
 pub(super) fn categorical_shape(object: &ObjectInstance) -> Vec<usize> {
-    match object.properties.get("Codes") {
+    match object.properties().get("Codes") {
         Some(Value::Tensor(tensor)) => normalized_shape(tensor.shape()),
         _ => vec![1, 1],
     }

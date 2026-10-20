@@ -10,7 +10,13 @@ async fn filter2_builtin(
     image: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
-    super::filter2_builtin(None, kernel, image, rest).await
+    super::filter2_builtin(
+        None,
+        kernel,
+        image,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    )
+    .await
 }
 
 #[test]

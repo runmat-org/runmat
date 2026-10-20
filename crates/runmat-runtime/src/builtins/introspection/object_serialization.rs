@@ -4,7 +4,7 @@ use crate::execution::{RootedValue, RootedValueLease, RootedValuesBuilder};
 use futures::future::LocalBoxFuture;
 use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
-use runmat_value::{CellArray, ObjectInstance, StructValue, Value};
+use runmat_value::{CellArray, StructValue, Value};
 use std::ops::ControlFlow;
 
 mod assembly;
@@ -400,9 +400,18 @@ pub(crate) fn prepare_mat_object_element(
 
 fn into_object_properties_payload(value: Value) -> crate::BuiltinResult<StructValue> {
     match value {
-        Value::Object(object) if !object.has_native_payload() => Ok(StructValue {
-            fields: object.properties.into_iter().collect(),
-        }),
+        Value::Object(object) if !object.has_native_payload() => {
+            let builder = object.into_unbounded_builder().map_err(|_| {
+                serialization_error(
+                    SAVEOBJ_METHOD.display_name(),
+                    &SERIALIZATION_ERROR_ARGUMENT,
+                    "admitted object properties require an admitted serialization destination",
+                )
+            })?;
+            Ok(StructValue::from_fields_unbounded(
+                builder.into_properties_unbounded(),
+            ))
+        }
         other => object_properties_payload(&other),
     }
 }
@@ -492,7 +501,7 @@ pub(crate) async fn restore_mat_object_element(
     payload: Value,
     runtime: Option<&crate::context::RuntimeContext>,
 ) -> crate::BuiltinResult<RootedValue> {
-    let payload = root_value(payload)?;
+    let payload = RootedValue::in_optional_context(payload, runtime)?;
     validate_mat_object_product_current(product, runtime)?;
     if let crate::context::CurrentClassProductResolution::Selected(facts) = product {
         if let Some(method) = facts.method(&LOADOBJ_METHOD.owned()) {
@@ -579,38 +588,45 @@ pub(crate) async fn restore_mat_object_element(
                 )
             });
     }
-    payload.try_map_owned(
-        |payload| {
-            let Value::Struct(fields) = payload else {
-                return Err(serialization_error(
-                    LOADOBJ_METHOD.display_name(),
-                    &SERIALIZATION_ERROR_ARGUMENT,
-                    "object without loadobj requires a saved property structure",
-                ));
+    payload.with_owned(|payload| {
+        let Value::Struct(fields) = payload else {
+            return Err(serialization_error(
+                LOADOBJ_METHOD.display_name(),
+                &SERIALIZATION_ERROR_ARGUMENT,
+                "object without loadobj requires a saved property structure",
+            ));
+        };
+        let object = crate::execution::object::construct_object_from_borrowed_fields(
+            runtime,
+            class.display_name(),
+            fields.fields.iter(),
+        )?;
+        if handle {
+            let Value::Object(instance) = object.value() else {
+                unreachable!("constructed restored object")
             };
-            let mut object = ObjectInstance::new(class.clone());
-            object.properties = fields.fields.into_iter().collect();
-            let object = Value::Object(object);
-            if handle {
-                let class_name = object_class_name(&object).expect("constructed object class");
-                let target = runmat_gc::gc_allocate(object).map_err(|error| {
+            let class_name = instance.class_name_owner().clone();
+            object.with_owned(|value| {
+                let target = runmat_gc::gc_allocate_rooted(value).map_err(|error| {
                     serialization_error(
                         LOADOBJ_METHOD.display_name(),
                         &SERIALIZATION_ERROR_ARGUMENT,
                         format!("failed to restore serialized handle object: {error}"),
                     )
                 })?;
-                Ok(Value::HandleObject(runmat_value::HandleRef {
-                    class_name,
-                    target,
-                    valid: true,
-                }))
-            } else {
-                Ok(object)
-            }
-        },
-        |error| error.into_runtime_error(),
-    )
+                RootedValue::in_optional_context(
+                    Value::HandleObject(runmat_value::HandleRef {
+                        class_name,
+                        target: target.handle(),
+                        valid: true,
+                    }),
+                    runtime,
+                )
+            })
+        } else {
+            Ok(object)
+        }
+    })
 }
 
 /// Rebind a decoded object's storage to the exact current product selected for
@@ -624,7 +640,7 @@ pub(crate) fn reconcile_mat_object_product(
 ) -> crate::BuiltinResult<RootedValue> {
     value.try_map_owned(
         |value| match (value, handle) {
-            (Value::Object(mut object), false) if &object.class_name == class => {
+            (Value::Object(mut object), false) if object.class_name() == class => {
                 match product {
                     crate::context::CurrentClassProductResolution::Selected(facts) => {
                         if let Some(existing) = object.selected_class() {
@@ -664,7 +680,7 @@ pub(crate) fn reconcile_mat_object_product(
                             "loadobj returned a handle without an object target",
                         ));
                     };
-                    if &object.class_name != class {
+                    if object.class_name() != class {
                         return Err(serialization_error(
                             LOADOBJ_METHOD.display_name(),
                             &SERIALIZATION_ERROR_DISPATCH,
@@ -730,11 +746,11 @@ fn object_properties_payload(value: &Value) -> crate::BuiltinResult<StructValue>
                     "GC-owned native object payloads require a typed serializer",
                 ));
             }
-            let mut payload = StructValue::new();
-            for (name, property) in &object.properties {
-                payload.insert(name.clone(), property.clone());
+            let mut payload = runmat_value::UnboundedStructValueBuilder::new();
+            for (name, property) in object.properties().iter() {
+                payload.insert(name.to_owned(), property.clone());
             }
-            Ok(payload)
+            Ok(payload.finish())
         }
         Value::HandleObject(handle) => runmat_gc::gc_with_value(&handle.target, |target| {
             if let Value::Object(object) = target {
@@ -745,11 +761,11 @@ fn object_properties_payload(value: &Value) -> crate::BuiltinResult<StructValue>
                         "GC-owned native object payloads require a typed serializer",
                     ));
                 }
-                let mut payload = StructValue::new();
-                for (name, property) in &object.properties {
-                    payload.insert(name.clone(), property.clone());
+                let mut payload = runmat_value::UnboundedStructValueBuilder::new();
+                for (name, property) in object.properties().iter() {
+                    payload.insert(name.to_owned(), property.clone());
                 }
-                Ok(payload)
+                Ok(payload.finish())
             } else {
                 Err(serialization_error(
                     SAVEOBJ_METHOD.display_name(),
@@ -841,14 +857,14 @@ mod tests {
     use tempfile::tempdir;
 
     fn structure(field: &str, value: Value) -> StructValue {
-        let mut structure = StructValue::new();
+        let mut structure = runmat_value::UnboundedStructValueBuilder::new();
         structure.insert(field, value);
-        structure
+        structure.finish()
     }
 
     #[test]
     fn loadobj_preserves_nested_integer_payloads_without_materialization() {
-        let mut payload = StructValue::new();
+        let mut payload = runmat_value::UnboundedStructValueBuilder::new();
         payload.insert("scalar", Value::Int(IntValue::U64(u64::MAX)));
         payload.insert(
             "array",
@@ -857,7 +873,7 @@ mod tests {
                     .expect("integer payload"),
             ),
         );
-        let restored = block_on(loadobj_builtin(Value::Struct(payload))).expect("loadobj");
+        let restored = block_on(loadobj_builtin(Value::Struct(payload.finish()))).expect("loadobj");
         let Value::Struct(restored) = restored.value() else {
             panic!("expected structure payload");
         };
@@ -885,7 +901,10 @@ mod tests {
         };
         assert_eq!(saved.shape(), [0, 2, 3]);
         assert_eq!(
-            saved.field_names().cloned().collect::<Vec<_>>(),
+            saved
+                .field_names()
+                .map(ToOwned::to_owned)
+                .collect::<Vec<_>>(),
             ["payload"]
         );
 
@@ -909,16 +928,13 @@ mod tests {
 
     #[test]
     fn loadobj_preserves_nested_value_and_handle_objects() {
-        let mut value_object = ObjectInstance::new("NestedValue".to_string());
-        value_object
-            .properties
-            .insert("payload".into(), Value::Int(IntValue::U64(u64::MAX)));
+        let mut value_object = runmat_value::UnboundedObjectBuilder::new("NestedValue");
+        value_object.insert("payload".into(), Value::Int(IntValue::U64(u64::MAX)));
 
-        let mut handle_object = ObjectInstance::new("NestedHandle".to_string());
-        handle_object
-            .properties
-            .insert("payload".into(), Value::String("entry".into()));
-        let target = runmat_gc::gc_allocate(Value::Object(handle_object)).expect("handle target");
+        let mut handle_object = runmat_value::UnboundedObjectBuilder::new("NestedHandle");
+        handle_object.insert("payload".into(), Value::String("entry".into()));
+        let target =
+            runmat_gc::gc_allocate(Value::Object(handle_object.finish())).expect("handle target");
         let handle = Value::HandleObject(runmat_value::HandleRef {
             class_name: "NestedHandle".into(),
             target,
@@ -928,7 +944,7 @@ mod tests {
         let array = StructArray::with_fields(
             vec!["payload".into()],
             vec![
-                structure("payload", Value::Object(value_object)),
+                structure("payload", Value::Object(value_object.finish())),
                 structure("payload", handle),
             ],
             vec![2, 1],
@@ -940,7 +956,7 @@ mod tests {
         };
         assert!(matches!(
             restored.get_linear(0).unwrap().fields.get("payload"),
-            Some(Value::Object(object)) if object.class_name.display_name() == "NestedValue"
+            Some(Value::Object(object)) if object.class_name().display_name() == "NestedValue"
         ));
         let Some(Value::HandleObject(handle)) =
             restored.get_linear(1).unwrap().fields.get("payload")
@@ -950,7 +966,7 @@ mod tests {
         assert_eq!(handle.class_name.display_name(), "NestedHandle");
         assert!(runmat_gc::gc_with_value(&handle.target, |target| {
             matches!(target, Value::Object(object)
-                if object.properties.get("payload") == Some(&Value::String("entry".into())))
+                if object.property("payload") == Some(&Value::String("entry".into())))
         })
         .expect("live handle target"));
     }
@@ -1017,9 +1033,9 @@ mod tests {
 
     #[test]
     fn saveobj_without_overload_returns_property_struct() {
-        let mut object = ObjectInstance::new("NoIdx".to_string());
-        object.properties.insert("x".to_string(), Value::Num(4.0));
-        let saved = block_on(saveobj_builtin(Value::Object(object))).expect("saveobj");
+        let mut object = runmat_value::UnboundedObjectBuilder::new("NoIdx");
+        object.insert("x".to_string(), Value::Num(4.0));
+        let saved = block_on(saveobj_builtin(Value::Object(object.finish()))).expect("saveobj");
         let Value::Struct(st) = saved.value() else {
             panic!("expected struct payload");
         };
@@ -1029,37 +1045,40 @@ mod tests {
     #[test]
     fn saveobj_dispatches_registered_method() {
         block_on(crate::register_test_classes_builtin()).expect("test classes");
-        let mut object = ObjectInstance::new("OverIdx".to_string());
-        object.properties.insert("k".to_string(), Value::Num(9.0));
-        object
-            .properties
-            .insert("nargs".to_string(), Value::Num(5.0));
+        let mut object = runmat_value::UnboundedObjectBuilder::new("OverIdx");
+        object.insert("k".to_string(), Value::Num(9.0));
+        object.insert("nargs".to_string(), Value::Num(5.0));
 
-        let saved = block_on(saveobj_builtin(Value::Object(object))).expect("saveobj");
+        let saved = block_on(saveobj_builtin(Value::Object(object.finish()))).expect("saveobj");
         let Value::Struct(st) = saved.value() else {
             panic!("expected saveobj struct");
         };
         assert_eq!(st.fields.get("k"), Some(&Value::Num(9.0)));
         assert_eq!(
             st.fields.get("saved_by"),
-            Some(&Value::String("OverIdx.saveobj".to_string()))
+            Some(&Value::String("OverIdx.saveobj".to_string().into()))
         );
     }
 
     #[test]
     fn former_marker_fields_roundtrip_as_an_ordinary_mat_struct() {
-        let mut fields = StructValue::new();
+        // Level5 stores text as char arrays; isolate ordinary-struct
+        // classification from the format's existing string conversion.
+        let mut fields = runmat_value::UnboundedStructValueBuilder::new();
         fields.insert(
             "__runmat_serialized_object_class__",
-            Value::string("NotAnObject"),
+            Value::CharArray(runmat_value::CharArray::new_row("NotAnObject")),
         );
-        fields.insert("__runmat_serialized_object_kind__", Value::string("value"));
+        fields.insert(
+            "__runmat_serialized_object_kind__",
+            Value::CharArray(runmat_value::CharArray::new_row("value")),
+        );
         fields.insert(
             "__runmat_serialized_object_had_saveobj__",
             Value::Bool(true),
         );
         fields.insert("__runmat_serialized_object_payload__", Value::Num(7.0));
-        let expected = Value::Struct(fields);
+        let expected = Value::Struct(fields.finish());
         assert_eq!(
             block_on(loadobj_builtin(expected.clone()))
                 .expect("direct loadobj preserves ordinary struct")
@@ -1093,20 +1112,16 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("object_roundtrip.mat");
 
-        let mut object = ObjectInstance::new("OverIdx".to_string());
-        object.properties.insert("k".to_string(), Value::Num(13.0));
-        object
-            .properties
-            .insert("nargs".to_string(), Value::Num(2.0));
+        let mut object = runmat_value::UnboundedObjectBuilder::new("OverIdx");
+        object.insert("k".to_string(), Value::Num(13.0));
+        object.insert("nargs".to_string(), Value::Num(2.0));
 
         let array_elements = [13.0, 22.0]
             .into_iter()
             .map(|number| {
-                let mut element = ObjectInstance::new("OverIdx");
-                element
-                    .properties
-                    .insert("k".to_owned(), Value::Num(number));
-                Value::Object(element)
+                let mut element = runmat_value::UnboundedObjectBuilder::new("OverIdx");
+                element.insert("k".to_owned(), Value::Num(number));
+                Value::Object(element.finish())
             })
             .collect();
         let array = runmat_value::ObjectArray::new("OverIdx", array_elements, vec![2, 1])
@@ -1116,7 +1131,7 @@ mod tests {
 
         let bytes = block_on(
             crate::builtins::io::mat::save::encode_workspace_to_mat_bytes(&[
-                ("obj".to_string(), Value::Object(object)),
+                ("obj".to_string(), Value::Object(object.finish())),
                 ("array".to_string(), Value::ObjectArray(array)),
                 ("empty".to_string(), Value::ObjectArray(empty)),
             ]),
@@ -1136,11 +1151,11 @@ mod tests {
         let Value::Object(restored_object) = loaded else {
             panic!("expected restored object");
         };
-        assert_eq!(restored_object.class_name.display_name(), "OverIdx");
-        assert_eq!(restored_object.properties.get("k"), Some(&Value::Num(13.0)));
+        assert_eq!(restored_object.class_name().display_name(), "OverIdx");
+        assert_eq!(restored_object.property("k"), Some(&Value::Num(13.0)));
         assert_eq!(
-            restored_object.properties.get("loaded_by"),
-            Some(&Value::String("OverIdx.loadobj".to_string()))
+            restored_object.property("loaded_by"),
+            Some(&Value::String("OverIdx.loadobj".to_string().into()))
         );
         let loaded_array = entries
             .value()
@@ -1159,10 +1174,10 @@ mod tests {
             .map(|value| match value {
                 Value::Object(object) => {
                     assert_eq!(
-                        object.properties.get("loaded_by"),
-                        Some(&Value::String("OverIdx.loadobj".to_string()))
+                        object.property("loaded_by"),
+                        Some(&Value::String("OverIdx.loadobj".to_string().into()))
                     );
-                    object.properties.get("k").cloned()
+                    object.property("k").cloned()
                 }
                 _ => panic!("expected restored object element"),
             })
@@ -1195,10 +1210,10 @@ mod tests {
         let Value::Object(decoded_object) = decoded_value else {
             panic!("expected decoded object");
         };
-        assert_eq!(decoded_object.class_name.display_name(), "OverIdx");
+        assert_eq!(decoded_object.class_name().display_name(), "OverIdx");
         assert_eq!(
-            decoded_object.properties.get("loaded_by"),
-            Some(&Value::String("OverIdx.loadobj".to_string()))
+            decoded_object.property("loaded_by"),
+            Some(&Value::String("OverIdx.loadobj".to_string().into()))
         );
     }
 }

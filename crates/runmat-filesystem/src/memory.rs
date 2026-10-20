@@ -85,7 +85,11 @@ impl MemoryFsProvider {
         entries.insert(PathBuf::from("/"), MemoryEntry::Directory);
         let provider = Self {
             default_current_dir,
-            inner: Arc::new(Mutex::new(MemoryTree { entries, publications: BTreeMap::new(), executions: Arc::new(BTreeMap::new()) })),
+            inner: Arc::new(Mutex::new(MemoryTree {
+                entries,
+                publications: BTreeMap::new(),
+                executions: Arc::new(BTreeMap::new()),
+            })),
         };
         let _ = provider.create_dir_all_sync(&provider.default_current_dir);
         provider
@@ -276,29 +280,54 @@ impl FsProvider for MemoryFsProvider {
         command: crate::execution::ExecutionLeaseCommand,
     ) -> io::Result<crate::execution::ExecutionLeaseOutcome> {
         let key = crate::execution::work_key(work)?;
-        let mut tree = self.inner.lock().map_err(|_| io::Error::other("memory filesystem lock poisoned"))?;
+        let mut tree = self
+            .inner
+            .lock()
+            .map_err(|_| io::Error::other("memory filesystem lock poisoned"))?;
         let (next, outcome) = crate::execution::transition_execution_lease(
-            work, tree.executions.get(&key), &command, crate::execution::authority_time_ms()?,
-        ).map_err(io::Error::other)?;
+            work,
+            tree.executions.get(&key),
+            &command,
+            crate::execution::authority_time_ms()?,
+        )
+        .map_err(io::Error::other)?;
         if let Some(next) = next {
-            if !tree.executions.contains_key(&key) && tree.executions.len() >= crate::execution::MAX_EXECUTION_RECORDS {
-                return Err(io::Error::new(ErrorKind::InvalidInput, "execution ownership record budget exhausted"));
+            if !tree.executions.contains_key(&key)
+                && tree.executions.len() >= crate::execution::MAX_EXECUTION_RECORDS
+            {
+                return Err(io::Error::new(
+                    ErrorKind::InvalidInput,
+                    "execution ownership record budget exhausted",
+                ));
             }
             Arc::make_mut(&mut tree.executions).insert(key, next);
         }
         Ok(outcome)
     }
-    async fn lookup_workspace_publication(&self, request: &crate::workspace::WorkspacePublicationRequest) -> io::Result<Option<crate::workspace::WorkspacePublicationOutcome>> {
+    async fn lookup_workspace_publication(
+        &self,
+        request: &crate::workspace::WorkspacePublicationRequest,
+    ) -> io::Result<Option<crate::workspace::WorkspacePublicationOutcome>> {
         workspace::lookup(self, request)
     }
-    async fn capture_workspace(&self, request: crate::workspace::WorkspaceCaptureRequest) -> io::Result<crate::workspace::WorkspaceSnapshot> {
+    async fn capture_workspace(
+        &self,
+        request: crate::workspace::WorkspaceCaptureRequest,
+    ) -> io::Result<crate::workspace::WorkspaceSnapshot> {
         workspace::capture(self, request)
     }
 
-    async fn publish_workspace(&self, request: crate::workspace::WorkspacePublicationRequest) -> io::Result<crate::workspace::WorkspacePublicationOutcome> {
+    async fn publish_workspace(
+        &self,
+        request: crate::workspace::WorkspacePublicationRequest,
+    ) -> io::Result<crate::workspace::WorkspacePublicationOutcome> {
         workspace::publish(self, request)
     }
-    async fn publish_workspace_fenced(&self, request: crate::workspace::WorkspacePublicationRequest, lease: &crate::execution::ExecutionLease) -> io::Result<crate::execution::FencedWorkspacePublicationOutcome> {
+    async fn publish_workspace_fenced(
+        &self,
+        request: crate::workspace::WorkspacePublicationRequest,
+        lease: &crate::execution::ExecutionLease,
+    ) -> io::Result<crate::execution::FencedWorkspacePublicationOutcome> {
         crate::execution::fenced_outcome(workspace::publish_with_lease(self, request, Some(lease)))
     }
     fn path_namespace(&self) -> crate::FsPathNamespace {

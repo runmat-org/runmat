@@ -79,7 +79,7 @@ pub(super) async fn execute(
 ) -> Result<ResidentExecution, StageExecutionFailure> {
     let provider = crate::builtins::common::gpu_helpers::exact_provider_for_handle(input)
         .ok_or_else(|| admission::invalid_owner(function, admission::GpuOperand::Input))?;
-    let Some(Value::Cell(layers)) = network.properties.get("Layers") else {
+    let Some(Value::Cell(layers)) = network.properties().get("Layers") else {
         unreachable!("host plan admitted Layers")
     };
     let mut current = input.clone();
@@ -157,7 +157,7 @@ pub(super) async fn execute(
                 (output, Some(ResidentStageKind::Transpose { materialize }))
             }
             Stage::Dense { layer_index } => {
-                let Value::Object(layer) = &layers.data[layer_index] else {
+                let Value::Object(layer) = &layers.data()[layer_index] else {
                     unreachable!("host plan admitted layer objects")
                 };
                 let (output, weights) =
@@ -175,7 +175,7 @@ pub(super) async fn execute(
                 layer_index,
                 request,
             } => {
-                let Value::Object(layer) = &layers.data[layer_index] else {
+                let Value::Object(layer) = &layers.data()[layer_index] else {
                     unreachable!("host plan admitted convolution layer objects")
                 };
                 let check = || admit_cancellation(runtime, function);

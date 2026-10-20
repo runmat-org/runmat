@@ -11,8 +11,8 @@ pub(crate) fn extract_scalar_string(value: &Value) -> Option<String> {
     }
     match value {
         Value::String(s) => Some(s.as_str().to_owned()),
-        Value::CharArray(ca) => Some(ca.data.iter().collect()),
-        Value::StringArray(sa) => Some(sa.data[0].as_str().to_owned()),
+        Value::CharArray(ca) => Some(ca.data().iter().collect()),
+        Value::StringArray(sa) => Some(sa.data()[0].as_str().to_owned()),
         _ => None,
     }
 }

@@ -9,12 +9,12 @@ pub(super) fn get(
 ) -> BuiltinResult<Value> {
     match property.map(canonical_property_name).as_deref() {
         None => {
-            let mut value = StructValue::new();
+            let mut value = runmat_value::UnboundedStructValueBuilder::new();
             value.insert("Type", Value::String("colorbar".into()));
             value.insert("Parent", Value::Num(bar.figure.as_u32() as f64));
             value.insert("Children", handles_value(Vec::new()));
             value.insert("Visible", Value::Bool(bar.visible));
-            Ok(Value::Struct(value))
+            Ok(Value::Struct(value.finish()))
         }
         Some("type") => Ok(Value::String("colorbar".into())),
         Some("parent") => Ok(Value::Num(bar.figure.as_u32() as f64)),

@@ -105,8 +105,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::factor::svd"
 )]
-async fn svd_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let eval = evaluate(value, &rest).await?;
+async fn svd_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    let eval = evaluate(value, rest.view()).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Value::output_list(Vec::new()));
@@ -177,7 +180,10 @@ enum SigmaFormat {
     Vector,
 }
 
-pub async fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<SvdEval> {
+pub async fn evaluate(
+    value: Value,
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<SvdEval> {
     if crate::builtins::common::validation::value_has_native_integer_class(&value) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &SVD_INTEGER_INPUT_EXTENSION,
@@ -297,7 +303,7 @@ fn complex_tensor_to_matrix(tensor: &ComplexTensor) -> BuiltinResult<DMatrix<Com
     Ok(DMatrix::from_column_slice(rows, cols, &data))
 }
 
-fn parse_options(args: &[Value]) -> BuiltinResult<SvdOptions> {
+fn parse_options(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<SvdOptions> {
     let mut opts = SvdOptions::default();
     if args.len() > 2 {
         return Err(svd_invalid_argument("svd: too many option arguments"));
@@ -1190,10 +1196,15 @@ pub(crate) mod tests {
     }
 
     fn svd_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::svd_builtin(value, rest))
+        let rest = crate::execution::RootedValues::new(rest)
+            .map_err(|error| error.into_runtime_error())?;
+        block_on(super::svd_builtin(value, rest.into()))
     }
 
     fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<SvdEval> {
-        block_on(super::evaluate(value, args))
+        block_on(super::evaluate(
+            value,
+            crate::call::FunctionArgumentView::from_slice(args),
+        ))
     }
 }

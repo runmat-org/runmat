@@ -45,7 +45,7 @@ mod pending_tests;
 pub async fn print_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let status = execute_print(runtime, requested_outputs, args).await?;
     Ok(if requested_outputs == Some(0) {
@@ -60,13 +60,14 @@ async fn print_builtin_direct(
     runtime: Option<crate::context::RuntimeContext>,
     args: Vec<Value>,
 ) -> BuiltinResult<bool> {
+    let args = crate::call::BuiltinArguments::from_borrowed(&args, runtime.as_ref())?;
     execute_print(runtime, crate::output_count::current_output_count(), args).await
 }
 
 async fn execute_print(
     runtime: Option<crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<bool> {
     let selected_runtime = runtime.clone();
     let operation = print_in_context(runtime.as_ref(), requested_outputs, args);
@@ -79,7 +80,7 @@ async fn execute_print(
 async fn print_in_context(
     runtime: Option<&crate::context::RuntimeContext>,
     requested_outputs: Option<usize>,
-    mut args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<bool> {
     match requested_outputs {
         Some(count) if count > 1 => {
@@ -137,7 +138,7 @@ async fn print_in_context(
             .build());
         }
     }
-    let known_filename = preflight_host_arguments(&args)?;
+    let known_filename = preflight_host_arguments(args.view())?;
     super::engine::ensure_png_export_available().map_err(|source| {
         print_error_with_source(
             format!("{}: {source}", PRINT_ERROR_RENDER.message),
@@ -160,6 +161,7 @@ async fn print_in_context(
     // A wide resident integer handle needs one authenticated provider readback
     // to establish binary64 exactness. Retain and materialize that payload so
     // the ordinary argument gather never repeats the download.
+    let mut prepared_first = None;
     if let Some(first @ Value::GpuTensor(_)) = args.first() {
         if crate::builtins::common::validation::value_has_native_integer_class(first) {
             let mut cooperation = runtime.map(crate::context::RuntimeContext::cpu_cooperation);
@@ -181,7 +183,7 @@ async fn print_in_context(
                 .build());
             }
             if let Some(payload) = prepared.into_resident_payload() {
-                args[0] = payload.into_value().map_err(|detail| {
+                prepared_first = Some(payload.into_value().map_err(|detail| {
                     build_runtime_error(format!(
                         "print: validated integer figure handle could not be materialized: {detail}"
                     ))
@@ -189,15 +191,15 @@ async fn print_in_context(
                     .with_builtin(BUILTIN_NAME)
                     .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
                     .build()
-                })?;
+                })?);
             }
         }
     }
     // Host-known invalid controls are rejected before any resident download or
     // filesystem service capture. Dynamic controls receive the same parser
     // after materialization.
-    let args = gather_values(runtime, &args).await?;
-    let request = parse_print_args(&args, selected_figure)?;
+    let args = gather_values(runtime, args, prepared_first.as_ref()).await?;
+    let request = parse_print_args(args.view(), selected_figure)?;
     let path = request.output_path()?;
     let selected = owner.path(path).map_err(export::map_io)?;
     #[cfg(feature = "plot-core")]
@@ -235,17 +237,23 @@ fn is_host_text(value: &Value) -> bool {
 
 async fn gather_values(
     runtime: Option<&crate::context::RuntimeContext>,
-    values: &[Value],
-) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(values.len());
-    for value in values {
-        out.push(
-            export::await_effect(runtime, gather_if_needed_async(value))
+    values: crate::call::BuiltinArguments,
+    prepared_first: Option<&Value>,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    values
+        .try_map_preserving_roots_async(values.len(), runtime, async |index| {
+            if index == 0 {
+                if let Some(prepared) = prepared_first {
+                    // The exact numeric provider payload was materialized above;
+                    // retain its original owner without repeating its readback.
+                    return Ok(prepared.clone());
+                }
+            }
+            export::await_effect(runtime, gather_if_needed_async(&values[index]))
                 .await?
-                .map_err(map_control_flow)?,
-        );
-    }
-    Ok(out)
+                .map_err(map_control_flow)
+        })
+        .await
 }
 
 #[cfg(feature = "plot-core")]

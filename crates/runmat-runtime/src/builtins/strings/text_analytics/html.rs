@@ -8,8 +8,10 @@ use runmat_builtins::{
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
     BuiltinSignatureDescriptor, ResolveContext, Type,
 };
+use runmat_builtins::{HTML_TREE_BROAD_CELL_EXTENSION, HTML_TREE_CELL_OBJECT_ARRAY_EXTENSION};
+pub use runmat_builtins::{HTML_TREE_DESCRIPTOR, HTML_TREE_EXTENSIONS, HTML_TREE_INTEGER_AUDIT};
 use runmat_macros::runtime_builtin;
-use runmat_value::{CellArray, ObjectInstance, StringArray, StructValue, Value};
+use runmat_value::{CellArray, ObjectInstance, StringArray, Value};
 
 use crate::builtins::strings::core::compat::{scalar_text, text_items};
 use crate::{build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult};
@@ -31,23 +33,6 @@ const EXTRACT_HTML_BROAD_CELL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExt
         "extractHTMLText with string-valued or mixed htmlTree/text cells is a RunMat extension",
     error_identifier: Some("RunMat:compatibility:ExtractHTMLTextBroadCellExtension"),
 };
-const HTML_TREE_CELL_OBJECT_ARRAY_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "htmltree-cell-object-array",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "htmlTree nonscalar input currently returns a shape-preserving cell array of scalar htmlTree objects because RunMat does not yet have a native object-array container",
-        error_identifier: Some("RunMat:compatibility:HtmlTreeCellObjectArrayExtension"),
-    };
-const HTML_TREE_BROAD_CELL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "htmltree-broad-cell-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "htmlTree accepts string-valued cells only as a RunMat extension; the public cell form is a cell array of character vectors",
-    error_identifier: Some("RunMat:compatibility:HtmlTreeBroadCellExtension"),
-};
-const HTML_TREE_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    HTML_TREE_CELL_OBJECT_ARRAY_EXTENSION,
-    HTML_TREE_BROAD_CELL_EXTENSION,
-];
 const EXTRACT_HTML_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
     EXTRACT_HTML_CHAR_MATRIX_EXTENSION,
     EXTRACT_HTML_BROAD_CELL_EXTENSION,
@@ -70,19 +55,6 @@ pub const GET_ATTRIBUTE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
         canonical_builtin: None,
         notes: "htmlTree.getAttribute accepts host htmlTree objects and a host text attribute name only. All eight integer classes and provider-resident numeric values reject without implicit conversion, gather, or provider access.",
     };
-pub const HTML_TREE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "htmlTree accepts host string arrays, character vectors, and cell arrays of character vectors. All eight integer classes, logical and complex values, and resident numeric handles reject before parsing, conversion, gather, or provider access.",
-};
-
-const OUT_TREE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "tree",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Parsed HTML tree.",
-}];
 
 const OUT_TEXT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "str",
@@ -175,17 +147,6 @@ const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
 
 const ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_INVALID_INPUT];
 
-pub const HTML_TREE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &[BuiltinSignatureDescriptor {
-        label: "tree = htmlTree(code)",
-        inputs: &IN_CODE,
-        outputs: &OUT_TREE,
-    }],
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
 pub const EXTRACT_HTML_TEXT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &[
         BuiltinSignatureDescriptor {
@@ -244,17 +205,14 @@ fn html_error(fn_name: &str, message: impl Into<String>) -> crate::RuntimeError 
 
 #[runtime_builtin(
     name = "htmlTree",
-    category = "strings/text_analytics",
-    summary = "Parse HTML code into a lightweight htmlTree object.",
-    keywords = "htmlTree,HTML,text analytics,DOM",
-    accel = "metadata",
-    extensions(HTML_TREE_EXTENSIONS),
-    integer_audit(crate::builtins::strings::text_analytics::html::HTML_TREE_INTEGER_AUDIT),
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::text_analytics::html::HTML_TREE_DESCRIPTOR),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::strings::text_analytics::html"
 )]
-async fn html_tree_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn html_tree_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if args.len() != 1 {
         return Err(html_error(
             "htmlTree",
@@ -268,7 +226,7 @@ async fn html_tree_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             format!("htmlTree: failed to gather input: {err}"),
         )
     })?;
-    html_tree_value(value)
+    html_tree_value(runtime.as_ref(), value)
 }
 
 fn preflight_html_tree_input(value: &Value) -> BuiltinResult<()> {
@@ -280,7 +238,7 @@ fn preflight_html_tree_input(value: &Value) -> BuiltinResult<()> {
     }
     if let Value::Cell(cell) = value {
         if cell
-            .data
+            .data()
             .iter()
             .any(|value| !matches!(value, Value::CharArray(array) if array.rows <= 1))
         {
@@ -291,9 +249,9 @@ fn preflight_html_tree_input(value: &Value) -> BuiltinResult<()> {
         }
     }
     let nonscalar = match value {
-        Value::StringArray(array) => array.data.len() != 1,
+        Value::StringArray(array) => array.data().len() != 1,
         Value::CharArray(array) => array.rows > 1,
-        Value::Cell(cell) => cell.data.len() != 1,
+        Value::Cell(cell) => cell.data().len() != 1,
         _ => false,
     };
     if nonscalar {
@@ -374,7 +332,7 @@ fn numeric_or_resident(value: &Value) -> bool {
 fn contains_numeric_or_resident(value: &Value) -> bool {
     match value {
         Value::Cell(cell) => cell
-            .data
+            .data()
             .iter()
             .any(|value| numeric_or_resident(value) || contains_numeric_or_resident(value)),
         Value::Struct(value) => value
@@ -391,11 +349,11 @@ fn html_cell_is_broad(value: &Value) -> bool {
     let Value::Cell(cell) = value else {
         return false;
     };
-    let contains_tree = cell.data.iter().any(is_html_tree_value);
+    let contains_tree = cell.data().iter().any(is_html_tree_value);
     if contains_tree {
-        cell.data.iter().any(|value| !is_html_tree_value(value))
+        cell.data().iter().any(|value| !is_html_tree_value(value))
     } else {
-        cell.data
+        cell.data()
             .iter()
             .any(|value| !matches!(value, Value::CharArray(array) if array.rows <= 1))
     }
@@ -477,10 +435,10 @@ async fn get_attribute_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 
 fn attribute_name_text(value: &Value) -> BuiltinResult<String> {
     if let Value::Cell(cell) = value {
-        if cell.data.len() == 1 {
-            if let Value::CharArray(array) = &cell.data[0] {
+        if cell.data().len() == 1 {
+            if let Value::CharArray(array) = &cell.data()[0] {
                 if array.rows <= 1 {
-                    return scalar_text(&cell.data[0], "getAttribute");
+                    return scalar_text(&cell.data()[0], "getAttribute");
                 }
             }
         }
@@ -541,7 +499,10 @@ async fn parse_extract_args(args: Vec<Value>) -> BuiltinResult<(Value, Extractio
     }
 }
 
-fn html_tree_value(value: Value) -> BuiltinResult<Value> {
+fn html_tree_value(
+    runtime: Option<&crate::context::RuntimeContext>,
+    value: Value,
+) -> BuiltinResult<Value> {
     if let Value::Object(object) = value {
         if object.is_class(HTML_TREE_CLASS) {
             return Ok(Value::Object(object));
@@ -550,7 +511,7 @@ fn html_tree_value(value: Value) -> BuiltinResult<Value> {
             "htmlTree",
             format!(
                 "htmlTree: expected HTML text, got object {}",
-                object.class_name
+                object.class_name()
             ),
         ));
     }
@@ -559,7 +520,7 @@ fn html_tree_value(value: Value) -> BuiltinResult<Value> {
     let mut objects = Vec::with_capacity(list.items.len());
     for item in list.items {
         let html = item.as_ref().map(|text| text.as_str()).unwrap_or(MISSING);
-        objects.push(Value::Object(parse_html_tree(html)?.into_object(None)?));
+        objects.push(parse_html_tree(html)?.into_value(runtime, None)?);
     }
     if objects.len() == 1 {
         Ok(objects.remove(0))
@@ -580,10 +541,10 @@ pub(in crate::builtins::strings::text_analytics) fn extract_html_text_value(
             "extractHTMLText",
             format!(
                 "extractHTMLText: expected HTML text or htmlTree, got object {}",
-                object.class_name
+                object.class_name()
             ),
         )),
-        Value::Cell(cell) if cell.data.iter().any(is_html_tree_value) => {
+        Value::Cell(cell) if cell.data().iter().any(is_html_tree_value) => {
             extract_html_text_from_cell(cell, method)
         }
         other => {
@@ -606,8 +567,8 @@ pub(in crate::builtins::strings::text_analytics) fn extract_html_text_value(
 
 fn extract_html_text_from_cell(cell: CellArray, method: ExtractionMethod) -> BuiltinResult<Value> {
     let shape = cell.shape().to_vec();
-    let mut texts = Vec::with_capacity(cell.data.len());
-    for value in &cell.data {
+    let mut texts = Vec::with_capacity(cell.data().len());
+    for value in cell.data() {
         match value {
             Value::Object(object) if object.is_class(HTML_TREE_CLASS) => {
                 texts.push(extract_from_object(object, method)?);
@@ -617,7 +578,7 @@ fn extract_html_text_from_cell(cell: CellArray, method: ExtractionMethod) -> Bui
                     "extractHTMLText",
                     format!(
                         "extractHTMLText: expected HTML text or htmlTree, got object {}",
-                        object.class_name
+                        object.class_name()
                     ),
                 ));
             }
@@ -658,7 +619,7 @@ fn find_element_value(value: Value, selector: &str) -> BuiltinResult<Value> {
             collect_selector_matches(&root, &selector, &mut matches)?;
         }
         Value::Cell(cell) => {
-            for item in &cell.data {
+            for item in cell.data() {
                 match item {
                     Value::Object(object) if object.is_class(HTML_TREE_CLASS) => {
                         let root = node_from_object(object, "findElement")?;
@@ -678,7 +639,7 @@ fn find_element_value(value: Value, selector: &str) -> BuiltinResult<Value> {
                 "findElement",
                 format!(
                     "findElement: expected htmlTree, got object {}",
-                    object.class_name
+                    object.class_name()
                 ),
             ));
         }
@@ -692,12 +653,7 @@ fn find_element_value(value: Value, selector: &str) -> BuiltinResult<Value> {
 
     let objects = matches
         .into_iter()
-        .map(|matched| {
-            matched
-                .node
-                .into_object(matched.parent.as_deref())
-                .map(Value::Object)
-        })
+        .map(|matched| matched.node.into_value(None, matched.parent.as_deref()))
         .collect::<BuiltinResult<Vec<_>>>()?;
     let rows = objects.len();
     Ok(Value::Cell(CellArray::new(objects, rows, 1).map_err(
@@ -721,13 +677,13 @@ fn get_attribute_value(value: Value, attr: &str) -> BuiltinResult<Value> {
             "getAttribute",
             format!(
                 "getAttribute: expected htmlTree, got object {}",
-                object.class_name
+                object.class_name()
             ),
         )),
         Value::Cell(cell) => {
             let shape = cell.shape().to_vec();
-            let mut values = Vec::with_capacity(cell.data.len());
-            for item in &cell.data {
+            let mut values = Vec::with_capacity(cell.data().len());
+            for item in cell.data() {
                 match item {
                     Value::Object(object) if object.is_class(HTML_TREE_CLASS) => {
                         values.push(attribute_from_object(object, &attr)?);
@@ -762,12 +718,12 @@ fn attribute_from_object(object: &ObjectInstance, attr: &str) -> BuiltinResult<S
 }
 
 fn node_from_object(object: &ObjectInstance, fn_name: &str) -> BuiltinResult<HtmlNode> {
-    match object.properties.get("RawHTML") {
+    match object.properties().get("RawHTML") {
         Some(Value::String(html)) => parse_html_tree(html),
         Some(Value::CharArray(_)) | Some(Value::StringArray(_)) => {
             let html = scalar_text(
                 object
-                    .properties
+                    .properties()
                     .get("RawHTML")
                     .expect("RawHTML checked above"),
                 fn_name,
@@ -1859,70 +1815,80 @@ fn is_nonblank_text(node: &HtmlNode) -> bool {
 }
 
 impl HtmlNode {
-    fn into_object(self, parent_name: Option<&str>) -> BuiltinResult<ObjectInstance> {
-        let mut object = ObjectInstance::new(HTML_TREE_CLASS.to_string());
-        match self {
+    fn into_value(
+        self,
+        runtime: Option<&crate::context::RuntimeContext>,
+        parent_name: Option<&str>,
+    ) -> BuiltinResult<Value> {
+        let (name, raw_html, text, attributes, children) = match self {
             HtmlNode::Text(text) => {
                 let decoded = normalize_space(&decode_html_entities(&text));
-                object
-                    .properties
-                    .insert("Name".to_string(), Value::string("#text".to_string()));
-                object
-                    .properties
-                    .insert("RawHTML".to_string(), Value::string(text));
-                object
-                    .properties
-                    .insert("Text".to_string(), Value::string(decoded));
-                object
-                    .properties
-                    .insert("Attributes".to_string(), Value::Struct(StructValue::new()));
-                object.properties.insert(
-                    "Children".to_string(),
+                let attributes =
+                    crate::execution::structure::construct_struct_from_fields_in_optional_context(
+                        runtime,
+                        std::iter::empty::<(&str, &Value)>(),
+                    )?
+                    .into_value_and_lease()
+                    .0;
+                (
+                    Value::string("#text".to_string()),
+                    Value::string(text),
+                    Value::string(decoded),
+                    attributes,
                     Value::Cell(
                         CellArray::new(Vec::new(), 0, 1)
                             .map_err(|err| html_error("htmlTree", format!("htmlTree: {err}")))?,
                     ),
-                );
+                )
             }
             HtmlNode::Element(element) => {
                 let name = element.name.to_ascii_uppercase();
                 let text = HtmlNode::Element(element.clone()).extract_text(ExtractionMethod::Tree);
-                let mut attr_struct = StructValue::new();
-                for (key, value) in &element.attrs {
-                    attr_struct.insert(key.clone(), Value::string(value.clone()));
-                }
+                let attribute_values = element
+                    .attrs
+                    .iter()
+                    .map(|(key, value)| (key.as_str(), Value::string(value.clone())))
+                    .collect::<Vec<_>>();
+                let attributes =
+                    crate::execution::structure::construct_struct_from_fields_in_optional_context(
+                        runtime,
+                        attribute_values.iter().map(|(key, value)| (*key, value)),
+                    )?
+                    .into_value_and_lease()
+                    .0;
                 let children = element
                     .children
                     .into_iter()
-                    .map(|child| child.into_object(Some(&name)).map(Value::Object))
+                    .map(|child| child.into_value(runtime, Some(&name)))
                     .collect::<BuiltinResult<Vec<_>>>()?;
                 let child_count = children.len();
-                object
-                    .properties
-                    .insert("Name".to_string(), Value::string(name));
-                object
-                    .properties
-                    .insert("RawHTML".to_string(), Value::string(element.raw));
-                object
-                    .properties
-                    .insert("Text".to_string(), Value::string(text));
-                object
-                    .properties
-                    .insert("Attributes".to_string(), Value::Struct(attr_struct));
-                object.properties.insert(
-                    "Children".to_string(),
+                (
+                    Value::string(name),
+                    Value::string(element.raw),
+                    Value::string(text),
+                    attributes,
                     Value::Cell(
                         CellArray::new(children, child_count, 1)
                             .map_err(|err| html_error("htmlTree", format!("htmlTree: {err}")))?,
                     ),
-                );
+                )
             }
-        }
-        object.properties.insert(
-            "Parent".to_string(),
-            Value::string(parent_name.unwrap_or(MISSING).to_string()),
-        );
-        Ok(object)
+        };
+        let parent = Value::string(parent_name.unwrap_or(MISSING).to_string());
+        let fields = [
+            ("Name", name),
+            ("RawHTML", raw_html),
+            ("Text", text),
+            ("Attributes", attributes),
+            ("Children", children),
+            ("Parent", parent),
+        ];
+        let object = crate::execution::object::construct_object_from_borrowed_fields(
+            runtime,
+            HTML_TREE_CLASS.display_name(),
+            fields.iter().map(|(name, value)| (*name, value)),
+        )?;
+        Ok(object.into_value_and_lease().0)
     }
 
     fn extract_text(&self, method: ExtractionMethod) -> String {
@@ -2151,7 +2117,7 @@ mod tests {
 
     fn string_value(value: Value) -> String {
         match value {
-            Value::String(text) => text,
+            Value::String(text) => text.to_string(),
             other => panic!("expected string, got {other:?}"),
         }
     }
@@ -2161,7 +2127,8 @@ mod tests {
     fn extracts_text_from_scalar_html() {
         let html = Value::String(
             "<html><body><h1>THE SONNETS</h1><p>by William Shakespeare</p></body></html>"
-                .to_string(),
+                .to_string()
+                .into(),
         );
         let out =
             futures::executor::block_on(extract_html_text_builtin(vec![html])).expect("extract");
@@ -2186,7 +2153,7 @@ mod tests {
             panic!("expected string array");
         };
         assert_eq!(array.shape, vec![1, 2]);
-        assert_eq!(array.data, vec!["alpha", "beta two"]);
+        assert_eq!(array.data(), vec!["alpha", "beta two"]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -2194,12 +2161,12 @@ mod tests {
     fn all_text_skips_scripts_and_styles() {
         let html = Value::String(
             "<body><style>.x{}</style><p>visible</p><script>hidden()</script><span>tail</span></body>"
-                .to_string(),
+                .to_string().into(),
         );
         let out = futures::executor::block_on(extract_html_text_builtin(vec![
             html,
-            Value::String("ExtractionMethod".to_string()),
-            Value::String("all-text".to_string()),
+            Value::String("ExtractionMethod".to_string().into()),
+            Value::String("all-text".to_string().into()),
         ]))
         .expect("extract");
         assert_eq!(string_value(out), "visible tail");
@@ -2208,7 +2175,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn quoted_attribute_gt_does_not_end_tag() {
-        let html = Value::String("<p title=\"1 > 0\">ok &amp; done</p>".to_string());
+        let html = Value::String("<p title=\"1 > 0\">ok &amp; done</p>".to_string().into());
         let out =
             futures::executor::block_on(extract_html_text_builtin(vec![html])).expect("extract");
         assert_eq!(string_value(out), "ok & done");
@@ -2220,8 +2187,8 @@ mod tests {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let cell = CellArray::new(
             vec![
-                Value::String("<p>first</p>".to_string()),
-                Value::String("<p>second</p>".to_string()),
+                Value::String("<p>first</p>".to_string().into()),
+                Value::String("<p>second</p>".to_string().into()),
             ],
             2,
             1,
@@ -2233,30 +2200,35 @@ mod tests {
             panic!("expected string array");
         };
         assert_eq!(array.shape, vec![2, 1]);
-        assert_eq!(array.data, vec!["first", "second"]);
+        assert_eq!(array.data(), vec!["first", "second"]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn html_tree_returns_object_with_core_properties() {
-        let tree = futures::executor::block_on(html_tree_builtin(vec![Value::String(
-            "<html><body><p class='lead'>RunMat</p></body></html>".to_string(),
-        )]))
+        let tree = futures::executor::block_on(html_tree_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "<html><body><p class='lead'>RunMat</p></body></html>"
+                    .to_string()
+                    .into(),
+            )]),
+        ))
         .expect("tree");
         let Value::Object(object) = tree else {
             panic!("expected object");
         };
-        assert!(object.class_name.is(HTML_TREE_CLASS));
+        assert!(object.class_name().is(HTML_TREE_CLASS));
         assert_eq!(
-            object.properties.get("Name"),
-            Some(&Value::String("HTML".to_string()))
+            object.properties().get("Name"),
+            Some(&Value::String("HTML".to_string().into()))
         );
         assert_eq!(
-            object.properties.get("Text"),
-            Some(&Value::String("RunMat".to_string()))
+            object.properties().get("Text"),
+            Some(&Value::String("RunMat".to_string().into()))
         );
         assert!(matches!(
-            object.properties.get("Children"),
+            object.properties().get("Children"),
             Some(Value::Cell(_))
         ));
     }
@@ -2270,21 +2242,29 @@ mod tests {
             vec![1, 2],
         )
         .unwrap();
-        let out = futures::executor::block_on(html_tree_builtin(vec![Value::StringArray(input)]))
-            .expect("tree");
+        let out = futures::executor::block_on(html_tree_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::StringArray(
+                input,
+            )]),
+        ))
+        .expect("tree");
         let Value::Cell(cell) = out else {
             panic!("expected cell");
         };
         assert_eq!(cell.shape, vec![1, 2]);
-        assert!(cell.data.iter().all(
+        assert!(cell.data().iter().all(
             |value| matches!(value, Value::Object(object) if object.is_class(HTML_TREE_CLASS))
         ));
     }
 
     #[test]
     fn html_tree_rejects_numeric_and_resident_inputs_before_gather() {
-        let numeric = futures::executor::block_on(html_tree_builtin(vec![Value::Num(1.0)]))
-            .expect_err("numeric input must reject");
+        let numeric = futures::executor::block_on(html_tree_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(1.0)]),
+        ))
+        .expect_err("numeric input must reject");
         assert_eq!(numeric.identifier(), Some("RunMat:html:InvalidInput"));
 
         let resident = Value::GpuTensor(
@@ -2297,8 +2277,11 @@ mod tests {
                 .expect("resident numeric admission fixture")
                 .handle,
         );
-        let resident = futures::executor::block_on(html_tree_builtin(vec![resident]))
-            .expect_err("resident input must reject before provider access");
+        let resident = futures::executor::block_on(html_tree_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![resident]),
+        ))
+        .expect_err("resident input must reject before provider access");
         assert_eq!(resident.identifier(), Some("RunMat:html:InvalidInput"));
         assert_eq!(
             HTML_TREE_INTEGER_AUDIT.kind,
@@ -2314,16 +2297,24 @@ mod tests {
             vec![1, 2],
         )
         .unwrap();
-        let array = futures::executor::block_on(html_tree_builtin(vec![Value::StringArray(input)]))
-            .expect_err("cell object-array representation is gated");
+        let array = futures::executor::block_on(html_tree_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::StringArray(
+                input,
+            )]),
+        ))
+        .expect_err("cell object-array representation is gated");
         assert_eq!(
             array.identifier(),
             Some("RunMat:compatibility:HtmlTreeCellObjectArrayExtension")
         );
 
         let broad = Value::Cell(CellArray::new(vec![Value::from("<p>x</p>")], 1, 1).unwrap());
-        let broad = futures::executor::block_on(html_tree_builtin(vec![broad]))
-            .expect_err("string-valued cell is gated");
+        let broad = futures::executor::block_on(html_tree_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![broad]),
+        ))
+        .expect_err("string-valued cell is gated");
         assert_eq!(
             broad.identifier(),
             Some("RunMat:compatibility:HtmlTreeBroadCellExtension")
@@ -2333,9 +2324,14 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn extracts_from_html_tree_object() {
-        let tree = futures::executor::block_on(html_tree_builtin(vec![Value::String(
-            "<article><h2>Title</h2><p>Body &amp; tail</p></article>".to_string(),
-        )]))
+        let tree = futures::executor::block_on(html_tree_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "<article><h2>Title</h2><p>Body &amp; tail</p></article>"
+                    .to_string()
+                    .into(),
+            )]),
+        ))
         .expect("tree");
         let out =
             futures::executor::block_on(extract_html_text_builtin(vec![tree])).expect("extract");
@@ -2345,14 +2341,14 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn find_element_supports_common_selectors_and_attribute_reads() {
-        let tree = futures::executor::block_on(html_tree_builtin(vec![Value::String(
+        let tree = futures::executor::block_on(html_tree_builtin(None, crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
             "<div><a id='home' class='nav primary' href='/home'>Home</a><a class='nav'>Docs</a><p data-kind='lead'>Lead</p></div>"
-                .to_string(),
-        )]))
+                .to_string().into(),
+        )])))
         .expect("tree");
         let links = futures::executor::block_on(find_element_builtin(vec![
             tree.clone(),
-            Value::String("a.nav".to_string()),
+            Value::String("a.nav".to_string().into()),
         ]))
         .expect("find links");
         let Value::Cell(link_cell) = links else {
@@ -2368,22 +2364,22 @@ mod tests {
             panic!("expected string array");
         };
         assert_eq!(link_text.shape, vec![2, 1]);
-        assert_eq!(link_text.data, vec!["Home", "Docs"]);
+        assert_eq!(link_text.data(), vec!["Home", "Docs"]);
 
         let hrefs = futures::executor::block_on(get_attribute_builtin(vec![
             Value::Cell(link_cell),
-            Value::String("href".to_string()),
+            Value::String("href".to_string().into()),
         ]))
         .expect("hrefs");
         let Value::StringArray(hrefs) = hrefs else {
             panic!("expected string array");
         };
         assert_eq!(hrefs.shape, vec![2, 1]);
-        assert_eq!(hrefs.data, vec!["/home", MISSING]);
+        assert_eq!(hrefs.data(), vec!["/home", MISSING]);
 
         let lead = futures::executor::block_on(find_element_builtin(vec![
             tree.clone(),
-            Value::String("[data-kind=lead]".to_string()),
+            Value::String("[data-kind=lead]".to_string().into()),
         ]))
         .expect("find attr");
         let Value::Cell(lead) = lead else {
@@ -2393,7 +2389,7 @@ mod tests {
 
         let home = futures::executor::block_on(find_element_builtin(vec![
             tree,
-            Value::String("#home".to_string()),
+            Value::String("#home".to_string().into()),
         ]))
         .expect("find id");
         let Value::Cell(home) = home else {
@@ -2405,14 +2401,14 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn find_element_supports_combinators_empty_not_empty_and_groups() {
-        let tree = futures::executor::block_on(html_tree_builtin(vec![Value::String(
+        let tree = futures::executor::block_on(html_tree_builtin(None, crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
             "<section><h1>Title</h1>\n<p class='lead'>Lead</p><label></label><label>Name</label></section>"
-                .to_string(),
-        )]))
+                .to_string().into(),
+        )])))
         .expect("tree");
         let adjacent = futures::executor::block_on(find_element_builtin(vec![
             tree.clone(),
-            Value::String("h1 + p".to_string()),
+            Value::String("h1 + p".to_string().into()),
         ]))
         .expect("adjacent");
         let Value::Cell(adjacent) = adjacent else {
@@ -2422,7 +2418,7 @@ mod tests {
 
         let child = futures::executor::block_on(find_element_builtin(vec![
             tree.clone(),
-            Value::String("section > p.lead".to_string()),
+            Value::String("section > p.lead".to_string().into()),
         ]))
         .expect("child");
         let Value::Cell(child) = child else {
@@ -2432,7 +2428,7 @@ mod tests {
 
         let empty = futures::executor::block_on(find_element_builtin(vec![
             tree.clone(),
-            Value::String("label:empty".to_string()),
+            Value::String("label:empty".to_string().into()),
         ]))
         .expect("empty");
         let Value::Cell(empty) = empty else {
@@ -2442,7 +2438,7 @@ mod tests {
 
         let not_empty = futures::executor::block_on(find_element_builtin(vec![
             tree,
-            Value::String("label:not(:empty), h1".to_string()),
+            Value::String("label:not(:empty), h1".to_string().into()),
         ]))
         .expect("not empty");
         let Value::Cell(not_empty) = not_empty else {
@@ -2455,19 +2451,22 @@ mod tests {
         let Value::StringArray(text) = text else {
             panic!("expected string array");
         };
-        assert_eq!(text.data, vec!["Title", "Name"]);
+        assert_eq!(text.data(), vec!["Title", "Name"]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn get_attribute_returns_missing_for_absent_scalar_attribute() {
-        let tree = futures::executor::block_on(html_tree_builtin(vec![Value::String(
-            "<a href='/home'>Home</a>".to_string(),
-        )]))
+        let tree = futures::executor::block_on(html_tree_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "<a href='/home'>Home</a>".to_string().into(),
+            )]),
+        ))
         .expect("tree");
         let out = futures::executor::block_on(get_attribute_builtin(vec![
             tree,
-            Value::String("title".to_string()),
+            Value::String("title".to_string().into()),
         ]))
         .expect("attribute");
         assert_eq!(string_value(out), MISSING);
@@ -2475,9 +2474,12 @@ mod tests {
 
     #[test]
     fn get_attribute_accepts_scalar_cell_character_attribute_name() {
-        let tree = futures::executor::block_on(html_tree_builtin(vec![Value::String(
-            "<a href='/home'>Home</a>".to_string(),
-        )]))
+        let tree = futures::executor::block_on(html_tree_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "<a href='/home'>Home</a>".to_string().into(),
+            )]),
+        ))
         .expect("tree");
         let attr = Value::Cell(
             CellArray::new(
@@ -2495,13 +2497,18 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn find_element_handles_quoted_attribute_selectors_and_empty_results() {
-        let tree = futures::executor::block_on(html_tree_builtin(vec![Value::String(
-            "<div><p data-kind=\"lead item\">Lead</p></div>".to_string(),
-        )]))
+        let tree = futures::executor::block_on(html_tree_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "<div><p data-kind=\"lead item\">Lead</p></div>"
+                    .to_string()
+                    .into(),
+            )]),
+        ))
         .expect("tree");
         let quoted = futures::executor::block_on(find_element_builtin(vec![
             tree.clone(),
-            Value::String("p[data-kind=\"lead item\"]".to_string()),
+            Value::String("p[data-kind=\"lead item\"]".to_string().into()),
         ]))
         .expect("quoted attribute selector");
         let Value::Cell(quoted) = quoted else {
@@ -2511,23 +2518,23 @@ mod tests {
 
         let missing = futures::executor::block_on(find_element_builtin(vec![
             tree,
-            Value::String("span.unknown".to_string()),
+            Value::String("span.unknown".to_string().into()),
         ]))
         .expect("empty result");
         let Value::Cell(missing) = missing else {
             panic!("expected cell");
         };
         assert_eq!(missing.shape, vec![0, 1]);
-        assert!(missing.data.is_empty());
+        assert!(missing.data().is_empty());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn find_element_supports_css_attribute_operator_selectors() {
-        let tree = futures::executor::block_on(html_tree_builtin(vec![Value::String(
+        let tree = futures::executor::block_on(html_tree_builtin(None, crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
             "<div><a href='manual.pdf' hreflang='en-US' rel='tag external' data-code='abc-123'>Manual</a><a href='guide.html' hreflang='en' rel='external' data-code='xyz'>Guide</a><a href='notes.txt' data-code='a$=b'>Notes</a></div>"
-                .to_string(),
-        )]))
+                .to_string().into(),
+        )])))
         .expect("tree");
 
         for (selector, expected) in [
@@ -2540,14 +2547,14 @@ mod tests {
         ] {
             let matches = futures::executor::block_on(find_element_builtin(vec![
                 tree.clone(),
-                Value::String(selector.to_string()),
+                Value::String(selector.to_string().into()),
             ]))
             .unwrap_or_else(|err| panic!("{selector} failed: {err}"));
             let text = futures::executor::block_on(extract_html_text_builtin(vec![matches]))
                 .unwrap_or_else(|err| panic!("{selector} text extraction failed: {err}"));
             match text {
                 Value::String(text) => assert_eq!(vec![text], expected),
-                Value::StringArray(array) => assert_eq!(array.data, expected),
+                Value::StringArray(array) => assert_eq!(array.data(), expected),
                 other => panic!("expected extracted text for {selector}, got {other:?}"),
             }
         }
@@ -2556,15 +2563,19 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn find_element_supports_first_child_first_of_type_and_general_sibling() {
-        let tree = futures::executor::block_on(html_tree_builtin(vec![Value::String(
+        let tree = futures::executor::block_on(html_tree_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
             "<section><p>Intro</p><span>Aside</span><a>First link</a><a>Second link</a></section>"
-                .to_string(),
-        )]))
+                .to_string()
+                .into(),
+        )]),
+        ))
         .expect("tree");
 
         let first_child = futures::executor::block_on(find_element_builtin(vec![
             tree.clone(),
-            Value::String("p:first-child".to_string()),
+            Value::String("p:first-child".to_string().into()),
         ]))
         .expect("first child");
         let text = futures::executor::block_on(extract_html_text_builtin(vec![first_child]))
@@ -2573,7 +2584,7 @@ mod tests {
 
         let first_of_type = futures::executor::block_on(find_element_builtin(vec![
             tree.clone(),
-            Value::String("a:first-of-type".to_string()),
+            Value::String("a:first-of-type".to_string().into()),
         ]))
         .expect("first of type");
         let text = futures::executor::block_on(extract_html_text_builtin(vec![first_of_type]))
@@ -2582,7 +2593,7 @@ mod tests {
 
         let following_links = futures::executor::block_on(find_element_builtin(vec![
             tree,
-            Value::String("p ~ a".to_string()),
+            Value::String("p ~ a".to_string().into()),
         ]))
         .expect("general sibling");
         let text = futures::executor::block_on(extract_html_text_builtin(vec![following_links]))
@@ -2590,28 +2601,36 @@ mod tests {
         let Value::StringArray(text) = text else {
             panic!("expected string array");
         };
-        assert_eq!(text.data, vec!["First link", "Second link"]);
+        assert_eq!(text.data(), vec!["First link", "Second link"]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn find_element_rejects_unsupported_selectors() {
-        let tree =
-            futures::executor::block_on(html_tree_builtin(vec![Value::String("<p>x</p>".into())]))
-                .expect("tree");
+        let tree = futures::executor::block_on(html_tree_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "<p>x</p>".into(),
+            )]),
+        ))
+        .expect("tree");
         let err = futures::executor::block_on(find_element_builtin(vec![
             tree,
-            Value::String("p:hover".to_string()),
+            Value::String("p:hover".to_string().into()),
         ]))
         .expect_err("unsupported selector");
         assert!(err.to_string().contains("unsupported pseudo-class"));
 
-        let tree =
-            futures::executor::block_on(html_tree_builtin(vec![Value::String("<p>x</p>".into())]))
-                .expect("tree");
+        let tree = futures::executor::block_on(html_tree_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                "<p>x</p>".into(),
+            )]),
+        ))
+        .expect("tree");
         let err = futures::executor::block_on(find_element_builtin(vec![
             tree,
-            Value::String("div > + p".to_string()),
+            Value::String("div > + p".to_string().into()),
         ]))
         .expect_err("repeated combinator");
         assert!(err.to_string().contains("repeated combinators"));
@@ -2680,9 +2699,12 @@ mod tests {
             ]))
             .expect_err("integer tree input");
             assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
-            let tree = futures::executor::block_on(html_tree_builtin(vec![Value::String(
-                "<a href='x'>x</a>".into(),
-            )]))
+            let tree = futures::executor::block_on(html_tree_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+                    "<a href='x'>x</a>".into(),
+                )]),
+            ))
             .expect("tree");
             let error = futures::executor::block_on(get_attribute_builtin(vec![tree, value]))
                 .expect_err("integer attribute input");
@@ -2722,9 +2744,9 @@ mod tests {
     #[test]
     fn invalid_extraction_method_errors() {
         let err = futures::executor::block_on(extract_html_text_builtin(vec![
-            Value::String("<p>x</p>".to_string()),
-            Value::String("ExtractionMethod".to_string()),
-            Value::String("summary".to_string()),
+            Value::String("<p>x</p>".to_string().into()),
+            Value::String("ExtractionMethod".to_string().into()),
+            Value::String("summary".to_string().into()),
         ]))
         .expect_err("invalid method");
         assert!(err.to_string().contains("ExtractionMethod"));

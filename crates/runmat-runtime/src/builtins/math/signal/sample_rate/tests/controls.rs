@@ -83,7 +83,10 @@ fn dimension_runtime_rejects_known_invalid_scalar_kinds() {
         Value::Complex(2.0, 0.0),
     ] {
         let error = block_on(parse_resample_options(
-            vec![Value::String("Dimension".into()), value],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("Dimension".into()),
+                value,
+            ]),
             2,
             1,
         ))

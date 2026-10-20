@@ -119,19 +119,23 @@ pub(super) fn mechanical_damping_from_value(
             "Damping must be a typed fea.MechanicalDamping value",
         ));
     };
-    if object.class_name.display_name() != MECHANICAL_DAMPING_CLASS {
+    if object.class_name().display_name() != MECHANICAL_DAMPING_CLASS {
         return Err(builtin_error(
             builtin,
             &ERROR_INPUT,
             format!(
                 "Damping must be {MECHANICAL_DAMPING_CLASS}, got {}",
-                object.class_name
+                object.class_name()
             ),
         ));
     }
     validate_damping_object(object)
         .map_err(|message| builtin_error(builtin, &ERROR_INPUT, message))?;
-    let Value::String(kind) = object.properties.get(KIND).expect("validated damping kind") else {
+    let Value::String(kind) = object
+        .properties()
+        .get(KIND)
+        .expect("validated damping kind")
+    else {
         unreachable!("validated damping kind is a string")
     };
     match kind.as_str() {
@@ -140,7 +144,7 @@ pub(super) fn mechanical_damping_from_value(
             mass_coefficient: runmat_analysis_core::RayleighMassCoefficient::new(quantity_scalar(
                 builtin,
                 object
-                    .properties
+                    .properties()
                     .get(MASS_COEFFICIENT)
                     .expect("validated mass coefficient"),
                 RAYLEIGH_MASS_COEFFICIENT_CLASS,
@@ -150,7 +154,7 @@ pub(super) fn mechanical_damping_from_value(
                 quantity_scalar(
                     builtin,
                     object
-                        .properties
+                        .properties()
                         .get(STIFFNESS_COEFFICIENT)
                         .expect("validated stiffness coefficient"),
                     RAYLEIGH_STIFFNESS_COEFFICIENT_CLASS,
@@ -168,19 +172,18 @@ fn damping_object(
     stiffness_coefficient: Option<Value>,
 ) -> BuiltinResult<Value> {
     ensure_damping_class_registered();
-    let mut object = ObjectInstance::new(MECHANICAL_DAMPING_CLASS);
-    object
-        .properties
-        .insert(KIND.into(), Value::String(kind.into()));
+    let mut object = crate::builtins::fea::object_api::ordinary_builder(
+        "fea.MechanicalDamping",
+        MECHANICAL_DAMPING_CLASS,
+    )?;
+    object.insert(KIND.into(), Value::String(kind.into()));
     if let Some(value) = mass_coefficient {
-        object.properties.insert(MASS_COEFFICIENT.into(), value);
+        object.insert(MASS_COEFFICIENT.into(), value);
     }
     if let Some(value) = stiffness_coefficient {
-        object
-            .properties
-            .insert(STIFFNESS_COEFFICIENT.into(), value);
+        object.insert(STIFFNESS_COEFFICIENT.into(), value);
     }
-    Ok(Value::Object(object))
+    Ok(Value::Object(object.finish()))
 }
 
 pub(super) fn ensure_damping_class_registered() {
@@ -213,25 +216,25 @@ pub(super) fn ensure_damping_class_registered() {
 }
 
 fn validate_damping_object(object: &ObjectInstance) -> Result<(), String> {
-    let Some(Value::String(kind)) = object.properties.get(KIND) else {
+    let Some(Value::String(kind)) = object.properties().get(KIND) else {
         return Err("fea.MechanicalDamping requires a string `kind`".into());
     };
     match kind.as_str() {
         "undamped" => {
-            if object.properties.contains_key(MASS_COEFFICIENT)
-                || object.properties.contains_key(STIFFNESS_COEFFICIENT)
+            if object.properties().contains_key(MASS_COEFFICIENT)
+                || object.properties().contains_key(STIFFNESS_COEFFICIENT)
             {
                 return Err("undamped mechanical damping cannot contain coefficients".into());
             }
         }
         "rayleigh" => {
-            let mass = object.properties.get(MASS_COEFFICIENT);
-            let stiffness = object.properties.get(STIFFNESS_COEFFICIENT);
-            if !matches!(mass, Some(Value::Object(value)) if value.class_name.display_name() == RAYLEIGH_MASS_COEFFICIENT_CLASS)
+            let mass = object.properties().get(MASS_COEFFICIENT);
+            let stiffness = object.properties().get(STIFFNESS_COEFFICIENT);
+            if !matches!(mass, Some(Value::Object(value)) if value.class_name().display_name() == RAYLEIGH_MASS_COEFFICIENT_CLASS)
             {
                 return Err("Rayleigh damping requires a typed fea.RayleighMassCoefficient".into());
             }
-            if !matches!(stiffness, Some(Value::Object(value)) if value.class_name.display_name() == RAYLEIGH_STIFFNESS_COEFFICIENT_CLASS)
+            if !matches!(stiffness, Some(Value::Object(value)) if value.class_name().display_name() == RAYLEIGH_STIFFNESS_COEFFICIENT_CLASS)
             {
                 return Err(
                     "Rayleigh damping requires a typed fea.RayleighStiffnessCoefficient".into(),

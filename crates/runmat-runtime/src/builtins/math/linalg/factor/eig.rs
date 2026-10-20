@@ -111,10 +111,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::factor::eig"
 )]
-async fn eig_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn eig_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     if let Some(out_count) = crate::output_count::current_output_count() {
         let require_left = out_count >= 3;
-        let eval = evaluate(value, &rest, require_left).await?;
+        let eval = evaluate(value, rest.view(), require_left).await?;
         if out_count == 0 {
             return Ok(Value::output_list(Vec::new()));
         }
@@ -134,7 +137,7 @@ async fn eig_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Val
         }
         return Err(eig_error(&EIG_ERROR_INVALID_ARGUMENT));
     }
-    let eval = evaluate(value, &rest, false).await?;
+    let eval = evaluate(value, rest.view(), false).await?;
     Ok(eval.eigenvalues())
 }
 
@@ -235,7 +238,11 @@ struct EigRequest {
     options: EigOptions,
 }
 
-pub async fn evaluate(value: Value, args: &[Value], require_left: bool) -> BuiltinResult<EigEval> {
+pub async fn evaluate(
+    value: Value,
+    args: crate::call::FunctionArgumentView<'_>,
+    require_left: bool,
+) -> BuiltinResult<EigEval> {
     let request = parse_request(args)?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
     ensure_eig_coefficient_extension_enabled(&value)?;
@@ -594,7 +601,7 @@ fn cast_eig_value_to_single(value: Value) -> BuiltinResult<Value> {
     }
 }
 
-fn parse_request(args: &[Value]) -> BuiltinResult<EigRequest> {
+fn parse_request(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<EigRequest> {
     let mut opts = EigOptions::default();
     let mut b = None;
     for (idx, arg) in args.iter().enumerate() {
@@ -625,13 +632,13 @@ fn parse_request(args: &[Value]) -> BuiltinResult<EigRequest> {
 fn option_text(value: &Value) -> BuiltinResult<Option<String>> {
     match value {
         Value::String(text) => Ok(Some(text.as_str().to_owned())),
-        Value::StringArray(array) if array.data.len() == 1 => {
-            Ok(Some(array.data[0].as_str().to_owned()))
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(Some(array.data()[0].as_str().to_owned()))
         }
         Value::StringArray(_) => Err(eig_invalid_argument(
             "eig: option arguments must be character vectors or string scalars",
         )),
-        Value::CharArray(chars) if chars.rows <= 1 => Ok(Some(chars.data.iter().collect())),
+        Value::CharArray(chars) if chars.rows <= 1 => Ok(Some(chars.data().iter().collect())),
         Value::CharArray(_) => Err(eig_invalid_argument(
             "eig: option arguments must be character vectors or string scalars",
         )),
@@ -1950,10 +1957,16 @@ pub(crate) mod tests {
     }
 
     fn eig_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::eig_builtin(value, rest))
+        let rest = crate::execution::RootedValues::new(rest)
+            .map_err(|error| error.into_runtime_error())?;
+        block_on(super::eig_builtin(value, rest.into()))
     }
 
     fn evaluate(value: Value, args: &[Value], require_left: bool) -> BuiltinResult<EigEval> {
-        block_on(super::evaluate(value, args, require_left))
+        block_on(super::evaluate(
+            value,
+            crate::call::FunctionArgumentView::from_slice(args),
+            require_left,
+        ))
     }
 }

@@ -73,12 +73,12 @@ pub(crate) fn parse_positive_db(
 pub(crate) fn option_text(value: &Value) -> Option<String> {
     match value {
         Value::String(text) => Some(text.trim().to_ascii_lowercase()),
-        Value::StringArray(array) if array.data.len() == 1 => {
-            Some(array.data[0].trim().to_ascii_lowercase())
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Some(array.data()[0].trim().to_ascii_lowercase())
         }
         Value::CharArray(chars) if chars.rows <= 1 => Some(
             chars
-                .data
+                .data()
                 .iter()
                 .collect::<String>()
                 .trim()

@@ -291,7 +291,7 @@ fn read_cell_with_plan(value: &CellArray, plan: &IndexPlan) -> Result<Value, Run
         .iter()
         .map(|index| {
             cell_storage_index(*index as usize, &value.shape)
-                .and_then(|index| value.data.get(index))
+                .and_then(|index| value.data().get(index))
                 .cloned()
                 .ok_or_else(|| {
                     semantic_error("ParallelSliceShape", "cell slice index is out of bounds")
@@ -322,8 +322,8 @@ fn assign_cell_with_plan(
             "cell sliced output has an incompatible shape",
         ));
     }
-    if !destination.data.is_exact() {
-        destination.data.make_unique_unbounded().map_err(|error| {
+    if !destination.data_owner().is_exact() {
+        destination.make_data_unique_unbounded().map_err(|error| {
             semantic_error(
                 "ParallelSliceOwner",
                 format!("cell slice owner unavailable: {error}"),
@@ -335,7 +335,7 @@ fn assign_cell_with_plan(
             cell_storage_index(*index as usize, &destination.shape).ok_or_else(|| {
                 semantic_error("ParallelSliceShape", "cell slice index is out of bounds")
             })?;
-        if storage_index >= destination.data.len() {
+        if storage_index >= destination.data().len() {
             return Err(semantic_error(
                 "ParallelSliceShape",
                 "cell slice index is out of bounds",

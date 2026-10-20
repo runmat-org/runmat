@@ -208,8 +208,10 @@ pub const FUNCTIONTESTS_CATALOG_ENTRY: BuiltinCatalogEntry = entry(EntryDefiniti
     descriptor: &FUNCTIONTESTS_DESCRIPTOR,
     infer: inference::functiontests,
     async_behavior: BuiltinAsyncBehavior::NeverSuspends,
-    purity: BuiltinPurity::Pure,
-    effects: &[EffectKind::EnvironmentRead, EffectKind::MayThrow],
+    // Labels come from the invocation's already-bound source record. This
+    // reads neither session environment variables nor host/filesystem state.
+    purity: BuiltinPurity::DeterministicReadOnly,
+    effects: &[EffectKind::MayThrow],
     capabilities: &[],
 });
 pub const WITH_TEXT_OUTPUT_CATALOG_ENTRY: BuiltinCatalogEntry = entry(EntryDefinition {

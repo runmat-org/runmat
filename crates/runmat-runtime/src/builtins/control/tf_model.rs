@@ -10,7 +10,7 @@ pub use admission::preflight_ss_host_properties;
 pub(super) use admission::state_matrix_dimensions;
 use admission::{
     admit_coefficient_property, admit_delay_property, admit_sample_time_property,
-    preflight_host_model_properties,
+    preflight_host_model_properties, preflight_ss_host_value,
 };
 pub use domain::{TfPolynomialBasis, TfSampleDomain, TfVariable};
 use numerics::{finite_complex_ratio, finite_complex_ratio_direction};
@@ -255,7 +255,7 @@ impl TfModel {
     }
 
     pub async fn from_value_async(value: Value, builtin: &'static str) -> BuiltinResult<Self> {
-        let Value::Object(mut object) = value else {
+        let Value::Object(object) = value else {
             return Self::from_value(value, builtin);
         };
         if !object.is_class(TF_CLASS) {
@@ -276,13 +276,29 @@ impl TfModel {
             property(&object, name, builtin)?;
         }
         preflight_host_model_properties(&object, builtin)?;
-        for name in REQUIRED.iter().copied().chain(["Variable"]) {
-            if let Some(value) = object.properties.get(name) {
-                let gathered = dispatcher::gather_if_needed_async(value).await?;
-                object.properties.insert(name.to_string(), gathered);
-            }
-        }
-        Self::from_value(Value::Object(object), builtin)
+        let numerator =
+            dispatcher::gather_if_needed_async(property(&object, "Numerator", builtin)?).await?;
+        let denominator =
+            dispatcher::gather_if_needed_async(property(&object, "Denominator", builtin)?).await?;
+        let sample_time =
+            dispatcher::gather_if_needed_async(property(&object, "Ts", builtin)?).await?;
+        let input_delay =
+            dispatcher::gather_if_needed_async(property(&object, "InputDelay", builtin)?).await?;
+        let output_delay =
+            dispatcher::gather_if_needed_async(property(&object, "OutputDelay", builtin)?).await?;
+        let variable = match object.properties().get("Variable") {
+            Some(value) => Some(dispatcher::gather_if_needed_async(value).await?),
+            None => None,
+        };
+        Self::from_host_properties(
+            &numerator,
+            &denominator,
+            variable.as_ref(),
+            &sample_time,
+            &input_delay,
+            &output_delay,
+            builtin,
+        )
     }
 
     pub fn from_value(value: Value, builtin: &'static str) -> BuiltinResult<Self> {
@@ -299,25 +315,43 @@ impl TfModel {
                 unsupported_model_identifier(builtin),
                 format!(
                     "{builtin}: unsupported model class '{}'; only SISO tf objects are supported",
-                    object.class_name
+                    object.class_name()
                 ),
             ));
         }
 
-        for (name, role) in [("Numerator", "numerator"), ("Denominator", "denominator")] {
-            admit_coefficient_property(property(&object, name, builtin)?, role, builtin)?;
-        }
-        let numerator = coefficients_from_property(&object, "Numerator", builtin)?;
-        let denominator = coefficients_from_property(&object, "Denominator", builtin)?;
+        Self::from_host_properties(
+            property(&object, "Numerator", builtin)?,
+            property(&object, "Denominator", builtin)?,
+            object.properties().get("Variable"),
+            property(&object, "Ts", builtin)?,
+            property(&object, "InputDelay", builtin)?,
+            property(&object, "OutputDelay", builtin)?,
+            builtin,
+        )
+    }
+
+    fn from_host_properties(
+        numerator_value: &Value,
+        denominator_value: &Value,
+        variable_value: Option<&Value>,
+        sample_time_value: &Value,
+        input_delay_value: &Value,
+        output_delay_value: &Value,
+        builtin: &'static str,
+    ) -> BuiltinResult<Self> {
+        admit_coefficient_property(numerator_value, "numerator", builtin)?;
+        admit_coefficient_property(denominator_value, "denominator", builtin)?;
+        let numerator = coefficients_from_value(numerator_value, "Numerator", builtin)?;
+        let denominator = coefficients_from_value(denominator_value, "Denominator", builtin)?;
         validate_coefficients("numerator", &numerator, builtin)?;
         validate_coefficients("denominator", &denominator, builtin)?;
-        admit_sample_time_property(property(&object, "Ts", builtin)?, builtin)?;
-        let sample_time = scalar_property(&object, "Ts", builtin)?;
-        for name in ["InputDelay", "OutputDelay"] {
-            admit_delay_property(property(&object, name, builtin)?, name, builtin)?;
-        }
-        let input_delay = scalar_property(&object, "InputDelay", builtin)?;
-        let output_delay = scalar_property(&object, "OutputDelay", builtin)?;
+        admit_sample_time_property(sample_time_value, builtin)?;
+        let sample_time = scalar_f64(sample_time_value, "Ts", builtin)?;
+        admit_delay_property(input_delay_value, "InputDelay", builtin)?;
+        admit_delay_property(output_delay_value, "OutputDelay", builtin)?;
+        let input_delay = scalar_f64(input_delay_value, "InputDelay", builtin)?;
+        let output_delay = scalar_f64(output_delay_value, "OutputDelay", builtin)?;
         validate_delay(input_delay, "InputDelay", builtin)?;
         validate_delay(output_delay, "OutputDelay", builtin)?;
         if all_zero(&denominator) {
@@ -327,7 +361,7 @@ impl TfModel {
                 format!("{builtin}: denominator coefficients must not all be zero"),
             ));
         }
-        let variable = match object.properties.get("Variable") {
+        let variable = match variable_value {
             Some(value) => TfVariable::parse(&scalar_text(value, "Variable", builtin)?, builtin)?,
             None => {
                 if sample_time != 0.0 {
@@ -352,29 +386,24 @@ impl TfModel {
     pub fn to_value(&self, builtin: &'static str) -> BuiltinResult<Value> {
         ensure_tf_class_registered();
         let (numerator, denominator) = self.external_coefficients();
-        let mut object = ObjectInstance::new(TF_CLASS.to_string());
-        object.properties.insert(
+        let mut object =
+            runmat_value::UnboundedObjectBuilder::with_property_capacity(TF_CLASS.to_string(), 6);
+        object.insert(
             "Numerator".to_string(),
             coefficient_value(&numerator, builtin)?,
         );
-        object.properties.insert(
+        object.insert(
             "Denominator".to_string(),
             coefficient_value(&denominator, builtin)?,
         );
-        object.properties.insert(
+        object.insert(
             "Variable".to_string(),
             Value::CharArray(CharArray::new_row(self.variable.as_str())),
         );
-        object
-            .properties
-            .insert("Ts".to_string(), Value::Num(self.sample_time()));
-        object
-            .properties
-            .insert("InputDelay".to_string(), Value::Num(self.input_delay));
-        object
-            .properties
-            .insert("OutputDelay".to_string(), Value::Num(self.output_delay));
-        Ok(Value::Object(object))
+        object.insert("Ts".to_string(), Value::Num(self.sample_time()));
+        object.insert("InputDelay".to_string(), Value::Num(self.input_delay));
+        object.insert("OutputDelay".to_string(), Value::Num(self.output_delay));
+        Ok(Value::Object(object.finish()))
     }
 
     pub fn coefficient_values(&self, builtin: &'static str) -> BuiltinResult<(Value, Value)> {
@@ -870,7 +899,10 @@ pub fn preflight_model_operand(value: &Value, builtin: &'static str) -> BuiltinR
                 return Err(control_error(
                     builtin,
                     unsupported_model_identifier(builtin),
-                    format!("{builtin}: unsupported model class '{}'", object.class_name),
+                    format!(
+                        "{builtin}: unsupported model class '{}'",
+                        object.class_name()
+                    ),
                 ));
             }
             for name in [
@@ -899,9 +931,9 @@ pub fn scalar_text(
 ) -> BuiltinResult<runmat_value::Utf8Text> {
     match value {
         Value::String(text) => Ok(text.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::StringArray(array) if array.data().len() == 1 => Ok(array.data()[0].clone()),
         Value::CharArray(array) if array.rows == 1 => {
-            Ok(array.data.iter().collect::<String>().into())
+            Ok(array.data().iter().collect::<String>().into())
         }
         other => Err(control_error(
             builtin,
@@ -1031,8 +1063,20 @@ pub fn ss_poles_from_object(
     builtin: &'static str,
 ) -> BuiltinResult<(Vec<Complex64>, f64)> {
     preflight_ss_host_properties(object, &["A", "Ts"], builtin)?;
-    let a = ss_state_matrix_property(object, "A", builtin)?;
-    let sample_time = scalar_property(object, "Ts", builtin)?;
+    ss_poles_from_values(
+        property(object, "A", builtin)?,
+        property(object, "Ts", builtin)?,
+        builtin,
+    )
+}
+
+fn ss_poles_from_values(
+    state: &Value,
+    sample: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<(Vec<Complex64>, f64)> {
+    let a = ss_state_matrix_value(state, "A", builtin)?;
+    let sample_time = scalar_f64(sample, "Ts", builtin)?;
     validate_sample_time(sample_time, builtin)?;
     let eigenvalues = a.eigenvalues().ok_or_else(|| {
         control_error(
@@ -1045,13 +1089,15 @@ pub fn ss_poles_from_object(
 }
 
 /// Gather only the state-space properties consumed by an analysis operation.
-pub async fn gather_ss_properties(
-    mut object: ObjectInstance,
-    required: &[&str],
+/// The fixed result lives in the caller's future; no temporary Object
+/// generation or property map is allocated merely to parse host values.
+pub async fn gather_ss_property_values<const N: usize>(
+    object: &ObjectInstance,
+    required: [&'static str; N],
     builtin: &'static str,
-) -> BuiltinResult<ObjectInstance> {
-    for &name in required {
-        if !object.properties.contains_key(name) {
+) -> BuiltinResult<[Value; N]> {
+    for name in required {
+        if !object.properties().contains_key(name) {
             return Err(control_error(
                 builtin,
                 invalid_model_identifier(builtin),
@@ -1059,17 +1105,21 @@ pub async fn gather_ss_properties(
             ));
         }
     }
-    preflight_ss_host_properties(&object, required, builtin)?;
-    for &name in required {
-        let value = object
-            .properties
+    preflight_ss_host_properties(object, &required, builtin)?;
+    let mut values = required.map(|name| {
+        object
+            .properties()
             .get(name)
-            .expect("preflight checked property");
-        let gathered = dispatcher::gather_if_needed_async(value).await?;
-        object.properties.insert(name.to_string(), gathered);
+            .expect("preflight checked property")
+            .clone()
+    });
+    for value in &mut values {
+        *value = dispatcher::gather_if_needed_async(value).await?;
     }
-    preflight_ss_host_properties(&object, required, builtin)?;
-    Ok(object)
+    for (name, value) in required.into_iter().zip(&values) {
+        preflight_ss_host_value(name, value, builtin)?;
+    }
+    Ok(values)
 }
 
 /// Gather only the state matrix and sample time used by pole analysis. Other
@@ -1079,7 +1129,7 @@ pub async fn ss_poles_from_object_async(
     builtin: &'static str,
 ) -> BuiltinResult<(Vec<Complex64>, f64)> {
     for name in ["A", "Ts"] {
-        if !object.properties.contains_key(name) {
+        if !object.properties().contains_key(name) {
             return Err(control_error(
                 builtin,
                 invalid_model_identifier(builtin),
@@ -1088,8 +1138,8 @@ pub async fn ss_poles_from_object_async(
         }
     }
     preflight_ss_host_properties(object, &["A", "Ts"], builtin)?;
-    let a_resident = matches!(object.properties.get("A"), Some(Value::GpuTensor(_)));
-    let ts_resident = matches!(object.properties.get("Ts"), Some(Value::GpuTensor(_)));
+    let a_resident = matches!(object.properties().get("A"), Some(Value::GpuTensor(_)));
+    let ts_resident = matches!(object.properties().get("Ts"), Some(Value::GpuTensor(_)));
     if !a_resident {
         // Pole analysis accepts only real A, unlike general SS conversion.
         ss_state_matrix_property(object, "A", builtin)?;
@@ -1097,18 +1147,18 @@ pub async fn ss_poles_from_object_async(
     if !a_resident && !ts_resident {
         return ss_poles_from_object(object, builtin);
     }
-    let mut consumed = ObjectInstance::new(object.class_name.clone());
-    for name in ["A", "Ts"] {
-        let value = object
-            .properties
-            .get(name)
-            .expect("prevalidated ss property");
-        consumed.properties.insert(
-            name.to_string(),
-            dispatcher::gather_if_needed_async(value).await?,
-        );
-    }
-    ss_poles_from_object(&consumed, builtin)
+    let state = dispatcher::gather_if_needed_async(
+        object.properties().get("A").expect("prevalidated ss state"),
+    )
+    .await?;
+    let sample = dispatcher::gather_if_needed_async(
+        object
+            .properties()
+            .get("Ts")
+            .expect("prevalidated ss sample time"),
+    )
+    .await?;
+    ss_poles_from_values(&state, &sample, builtin)
 }
 
 fn ss_state_matrix_property(
@@ -1116,13 +1166,21 @@ fn ss_state_matrix_property(
     name: &'static str,
     builtin: &'static str,
 ) -> BuiltinResult<DMatrix<Complex64>> {
-    let value = object.properties.get(name).ok_or_else(|| {
+    let value = object.properties().get(name).ok_or_else(|| {
         control_error(
             builtin,
             invalid_model_identifier(builtin),
             format!("{builtin}: ss object is missing {name}"),
         )
     })?;
+    ss_state_matrix_value(value, name, builtin)
+}
+
+fn ss_state_matrix_value(
+    value: &Value,
+    name: &'static str,
+    builtin: &'static str,
+) -> BuiltinResult<DMatrix<Complex64>> {
     let tensor = match value {
         Value::Tensor(tensor) => tensor::integer_tensor_to_f64(tensor.clone()).map_err(|err| {
             control_error(
@@ -1286,13 +1344,21 @@ fn coefficients_from_property(
     name: &str,
     builtin: &'static str,
 ) -> BuiltinResult<Vec<Complex64>> {
-    let value = object.properties.get(name).ok_or_else(|| {
+    let value = object.properties().get(name).ok_or_else(|| {
         control_error(
             builtin,
             invalid_model_identifier(builtin),
             format!("{builtin}: tf object is missing {name}"),
         )
     })?;
+    coefficients_from_value(value, name, builtin)
+}
+
+fn coefficients_from_value(
+    value: &Value,
+    name: &str,
+    builtin: &'static str,
+) -> BuiltinResult<Vec<Complex64>> {
     match value {
         Value::Tensor(tensor) => {
             ensure_vector_shape(name, tensor.shape(), builtin)?;
@@ -1352,7 +1418,7 @@ fn property<'a>(
     name: &str,
     builtin: &'static str,
 ) -> BuiltinResult<&'a Value> {
-    object.properties.get(name).ok_or_else(|| {
+    object.properties().get(name).ok_or_else(|| {
         control_error(
             builtin,
             invalid_model_identifier(builtin),
@@ -1659,7 +1725,7 @@ mod tests {
         let Value::Object(object) = model.to_value("feedback").expect("serialize") else {
             panic!("model object")
         };
-        let Value::ComplexTensor(numerator) = object.properties.get("Numerator").unwrap() else {
+        let Value::ComplexTensor(numerator) = object.properties().get("Numerator").unwrap() else {
             panic!("complex numerator")
         };
         assert_eq!(numerator.shape(), [1, 2]);
@@ -1734,13 +1800,10 @@ mod tests {
             let a = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
             let resident =
                 crate::builtins::common::gpu_helpers::upload_tensor(provider, &a).unwrap();
-            let mut object = ObjectInstance::new(SS_CLASS.to_string());
-            object
-                .properties
-                .insert("A".into(), Value::GpuTensor(resident));
-            object
-                .properties
-                .insert("Ts".into(), Value::String("bad".into()));
+            let mut object = runmat_value::UnboundedObjectBuilder::new(SS_CLASS);
+            object.insert("A".into(), Value::GpuTensor(resident));
+            object.insert("Ts".into(), Value::String("bad".into()));
+            let object = object.finish();
             provider.reset_telemetry();
             let error =
                 block_on(ss_poles_from_object_async(&object, "pole")).expect_err("invalid Ts");
@@ -1755,13 +1818,10 @@ mod tests {
             let ts = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
             let resident =
                 crate::builtins::common::gpu_helpers::upload_tensor(provider, &ts).unwrap();
-            let mut object = ObjectInstance::new(SS_CLASS.to_string());
-            object
-                .properties
-                .insert("A".into(), Value::Complex(1.0, 1.0));
-            object
-                .properties
-                .insert("Ts".into(), Value::GpuTensor(resident));
+            let mut object = runmat_value::UnboundedObjectBuilder::new(SS_CLASS);
+            object.insert("A".into(), Value::Complex(1.0, 1.0));
+            object.insert("Ts".into(), Value::GpuTensor(resident));
+            let object = object.finish();
             provider.reset_telemetry();
             let error = block_on(ss_poles_from_object_async(&object, "pole"))
                 .expect_err("complex A not supported by pole parser");
@@ -1913,8 +1973,8 @@ mod tests {
 
     #[test]
     fn coefficients_from_property_reads_complex_typed_integer_storage_exactly() {
-        let mut object = ObjectInstance::new(TF_CLASS.to_string());
-        object.properties.insert(
+        let mut object = runmat_value::UnboundedObjectBuilder::new(TF_CLASS);
+        object.insert(
             "Numerator".to_string(),
             poisoned_complex_integer_tensor(
                 IntegerStorage::I16(vec![5, 7]),
@@ -1922,6 +1982,7 @@ mod tests {
                 vec![1, 2],
             ),
         );
+        let object = object.finish();
 
         assert_eq!(
             coefficients_from_property(&object, "Numerator", "tf").expect("coefficients"),
@@ -1931,11 +1992,12 @@ mod tests {
 
     #[test]
     fn ss_state_matrix_property_reads_typed_integer_storage_exactly() {
-        let mut object = ObjectInstance::new(SS_CLASS.to_string());
-        object.properties.insert(
+        let mut object = runmat_value::UnboundedObjectBuilder::new(SS_CLASS);
+        object.insert(
             "A".to_string(),
             poisoned_integer_tensor(IntegerStorage::I16(vec![1, 3, 2, 4]), vec![2, 2]),
         );
+        let object = object.finish();
 
         let matrix = ss_state_matrix_property(&object, "A", "pole").expect("state matrix");
         assert_eq!(matrix.shape(), (2, 2));

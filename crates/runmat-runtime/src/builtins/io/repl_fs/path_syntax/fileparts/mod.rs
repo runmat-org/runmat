@@ -9,6 +9,6 @@ use runmat_value::Value;
     binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::path_syntax::fileparts"
 )]
-async fn fileparts_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn fileparts_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
     execute::run(args)
 }

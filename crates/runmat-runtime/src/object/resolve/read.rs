@@ -53,18 +53,22 @@ async fn read_member_sequence_in_scope(
     allow_init: bool,
     caller_function_name: Option<&str>,
 ) -> Result<RootedValueSequence, RuntimeError> {
-    let _source_root = RootedValueLease::for_values(std::iter::once(&base))
-        .map_err(|error| error.into_runtime_error())?;
+    let _source_root = match context {
+        Some(runtime) => {
+            RootedValueLease::for_value_slices_in_context(&[std::slice::from_ref(&base)], runtime)?
+        }
+        None => RootedValueLease::for_values(std::iter::once(&base))
+            .map_err(|error| error.into_runtime_error())?,
+    };
     match base {
         Value::StructArray(array) => {
-            RootedValueSequence::new(crate::aggregate::structure::gather_member(array, &field)?)
-                .map_err(|error| error.into_runtime_error())
+            crate::aggregate::structure::gather_member(context, array, &field)
         }
         Value::ObjectArray(array) => {
             let roots = crate::call::arguments::roots::ExpansionRoots::new()?;
             roots.retain_values(array.data());
             let mut values = Vec::with_capacity(array.len());
-            for value in array.into_data() {
+            for value in array.data().iter().cloned() {
                 let selected = Box::pin(read_member_sequence_with_context(
                     context,
                     value,
@@ -129,8 +133,8 @@ async fn load_scalar_member_with_context(
         Value::Object(obj) => {
             let selected = crate::class_registry::checked_receiver_projection(&obj)?;
             let lookup_property = |name: &runmat_types::MemberName| match &selected {
-                Some(projection) => projection.receiver_property(&obj.class_name, name),
-                None => crate::class_registry::lookup_property(&obj.class_name, name).map(
+                Some(projection) => projection.receiver_property(obj.class_name(), name),
+                None => crate::class_registry::lookup_property(obj.class_name(), name).map(
                     |(property, owner)| {
                         (
                             crate::class_registry::receiver_property_declaration(property),
@@ -191,7 +195,9 @@ async fn load_scalar_member_with_context(
                         "RunMat:PropertyStaticAccess",
                         &format!(
                             "Property '{}' is static; use classref('{}').{}",
-                            field, obj.class_name, field
+                            field,
+                            obj.class_name(),
+                            field
                         ),
                     ));
                 }
@@ -206,14 +212,14 @@ async fn load_scalar_member_with_context(
                     if selected.as_ref().map_or_else(
                         || {
                             crate::class_registry::lookup_method(
-                                &obj.class_name,
+                                obj.class_name(),
                                 &runmat_types::MethodName::from(getter.as_str()),
                             )
                             .is_some()
                         },
                         |projection| {
                             projection.receiver_declares_method(
-                                &obj.class_name,
+                                obj.class_name(),
                                 &runmat_types::MethodName::from(getter.as_str()),
                             )
                         },
@@ -243,7 +249,7 @@ async fn load_scalar_member_with_context(
             }
             let value = if let Some(v) = dynamicprops::dynamic_property_read(&obj, &field)? {
                 Ok::<Value, crate::RuntimeError>(v)
-            } else if let Some(v) = obj.properties.get(&field) {
+            } else if let Some(v) = obj.property(&field) {
                 Ok(v.clone())
             } else if let Some((p2, owner)) =
                 lookup_property(&runmat_types::MemberName::from(field.as_str()))
@@ -256,26 +262,28 @@ async fn load_scalar_member_with_context(
                 }
                 if p2.is_dependent {
                     let backing = format!("{field}_backing");
-                    if let Some(vb) = obj.properties.get(&backing) {
+                    if let Some(vb) = obj.property(&backing) {
                         return RootedValue::new(vb.clone())
                             .map_err(|error| error.into_runtime_error());
                     }
                 }
                 Err(format!(
                     "Undefined property '{}' for class {}",
-                    field, obj.class_name
+                    field,
+                    obj.class_name()
                 )
                 .into())
             } else if selected.is_some()
-                || crate::class_registry::get_class(&obj.class_name).is_some()
+                || crate::class_registry::get_class(obj.class_name()).is_some()
             {
                 Err(format!(
                     "Undefined property '{}' for class {}",
-                    field, obj.class_name
+                    field,
+                    obj.class_name()
                 )
                 .into())
             } else {
-                Err(format!("Unknown class {}", obj.class_name).into())
+                Err(format!("Unknown class {}", obj.class_name()).into())
             }?;
             RootedValue::new(value).map_err(|error| error.into_runtime_error())
         }

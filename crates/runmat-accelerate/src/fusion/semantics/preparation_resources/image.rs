@@ -213,8 +213,8 @@ impl ImageSourceGeometry {
                     .add(u64::try_from(text.len()).map_err(|_| PreparationBoundError::Overflow)?)?,
                 Value::StringArray(array) => {
                     one.vector::<usize>(array.shape.len())?;
-                    one.vector::<String>(array.data.len())?;
-                    for text in &array.data {
+                    one.vector::<String>(array.data().len())?;
+                    for text in array.data() {
                         one.add(
                             u64::try_from(text.len())
                                 .map_err(|_| PreparationBoundError::Overflow)?,
@@ -223,7 +223,7 @@ impl ImageSourceGeometry {
                 }
                 Value::CharArray(array) => {
                     one.vector::<usize>(array.shape().len())?;
-                    one.vector::<char>(array.data.len())?;
+                    one.vector::<char>(array.data().len())?;
                 }
                 Value::Tensor(tensor) if tensor.len() <= 16 => {
                     one.vector::<usize>(tensor.shape().len())?;

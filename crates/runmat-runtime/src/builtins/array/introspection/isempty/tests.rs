@@ -15,7 +15,7 @@ fn classifies_numeric_text_and_cell_geometry() {
     assert!(run(Value::Tensor(Tensor::zeros(vec![0, 3]))));
     assert!(!run(Value::Num(5.0)));
     assert!(run(Value::CharArray(CharArray::new_row(""))));
-    assert!(!run(Value::String(String::new())));
+    assert!(!run(Value::String(String::new().into())));
     assert!(run(Value::StringArray(
         StringArray::new(Vec::<String>::new(), vec![0, 2]).unwrap()
     )));

@@ -179,7 +179,12 @@ mod tests {
         assert!(runtime.state().timing.borrow().starts.is_empty());
         time.set(Duration::from_millis(3_250));
         assert_eq!(
-            block_on(toc_builtin(Some(runtime.clone()), Some(0), Vec::new())).unwrap(),
+            block_on(toc_builtin(
+                Some(runtime.clone()),
+                Some(0),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new())
+            ))
+            .unwrap(),
             0.25
         );
         let entries = crate::console::take_thread_buffer();
@@ -188,11 +193,21 @@ mod tests {
         assert_eq!(entries[0].text, "Elapsed time is 0.250000 seconds.\n");
 
         assert_eq!(
-            block_on(toc_builtin(Some(runtime.clone()), Some(1), Vec::new())).unwrap(),
+            block_on(toc_builtin(
+                Some(runtime.clone()),
+                Some(1),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new())
+            ))
+            .unwrap(),
             0.25
         );
         assert_eq!(
-            block_on(toc_builtin(Some(runtime.clone()), None, Vec::new())).unwrap(),
+            block_on(toc_builtin(
+                Some(runtime.clone()),
+                None,
+                crate::builtins::common::test_support::builtin_arguments(Vec::new())
+            ))
+            .unwrap(),
             0.25
         );
         assert!(crate::console::take_thread_buffer().is_empty());
@@ -200,7 +215,12 @@ mod tests {
         let token = block_on(tic_builtin(Some(runtime.clone()), Some(1))).unwrap();
         time.set(Duration::from_secs(4));
         assert_eq!(
-            block_on(toc_builtin(Some(runtime), Some(1), vec![token])).unwrap(),
+            block_on(toc_builtin(
+                Some(runtime),
+                Some(1),
+                crate::builtins::common::test_support::builtin_arguments(vec![token])
+            ))
+            .unwrap(),
             0.75
         );
         assert!(crate::console::take_thread_buffer().is_empty());

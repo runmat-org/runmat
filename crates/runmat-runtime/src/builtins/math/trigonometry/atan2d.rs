@@ -134,7 +134,7 @@ fn input_tensor(value: Value) -> BuiltinResult<Tensor> {
         }
         Value::CharArray(chars) => Tensor::new(
             chars
-                .data
+                .data()
                 .iter()
                 .map(|character| u32::from(*character) as f64)
                 .collect(),

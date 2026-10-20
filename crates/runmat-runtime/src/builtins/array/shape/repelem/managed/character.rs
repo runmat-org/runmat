@@ -3,13 +3,13 @@ use super::*;
 pub(super) fn assemble(
     context: &RuntimeContext,
     source: &CharArray,
-    controls: &[Value],
+    controls: crate::call::FunctionArgumentView<'_>,
 ) -> crate::BuiltinResult<Value> {
     let source_len = source
         .rows
         .checked_mul(source.cols)
         .ok_or_else(|| repelem_invalid_factors("repelem: character source dimensions overflow"))?;
-    if source_len != source.data.len() {
+    if source_len != source.data().len() {
         return Err(repelem_internal(
             "repelem: character source shape does not match payload",
         ));
@@ -84,7 +84,7 @@ pub(super) fn assemble(
                             .map_err(|cause| admission(context, cause))?;
                     }
                     let index = row_table[row] * source.cols + col_table[col];
-                    data[destination] = *source.data.get(index).ok_or_else(|| {
+                    data[destination] = *source.data().get(index).ok_or_else(|| {
                         repelem_internal(
                             "repelem: character source geometry changed during assembly",
                         )

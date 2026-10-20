@@ -107,10 +107,7 @@ impl HostState {
         Ok(values)
     }
 
-    fn nested_function_is_visible(
-        &self,
-        target_parent: Option<runmat_types::FunctionId>,
-    ) -> bool {
+    fn nested_function_is_visible(&self, target_parent: Option<runmat_types::FunctionId>) -> bool {
         let Some(target_parent) = target_parent else {
             return false;
         };
@@ -129,10 +126,7 @@ impl HostState {
         false
     }
 
-    pub fn program_function(
-        &self,
-        function: runmat_types::FunctionId,
-    ) -> Option<&NativeFunction> {
+    pub fn program_function(&self, function: runmat_types::FunctionId) -> Option<&NativeFunction> {
         self.functions
             .iter()
             .find(|candidate| candidate.id == function)

@@ -103,11 +103,11 @@ async fn restored_product_freezes_original_analysis_source_and_function_without_
         original.revision().source_digest
     );
     assert_eq!(
-        captured.function,
-        original
-            .function_analysis(function(&original))
+        ExecutableUnit::from_portable_envelope(&captured.executable)
             .unwrap()
-            .clone()
+            .function_analysis(function(&restored))
+            .unwrap(),
+        original.function_analysis(function(&original)).unwrap()
     );
 }
 

@@ -3,7 +3,7 @@ use super::*;
 pub(super) async fn parse_named_eval_parameters(
     builtin: &'static str,
     kind: DistributionKind,
-    rest: Vec<Value>,
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<Vec<f64>> {
     let tensors = parse_parameter_tensors(builtin, kind, rest).await?;
     let (values, _shape) = broadcast_tensors_for(builtin, &tensors.iter().collect::<Vec<_>>())?;
@@ -18,7 +18,7 @@ pub(super) async fn parse_named_eval_parameters(
 
 pub(super) async fn parse_named_random_args(
     kind: DistributionKind,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<(FittedDistribution, Vec<usize>)> {
     let parameter_count = kind.parameter_names().len();
     if rest.len() < parameter_count {
@@ -31,8 +31,8 @@ pub(super) async fn parse_named_random_args(
             ),
         ));
     }
-    let parameter_values = rest[..parameter_count].to_vec();
-    let shape_args = rest[parameter_count..].to_vec();
+    let parameter_values = rest.view().range(..parameter_count)?;
+    let shape_args = rest.view().range(parameter_count..)?;
     let params = parse_named_eval_parameters(RANDOM_NAME, kind, parameter_values).await?;
     let fit = FittedDistribution {
         kind,
@@ -40,34 +40,36 @@ pub(super) async fn parse_named_random_args(
         nlogl: f64::NAN,
         observations: f64::NAN,
     };
-    let shape = parse_shape_args(&shape_args).await?;
+    let shape = parse_shape_args(shape_args).await?;
     Ok((fit, shape))
 }
 
 pub(super) async fn parse_parameter_tensors(
     builtin: &'static str,
     kind: DistributionKind,
-    rest: Vec<Value>,
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<Vec<Tensor>> {
     match kind {
-        DistributionKind::Normal | DistributionKind::Lognormal => match rest.as_slice() {
-            [] => Ok(vec![scalar_tensor(0.0), scalar_tensor(1.0)]),
-            [mu] => Ok(vec![
-                value_to_tensor(builtin, mu.clone()).await?,
-                scalar_tensor(1.0),
-            ]),
-            [mu, sigma] => Ok(vec![
-                value_to_tensor(builtin, mu.clone()).await?,
-                value_to_tensor(builtin, sigma.clone()).await?,
-            ]),
-            _ => Err(invalid_for(
-                builtin,
-                format!(
-                    "{builtin}: {} distribution expects x, x and mu, or x, mu, sigma",
-                    kind.canonical_name()
-                ),
-            )),
-        },
+        DistributionKind::Normal | DistributionKind::Lognormal => {
+            match (rest.len(), rest.get(0), rest.get(1)) {
+                (0, _, _) => Ok(vec![scalar_tensor(0.0), scalar_tensor(1.0)]),
+                (1, Some(mu), _) => Ok(vec![
+                    value_to_tensor(builtin, mu.clone()).await?,
+                    scalar_tensor(1.0),
+                ]),
+                (2, Some(mu), Some(sigma)) => Ok(vec![
+                    value_to_tensor(builtin, mu.clone()).await?,
+                    value_to_tensor(builtin, sigma.clone()).await?,
+                ]),
+                _ => Err(invalid_for(
+                    builtin,
+                    format!(
+                        "{builtin}: {} distribution expects x, x and mu, or x, mu, sigma",
+                        kind.canonical_name()
+                    ),
+                )),
+            }
+        }
         DistributionKind::Exponential | DistributionKind::Poisson => {
             if rest.len() != 1 {
                 return Err(invalid_for(

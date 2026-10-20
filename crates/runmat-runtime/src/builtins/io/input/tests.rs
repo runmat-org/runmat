@@ -5,7 +5,11 @@ use crate::interaction::{push_queued_response, InteractionResponse};
 mod retry;
 
 fn input_with_empty_prompt() -> BuiltinResult<crate::execution::RootedValue> {
-    futures::executor::block_on(input_builtin(vec![Value::String(String::new())]))
+    futures::executor::block_on(input_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+            String::new().into(),
+        )]),
+    ))
 }
 
 #[test]
@@ -34,8 +38,11 @@ fn numeric_input_parses_scalar() {
 fn string_mode_returns_char_row() {
     push_queued_response(Ok(InteractionResponse::Line("RunMat".into())));
     let prompt = Value::CharArray(CharArray::new_row("Name: "));
-    let mode = Value::String("s".to_string());
-    let value = futures::executor::block_on(input_builtin(vec![prompt, mode])).expect("input");
+    let mode = Value::String("s".to_string().into());
+    let value = futures::executor::block_on(input_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![prompt, mode]),
+    ))
+    .expect("input");
     assert_eq!(value, Value::CharArray(CharArray::new_row("RunMat")));
 }
 
@@ -216,24 +223,32 @@ fn logical_matrix_2x2_column_major_layout() {
 #[test]
 fn invalid_string_flag_errors_before_prompt() {
     push_queued_response(Ok(InteractionResponse::Line("ignored".into())));
-    let prompt = Value::String("Ready?".to_string());
-    let bad_flag = Value::String("not-string-mode".to_string());
-    let err = futures::executor::block_on(input_builtin(vec![prompt, bad_flag])).unwrap_err();
+    let prompt = Value::String("Ready?".to_string().into());
+    let bad_flag = Value::String("not-string-mode".to_string().into());
+    let err = futures::executor::block_on(input_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![prompt, bad_flag]),
+    ))
+    .unwrap_err();
     assert_eq!(err.identifier(), Some("RunMat:input:InvalidStringFlag"));
 }
 
 #[test]
 fn strict_mode_gates_runmat_only_call_forms_before_interaction() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-    let no_prompt = futures::executor::block_on(input_builtin(vec![])).unwrap_err();
+    let no_prompt = futures::executor::block_on(input_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap_err();
     assert_eq!(
         no_prompt.identifier(),
         INPUT_NO_PROMPT_EXTENSION.error_identifier
     );
-    let swapped = futures::executor::block_on(input_builtin(vec![
-        Value::String("s".into()),
-        Value::String("Prompt: ".into()),
-    ]))
+    let swapped = futures::executor::block_on(input_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::String("s".into()),
+            Value::String("Prompt: ".into()),
+        ]),
+    ))
     .unwrap_err();
     assert_eq!(
         swapped.identifier(),
@@ -256,7 +271,10 @@ fn resident_prompt_rejects_without_provider_access() {
             .is_none()
     );
     let resident = Value::GpuTensor(allocation.handle.clone());
-    let error = futures::executor::block_on(input_builtin(vec![resident])).unwrap_err();
+    let error = futures::executor::block_on(input_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![resident]),
+    ))
+    .unwrap_err();
     assert_eq!(
         error.identifier(),
         INPUT_ERROR_INVALID_PROMPT_TYPE.identifier
@@ -280,15 +298,19 @@ fn input_integer_audit_is_explicitly_not_applicable() {
 fn paged_prompt_and_flag_reject_before_interaction_but_trailing_singleton_works() {
     let paged =
         CharArray::new_with_shape("ab".chars().collect(), vec![1, 1, 2]).expect("paged char");
-    let err = futures::executor::block_on(input_builtin(vec![Value::CharArray(paged)]))
-        .expect_err("paged prompt must fail");
+    let err = futures::executor::block_on(input_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::CharArray(paged)]),
+    ))
+    .expect_err("paged prompt must fail");
     assert_eq!(err.identifier(), INPUT_ERROR_PROMPT_ROW_VECTOR.identifier);
     let paged_flag =
         CharArray::new_with_shape("ss".chars().collect(), vec![1, 1, 2]).expect("paged flag");
-    let err = futures::executor::block_on(input_builtin(vec![
-        Value::String("Prompt: ".into()),
-        Value::CharArray(paged_flag),
-    ]))
+    let err = futures::executor::block_on(input_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::String("Prompt: ".into()),
+            Value::CharArray(paged_flag),
+        ]),
+    ))
     .expect_err("paged flag must fail");
     assert_eq!(err.identifier(), INPUT_ERROR_INVALID_STRING_FLAG.identifier);
     let trailing = CharArray::new_with_shape("s".chars().collect(), vec![1, 1, 1])
@@ -303,7 +325,11 @@ fn paged_prompt_and_flag_reject_before_interaction_but_trailing_singleton_works(
 #[test]
 fn excessive_outputs_reject_before_interaction() {
     let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
-    let err = futures::executor::block_on(input_builtin(vec![Value::String("Prompt: ".into())]))
-        .expect_err("too many outputs");
+    let err = futures::executor::block_on(input_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+            "Prompt: ".into(),
+        )]),
+    ))
+    .expect_err("too many outputs");
     assert_eq!(err.identifier(), INPUT_ERROR_TOO_MANY_OUTPUTS.identifier);
 }

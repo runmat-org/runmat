@@ -55,7 +55,7 @@ pub(super) fn apply(
 
 fn unwrap_specification(value: &Value) -> BuiltinResult<&Value> {
     match value {
-        Value::Cell(value) if value.data.len() == 1 => Ok(&value.data[0]),
+        Value::Cell(value) if value.data().len() == 1 => Ok(&value.data()[0]),
         Value::Cell(_) => Err(error::invalid(
             "groupcounts: one grouping vector requires one bin specification",
         )),

@@ -106,14 +106,19 @@ fn no_output_failure_throws_and_success_still_moves() {
     let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let run = |args| futures::executor::block_on(super::super::movefile_builtin(None, args));
     assert_eq!(
-        run(vec![text(&source), text(&target)])
-            .unwrap_err()
-            .identifier(),
+        run(crate::builtins::common::test_support::builtin_arguments(
+            vec![text(&source), text(&target)]
+        ))
+        .unwrap_err()
+        .identifier(),
         MOVEFILE_RESULT_SOURCE_NOT_FOUND.identifier
     );
     File::create(&source).unwrap();
     assert_eq!(
-        run(vec![text(&source), text(&target)]).unwrap(),
+        run(crate::builtins::common::test_support::builtin_arguments(
+            vec![text(&source), text(&target)]
+        ))
+        .unwrap(),
         Value::output_list(vec![])
     );
     assert!(!source.exists() && target.exists());

@@ -173,7 +173,7 @@ fn revoked_owner_after_partial_first_write_prevents_retry_and_success() {
     let error = block_on(super::super::writematrix_builtin(
         None,
         Value::Tensor(matrix),
-        vec![Value::from("revoked.csv")],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("revoked.csv")]),
     ))
     .expect_err("revoked owner");
     assert!(error.message().contains("authority was revoked"));
@@ -199,7 +199,9 @@ fn interrupted_then_partial_writes_preserve_output() {
     block_on(super::super::writematrix_builtin(
         None,
         Value::Tensor(matrix),
-        vec![Value::from("interrupted.csv")],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from(
+            "interrupted.csv",
+        )]),
     ))
     .expect("interrupted write retries");
     assert_eq!(
@@ -230,7 +232,9 @@ fn revoked_owner_on_interrupted_write_prevents_retry() {
     let error = block_on(super::super::writematrix_builtin(
         None,
         Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
-        vec![Value::from("revoked-interrupt.csv")],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from(
+            "revoked-interrupt.csv",
+        )]),
     ))
     .expect_err("revocation wins before retry");
     assert!(error.message().contains("authority was revoked"));

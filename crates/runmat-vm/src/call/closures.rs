@@ -144,7 +144,7 @@ mod tests {
         )
         .expect("call-port scope");
         let value = block_on(call_method_or_member_index_with_outputs(
-            Value::ClassRef(class_name),
+            Value::ClassRef(class_name.into()),
             CallableIdentity::Method(MethodId("remote_inc".to_string())),
             vec![Value::Num(2.0)],
             1,
@@ -283,7 +283,7 @@ mod tests {
         );
 
         let err = block_on(call_method_or_member_index_with_outputs(
-            Value::ClassRef(class_name),
+            Value::ClassRef(class_name.into()),
             CallableIdentity::Method(MethodId("inst".to_string())),
             vec![],
             1,

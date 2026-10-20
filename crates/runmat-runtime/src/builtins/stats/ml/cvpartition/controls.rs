@@ -137,7 +137,7 @@ pub(super) fn scalar_bool(value: &Value, label: &str) -> BuiltinResult<bool> {
             invalid_argument(format!("cvpartition: {label} must be logical scalar"))
         }),
         Value::CharArray(chars) => {
-            let text = chars.data.iter().collect::<String>();
+            let text = chars.data().iter().collect::<String>();
             parse_stratify_boolean_alias(&text).ok_or_else(|| {
                 invalid_argument(format!("cvpartition: {label} must be logical scalar"))
             })
@@ -151,9 +151,9 @@ pub(super) fn scalar_bool(value: &Value, label: &str) -> BuiltinResult<bool> {
 pub(super) fn scalar_text<'a>(value: &'a Value, label: &str) -> BuiltinResult<Cow<'a, str>> {
     match value {
         Value::String(text) => Ok(Cow::Borrowed(text.as_str())),
-        Value::CharArray(chars) => Ok(Cow::Owned(chars.data.iter().collect())),
-        Value::StringArray(array) if array.data.len() == 1 => {
-            Ok(Cow::Borrowed(array.data[0].as_str()))
+        Value::CharArray(chars) => Ok(Cow::Owned(chars.data().iter().collect())),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(Cow::Borrowed(array.data()[0].as_str()))
         }
         other => Err(invalid_argument(format!(
             "cvpartition: {label} must be a string scalar, got {other:?}"

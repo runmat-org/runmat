@@ -28,7 +28,7 @@ fn stopwords_error(message: impl Into<String>) -> RuntimeError {
 )]
 async fn stop_words_builtin(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let language = parse_language_args(runtime.as_ref(), args)?;
     let words = stop_words_for_language(language);
@@ -37,7 +37,7 @@ async fn stop_words_builtin(
 
 fn parse_language_args(
     runtime: Option<&crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<StopWordsLanguage> {
     match args.len() {
         0 => Ok(StopWordsLanguage::English),
@@ -713,7 +713,10 @@ mod tests {
     }
 
     fn call(args: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(stop_words_builtin(None, args))
+        block_on(stop_words_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
 
     fn words(value: Value) -> runmat_value::StringArray {

@@ -1,5 +1,15 @@
 use super::*;
 
+async fn timer_startat_with_args(
+    runtime: Option<RuntimeContext>,
+    requested_outputs: Option<usize>,
+    value: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
+    let args = crate::call::BuiltinArguments::from_borrowed(&rest, runtime.as_ref())?;
+    super::super::timer_startat_builtin(runtime, requested_outputs, value, args).await
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn absolute_startat_matches_exact_date_shape_before_lifecycle_effects() {
@@ -35,7 +45,7 @@ fn absolute_startat_matches_exact_date_shape_before_lifecycle_effects() {
         })
         .collect::<Vec<_>>();
     let mismatch = Value::StringArray(StringArray::new(dates.clone(), vec![2]).unwrap());
-    let error = block_on(super::super::timer_startat_builtin(
+    let error = block_on(timer_startat_with_args(
         Some(test_runtime()),
         Some(0),
         receiver.clone(),
@@ -50,7 +60,7 @@ fn absolute_startat_matches_exact_date_shape_before_lifecycle_effects() {
         assert_eq!(string_property(handle, "Running").unwrap(), "off");
     }
     let matching = Value::StringArray(StringArray::new(dates, vec![1, 2]).unwrap());
-    block_on(super::super::timer_startat_builtin(
+    block_on(timer_startat_with_args(
         Some(test_runtime()),
         Some(0),
         receiver.clone(),
@@ -82,7 +92,7 @@ fn timer_method_status_and_relative_startat_are_gated_before_lifecycle_effects()
         assigned.identifier(),
         Some("RunMat:compatibility:TimerMethodStatusOutputExtension")
     );
-    let relative = block_on(super::super::timer_startat_builtin(
+    let relative = block_on(timer_startat_with_args(
         Some(runtime.clone()),
         Some(0),
         timer.clone(),
@@ -122,11 +132,11 @@ fn absolute_startat_uses_injected_wall_clock_without_relative_extension() {
         .naive_utc()
         .format("%Y-%m-%d %H:%M:%S")
         .to_string();
-    block_on(super::super::timer_startat_builtin(
+    block_on(timer_startat_with_args(
         Some(test_runtime()),
         Some(0),
         timer.clone(),
-        vec![Value::String(future)],
+        vec![Value::String(future.into())],
     ))
     .expect("absolute date text starts without the RunMat extension");
     let Value::HandleObject(handle) = &timer else {
@@ -153,11 +163,11 @@ fn absolute_startat_rejects_past_window_and_mismatched_array_before_start() {
         now + chrono::Duration::days(26),
     ] {
         let date = instant.format("%Y-%m-%d %H:%M:%S").to_string();
-        let error = block_on(super::super::timer_startat_builtin(
+        let error = block_on(timer_startat_with_args(
             Some(test_runtime()),
             Some(0),
             timer.clone(),
-            vec![Value::String(date)],
+            vec![Value::String(date.into())],
         ))
         .expect_err("invalid absolute date");
         assert_eq!(error.identifier(), Some("RunMat:timer:InvalidInput"));
@@ -176,7 +186,7 @@ fn absolute_startat_rejects_past_window_and_mismatched_array_before_start() {
         )
         .unwrap(),
     );
-    let error = block_on(super::super::timer_startat_builtin(
+    let error = block_on(timer_startat_with_args(
         Some(test_runtime()),
         Some(0),
         timer.clone(),
@@ -233,7 +243,7 @@ fn startat_uses_column_major_timer_arrays_and_accepts_nd_object_arrays() {
         )
         .unwrap(),
     );
-    block_on(super::super::timer_startat_builtin(
+    block_on(timer_startat_with_args(
         Some(test_runtime()),
         Some(0),
         object_array.clone(),
@@ -256,7 +266,7 @@ fn startat_empty_object_array_preserves_shape_and_has_no_lifecycle_effect() {
     let array =
         Value::ObjectArray(ObjectArray::empty(TIMER_CLASS.to_string(), vec![0, 2, 1]).unwrap());
     let empty_dates = Value::StringArray(StringArray::new(Vec::new(), vec![0, 2, 1]).unwrap());
-    block_on(super::super::timer_startat_builtin(
+    block_on(timer_startat_with_args(
         Some(test_runtime()),
         Some(0),
         array,

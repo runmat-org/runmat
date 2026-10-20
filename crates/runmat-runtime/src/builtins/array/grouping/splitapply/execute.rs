@@ -7,7 +7,7 @@ use super::input::Input;
 pub(super) async fn apply(
     function: Value,
     first_data: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<crate::execution::RootedValue> {
     let _inputs_root = crate::execution::RootedValueLease::for_values(
         [&function, &first_data].into_iter().chain(rest.iter()),

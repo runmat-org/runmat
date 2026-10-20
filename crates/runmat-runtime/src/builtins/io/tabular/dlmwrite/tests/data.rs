@@ -23,7 +23,7 @@ fn known_invalid_resident_matrix_shape_rejects_before_download_or_file_creation(
             None,
             Value::from(path),
             Value::GpuTensor(handle.clone()),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect_err("non-singleton page is invalid data geometry");
         assert!(error.message().contains("2-D"));

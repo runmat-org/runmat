@@ -385,7 +385,12 @@ impl MexRuntimeSession {
 
     async fn service_isolated_background_once(&self) -> bool {
         loop {
-            let paths = self.isolated.borrow().keys().cloned().collect::<Vec<_>>();
+            let paths = self
+                .isolated
+                .borrow()
+                .keys()
+                .map(ToOwned::to_owned)
+                .collect::<Vec<_>>();
             if paths.is_empty() {
                 return futures::future::pending().await;
             }
@@ -1020,7 +1025,12 @@ impl MexRuntimeSession {
             return MexSessionRetirement::Retained(error);
         }
         let policy = *self.isolation_policy.borrow();
-        let paths = self.isolated.borrow().keys().cloned().collect::<Vec<_>>();
+        let paths = self
+            .isolated
+            .borrow()
+            .keys()
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>();
         let mut first_error = abandoned_operation;
         let mut retained = false;
         for path in paths {
@@ -1734,7 +1744,9 @@ mod tests {
         cancellation.cancel(runmat_execution::CancellationReason::User);
         let result = futures::executor::block_on(Rc::new(MexRuntimeSession::new()).load_and_call(
             "module_that_must_not_be_resolved",
-            Vec::new(),
+            crate::call::RootedFunctionArguments::ordinary(
+                crate::execution::RootedValues::new(Vec::new()).expect("empty arguments"),
+            ),
             0,
             runtime,
         ))
@@ -1747,17 +1759,25 @@ mod tests {
         let available = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
         let text = String::from("selected MEX argument owner");
         let payload = text.as_ptr();
-        let missing =
-            futures::executor::block_on(Rc::new(MexRuntimeSession::new()).load_installed_and_call(
+        let missing = futures::executor::block_on(
+            Rc::new(MexRuntimeSession::new()).load_installed_and_call(
                 "module_not_installed_in_this_owner",
-                vec![Value::String(text.into())],
+                crate::call::RootedFunctionArguments::ordinary(
+                    crate::execution::RootedValues::in_context(
+                        vec![Value::String(text.into())],
+                        &available,
+                    )
+                    .expect("root the original MEX argument"),
+                ),
                 0,
                 available,
-            ));
+            ),
+        );
         let std::ops::ControlFlow::Continue(arguments) = missing else {
             panic!("missing installed MEX returns original arguments");
         };
-        let [Value::String(text)] = arguments.as_slice() else {
+        assert_eq!(arguments.len(), 1);
+        let Some(Value::String(text)) = arguments.first() else {
             panic!("missing MEX returned original string argument");
         };
         assert_eq!(text.as_ptr(), payload);

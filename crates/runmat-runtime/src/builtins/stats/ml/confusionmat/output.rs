@@ -88,7 +88,7 @@ pub(super) fn char_rows(array: &CharArray) -> Vec<String> {
     let mut rows = Vec::with_capacity(array.rows);
     for row in 0..array.rows {
         let start = row * array.cols;
-        rows.push(array.data[start..start + array.cols].iter().collect());
+        rows.push(array.data()[start..start + array.cols].iter().collect());
     }
     rows
 }

@@ -14,7 +14,9 @@ fn graph_error(function: &'static str, message: impl Into<String>) -> RuntimeErr
     binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::graph"
 )]
-pub(super) async fn layer_graph_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn layer_graph_builtin(
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     super::errors::admit_single_output("layerGraph", &runmat_builtins::GRAPH_INVALID_INPUT)?;
     if args.len() > 1 {
         return Err(graph_error(
@@ -40,7 +42,7 @@ pub(super) async fn layer_graph_builtin(args: Vec<Value>) -> BuiltinResult<Value
     let layers_cell = CellArray::new(layers, layer_count, 1)
         .map(Value::Cell)
         .map_err(|err| graph_error("layerGraph", err))?;
-    Ok(object(
+    object(
         "nnet.cnn.LayerGraph",
         vec![
             ("Layers", layers_cell),
@@ -50,7 +52,7 @@ pub(super) async fn layer_graph_builtin(args: Vec<Value>) -> BuiltinResult<Value
             ),
             ("Connections", Value::Struct(StructValue::new())),
         ],
-    ))
+    )
 }
 
 #[runtime_builtin(
@@ -61,8 +63,8 @@ pub(super) async fn layer_graph_builtin(args: Vec<Value>) -> BuiltinResult<Value
 pub(super) async fn analyze_network_builtin(network: Value) -> BuiltinResult<Value> {
     super::errors::admit_single_output("analyzeNetwork", &runmat_builtins::GRAPH_INVALID_INPUT)?;
     let layers = match &network {
-        Value::Object(object) if object.class_name.is(super::LAYER_GRAPH_CLASS) => object
-            .properties
+        Value::Object(object) if object.class_name().is(super::LAYER_GRAPH_CLASS) => object
+            .properties()
             .get("Layers")
             .cloned()
             .map(|value| layers_from_value(value, "analyzeNetwork"))
@@ -79,7 +81,7 @@ pub(super) async fn analyze_network_builtin(network: Value) -> BuiltinResult<Val
         }
     };
     let names = layer_names(&layers, "analyzeNetwork")?;
-    Ok(object(
+    object(
         "nnet.cnn.NetworkAnalysis",
         vec![
             ("NumLayers", Value::Num(layers.len() as f64)),
@@ -92,5 +94,5 @@ pub(super) async fn analyze_network_builtin(network: Value) -> BuiltinResult<Val
                 Value::String("RunMat metadata analysis completed without launching UI".into()),
             ),
         ],
-    ))
+    )
 }

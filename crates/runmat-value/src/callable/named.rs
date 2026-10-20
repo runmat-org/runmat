@@ -15,8 +15,13 @@ pub struct NamedFunctionHandle {
 
 impl NamedFunctionHandle {
     pub fn new(name: String) -> Self {
+        Self::from_text_owner(Utf8Text::new(name))
+    }
+
+    /// Retains the supplied original text owner without copying its backing.
+    pub fn from_text_owner(name: Utf8Text) -> Self {
         Self {
-            name: Utf8Text::new(name),
+            name,
             instance: CallableInstanceId::mint(),
         }
     }

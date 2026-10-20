@@ -29,7 +29,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn string_scalar_reports_true() {
-        let value = Value::String("RunMat".to_string());
+        let value = Value::String("RunMat".to_string().into());
         let result = isstring_builtin(value).expect("isstring");
         assert_eq!(result, Value::Bool(true));
     }

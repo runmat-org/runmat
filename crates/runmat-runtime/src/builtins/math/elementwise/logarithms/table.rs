@@ -18,7 +18,7 @@ pub(super) async fn evaluate(
         .map_err(|error| super::errors::invalid(operation, error.message()))?;
     let mut names = Vec::with_capacity(variables.fields.len());
     let mut output = RootedValuesBuilder::with_capacity(variables.fields.len());
-    for (name, value) in variables.fields {
+    for (name, value) in variables.into_fields_unbounded() {
         let transformed = super::engine::execute_non_table(nested.as_ref(), operation, value)
             .await
             .map_err(|error| {

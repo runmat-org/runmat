@@ -1,6 +1,6 @@
 use super::*;
 use futures::executor::block_on;
-use runmat_value::{IntValue, IntegerStorage, SparseTensor, StringArray, StructValue, Tensor};
+use runmat_value::{IntValue, IntegerStorage, SparseTensor, StringArray, Tensor};
 
 #[test]
 fn cancelled_invocation_rejects_before_fit_or_output_publication() {
@@ -18,7 +18,7 @@ fn cancelled_invocation_rejects_before_fit_or_output_publication() {
         Some(&runtime),
         tensor_value(vec![0.0, 1.0, 2.0, 3.0], 4, 1),
         tensor_value(vec![1.0, 1.0, 2.0, 2.0], 4, 1),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect_err("cancelled invocation cannot publish a model");
     assert!(error
@@ -327,10 +327,10 @@ fn mnrfit_accepts_text_labels_and_omits_missing_rows() {
         vec![
             Value::String("Options".into()),
             Value::Struct({
-                let mut st = StructValue::new();
+                let mut st = runmat_value::UnboundedStructValueBuilder::new();
                 st.insert("IterationLimit", Value::Num(200.0));
                 st.insert("Tolerance", Value::Num(1.0e-8));
-                st
+                st.finish()
             }),
         ],
     ))
@@ -345,7 +345,7 @@ fn mnrfit_accepts_text_labels_and_omits_missing_rows() {
     let Value::StringArray(class_names) = stats.fields.get("classNames").unwrap() else {
         panic!("expected text class names");
     };
-    assert_eq!(class_names.data, vec!["high", "low"]);
+    assert_eq!(class_names.data(), vec!["high", "low"]);
 }
 
 #[test]
@@ -376,12 +376,12 @@ fn mnrfit_reads_typed_integer_class_vectors_exactly() {
             poisoned_int_tensor(IntegerStorage::U16(vec![200]), 1, 1),
             Value::String("Options".into()),
             Value::Struct({
-                let mut st = StructValue::new();
+                let mut st = runmat_value::UnboundedStructValueBuilder::new();
                 st.insert(
                     "Tolerance",
                     poisoned_int_tensor(IntegerStorage::U8(vec![1]), 1, 1),
                 );
-                st
+                st.finish()
             }),
         ],
     ))

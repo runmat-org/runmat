@@ -87,8 +87,9 @@ fn executable(admitted: &AdmittedSignalGenerator) -> ExecutableUnitEnvelope {
                 program: admitted.program_revision.clone(),
                 root_package: admitted.callable.owner_identity.clone(),
                 entrypoint: admitted.callable.qualified_name.clone(),
-                entrypoint_function: admitted.function,
+                entrypoint_function: Some(admitted.function),
                 entrypoint_kind: ExecutableEntrypointKind::Function,
+                declaration_class: None,
                 source_digest: admitted.executable_source_digest,
             },
             revisions: ExecutableComponentRevisions {
@@ -145,6 +146,7 @@ fn external_input(scope: &str) -> ProgramExecutionObject {
 
 fn task_context(scope: &[u8], pool: &[u8]) -> GeneratorExecutionContext {
     GeneratorExecutionContext {
+        host: crate::tests::contract_host(&revision()),
         scope_id: ExecutionScopeId::derive(&[scope]),
         pool_id: PoolId::derive(&[pool]),
         resources: ResourceRequest {
@@ -206,7 +208,10 @@ fn portable_program_binds_exact_callable_revision_and_chunk_arguments() {
     let prepared =
         prepare_generator_program(&admitted, executable(&admitted), chunks(), &[]).unwrap();
     assert_eq!(prepared.chunks.len(), 1);
-    assert_eq!(prepared.chunks[0].request.function, 3);
+    assert_eq!(
+        prepared.chunks[0].request.callable.semantic_function(),
+        Some(ProgramFunctionId(3))
+    );
     assert_eq!(
         prepared.chunks[0].request.arguments,
         prepared.chunks[0].plan.arguments
@@ -354,7 +359,7 @@ fn task_identity_is_logical_and_independent_of_pool_placement() {
         task_context(b"scope-a", b"pool-a"),
     )
     .unwrap();
-    assert_eq!(first.request.callable.qualified_name, "loads.pulse");
+    assert_eq!(first.request.callable.qualified_name(), "loads.pulse");
     let second = build_generator_task_submission(
         &admitted,
         &prepared.chunks[0],
@@ -393,11 +398,13 @@ fn task_identity_tracks_materialization_while_entrypoint_tracks_generator() {
     let sampling_task = submit(&sampling_change);
     assert_ne!(baseline_task.request.id, sampling_task.request.id);
     assert_eq!(
-        baseline_task.request.callable.entrypoint_digest,
-        sampling_task.request.callable.entrypoint_digest
+        baseline_task.request.callable.entrypoint_digest(),
+        sampling_task.request.callable.entrypoint_digest()
     );
 
     let mut generator_change = baseline.clone();
+    generator_change.function = ProgramFunctionId(4);
+    generator_change.callable.qualified_name = "loads.alternate".into();
     generator_change.generator_identity = GeneratorIdentity::new(
         digest("changed-callable"),
         digest("captures"),
@@ -410,10 +417,23 @@ fn task_identity_tracks_materialization_while_entrypoint_tracks_generator() {
         digest("sampling"),
     )
     .unwrap();
-    let generator_task = submit(&generator_change);
+    let generator_program = prepare_generator_program(
+        &generator_change,
+        executable(&generator_change),
+        chunks(),
+        &[],
+    )
+    .unwrap();
+    let generator_task = build_generator_task_submission(
+        &generator_change,
+        &generator_program.chunks[0],
+        BTreeSet::new(),
+        task_context(b"scope", b"pool"),
+    )
+    .unwrap();
     assert_ne!(baseline_task.request.id, generator_task.request.id);
     assert_ne!(
-        baseline_task.request.callable.entrypoint_digest,
-        generator_task.request.callable.entrypoint_digest
+        baseline_task.request.callable.entrypoint_digest(),
+        generator_task.request.callable.entrypoint_digest()
     );
 }

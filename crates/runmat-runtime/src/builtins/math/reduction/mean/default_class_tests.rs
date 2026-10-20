@@ -119,9 +119,11 @@ fn default_resident_integer_and_logical_means_are_double_on_exact_owner() {
                 .unwrap()
         };
         let input = owner.remember(allocation);
-        let result =
-            futures::executor::block_on(mean_builtin(Value::GpuTensor(input.clone()), Vec::new()))
-                .unwrap();
+        let result = futures::executor::block_on(mean_builtin(
+            Value::GpuTensor(input.clone()),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .unwrap();
         let Value::GpuTensor(output) = result else {
             panic!("F64 fixture must restore resident output")
         };
@@ -177,9 +179,11 @@ fn scalar_single_mean_keeps_supported_resident_identity_without_host_transfer() 
             })
             .unwrap(),
     );
-    let result =
-        futures::executor::block_on(mean_builtin(Value::GpuTensor(input.clone()), Vec::new()))
-            .unwrap();
+    let result = futures::executor::block_on(mean_builtin(
+        Value::GpuTensor(input.clone()),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    ))
+    .unwrap();
     let Value::GpuTensor(output) = result else {
         panic!("Single identity must remain resident")
     };
@@ -195,9 +199,11 @@ fn scalar_single_mean_keeps_supported_resident_identity_without_host_transfer() 
 #[test]
 fn host_default_integer_identity_dimensions_still_return_double() {
     let input = Tensor::new_integer(IntegerStorage::I16(vec![4, 5]), vec![2, 1]).unwrap();
-    let result =
-        futures::executor::block_on(mean_builtin(Value::Tensor(input), vec![Value::Num(3.0)]))
-            .unwrap();
+    let result = futures::executor::block_on(mean_builtin(
+        Value::Tensor(input),
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(3.0)]),
+    ))
+    .unwrap();
     let Value::Tensor(output) = result else {
         panic!("expected non-scalar tensor")
     };

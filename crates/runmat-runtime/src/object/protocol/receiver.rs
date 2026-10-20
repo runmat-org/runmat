@@ -141,7 +141,7 @@ fn value_shape(value: &Value) -> Vec<usize> {
         Value::Cell(value) => value.shape().to_vec(),
         Value::StructArray(value) => value.shape().to_vec(),
         Value::ObjectArray(value) => value.shape().to_vec(),
-        Value::SymbolicArray(value) => value.shape.clone(),
+        Value::SymbolicArray(value) => value.shape.to_vec(),
         _ => vec![1, 1],
     }
 }

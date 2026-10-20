@@ -3,14 +3,14 @@ use runmat_value::Value;
 pub(super) fn text(value: &Value) -> Option<String> {
     match value {
         Value::String(text) => Some(text.as_str().to_owned()),
-        Value::StringArray(array) if array.data.len() == 1 => {
-            Some(array.data[0].as_str().to_owned())
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Some(array.data()[0].as_str().to_owned())
         }
         Value::CharArray(characters)
             if characters.rows == 1
                 && crate::builtins::common::shape::effective_rank(&characters.shape) <= 2 =>
         {
-            Some(characters.data.iter().collect())
+            Some(characters.data().iter().collect())
         }
         _ => None,
     }

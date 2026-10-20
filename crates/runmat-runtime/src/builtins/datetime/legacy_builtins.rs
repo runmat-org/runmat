@@ -43,9 +43,13 @@ fn preflight_legacy_inputs<'a>(
 #[runmat_macros::runtime_builtin(
     name = "datenum",
     builtin_path = "crate::builtins::datetime",
-    binding_variant = "default"
+    binding_variant = "default",
+    context = true
 )]
-pub(super) async fn datenum_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub(super) async fn datenum_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     if !matches!(args.len(), 0 | 1 | 3..=6) {
         return Err(datetime_error(
             "datenum: expected datetime, text, date vector, or Y/M/D components",
@@ -58,7 +62,7 @@ pub(super) async fn datenum_builtin(args: Vec<Value>) -> crate::BuiltinResult<Va
         )?;
     }
     preflight_legacy_inputs("datenum", args.iter(), true)?;
-    let args = gather_args(&args).await?;
+    let args = gather_retained_args(args, runtime.as_ref()).await?;
     let tensor = match args.len() {
         0 => Tensor::new(vec![datenum_from_naive(current_naive_local())], vec![1, 1])
             .map_err(|err| datetime_error(format!("datenum: {err}")))?,
@@ -79,7 +83,7 @@ pub(super) async fn datenum_builtin(args: Vec<Value>) -> crate::BuiltinResult<Va
             _ => serial_tensor_from_value(args[0].clone(), "datenum")?,
         },
         3..=6 => {
-            let datetime = build_from_components(args, None)?;
+            let datetime = build_from_components(runtime.as_ref(), args, None)?;
             serials_from_datetime_value(&datetime)?
         }
         _ => {
@@ -142,9 +146,14 @@ pub(super) async fn datevec_builtin(value: Value) -> crate::BuiltinResult<Value>
 #[runmat_macros::runtime_builtin(
     name = "datestr",
     builtin_path = "crate::builtins::datetime",
-    binding_variant = "default"
+    binding_variant = "default",
+    context = true
 )]
-pub(super) async fn datestr_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub(super) async fn datestr_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(datetime_error(
             "datestr: expected at most one format argument",
@@ -157,10 +166,10 @@ pub(super) async fn datestr_builtin(value: Value, rest: Vec<Value>) -> crate::Bu
     {
         return Err(datetime_error("datestr: format must be host text"));
     }
-    let value = gather_if_needed_async(&value)
+    let value = gather_in_runtime(runtime.as_ref(), &value)
         .await
         .map_err(|err| datetime_error(format!("datestr: {}", err.message())))?;
-    let rest = gather_args(&rest).await?;
+    let rest = gather_retained_args(rest, runtime.as_ref()).await?;
     let format = rest
         .first()
         .map(|value| scalar_text(value, "datestr format"))
@@ -187,9 +196,14 @@ pub(super) async fn datestr_builtin(value: Value, rest: Vec<Value>) -> crate::Bu
 #[runmat_macros::runtime_builtin(
     name = "weekday",
     builtin_path = "crate::builtins::datetime",
-    binding_variant = "default"
+    binding_variant = "default",
+    context = true
 )]
-pub(super) async fn weekday_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub(super) async fn weekday_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(datetime_error(
             "weekday: expected a date and at most one day-name form",
@@ -210,7 +224,7 @@ pub(super) async fn weekday_builtin(value: Value, rest: Vec<Value>) -> crate::Bu
         },
     };
     preflight_legacy_inputs("weekday", [&value].into_iter(), false)?;
-    let value = gather_if_needed_async(&value)
+    let value = gather_in_runtime(runtime.as_ref(), &value)
         .await
         .map_err(|err| datetime_error(format!("weekday: {}", err.message())))?;
     let serials = numeric_or_datetime_serial_tensor(value, "weekday")?;
@@ -370,4 +384,36 @@ pub(super) async fn isbetween_builtin(
                 .map_err(|err| datetime_error(format!("isbetween: {err}")))?,
         ))
     }
+}
+#[cfg(test)]
+pub(crate) async fn datenum_builtin_source(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    datenum_builtin(
+        None,
+        crate::call::BuiltinArguments::from_borrowed(&args, None)?,
+    )
+    .await
+}
+#[cfg(test)]
+pub(crate) async fn datestr_builtin_source(
+    value: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    datestr_builtin(
+        None,
+        value,
+        crate::call::BuiltinArguments::from_borrowed(&rest, None)?,
+    )
+    .await
+}
+#[cfg(test)]
+pub(crate) async fn weekday_builtin_source(
+    value: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    weekday_builtin(
+        None,
+        value,
+        crate::call::BuiltinArguments::from_borrowed(&rest, None)?,
+    )
+    .await
 }

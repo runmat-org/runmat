@@ -233,10 +233,12 @@ pub(super) fn bound_constraint_to_object<T: Serialize>(
             constraint,
         },
     )?;
-    object.properties.insert(
-        "geometry_revision".into(),
+    crate::builtins::fea::object_api::replace(
+        builtin,
+        &mut object,
+        "geometry_revision",
         Value::Int(IntValue::U32(geometry_revision)),
-    );
+    )?;
     Ok(Value::Object(object))
 }
 
@@ -484,12 +486,20 @@ mod tests {
         let Value::Object(mut object) = region.clone() else {
             panic!("expected geometry.Region")
         };
-        object
-            .properties
-            .insert("region_id".into(), Value::String("face:secondary".into()));
-        object
-            .properties
-            .insert("name".into(), Value::String("Secondary".into()));
+        crate::builtins::fea::object_api::replace(
+            "fea.fixture",
+            &mut object,
+            "region_id",
+            Value::String("face:secondary".into()),
+        )
+        .expect("ordinary fixture property edit");
+        crate::builtins::fea::object_api::replace(
+            "fea.fixture",
+            &mut object,
+            "name",
+            Value::String("Secondary".into()),
+        )
+        .expect("ordinary fixture property edit");
         Value::Object(object)
     }
 
@@ -502,9 +512,10 @@ mod tests {
             "solid base\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid base\n",
         )
         .unwrap();
-        let asset = block_on(geometry_load_builtin(vec![Value::String(
-            path.to_string_lossy().to_string(),
-        )]))
+        let asset = block_on(geometry_load_builtin(
+            Value::String(path.to_string_lossy().to_string().into()),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
         .expect("geometry should load");
         let decoded = geometry_asset_from_value_with_builtin(&asset, STRUCTURAL_FIXED_NAME)
             .expect("asset should decode");
@@ -547,28 +558,32 @@ mod tests {
         .expect("region");
         let constraint =
             block_on(structural_fixed_builtin("base".into(), region)).expect("fixed constraint");
-        let model = create_model_object_from_args(vec![
-            Value::String("matching".into()),
-            asset,
-            Value::String("Steps".into()),
-            super::super::modeling::static_test_steps_value(),
-            Value::String("Constraints".into()),
-            constraint.clone(),
-        ])
+        let model = create_model_object_from_args(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("matching".into()),
+                asset,
+                Value::String("Steps".into()),
+                super::super::modeling::static_test_steps_value(),
+                Value::String("Constraints".into()),
+                constraint.clone(),
+            ]),
+        )
         .expect("matching geometry should compose");
         let model: AnalysisModel =
             object_payload(MODEL_NAME, &model, FEA_MODEL_CLASS).expect("model should decode");
         assert_eq!(model.constraints.len(), 1);
 
         let foreign_asset = load_stl_fixture(&tmp.path().join("part-b.stl"), 2.0);
-        let error = create_model_object_from_args(vec![
-            Value::String("foreign".into()),
-            foreign_asset,
-            Value::String("Steps".into()),
-            super::super::modeling::static_test_steps_value(),
-            Value::String("Constraints".into()),
-            constraint,
-        ])
+        let error = create_model_object_from_args(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("foreign".into()),
+                foreign_asset,
+                Value::String("Steps".into()),
+                super::super::modeling::static_test_steps_value(),
+                Value::String("Constraints".into()),
+                constraint,
+            ]),
+        )
         .unwrap_err();
         assert!(error.message().contains("belongs to geometry"));
     }
@@ -632,22 +647,23 @@ mod tests {
         ))
         .expect("primary region");
         let secondary = distinct_region(&primary);
-        let matching = block_on(periodic_pairing_matching_builtin()).expect("matching pairing");
-        let identity = block_on(periodic_transform_identity_builtin()).expect("identity transform");
+        let matching = block_on(periodic_pairing_matching_builtin(None)).expect("matching pairing");
+        let identity =
+            block_on(periodic_transform_identity_builtin(None)).expect("identity transform");
         let translation = block_on(
             crate::builtins::fea::values::translation_millimeters_builtin(Value::Tensor(
                 Tensor::new_2d(vec![10.0, 0.0, 0.0], 1, 3).unwrap(),
             )),
         )
         .expect("translation");
-        let translated = block_on(periodic_transform_translation_builtin(translation))
+        let translated = block_on(periodic_transform_translation_builtin(None, translation))
             .expect("translated transform");
         let tolerance = block_on(crate::builtins::fea::values::length_micrometers_builtin(
             Value::Num(5.0),
         ))
         .expect("tolerance");
-        let geometric =
-            block_on(periodic_pairing_geometric_builtin(tolerance)).expect("geometric pairing");
+        let geometric = block_on(periodic_pairing_geometric_builtin(None, tolerance))
+            .expect("geometric pairing");
 
         let tie = block_on(structural_tie_builtin(
             "tie".into(),
@@ -805,9 +821,13 @@ mod tests {
         let Value::Object(object) = &mut foreign else {
             unreachable!()
         };
-        object
-            .properties
-            .insert("geometry_id".into(), Value::String("foreign".into()));
+        crate::builtins::fea::object_api::replace(
+            "fea.fixture",
+            object,
+            "geometry_id",
+            Value::String("foreign".into()),
+        )
+        .expect("ordinary fixture property edit");
         assert!(block_on(structural_tie_builtin(
             "foreign_pair".into(),
             primary,
@@ -865,14 +885,16 @@ mod tests {
             block_on(fluid_no_slip_wall_builtin("fluid".into(), select())).unwrap(),
         ];
         let conditions = crate::make_cell_with_shape(constraints, vec![1, 6]).unwrap();
-        let model = create_model_object_from_args(vec![
-            Value::String("families".into()),
-            asset,
-            Value::String("Steps".into()),
-            super::super::modeling::static_test_steps_value(),
-            Value::String("Constraints".into()),
-            conditions,
-        ])
+        let model = create_model_object_from_args(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("families".into()),
+                asset,
+                Value::String("Steps".into()),
+                super::super::modeling::static_test_steps_value(),
+                Value::String("Constraints".into()),
+                conditions,
+            ]),
+        )
         .expect("typed family constraints should compose");
         let model: AnalysisModel = object_payload(MODEL_NAME, &model, FEA_MODEL_CLASS).unwrap();
         assert_eq!(model.constraints.len(), 6);
@@ -907,8 +929,11 @@ mod tests {
             (FEA_ACOUSTIC_CONSTRAINT_CLASS, "prescribedPressure"),
             (FEA_FLUID_CONSTRAINT_CLASS, "movingWall"),
         ] {
-            let (definition, _) = crate::class_registry::lookup_method(class_name, method)
-                .expect("typed class method should be registered");
+            let (definition, _) = crate::class_registry::lookup_method(
+                &runmat_types::ClassIdentity::from(class_name),
+                &runmat_types::MethodName::from(method),
+            )
+            .expect("typed class method should be registered");
             assert!(definition.is_static);
         }
     }
@@ -927,8 +952,8 @@ mod tests {
             .expect("region")
         };
 
-        let ux = block_on(support::dof::structural_dof_ux_builtin()).unwrap();
-        let rz = block_on(support::dof::structural_dof_rz_builtin()).unwrap();
+        let ux = block_on(support::dof::structural_dof_ux_builtin(None)).unwrap();
+        let rz = block_on(support::dof::structural_dof_rz_builtin(None)).unwrap();
         let displacement = block_on(
             crate::builtins::fea::values::displacement_millimeters_builtin(Value::Num(2.5)),
         )
@@ -938,15 +963,17 @@ mod tests {
         ))
         .unwrap();
         let ux_value = block_on(support::dof::structural_translation_value_builtin(
+            None,
             ux.clone(),
             displacement.clone(),
         ))
         .unwrap();
         let rz_value = block_on(support::dof::structural_rotation_value_builtin(
-            rz, rotation,
+            None, rz, rotation,
         ))
         .unwrap();
         assert!(block_on(support::dof::structural_rotation_value_builtin(
+            None,
             ux,
             displacement,
         ))
@@ -954,7 +981,7 @@ mod tests {
 
         let values = crate::make_cell_with_shape(vec![ux_value.clone(), rz_value], vec![1, 2])
             .expect("DOF values cell");
-        let frame = block_on(support::frame::coordinate_frame_global_builtin()).unwrap();
+        let frame = block_on(support::frame::coordinate_frame_global_builtin(None)).unwrap();
         let prescribed = block_on(structural::structural_prescribed_builtin(
             "guided".into(),
             select(),
@@ -990,7 +1017,7 @@ mod tests {
 
         let duplicate_values =
             crate::make_cell_with_shape(vec![ux_value.clone(), ux_value], vec![1, 2]).unwrap();
-        let frame = block_on(support::frame::coordinate_frame_global_builtin()).unwrap();
+        let frame = block_on(support::frame::coordinate_frame_global_builtin(None)).unwrap();
         assert!(block_on(structural::structural_prescribed_builtin(
             "duplicate".into(),
             select(),
@@ -1005,6 +1032,7 @@ mod tests {
         .unwrap();
         let point = block_on(
             support::reference_point::reference_point_from_coordinates_builtin(
+                None,
                 "load_point".into(),
                 position,
             ),
@@ -1032,14 +1060,16 @@ mod tests {
 
         let conditions = crate::make_cell_with_shape(vec![prescribed, coupling], vec![1, 2])
             .expect("typed structural condition cell");
-        let model = create_model_object_from_args(vec![
-            Value::String("typed_structural".into()),
-            asset,
-            Value::String("Steps".into()),
-            super::super::modeling::static_test_steps_value(),
-            Value::String("Constraints".into()),
-            conditions,
-        ])
+        let model = create_model_object_from_args(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("typed_structural".into()),
+                asset,
+                Value::String("Steps".into()),
+                super::super::modeling::static_test_steps_value(),
+                Value::String("Constraints".into()),
+                conditions,
+            ]),
+        )
         .expect("typed prescribed DOFs and coupling should compose into a model");
         let model: AnalysisModel = object_payload(MODEL_NAME, &model, FEA_MODEL_CLASS).unwrap();
         assert_eq!(model.constraints.len(), 2);
@@ -1051,8 +1081,11 @@ mod tests {
             ("fea.CoordinateFrame", "cartesian"),
             ("fea.ReferencePoint", "fromCoordinates"),
         ] {
-            let (definition, _) = crate::class_registry::lookup_method(class_name, method)
-                .unwrap_or_else(|| panic!("{class_name}.{method} should be registered"));
+            let (definition, _) = crate::class_registry::lookup_method(
+                &runmat_types::ClassIdentity::from(class_name),
+                &runmat_types::MethodName::from(method),
+            )
+            .unwrap_or_else(|| panic!("{class_name}.{method} should be registered"));
             assert!(definition.is_static);
         }
     }
@@ -1086,7 +1119,7 @@ mod tests {
             crate::builtins::fea::values::velocity_meters_per_second_builtin(Value::Num(-0.5)),
         )
         .unwrap();
-        let ux = block_on(support::dof::structural_dof_ux_builtin()).unwrap();
+        let ux = block_on(support::dof::structural_dof_ux_builtin(None)).unwrap();
         let motion = block_on(support::motion::structural_acceleration_motion_builtin(
             ux,
             acceleration,
@@ -1126,27 +1159,32 @@ mod tests {
         assert!(support::motion::structural_motions_from_value("test", &duplicate).is_err());
 
         ensure_fea_classes_registered();
-        assert!(
-            crate::class_registry::lookup_method("fea.StructuralMotion", "acceleration").is_some()
-        );
         assert!(crate::class_registry::lookup_method(
-            "fea.StructuralConstraint",
-            "prescribedMotion"
+            &runmat_types::ClassIdentity::from("fea.StructuralMotion"),
+            &runmat_types::MethodName::from("acceleration")
+        )
+        .is_some());
+        assert!(crate::class_registry::lookup_method(
+            &runmat_types::ClassIdentity::from("fea.StructuralConstraint"),
+            &runmat_types::MethodName::from("prescribedMotion")
         )
         .is_some());
         for removed in ["baseDisplacement", "baseVelocity", "baseAcceleration"] {
-            assert!(
-                crate::class_registry::lookup_method("fea.StructuralExcitation", removed).is_none()
-            );
+            assert!(crate::class_registry::lookup_method(
+                &runmat_types::ClassIdentity::from("fea.StructuralExcitation"),
+                &runmat_types::MethodName::from(removed)
+            )
+            .is_none());
         }
     }
 
     #[test]
     fn coordinate_frames_validate_and_round_trip_without_string_dispatch() {
         let vector = |components: [f64; 3]| {
-            block_on(support::direction::direction_vector_builtin(Value::Tensor(
-                Tensor::new(components.to_vec(), vec![1, 3]).unwrap(),
-            )))
+            block_on(support::direction::direction_vector_builtin(
+                None,
+                Value::Tensor(Tensor::new(components.to_vec(), vec![1, 3]).unwrap()),
+            ))
             .unwrap()
         };
         let origin = block_on(crate::builtins::fea::values::position_meters_builtin(
@@ -1154,6 +1192,7 @@ mod tests {
         ))
         .unwrap();
         let frame = block_on(support::frame::coordinate_frame_cartesian_builtin(
+            None,
             "fixture".into(),
             origin.clone(),
             vector([1.0, 0.0, 0.0]),
@@ -1170,6 +1209,7 @@ mod tests {
             }) if frame_id == "fixture"
         ));
         assert!(block_on(support::frame::coordinate_frame_cartesian_builtin(
+            None,
             "parallel".into(),
             origin,
             vector([1.0, 0.0, 0.0]),

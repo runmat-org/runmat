@@ -50,12 +50,12 @@ fn categorical_group(codes: Vec<f64>, with_categories: bool) -> Value {
     let mut object =
         runmat_value::ObjectInstance::new(runmat_types::standard::CATEGORICAL.to_string());
     let len = codes.len();
-    object.properties.insert(
+    object.replace_property_unbounded(
         "Codes".to_string(),
         Value::Tensor(Tensor::new(codes, vec![len, 1]).unwrap()),
     );
     if with_categories {
-        object.properties.insert(
+        object.replace_property_unbounded(
             "Categories".to_string(),
             Value::StringArray(
                 runmat_value::StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap(),
@@ -491,7 +491,10 @@ fn registered_cancelled_nested_host_preflight_never_downloads_borrowed_sample() 
     source.cancel(runmat_execution::CancellationReason::User);
     let error = block_on(boxplot_builtin_registered(
         Some(runtime),
-        vec![Value::GpuTensor(resident.handle.clone()), labels],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::GpuTensor(resident.handle.clone()),
+            labels,
+        ]),
     ))
     .expect_err("cancelled nested group admission must stop before resident transfer");
     assert_eq!(error.identifier(), Some("RunMat:Cancelled"));

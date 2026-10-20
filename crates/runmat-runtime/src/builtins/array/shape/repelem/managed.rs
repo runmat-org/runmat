@@ -17,7 +17,7 @@ mod character;
 pub(super) fn character(
     context: &RuntimeContext,
     value: &CharArray,
-    controls: &[Value],
+    controls: crate::call::FunctionArgumentView<'_>,
 ) -> crate::BuiltinResult<Value> {
     character::assemble(context, value, controls)
 }
@@ -174,7 +174,7 @@ fn control_at(control: &Value, index: usize, position: usize) -> crate::BuiltinR
 }
 
 fn axis_control(
-    controls: &[Value],
+    controls: crate::call::FunctionArgumentView<'_>,
     single_axis: Option<usize>,
     axis: usize,
 ) -> Option<(&Value, usize)> {
@@ -187,7 +187,7 @@ fn axis_control(
 
 fn axis_extent(
     context: &RuntimeContext,
-    controls: &[Value],
+    controls: crate::call::FunctionArgumentView<'_>,
     single_axis: Option<usize>,
     axis: usize,
     source_extent: usize,
@@ -265,7 +265,7 @@ impl Output {
 pub(super) fn dense(
     context: &RuntimeContext,
     value: &Value,
-    controls: &[Value],
+    controls: crate::call::FunctionArgumentView<'_>,
 ) -> crate::BuiltinResult<Value> {
     let original = source_shape(value)
         .ok_or_else(|| repelem_unsupported("repelem: unsupported finite dense input"))?;
@@ -493,7 +493,12 @@ mod tests {
         let counts = Value::Tensor(
             Tensor::new_integer(IntegerStorage::U64(vec![1, 2]), vec![2, 1]).unwrap(),
         );
-        let result = dense(&context, &source, &[counts]).unwrap();
+        let result = dense(
+            &context,
+            &source,
+            crate::call::FunctionArgumentView::from_slice(&[counts]),
+        )
+        .unwrap();
         let Value::Tensor(tensor) = &result else {
             panic!("native single output")
         };
@@ -505,7 +510,12 @@ mod tests {
         assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
 
         let chars = CharArray::new_row("ab");
-        let repeated = character(&context, &chars, &[Value::Num(2.0)]).unwrap();
+        let repeated = character(
+            &context,
+            &chars,
+            crate::call::FunctionArgumentView::from_slice(&[Value::Num(2.0)]),
+        )
+        .unwrap();
         let Value::CharArray(output) = &repeated else {
             panic!("character output")
         };
@@ -514,7 +524,7 @@ mod tests {
         let selected = futures::executor::block_on(super::super::repelem_builtin(
             Some(runtime(&ledger)),
             Value::CharArray(CharArray::new_row("ab")),
-            vec![Value::Num(2.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(2.0)]),
         ))
         .unwrap();
         assert!(
@@ -525,8 +535,18 @@ mod tests {
         assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
 
         let denied = ManagedHostEffectLedger::new(0);
-        assert!(dense(&runtime(&denied), &source, &[Value::Num(2.0)]).is_err());
-        assert!(character(&runtime(&denied), &chars, &[Value::Num(2.0)]).is_err());
+        assert!(dense(
+            &runtime(&denied),
+            &source,
+            crate::call::FunctionArgumentView::from_slice(&[Value::Num(2.0)])
+        )
+        .is_err());
+        assert!(character(
+            &runtime(&denied),
+            &chars,
+            crate::call::FunctionArgumentView::from_slice(&[Value::Num(2.0)])
+        )
+        .is_err());
         assert_eq!(denied.snapshot().live_reserved_bytes, 0);
     }
 }

@@ -916,7 +916,7 @@ fn setdiff_char_elements(
     opts: &SetdiffOptions,
 ) -> crate::BuiltinResult<SetdiffEvaluation> {
     let mut b_keys: HashSet<u32> = HashSet::new();
-    for ch in &b.data {
+    for ch in b.data() {
         b_keys.insert(*ch as u32);
     }
 
@@ -928,7 +928,7 @@ fn setdiff_char_elements(
         for row in 0..a.rows {
             let linear_idx = row + col * a.rows;
             let data_idx = row * a.cols + col;
-            let ch = a.data[data_idx];
+            let ch = a.data()[data_idx];
             let key = ch as u32;
             if b_keys.contains(&key) {
                 continue;
@@ -966,7 +966,7 @@ fn setdiff_char_rows(
         let mut row_values = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r * cols + c;
-            row_values.push(b.data[idx]);
+            row_values.push(b.data()[idx]);
         }
         b_keys.insert(RowCharKey::from_slice(&row_values));
     }
@@ -979,7 +979,7 @@ fn setdiff_char_rows(
         let mut row_values = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r * cols + c;
-            row_values.push(a.data[idx]);
+            row_values.push(a.data()[idx]);
         }
         let key = RowCharKey::from_slice(&row_values);
         if b_keys.contains(&key) {
@@ -1017,7 +1017,7 @@ fn setdiff_string_elements(
     opts: &SetdiffOptions,
 ) -> crate::BuiltinResult<SetdiffEvaluation> {
     let mut b_keys: HashSet<&str> = HashSet::new();
-    for value in &b.data {
+    for value in b.data() {
         b_keys.insert(value.as_str());
     }
 
@@ -1025,7 +1025,7 @@ fn setdiff_string_elements(
     let mut entries = Vec::<StringDiffEntry>::new();
     let mut order_counter = 0usize;
 
-    for (idx, value) in a.data.iter().enumerate() {
+    for (idx, value) in a.data().iter().enumerate() {
         if b_keys.contains(value.as_str()) {
             continue;
         }
@@ -1066,7 +1066,7 @@ fn setdiff_string_rows(
         let mut row_values = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows_b;
-            row_values.push(&b.data[idx]);
+            row_values.push(&b.data()[idx]);
         }
         b_keys.insert(RowStringKey(row_values));
     }
@@ -1079,7 +1079,7 @@ fn setdiff_string_rows(
         let mut row_values = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows_a;
-            row_values.push(&a.data[idx]);
+            row_values.push(&a.data()[idx]);
         }
         let key = RowStringKey(row_values.clone());
         if b_keys.contains(&key) {
@@ -2001,7 +2001,7 @@ pub(crate) mod tests {
             Value::CharArray(arr) => {
                 assert_eq!(arr.rows, 1);
                 assert_eq!(arr.cols, 1);
-                assert_eq!(arr.data, vec!['z']);
+                assert_eq!(arr.data(), vec!['z']);
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -2041,7 +2041,7 @@ pub(crate) mod tests {
         match eval.values_value() {
             Value::StringArray(arr) => {
                 assert_eq!(arr.shape, vec![1, 2]);
-                assert_eq!(arr.data, vec!["alpha".to_string(), "beta".to_string()]);
+                assert_eq!(arr.data(), vec!["alpha".to_string(), "beta".to_string()]);
             }
             other => panic!("expected string array, got {other:?}"),
         }

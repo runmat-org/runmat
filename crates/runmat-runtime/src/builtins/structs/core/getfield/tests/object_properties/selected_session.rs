@@ -16,12 +16,13 @@ fn public_getfield_output_admission_uses_selected_session_not_enclosing_session(
         let _selected_scope = selected.enter();
         crate::output_count::push_output_count(Some(1)).expect("selected output-count scope")
     };
-    let mut value = StructValue::new();
+    let mut value = runmat_value::UnboundedStructValueBuilder::new();
     value.fields.insert("p".to_string(), Value::Num(7.0));
+    let value = value.finish();
     let result = futures::executor::block_on(getfield_builtin(
         Some(selected.clone()),
         Value::Struct(value.clone()),
-        vec![Value::from("p")],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("p")]),
     ))
     .expect("enclosing two-output request must not reject selected one-output call");
     assert_eq!(result.value(), &Value::Num(7.0));
@@ -37,7 +38,7 @@ fn public_getfield_output_admission_uses_selected_session_not_enclosing_session(
     let error = futures::executor::block_on(getfield_builtin(
         Some(selected),
         Value::Struct(value),
-        vec![Value::from("p")],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("p")]),
     ))
     .expect_err("selected two-output request must be rejected before field access");
     assert_eq!(
@@ -116,7 +117,7 @@ fn public_getfield_dependent_getter_uses_selected_session() {
     let result = futures::executor::block_on(getfield_builtin(
         Some(selected),
         Value::Object(ObjectInstance::new(class)),
-        vec![Value::from("p")],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("p")]),
     ))
     .expect("selected public getfield getter");
     assert_eq!(result.value(), &Value::Num(29.0));

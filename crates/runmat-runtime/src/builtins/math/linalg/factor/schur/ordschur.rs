@@ -121,10 +121,13 @@ fn block_order(blocks: &[SchurBlock], selection: Selection) -> Vec<usize> {
     binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::factor::schur"
 )]
-async fn ordschur_builtin(vectors: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn ordschur_builtin(
+    vectors: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     const NAME: SchurContext = ORDSCHUR;
     validate_pair_outputs(NAME)?;
-    let [triangular, selector] = rest.as_slice() else {
+    let (2, Some(triangular), Some(selector)) = (rest.len(), rest.get(0), rest.get(1)) else {
         return Err(invalid(NAME, "ordschur expects U, T, and a selector"));
     };
     let (mut form, dtype) = factor_from_values(vectors, triangular.clone(), NAME)?;

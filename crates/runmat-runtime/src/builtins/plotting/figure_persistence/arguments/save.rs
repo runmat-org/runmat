@@ -1,6 +1,8 @@
 use super::*;
 
-pub(in super::super) fn parse_saveas_args(args: &[Value]) -> BuiltinResult<SaveAsRequest> {
+pub(in super::super) fn parse_saveas_args(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<SaveAsRequest> {
     if args.len() < 2 || args.len() > 3 {
         return Err(persistence_error(
             &ERROR_INVALID_ARGUMENT,
@@ -30,7 +32,7 @@ pub(in super::super) fn parse_saveas_args(args: &[Value]) -> BuiltinResult<SaveA
 }
 
 pub(in super::super) fn parse_savefig_args(
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     builtin: &'static str,
 ) -> BuiltinResult<SaveFigRequest> {
     if args.is_empty() {

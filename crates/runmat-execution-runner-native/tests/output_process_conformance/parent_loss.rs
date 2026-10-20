@@ -14,14 +14,14 @@ pub(super) async fn verify(config: &NativeExecutionConfig) {
         max_records: 4,
         max_text_bytes: 100,
     });
-    let request = runmat_vm::materialize_deferred_call(
+    let request = materialized_request(
         &call,
         runmat_execution::OutputContract {
             requested_outputs: 1,
+            owned_work: None,
         },
         runmat_execution_artifact::ProgramTarget::portable("original-parent-loss"),
-    )
-    .unwrap();
+    );
     let mut command = HostCommand::new(&config.executable);
     command.arguments = config.worker_arguments.clone();
     command.max_stderr_bytes = config.max_stderr_bytes;
@@ -32,9 +32,16 @@ pub(super) async fn verify(config: &NativeExecutionConfig) {
     let limits = FrameLimits {
         max_message_bytes: config.max_message_bytes,
     };
-    write_payload(&mut writer, &serde_json::to_vec(&request).unwrap(), limits)
-        .await
-        .unwrap();
+    write_payload(
+        &mut writer,
+        &serde_json::to_vec(&runmat_execution_artifact::WorkerProgramRequest::Graph(
+            request,
+        ))
+        .unwrap(),
+        limits,
+    )
+    .await
+    .unwrap();
     let bytes = tokio::time::timeout(Duration::from_secs(30), read_payload(&mut reader, limits))
         .await
         .expect("original non-yielding source did not deliver its first write")

@@ -10,8 +10,8 @@ pub(super) fn resident_input_handle(value: &Value) -> Option<&GpuTensorHandle> {
 
 pub(in crate::builtins::deep_learning) fn forward_data(value: &Value) -> &Value {
     if let Value::Object(object) = value {
-        if object.class_name.is(super::DLARRAY_CLASS) {
-            return object.properties.get("Data").unwrap_or(value);
+        if object.class_name().is(super::DLARRAY_CLASS) {
+            return object.properties().get("Data").unwrap_or(value);
         }
     }
     value

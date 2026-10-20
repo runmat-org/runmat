@@ -57,12 +57,12 @@ fn extract_payload(data: &Value) -> BuiltinResult<Payload> {
 
 fn char_array_to_text(ca: &CharArray) -> Vec<char> {
     if ca.rows <= 1 {
-        return ca.data.as_slice().to_vec();
+        return ca.data_owner().as_slice().to_vec();
     }
     let mut out = Vec::with_capacity(ca.rows * (ca.cols + 1));
     for row in 0..ca.rows {
         for col in 0..ca.cols {
-            out.push(ca.data[row * ca.cols + col]);
+            out.push(ca.data()[row * ca.cols + col]);
         }
         if row + 1 < ca.rows {
             out.push('\n');
@@ -72,13 +72,13 @@ fn char_array_to_text(ca: &CharArray) -> Vec<char> {
 }
 
 fn string_array_to_text(sa: &StringArray) -> Vec<char> {
-    if sa.data.is_empty() {
+    if sa.data().is_empty() {
         return Vec::new();
     }
     let mut combined = String::new();
-    for (idx, entry) in sa.data.iter().enumerate() {
+    for (idx, entry) in sa.data().iter().enumerate() {
         combined.push_str(entry);
-        if idx + 1 < sa.data.len() {
+        if idx + 1 < sa.data().len() {
             combined.push('\n');
         }
     }

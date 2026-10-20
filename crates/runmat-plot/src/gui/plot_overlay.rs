@@ -276,9 +276,15 @@ impl PlotOverlay {
         let denom = (edges.len() - 1) as f64;
         let (first, last) = (edges[0], edges[edges.len() - 1]);
         let place = |value: f64| -> Option<f64> {
-            let i = edges.windows(2).position(|w| value >= w[0] && value <= w[1])?;
+            let i = edges
+                .windows(2)
+                .position(|w| value >= w[0] && value <= w[1])?;
             let width = edges[i + 1] - edges[i];
-            let within = if width > 0.0 { (value - edges[i]) / width } else { 0.0 };
+            let within = if width > 0.0 {
+                (value - edges[i]) / width
+            } else {
+                0.0
+            };
             Some((i as f64 + within) / denom)
         };
         for value in plot_utils::generate_major_ticks(first.min(last), first.max(last)) {
@@ -461,7 +467,9 @@ impl PlotOverlay {
                 let end_decade = y_max.log10().ceil() as i32;
                 (start_decade..=end_decade)
                     .filter(|d| Self::tick_within_log_limits(10f64.powi(*d), y_min, y_max))
-                    .map(|d| Self::approx_text_width_points(&Self::power_of_ten_label(d), tick_font_size))
+                    .map(|d| {
+                        Self::approx_text_width_points(&Self::power_of_ten_label(d), tick_font_size)
+                    })
                     .fold(0.0_f32, f32::max)
             } else {
                 plot_utils::generate_major_ticks(y_min, y_max)
@@ -1447,9 +1455,9 @@ impl PlotOverlay {
                 vec![plot_area_rect; axes_count]
             };
             let grid_cols = if rows * cols > 1 { cols } else { 0 };
-            let mut panel_layouts =
-                self.grid_panel_layouts(&rects, grid_cols, plot_renderer, config.font_scale)
-                    .into_iter();
+            let mut panel_layouts = self
+                .grid_panel_layouts(&rects, grid_cols, plot_renderer, config.font_scale)
+                .into_iter();
             for (i, cell_rect) in rects.iter().enumerate() {
                 let cell_rect = Self::positioned_axes_outer_rect(*cell_rect, plot_renderer, i);
                 let panel_layout = panel_layouts
@@ -1515,7 +1523,15 @@ impl PlotOverlay {
                         self.draw_projected_world_texts(ui, r, plot_renderer, i, config.font_scale);
                     }
                     for (label, pos) in plot_renderer.pie_labels_for_axes(i) {
-                        self.draw_pie_label(ui, r, plot_renderer, i, &label, pos, config.font_scale);
+                        self.draw_pie_label(
+                            ui,
+                            r,
+                            plot_renderer,
+                            i,
+                            &label,
+                            pos,
+                            config.font_scale,
+                        );
                     }
                     if plot_renderer.overlay_show_legend_for_axes(i) {
                         let entries = plot_renderer.overlay_legend_entries_for_axes(i);
@@ -2644,7 +2660,10 @@ impl PlotOverlay {
     ) {
         let text = text.to_string();
         if angle_degrees.abs() <= f64::EPSILON {
-            if let Some(exponent) = text.strip_prefix("10^").filter(|e| e.parse::<i32>().is_ok()) {
+            if let Some(exponent) = text
+                .strip_prefix("10^")
+                .filter(|e| e.parse::<i32>().is_ok())
+            {
                 // `10` with the exponent raised and smaller.
                 let painter = ui.painter();
                 let base = painter.layout_no_wrap("10".to_string(), font_id.clone(), text_color);
@@ -3243,8 +3262,14 @@ impl PlotOverlay {
             }
             MarkerStyle::Plus | MarkerStyle::Cross | MarkerStyle::Star => {
                 let d = radius;
-                painter.line_segment([center - egui::vec2(d, 0.0), center + egui::vec2(d, 0.0)], edge);
-                painter.line_segment([center - egui::vec2(0.0, d), center + egui::vec2(0.0, d)], edge);
+                painter.line_segment(
+                    [center - egui::vec2(d, 0.0), center + egui::vec2(d, 0.0)],
+                    edge,
+                );
+                painter.line_segment(
+                    [center - egui::vec2(0.0, d), center + egui::vec2(0.0, d)],
+                    edge,
+                );
             }
             _ => {
                 if let Some(fill) = fill {
@@ -3420,12 +3445,20 @@ impl PlotOverlay {
         if style.horizontal_alignment.is_none() && style.vertical_alignment.is_none() {
             return None;
         }
-        let h = match style.horizontal_alignment.as_deref().map(str::to_ascii_lowercase) {
+        let h = match style
+            .horizontal_alignment
+            .as_deref()
+            .map(str::to_ascii_lowercase)
+        {
             Some(ref a) if a == "center" => egui::Align::Center,
             Some(ref a) if a == "right" => egui::Align::Max,
             _ => egui::Align::Min,
         };
-        let v = match style.vertical_alignment.as_deref().map(str::to_ascii_lowercase) {
+        let v = match style
+            .vertical_alignment
+            .as_deref()
+            .map(str::to_ascii_lowercase)
+        {
             Some(ref a) if a == "top" || a == "cap" => egui::Align::Min,
             Some(ref a) if a == "bottom" || a == "baseline" => egui::Align::Max,
             _ => egui::Align::Center,
@@ -3469,8 +3502,14 @@ impl PlotOverlay {
             let font_size = Self::style_font_size(&style, 14.0, scale);
             let (offset, anchor) = match Self::text_alignment_anchor(&style) {
                 Some(anchor) => (egui::Vec2::ZERO, anchor),
-                None if is_3d => (egui::vec2(0.0, -8.0 * scale.max(0.75)), Align2::CENTER_CENTER),
-                None => (egui::vec2(0.0, 6.0 * scale.max(0.75)), Align2::CENTER_CENTER),
+                None if is_3d => (
+                    egui::vec2(0.0, -8.0 * scale.max(0.75)),
+                    Align2::CENTER_CENTER,
+                ),
+                None => (
+                    egui::vec2(0.0, 6.0 * scale.max(0.75)),
+                    Align2::CENTER_CENTER,
+                ),
             };
             Self::paint_styled_text(
                 &ui.painter().with_clip_rect(plot_rect),
@@ -3529,7 +3568,10 @@ impl PlotOverlay {
                 (c.z.clamp(0.0, 1.0) * 255.0) as u8,
             );
             ui.painter().rect_filled(
-                Rect::from_min_max(egui::pos2(bar_rect.min.x, y1), egui::pos2(bar_rect.max.x, y0)),
+                Rect::from_min_max(
+                    egui::pos2(bar_rect.min.x, y1),
+                    egui::pos2(bar_rect.max.x, y0),
+                ),
                 0.0,
                 col,
             );
@@ -3555,7 +3597,10 @@ impl PlotOverlay {
             }
             let y = bar_rect.max.y - t * bar_rect.height();
             ui.painter().line_segment(
-                [egui::pos2(bar_rect.max.x - tick_len, y), egui::pos2(bar_rect.max.x, y)],
+                [
+                    egui::pos2(bar_rect.max.x - tick_len, y),
+                    egui::pos2(bar_rect.max.x, y),
+                ],
                 stroke,
             );
             ui.painter().text(
@@ -3624,10 +3669,8 @@ impl PlotOverlay {
                     let Some(at) = self.project_world_to_screen(plot_rect, camera, mid) else {
                         continue;
                     };
-                    let pos = Pos2::new(
-                        plot_rect.max.x - pad - size.x,
-                        at.y - 2.0 * scale - size.y,
-                    );
+                    let pos =
+                        Pos2::new(plot_rect.max.x - pad - size.x, at.y - 2.0 * scale - size.y);
                     painter.galley(pos, galley, rgba);
                 }
             }

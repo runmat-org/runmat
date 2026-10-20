@@ -39,10 +39,17 @@ fn bound_callback_uses_semantic_identity() {
         source_file: None,
         captures: vec![Value::Num(10.0)].into(),
     }));
-    let result = futures::executor::block_on(runtime.scope(super::cellfun_builtin(
-        callback,
-        vec![cell(vec![Value::Num(1.0), Value::Num(2.0)], &[1, 2])],
-    )))
+    let result = futures::executor::block_on(
+        runtime.scope(super::cellfun_builtin(
+            None,
+            callback,
+            crate::call::BuiltinArguments::from_borrowed(
+                &[cell(vec![Value::Num(1.0), Value::Num(2.0)], &[1, 2])],
+                Some(&runtime),
+            )
+            .unwrap(),
+        )),
+    )
     .unwrap();
     assert_eq!(tensor_values(result.value()), vec![11.0, 12.0]);
 }
@@ -70,10 +77,17 @@ fn name_callback_resolves_to_semantic_function() {
     )))
     .expect("call-port scope");
     drop(entry);
-    let result = futures::executor::block_on(runtime.scope(super::cellfun_builtin(
-        Value::String("project_callback".into()),
-        vec![cell(vec![Value::Num(3.0)], &[1, 1])],
-    )))
+    let result = futures::executor::block_on(
+        runtime.scope(super::cellfun_builtin(
+            None,
+            Value::String("project_callback".into()),
+            crate::call::BuiltinArguments::from_borrowed(
+                &[cell(vec![Value::Num(3.0)], &[1, 1])],
+                Some(&runtime),
+            )
+            .unwrap(),
+        )),
+    )
     .unwrap();
     assert_eq!(tensor_values(result.value()), vec![6.0]);
 }

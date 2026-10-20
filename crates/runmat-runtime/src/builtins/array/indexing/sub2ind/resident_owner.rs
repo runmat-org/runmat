@@ -3,7 +3,10 @@ use super::*;
 use crate::builtins::common::gpu_helpers;
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage, ProviderPrecision};
 
-pub(super) fn source(dims: &Value, subs: &[Value]) -> Option<GpuTensorHandle> {
+pub(super) fn source(
+    dims: &Value,
+    subs: crate::call::FunctionArgumentView<'_>,
+) -> Option<GpuTensorHandle> {
     // Mixed owners still admit the host numerical computation, but there is
     // no authority for restoring its result to any one of them.
     gpu_helpers::select_resident_output_source(

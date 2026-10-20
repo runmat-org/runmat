@@ -34,7 +34,9 @@ pub(super) enum CommentStyle {
     Block { start: String, end: String },
 }
 
-pub(super) fn parse_args(args: &[Value]) -> BuiltinResult<(Option<usize>, TextscanOptions)> {
+pub(super) fn parse_args(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<(Option<usize>, TextscanOptions)> {
     let mut idx = 0usize;
     let repeat = if let Some(value) = args.first() {
         if is_numeric_scalar(value) {
@@ -95,7 +97,7 @@ impl TextscanOptionName {
 }
 
 pub(super) fn preflight_host_options(
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<Option<(Option<usize>, TextscanOptions)>> {
     if !args.iter().any(crate::dispatcher::value_contains_gpu) {
         return parse_args(args).map(Some);
@@ -125,7 +127,7 @@ pub(super) fn preflight_host_options(
         ));
     }
     let mut checked = TextscanOptions::default();
-    for pair in args[start..].chunks_exact(2) {
+    for pair in args.range(start..)?.chunks_exact(2) {
         if !matches!(
             pair[0],
             Value::String(_) | Value::StringArray(_) | Value::CharArray(_)
@@ -217,7 +219,7 @@ pub(super) fn string_scalar(value: &Value, context: &str) -> BuiltinResult<Strin
 fn string_list(value: &Value, context: &str) -> BuiltinResult<Vec<String>> {
     match value {
         Value::Cell(cell) => {
-            let mut out = Vec::with_capacity(cell.data.len());
+            let mut out = Vec::with_capacity(cell.data().len());
             for row in 0..cell.rows {
                 for col in 0..cell.cols {
                     out.push(string_scalar(
@@ -234,7 +236,7 @@ fn string_list(value: &Value, context: &str) -> BuiltinResult<Vec<String>> {
             Ok(out)
         }
         Value::StringArray(sa) => Ok(sa
-            .data
+            .data()
             .iter()
             .map(|text| text.as_str().to_owned())
             .collect()),
@@ -272,7 +274,7 @@ fn parse_comment_style(value: &Value) -> BuiltinResult<CommentStyle> {
                 Ok(CommentStyle::Line(vec![text]))
             }
         }
-        Value::Cell(cell) if cell.data.len() == 2 => {
+        Value::Cell(cell) if cell.data().len() == 2 => {
             let first = string_scalar(
                 &cell.get(0, 0).map_err(|err| {
                     textscan_error_with(&TEXTSCAN_ERROR_ARGUMENT, format!("textscan: {err}"))

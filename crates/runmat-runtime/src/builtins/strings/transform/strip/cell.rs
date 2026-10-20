@@ -14,15 +14,15 @@ const CHECKPOINT_CHUNK: usize = 4096;
 pub(super) async fn strip_cell_array(
     runtime: Option<&RuntimeContext>,
     cell: CellArray,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<Value> {
-    let expectation = PatternExpectation::with_shape(cell.data.len(), cell.shape.as_slice());
+    let expectation = PatternExpectation::with_shape(cell.data().len(), cell.shape.as_slice());
     let (direction, patterns) = parse_arguments(args, &expectation).await?;
     let policy =
         HostAllocationReceipt::policy(runtime).map_err(|cause| allocation(runtime, cause))?;
     if policy == HostAllocationPolicy::Unbounded {
-        let mut values = Vec::with_capacity(cell.data.len());
-        for (index, value) in cell.data.iter().enumerate() {
+        let mut values = Vec::with_capacity(cell.data().len());
+        for (index, value) in cell.data().iter().enumerate() {
             checkpoint(runtime, index)?;
             values.push(ordinary_child(
                 value,
@@ -35,9 +35,9 @@ pub(super) async fn strip_cell_array(
             .map_err(invalid);
     }
     let runtime = runtime.ok_or_else(|| invalid("Managed cell output lacks runtime"))?;
-    let mut bytes = OutputListStorage::requested_bytes(cell.data.len())
+    let mut bytes = OutputListStorage::requested_bytes(cell.data().len())
         .map_err(|cause| strip_allocation_error(runtime, HostAllocationError::Numeric(cause)))?;
-    let mut claims = usize::from(!cell.data.is_empty());
+    let mut claims = usize::from(!cell.data().is_empty());
     let reuse_shape = cell.shape.is_admitted();
     if !reuse_shape {
         add_quote(
@@ -50,7 +50,7 @@ pub(super) async fn strip_cell_array(
             runtime,
         )?;
     }
-    for (index, value) in cell.data.iter().enumerate() {
+    for (index, value) in cell.data().iter().enumerate() {
         checkpoint(Some(runtime), index)?;
         quote_child(
             value,
@@ -83,14 +83,14 @@ pub(super) async fn strip_cell_array(
                     |cause| strip_allocation_error(runtime, HostAllocationError::Numeric(cause)),
                 )?
             };
-            let data = OutputListStorage::try_initialize(cell.data.len(), permit, |index| {
+            let data = OutputListStorage::try_initialize(cell.data().len(), permit, |index| {
                 if index.is_multiple_of(CHECKPOINT_CHUNK) {
                     receipt
                         .checkpoint(runtime)
                         .map_err(|cause| strip_allocation_error(runtime, cause))?;
                 }
                 admitted_child(
-                    &cell.data[index],
+                    &cell.data()[index],
                     direction,
                     patterns.pattern_for_index(index),
                     permit,
@@ -117,7 +117,7 @@ pub(super) async fn strip_cell_array(
 fn text_child(value: &Value) -> Option<&Utf8Text> {
     match value {
         Value::String(text) => Some(text),
-        Value::StringArray(array) if array.data.len() == 1 => array.data.first(),
+        Value::StringArray(array) if array.data().len() == 1 => array.data().first(),
         _ => None,
     }
 }
@@ -180,7 +180,8 @@ fn quote_child(
             }
             return Ok(());
         }
-        let (left, right) = character::trimmed_bounds(array.data.as_slice(), direction, pattern);
+        let (left, right) =
+            character::trimmed_bounds(array.data_owner().as_slice(), direction, pattern);
         let count = right - left;
         let payload = ExactArrayStorage::<char>::requested_bytes(count).map_err(|cause| {
             strip_allocation_error(runtime, HostAllocationError::Numeric(cause))
@@ -229,7 +230,7 @@ fn admitted_child(
     }
     if let Some(array) = character_child(value)? {
         if array.rows == 0 {
-            if array.shape.is_admitted() && array.data.is_exact() {
+            if array.shape.is_admitted() && array.data_owner().is_exact() {
                 return Ok(Value::CharArray(array.clone()));
             }
             let shape = if array.shape.is_admitted() {
@@ -239,8 +240,8 @@ fn admitted_child(
                     |cause| strip_allocation_error(runtime, HostAllocationError::Numeric(cause)),
                 )?
             };
-            let data = if array.data.is_exact() {
-                array.data.clone()
+            let data = if array.data_owner().is_exact() {
+                array.data_owner().clone()
             } else {
                 ExactArrayStorage::try_initialize(0, permit, |_| Ok::<char, RuntimeError>(' '))
                     .map_err(|cause| match cause {
@@ -254,7 +255,8 @@ fn admitted_child(
                 .map(Value::CharArray)
                 .map_err(invalid);
         }
-        let (left, right) = character::trimmed_bounds(array.data.as_slice(), direction, pattern);
+        let (left, right) =
+            character::trimmed_bounds(array.data_owner().as_slice(), direction, pattern);
         let width = right - left;
         let row = [width];
         let matrix = [1, width];
@@ -267,7 +269,7 @@ fn admitted_child(
             strip_allocation_error(runtime, HostAllocationError::Numeric(cause))
         })?;
         let data = ExactArrayStorage::try_initialize(width, permit, |index| {
-            Ok::<char, RuntimeError>(array.data[left + index])
+            Ok::<char, RuntimeError>(array.data()[left + index])
         })
         .map_err(|cause| match cause {
             ExactArrayInitializationError::Allocation(cause) => {
@@ -296,14 +298,15 @@ fn ordinary_child(
         if array.rows == 0 {
             return Ok(Value::CharArray(array.clone()));
         }
-        let (left, right) = character::trimmed_bounds(array.data.as_slice(), direction, pattern);
+        let (left, right) =
+            character::trimmed_bounds(array.data_owner().as_slice(), direction, pattern);
         let width = right - left;
         let dimensions = if array.shape.len() == 1 {
             vec![width]
         } else {
             vec![1, width]
         };
-        return CharArray::new_with_shape(array.data[left..right].to_vec(), dimensions)
+        return CharArray::new_with_shape(array.data()[left..right].to_vec(), dimensions)
             .map(Value::CharArray)
             .map_err(invalid);
     }

@@ -177,7 +177,10 @@ pub(crate) fn matrix_dimensions_for(
 }
 
 /// Parse an optional tolerance argument shared by SVD-derived builtins.
-pub(crate) fn parse_tolerance_arg(name: &str, args: &[Value]) -> Result<Option<f64>, String> {
+pub(crate) fn parse_tolerance_arg(
+    name: &str,
+    args: crate::call::FunctionArgumentView<'_>,
+) -> Result<Option<f64>, String> {
     match args.len() {
         0 => Ok(None),
         1 => {
@@ -286,7 +289,11 @@ mod tests {
         let tol =
             Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("typed tolerance");
         assert_eq!(
-            parse_tolerance_arg("rank", &[Value::Tensor(tol)]).expect("tolerance"),
+            parse_tolerance_arg(
+                "rank",
+                crate::call::FunctionArgumentView::from_slice(&[Value::Tensor(tol)])
+            )
+            .expect("tolerance"),
             Some(2.0)
         );
     }
@@ -295,8 +302,11 @@ mod tests {
     fn parse_tolerance_arg_rejects_negative_typed_integer_storage() {
         let tol = Tensor::new_integer(IntegerStorage::I16(vec![-1]), vec![1, 1])
             .expect("typed tolerance");
-        let err = parse_tolerance_arg("pinv", &[Value::Tensor(tol)])
-            .expect_err("negative typed tolerance must reject");
+        let err = parse_tolerance_arg(
+            "pinv",
+            crate::call::FunctionArgumentView::from_slice(&[Value::Tensor(tol)]),
+        )
+        .expect_err("negative typed tolerance must reject");
         assert!(err.contains("tolerance must be >= 0"), "{err}");
     }
 

@@ -52,16 +52,16 @@ fn worker_capacity_covers_concurrent_attempts_and_is_reusable_after_release() {
     let mut allocated = ResourceAllocation::default();
     let first = request(60);
     let second = request(50);
-    reserve_attempt_capacity(&inventory(), &mut allocated, &first).unwrap();
+    reserve_attempt_capacity(&inventory(), &mut allocated, &first, &Default::default()).unwrap();
     let reserved = allocated.clone();
     assert_eq!(
-        reserve_attempt_capacity(&inventory(), &mut allocated, &second),
+        reserve_attempt_capacity(&inventory(), &mut allocated, &second, &Default::default()),
         Err("attempt resources exceed the worker's available inventory")
     );
     assert_eq!(allocated, reserved);
 
-    release(&mut allocated, &first);
-    reserve_attempt_capacity(&inventory(), &mut allocated, &second).unwrap();
+    release(&mut allocated, &first, &Default::default());
+    reserve_attempt_capacity(&inventory(), &mut allocated, &second, &Default::default()).unwrap();
     assert_eq!(allocated.memory_bytes, 50);
     assert_eq!(allocated.cpu_millicores, 1_000);
 }
@@ -78,7 +78,7 @@ fn overflowing_reservation_does_not_partially_change_worker_capacity() {
     };
     let before = allocated.clone();
     assert_eq!(
-        reserve_attempt_capacity(&inventory, &mut allocated, &request(2)),
+        reserve_attempt_capacity(&inventory, &mut allocated, &request(2), &Default::default()),
         Err("attempt resource reservation overflowed")
     );
     assert_eq!(allocated, before);
@@ -90,7 +90,7 @@ fn invalid_attempt_request_cannot_reserve_worker_capacity() {
     let mut invalid = request(50);
     invalid.cpu_millicores = 0;
     assert_eq!(
-        reserve_attempt_capacity(&inventory(), &mut allocated, &invalid),
+        reserve_attempt_capacity(&inventory(), &mut allocated, &invalid, &Default::default()),
         Err("attempt has an invalid resource request")
     );
     assert_eq!(allocated, ResourceAllocation::default());
@@ -122,11 +122,18 @@ async fn completed_attempt_releases_its_worker_reservation_once_inner() {
         graph_programs: Default::default(),
         graph_cache: Default::default(),
     };
-    reserve_attempt_capacity(&inventory(), &mut state.allocated, &resources).unwrap();
+    reserve_attempt_capacity(
+        &inventory(),
+        &mut state.allocated,
+        &resources,
+        &Default::default(),
+    )
+    .unwrap();
     let (_finished_sender, finished) = tokio::sync::watch::channel(false);
     state.attempts.insert(
         attempt_id,
         ActiveAttempt {
+            assignment: Default::default(),
             task: tokio::spawn(async {}),
             reply: super::super::attempt_reply::AttemptReply::spawn(
                 std::sync::Arc::new(SilentRoute),

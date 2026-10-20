@@ -15,7 +15,7 @@ impl Labels {
         match value {
             Value::Num(_) | Value::Int(_) | Value::String(_) => Ok(1),
             Value::Tensor(tensor) => Ok(tensor.len()),
-            Value::StringArray(strings) => Ok(strings.data.len()),
+            Value::StringArray(strings) => Ok(strings.data().len()),
             Value::CharArray(_) => {
                 super::arguments::validate_scalar_text(value, "replacement value")?;
                 Ok(1)
@@ -24,7 +24,7 @@ impl Labels {
                 for value in cell.iter_column_major() {
                     super::arguments::validate_scalar_text(value, "text replacement cell")?;
                 }
-                Ok(cell.data.len())
+                Ok(cell.data().len())
             }
             _ => Err(error::invalid(
                 "discretize: replacement values must be real numeric or text",
@@ -113,14 +113,14 @@ fn missing_numeric(labels: &NumericStorage, len: usize) -> NumericStorage {
 fn text_values(value: &Value) -> BuiltinResult<Vec<Utf8Text>> {
     match value {
         Value::String(value) => Ok(vec![value.clone()]),
-        Value::StringArray(value) => Ok(value.data.iter().cloned().collect()),
+        Value::StringArray(value) => Ok(value.data().to_vec()),
         Value::CharArray(_) => super::arguments::scalar_text(value, "replacement value")
             .map(|text| vec![text.into_owned().into()]),
         Value::Cell(value) => value
             .iter_column_major()
             .map(|item| match item {
                 Value::String(text) => Ok(text.clone()),
-                Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+                Value::StringArray(array) if array.data().len() == 1 => Ok(array.data()[0].clone()),
                 _ => super::arguments::scalar_text(item, "text replacement cell")
                     .map(|text| text.into_owned().into()),
             })

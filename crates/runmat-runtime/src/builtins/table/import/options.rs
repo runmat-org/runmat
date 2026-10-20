@@ -130,12 +130,17 @@ impl ReadTableOptions {
             .any(|variable| variable.has_value_controls())
     }
 
-    pub(in crate::builtins::table) fn parse(args: &[Value]) -> BuiltinResult<Self> {
+    pub(in crate::builtins::table) fn parse(
+        runtime: Option<&crate::context::RuntimeContext>,
+        args: crate::call::FunctionArgumentView<'_>,
+    ) -> BuiltinResult<Self> {
         let mut options = Self::default();
         let mut idx = 0usize;
         if let Some(source) = args.first() {
             if let Some(import) =
-                crate::builtins::io::tabular::import_options::ImportOptions::decode(source)?
+                crate::builtins::io::tabular::import_options::ImportOptions::decode(
+                    runtime, source,
+                )?
             {
                 options.variable_options = import.variables().to_vec();
                 options.variable_source_origin = import.source_origin();
@@ -315,7 +320,7 @@ impl ReadTableOptions {
 }
 
 pub(in crate::builtins::table) fn spreadsheet_import_options(
-    args: Vec<Value>,
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<Value> {
     if !args.len().is_multiple_of(2) {
         return Err(invalid_argument(
@@ -503,7 +508,7 @@ pub(in crate::builtins::table) fn detected_options_from_rows(
     let output_num_header_lines = detected_output_header_lines(options, header_rows_consumed);
     let output_range = detected_output_range(options.range, header_rows_consumed);
 
-    let mut out = StructValue::new();
+    let mut out = runmat_value::UnboundedStructValueBuilder::new();
     out.insert("FileType", Value::string(import_file_type_label(file_type)));
     if let Some(delimiter) = delimiter {
         out.insert("Delimiter", Value::string(delimiter_label(&delimiter)));
@@ -577,7 +582,7 @@ pub(in crate::builtins::table) fn detected_options_from_rows(
         ),
     );
     out.insert("Encoding", Value::string(options.encoding.clone()));
-    Ok(Value::Struct(out))
+    Ok(Value::Struct(out.finish()))
 }
 
 pub(in crate::builtins::table) fn detected_variable_type_labels(
@@ -973,7 +978,7 @@ impl SpreadsheetImportOptions {
 
     fn into_struct(mut self) -> BuiltinResult<StructValue> {
         self.ensure_variable_metadata_len();
-        let mut out = StructValue::new();
+        let mut out = runmat_value::UnboundedStructValueBuilder::new();
         out.insert("FileType", Value::string("spreadsheet".to_string()));
         out.insert("NumVariables", Value::Num(self.num_variables as f64));
         if let Some(read_variable_names) = self.read_variable_names {
@@ -1034,7 +1039,7 @@ impl SpreadsheetImportOptions {
         out.insert("EmptyLineRule", Value::string(self.empty_line_rule));
         out.insert("TextType", Value::string(self.text_type));
         out.insert("DatetimeType", Value::string(self.datetime_type));
-        Ok(out)
+        Ok(out.finish())
     }
 }
 
@@ -1254,10 +1259,10 @@ impl RangeSpec {
         match value {
             Value::String(text) => Self::parse_text(text),
             Value::CharArray(ca) if ca.rows == 1 => {
-                let text: String = ca.data.iter().collect();
+                let text: String = ca.data().iter().collect();
                 Self::parse_text(&text)
             }
-            Value::StringArray(sa) if sa.data.len() == 1 => Self::parse_text(&sa.data[0]),
+            Value::StringArray(sa) if sa.data().len() == 1 => Self::parse_text(&sa.data()[0]),
             Value::Tensor(t) if tensor_len(t) == 2 || tensor_len(t) == 4 => {
                 let len = tensor_len(t);
                 let mut indices = Vec::with_capacity(len);

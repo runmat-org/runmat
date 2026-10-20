@@ -4,9 +4,9 @@ use super::*;
 pub(crate) fn predict_classification_linear_object(
     object: ObjectInstance,
     xnew: Value,
-    rest: Vec<Value>,
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<Vec<Value>> {
-    let options = parse_predict_options(&rest)?;
+    let options = parse_predict_options(rest)?;
     let predictor_names = string_array_property(&object, "PredictorNames")?;
     let x = predictors_for_prediction(xnew, &predictor_names, options.observations_in)?;
     let beta = tensor_property(&object, "Beta")?;
@@ -22,7 +22,7 @@ pub(crate) fn predict_classification_linear_object(
     }
     let class_names = labels_from_value(
         object
-            .properties
+            .properties()
             .get("ClassNames")
             .cloned()
             .ok_or_else(|| predict_invalid("predict: model is missing ClassNames"))?,
@@ -94,7 +94,9 @@ struct PredictOptions {
     observations_in: ObservationsIn,
 }
 
-fn parse_predict_options(values: &[Value]) -> BuiltinResult<PredictOptions> {
+fn parse_predict_options(
+    values: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<PredictOptions> {
     if !values.len().is_multiple_of(2) {
         return Err(predict_invalid(
             "predict: name-value options must be paired",

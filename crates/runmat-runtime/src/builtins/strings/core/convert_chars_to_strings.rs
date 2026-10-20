@@ -16,7 +16,7 @@ const NAME: &str = "convertCharsToStrings";
 )]
 pub(crate) async fn convert_chars_to_strings_builtin(
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     convert_variadic(value, rest, convert_value)
 }
@@ -24,25 +24,25 @@ pub(crate) async fn convert_chars_to_strings_builtin(
 fn convert_value(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::CharArray(array) => {
-            let mut text = String::with_capacity(array.data.len());
+            let mut text = String::with_capacity(array.data().len());
             for col in 0..array.cols {
                 for row in 0..array.rows {
-                    text.push(array.data[row * array.cols + col]);
+                    text.push(array.data()[row * array.cols + col]);
                 }
             }
             Ok(Value::string(text))
         }
         Value::Cell(cell) => {
-            if !cell.data.iter().all(is_character_vector) {
+            if !cell.data().iter().all(is_character_vector) {
                 return Ok(Value::Cell(cell));
             }
             let data = cell
-                .data
+                .data()
                 .iter()
                 .map(|value| match value {
                     Value::CharArray(array) if array.rows == 0 => Ok(String::new()),
                     Value::CharArray(array) => {
-                        Ok(char_row_to_string_slice(&array.data, array.cols, 0))
+                        Ok(char_row_to_string_slice(array.data(), array.cols, 0))
                     }
                     _ => Err(conversion_error(
                         "convertCharsToStrings: invalid cellstr element",

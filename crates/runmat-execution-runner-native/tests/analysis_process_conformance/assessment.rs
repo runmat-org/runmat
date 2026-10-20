@@ -47,6 +47,7 @@ pub(super) async fn run() {
     let mut compiler = runmat_core::RunMatSession::with_options(false, false).unwrap();
     compiler
         .install_project_handoff(runmat_package::FrozenProjectHandoff::new(project.clone()))
+        .await
         .unwrap();
     let unit = compiler
         .compile_executable_unit(
@@ -109,6 +110,7 @@ pub(super) async fn run() {
             &prepared,
             BTreeSet::new(),
             NamedCallableExecutionContext {
+                host: super::phase_execution_support::host_requirement(prepared.request()),
                 scope_id: session.scope_id(),
                 pool_id: session.pool_id(),
                 resources: resources.clone(),

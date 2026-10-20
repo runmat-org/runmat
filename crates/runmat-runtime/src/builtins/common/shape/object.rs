@@ -23,7 +23,9 @@ pub(super) async fn dimensions(
         if sibling != dimensions {
             return Err(crate::build_runtime_error(format!(
                 "{}: array payload properties {} and {} have inconsistent dimensions",
-                object.class_name, primary.0, property.0
+                object.class_name(),
+                primary.0,
+                property.0
             ))
             .build());
         }
@@ -36,17 +38,19 @@ async fn property_dimensions(
     property: &MemberName,
     kind: ClassArrayPayload,
 ) -> Result<Vec<usize>, RuntimeError> {
-    let payload = object.properties.get(&property.0).ok_or_else(|| {
+    let payload = object.properties().get(&property.0).ok_or_else(|| {
         crate::build_runtime_error(format!(
             "{}: array payload property {} is missing",
-            object.class_name, property.0
+            object.class_name(),
+            property.0
         ))
         .build()
     })?;
     if !super::array_payload_storage_matches(payload, kind) {
         return Err(crate::build_runtime_error(format!(
             "{}: array payload property {} has invalid storage",
-            object.class_name, property.0
+            object.class_name(),
+            property.0
         ))
         .build());
     }

@@ -24,9 +24,11 @@ fn immutable_mesh_collision_read_cancels_without_changing_original_or_later_repl
     let original = vec![7_u8; 16385];
     persist_canonical(&path, &original).unwrap();
     {
-        let _interrupt = crate::interrupt::replace_interrupt(Some(runmat_execution::CancellationToken::from_shared(std::sync::Arc::new(
-            std::sync::atomic::AtomicBool::new(true),
-        ))));
+        let _interrupt = crate::interrupt::replace_interrupt(Some(
+            runmat_execution::CancellationToken::from_shared(std::sync::Arc::new(
+                std::sync::atomic::AtomicBool::new(true),
+            )),
+        ));
         assert!(persist_canonical(&path, &original)
             .unwrap_err()
             .contains("cancelled"));
@@ -43,9 +45,11 @@ fn borrowed_mesh_encoding_observes_runtime_cancellation_and_preserves_original()
         let mesh = canonical_tetrahedron_solver_mesh(order);
         let original = mesh.canonical_encode().unwrap();
         {
-            let _interrupt = crate::interrupt::replace_interrupt(Some(runmat_execution::CancellationToken::from_shared(std::sync::Arc::new(
-                std::sync::atomic::AtomicBool::new(true),
-            ))));
+            let _interrupt = crate::interrupt::replace_interrupt(Some(
+                runmat_execution::CancellationToken::from_shared(std::sync::Arc::new(
+                    std::sync::atomic::AtomicBool::new(true),
+                )),
+            ));
             assert!(mesh
                 .canonical_encode_with_cancellation(&MeshPersistenceCancellation)
                 .is_err());

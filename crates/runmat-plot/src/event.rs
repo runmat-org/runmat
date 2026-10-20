@@ -1,5 +1,4 @@
 mod geometry_lines;
-pub use geometry_lines::GeometryLines;
 use crate::core::{BoundingBox, Vertex};
 use crate::plots::{
     AreaPlot, AxesKind, AxesMetadata, BarChart, ColorMap, ContourFillPlot, ContourPlot, ErrorBar,
@@ -9,6 +8,7 @@ use crate::plots::{
     PlotElement, PlotType, QuiverPlot, ReferenceLine, ReferenceLineOrientation, Scatter3Plot,
     ScatterPlot, ShadingMode, StairsPlot, StemPlot, SurfacePlot, TextStyle,
 };
+pub use geometry_lines::GeometryLines;
 use glam::{Vec3, Vec4};
 use runmat_value::NumericStorage;
 use serde::{Deserialize, Serialize};
@@ -801,7 +801,11 @@ impl FigureScene {
         Self {
             schema_version: Self::SCHEMA_VERSION,
             geometry_overlay: scene.overlay.clone(),
-            geometry_lines: scene.chunks.iter().filter_map(GeometryLines::capture).collect(),
+            geometry_lines: scene
+                .chunks
+                .iter()
+                .filter_map(GeometryLines::capture)
+                .collect(),
             layout: FigureLayout {
                 axes_rows: 1,
                 axes_cols: 1,
@@ -4789,8 +4793,14 @@ mod tests {
     #[test]
     fn hidden_lines_stay_out_of_the_legend_after_scene_roundtrip() {
         let mut figure = Figure::new();
-        figure.add_line_plot(LinePlot::new(vec![0.0, 1.0], vec![0.0, 1.0]).unwrap().with_label("shown"));
-        let mut hidden = LinePlot::new(vec![0.0, 1.0], vec![1.0, 0.0]).unwrap().with_label("[1 0]");
+        figure.add_line_plot(
+            LinePlot::new(vec![0.0, 1.0], vec![0.0, 1.0])
+                .unwrap()
+                .with_label("shown"),
+        );
+        let mut hidden = LinePlot::new(vec![0.0, 1.0], vec![1.0, 0.0])
+            .unwrap()
+            .with_label("[1 0]");
         hidden.handle_visibility = "off".to_string();
         figure.add_line_plot(hidden);
 

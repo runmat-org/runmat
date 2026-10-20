@@ -23,7 +23,7 @@ use runmat_plot::plots::SurfacePlot;
 use runmat_value::{IntValue, NumericScalar, ObjectInstance, Tensor, Value};
 
 use crate::builtins::common::tensor;
-use crate::builtins::plotting::op_common::{apply_axes_target, split_leading_axes_handle};
+use crate::builtins::plotting::op_common::{apply_axes_target, split_leading_axes_arguments};
 use crate::builtins::plotting::state::color_limits_snapshot;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -94,12 +94,23 @@ fn map_plot_error(err: RuntimeError) -> RuntimeError {
     }
 }
 
+#[cfg(test)]
+pub(crate) async fn binscatter_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
+    let args =
+        crate::execution::RootedValues::new(args).map_err(|error| error.into_runtime_error())?;
+    binscatter_builtin_registered(None, args.into()).await
+}
+
 #[runtime_builtin(
     name = "binscatter",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::stats::summary::binscatter"
 )]
-pub(crate) async fn binscatter_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
+pub(crate) async fn binscatter_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<f64> {
     if args
         .iter()
         .any(|value| matches!(value, Value::GpuTensor(_)))
@@ -109,7 +120,7 @@ pub(crate) async fn binscatter_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
             NAME,
         )?;
     }
-    let (axes_target, args) = split_leading_axes_handle(args, NAME).map_err(map_plot_error)?;
+    let (axes_target, args) = split_leading_axes_arguments(args, NAME).map_err(map_plot_error)?;
     let input_count = if matches!(args.first(), Some(Value::Object(object)) if crate::builtins::table::is_tabular_object(object))
     {
         3
@@ -119,12 +130,17 @@ pub(crate) async fn binscatter_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
     if args.len() < input_count {
         return Err(invalid("binscatter: expected x and y inputs"));
     }
-    let prepared_inputs = input::admit_host_visible(&args[..input_count])?;
-    let option_plan = BinscatterOptionPlan::admit(args[input_count..].to_vec())?;
+    let prepared_inputs = input::admit_host_visible(args.view().range(..input_count)?)?;
+    let _argument_sources = args.fork();
+    let option_plan = BinscatterOptionPlan::admit(args.range(input_count..)?)?;
     let inputs = if let Some(inputs) = prepared_inputs {
         inputs
     } else {
-        parse_inputs(gather_values(args.into_iter().take(input_count).collect()).await?)?
+        parse_inputs(
+            gather_values(args.into_range(..input_count)?, runtime.as_ref())
+                .await?
+                .view(),
+        )?
     };
     let options = option_plan.evaluate().await?;
     let [x_bins, y_bins] = if let Some(num_bins) = options.num_bins {
@@ -153,16 +169,16 @@ pub(crate) async fn binscatter_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
     render_binscatter(inputs, options, [x_bins, y_bins], chart)
 }
 
-async fn gather_values(args: Vec<Value>) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(args.len());
-    for value in args {
-        out.push(
-            gather_if_needed_async(&value)
-                .await
-                .map_err(|err| invalid_with_source(format!("binscatter: {err}"), err))?,
-        );
-    }
-    Ok(out)
+async fn gather_values(
+    args: crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    args.try_map_preserving_roots_async(args.len(), runtime, async |index| {
+        gather_if_needed_async(&args[index])
+            .await
+            .map_err(|err| invalid_with_source(format!("binscatter: {err}"), err))
+    })
+    .await
 }
 
 #[cfg(test)]

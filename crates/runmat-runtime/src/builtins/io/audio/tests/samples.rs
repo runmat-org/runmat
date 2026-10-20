@@ -25,11 +25,20 @@ fn audioread_descriptor_covers_core_forms() {
 #[test]
 fn audioread_invalid_output_count_and_controls_precede_file_read() {
     let _count = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
-    let err = block_on(audioread_builtin(None, Value::from("missing.wav"), vec![]))
-        .expect_err("invalid output count");
+    let err = block_on(audioread_builtin(
+        None,
+        Value::from("missing.wav"),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .expect_err("invalid output count");
     assert_eq!(err.identifier(), Some("RunMat:audioread:InvalidArgument"));
     drop(_count);
-    let err = block_on(audioread_builtin(None, Value::Num(1.0), vec![])).expect_err("numeric path");
+    let err = block_on(audioread_builtin(
+        None,
+        Value::Num(1.0),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .expect_err("numeric path");
     assert_eq!(err.identifier(), Some("RunMat:audioread:InvalidArgument"));
 }
 
@@ -42,7 +51,7 @@ fn audioread_open_ended_range_after_last_frame_reports_format_error() {
     let error = block_on(audioread_builtin(
         None,
         Value::from(path.to_string_lossy().into_owned()),
-        vec![range],
+        crate::builtins::common::test_support::builtin_arguments(vec![range]),
     ))
     .expect_err("range beyond file");
     assert_eq!(
@@ -64,7 +73,7 @@ fn audioread_reads_mono_pcm16_as_normalized_double() {
         block_on(audioread_builtin(
             None,
             Value::from(path.to_string_lossy().into_owned()),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect("audioread"),
     );
@@ -96,7 +105,7 @@ fn audioread_stereo_output_is_column_major_by_channel() {
         block_on(audioread_builtin(
             None,
             Value::from(path.to_string_lossy().into_owned()),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect("audioread"),
     );
@@ -118,9 +127,9 @@ fn audioread_sample_range_is_one_based_inclusive_and_returns_fs() {
         block_on(audioread_builtin(
             None,
             Value::from(path.to_string_lossy().into_owned()),
-            vec![Value::Tensor(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(
                 Tensor::new(vec![2.0, 3.0], vec![1, 2]).expect("range"),
-            )],
+            )]),
         ))
         .expect("audioread"),
     );
@@ -184,7 +193,7 @@ fn audioread_rejects_resident_inputs_before_provider_access() {
     let error = block_on(audioread_builtin(
         None,
         Value::from("unused.wav"),
-        vec![resident],
+        crate::builtins::common::test_support::builtin_arguments(vec![resident]),
     ))
     .expect_err("resident sample range must reject");
     assert_eq!(error.identifier(), Some("RunMat:audioread:InvalidArgument"));
@@ -208,7 +217,10 @@ fn audioread_infinite_endpoint_reads_through_last_frame() {
         block_on(audioread_builtin(
             None,
             Value::from(path.to_string_lossy().into_owned()),
-            vec![Value::Tensor(range), Value::from("native")],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Tensor(range),
+                Value::from("native"),
+            ]),
         ))
         .expect("audioread"),
     );
@@ -230,7 +242,7 @@ fn audioread_native_pcm8_uses_exact_uint8_storage() {
         block_on(audioread_builtin(
             None,
             Value::from(path.to_string_lossy().into_owned()),
-            vec![Value::from("native")],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from("native")]),
         ))
         .expect("audioread"),
     );
@@ -252,7 +264,7 @@ fn audioread_native_pcm16_preserves_exact_storage_and_channel_order() {
         block_on(audioread_builtin(
             None,
             Value::from(path.to_string_lossy().into_owned()),
-            vec![Value::from("native")],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from("native")]),
         ))
         .expect("audioread"),
     );
@@ -274,10 +286,10 @@ fn audioread_native_pcm16_preserves_exact_storage_for_sample_ranges() {
         block_on(audioread_builtin(
             None,
             Value::from(path.to_string_lossy().into_owned()),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::Tensor(Tensor::new(vec![2.0, 3.0], vec![1, 2]).expect("range")),
                 Value::from("native"),
-            ],
+            ]),
         ))
         .expect("audioread"),
     );
@@ -296,7 +308,7 @@ fn audioread_native_pcm24_left_aligns_into_exact_int32_storage() {
         block_on(audioread_builtin(
             None,
             Value::from(path.to_string_lossy().into_owned()),
-            vec![Value::from("native")],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from("native")]),
         ))
         .expect("audioread"),
     );
@@ -317,7 +329,7 @@ fn audioread_native_pcm32_preserves_int32_extrema() {
         block_on(audioread_builtin(
             None,
             Value::from(path.to_string_lossy().into_owned()),
-            vec![Value::from("native")],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from("native")]),
         ))
         .expect("audioread"),
     );
@@ -338,7 +350,7 @@ fn audioread_reads_float32_wave() {
         block_on(audioread_builtin(
             None,
             Value::from(path.to_string_lossy().into_owned()),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect("audioread"),
     );
@@ -357,7 +369,7 @@ fn audioread_native_float32_wave_remains_single() {
         block_on(audioread_builtin(
             None,
             Value::from(path.to_string_lossy().into_owned()),
-            vec![Value::from("native")],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from("native")]),
         ))
         .expect("audioread"),
     );
@@ -377,7 +389,7 @@ fn audioread_native_float64_wave_remains_double() {
         block_on(audioread_builtin(
             None,
             Value::from(path.to_string_lossy().into_owned()),
-            vec![Value::from("native")],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from("native")]),
         ))
         .expect("audioread"),
     );
@@ -399,7 +411,7 @@ fn audioread_reads_rf64_data_size_from_ds64() {
             block_on(audioread_builtin(
                 None,
                 Value::from(path.to_string_lossy().into_owned()),
-                Vec::new(),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
             ))
             .expect("audioread"),
         )
@@ -432,7 +444,7 @@ fn audioread_reads_via_active_filesystem_provider() {
             block_on(audioread_builtin(
                 None,
                 Value::from("/audio.wav"),
-                Vec::new(),
+                crate::builtins::common::test_support::builtin_arguments(Vec::new()),
             ))
             .expect("audioread"),
         )

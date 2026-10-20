@@ -232,7 +232,10 @@ fn registered_known_start_shape_rejects_before_resident_x_download_and_keeps_lea
             None,
             Value::GpuTensor(x.clone()),
             k,
-            vec![Value::from("Start"), Value::Tensor(start)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("Start"),
+                Value::Tensor(start),
+            ]),
         ))
         .expect_err("known k-by-p mismatch must reject before download");
         assert!(error.message().contains("numeric Start must be k-by-p"));
@@ -245,12 +248,14 @@ fn registered_known_start_shape_rejects_before_resident_x_download_and_keeps_lea
 fn effective_start_shape_uses_last_override_and_vector_feature_geometry() {
     let x = Tensor::new(vec![0.0, 1.0, 9.0, 10.0], vec![1, 4]).unwrap();
     let options = admission::admit_option_values(
-        admission::parse_option_headers(vec![
-            Value::from("Start"),
-            Value::Tensor(Tensor::new(vec![0.0; 6], vec![2, 3]).unwrap()),
-            Value::from("Start"),
-            Value::Tensor(Tensor::new(vec![0.0, 10.0], vec![2, 1]).unwrap()),
-        ])
+        admission::parse_option_headers(crate::builtins::common::test_support::builtin_arguments(
+            vec![
+                Value::from("Start"),
+                Value::Tensor(Tensor::new(vec![0.0; 6], vec![2, 3]).unwrap()),
+                Value::from("Start"),
+                Value::Tensor(Tensor::new(vec![0.0, 10.0], vec![2, 1]).unwrap()),
+            ],
+        ))
         .unwrap(),
     )
     .unwrap();
@@ -265,7 +270,7 @@ fn ignored_resident_statset_field_does_not_download() {
     let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
     let ignored = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
     let ignored = crate::builtins::common::gpu_helpers::upload_tensor(provider, &ignored).unwrap();
-    let mut statset = runmat_value::StructValue::new();
+    let mut statset = runmat_value::UnboundedStructValueBuilder::new();
     statset.insert("LegacyField", Value::GpuTensor(ignored));
     block_on(kmeans_builtin(
         Value::Tensor(Tensor::new(vec![0.0, 1.0, 9.0, 10.0], vec![4, 1]).unwrap()),
@@ -274,7 +279,7 @@ fn ignored_resident_statset_field_does_not_download() {
             Value::from("Start"),
             Value::Tensor(Tensor::new(vec![0.0, 10.0], vec![2, 1]).unwrap()),
             Value::from("Options"),
-            Value::Struct(statset),
+            Value::Struct(statset.finish()),
         ],
     ))
     .expect("ignored statset field cannot access provider");
@@ -287,16 +292,18 @@ fn typed_headers_preserve_order_and_skip_unrecognized_statset_payloads() {
     let ignored = owner
         .allocate_zeroed(vec![4, 1], NumericElementType::F64, GpuTensorStorage::Real)
         .unwrap();
-    let mut statset = runmat_value::StructValue::new();
+    let mut statset = runmat_value::UnboundedStructValueBuilder::new();
     statset.insert("LegacyField", Value::GpuTensor(ignored.handle.clone()));
-    let headers = admission::parse_option_headers(vec![
-        Value::from("Distance"),
-        Value::from("cityblock"),
-        Value::from("Options"),
-        Value::Struct(statset),
-        Value::from("Distance"),
-        Value::from("cosine"),
-    ])
+    let headers = admission::parse_option_headers(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("Distance"),
+            Value::from("cityblock"),
+            Value::from("Options"),
+            Value::Struct(statset.finish()),
+            Value::from("Distance"),
+            Value::from("cosine"),
+        ]),
+    )
     .unwrap();
     let options = admission::admit_option_values(headers).unwrap();
     assert_eq!(options.len(), 3);
@@ -365,11 +372,13 @@ fn ignored_nested_resident_metadata_is_protected_without_inheriting_explicit_int
     let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
     let cell = runmat_value::CellArray::new(vec![Value::GpuTensor(ignored_explicit.clone())], 1, 1)
         .unwrap();
-    let mut statset = runmat_value::StructValue::new();
+    let mut statset = runmat_value::UnboundedStructValueBuilder::new();
     statset.insert("IgnoredField", Value::Cell(cell));
     statset.insert("Streams", Value::GpuTensor(empty_stream.handle.clone()));
     let mut borrowed = BorrowedOperands::new();
-    borrowed.protect_value(&Value::Struct(statset)).unwrap();
+    borrowed
+        .protect_value(&Value::Struct(statset.finish()))
+        .unwrap();
     let result = restore_kmeans_value(
         Value::Tensor(Tensor::new(vec![1.0; 4], vec![4, 1]).unwrap()),
         Some(&source.handle),
@@ -483,10 +492,12 @@ fn invalid_text_control_precedes_any_resident_download() {
     let resident = owner
         .allocate_zeroed(vec![4, 1], NumericElementType::F64, GpuTensorStorage::Real)
         .unwrap();
-    let headers = admission::parse_option_headers(vec![
-        Value::from("Distance"),
-        Value::GpuTensor(resident.handle.clone()),
-    ])
+    let headers = admission::parse_option_headers(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("Distance"),
+            Value::GpuTensor(resident.handle.clone()),
+        ]),
+    )
     .unwrap();
     assert!(admission::admit_option_values(headers).is_err());
     assert_eq!(resident.probe.retirements(), 0);
@@ -501,7 +512,10 @@ fn host_wide_start_is_checked_before_any_download() {
         )
         .unwrap(),
     );
-    let headers = admission::parse_option_headers(vec![Value::from("Start"), start]).unwrap();
+    let headers = admission::parse_option_headers(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::from("Start"), start]),
+    )
+    .unwrap();
     assert!(admission::admit_option_values(headers).is_err());
     let aligned = Value::Tensor(
         Tensor::new_integer(
@@ -510,6 +524,10 @@ fn host_wide_start_is_checked_before_any_download() {
         )
         .unwrap(),
     );
-    let headers = admission::parse_option_headers(vec![Value::from("Start"), aligned]).unwrap();
+    let headers =
+        admission::parse_option_headers(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::from("Start"), aligned],
+        ))
+        .unwrap();
     assert!(admission::admit_option_values(headers).is_ok());
 }

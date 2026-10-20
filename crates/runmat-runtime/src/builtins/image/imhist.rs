@@ -106,7 +106,7 @@ fn map_flow(err: RuntimeError) -> RuntimeError {
 async fn imhist_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     image: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     if crate::output_count::current_output_count().is_some_and(|count| count > 2) {
         return Err(too_many_outputs());
@@ -118,8 +118,8 @@ async fn imhist_builtin(
             1
         }
     });
-    let mut selected = placement::select(runtime.as_ref(), &image, &rest, output_count)?;
-    let eval = evaluate(image, &rest).await?;
+    let mut selected = placement::select(runtime.as_ref(), &image, rest.view(), output_count)?;
+    let eval = evaluate_arguments(image, rest.view()).await?;
 
     if crate::output_context::requested_output_count() == Some(0)
         && crate::output_count::current_output_count().is_none()
@@ -154,6 +154,13 @@ async fn imhist_builtin(
 }
 
 pub async fn evaluate(image: Value, rest: &[Value]) -> BuiltinResult<ImhistEvaluation> {
+    evaluate_arguments(image, crate::call::FunctionArgumentView::from_slice(rest)).await
+}
+
+async fn evaluate_arguments(
+    image: Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<ImhistEvaluation> {
     if rest.len() > 1 {
         return Err(invalid(
             "expected imhist(I), imhist(I, n), or imhist(X, map)",
@@ -178,11 +185,11 @@ pub async fn evaluate(image: Value, rest: &[Value]) -> BuiltinResult<ImhistEvalu
         return Err(unsupported("indexed gpuArray images are not supported"));
     }
     let image = gather_preserving_resident_value(&image).await?;
-    let mut gathered_rest = Vec::with_capacity(rest.len());
-    for arg in rest {
-        gathered_rest.push(gather_preserving_resident_value(arg).await?);
-    }
-    let call = parse_call(image, &gathered_rest)?;
+    let gathered_control = match rest.first() {
+        Some(value) => Some(gather_preserving_resident_value(value).await?),
+        None => None,
+    };
+    let call = parse_call(image, gathered_control.as_slice())?;
     let eval = match call.mode {
         ImhistMode::Grayscale { bins } => {
             let input = GrayscaleInput::from_value(call.image)?;

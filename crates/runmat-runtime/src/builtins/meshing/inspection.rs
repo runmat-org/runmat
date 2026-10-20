@@ -7,7 +7,7 @@ use runmat_meshing_core::{
     },
     BoundaryFaceRole, ElementOrder, SolverMeshArtifact,
 };
-use runmat_value::{IntegerStorage, StructValue, Tensor, Value};
+use runmat_value::{IntegerStorage, Tensor, Value};
 
 use super::object::payload_from_value;
 use super::{error, BOUNDARY_FACES_NAME, ELEMENTS_NAME, NODES_NAME, QUALITY_NAME, REGIONS_NAME};
@@ -20,7 +20,7 @@ pub(super) fn nodes(mesh: Value) -> BuiltinResult<Value> {
     for axis in 0..3 {
         coordinates.extend(nodes.iter().map(|node| node.coordinates_m[axis]));
     }
-    let mut result = StructValue::new();
+    let mut result = runmat_value::UnboundedStructValueBuilder::new();
     result.insert(
         "ids",
         u64_tensor(
@@ -36,7 +36,7 @@ pub(super) fn nodes(mesh: Value) -> BuiltinResult<Value> {
                 .map_err(|cause| error(NODES_NAME, cause.to_string()))?,
         ),
     );
-    Ok(Value::Struct(result))
+    Ok(Value::Struct(result.finish()))
 }
 
 pub(super) fn elements(mesh: Value) -> BuiltinResult<Value> {
@@ -55,7 +55,7 @@ pub(super) fn elements(mesh: Value) -> BuiltinResult<Value> {
     let connectivity = column_major_u64(elements.len(), width, |row, column| {
         elements[row].node_ids[column]
     });
-    let mut result = StructValue::new();
+    let mut result = runmat_value::UnboundedStructValueBuilder::new();
     result.insert(
         "ids",
         u64_tensor(
@@ -88,7 +88,7 @@ pub(super) fn elements(mesh: Value) -> BuiltinResult<Value> {
                 .collect(),
         )?,
     );
-    Ok(Value::Struct(result))
+    Ok(Value::Struct(result.finish()))
 }
 
 pub(super) fn boundary_faces(mesh: Value) -> BuiltinResult<Value> {
@@ -104,7 +104,7 @@ pub(super) fn boundary_faces(mesh: Value) -> BuiltinResult<Value> {
     let connectivity = column_major_u64(faces.len(), width, |row, column| {
         faces[row].node_ids[column]
     });
-    let mut result = StructValue::new();
+    let mut result = runmat_value::UnboundedStructValueBuilder::new();
     result.insert(
         "ids",
         u64_tensor(
@@ -163,7 +163,7 @@ pub(super) fn boundary_faces(mesh: Value) -> BuiltinResult<Value> {
         )
         .map_err(|message| error(BOUNDARY_FACES_NAME, message))?,
     );
-    Ok(Value::Struct(result))
+    Ok(Value::Struct(result.finish()))
 }
 
 pub(super) fn regions(mesh: Value) -> BuiltinResult<Value> {
@@ -174,7 +174,7 @@ pub(super) fn regions(mesh: Value) -> BuiltinResult<Value> {
         .regions
         .iter()
         .map(|region| {
-            let mut value = StructValue::new();
+            let mut value = runmat_value::UnboundedStructValueBuilder::new();
             value.insert(
                 "id",
                 Value::String(region.region_id.source_topology_id.clone().into()),
@@ -195,7 +195,7 @@ pub(super) fn regions(mesh: Value) -> BuiltinResult<Value> {
                 "element_count",
                 Value::Int(runmat_value::IntValue::U64(region.element_ids.len() as u64)),
             );
-            Ok(Value::Struct(value))
+            Ok(Value::Struct(value.finish()))
         })
         .collect::<BuiltinResult<Vec<_>>>()?;
     crate::make_cell_with_shape(values, vec![1, payload.artifact.topology.regions.len()])
@@ -248,7 +248,7 @@ pub(super) fn quality_value(mesh: &SolverMeshArtifact) -> BuiltinResult<Value> {
         aspects.push(tetrahedron_edge_aspect_ratio(points));
         volumes.push(tetrahedron_volume(points));
     }
-    let mut value = StructValue::new();
+    let mut value = runmat_value::UnboundedStructValueBuilder::new();
     value.insert(
         "element_order",
         Value::String(
@@ -305,11 +305,11 @@ pub(super) fn quality_value(mesh: &SolverMeshArtifact) -> BuiltinResult<Value> {
         Value::Num(volumes.iter().copied().fold(f64::INFINITY, f64::min)),
     );
     value.insert("total_corner_volume_m3", Value::Num(volumes.iter().sum()));
-    Ok(Value::Struct(value))
+    Ok(Value::Struct(value.finish()))
 }
 
 fn persistent_entity_value(id: &PersistentEntityId) -> BuiltinResult<Value> {
-    let mut value = StructValue::new();
+    let mut value = runmat_value::UnboundedStructValueBuilder::new();
     value.insert(
         "kind",
         Value::String(persistent_entity_kind(id.kind).to_string().into()),
@@ -319,7 +319,7 @@ fn persistent_entity_value(id: &PersistentEntityId) -> BuiltinResult<Value> {
         Value::String(id.source_topology_id.clone().into()),
     );
     value.insert("assembly_path", string_cell(id.assembly_path.clone())?);
-    Ok(Value::Struct(value))
+    Ok(Value::Struct(value.finish()))
 }
 
 fn persistent_entity_kind(kind: PersistentEntityKind) -> &'static str {

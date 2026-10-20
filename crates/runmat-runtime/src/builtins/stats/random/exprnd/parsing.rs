@@ -1,5 +1,7 @@
 use super::*;
-pub(super) async fn parse_args(args: Vec<Value>) -> crate::BuiltinResult<ParsedExprnd> {
+pub(super) async fn parse_args(
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<ParsedExprnd> {
     if args.is_empty() {
         return Err(exprnd_error_with(
             &EXPRND_ERROR_INVALID_ARGUMENT,
@@ -27,7 +29,7 @@ pub(super) async fn parse_args(args: Vec<Value>) -> crate::BuiltinResult<ParsedE
     let shape = if args.len() == 1 {
         mu_shape.clone()
     } else {
-        parse_shape_args(&args[1..]).await?
+        parse_shape_args(args.view().range(1..)?).await?
     };
     if mu.len() != 1 && mu_shape != shape {
         return Err(exprnd_error_with(
@@ -44,7 +46,9 @@ pub(super) async fn parse_args(args: Vec<Value>) -> crate::BuiltinResult<ParsedE
     })
 }
 
-async fn parse_shape_args(rest: &[Value]) -> crate::BuiltinResult<Vec<usize>> {
+async fn parse_shape_args(
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<Vec<usize>> {
     let mut dims = Vec::new();
     for value in rest {
         let gathered = gather_if_needed_async(value).await.map_err(|err| {
@@ -92,7 +96,9 @@ pub(super) fn value_to_mu_tensor(value: Value) -> BuiltinResult<Tensor> {
     result.map_err(|err| exprnd_internal_error(format!("exprnd: {err}")))
 }
 
-pub(super) fn reject_unsupported_classes(args: &[Value]) -> BuiltinResult<()> {
+pub(super) fn reject_unsupported_classes(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     let Some(mu) = args.first() else {
         return Ok(());
     };

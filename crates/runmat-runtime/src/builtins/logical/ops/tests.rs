@@ -113,7 +113,7 @@ use futures::executor::block_on;
 use runmat_accelerate_api::HostTensorView;
 use runmat_value::{
     CellArray, IntValue, IntegerComplexStorage, IntegerStorage, MException, ObjectInstance,
-    SparseTensor, StructValue, SymbolicExpr,
+    SparseTensor, SymbolicExpr,
 };
 
 fn logical_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -123,7 +123,7 @@ fn logical_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
     block_on(super::logical_builtin(
         crate::context::legacy::active(),
         value,
-        rest,
+        crate::builtins::common::test_support::builtin_arguments(rest),
     ))
     .map(|output| output.with_owned(|value| value))
 }
@@ -268,7 +268,7 @@ fn logical_char_array_conversion() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn logical_string_error() {
-    let err = logical_builtin(Value::String("runmat".to_string()), Vec::new()).unwrap_err();
+    let err = logical_builtin(Value::String("runmat".to_string().into()), Vec::new()).unwrap_err();
     assert_error_message(
         &err,
         "logical: conversion to logical from string is not possible",
@@ -282,9 +282,9 @@ fn logical_string_error() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn logical_struct_error() {
-    let mut st = StructValue::new();
+    let mut st = runmat_value::UnboundedStructValueBuilder::new();
     st.insert("field", Value::Num(1.0));
-    let err = logical_builtin(Value::Struct(st), Vec::new()).unwrap_err();
+    let err = logical_builtin(Value::Struct(st.finish()), Vec::new()).unwrap_err();
     assert_error_contains(&err, "struct");
     assert_eq!(
         err.identifier(),

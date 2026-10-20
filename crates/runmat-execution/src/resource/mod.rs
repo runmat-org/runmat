@@ -126,11 +126,11 @@ pub use accelerator::{
     AcceleratorDeviceLease, AcceleratorFeature, AcceleratorProvider, AcceleratorProviderId,
     AcceleratorProviderVersion, AcceleratorRequest,
 };
+pub use accounting::{ResourceAccounting, ResourceAccountingSummary};
 pub use capability::Capability;
 pub use matching::{
     accelerator_devices_exactly_satisfy, accelerator_request_is_within,
     accelerator_requests_satisfy_requirements, select_accelerator_devices,
 };
 pub use request::{ResourceAssignment, ResourceInventory, ResourceRequest};
-pub use accounting::{ResourceAccounting, ResourceAccountingSummary};
 pub use usage::{AcceleratorUsage, ResourceUsage};

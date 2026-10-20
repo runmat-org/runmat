@@ -134,13 +134,13 @@ impl PatternSpec<'_> {
             PatternSpec::Default => PatternRef::Default,
             PatternSpec::Scalar(pattern) => *pattern,
             PatternSpec::PerElementStrings(array) => {
-                PatternRef::CustomText(array.data[idx].as_str())
+                PatternRef::CustomText(array.data()[idx].as_str())
             }
             PatternSpec::PerElementChars(array) => {
                 let start = idx * array.cols;
-                PatternRef::CustomChars(&array.data[start..start + array.cols])
+                PatternRef::CustomChars(&array.data()[start..start + array.cols])
             }
-            PatternSpec::PerElementCell(cell) => pattern_ref_from_value(&cell.data[idx])
+            PatternSpec::PerElementCell(cell) => pattern_ref_from_value(&cell.data()[idx])
                 .expect("pattern elements validated before selection"),
         }
     }
@@ -155,18 +155,18 @@ impl PatternSpec<'_> {
 async fn strip_builtin(
     runtime: Option<RuntimeContext>,
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     if contains_resident_text_input(&value) || rest.iter().any(contains_resident_text_input) {
         return Err(strip_error(&STRIP_ERROR_INVALID_INPUT));
     }
     match value {
-        Value::String(text) => strip_string(runtime.as_ref(), text, &rest).await,
-        Value::StringArray(array) => strip_string_array(runtime.as_ref(), array, &rest).await,
+        Value::String(text) => strip_string(runtime.as_ref(), text, rest.view()).await,
+        Value::StringArray(array) => strip_string_array(runtime.as_ref(), array, rest.view()).await,
         Value::CharArray(array) => {
-            character::strip_char_array(runtime.as_ref(), array, &rest).await
+            character::strip_char_array(runtime.as_ref(), array, rest.view()).await
         }
-        Value::Cell(cell) => cell::strip_cell_array(runtime.as_ref(), cell, &rest).await,
+        Value::Cell(cell) => cell::strip_cell_array(runtime.as_ref(), cell, rest.view()).await,
         _ => Err(strip_error(&STRIP_ERROR_INVALID_INPUT)),
     }
 }
@@ -174,7 +174,7 @@ async fn strip_builtin(
 async fn strip_string(
     runtime: Option<&RuntimeContext>,
     text: Utf8Text,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<Value> {
     if is_missing_string(&text) {
         return Ok(Value::string(text));
@@ -193,9 +193,9 @@ async fn strip_string(
 async fn strip_string_array(
     runtime: Option<&RuntimeContext>,
     array: StringArray,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<Value> {
-    let expected_len = array.data.len();
+    let expected_len = array.data().len();
     let expectation = PatternExpectation::with_shape(expected_len, &array.shape);
     let (direction, pattern_spec) = parse_arguments(args, &expectation).await?;
     let result = transform_string_array_borrowed_indexed(
@@ -229,7 +229,7 @@ fn strip_allocation_error(runtime: &RuntimeContext, cause: HostAllocationError) 
 }
 
 async fn parse_arguments<'a>(
-    args: &'a [Value],
+    args: crate::call::FunctionArgumentView<'a>,
     expectation: &PatternExpectation<'_>,
 ) -> BuiltinResult<(StripDirection, PatternSpec<'a>)> {
     match args.len() {
@@ -238,7 +238,9 @@ async fn parse_arguments<'a>(
             if let Some(direction) = try_parse_direction(&args[0], false)? {
                 Ok((direction, PatternSpec::Default))
             } else {
-                let pattern = parse_pattern(&args[0], expectation).await?;
+                let pattern =
+                    parse_pattern(args.get(0).expect("single pattern argument"), expectation)
+                        .await?;
                 enforce_pattern_extension(&pattern)?;
                 Ok((StripDirection::Both, pattern))
             }
@@ -248,7 +250,8 @@ async fn parse_arguments<'a>(
                 Some(dir) => dir,
                 None => return Err(strip_error(&STRIP_ERROR_DIRECTION)),
             };
-            let pattern = parse_pattern(&args[1], expectation).await?;
+            let pattern =
+                parse_pattern(args.get(1).expect("pattern after direction"), expectation).await?;
             enforce_pattern_extension(&pattern)?;
             Ok((direction, pattern))
         }
@@ -278,13 +281,13 @@ fn enforce_pattern_extension(pattern: &PatternSpec<'_>) -> BuiltinResult<()> {
 fn try_parse_direction(value: &Value, strict: bool) -> BuiltinResult<Option<StripDirection>> {
     let token = match value {
         Value::String(text) => direction_token(text.as_str()),
-        Value::StringArray(array) if array.data.len() == 1 => {
-            direction_token(array.data[0].as_str())
+        Value::StringArray(array) if array.data().len() == 1 => {
+            direction_token(array.data()[0].as_str())
         }
         Value::CharArray(array)
             if array.rows <= 1 && array.shape.len() <= 2 && array.validate_layout().is_ok() =>
         {
-            direction_char_token(array.data.as_slice())
+            direction_char_token(array.data_owner().as_slice())
         }
         _ => None,
     };
@@ -356,13 +359,13 @@ async fn parse_pattern<'a>(
     match value {
         Value::String(text) => Ok(PatternSpec::Scalar(PatternRef::CustomText(text.as_str()))),
         Value::StringArray(sa) => {
-            if sa.data.len() <= 1 {
-                if let Some(first) = sa.data.first() {
+            if sa.data().len() <= 1 {
+                if let Some(first) = sa.data().first() {
                     Ok(PatternSpec::Scalar(PatternRef::CustomText(first.as_str())))
                 } else {
                     Ok(PatternSpec::Scalar(PatternRef::CustomChars(&[])))
                 }
-            } else if sa.data.len() == expected_len {
+            } else if sa.data().len() == expected_len {
                 if let Some(shape) = expectation.shape() {
                     if sa.shape.as_slice() != shape {
                         return Err(strip_error(&STRIP_ERROR_SIZE_MISMATCH));
@@ -374,7 +377,7 @@ async fn parse_pattern<'a>(
             }
         }
         Value::CharArray(ca) => {
-            if ca.shape.len() > 2 || ca.rows.checked_mul(ca.cols) != Some(ca.data.len()) {
+            if ca.shape.len() > 2 || ca.rows.checked_mul(ca.cols) != Some(ca.data().len()) {
                 return Err(strip_error(&STRIP_ERROR_CHARACTERS));
             }
             if ca.rows <= 1 {
@@ -382,7 +385,7 @@ async fn parse_pattern<'a>(
                     Ok(PatternSpec::Scalar(PatternRef::CustomChars(&[])))
                 } else {
                     Ok(PatternSpec::Scalar(PatternRef::CustomChars(
-                        ca.data.as_slice(),
+                        ca.data_owner().as_slice(),
                     )))
                 }
             } else if ca.rows == expected_len {
@@ -400,12 +403,12 @@ async fn parse_pattern_cell<'a>(
     cell: &'a CellArray,
     expectation: &PatternExpectation<'_>,
 ) -> BuiltinResult<PatternSpec<'a>> {
-    let len = cell.data.len();
+    let len = cell.data().len();
     if len == 0 {
         return Ok(PatternSpec::Scalar(PatternRef::CustomChars(&[])));
     }
     if len == 1 {
-        let pattern = pattern_ref_from_value(&cell.data[0])
+        let pattern = pattern_ref_from_value(&cell.data()[0])
             .ok_or_else(|| strip_error(&STRIP_ERROR_CHARACTERS))?;
         return Ok(PatternSpec::Scalar(pattern));
     }
@@ -417,7 +420,7 @@ async fn parse_pattern_cell<'a>(
             return Err(strip_error(&STRIP_ERROR_SIZE_MISMATCH));
         }
     }
-    for value in &cell.data {
+    for value in cell.data() {
         pattern_ref_from_value(value).ok_or_else(|| strip_error(&STRIP_ERROR_CHARACTERS))?;
     }
     Ok(PatternSpec::PerElementCell(cell))
@@ -426,15 +429,15 @@ async fn parse_pattern_cell<'a>(
 fn pattern_ref_from_value(value: &Value) -> Option<PatternRef<'_>> {
     match value {
         Value::String(text) => Some(PatternRef::CustomText(text.as_str())),
-        Value::StringArray(array) if array.data.len() == 1 => {
-            Some(PatternRef::CustomText(array.data[0].as_str()))
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Some(PatternRef::CustomText(array.data()[0].as_str()))
         }
         Value::CharArray(array)
             if array.rows <= 1
                 && array.shape.len() <= 2
-                && array.rows.checked_mul(array.cols) == Some(array.data.len()) =>
+                && array.rows.checked_mul(array.cols) == Some(array.data().len()) =>
         {
-            Some(PatternRef::CustomChars(array.data.as_slice()))
+            Some(PatternRef::CustomChars(array.data_owner().as_slice()))
         }
         _ => None,
     }
@@ -471,10 +474,13 @@ where
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{ResolveContext, Type};
 
     fn run_strip(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(strip_builtin(None, value, rest))
+        futures::executor::block_on(strip_builtin(
+            None,
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -528,7 +534,7 @@ pub(crate) mod tests {
     fn strip_empty_pattern_returns_original() {
         let result = run_strip(
             Value::String("abc".into()),
-            vec![Value::String(String::new())],
+            vec![Value::String(String::new().into())],
         )
         .expect("strip");
         assert_eq!(result, Value::String("abc".into()));
@@ -586,7 +592,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(sa) => {
                 assert_eq!(
-                    sa.data,
+                    sa.data(),
                     vec![
                         String::from("ok"),
                         String::from("warn"),
@@ -624,7 +630,7 @@ pub(crate) mod tests {
             run_strip(Value::StringArray(strings), vec![Value::Cell(patterns)]).expect("strip");
         match result {
             Value::StringArray(sa) => {
-                assert_eq!(sa.data, vec![String::from("pass"), String::from("warn")]);
+                assert_eq!(sa.data(), vec![String::from("pass"), String::from("warn")]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -638,8 +644,8 @@ pub(crate) mod tests {
         let result = run_strip(Value::StringArray(strings), Vec::new()).expect("strip");
         match result {
             Value::StringArray(sa) => {
-                assert_eq!(sa.data[0], "data");
-                assert_eq!(sa.data[1], "<missing>");
+                assert_eq!(sa.data()[0], "data");
+                assert_eq!(sa.data()[1], "<missing>");
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -657,7 +663,7 @@ pub(crate) mod tests {
                 assert_eq!(ca.rows, 1);
                 assert_eq!(ca.cols, 8);
                 let expected: Vec<char> = "cat  dog".chars().collect();
-                assert_eq!(ca.data, expected);
+                assert_eq!(ca.data(), expected);
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -667,7 +673,7 @@ pub(crate) mod tests {
             panic!("expected character row");
         };
         assert_eq!(row.shape.as_slice(), &[2]);
-        assert_eq!(row.data.as_slice(), &['x', 'y']);
+        assert_eq!(row.data(), &['x', 'y']);
 
         let pages = CharArray::new_with_shape(
             [" a   ", " b   ", " cc  ", " d   "]
@@ -682,10 +688,7 @@ pub(crate) mod tests {
             panic!("expected character pages");
         };
         assert_eq!(pages.shape.as_slice(), &[2, 2, 2]);
-        assert_eq!(
-            pages.data.as_slice(),
-            &['a', ' ', 'b', ' ', 'c', 'c', 'd', ' ']
-        );
+        assert_eq!(pages.data(), &['a', ' ', 'b', ' ', 'c', 'c', 'd', ' ']);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -703,7 +706,7 @@ pub(crate) mod tests {
                 assert_eq!(ca.rows, 1);
                 assert_eq!(ca.cols, 3);
                 let expected: Vec<char> = "gpu".chars().collect();
-                assert_eq!(ca.data, expected);
+                assert_eq!(ca.data(), expected);
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -859,9 +862,25 @@ pub(crate) mod tests {
 
     #[test]
     fn strip_type_preserves_text() {
-        assert_eq!(
-            text_preserve_type(&[Type::String], &ResolveContext::new(Vec::new())),
-            Type::String
+        use runmat_types::{
+            CallRequest, LiteralContext, OutputSelection, RequestedOutputCount, ValueFact,
+            ValueKindFact,
+        };
+        let input = ValueFact::scalar(ValueKindFact::String);
+        let request = CallRequest {
+            arguments: vec![input.clone()],
+            literals: LiteralContext::new(Vec::new()),
+            outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+        };
+        let inferred =
+            runmat_builtins::infer_catalog_call(&runmat_builtins::STRIP_CATALOG_ENTRY, &request);
+        assert!(
+            inferred.diagnostics.is_empty(),
+            "{:?}",
+            inferred.diagnostics
         );
+        assert_eq!(inferred.outputs.len(), 1);
+        assert_eq!(inferred.outputs[0].kind, ValueKindFact::String);
+        assert_eq!(inferred.outputs[0].shape, input.shape);
     }
 }

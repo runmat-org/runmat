@@ -9,8 +9,8 @@ const BUILTIN_NAME: &str = "cd";
 pub(super) fn path(value: Value) -> BuiltinResult<(String, PathBuf)> {
     let raw = match value {
         Value::String(text) => text.into_string_unbounded(),
-        Value::StringArray(array) if array.data.len() == 1 => array.data[0].as_str().to_owned(),
-        Value::CharArray(chars) if chars.rows == 1 => chars.data.iter().collect::<String>(),
+        Value::StringArray(array) if array.data().len() == 1 => array.data()[0].as_str().to_owned(),
+        Value::CharArray(chars) if chars.rows == 1 => chars.data().iter().collect::<String>(),
         _ => {
             return Err(runtime_descriptor_error(
                 BUILTIN_NAME,

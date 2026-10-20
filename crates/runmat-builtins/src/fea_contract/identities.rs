@@ -9,17 +9,17 @@ pub const FEA_SWEEP_CLASS: StaticClassIdentity = StaticClassIdentity::new("fea.S
 pub const FEA_VALIDATION_CLASS: StaticClassIdentity = StaticClassIdentity::new("fea.Validation");
 pub const FEA_PLAN_CLASS: StaticClassIdentity = StaticClassIdentity::new("fea.Plan");
 pub const FEA_RUN_RESULT_CLASS: StaticClassIdentity = StaticClassIdentity::new("fea.RunResult");
+pub const FEA_STEP_RUN_RESULT_CLASS: StaticClassIdentity =
+    StaticClassIdentity::new("fea.StepRunResult");
+pub const FEA_SWEEP_RUN_RESULT_CLASS: StaticClassIdentity =
+    StaticClassIdentity::new("fea.SweepRunResult");
+pub const FEA_SWEEP_VALIDATION_CLASS: StaticClassIdentity =
+    StaticClassIdentity::new("fea.SweepValidation");
+pub const FEA_SWEEP_PLAN_CLASS: StaticClassIdentity = StaticClassIdentity::new("fea.SweepPlan");
 pub const FEA_MODEL_CLASS: StaticClassIdentity = StaticClassIdentity::new("fea.Model");
 pub const FEA_MATERIAL_CLASS: StaticClassIdentity = StaticClassIdentity::new("fea.Material");
 pub const FEA_MATERIAL_ASSIGNMENT_CLASS: StaticClassIdentity =
     StaticClassIdentity::new("fea.MaterialAssignment");
-pub const FEA_BOUNDARY_CONDITION_CLASS: StaticClassIdentity =
-    StaticClassIdentity::new("fea.BoundaryCondition");
-pub const FEA_LOAD_CASE_CLASS: StaticClassIdentity = StaticClassIdentity::new("fea.LoadCase");
-pub const FEA_STEP_CLASS: StaticClassIdentity = StaticClassIdentity::new("fea.Step");
-pub const FEA_DOMAIN_CLASS: StaticClassIdentity = StaticClassIdentity::new("fea.Domain");
-pub const FEA_INTERFACE_CLASS: StaticClassIdentity = StaticClassIdentity::new("fea.Interface");
-pub const FEA_RUN_OPTIONS_CLASS: StaticClassIdentity = StaticClassIdentity::new("fea.RunOptions");
 pub const FEA_RESULTS_CLASS: StaticClassIdentity = StaticClassIdentity::new("fea.Results");
 pub const FEA_FIELD_CLASS: StaticClassIdentity = StaticClassIdentity::new("fea.Field");
 pub const FEA_COMPARE_CLASS: StaticClassIdentity = StaticClassIdentity::new("fea.Compare");

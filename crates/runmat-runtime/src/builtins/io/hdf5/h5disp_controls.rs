@@ -22,20 +22,20 @@ pub(super) struct H5DispControls {
     pub text_encoding: Option<H5DispTextEncoding>,
 }
 
-pub(super) fn parse(rest: &[Value]) -> BuiltinResult<H5DispControls> {
+pub(super) fn parse(rest: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<H5DispControls> {
     let mut controls = H5DispControls {
         location: "/".to_string(),
         mode: H5DispMode::Simple,
         text_encoding: None,
     };
     let (location, mode, encoding) =
-        match rest {
-            [] => (None, None, None),
-            [location] => (Some(location), None, None),
-            [first, value] if option_name(first)? => (None, None, Some((first, value))),
-            [location, mode] => (Some(location), Some(mode), None),
-            [location, option, value] => (Some(location), None, Some((option, value))),
-            [location, mode, option, value] => (Some(location), Some(mode), Some((option, value))),
+        match rest.len() {
+            0 => (None, None, None),
+            1 => (Some(&rest[0]), None, None),
+            2 if option_name(&rest[0])? => (None, None, Some((&rest[0], &rest[1]))),
+            2 => (Some(&rest[0]), Some(&rest[1]), None),
+            3 => (Some(&rest[0]), None, Some((&rest[1], &rest[2]))),
+            4 => (Some(&rest[0]), Some(&rest[1]), Some((&rest[2], &rest[3]))),
             _ => return Err(hdf5_error(
                 H5DISP_NAME,
                 &ERR_ARGUMENT,
@@ -93,28 +93,49 @@ mod tests {
 
     #[test]
     fn documented_forms_and_invalid_suffixes() {
-        let text = |value: &str| Value::String(value.to_string());
-        let base = parse(&[]).unwrap();
+        let text = |value: &str| Value::String(value.to_string().into());
+        let base = parse(crate::call::FunctionArgumentView::from_slice(&[])).unwrap();
         assert_eq!(base.location, "/");
         assert_eq!(base.mode, H5DispMode::Simple);
         assert!(base.text_encoding.is_none());
-        let minimal = parse(&[text("/data"), text("min")]).unwrap();
+        let minimal = parse(crate::call::FunctionArgumentView::from_slice(&[
+            text("/data"),
+            text("min"),
+        ]))
+        .unwrap();
         assert_eq!(minimal.location, "/data");
         assert_eq!(minimal.mode, H5DispMode::Min);
-        let encoded = parse(&[text("TextEncoding"), text("UTF-8")]).unwrap();
+        let encoded = parse(crate::call::FunctionArgumentView::from_slice(&[
+            text("TextEncoding"),
+            text("UTF-8"),
+        ]))
+        .unwrap();
         assert_eq!(encoded.location, "/");
         assert_eq!(encoded.text_encoding, Some(H5DispTextEncoding::Utf8));
-        let full = parse(&[
+        let full = parse(crate::call::FunctionArgumentView::from_slice(&[
             text("/data"),
             text("simple"),
             text("TextEncoding"),
             text("UTF-8"),
-        ])
+        ]))
         .unwrap();
         assert_eq!(full.location, "/data");
         assert_eq!(full.mode, H5DispMode::Simple);
-        assert!(parse(&[text("/data"), text("not-a-mode")]).is_err());
-        assert!(parse(&[text("/data"), text("Other"), text("UTF-8")]).is_err());
-        assert!(parse(&[text("TextEncoding"), text("Latin-1")]).is_err());
+        assert!(parse(crate::call::FunctionArgumentView::from_slice(&[
+            text("/data"),
+            text("not-a-mode")
+        ]))
+        .is_err());
+        assert!(parse(crate::call::FunctionArgumentView::from_slice(&[
+            text("/data"),
+            text("Other"),
+            text("UTF-8")
+        ]))
+        .is_err());
+        assert!(parse(crate::call::FunctionArgumentView::from_slice(&[
+            text("TextEncoding"),
+            text("Latin-1")
+        ]))
+        .is_err());
     }
 }

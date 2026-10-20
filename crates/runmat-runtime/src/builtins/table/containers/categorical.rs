@@ -42,14 +42,17 @@ fn categorical_object_from_plan(
             codes.push(f64::NAN);
         }
     }
-    let mut object = ObjectInstance::new(CATEGORICAL_CLASS.to_string());
-    object.properties.insert(
+    let mut object = runmat_value::UnboundedObjectBuilder::with_property_capacity(
+        CATEGORICAL_CLASS.to_string(),
+        4,
+    );
+    object.insert(
         "Codes".to_string(),
         Value::Tensor(
             Tensor::new(codes, value_shape_or_column(source)?).map_err(invalid_variable)?,
         ),
     );
-    object.properties.insert(
+    object.insert(
         "Categories".to_string(),
         Value::StringArray(
             StringArray::new(
@@ -59,13 +62,9 @@ fn categorical_object_from_plan(
             .map_err(invalid_variable)?,
         ),
     );
-    object
-        .properties
-        .insert("Ordinal".to_string(), Value::Bool(ordinal));
-    object
-        .properties
-        .insert("Protected".to_string(), Value::Bool(ordinal || protected));
-    Ok(Value::Object(object))
+    object.insert("Ordinal".to_string(), Value::Bool(ordinal));
+    object.insert("Protected".to_string(), Value::Bool(ordinal || protected));
+    Ok(Value::Object(object.finish()))
 }
 
 pub(in crate::builtins::table) fn ordinal_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -214,27 +213,26 @@ fn categorical_object_from_codes(
     ordinal: bool,
     protected: bool,
 ) -> BuiltinResult<Value> {
-    let mut object = ObjectInstance::new(CATEGORICAL_CLASS.to_string());
-    object.properties.insert(
+    let mut object = runmat_value::UnboundedObjectBuilder::with_property_capacity(
+        CATEGORICAL_CLASS.to_string(),
+        4,
+    );
+    object.insert(
         "Codes".to_string(),
         Value::Tensor(
             Tensor::new(codes, value_shape_or_column(source)?).map_err(invalid_variable)?,
         ),
     );
-    object.properties.insert(
+    object.insert(
         "Categories".to_string(),
         Value::StringArray(
             StringArray::new(categories.clone(), vec![1, categories.len()])
                 .map_err(invalid_variable)?,
         ),
     );
-    object
-        .properties
-        .insert("Ordinal".to_string(), Value::Bool(ordinal));
-    object
-        .properties
-        .insert("Protected".to_string(), Value::Bool(ordinal || protected));
-    Ok(Value::Object(object))
+    object.insert("Ordinal".to_string(), Value::Bool(ordinal));
+    object.insert("Protected".to_string(), Value::Bool(ordinal || protected));
+    Ok(Value::Object(object.finish()))
 }
 
 fn ordinal_numeric_values(value: &Value, context: &str) -> BuiltinResult<Vec<NumericScalar>> {
@@ -268,9 +266,9 @@ fn ensure_ordinal_vector(value: &Value, context: &str) -> BuiltinResult<()> {
 fn value_element_count(value: &Value) -> Option<usize> {
     match value {
         Value::Tensor(tensor) => Some(tensor.len()),
-        Value::StringArray(array) => Some(array.data.len()),
+        Value::StringArray(array) => Some(array.data().len()),
         Value::LogicalArray(array) => Some(array.data.len()),
-        Value::Cell(cell) => Some(cell.data.len()),
+        Value::Cell(cell) => Some(cell.data().len()),
         _ => None,
     }
 }
@@ -386,7 +384,7 @@ pub(crate) fn categorical_extrema_to_value(
 
 pub(crate) async fn categorical_max_evaluate(
     value: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> Option<BuiltinResult<CategoricalExtremaEvaluation>> {
     let Value::Object(object) = value else {
         return None;
@@ -399,7 +397,7 @@ pub(crate) async fn categorical_max_evaluate(
 
 pub(crate) async fn categorical_min_evaluate(
     value: &Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> Option<BuiltinResult<CategoricalExtremaEvaluation>> {
     let Value::Object(object) = value else {
         return None;
@@ -412,7 +410,7 @@ pub(crate) async fn categorical_min_evaluate(
 
 async fn categorical_extrema_evaluate(
     object: &ObjectInstance,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     maximum: bool,
 ) -> BuiltinResult<CategoricalExtremaEvaluation> {
     if !categorical_is_ordinal(object) {
@@ -423,7 +421,7 @@ async fn categorical_extrema_evaluate(
     let codes = categorical_codes(object)?;
     let categories = categorical_categories_value(object)?;
     let protected = object
-        .properties
+        .properties()
         .get("Protected")
         .cloned()
         .unwrap_or_else(|| Value::Bool(true));
@@ -454,25 +452,22 @@ fn categorical_from_code_value(
             )))
         }
     };
-    let mut object = ObjectInstance::new(CATEGORICAL_CLASS.to_string());
-    object
-        .properties
-        .insert("Codes".to_string(), Value::Tensor(codes));
-    object
-        .properties
-        .insert("Categories".to_string(), categories);
-    object
-        .properties
-        .insert("Ordinal".to_string(), Value::Bool(true));
-    object.properties.insert("Protected".to_string(), protected);
-    Ok(Value::Object(object))
+    let mut object = runmat_value::UnboundedObjectBuilder::with_property_capacity(
+        CATEGORICAL_CLASS.to_string(),
+        4,
+    );
+    object.insert("Codes".to_string(), Value::Tensor(codes));
+    object.insert("Categories".to_string(), categories);
+    object.insert("Ordinal".to_string(), Value::Bool(true));
+    object.insert("Protected".to_string(), protected);
+    Ok(Value::Object(object.finish()))
 }
 
 pub(crate) fn categorical_labels(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
         Value::String(text) => Ok(vec![normalize_category_label(text)]),
         Value::StringArray(array) => Ok(array
-            .data
+            .data()
             .iter()
             .map(|value| normalize_category_label(value))
             .collect()),
@@ -493,7 +488,7 @@ pub(crate) fn categorical_labels(value: &Value) -> BuiltinResult<Vec<String>> {
             .iter()
             .map(|flag| if *flag != 0 { "true" } else { "false" }.to_string())
             .collect()),
-        Value::Cell(cell) => cell.data.iter().map(cell_scalar_label).collect(),
+        Value::Cell(cell) => cell.data().iter().map(cell_scalar_label).collect(),
         Value::Object(object) if object.is_class(CATEGORICAL_CLASS) => {
             categorical_object_labels(object)
         }
@@ -505,7 +500,7 @@ pub(in crate::builtins::table) fn cell_scalar_label(value: &Value) -> BuiltinRes
     match value {
         Value::String(text) => Ok(normalize_category_label(text)),
         Value::CharArray(array) if array.rows == 1 => {
-            let text: String = array.data.iter().collect();
+            let text: String = array.data().iter().collect();
             Ok(normalize_category_label(&text))
         }
         Value::Num(value) if value.is_nan() => Ok(String::new()),
@@ -572,7 +567,7 @@ fn categorical_category_names(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => categorical_labels(value),
         Value::Cell(cell) => cell
-            .data
+            .data()
             .iter()
             .map(|value| match value {
                 Value::String(_) | Value::CharArray(_) => cell_scalar_label(value),
@@ -902,9 +897,18 @@ pub(crate) fn categorical_declared_levels(object: &ObjectInstance) -> BuiltinRes
     )
     .map_err(invalid_variable)?;
     let mut levels = object.clone();
-    levels
-        .properties
-        .insert("Codes".to_string(), Value::Tensor(codes));
+    crate::execution::object::replacement::replace_property(
+        None,
+        &mut levels,
+        "Codes",
+        Value::Tensor(codes),
+        |_, source| {
+            invalid_variable(format!(
+                "categorical: replacement admission failed: {source}"
+            ))
+        },
+        invalid_variable,
+    )?;
     Ok(Value::Object(levels))
 }
 
@@ -930,35 +934,46 @@ pub(crate) fn categorical_levels_for_observations(
         .collect::<BuiltinResult<Vec<_>>>()?;
     let codes = Tensor::new(codes, vec![labels.len(), 1]).map_err(invalid_variable)?;
     let mut levels = object.clone();
-    levels
-        .properties
-        .insert("Codes".to_string(), Value::Tensor(codes));
+    crate::execution::object::replacement::replace_property(
+        None,
+        &mut levels,
+        "Codes",
+        Value::Tensor(codes),
+        |_, source| {
+            invalid_variable(format!(
+                "categorical: replacement admission failed: {source}"
+            ))
+        },
+        invalid_variable,
+    )?;
     Ok(Value::Object(levels))
 }
 
 pub(crate) fn categorical_categories(object: &ObjectInstance) -> BuiltinResult<Vec<String>> {
-    match object.properties.get("Categories") {
-        Some(Value::StringArray(array)) => Ok(array.data.iter().map(ToString::to_string).collect()),
+    match object.properties().get("Categories") {
+        Some(Value::StringArray(array)) => {
+            Ok(array.data().iter().map(ToString::to_string).collect())
+        }
         _ => Err(invalid_variable("categorical: missing Categories property")),
     }
 }
 
 fn categorical_categories_value(object: &ObjectInstance) -> BuiltinResult<Value> {
-    match object.properties.get("Categories") {
+    match object.properties().get("Categories") {
         Some(Value::StringArray(array)) => Ok(Value::StringArray(array.clone())),
         _ => Err(invalid_variable("categorical: missing Categories property")),
     }
 }
 
 fn categorical_codes(object: &ObjectInstance) -> BuiltinResult<Tensor> {
-    match object.properties.get("Codes") {
+    match object.properties().get("Codes") {
         Some(Value::Tensor(tensor)) => Ok(tensor.clone()),
         _ => Err(invalid_variable("categorical: missing Codes property")),
     }
 }
 
 fn categorical_is_ordinal(object: &ObjectInstance) -> bool {
-    matches!(object.properties.get("Ordinal"), Some(Value::Bool(true)))
+    matches!(object.properties().get("Ordinal"), Some(Value::Bool(true)))
 }
 
 fn category_label_for_code<S: AsRef<str>>(code: f64, categories: &[S]) -> Option<&str> {
@@ -1130,21 +1145,23 @@ mod tests {
             );
 
             let codes = Tensor::new_integer(storage, vec![1, 1]).unwrap();
-            let mut object = ObjectInstance::new(CATEGORICAL_CLASS.to_string());
-            object
-                .properties
-                .insert("Codes".to_string(), Value::Tensor(codes));
-            object.properties.insert(
+            let mut object = runmat_value::UnboundedObjectBuilder::with_property_capacity(
+                CATEGORICAL_CLASS.to_string(),
+                2,
+            );
+            object.insert("Codes".to_string(), Value::Tensor(codes));
+            object.insert(
                 "Categories".to_string(),
                 Value::StringArray(
                     StringArray::new(vec!["one".into(), "two".into()], vec![1, 2]).unwrap(),
                 ),
             );
+            let object = object.finish();
             assert_eq!(categorical_object_labels(&object).unwrap(), vec!["two"]);
             assert!(matches!(
                 categorical_compare(
                     &Value::Object(object),
-                    &Value::String("two".to_string()),
+                    &Value::String("two".to_string().into()),
                     CategoricalComparison::Eq,
                 )
                 .unwrap()
@@ -1163,16 +1180,18 @@ mod tests {
         );
 
         let codes = Tensor::from_f32(vec![2.0, f32::NAN, 1.5], vec![1, 3]).unwrap();
-        let mut object = ObjectInstance::new(CATEGORICAL_CLASS.to_string());
-        object
-            .properties
-            .insert("Codes".to_string(), Value::Tensor(codes));
-        object.properties.insert(
+        let mut object = runmat_value::UnboundedObjectBuilder::with_property_capacity(
+            CATEGORICAL_CLASS.to_string(),
+            2,
+        );
+        object.insert("Codes".to_string(), Value::Tensor(codes));
+        object.insert(
             "Categories".to_string(),
             Value::StringArray(
                 StringArray::new(vec!["one".into(), "two".into()], vec![1, 2]).unwrap(),
             ),
         );
+        let object = object.finish();
         assert_eq!(
             categorical_object_labels(&object).unwrap(),
             vec!["two", "", ""]

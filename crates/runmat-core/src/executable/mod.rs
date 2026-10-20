@@ -1,4 +1,5 @@
 mod coverage;
+pub(crate) mod callback;
 mod dependencies;
 mod import;
 mod interop;
@@ -14,9 +15,10 @@ mod unit;
 
 pub use coverage::CoveragePlan;
 pub(crate) use interop::python_environment_requirement;
+pub(crate) use invocation::AdmittedProcedureInvocation;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) use invocation::ExecutableBackendPolicy;
-pub use invocation::{InvocationControl, ProcedureInvocation, ProcedureTarget};
+pub use invocation::{InvocationControl, ProcedureArguments, ProcedureInvocation, ProcedureTarget};
 #[cfg(not(target_arch = "wasm32"))]
 pub use native::{AotObjectDataOptions, NativeCompilationInput};
 pub use revision::ExecutableRevision;

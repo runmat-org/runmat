@@ -5,8 +5,14 @@ use std::convert::TryFrom;
 
 #[test]
 fn returns_a_stable_nonempty_character_row_with_separator() {
-    let first = execute::run(Vec::new()).expect("tempdir");
-    let second = execute::run(Vec::new()).expect("tempdir");
+    let first = execute::run(crate::builtins::common::test_support::builtin_arguments(
+        Vec::new(),
+    ))
+    .expect("tempdir");
+    let second = execute::run(crate::builtins::common::test_support::builtin_arguments(
+        Vec::new(),
+    ))
+    .expect("tempdir");
     assert_eq!(first, second);
     match &first {
         Value::CharArray(CharArray { rows: 1, cols, .. }) => assert!(*cols > 0),
@@ -18,6 +24,9 @@ fn returns_a_stable_nonempty_character_row_with_separator() {
 
 #[test]
 fn rejects_inputs_with_the_catalog_error() {
-    let error = execute::run(vec![Value::Num(1.0)]).expect_err("arity error");
+    let error = execute::run(crate::builtins::common::test_support::builtin_arguments(
+        vec![Value::Num(1.0)],
+    ))
+    .expect_err("arity error");
     assert_eq!(error.message(), TEMPDIR_ERROR_TOO_MANY_INPUTS.message);
 }

@@ -8,8 +8,12 @@ use runmat_value::Value;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinGpuSpec, ConstantStrategy, GpuOpKind, ReductionNaN, ResidencyPolicy,
 };
-use crate::builtins::strings::regex::regexp::{self, RegexpEvaluation};
-use crate::{build_runtime_error, make_cell, BuiltinResult, RuntimeError};
+use crate::builtins::strings::regex::regexp;
+#[cfg(test)]
+use crate::builtins::strings::regex::regexp::RegexpEvaluation;
+#[cfg(test)]
+use crate::BuiltinResult;
+use crate::{build_runtime_error, make_cell, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::regex::regexpi")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -36,12 +40,20 @@ fn runtime_error_for(message: impl Into<String>) -> RuntimeError {
 }
 
 /// Evaluate `regexpi` with MATLAB-compatible defaults and return the shared regex evaluation handle.
+#[cfg(test)]
 pub async fn evaluate(
     subject: Value,
     pattern: Value,
     rest: &[Value],
 ) -> BuiltinResult<RegexpEvaluation> {
-    regexp::evaluate_with_default(BUILTIN_NAME, subject, pattern, rest, true).await
+    regexp::evaluate_with_default(
+        BUILTIN_NAME,
+        subject,
+        pattern,
+        crate::call::FunctionArgumentView::from_slice(rest),
+        true,
+    )
+    .await
 }
 
 #[runtime_builtin(
@@ -52,9 +64,10 @@ pub async fn evaluate(
 async fn regexpi_builtin(
     subject: Value,
     pattern: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
-    let evaluation = evaluate(subject, pattern, &rest).await?;
+    let evaluation =
+        regexp::evaluate_with_default(BUILTIN_NAME, subject, pattern, rest.view(), true).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Value::output_list(Vec::new()));
@@ -109,7 +122,11 @@ pub(crate) mod tests {
         pattern: Value,
         rest: Vec<Value>,
     ) -> BuiltinResult<Value> {
-        futures::executor::block_on(regexpi_builtin(subject, pattern, rest))
+        futures::executor::block_on(regexpi_builtin(
+            subject,
+            pattern,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -144,8 +161,8 @@ pub(crate) mod tests {
         assert_eq!(outputs.len(), 1);
         match &outputs[0] {
             Value::Cell(ca) => {
-                assert_eq!(ca.data.len(), 1);
-                let first = &ca.data[0];
+                assert_eq!(ca.data().len(), 1);
+                let first = &ca.data()[0];
                 assert_eq!(first, &Value::String("abcXYZ".into()));
             }
             other => panic!("unexpected output {other:?}"),
@@ -181,8 +198,8 @@ pub(crate) mod tests {
         .unwrap();
         match result {
             Value::Cell(ca) => {
-                assert_eq!(ca.data.len(), 1);
-                let entry = &ca.data[0];
+                assert_eq!(ca.data().len(), 1);
+                let entry = &ca.data()[0];
                 assert_eq!(entry, &Value::String("Bar".into()));
             }
             other => panic!("unexpected builtin output {other:?}"),
@@ -205,8 +222,8 @@ pub(crate) mod tests {
                 assert_eq!(outputs.len(), 3);
                 match &outputs[2] {
                     Value::Cell(matches) => {
-                        assert_eq!(matches.data.len(), 1);
-                        match &matches.data[0] {
+                        assert_eq!(matches.data().len(), 1);
+                        match &matches.data()[0] {
                             Value::Tensor(extents) => {
                                 assert_eq!(extents.shape(), &[2, 2]);
                                 assert_eq!(extents.materialize_f64(), vec![1.0, 3.0, 2.0, 4.0]);
@@ -240,8 +257,8 @@ pub(crate) mod tests {
             Value::Cell(ca) => {
                 assert_eq!(ca.rows, 1);
                 assert_eq!(ca.cols, 2);
-                let first = &ca.data[0];
-                let second = &ca.data[1];
+                let first = &ca.data()[0];
+                let second = &ca.data()[1];
                 assert_eq!(first, &Value::String("AB".into()));
                 assert_eq!(second, &Value::String("12".into()));
             }
@@ -275,12 +292,12 @@ pub(crate) mod tests {
             Value::Cell(ca) => {
                 assert_eq!(ca.rows, 1);
                 assert_eq!(ca.cols, 1);
-                let cell = &ca.data[0];
+                let cell = &ca.data()[0];
                 match cell {
                     Value::Cell(inner) => {
-                        assert_eq!(inner.data.len(), 2);
-                        let first = &inner.data[0];
-                        let second = &inner.data[1];
+                        assert_eq!(inner.data().len(), 2);
+                        let first = &inner.data()[0];
+                        let second = &inner.data()[1];
                         assert_eq!(first, &Value::String("l".into()));
                         assert_eq!(second, &Value::String("l".into()));
                     }
@@ -304,8 +321,8 @@ pub(crate) mod tests {
         assert_eq!(outputs.len(), 1);
         match &outputs[0] {
             Value::Cell(ca) => {
-                assert_eq!(ca.data.len(), 1);
-                let matrix = &ca.data[0];
+                assert_eq!(ca.data().len(), 1);
+                let matrix = &ca.data()[0];
                 match matrix {
                     Value::Tensor(t) => {
                         assert_eq!(t.shape(), &[2, 2]);
@@ -331,12 +348,12 @@ pub(crate) mod tests {
         assert_eq!(outputs.len(), 1);
         match &outputs[0] {
             Value::Cell(ca) => {
-                assert_eq!(ca.data.len(), 3);
+                assert_eq!(ca.data().len(), 3);
                 let parts: Vec<String> = ca
-                    .data
+                    .data()
                     .iter()
                     .map(|ptr| match ptr {
-                        Value::String(s) => s.clone(),
+                        Value::String(s) => s.to_string(),
                         other => panic!("expected string split part, got {other:?}"),
                     })
                     .collect();
@@ -383,7 +400,7 @@ pub(crate) mod tests {
             Value::Cell(ca) => {
                 assert_eq!(ca.rows, 2);
                 assert_eq!(ca.cols, 1);
-                assert_eq!(ca.data.len(), 2);
+                assert_eq!(ca.data().len(), 2);
             }
             other => panic!("unexpected output {other:?}"),
         }
@@ -410,7 +427,7 @@ pub(crate) mod tests {
             futures::executor::block_on(regexpi_builtin(
                 Value::String("A".into()),
                 Value::String("a".into()),
-                rest,
+                crate::builtins::common::test_support::builtin_arguments(rest),
             ))
             .expect("registered regexpi")
         };

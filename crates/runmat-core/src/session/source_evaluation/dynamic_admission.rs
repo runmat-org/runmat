@@ -441,7 +441,7 @@ impl DynamicEvalProductAdmission for CoreDynamicEvalAdmission {
                 super::SelectedGraphSource {
                     unit: Rc::clone(&unit),
                     primary_source: Some(ProgramSourceId(0)),
-                    already_published: Some(Arc::clone(&canonical_v3)),
+                    code: super::SelectedGraphCodeSource::PublishedBytes(Arc::clone(&canonical_v3)),
                 },
                 &selected_runtime,
                 active.clone(),

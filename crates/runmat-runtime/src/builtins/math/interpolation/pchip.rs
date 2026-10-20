@@ -75,7 +75,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::math::interpolation::pchip"
 )]
-async fn pchip_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn pchip_builtin(
+    x: Value,
+    y: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     ensure_pchip_integer_boundary(&x, &PCHIP_INTEGER_SAMPLE_LOCATIONS_EXTENSION, "X").await?;
     ensure_pchip_integer_boundary(&y, &PCHIP_INTEGER_SAMPLE_VALUES_EXTENSION, "Y").await?;
     if let Some(query) = rest.first() {
@@ -155,7 +159,7 @@ mod tests {
         let value = block_on(pchip_builtin(
             row(&[1.0, 2.0, 3.0, 4.0]),
             row(&[0.0, 1.0, 1.5, 1.75]),
-            vec![row(&[1.5, 2.5, 3.5])],
+            crate::builtins::common::test_support::builtin_arguments(vec![row(&[1.5, 2.5, 3.5])]),
         ))
         .expect("pchip");
         let Value::Tensor(tensor) = value else {
@@ -172,7 +176,7 @@ mod tests {
         let value = block_on(pchip_builtin(
             row(&[1.0, 2.0, 3.0]),
             row(&[1.0, 4.0, 9.0]),
-            vec![row(&[1.5, 2.5])],
+            crate::builtins::common::test_support::builtin_arguments(vec![row(&[1.5, 2.5])]),
         ))
         .expect("pchip values");
         let Value::Tensor(output) = value else {
@@ -189,9 +193,9 @@ mod tests {
         let value = block_on(pchip_builtin(
             row(&[1.0, 2.0, 3.0, 4.0]),
             Value::Tensor(Tensor::new(data, vec![2, 3, 4]).unwrap()),
-            vec![Value::Tensor(
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(
                 Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap(),
-            )],
+            )]),
         ))
         .expect("array-valued pchip");
         let Value::Tensor(output) = value else {
@@ -237,7 +241,10 @@ mod tests {
         let err = block_on(pchip_builtin(
             row(&[1.0, 2.0]),
             row(&[1.0, 4.0]),
-            vec![Value::Num(1.5), Value::Num(2.5)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(1.5),
+                Value::Num(2.5),
+            ]),
         ))
         .expect_err("expected pchip argument error");
         assert_eq!(err.identifier(), PCHIP_ERROR_INVALID_ARGUMENT.identifier);

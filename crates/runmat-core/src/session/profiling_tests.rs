@@ -355,7 +355,7 @@ fn standalone_executable_admits_and_seals_a_fresh_command_after_source_execution
                 &unit,
                 crate::ProcedureInvocation {
                     target: crate::ProcedureTarget::Function("answer".into()),
-                    arguments: Vec::new(),
+                    arguments: crate::ProcedureArguments::Source(Vec::new()),
                     requested_outputs: 1,
                 },
                 &crate::InvocationControl::default(),

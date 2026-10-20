@@ -1,5 +1,5 @@
 use runmat_builtins::BuiltinExtensionDescriptor;
-use runmat_value::{CharArray, StringArray, Tensor, Value};
+use runmat_value::{CharArray, Tensor, Value};
 
 use crate::builtins::io::repl_fs::text_conversion::tensor_char_codes_to_string;
 
@@ -16,7 +16,7 @@ pub(in crate::builtins::io::repl_fs) enum DecodeError {
 }
 
 pub(in crate::builtins::io::repl_fs) async fn decode(
-    values: Vec<Value>,
+    values: crate::call::BuiltinArguments,
     builtin: &'static str,
     policy: NumericPolicy,
 ) -> Result<Vec<String>, DecodeError> {
@@ -55,8 +55,10 @@ fn admit(
 ) -> Result<(), DecodeError> {
     match value {
         Value::String(text) => output.push(AdmittedToken::Text(text.as_str().to_owned())),
-        Value::StringArray(StringArray { data, .. }) => output.extend(
-            data.iter()
+        Value::StringArray(array) => output.extend(
+            array
+                .data()
+                .iter()
                 .map(|text| AdmittedToken::Text(text.as_str().to_owned())),
         ),
         Value::CharArray(chars)
@@ -98,7 +100,7 @@ fn admit_numeric(builtin: &'static str, policy: NumericPolicy) -> Result<(), Dec
 fn collect_char_rows(chars: &CharArray, output: &mut Vec<AdmittedToken>) {
     for row in 0..chars.rows {
         let start = row * chars.cols;
-        let text: String = chars.data[start..start + chars.cols].iter().collect();
+        let text: String = chars.data()[start..start + chars.cols].iter().collect();
         output.push(AdmittedToken::Text(text.trim_end().to_owned()));
     }
 }

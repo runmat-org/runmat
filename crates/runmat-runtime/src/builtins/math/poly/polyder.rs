@@ -76,7 +76,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::math::poly::polyder"
 )]
-async fn polyder_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn polyder_builtin(
+    first: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     if rest.len() > 1 {
         return Err(polyder_argument_error("polyder: too many input arguments"));
     }
@@ -746,7 +749,10 @@ pub(crate) mod tests {
     fn builtin_rejects_too_many_inputs() {
         let err = futures::executor::block_on(super::polyder_builtin(
             Value::Num(1.0),
-            vec![Value::Num(2.0), Value::Num(3.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(2.0),
+                Value::Num(3.0),
+            ]),
         ))
         .unwrap_err();
         assert_eq!(err.identifier(), POLYDER_ERROR_INVALID_ARGUMENT.identifier);

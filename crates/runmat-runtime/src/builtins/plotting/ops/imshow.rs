@@ -901,8 +901,8 @@ fn string_like_path(value: &Value) -> crate::BuiltinResult<Option<String>> {
 }
 
 fn scalar_string_array(array: &StringArray) -> crate::BuiltinResult<String> {
-    if array.data.len() == 1 {
-        Ok(array.data[0].as_str().to_owned())
+    if array.data().len() == 1 {
+        Ok(array.data()[0].as_str().to_owned())
     } else {
         Err(imshow_error("imshow: filename must be a string scalar"))
     }
@@ -910,7 +910,7 @@ fn scalar_string_array(array: &StringArray) -> crate::BuiltinResult<String> {
 
 fn scalar_char_array(chars: &CharArray) -> crate::BuiltinResult<String> {
     if chars.rows == 1 {
-        Ok(chars.data.iter().collect())
+        Ok(chars.data().iter().collect())
     } else {
         Err(imshow_error(
             "imshow: filename must be a character row vector",
@@ -1320,7 +1320,7 @@ mod tests {
         image.save(&path).expect("save png");
 
         futures::executor::block_on(imshow_builtin(vec![Value::String(
-            path.to_string_lossy().to_string(),
+            path.to_string_lossy().to_string().into(),
         )]))
         .unwrap();
         let fig = clone_figure(current_figure_handle()).unwrap();

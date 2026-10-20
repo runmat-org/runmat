@@ -23,7 +23,7 @@ impl ArrayData {
             Self::Complex(value) => complex(value, index),
             Self::Char(value) => character(value, index),
             Self::String(value) => {
-                Ok(Value::String(value.data.get(index).cloned().ok_or_else(
+                Ok(Value::String(value.data().get(index).cloned().ok_or_else(
                     || arrayfun_flow("arrayfun: index out of bounds"),
                 )?))
             }
@@ -90,7 +90,7 @@ fn character(value: &CharArray, index: usize) -> BuiltinResult<Value> {
     let row = index % value.rows;
     let column = index / value.rows;
     let character = *value
-        .data
+        .data()
         .get(row * value.cols + column)
         .ok_or_else(|| arrayfun_flow("arrayfun: index out of bounds"))?;
     CharArray::new(vec![character], 1, 1)

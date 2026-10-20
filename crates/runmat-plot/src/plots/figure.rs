@@ -1491,7 +1491,11 @@ impl Figure {
     pub fn apply_axes_colormaps_from(&mut self, start: usize) {
         for idx in start..self.plots.len() {
             let axes_index = self.plot_axes_indices.get(idx).copied().unwrap_or(0);
-            let Some(cmap) = self.axes_metadata.get(axes_index).map(|m| m.colormap.clone()) else {
+            let Some(cmap) = self
+                .axes_metadata
+                .get(axes_index)
+                .map(|m| m.colormap.clone())
+            else {
                 continue;
             };
             Self::apply_colormap_to_plot(&mut self.plots[idx], &cmap);
@@ -2088,7 +2092,12 @@ impl Figure {
                     );
                     out.push((
                         axes_index,
-                        plot.render_data_with_range(x_range, y_range, resolved_viewport.pixels, log_axes),
+                        plot.render_data_with_range(
+                            x_range,
+                            y_range,
+                            resolved_viewport.pixels,
+                            log_axes,
+                        ),
                     ));
                 }
                 PlotElement::Patch(plot) => {
@@ -2224,7 +2233,10 @@ impl Figure {
                     let legend_labels = pie.legend_labels.clone();
                     for (slice_index, slice) in pie.slice_meta().into_iter().enumerate() {
                         entries.push(LegendEntry {
-                            label: legend_labels.get(slice_index).cloned().unwrap_or(slice.label),
+                            label: legend_labels
+                                .get(slice_index)
+                                .cloned()
+                                .unwrap_or(slice.label),
                             color: slice.color,
                             plot_type: plot.plot_type(),
                             marker: None,
@@ -2301,7 +2313,9 @@ impl Figure {
                 continue;
             }
             let found = match plot {
-                PlotElement::Surface(surface) if surface.visible && surface.color_grid.is_none() => {
+                PlotElement::Surface(surface)
+                    if surface.visible && surface.color_grid.is_none() =>
+                {
                     surface.color_limits.or_else(|| {
                         surface
                             .z_data
@@ -2309,12 +2323,14 @@ impl Figure {
                             .and_then(|rows| finite_range(&mut rows.iter().flatten().copied()))
                     })
                 }
-                PlotElement::Scatter(scatter) if scatter.visible => scatter.color_limits.or_else(|| {
-                    scatter
-                        .color_values
-                        .as_ref()
-                        .and_then(|values| finite_range(&mut values.iter().copied()))
-                }),
+                PlotElement::Scatter(scatter) if scatter.visible => {
+                    scatter.color_limits.or_else(|| {
+                        scatter
+                            .color_values
+                            .as_ref()
+                            .and_then(|values| finite_range(&mut values.iter().copied()))
+                    })
+                }
                 PlotElement::Contour(contour) if contour.visible => contour.value_range,
                 PlotElement::ContourFill(fill) if fill.visible => fill.value_range,
                 _ => None,
@@ -3217,7 +3233,9 @@ mod tests {
     #[test]
     fn legend_entry_carries_marker_and_omits_line_for_marker_only_series() {
         let mut figure = Figure::new();
-        let mut plot = LinePlot::new(vec![2.0], vec![6.0]).unwrap().with_label("optimum");
+        let mut plot = LinePlot::new(vec![2.0], vec![6.0])
+            .unwrap()
+            .with_label("optimum");
         plot.line_style = crate::plots::line::LineStyle::None;
         plot.marker = Some(crate::plots::line::LineMarkerAppearance {
             kind: crate::plots::scatter::MarkerStyle::Circle,
@@ -3242,7 +3260,11 @@ mod tests {
         figure.add_line_plot(LinePlot::new(vec![0.0, 1.0], vec![3.0, 4.0]).unwrap());
         figure.set_labels(&["first".into(), "second".into()]);
 
-        let labels: Vec<String> = figure.legend_entries().into_iter().map(|e| e.label).collect();
+        let labels: Vec<String> = figure
+            .legend_entries()
+            .into_iter()
+            .map(|e| e.label)
+            .collect();
         assert_eq!(labels, vec!["first".to_string(), "second".to_string()]);
     }
 

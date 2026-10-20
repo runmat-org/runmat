@@ -49,7 +49,7 @@ pub(super) struct GroupLabelBuilder<'a> {
 impl<'a> GroupLabelBuilder<'a> {
     pub(super) fn new(value: &'a Value, expected_len: usize) -> BuiltinResult<Self> {
         let source = match value {
-            Value::Cell(cell) if cell.data.len() == expected_len => Source::CellScalar(cell),
+            Value::Cell(cell) if cell.data().len() == expected_len => Source::CellScalar(cell),
             Value::Cell(cell) => Source::CellFactors {
                 cell,
                 variables: Vec::new(),
@@ -63,7 +63,9 @@ impl<'a> GroupLabelBuilder<'a> {
                 Source::Categorical(object)
             }
             Value::String(text) if expected_len == 1 => Source::Text(text),
-            Value::StringArray(array) if array.data.len() == expected_len => Source::Strings(array),
+            Value::StringArray(array) if array.data().len() == expected_len => {
+                Source::Strings(array)
+            }
             Value::LogicalArray(array) if array.len() == expected_len => Source::Logical(array),
             Value::CharArray(array) if array.rows == expected_len => Source::Characters(array),
             Value::Tensor(tensor) => {
@@ -105,15 +107,15 @@ impl<'a> GroupLabelBuilder<'a> {
             let source = std::mem::replace(&mut self.source, Source::Done);
             match source {
                 Source::CellScalar(cell) => {
-                    if self.index == cell.data.len() {
+                    if self.index == cell.data().len() {
                         return Ok(LabelProgress::Complete(std::mem::take(&mut self.output)));
                     }
-                    if let Some(copy) = scalar_text_copy(&cell.data[self.index]) {
+                    if let Some(copy) = scalar_text_copy(&cell.data()[self.index]) {
                         self.pending_text = Some(copy);
                         self.source = Source::CellScalar(cell);
                         continue;
                     }
-                    match scalar_group_label(&cell.data[self.index]) {
+                    match scalar_group_label(&cell.data()[self.index]) {
                         Ok(label) => {
                             let units = label.as_ref().map_or(1, |key| group_key_work_units(key));
                             push_label(&mut self.output, label)?;
@@ -182,8 +184,11 @@ impl<'a> GroupLabelBuilder<'a> {
                             }
                         }
                     }
-                    if factor < cell.data.len() {
-                        child = Some(Box::new(Self::new(&cell.data[factor], self.expected_len)?));
+                    if factor < cell.data().len() {
+                        child = Some(Box::new(Self::new(
+                            &cell.data()[factor],
+                            self.expected_len,
+                        )?));
                         self.source = Source::CellFactors {
                             cell,
                             variables,
@@ -308,8 +313,8 @@ impl<'a> GroupLabelBuilder<'a> {
 fn scalar_text_copy(value: &Value) -> Option<TextCopy<'_>> {
     match value {
         Value::String(text) => Some(TextCopy::utf8(text, true)),
-        Value::StringArray(array) if array.data.len() == 1 => {
-            Some(TextCopy::utf8(&array.data[0], true))
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Some(TextCopy::utf8(&array.data()[0], true))
         }
         Value::CharArray(array) if array.rows == 1 => Some(TextCopy::character_row(array, 0)),
         _ => None,
@@ -319,7 +324,7 @@ fn scalar_text_copy(value: &Value) -> Option<TextCopy<'_>> {
 fn leaf_text_copy<'a>(source: &Source<'a>, index: usize) -> BuiltinResult<Option<TextCopy<'a>>> {
     match source {
         Source::Text(text) => Ok(Some(TextCopy::utf8(text, false))),
-        Source::Strings(array) => Ok(Some(TextCopy::utf8(&array.data[index], true))),
+        Source::Strings(array) => Ok(Some(TextCopy::utf8(&array.data()[index], true))),
         Source::Characters(array) => Ok(Some(TextCopy::character_row(array, index))),
         Source::Categorical(object) => {
             let view = crate::builtins::table::categorical_label_view(object).map_err(|err| {

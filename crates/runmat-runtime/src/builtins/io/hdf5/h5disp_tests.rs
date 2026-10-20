@@ -1,3 +1,4 @@
+use super::test_arguments::h5write_builtin;
 use super::*;
 use futures::executor::block_on;
 use runmat_value::IntValue;
@@ -9,8 +10,9 @@ fn h5disp_min_mode_and_utf8_option_use_typed_display_forms() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("display.h5");
-    let filename = || Value::String(path.display().to_string());
+    let filename = || Value::String(path.display().to_string().into());
     block_on(h5write_builtin(
+        None,
         filename(),
         Value::String("/café/measurements".into()),
         Value::Num(3.0),
@@ -18,6 +20,7 @@ fn h5disp_min_mode_and_utf8_option_use_typed_display_forms() {
     ))
     .expect("write Unicode-named dataset");
     block_on(h5writeatt_builtin(
+        None,
         filename(),
         Value::String("/café/measurements".into()),
         Value::String("units".into()),
@@ -25,6 +28,7 @@ fn h5disp_min_mode_and_utf8_option_use_typed_display_forms() {
     ))
     .expect("write attribute");
     block_on(h5writeatt_builtin(
+        None,
         filename(),
         Value::String("/café/measurements".into()),
         Value::String("exact".into()),
@@ -32,6 +36,7 @@ fn h5disp_min_mode_and_utf8_option_use_typed_display_forms() {
     ))
     .expect("write exact integer attribute");
     block_on(h5writeatt_builtin(
+        None,
         filename(),
         Value::String("/café/measurements".into()),
         Value::String("scale".into()),
@@ -43,7 +48,9 @@ fn h5disp_min_mode_and_utf8_option_use_typed_display_forms() {
     let quiet_capture = crate::console::begin_capture().expect("console capture");
     let simple = block_on(h5disp_builtin(
         filename(),
-        vec![Value::String("/café".into())],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+            "/café".into(),
+        )]),
     ))
     .expect("simple display");
     let Value::String(simple) = simple else {
@@ -61,12 +68,12 @@ fn h5disp_min_mode_and_utf8_option_use_typed_display_forms() {
 
     let minimal = block_on(h5disp_builtin(
         filename(),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::String("/café".into()),
             Value::String("min".into()),
             Value::String("TextEncoding".into()),
             Value::String("UTF-8".into()),
-        ],
+        ]),
     ))
     .expect("minimal UTF-8 display");
     let Value::String(minimal) = minimal else {
@@ -79,10 +86,10 @@ fn h5disp_min_mode_and_utf8_option_use_typed_display_forms() {
 
     let root_encoded = block_on(h5disp_builtin(
         filename(),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::String("TextEncoding".into()),
             Value::String("UTF-8".into()),
-        ],
+        ]),
     ))
     .expect("root UTF-8 display without explicit location");
     assert!(matches!(root_encoded, Value::String(text) if text.contains("café")));
@@ -93,8 +100,9 @@ fn dispatcher_statement_h5disp_prints_under_suppressed_expression_without_replay
     let _fs_lock = runmat_filesystem::provider_override_lock();
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("statement.h5");
-    let filename = Value::String(path.display().to_string());
+    let filename = Value::String(path.display().to_string().into());
     block_on(h5write_builtin(
+        None,
         filename.clone(),
         Value::String("/A".into()),
         Value::Num(7.0),

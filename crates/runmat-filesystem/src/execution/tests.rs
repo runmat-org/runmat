@@ -277,27 +277,50 @@ fn record_budget_bounds_new_work_without_blocking_an_existing_owner() {
     let memory = MemoryFsProvider::new();
     let first = lease(acquire(&memory, 1));
     for index in 1..MAX_EXECUTION_RECORDS {
-        let work = ExecutionWorkId { session_id:SessionId("session".into()), turn_id:TurnId(format!("work-{index}")) };
-        block_on(memory.transition_execution(&work, ExecutionLeaseCommand::Acquire {
-            owner:ExecutionOwnerId([1;16]), duration_ms:30_000,
-        })).unwrap();
+        let work = ExecutionWorkId {
+            session_id: SessionId("session".into()),
+            turn_id: TurnId(format!("work-{index}")),
+        };
+        block_on(memory.transition_execution(
+            &work,
+            ExecutionLeaseCommand::Acquire {
+                owner: ExecutionOwnerId([1; 16]),
+                duration_ms: 30_000,
+            },
+        ))
+        .unwrap();
     }
-    let extra = ExecutionWorkId { session_id:SessionId("session".into()), turn_id:TurnId("extra".into()) };
-    assert!(block_on(memory.transition_execution(&extra, ExecutionLeaseCommand::Acquire {
-        owner:ExecutionOwnerId([1;16]), duration_ms:30_000,
-    })).is_err());
+    let extra = ExecutionWorkId {
+        session_id: SessionId("session".into()),
+        turn_id: TurnId("extra".into()),
+    };
+    assert!(block_on(memory.transition_execution(
+        &extra,
+        ExecutionLeaseCommand::Acquire {
+            owner: ExecutionOwnerId([1; 16]),
+            duration_ms: 30_000,
+        }
+    ))
+    .is_err());
     assert_eq!(lease(acquire(&memory, 1)), first);
 
     let root = tempfile::tempdir().unwrap();
     let native = SandboxFsProvider::new(root.path().to_path_buf()).unwrap();
     let first = lease(acquire(&native, 1));
-    let records = root.path().join(".artifacts/workspace-publications/executions");
+    let records = root
+        .path()
+        .join(".artifacts/workspace-publications/executions");
     for index in 1..MAX_EXECUTION_RECORDS {
         // Foreign/corrupt files must also consume the bounded journal budget.
         std::fs::write(records.join(format!("foreign-{index}.json")), b"{}").unwrap();
     }
-    assert!(block_on(native.transition_execution(&extra, ExecutionLeaseCommand::Acquire {
-        owner:ExecutionOwnerId([1;16]), duration_ms:30_000,
-    })).is_err());
+    assert!(block_on(native.transition_execution(
+        &extra,
+        ExecutionLeaseCommand::Acquire {
+            owner: ExecutionOwnerId([1; 16]),
+            duration_ms: 30_000,
+        }
+    ))
+    .is_err());
     assert_eq!(lease(acquire(&native, 1)), first);
 }

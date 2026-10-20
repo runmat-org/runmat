@@ -40,7 +40,7 @@ pub(super) fn collect_indicators(value: &Value, set: &mut IndicatorSet) -> Built
         Value::String(s) => set.text.push(s.as_str().to_owned()),
         Value::StringArray(array) => set
             .text
-            .extend(array.data.iter().map(|text| text.as_str().to_owned())),
+            .extend(array.data().iter().map(|text| text.as_str().to_owned())),
         Value::CharArray(array) => set.text.extend(char_rows(array)),
         Value::Tensor(tensor) => {
             if let Some(storage) = tensor.integer_storage() {
@@ -59,7 +59,7 @@ pub(super) fn collect_indicators(value: &Value, set: &mut IndicatorSet) -> Built
             }
         }
         Value::Cell(cell) => {
-            for item in &cell.data {
+            for item in cell.data() {
                 collect_indicators(item, set)?;
             }
         }
@@ -115,7 +115,7 @@ pub(super) fn standardize_missing_value(
                     if indicators
                         .text
                         .iter()
-                        .any(|marker| marker.as_str() == array.data[index].as_str())
+                        .any(|marker| marker.as_str() == array.data()[index].as_str())
                     {
                         TextSelection::Literal
                     } else {
@@ -147,27 +147,38 @@ pub(super) fn standardize_missing_value(
         }
         Value::Object(mut object) if is_tabular_object(&object) => {
             let variables = table_variables(&object)?;
-            let mut out = StructValue::new();
-            for (name, field) in variables.fields {
+            let mut out = runmat_value::UnboundedStructValueBuilder::new();
+            for (name, field) in variables.into_fields_unbounded() {
                 out.insert(name, standardize_missing_value(runtime, field, indicators)?);
             }
-            object
-                .properties
-                .insert("__table_variables".to_string(), Value::Struct(out));
+            crate::execution::object::replacement::replace_property(
+                runtime,
+                &mut object,
+                "__table_variables",
+                Value::Struct(out.finish()),
+                |message, source| {
+                    crate::context::host_allocation::host_allocation_runtime_error(
+                        runtime,
+                        "RunMat:standardizeMissing:Allocation",
+                        message,
+                        source,
+                    )
+                },
+                internal_error,
+            )?;
             Ok(Value::Object(object))
         }
         Value::Cell(cell) => {
-            let mut out = Vec::with_capacity(cell.data.len());
-            let data = match cell.data.try_into_owned() {
-                Ok(values) => values.into_iter().collect::<Vec<_>>(),
-                Err(shared) => shared.iter().cloned().collect::<Vec<_>>(),
-            };
-            for item in data {
-                out.push(standardize_missing_value(runtime, item, indicators)?);
+            let (mut cell, _roots) =
+                crate::execution::structure::replacement::cell(&cell, runtime)?;
+            let values = cell.try_data_mut_unique().ok_or_else(|| {
+                internal_error("standardizeMissing: prepared Cell owner is unexpectedly shared")
+            })?;
+            for item in values {
+                let source = std::mem::replace(item, Value::Num(0.0));
+                *item = standardize_missing_value(runtime, source, indicators)?;
             }
-            Ok(Value::Cell(
-                CellArray::new(out, cell.rows, cell.cols).map_err(internal_error)?,
-            ))
+            Ok(Value::Cell(cell))
         }
         other => Ok(other),
     }

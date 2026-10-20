@@ -156,10 +156,10 @@ async fn response_geometry(
             numeric_response_shape(shape, count, rows)
         }
         Value::LogicalArray(array) => vector_response_shape(&array.shape, array.data.len(), rows),
-        Value::StringArray(array) => vector_response_shape(&array.shape, array.data.len(), rows),
+        Value::StringArray(array) => vector_response_shape(&array.shape, array.data().len(), rows),
         Value::Cell(array) => {
-            vector_response_shape(&array.shape, array.data.len(), rows)?;
-            for (index, value) in array.data.iter().enumerate() {
+            vector_response_shape(&array.shape, array.data().len(), rows)?;
+            for (index, value) in array.data().iter().enumerate() {
                 let valid_text = match value {
                     Value::String(_) => true,
                     Value::CharArray(chars) => chars.rows == 1,
@@ -172,7 +172,7 @@ async fn response_geometry(
                     cooperation.completed(16_384).await?;
                 }
             }
-            cooperation.completed((array.data.len() % 16_384) as u64).await?;
+            cooperation.completed((array.data().len() % 16_384) as u64).await?;
             Ok(())
         }
         Value::CharArray(array) if array.rows == rows => Ok(()),

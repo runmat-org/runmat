@@ -25,11 +25,13 @@ fn public_invocation_roots_arguments_before_poll_and_retires_them_on_drop() {
                 let handle = caller_root.handle();
                 let invocation = ProcedureInvocation {
                     target: ProcedureTarget::Function("keepManaged".into()),
-                    arguments: vec![Value::HandleObject(HandleRef {
-                        class_name: "InvocationHandle".into(),
-                        target: handle,
-                        valid: true,
-                    })],
+                    arguments: crate::ProcedureArguments::Source(vec![Value::HandleObject(
+                        HandleRef {
+                            class_name: "InvocationHandle".into(),
+                            target: handle,
+                            valid: true,
+                        },
+                    )]),
                     requested_outputs: 1,
                 };
                 let control = InvocationControl::default();
@@ -104,11 +106,13 @@ fn rejected_invocations_check_control_before_registering_argument_roots() {
                 let handle = caller_root.handle();
                 let invocation = ProcedureInvocation {
                     target: ProcedureTarget::Function("keepManaged".into()),
-                    arguments: vec![Value::HandleObject(HandleRef {
-                        class_name: "InvocationHandle".into(),
-                        target: handle,
-                        valid: true,
-                    })],
+                    arguments: crate::ProcedureArguments::Source(vec![Value::HandleObject(
+                        HandleRef {
+                            class_name: "InvocationHandle".into(),
+                            target: handle,
+                            valid: true,
+                        },
+                    )]),
                     requested_outputs: 1,
                 };
                 let error = if coverage {

@@ -179,6 +179,7 @@ fn recording_driver(submission: &TaskSubmission) -> NativeExecutionResult<Driver
         .map_err(protocol)?;
     driver
         .handle(DriverCommand::RegisterWorker(WorkerSpec {
+            host: crate::test_support::host_inventory(),
             id: WorkerId::derive(&[b"recording-thermal-worker"]),
             pool_id: pool,
             resources: inventory,

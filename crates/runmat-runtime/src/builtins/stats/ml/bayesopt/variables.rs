@@ -17,12 +17,12 @@ pub(super) enum VariableKind {
 }
 
 pub(super) fn parse_variables(value: Value) -> BuiltinResult<Vec<Variable>> {
-    let raw = match value {
-        Value::Object(object) if object.class_name.is(OPTIMIZABLE_VARIABLE_CLASS) => {
-            runmat_value::OutputListStorage::unbounded(vec![Value::Object(object)])
+    let raw = match &value {
+        Value::Object(object) if object.class_name().is(OPTIMIZABLE_VARIABLE_CLASS) => {
+            std::slice::from_ref(&value)
         }
-        Value::Cell(cell) => cell.data,
-        Value::OutputList(values) => values,
+        Value::Cell(cell) => cell.data(),
+        Value::OutputList(values) => values.as_slice(),
         other => {
             return Err(bayesopt_error(
                 format!("bayesopt: variables must be optimizableVariable objects, got {other:?}"),
@@ -45,11 +45,11 @@ pub(super) fn parse_variables(value: Value) -> BuiltinResult<Vec<Variable>> {
                 &ERROR_INVALID_ARGUMENT,
             ));
         };
-        if !object.class_name.is(OPTIMIZABLE_VARIABLE_CLASS) {
+        if !object.class_name().is(OPTIMIZABLE_VARIABLE_CLASS) {
             return Err(bayesopt_error(
                 format!(
                     "bayesopt: expected optimizableVariable, got {}",
-                    object.class_name
+                    object.class_name()
                 ),
                 &ERROR_INVALID_ARGUMENT,
             ));
@@ -88,7 +88,7 @@ fn variable_from_object(object: &ObjectInstance) -> BuiltinResult<Variable> {
             &ERROR_INVALID_ARGUMENT,
         )
     })?;
-    let optimize = match object.properties.get("Optimize") {
+    let optimize = match object.properties().get("Optimize") {
         Some(Value::Bool(value)) => *value,
         Some(other) => {
             return Err(bayesopt_error(
@@ -98,7 +98,7 @@ fn variable_from_object(object: &ObjectInstance) -> BuiltinResult<Variable> {
         }
         None => true,
     };
-    let range = object.properties.get("Range").ok_or_else(|| {
+    let range = object.properties().get("Range").ok_or_else(|| {
         bayesopt_error(
             format!("bayesopt: variable '{name}' is missing Range"),
             &ERROR_INVALID_ARGUMENT,
@@ -163,7 +163,7 @@ fn variable_from_object(object: &ObjectInstance) -> BuiltinResult<Variable> {
 }
 
 fn string_property<'a>(object: &'a ObjectInstance, name: &str) -> BuiltinResult<Cow<'a, str>> {
-    match object.properties.get(name) {
+    match object.properties().get(name) {
         Some(value) => value_to_text(value, name),
         None => Err(bayesopt_error(
             format!("bayesopt: optimizableVariable is missing {name}"),
@@ -207,14 +207,14 @@ fn categorical_range(value: &Value, name: &str) -> BuiltinResult<Vec<String>> {
     let categories = match value {
         Value::String(text) => vec![text.as_str().to_owned()],
         Value::StringArray(array) => array
-            .data
+            .data()
             .iter()
             .map(|text| text.as_str().to_owned())
             .collect(),
-        Value::CharArray(chars) if chars.rows == 1 => vec![chars.data.iter().collect()],
+        Value::CharArray(chars) if chars.rows == 1 => vec![chars.data().iter().collect()],
         Value::Cell(cell) => {
-            let mut out = Vec::with_capacity(cell.data.len());
-            for value in &cell.data {
+            let mut out = Vec::with_capacity(cell.data().len());
+            for value in cell.data() {
                 out.push(value_to_text(value, "Range")?.into_owned());
             }
             out

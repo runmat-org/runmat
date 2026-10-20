@@ -1,5 +1,9 @@
 use super::*;
 use crate::{ExecutableSource, RunError, RunMatSession};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
 async fn infinite(session: &mut RunMatSession) -> crate::ExecutableUnit {
     session
@@ -16,7 +20,9 @@ async fn caller_cancellation_stops_running_original_script_and_scope_is_restored
     let mut session = RunMatSession::with_options(false, false).unwrap();
     let unit = infinite(&mut session).await;
     let caller = Arc::new(AtomicBool::new(false));
-    let control = InvocationControl::default().with_cancellation(caller.clone());
+    let control = InvocationControl::default().with_cancellation(
+        runmat_execution::CancellationToken::from_shared(caller.clone()),
+    );
     let before = session.stats().total_executions;
     let cancel = std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(50));
@@ -44,15 +50,16 @@ async fn caller_cancellation_stops_running_original_script_and_scope_is_restored
         .unwrap();
     let invocation = ProcedureInvocation {
         target: ProcedureTarget::Entrypoint,
-        arguments: vec![],
+        arguments: crate::ProcedureArguments::Source(vec![]),
         requested_outputs: 1,
     };
     assert_eq!(
         session
             .invoke_executable(&next, invocation, &InvocationControl::default())
             .await
-            .unwrap(),
-        Value::Num(42.0)
+            .unwrap()
+            .as_slice(),
+        &[Value::Num(42.0)]
     );
 }
 
@@ -90,7 +97,7 @@ async fn entering_another_session_keeps_original_parent_deadline() {
     let _parent = parent.enter();
     let invocation = ProcedureInvocation {
         target: ProcedureTarget::Entrypoint,
-        arguments: vec![],
+        arguments: crate::ProcedureArguments::Source(vec![]),
         requested_outputs: 1,
     };
     let result = session
@@ -116,7 +123,7 @@ async fn prepared_native_loop(session: &mut RunMatSession) -> crate::ExecutableU
         .unwrap();
     let invocation = ProcedureInvocation {
         target: ProcedureTarget::Function("liveNative".into()),
-        arguments: vec![Value::Bool(false)],
+        arguments: crate::ProcedureArguments::Source(vec![Value::Bool(false)]),
         requested_outputs: 1,
     };
     assert_eq!(
@@ -127,8 +134,9 @@ async fn prepared_native_loop(session: &mut RunMatSession) -> crate::ExecutableU
                 &InvocationControl::default().force_generic_native()
             )
             .await
-            .unwrap(),
-        Value::Num(42.0)
+            .unwrap()
+            .as_slice(),
+        &[Value::Num(42.0)]
     );
     assert_eq!(session.generic_native_cache_counts(), (1, 1));
     unit
@@ -141,14 +149,16 @@ async fn original_caller_cancellation_stops_compiled_native_loop() {
     let caller = Arc::new(AtomicBool::new(false));
     let control = InvocationControl::default()
         .force_generic_native()
-        .with_cancellation(caller.clone());
+        .with_cancellation(runmat_execution::CancellationToken::from_shared(
+            caller.clone(),
+        ));
     let cancel = std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(50));
         caller.store(true, Ordering::Release);
     });
     let invocation = ProcedureInvocation {
         target: ProcedureTarget::Function("liveNative".into()),
-        arguments: vec![Value::Bool(true)],
+        arguments: crate::ProcedureArguments::Source(vec![Value::Bool(true)]),
         requested_outputs: 1,
     };
     let result = session.invoke_executable(&unit, invocation, &control).await;
@@ -168,12 +178,76 @@ async fn deadline_stops_compiled_native_loop_with_original_reason() {
         .with_deadline_unix_ms(u64::try_from(runmat_time::unix_timestamp_ms()).unwrap() + 50);
     let invocation = ProcedureInvocation {
         target: ProcedureTarget::Function("liveNative".into()),
-        arguments: vec![Value::Bool(true)],
+        arguments: crate::ProcedureArguments::Source(vec![Value::Bool(true)]),
         requested_outputs: 1,
     };
     let result = session.invoke_executable(&unit, invocation, &control).await;
     assert!(
         matches!(result, Err(RunError::Runtime(ref error)) if error.identifier() == Some("RunMat:ExecutionDeadline"))
+    );
+    assert_eq!(session.generic_native_cache_counts(), (1, 1));
+    let next = ProcedureInvocation {
+        target: ProcedureTarget::Function("liveNative".into()),
+        arguments: crate::ProcedureArguments::Source(vec![Value::Bool(false)]),
+        requested_outputs: 1,
+    };
+    assert_eq!(
+        session
+            .invoke_executable(
+                &unit,
+                next,
+                &InvocationControl::default().force_generic_native(),
+            )
+            .await
+            .unwrap()
+            .as_slice(),
+        &[Value::Num(42.0)],
+        "the completed deadline scope must not poison the next invocation"
+    );
+    assert_eq!(session.generic_native_cache_counts(), (1, 1));
+}
+
+#[tokio::test]
+async fn future_parent_deadline_stops_compiled_native_child_before_watchdog() {
+    let mut session = RunMatSession::with_options(false, false).unwrap();
+    let unit = prepared_native_loop(&mut session).await;
+    let deadline = u64::try_from(runmat_time::unix_timestamp_ms()).unwrap() + 50;
+    let parent = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ))
+    .with_cancellation_token(
+        runmat_execution::CancellationToken::default().with_deadline(Some(deadline)),
+    );
+    let invocation = ProcedureInvocation {
+        target: ProcedureTarget::Function("liveNative".into()),
+        arguments: crate::ProcedureArguments::Source(vec![Value::Bool(true)]),
+        requested_outputs: 1,
+    };
+    // A lost inherited deadline must fail with a distinct User cancellation
+    // rather than leave this regression witness in an unbounded native loop.
+    let watchdog_flag = Arc::new(AtomicBool::new(false));
+    let watchdog_control = watchdog_flag.clone();
+    let (done, finished) = std::sync::mpsc::channel();
+    let watchdog = std::thread::spawn(move || {
+        if finished
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .is_err()
+        {
+            watchdog_control.store(true, Ordering::Release);
+        }
+    });
+    let control = InvocationControl::default()
+        .force_generic_native()
+        .with_cancellation(runmat_execution::CancellationToken::from_shared(
+            watchdog_flag,
+        ));
+    let _parent = parent.enter();
+    let result = session.invoke_executable(&unit, invocation, &control).await;
+    let _ = done.send(());
+    watchdog.join().unwrap();
+    assert!(
+        matches!(result, Err(RunError::Runtime(ref error)) if error.identifier() == Some("RunMat:ExecutionDeadline")),
+        "child lost future parent deadline: {result:?}"
     );
     assert_eq!(session.generic_native_cache_counts(), (1, 1));
 }

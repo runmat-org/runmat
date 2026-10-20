@@ -11,7 +11,7 @@ use crate::{gather_if_needed_async, BuiltinResult};
 
 pub(in crate::builtins::stats::ml) fn parse_metric_name(
     caller: MetricCaller,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<DistanceMetricKind> {
     let Some(first) = args.first() else {
         return Ok(DistanceMetricKind::Euclidean);
@@ -30,20 +30,20 @@ pub(in crate::builtins::stats::ml) async fn parse_metric_kind(
     caller: MetricCaller,
     x: &Tensor,
     kind: DistanceMetricKind,
-    parameters: Vec<Value>,
+    parameters: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<DistanceMetric> {
     match kind {
         DistanceMetricKind::Euclidean => {
-            no_parameter(caller, &parameters, kind).map(|()| DistanceMetric::Euclidean)
+            no_parameter(caller, parameters, kind).map(|()| DistanceMetric::Euclidean)
         }
         DistanceMetricKind::SquareEuclidean => {
-            no_parameter(caller, &parameters, kind).map(|()| DistanceMetric::SquareEuclidean)
+            no_parameter(caller, parameters, kind).map(|()| DistanceMetric::SquareEuclidean)
         }
         DistanceMetricKind::Cityblock => {
-            no_parameter(caller, &parameters, kind).map(|()| DistanceMetric::Cityblock)
+            no_parameter(caller, parameters, kind).map(|()| DistanceMetric::Cityblock)
         }
         DistanceMetricKind::Chebychev => {
-            no_parameter(caller, &parameters, kind).map(|()| DistanceMetric::Chebychev)
+            no_parameter(caller, parameters, kind).map(|()| DistanceMetric::Chebychev)
         }
         DistanceMetricKind::Minkowski => {
             let p = if parameters.is_empty() {
@@ -109,26 +109,26 @@ pub(in crate::builtins::stats::ml) async fn parse_metric_kind(
             )?))
         }
         DistanceMetricKind::Cosine => {
-            no_parameter(caller, &parameters, kind).map(|()| DistanceMetric::Cosine)
+            no_parameter(caller, parameters, kind).map(|()| DistanceMetric::Cosine)
         }
         DistanceMetricKind::Correlation => {
-            no_parameter(caller, &parameters, kind).map(|()| DistanceMetric::Correlation)
+            no_parameter(caller, parameters, kind).map(|()| DistanceMetric::Correlation)
         }
         DistanceMetricKind::Hamming => {
-            no_parameter(caller, &parameters, kind).map(|()| DistanceMetric::Hamming)
+            no_parameter(caller, parameters, kind).map(|()| DistanceMetric::Hamming)
         }
         DistanceMetricKind::Jaccard => {
-            no_parameter(caller, &parameters, kind).map(|()| DistanceMetric::Jaccard)
+            no_parameter(caller, parameters, kind).map(|()| DistanceMetric::Jaccard)
         }
         DistanceMetricKind::Spearman => {
-            no_parameter(caller, &parameters, kind).map(|()| DistanceMetric::Spearman)
+            no_parameter(caller, parameters, kind).map(|()| DistanceMetric::Spearman)
         }
     }
 }
 
 fn no_parameter(
     caller: MetricCaller,
-    parameters: &[Value],
+    parameters: crate::call::FunctionArgumentView<'_>,
     kind: DistanceMetricKind,
 ) -> BuiltinResult<()> {
     if parameters.is_empty() {

@@ -32,7 +32,8 @@ fn table_methods_preserve_typed_variable_and_return_updated_value() {
         Value::Cell(CellArray::new(vec![Value::from("Count")], 1, 1).expect("name")),
     ]))
     .expect("table");
-    let selected = block_on(table_subsref(table.clone(), member("Count"))).expect("read variable");
+    let selected =
+        block_on(table_subsref(None, table.clone(), member("Count"))).expect("read variable");
     let Value::Tensor(selected) = selected.value() else {
         panic!("expected numeric column");
     };
@@ -44,11 +45,16 @@ fn table_methods_preserve_typed_variable_and_return_updated_value() {
     let replacement = Value::Tensor(
         Tensor::new_integer(IntegerStorage::U64(vec![1, 2]), vec![2, 1]).expect("replacement"),
     );
-    let updated = block_on(table_subsasgn(table.clone(), member("Count"), replacement))
-        .expect("replace variable");
-    let original = block_on(table_subsref(table, member("Count"))).expect("original read");
+    let updated = block_on(table_subsasgn(
+        None,
+        table.clone(),
+        member("Count"),
+        replacement,
+    ))
+    .expect("replace variable");
+    let original = block_on(table_subsref(None, table, member("Count"))).expect("original read");
     let modified = updated
-        .with_owned(|value| block_on(table_subsref(value, member("Count"))))
+        .with_owned(|value| block_on(table_subsref(None, value, member("Count"))))
         .expect("updated read");
     let Value::Tensor(original) = original.value() else {
         panic!("expected original column");
@@ -103,9 +109,10 @@ fn dictionary_methods_compare_wide_keys_and_keep_original_value() {
 fn method_receivers_reject_wrong_class_and_invalid_path() {
     let wrong = Value::Num(1.0);
     let valid_path = member("Count");
-    assert!(block_on(table_subsref(wrong.clone(), valid_path.clone())).is_err());
+    assert!(block_on(table_subsref(None, wrong.clone(), valid_path.clone())).is_err());
     assert!(block_on(dictionary_subsref(wrong.clone(), valid_path.clone())).is_err());
     assert!(block_on(table_subsasgn(
+        None,
         wrong.clone(),
         valid_path.clone(),
         Value::Num(2.0)

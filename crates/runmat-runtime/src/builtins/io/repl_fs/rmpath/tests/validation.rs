@@ -37,7 +37,7 @@ fn failed_removal_leaves_the_path_unchanged() {
     );
     crate::builtins::common::path_state::set_path_string(&original);
     let error = super::run(vec![
-        Value::String(first),
+        Value::String(first.into()),
         Value::String("missing/path/for/rmpath".into()),
     ])
     .expect_err("missing folder");
@@ -57,7 +57,7 @@ fn distinguishes_existing_folders_that_are_not_on_the_path() {
     let directory = tempdir().expect("directory");
     crate::builtins::common::path_state::set_path_string("");
     let error = super::run(vec![Value::String(
-        directory.path().to_string_lossy().into_owned(),
+        directory.path().to_string_lossy().into_owned().into(),
     )])
     .expect_err("not on path");
     assert_eq!(
@@ -72,7 +72,7 @@ fn distinguishes_files_from_missing_folders() {
     let file = NamedTempFile::new().expect("file");
     crate::builtins::common::path_state::set_path_string("");
     let error = super::run(vec![Value::String(
-        file.path().to_string_lossy().into_owned(),
+        file.path().to_string_lossy().into_owned().into(),
     )])
     .expect_err("not a folder");
     assert_eq!(

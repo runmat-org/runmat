@@ -23,7 +23,9 @@ use super::mesh::{
 };
 use super::op_common::surface_composite::contour_for_surface_axes_input;
 use super::op_common::surface_inputs::{
-    axis_sources_to_host, parse_surface_call_args_matlab_xy, surface_axis_sources_from_xy_values,
+    axis_sources_to_host,
+    parse_surface_source_call_args_matlab_xy as parse_surface_call_args_matlab_xy,
+    surface_axis_sources_from_xy_values,
 };
 use super::state::{render_active_plot, PlotRenderOptions};
 
@@ -273,7 +275,7 @@ pub async fn meshc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let style = Arc::new(
         parse_surface_style_args(
             "meshc",
-            &rest,
+            crate::call::FunctionArgumentView::from_slice(&rest),
             SurfaceStyleDefaults::new(
                 ColorMap::Turbo,
                 ShadingMode::Faceted,

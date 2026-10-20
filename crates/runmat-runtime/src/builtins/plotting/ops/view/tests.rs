@@ -21,13 +21,13 @@ fn view_rejects_nonfinite_and_overflowed_angles_before_axes_creation() {
             )],
         ] {
             assert_eq!(
-                view_builtin(args).unwrap_err().identifier(),
+                view_builtin_source(args).unwrap_err().identifier(),
                 Some("RunMat:view:InvalidArgument")
             );
             assert!(state::current_figure_handle_if_exists().is_none());
         }
     }
-    assert!(view_builtin(vec![Value::Num(f32::MAX as f64), Value::Num(0.)]).is_ok());
+    assert!(view_builtin_source(vec![Value::Num(f32::MAX as f64), Value::Num(0.)]).is_ok());
 }
 
 #[test]
@@ -63,11 +63,11 @@ fn view_two_outputs_share_query_and_set_state_in_matlab_mode() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
     let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     assert_eq!(
-        view_builtin(vec![Value::Num(45.), Value::Num(20.)]).unwrap(),
+        view_builtin_source(vec![Value::Num(45.), Value::Num(20.)]).unwrap(),
         Value::output_list(vec![Value::Num(45.), Value::Num(20.)])
     );
     assert_eq!(
-        view_builtin(vec![]).unwrap(),
+        view_builtin_source(vec![]).unwrap(),
         Value::output_list(vec![Value::Num(45.), Value::Num(20.)])
     );
 }
@@ -80,7 +80,7 @@ fn view_output_and_numeric_admission_precedes_default_axes_creation() {
     {
         let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         assert_eq!(
-            view_builtin(vec![]).unwrap_err().identifier(),
+            view_builtin_source(vec![]).unwrap_err().identifier(),
             Some("RunMat:view:TooManyOutputs")
         );
         assert!(state::current_figure_handle_if_exists().is_none());
@@ -89,17 +89,17 @@ fn view_output_and_numeric_admission_precedes_default_axes_creation() {
         let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         assert_eq!(
-            view_builtin(vec![]).unwrap_err().identifier(),
+            view_builtin_source(vec![]).unwrap_err().identifier(),
             Some("RunMat:compatibility:ViewVectorOutputExtension")
         );
         assert!(state::current_figure_handle_if_exists().is_none());
     }
     {
         let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
-        assert!(view_builtin(vec![Value::Num(4.)]).is_err());
+        assert!(view_builtin_source(vec![Value::Num(4.)]).is_err());
         assert!(state::current_figure_handle_if_exists().is_none());
         assert_eq!(
-            view_builtin(vec![Value::Num(2.)]).unwrap(),
+            view_builtin_source(vec![Value::Num(2.)]).unwrap(),
             Value::output_list(vec![])
         );
         assert!(state::current_figure_handle_if_exists().is_some());
@@ -112,7 +112,7 @@ fn view_sets_axes_local_angles() {
     ensure_plot_test_env();
     reset_hold_state_for_run();
     let _ = clear_figure(None);
-    let value = view_builtin(vec![Value::Num(45.0), Value::Num(20.0)]).unwrap();
+    let value = view_builtin_source(vec![Value::Num(45.0), Value::Num(20.0)]).unwrap();
     let t = Tensor::try_from(&value).unwrap();
     assert_eq!(t.materialize_f64(), vec![45.0, 20.0]);
     let fig = clone_figure(current_figure_handle()).unwrap();
@@ -128,7 +128,7 @@ fn view_is_subplot_local() {
     reset_hold_state_for_run();
     let _ = clear_figure(None);
     configure_subplot(1, 2, 1).unwrap();
-    let _ = view_builtin(vec![Value::Num(10.0), Value::Num(15.0)]).unwrap();
+    let _ = view_builtin_source(vec![Value::Num(10.0), Value::Num(15.0)]).unwrap();
     let fig = clone_figure(current_figure_handle()).unwrap();
     assert_eq!(fig.axes_metadata(0).unwrap().view_azimuth_deg, None);
     assert_eq!(fig.axes_metadata(1).unwrap().view_azimuth_deg, Some(10.0));
@@ -142,13 +142,13 @@ fn view_supports_query_forms_and_presets() {
     let _ = clear_figure(None);
 
     let ax = Value::Num(crate::builtins::plotting::axes::axes_builtin(vec![]).unwrap());
-    let _ = view_builtin(vec![ax.clone(), Value::Num(2.0)]).unwrap();
-    let v = view_builtin(vec![ax.clone()]).unwrap();
+    let _ = view_builtin_source(vec![ax.clone(), Value::Num(2.0)]).unwrap();
+    let v = view_builtin_source(vec![ax.clone()]).unwrap();
     let t = Tensor::try_from(&v).unwrap();
     assert_eq!(t.materialize_f64(), vec![0.0, 90.0]);
 
-    let _ = view_builtin(vec![ax.clone(), Value::Num(3.0)]).unwrap();
-    let v = view_builtin(vec![ax]).unwrap();
+    let _ = view_builtin_source(vec![ax.clone(), Value::Num(3.0)]).unwrap();
+    let v = view_builtin_source(vec![ax]).unwrap();
     let t = Tensor::try_from(&v).unwrap();
     assert_eq!(t.materialize_f64(), vec![-37.5, 30.0]);
 }
@@ -164,7 +164,7 @@ fn view_handles_large_angles_and_property_roundtrip() {
     let (figure_handle, axes_index) =
         crate::builtins::plotting::state::decode_axes_handle(ax_handle).unwrap();
     let ax = Value::Num(ax_handle);
-    let _ = view_builtin(vec![ax.clone(), Value::Num(405.0), Value::Num(89.0)]).unwrap();
+    let _ = view_builtin_source(vec![ax.clone(), Value::Num(405.0), Value::Num(89.0)]).unwrap();
     let queried = get_builtin(vec![ax.clone(), Value::String("View".into())]).unwrap();
     let t = Tensor::try_from(&queried).unwrap();
     assert_eq!(t.materialize_f64(), vec![405.0, 89.0]);
@@ -197,7 +197,7 @@ fn view_accepts_typed_integer_angle_vector() {
     let tensor =
         Tensor::new_integer(IntegerStorage::I16(vec![45, 20]), vec![1, 2]).expect("angles");
     let angles = Value::Tensor(tensor);
-    let value = view_builtin(vec![angles]).unwrap();
+    let value = view_builtin_source(vec![angles]).unwrap();
     let t = Tensor::try_from(&value).unwrap();
 
     assert_eq!(t.materialize_f64(), vec![45.0, 20.0]);
@@ -214,7 +214,7 @@ fn view_accepts_separate_typed_integer_angle_scalars() {
     let az = Tensor::new_integer(IntegerStorage::I16(vec![45]), vec![1, 1]).expect("azimuth");
     let el = Tensor::new_integer(IntegerStorage::I16(vec![20]), vec![1, 1]).expect("elevation");
 
-    let value = view_builtin(vec![Value::Tensor(az), Value::Tensor(el)]).unwrap();
+    let value = view_builtin_source(vec![Value::Tensor(az), Value::Tensor(el)]).unwrap();
     let t = Tensor::try_from(&value).unwrap();
 
     assert_eq!(t.materialize_f64(), vec![45.0, 20.0]);
@@ -232,7 +232,7 @@ fn view_integer_angles_are_gated_and_exact_at_camera_boundary() {
     );
     {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        let error = view_builtin(vec![angles.clone()]).expect_err("compatibility gate");
+        let error = view_builtin_source(vec![angles.clone()]).expect_err("compatibility gate");
         assert_eq!(
             error.identifier(),
             Some("RunMat:compatibility:ViewIntegerAnglesExtension")
@@ -241,7 +241,7 @@ fn view_integer_angles_are_gated_and_exact_at_camera_boundary() {
     {
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let lossy = Value::Int(IntValue::I32(16_777_217));
-        let error = view_builtin(vec![lossy, Value::Int(IntValue::I8(0))])
+        let error = view_builtin_source(vec![lossy, Value::Int(IntValue::I8(0))])
             .expect_err("lossy binary32 angle");
         assert!(error.message().contains("exactly representable as single"));
     }

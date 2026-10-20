@@ -351,7 +351,8 @@ fn logical_mount_root(identity: &ContentDigest) -> Result<NormalizedRelativePath
     NormalizedRelativePath::new(format!(
         "packages/{}",
         identity.to_string().replace(':', "_")
-    )).map_err(Into::into)
+    ))
+    .map_err(Into::into)
 }
 
 mod stable_source_path_map {
@@ -401,8 +402,15 @@ impl FrozenProject {
     /// Source-only candidates must retain the admitted manifest. Comparing the
     /// canonical manifest preserves comments/formatting freedom without changing
     /// dependency, source-root, or capability interpretation under an old graph.
-    pub fn validate_root_manifest(&self, manifest: &runmat_config::project::ProjectManifest) -> Result<(), String> {
-        let root = self.graph.packages.get(&self.graph.root).ok_or("admitted root package is missing")?;
+    pub fn validate_root_manifest(
+        &self,
+        manifest: &runmat_config::project::ProjectManifest,
+    ) -> Result<(), String> {
+        let root = self
+            .graph
+            .packages
+            .get(&self.graph.root)
+            .ok_or("admitted root package is missing")?;
         let SourceId::Path(source) = &root.instance.source else {
             return Err("workspace candidates require an admitted path project".into());
         };
@@ -420,8 +428,13 @@ impl FrozenProject {
     ) -> Result<Self, String> {
         let mut candidate = self.clone();
         let root = &self.graph.root;
-        candidate.access_paths.retain(|id, _| &id.package_instance != root);
-        let package = candidate.sources.packages.get_mut(root)
+        candidate
+            .access_paths
+            .retain(|id, _| &id.package_instance != root);
+        let package = candidate
+            .sources
+            .packages
+            .get_mut(root)
             .ok_or_else(|| "frozen project has no root source catalog".to_string())?;
         package.sources.clear();
         for (file, bytes) in files {
@@ -430,24 +443,50 @@ impl FrozenProject {
             // Recompute declaration identity with the canonical source index.
             // Caller-supplied qualified names cannot grant private visibility.
             let canonical = runmat_config::project::project_source_file_from_path(
-                &access_path, &self.workspace_root.join(&file.source_root), &file.source_root,
-            ).ok_or_else(|| "candidate source is not an admitted MATLAB source".to_string())?;
-            if canonical != file { return Err("candidate source descriptor differs from canonical project indexing".into()); }
-            let id = StableSourceId { package_instance: root.clone(), relative_path,
-                content_digest: ContentDigest::sha256(&bytes) };
-            if candidate.access_paths.insert(id.clone(), access_path).is_some() {
+                &access_path,
+                &self.workspace_root.join(&file.source_root),
+                &file.source_root,
+            )
+            .ok_or_else(|| "candidate source is not an admitted MATLAB source".to_string())?;
+            if canonical != file {
+                return Err(
+                    "candidate source descriptor differs from canonical project indexing".into(),
+                );
+            }
+            let id = StableSourceId {
+                package_instance: root.clone(),
+                relative_path,
+                content_digest: ContentDigest::sha256(&bytes),
+            };
+            if candidate
+                .access_paths
+                .insert(id.clone(), access_path)
+                .is_some()
+            {
                 return Err("duplicate candidate source identity".into());
             }
-            if package.sources.iter().any(|source| source.id.relative_path == id.relative_path) {
+            if package
+                .sources
+                .iter()
+                .any(|source| source.id.relative_path == id.relative_path)
+            {
                 return Err("duplicate candidate source path".into());
             }
-            package.sources.push(FrozenSourceDescriptor { id, qualified_name: canonical.qualified_name,
-                package_path: canonical.package_path, class_name: canonical.class_name,
-                class_qualified_name: canonical.class_qualified_name, is_private: canonical.is_private });
+            package.sources.push(FrozenSourceDescriptor {
+                id,
+                qualified_name: canonical.qualified_name,
+                package_path: canonical.package_path,
+                class_name: canonical.class_name,
+                class_qualified_name: canonical.class_qualified_name,
+                is_private: canonical.is_private,
+            });
         }
-        package.sources.sort_by(|left, right| left.id.cmp(&right.id));
-        candidate.sources.revision = compute_source_revision(&candidate.graph.graph_digest, &candidate.sources.packages)
-            .map_err(|error| error.to_string())?;
+        package
+            .sources
+            .sort_by(|left, right| left.id.cmp(&right.id));
+        candidate.sources.revision =
+            compute_source_revision(&candidate.graph.graph_digest, &candidate.sources.packages)
+                .map_err(|error| error.to_string())?;
         Ok(candidate)
     }
 

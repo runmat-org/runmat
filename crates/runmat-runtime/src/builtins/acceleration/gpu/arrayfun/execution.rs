@@ -1,4 +1,4 @@
-use crate::execution::{RootedValue, RootedValueLease, RootedValuesBuilder};
+use crate::execution::{RootedValue, RootedValuesBuilder};
 use crate::{gather_if_needed_async, make_cell_with_shape, BuiltinResult};
 use runmat_value::Value;
 
@@ -12,10 +12,10 @@ use super::plan::InputPlan;
 pub(super) async fn execute(
     context: Option<&crate::context::RuntimeContext>,
     func: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<RootedValue> {
-    let _inputs_root = RootedValueLease::for_values(std::iter::once(&func).chain(rest.iter()))
-        .map_err(|error| error.into_runtime_error())?;
+    let _function_root =
+        crate::builtins::common::mapped_callable::root_callable_value(&func, context)?;
     let invocation = Invocation::parse(func, rest)?;
     let Invocation {
         callable,
@@ -39,7 +39,7 @@ pub(super) async fn execute(
         }
     }
 
-    let plan = InputPlan::prepare(inputs, has_gpu_input).await?;
+    let plan = InputPlan::prepare(context, &inputs, has_gpu_input).await?;
     let base_shape = plan.output_shape;
     let prepared_inputs = plan.inputs;
 
@@ -69,15 +69,15 @@ pub(super) async fn execute(
     };
 
     let mut cell_outputs = RootedValuesBuilder::with_capacity(total_len);
-    let mut args: Vec<Value> = Vec::with_capacity(prepared_inputs.len());
 
     for idx in 0..total_len {
-        args.clear();
-        for input in &prepared_inputs {
-            args.push(input.value_at(idx, &base_shape)?);
-        }
+        let args = inputs
+            .try_map_preserving_roots_async(prepared_inputs.len(), context, async |slot| {
+                prepared_inputs[slot].value_at(idx, &base_shape)
+            })
+            .await?;
 
-        let result = match callable.call(context, &args).await {
+        let result = match callable.call_retained(context, args.fork()).await {
             Ok(value) => value,
             Err(err) => {
                 let handler = match error_handler.as_ref() {
@@ -90,11 +90,13 @@ pub(super) async fn execute(
                     }
                 };
                 let err_message = format_handler_error(&err);
-                let err_value = make_error_struct(&err_message, idx);
-                let mut handler_args = Vec::with_capacity(1 + args.len());
-                handler_args.push(err_value);
-                handler_args.extend(args.clone());
-                handler.call(context, &handler_args).await?
+                let prefix = make_error_struct(context, &err_message, idx)?;
+                let handler_args =
+                    crate::builtins::common::mapped_callable::prepend_rooted_argument(
+                        &args, prefix, context,
+                    )
+                    .await?;
+                handler.call_retained(context, handler_args).await?
             }
         };
 

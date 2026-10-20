@@ -7,7 +7,7 @@ use runmat_runtime::execution::value_codec::ValueCodecError;
 use runmat_runtime::execution::ExecutionServiceError;
 use runmat_runtime::RuntimeError;
 
-pub(super) fn classify_failure(error: &RuntimeError) -> NativeTargetTestFailure {
+pub(in crate::execute) fn classify_failure(error: &RuntimeError) -> NativeTargetTestFailure {
     let mut cursor: &(dyn std::error::Error + 'static) = error;
     let mut protocol = false;
     let mut input_decode = false;
@@ -39,6 +39,16 @@ pub(super) fn classify_failure(error: &RuntimeError) -> NativeTargetTestFailure 
                         | ValueCodecError::Invalid { .. }
                         | ValueCodecError::TransientSequenceNotPortable { .. }
                 );
+        }
+        if let Some(root) = cursor.downcast_ref::<runmat_gc::GcError>() {
+            match root {
+                runmat_gc::GcError::OutOfMemory(_) => out_of_memory = true,
+                runmat_gc::GcError::InvalidPointer(_)
+                | runmat_gc::GcError::CollectionFailed(_)
+                | runmat_gc::GcError::RootRegistrationFailed(_)
+                | runmat_gc::GcError::ConfigError(_)
+                | runmat_gc::GcError::SyncError(_) => process_failure = true,
+            }
         }
         if let Some(allocation) = cursor.downcast_ref::<HostAllocationError>() {
             match allocation {
@@ -156,6 +166,27 @@ mod tests {
             ),
             NativeTargetTestFailure::ProtocolFailure
         );
+        for (source, expected) in [
+            (
+                runmat_gc::GcError::OutOfMemory("root allocation".into()),
+                NativeTargetTestFailure::ConfiguredOutOfMemory,
+            ),
+            (
+                runmat_gc::GcError::RootRegistrationFailed("root service unavailable".into()),
+                NativeTargetTestFailure::ProcessFailure,
+            ),
+        ] {
+            assert_eq!(
+                decoded_failure(
+                    ValueCodecError::RootRegistration {
+                        path: "$".into(),
+                        source
+                    }
+                    .into()
+                ),
+                expected
+            );
+        }
         assert_eq!(
             classify_failure(
                 &runmat_runtime::build_runtime_error("ordinary language failure").build()

@@ -87,9 +87,10 @@ impl Buffer<(f64, f64)> {
 
 impl Buffer<Utf8Text> {
     fn from_strings(value: StringArray) -> Self {
+        let (data, shape, _, _) = value.into_parts();
         Self {
-            data: value.data,
-            shape: value.shape.to_vec(),
+            data,
+            shape: shape.to_vec(),
         }
     }
 }

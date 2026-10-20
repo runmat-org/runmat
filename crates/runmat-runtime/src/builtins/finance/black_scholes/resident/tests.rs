@@ -368,7 +368,7 @@ fn unrepresentable_host_scalar_precedes_single_provider_effects() {
             Value::Num(0.1),
             Value::Num(0.25),
             Value::Num(0.5),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .expect_err("finite scalar cannot enter single calculation");
         assert_eq!(failure.identifier(), ERROR_INVALID_INPUT.identifier);

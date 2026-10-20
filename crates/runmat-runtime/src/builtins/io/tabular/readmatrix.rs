@@ -84,10 +84,10 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 pub(crate) async fn readmatrix_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     path: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     let mut cooperation = TabularCooperation::new(runtime.as_ref(), BUILTIN_NAME);
-    if raw_args_contain_option(&rest, ReadMatrixControl::Like) {
+    if raw_args_contain_option(rest.view(), ReadMatrixControl::Like) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &READMATRIX_LIKE_EXTENSION,
             BUILTIN_NAME,
@@ -99,7 +99,7 @@ pub(crate) async fn readmatrix_builtin(
             BUILTIN_NAME,
         )?;
     }
-    preflight_host_options(&rest)?;
+    preflight_host_options(runtime.as_ref(), rest.view())?;
     if admission::finite_budget(runtime.as_ref()) {
         if matches!(&path, Value::String(raw) if raw.is_empty()) {
             return Err(readmatrix_error(&READMATRIX_ERROR_FILENAME_EMPTY));
@@ -157,7 +157,12 @@ pub(crate) async fn readmatrix_builtin(
     .await?
     .map_err(map_control_flow)?;
     cooperation.completed(0).await?;
-    let options = await_io(runtime.as_ref(), BUILTIN_NAME, parse_options(&rest)).await??;
+    let options = await_io(
+        runtime.as_ref(),
+        BUILTIN_NAME,
+        parse_options(runtime.as_ref(), rest.view()),
+    )
+    .await??;
     cooperation.completed(0).await?;
     options.validate()?;
     let resolved = resolve_path(&path_value)?;
@@ -194,11 +199,14 @@ fn value_contains_typed_integer(value: &Value) -> bool {
         || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
         || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
         || matches!(value, Value::Struct(structure) if structure.fields.values().any(value_contains_typed_integer))
-        || matches!(value, Value::Object(object) if object.properties.values().any(value_contains_typed_integer))
-        || matches!(value, Value::Cell(cell) if cell.data.iter().any(value_contains_typed_integer))
+        || matches!(value, Value::Object(object) if object.properties().values().any(value_contains_typed_integer))
+        || matches!(value, Value::Cell(cell) if cell.data().iter().any(value_contains_typed_integer))
 }
 
-fn raw_args_contain_option(args: &[Value], sought: ReadMatrixControl) -> bool {
+fn raw_args_contain_option(
+    args: crate::call::FunctionArgumentView<'_>,
+    sought: ReadMatrixControl,
+) -> bool {
     let first_pair = match args.first() {
         Some(Value::Struct(structure)) => {
             if structure
@@ -212,7 +220,7 @@ fn raw_args_contain_option(args: &[Value], sought: ReadMatrixControl) -> bool {
         }
         Some(Value::Object(object)) => {
             if object
-                .properties
+                .properties()
                 .keys()
                 .any(|name| ReadMatrixControl::parse(name) == sought)
             {
@@ -231,7 +239,10 @@ fn raw_scalar_text(value: &Value) -> Option<String> {
     crate::builtins::common::validation::value_text_scalar_string(value)
 }
 
-async fn parse_options(args: &[Value]) -> BuiltinResult<ReadMatrixOptions> {
+async fn parse_options(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<ReadMatrixOptions> {
     let mut options = ReadMatrixOptions::default();
     let mut index = 0usize;
     if let Some(source) = args
@@ -241,7 +252,7 @@ async fn parse_options(args: &[Value]) -> BuiltinResult<ReadMatrixOptions> {
         match source {
             Value::Struct(structure) => parse_struct_options(structure, &mut options).await?,
             _ => {
-                let import = ImportOptions::decode(source)?.ok_or_else(|| {
+                let import = ImportOptions::decode(runtime, source)?.ok_or_else(|| {
                     readmatrix_error_with(
                         &READMATRIX_ERROR_ARG_CONFIG,
                         "readmatrix: expected tabular import options",
@@ -336,7 +347,10 @@ fn apply_decoded_control(
     Ok(())
 }
 
-fn preflight_host_options(args: &[Value]) -> BuiltinResult<()> {
+fn preflight_host_options(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     let mut options = ReadMatrixOptions::default();
     let mut index = 0;
     if let Some(source) = args
@@ -350,7 +364,7 @@ fn preflight_host_options(args: &[Value]) -> BuiltinResult<()> {
                 }
             }
             _ => {
-                let import = ImportOptions::decode(source)?.ok_or_else(|| {
+                let import = ImportOptions::decode(runtime, source)?.ok_or_else(|| {
                     readmatrix_error_with(
                         &READMATRIX_ERROR_ARG_CONFIG,
                         "readmatrix: expected tabular import options",
@@ -402,7 +416,7 @@ fn validate_host_missing_tokens(value: &Value) -> BuiltinResult<()> {
         Value::StringArray(_) => Ok(()),
         Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => Ok(()),
         Value::Cell(cell) => {
-            for item in &cell.data {
+            for item in cell.data() {
                 validate_host_missing_tokens(item)?;
             }
             Ok(())
@@ -563,9 +577,9 @@ async fn parse_treat_as_missing(value: &Value) -> BuiltinResult<Vec<String>> {
     while let Some(value) = stack.pop() {
         match value {
             Value::String(s) => out.push(s.into_string_unbounded()),
-            Value::CharArray(ca) if ca.rows == 1 => out.push(ca.data.iter().collect::<String>()),
+            Value::CharArray(ca) if ca.rows == 1 => out.push(ca.data().iter().collect::<String>()),
             Value::StringArray(sa) => {
-                out.extend(sa.data.iter().map(|text| text.as_str().to_owned()))
+                out.extend(sa.data().iter().map(|text| text.as_str().to_owned()))
             }
             Value::Num(n) => out.push(format_numeric_token(n)),
             Value::Int(i) => out.push(i.decimal_string()),
@@ -585,7 +599,7 @@ async fn parse_treat_as_missing(value: &Value) -> BuiltinResult<Vec<String>> {
                 }
             }
             Value::Cell(cell) => {
-                for handle in &cell.data {
+                for handle in cell.data() {
                     let inner = handle;
                     let gathered = gather_if_needed_async(inner)
                         .await

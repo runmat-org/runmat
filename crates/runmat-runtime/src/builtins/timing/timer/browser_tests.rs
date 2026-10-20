@@ -34,12 +34,12 @@ async fn browser_start_returns_before_callback_and_wait_joins_it() {
     let callback = crate::user_functions::test_support::exact_local_value("tick", binding.clone());
     let _bound = crate::user_functions::test_support::install_bound_forwarder(binding);
     drop(scope);
-    let timer = timer_builtin(
-        Some(runtime.clone()),
-        vec![Value::String("TimerFcn".into()), callback],
-    )
-    .await
-    .expect("timer");
+    let timer_args = [Value::String("TimerFcn".into()), callback];
+    let timer_args = crate::call::BuiltinArguments::from_borrowed(&timer_args, Some(&runtime))
+        .expect("root timer arguments");
+    let timer = timer_builtin(Some(runtime.clone()), timer_args)
+        .await
+        .expect("timer");
     timer_start_builtin(Some(runtime.clone()), Some(0), timer.clone())
         .await
         .expect("start");

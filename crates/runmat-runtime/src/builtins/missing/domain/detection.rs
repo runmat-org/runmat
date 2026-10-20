@@ -114,7 +114,7 @@ pub(super) fn ismissing_value(value: &Value) -> BuiltinResult<Value> {
             .map_err(internal_error)?,
         )),
         Value::StringArray(array) => logical_from_iter(
-            array.data.iter().map(|text| is_missing_text(text)),
+            array.data().iter().map(|text| is_missing_text(text)),
             array.shape.as_slice().to_vec(),
         ),
         Value::Tensor(tensor) if tensor.integer_storage().is_some() => logical_from_iter(
@@ -159,8 +159,8 @@ pub(super) fn ismissing_value(value: &Value) -> BuiltinResult<Value> {
             array.shape.to_vec(),
         ))),
         Value::Cell(cell) => {
-            let mut data = Vec::with_capacity(cell.data.len());
-            for item in &cell.data {
+            let mut data = Vec::with_capacity(cell.data().len());
+            for item in cell.data() {
                 data.push(u8::from(any_missing(item)?));
             }
             Ok(Value::LogicalArray(
@@ -168,16 +168,18 @@ pub(super) fn ismissing_value(value: &Value) -> BuiltinResult<Value> {
             ))
         }
         Value::Struct(st) => {
-            let mut out = StructValue::new();
+            let mut out = runmat_value::UnboundedStructValueBuilder::new();
             for (name, field) in &st.fields {
-                out.insert(name.clone(), ismissing_value(field)?);
+                out.insert(name, ismissing_value(field)?);
             }
-            Ok(Value::Struct(out))
+            Ok(Value::Struct(out.finish()))
         }
-        Value::StructArray(array) => array
-            .clone()
-            .try_map_values(|field| ismissing_value(&field))
-            .map(Value::StructArray),
+        Value::StructArray(array) => {
+            crate::aggregate::structure::operations::map_identity_preserving(array, |field| {
+                ismissing_value(&field)
+            })
+            .map(Value::StructArray)
+        }
         Value::Object(object) if is_tabular_object(object) => ismissing_table(object),
         Value::Object(object) if object.is_class(runmat_types::standard::DATETIME) => {
             let serials = crate::builtins::datetime::serials_from_datetime_value(value)?;

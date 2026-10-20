@@ -74,12 +74,11 @@ pub(super) fn evaluate_rvalue(
             elements,
         } => super::aggregate::evaluate(state, kind, row_lengths, elements)
             .map(|reference| vec![reference]),
-        MirRvalue::StructLiteral { fields } => {
-            super::aggregate::structure(state, fields).map(|value| vec![state.arena.insert(value)])
-        }
+        MirRvalue::StructLiteral { fields } => super::aggregate::structure(state, fields)
+            .map(|rooted| rooted.with_owned(|value| vec![state.arena.insert(value)])),
         MirRvalue::ObjectLiteral { class_name, fields } => {
             super::aggregate::object(state, class_name, fields)
-                .map(|value| vec![state.arena.insert(value)])
+                .map(|rooted| rooted.with_owned(|value| vec![state.arena.insert(value)]))
         }
         MirRvalue::Index { base, indexing } => {
             super::indexing::read(state, base, indexing, requested_outputs).and_then(|values| {
@@ -356,7 +355,7 @@ pub(super) fn evaluate_rvalue(
                     program,
                 })
                 .map_err(execution_service_error)?;
-            Ok(vec![state.arena.insert(Value::Future(future))])
+            Ok(vec![state.arena.insert(Value::Future(future.into()))])
         }
         MirRvalue::Spawn(operand) => {
             let value = materialize_operand(state, operand)?;
@@ -372,7 +371,7 @@ pub(super) fn evaluate_rvalue(
                 .execution()
                 .spawn(&future)
                 .map_err(execution_service_error)?;
-            Ok(vec![state.arena.insert(Value::Task(task))])
+            Ok(vec![state.arena.insert(Value::Task(task.into()))])
         }
         MirRvalue::Distributed(_) | MirRvalue::Collective(_) => Err(NativeExecutorError::Host(
             "predeclared distributed capability rejection reached native execution".into(),

@@ -31,7 +31,7 @@ pub(crate) async fn isspace_builtin(text: Value) -> BuiltinResult<Value> {
         "isspace",
     )?;
     let text = match text {
-        Value::StringArray(array) if array.data.len() == 1 => {
+        Value::StringArray(array) if array.data().len() == 1 => {
             return classify_string(array.data()[0].as_str(), "isspace", |ch| ch.is_whitespace());
         }
         Value::StringArray(_) => return Err(invalid_string_array_error()),

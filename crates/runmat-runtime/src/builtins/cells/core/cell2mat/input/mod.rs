@@ -52,7 +52,7 @@ impl CellEntry {
 pub(super) async fn gather(
     cells: &runmat_value::CellArray,
 ) -> BuiltinResult<(ElementKind, Vec<CellEntry>)> {
-    let mut entries = Vec::with_capacity(cells.data.len());
+    let mut entries = Vec::with_capacity(cells.data().len());
     let mut kind = None;
     for value in cells.iter_column_major() {
         let entry = parse::value(gather_if_needed_async(value).await?)?;

@@ -15,7 +15,7 @@ const NAME: &str = "convertContainedStringsToChars";
 )]
 pub(crate) async fn convert_contained_strings_to_chars_builtin(
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     convert_variadic(value, rest, convert_value)
 }
@@ -25,7 +25,7 @@ fn convert_value(value: Value) -> BuiltinResult<Value> {
         Value::String(_) | Value::StringArray(_) => string_to_chars(value, NAME),
         Value::Cell(cell) => {
             let values = cell
-                .data
+                .data()
                 .iter()
                 .cloned()
                 .map(convert_value)
@@ -36,14 +36,14 @@ fn convert_value(value: Value) -> BuiltinResult<Value> {
                     .build()
             })
         }
-        Value::Struct(st) => Ok(Value::Struct(StructValue {
-            fields: st
-                .fields
-                .into_iter()
-                .map(|(name, value)| convert_value(value).map(|value| (name, value)))
-                .collect::<BuiltinResult<_>>()?,
-        })),
-        Value::StructArray(array) => Ok(Value::StructArray(array.try_map_values(convert_value)?)),
+        Value::Struct(st) => Ok(Value::Struct(StructValue::try_from_fields_unbounded(
+            st.into_fields_unbounded()
+                .map(|(name, value)| convert_value(value).map(|value| (name, value))),
+        )?)),
+        Value::StructArray(array) => {
+            crate::aggregate::structure::operations::map_identity_preserving(&array, convert_value)
+                .map(Value::StructArray)
+        }
         other => Ok(other),
     }
 }

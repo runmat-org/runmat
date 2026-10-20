@@ -209,7 +209,9 @@ fn invalid_signal_carrier_precedes_resident_control_download() {
         );
         let error = futures::executor::block_on(evaluate_with_cooperation(
             invalid_signal,
-            &[Value::GpuTensor(resident_window.handle.clone())],
+            crate::call::FunctionArgumentView::from_slice(&[Value::GpuTensor(
+                resident_window.handle.clone(),
+            )]),
             &mut cooperation,
         ))
         .unwrap_err();

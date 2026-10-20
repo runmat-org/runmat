@@ -34,8 +34,9 @@ mod selected_class_product;
 #[path = "program/selected_executable_product.rs"]
 mod selected_executable_product;
 pub use selected_executable_product::{
-    SelectedExecutableProduct, SelectedLinkedNativeSite, SelectedStaticCapture,
-    SelectedStaticProductDependency, SelectedStaticProductTarget, SelectedStaticSiteOwner,
+    SelectedExecutableCode, SelectedExecutableProduct, SelectedLinkedNativeSite,
+    SelectedStaticCapture, SelectedStaticProductDependency, SelectedStaticProductTarget,
+    SelectedStaticSiteOwner,
 };
 #[path = "program/selected_registry.rs"]
 mod selected_registry;
@@ -2929,9 +2930,7 @@ mod function_registry_tests {
             .regions
             .clone();
         assert_eq!(original.len(), 1);
-        bytecode
-            .install_regions_for_functions(&[], &Default::default())
-            .unwrap();
+        bytecode.install_regions(&[], &Default::default()).unwrap();
         assert!(bytecode.regions.is_empty());
         assert_eq!(
             bytecode.function_registry.functions[&FunctionId(7)].regions,

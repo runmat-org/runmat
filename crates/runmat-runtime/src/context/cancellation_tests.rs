@@ -59,6 +59,47 @@ fn rebinding_invocation_does_not_change_cached_context_generation() {
     );
 }
 
+#[test]
+fn cancellation_scopes_restore_parent_and_retire_without_resetting_invocations() {
+    let parent = CancellationSource::new();
+    let context =
+        RuntimeContext::with_cancellation(Rc::new(RuntimeExecutionService::new()), parent.token());
+    let outer = CancellationSource::new();
+    let scope = context.scoped_cancellation_token(outer.token());
+    let retained = context
+        .clone()
+        .with_cancellation_token(context.cancellation());
+    let inner = CancellationSource::new();
+    let nested = context.scoped_cancellation_token(inner.token());
+    inner.cancel(CancellationReason::Deadline);
+    assert_eq!(
+        context.cancellation().stop_reason(),
+        Some(CancellationReason::Deadline)
+    );
+    drop(nested);
+    assert!(!context.is_cancelled());
+    outer.cancel(CancellationReason::User);
+    assert_eq!(
+        context.cancellation().stop_reason(),
+        Some(CancellationReason::User)
+    );
+    let successor = CancellationSource::new();
+    scope.retire_to(successor.token());
+    assert!(!context.is_cancelled());
+    assert_eq!(
+        retained.cancellation().stop_reason(),
+        Some(CancellationReason::User)
+    );
+    let restored = context.scoped_cancellation_token(parent.token());
+    parent.cancel(CancellationReason::Shutdown);
+    assert_eq!(
+        context.cancellation().stop_reason(),
+        Some(CancellationReason::Shutdown)
+    );
+    drop(restored);
+    assert!(!context.is_cancelled());
+}
+
 #[cfg(feature = "plot-core")]
 #[test]
 fn background_selection_keeps_original_policy_cancellation_and_weak_session() {

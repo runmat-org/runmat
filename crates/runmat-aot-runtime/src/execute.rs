@@ -212,10 +212,16 @@ fn execute_with_linked_authority(
     let mut mex_guard = crate::mex::install(&runtime, mex, local_tasks.clone())?;
     let mut entrypoints = BTreeMap::new();
     for function in &assembly.functions {
+        let function_index = u32::try_from(function.id.0).map_err(|_| {
+            format!(
+                "compiled function {} exceeds the standalone resolver ABI",
+                function.id.0
+            )
+        })?;
         // SAFETY: the generated resolver has the exact declared C ABI. It
         // returns only addresses of functions emitted from this same verified
         // assembly, or null when the object is inconsistent.
-        let address = unsafe { (input.function_resolver)(function.id.0) };
+        let address = unsafe { (input.function_resolver)(function_index) };
         if address.is_null() {
             return Err(format!(
                 "standalone object cannot resolve native function {}",
@@ -408,7 +414,9 @@ fn execute_with_linked_authority(
                 .map_err(|error| format!("standalone source evaluator retirement failed: {error}"))
         })
         .transpose();
-    let mut completion = execution_result?;
+    let completion = execution_result?;
+    #[cfg(feature = "source-evaluation")]
+    let mut completion = completion;
     #[cfg(feature = "source-evaluation")]
     if let Err(error) = source_retirement {
         if let Some((status, diagnostic)) = completion.as_mut() {

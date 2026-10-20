@@ -16,7 +16,9 @@ use runmat_builtins::{
     ON_CLEANUP_ERROR_HOST, ON_CLEANUP_ERROR_INVALID_CALLBACK, ON_CLEANUP_ERROR_INVALID_OBJECT,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{HandleRef, ObjectInstance, Value};
+#[cfg(test)]
+use runmat_value::ObjectInstance;
+use runmat_value::{HandleRef, Value};
 
 use crate::execution::RootedValue;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -117,19 +119,15 @@ pub(crate) async fn on_cleanup_builtin(callback: Value) -> BuiltinResult<RootedV
         .and_then(|runtime| runtime.cleanup_registry())
         .ok_or_else(|| on_cleanup_error(&ON_CLEANUP_ERROR_HOST, ON_CLEANUP_ERROR_HOST.message))?;
     ensure_on_cleanup_class_registered();
-    let mut object = ObjectInstance::new(ON_CLEANUP_CLASS.to_string());
-    object
-        .properties
-        .insert(CALLBACK_PROPERTY.to_string(), callback.clone());
-    object
-        .properties
-        .insert(ACTIVE_PROPERTY.to_string(), Value::Bool(true));
-    object.properties.insert(
+    let mut object = runmat_value::UnboundedObjectBuilder::new(ON_CLEANUP_CLASS);
+    object.insert(CALLBACK_PROPERTY.to_string(), callback.clone());
+    object.insert(ACTIVE_PROPERTY.to_string(), Value::Bool(true));
+    object.insert(
         crate::HANDLE_VALID_FLAG_PROPERTY.to_string(),
         Value::Bool(true),
     );
 
-    let target_root = runmat_gc::gc_allocate_rooted(Value::Object(object))
+    let target_root = runmat_gc::gc_allocate_rooted(Value::Object(object.finish()))
         .map_err(|err| on_cleanup_error(&ON_CLEANUP_ERROR_GC, format!("onCleanup: {err}")))?;
     let target = target_root.handle();
     // This producer owns the returned lease before any root retirement can
@@ -306,9 +304,9 @@ fn canonicalize_cleanup_callback(callback: Value) -> BuiltinResult<Value> {
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle(_)
-        | Value::Closure(_) => Ok(crate::canonicalize_callback_handle_for_semantic_resolution(
-            callback,
-        )),
+        | Value::Closure(_) => {
+            crate::canonicalize_callback_handle_for_semantic_resolution(callback)
+        }
         _ => Err(on_cleanup_error(
             &ON_CLEANUP_ERROR_INVALID_CALLBACK,
             ON_CLEANUP_ERROR_INVALID_CALLBACK.message,
@@ -400,16 +398,23 @@ fn deactivate_handle(handle: &HandleRef) -> BuiltinResult<()> {
         let Value::Object(object) = target else {
             return;
         };
-        let active = matches!(
-            object.properties.get(ACTIVE_PROPERTY),
-            Some(Value::Bool(true))
-        );
+        let active = matches!(object.property(ACTIVE_PROPERTY), Some(Value::Bool(true)));
         if !active {
             return;
         }
-        object
-            .properties
-            .insert(ACTIVE_PROPERTY.to_string(), Value::Bool(false));
+        let previous = std::mem::replace(target, Value::Num(0.0));
+        let Value::Object(object) = previous else {
+            unreachable!("cleanup target was checked as an object")
+        };
+        let mut object = match object.into_unbounded_builder() {
+            Ok(object) => object,
+            Err(object) => {
+                *target = Value::Object(object);
+                return;
+            }
+        };
+        object.insert(ACTIVE_PROPERTY.to_string(), Value::Bool(false));
+        *target = Value::Object(object.finish());
     })
     .map_err(|err| on_cleanup_error(&ON_CLEANUP_ERROR_GC, format!("onCleanup: {err}")))?;
     Ok(())
@@ -1047,14 +1052,16 @@ mod tests {
         ))
         .expect("create cleanup c");
 
-        let mut struct_value = runmat_value::StructValue::new();
+        let mut struct_value = runmat_value::UnboundedStructValueBuilder::new();
         struct_value.insert("cleanup", cleanup_a.value().clone());
-        let mut object = ObjectInstance::new("CleanupHolder".to_string());
-        object
-            .properties
-            .insert("cleanup".to_string(), cleanup_b.value().clone());
+        let object = ObjectInstance::new("CleanupHolder".to_string());
+        let mut object = object
+            .into_unbounded_builder()
+            .expect("ordinary test object");
+        object.insert("cleanup".to_string(), cleanup_b.value().clone());
+        let object = object.finish();
         let composite = RootedValue::new(Value::output_list(vec![
-            Value::Struct(struct_value),
+            Value::Struct(struct_value.finish()),
             Value::Object(object),
             cleanup_c.value().clone(),
         ]))

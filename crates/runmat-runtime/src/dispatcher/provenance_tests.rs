@@ -76,14 +76,14 @@ fn managed_shared_cell_provenance_admits_outer_and_text_without_copying_numeric_
     let Value::Cell(cell) = &projected else {
         panic!("projected Cell");
     };
-    assert!(cell.data.is_exact());
+    assert!(cell.data_owner().is_exact());
     assert!(cell.shape.is_admitted());
-    assert!(matches!(&cell.data[0], Value::String(text) if text.has_retained_claim()));
+    assert!(matches!(&cell.data()[0], Value::String(text) if text.has_retained_claim()));
     assert!(
-        matches!(&cell.data[1], Value::Tensor(value) if value.as_f64_slice().unwrap().as_ptr() == numeric_ptr)
+        matches!(&cell.data()[1], Value::Tensor(value) if value.as_f64_slice().unwrap().as_ptr() == numeric_ptr)
     );
-    assert!(matches!(&cell.data[2], Value::Cell(nested) if nested.data.is_exact()));
-    let Value::SparseTensor(sparse) = &cell.data[3] else {
+    assert!(matches!(&cell.data()[2], Value::Cell(nested) if nested.data_owner().is_exact()));
+    let Value::SparseTensor(sparse) = &cell.data()[3] else {
         panic!("shared sparse child");
     };
     assert_eq!(sparse.row_indices.as_ptr(), sparse_indices);
@@ -118,9 +118,7 @@ fn owned_object_array_projection_preserves_class_shape_and_source_aliases() {
         .allocate_zeroed(vec![2, 1], NumericElementType::F32, GpuTensorStorage::Real)
         .unwrap();
     let mut object = runmat_value::ObjectInstance::new("ProvenanceValue");
-    object
-        .properties
-        .insert("data".into(), Value::GpuTensor(allocation.handle.clone()));
+    object.replace_property_unbounded("data".into(), Value::GpuTensor(allocation.handle.clone()));
     let array =
         runmat_value::ObjectArray::from_objects("ProvenanceValue", vec![object], vec![1, 1, 1])
             .unwrap();
@@ -204,7 +202,7 @@ fn owned_object_array_projection_preserves_class_shape_and_source_aliases() {
     for unselected in [false, true] {
         let mut empty = ObjectArray::empty(class.clone(), vec![0, 2, 3])
             .unwrap()
-            .with_selected_provenance([old.clone(), new.clone()])
+            .with_selected_provenance_unbounded([old.clone(), new.clone()])
             .unwrap();
         if unselected {
             empty = empty.with_unselected_provenance();

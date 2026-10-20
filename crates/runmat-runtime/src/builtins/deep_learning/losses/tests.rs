@@ -53,14 +53,15 @@ fn repeated_spatial_weight_axes_broadcast_by_occurrence() {
 fn recognized_name_value_options_pass_public_preflight() {
     let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     let output = block_on(crossentropy_builtin(
+        None,
         Value::Tensor(Tensor::new(vec![0.8, 0.2, 0.7, 0.3, 0.6, 0.4], vec![2, 3]).unwrap()),
         Value::Tensor(Tensor::new(vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0], vec![2, 3]).unwrap()),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::String("DataFormat".into()),
             Value::String("cB".into()),
             Value::String("Reduction".into()),
             Value::String("none".into()),
-        ],
+        ]),
     ))
     .expect("recognized options pass preflight");
     let Value::Tensor(losses) = output else {
@@ -83,14 +84,15 @@ fn unreduced_numeric_loss_preserves_rank_zero_and_one_mask_geometry() {
     ] {
         let mask = Value::Tensor(Tensor::new(vec![1.0; predictions.len()], shape.clone()).unwrap());
         let output = block_on(crossentropy_builtin(
+            None,
             Value::Tensor(Tensor::new(predictions, shape.clone()).unwrap()),
             Value::Tensor(Tensor::new(targets, shape.clone()).unwrap()),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::String("Reduction".into()),
                 Value::String("none".into()),
                 Value::String("Mask".into()),
                 mask,
-            ],
+            ]),
         ))
         .unwrap();
         let Value::Tensor(losses) = output else {
@@ -101,12 +103,13 @@ fn unreduced_numeric_loss_preserves_rank_zero_and_one_mask_geometry() {
     }
 
     let error = block_on(crossentropy_builtin(
+        None,
         Value::Tensor(Tensor::new(vec![0.8, 0.2], vec![2]).unwrap()),
         Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![2]).unwrap()),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::String("Mask".into()),
             Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap()),
-        ],
+        ]),
     ))
     .unwrap_err();
     assert!(error
@@ -118,9 +121,10 @@ fn unreduced_numeric_loss_preserves_rank_zero_and_one_mask_geometry() {
 fn plain_numeric_pair_is_an_explicit_runmat_extension() {
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
     let err = block_on(crossentropy_builtin(
+        None,
         Value::Tensor(Tensor::new(vec![0.8, 0.2], vec![1, 2]).unwrap()),
         Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap()),
-        vec![],
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
     ))
     .expect_err("numeric pair is not a documented MATLAB dlarray form");
     assert_eq!(
@@ -148,9 +152,10 @@ fn single_resident_crossentropy_reduction_publishes_double_without_download() {
         let targets = upload(&targets);
         provider.reset_telemetry();
         let result = block_on(crossentropy_builtin(
+            None,
             Value::GpuTensor(predictions.clone()),
             Value::GpuTensor(targets.clone()),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .unwrap();
         let Value::Num(loss) = result else {
@@ -167,9 +172,10 @@ fn single_resident_crossentropy_reduction_publishes_double_without_download() {
 fn integer_input_is_rejected_by_strict_mode_before_payload_conversion() {
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
     let err = block_on(crossentropy_builtin(
+        None,
         Value::Tensor(Tensor::new_integer(IntegerStorage::U64(vec![1, 0]), vec![1, 2]).unwrap()),
         Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap()),
-        vec![],
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
     ))
     .expect_err("typed integer prediction extension");
     assert_eq!(
@@ -190,9 +196,10 @@ fn excess_outputs_reject_before_provider_download() {
         provider.reset_telemetry();
         let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let err = block_on(crossentropy_builtin(
+            None,
             Value::GpuTensor(input.clone()),
             Value::GpuTensor(input),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .expect_err("crossentropy has one output");
         assert_eq!(err.identifier(), Some("RunMat:deepLearning:InvalidInput"));
@@ -212,12 +219,13 @@ fn malformed_host_control_rejects_before_resident_prediction_download() {
             .expect("resident prediction");
         provider.reset_telemetry();
         let err = block_on(crossentropy_builtin(
+            None,
             Value::GpuTensor(prediction),
             Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap()),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::String("Reduction".into()),
                 Value::String("bogus".into()),
-            ],
+            ]),
         ))
         .expect_err("invalid host reduction");
         assert_eq!(err.identifier(), Some("RunMat:deepLearning:InvalidInput"));
@@ -243,12 +251,13 @@ fn invalid_resident_data_format_rejects_before_download_and_keeps_sources_live()
             .unwrap();
         provider.reset_telemetry();
         let err = block_on(crossentropy_builtin(
+            None,
             Value::GpuTensor(prediction.clone()),
             Value::GpuTensor(target.clone()),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::String("DataFormat".into()),
                 Value::String("CC".into()),
-            ],
+            ]),
         ))
         .expect_err("repeated channel axis");
         assert_eq!(err.identifier(), Some("RunMat:deepLearning:InvalidInput"));
@@ -270,9 +279,10 @@ fn invalid_host_target_rejects_before_provider_execution() {
             .expect("resident prediction");
         provider.reset_telemetry();
         let err = block_on(crossentropy_builtin(
+            None,
             Value::GpuTensor(prediction),
             Value::Tensor(Tensor::new(vec![2.0, 0.0], vec![1, 2]).unwrap()),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .expect_err("invalid target probability");
         assert_eq!(err.identifier(), Some("RunMat:deepLearning:InvalidInput"));
@@ -307,15 +317,16 @@ fn explicit_resident_weights_keep_unreduced_losses_resident_and_explicit() {
             .unwrap();
         provider.reset_telemetry();
         let output = block_on(crossentropy_builtin(
+            None,
             Value::GpuTensor(predictions.clone()),
             Value::GpuTensor(targets.clone()),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::GpuTensor(weights.clone()),
                 Value::String("ClassificationMode".into()),
                 Value::String("multi-label".into()),
                 Value::String("Reduction".into()),
                 Value::String("none".into()),
-            ],
+            ]),
         ))
         .unwrap();
         let Value::GpuTensor(handle) = &output else {
@@ -367,9 +378,10 @@ fn explicit_unsupported_normalization_rejects_without_download_while_automatic_f
         };
         provider.reset_telemetry();
         let error = block_on(crossentropy_builtin(
+            None,
             Value::GpuTensor(explicit),
             Value::GpuTensor(targets.clone()),
-            options(),
+            crate::builtins::common::test_support::builtin_arguments(options()),
         ))
         .unwrap_err();
         assert_eq!(error.identifier(), Some("RunMat:deepLearning:Unsupported"));
@@ -379,9 +391,10 @@ fn explicit_unsupported_normalization_rejects_without_download_while_automatic_f
 
         provider.reset_telemetry();
         let result = block_on(crossentropy_builtin(
+            None,
             Value::GpuTensor(predictions),
             Value::GpuTensor(targets),
-            options(),
+            crate::builtins::common::test_support::builtin_arguments(options()),
         ))
         .unwrap();
         let Value::Num(loss) = result else {

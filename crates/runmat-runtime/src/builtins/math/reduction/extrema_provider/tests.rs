@@ -632,12 +632,20 @@ async fn call_extrema_owner(name: &str, args: &[Value]) -> crate::BuiltinResult<
     let (value, rest) = args.split_first().expect("extrema data operand");
     match name {
         "min" => {
-            crate::builtins::math::reduction::min::min_builtin(None, value.clone(), rest.to_vec())
-                .await
+            crate::builtins::math::reduction::min::min_builtin(
+                None,
+                value.clone(),
+                crate::builtins::common::test_support::builtin_arguments(rest.to_vec()),
+            )
+            .await
         }
         "max" => {
-            crate::builtins::math::reduction::max::max_builtin(None, value.clone(), rest.to_vec())
-                .await
+            crate::builtins::math::reduction::max::max_builtin(
+                None,
+                value.clone(),
+                crate::builtins::common::test_support::builtin_arguments(rest.to_vec()),
+            )
+            .await
         }
         _ => unreachable!("fixture covers min and max"),
     }

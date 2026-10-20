@@ -195,7 +195,7 @@ fn names(value: runmat_runtime::execution::RootedValue) -> Vec<String> {
         panic!("expected who cell result, got {:?}", value.value());
     };
     values
-        .data
+        .data()
         .iter()
         .map(|value| String::try_from(value).expect("name text"))
         .collect()

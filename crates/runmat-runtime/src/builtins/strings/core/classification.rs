@@ -35,7 +35,7 @@ fn classify_text_ref(
         Value::String(text) => classify_string(text.as_str(), fn_name, pred),
         Value::StringArray(array) => {
             let values = array
-                .data
+                .data()
                 .iter()
                 .map(|text| classify_string(text.as_str(), fn_name, pred))
                 .collect::<BuiltinResult<Vec<_>>>()?;
@@ -44,7 +44,7 @@ fn classify_text_ref(
         }
         Value::CharArray(array) => {
             let data = array
-                .data
+                .data()
                 .iter()
                 .map(|ch| u8::from(pred(*ch)))
                 .collect::<Vec<_>>();
@@ -52,7 +52,7 @@ fn classify_text_ref(
         }
         Value::Cell(cell) => {
             let values = cell
-                .data
+                .data()
                 .iter()
                 .map(|value| classify_text_ref(value, fn_name, pred))
                 .collect::<BuiltinResult<Vec<_>>>()?;
@@ -120,7 +120,7 @@ pub(crate) fn classify_text_or_numeric_value(
 
 pub(crate) fn parse_force_cell_output(
     runtime: Option<&crate::context::RuntimeContext>,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<bool> {
     if rest.is_empty() {
         return Ok(false);

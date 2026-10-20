@@ -8,7 +8,10 @@ pub(crate) use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 const ARRAY2TIMETABLE_BUILTIN_NAME: &str = "array2timetable";
-fn ensure_numeric_row_times_extension(args: &[Value], builtin_name: &str) -> BuiltinResult<()> {
+fn ensure_numeric_row_times_extension(
+    args: crate::call::FunctionArgumentView<'_>,
+    builtin_name: &str,
+) -> BuiltinResult<()> {
     let has_numeric_vector = args.chunks_exact(2).any(|pair| {
         scalar_text(&pair[0], "RowTimes option")
             .is_ok_and(|name| name.eq_ignore_ascii_case("RowTimes"))
@@ -29,9 +32,13 @@ fn ensure_numeric_row_times_extension(args: &[Value], builtin_name: &str) -> Bui
 #[runtime_builtin(
     name = "timetable",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::table::builtins"
 )]
-pub(crate) async fn timetable_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(crate) async fn timetable_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     ensure_table_class_registered();
     if args
         .iter()
@@ -42,8 +49,9 @@ pub(crate) async fn timetable_builtin(args: Vec<Value>) -> BuiltinResult<Value> 
             "timetable",
         )?;
     }
-    let args = gather_values(&args).await?;
-    let (explicit_row_times, variables, options) = split_timetable_constructor_args(args)?;
+    let args = gather_retained_values(&args, runtime.as_ref()).await?;
+    let (explicit_row_times, variables, options) =
+        split_timetable_constructor_args(&args, runtime.as_ref()).await?;
     let timing_forms = usize::from(explicit_row_times.is_some())
         + usize::from(options.sample_rate.is_some())
         + usize::from(options.time_step.is_some());
@@ -61,7 +69,15 @@ pub(crate) async fn timetable_builtin(args: Vec<Value>) -> BuiltinResult<Value> 
 
     let preallocated = options.table.size.is_some() || options.table.variable_types.is_some();
     let (names, variables, row_names, height) = if preallocated {
-        preallocated_table_columns(variables, options.table, "timetable")?
+        if !variables.is_empty() {
+            return Err(invalid_argument(
+                "timetable: Size/VariableTypes preallocation cannot be combined with data variables",
+            ));
+        }
+        let (names, columns, row_names, height) =
+            preallocated_table_columns(Vec::new(), options.table, "timetable")?;
+        let columns = crate::call::BuiltinArguments::from_borrowed(&columns, runtime.as_ref())?;
+        (names, columns, row_names, height)
     } else {
         let names = options
             .table
@@ -112,9 +128,15 @@ pub(crate) async fn timetable_builtin(args: Vec<Value>) -> BuiltinResult<Value> 
         )?;
     }
 
-    let mut value = table_from_columns_with_class(TIMETABLE_CLASS, names, variables, row_names)?;
+    let mut value = table_from_retained_columns_with_class(
+        runtime.as_ref(),
+        TIMETABLE_CLASS,
+        names,
+        variables.iter(),
+        row_names,
+    )?;
     if let Value::Object(object) = &mut value {
-        set_timetable_row_times(object, row_times)?;
+        set_timetable_row_times(runtime.as_ref(), object, row_times)?;
     }
     Ok(value)
 }
@@ -122,11 +144,13 @@ pub(crate) async fn timetable_builtin(args: Vec<Value>) -> BuiltinResult<Value> 
 #[runtime_builtin(
     name = "array2timetable",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn array2timetable_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     ensure_table_class_registered();
     if matches!(value, Value::GpuTensor(_))
@@ -139,11 +163,9 @@ pub(crate) async fn array2timetable_builtin(
             ARRAY2TIMETABLE_BUILTIN_NAME,
         )?;
     }
-    let value = gather_if_needed_async(&value)
-        .await
-        .map_err(map_control_flow)?;
-    let rest = gather_values(&rest).await?;
-    let options = parse_array2timetable_options(&rest)?;
+    let value = gather_retained_value(&value, runtime.as_ref()).await?;
+    let rest = gather_retained_values(&rest, runtime.as_ref()).await?;
+    let options = parse_array2timetable_options(rest.view())?;
     let columns = split_value_columns(value)?;
     let names = options
         .variable_names
@@ -156,11 +178,22 @@ pub(crate) async fn array2timetable_builtin(
         .transpose()?
         .unwrap_or(0);
     let row_times = array2timetable_row_times(&options, height)?;
-    let mut out = table_from_columns_with_class(TIMETABLE_CLASS, names, columns, None)?;
+    let mut out = table_from_retained_columns_with_class(
+        runtime.as_ref(),
+        TIMETABLE_CLASS,
+        names,
+        columns.iter(),
+        None,
+    )?;
     if let Value::Object(object) = &mut out {
-        set_timetable_row_times(object, Some(row_times))?;
+        set_timetable_row_times(runtime.as_ref(), object, Some(row_times))?;
         if let Some(dimension_names) = options.dimension_names {
-            set_table_dimension_names(object, dimension_names, ARRAY2TIMETABLE_BUILTIN_NAME)?;
+            set_table_dimension_names(
+                runtime.as_ref(),
+                object,
+                dimension_names,
+                ARRAY2TIMETABLE_BUILTIN_NAME,
+            )?;
         }
     }
     Ok(out)
@@ -169,13 +202,15 @@ pub(crate) async fn array2timetable_builtin(
 #[runtime_builtin(
     name = "table2timetable",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn table2timetable_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    ensure_numeric_row_times_extension(&rest, "table2timetable")?;
+    ensure_numeric_row_times_extension(rest.view(), "table2timetable")?;
     if crate::builtins::common::validation::value_contains_explicit_gpu(&value)
         || rest
             .iter()
@@ -186,11 +221,9 @@ pub(crate) async fn table2timetable_builtin(
             "table2timetable",
         )?;
     }
-    let host = gather_if_needed_async(&value)
-        .await
-        .map_err(map_control_flow)?;
-    let rest = gather_values(&rest).await?;
-    let options = parse_table2timetable_options(&rest)?;
+    let host = gather_retained_value(&value, runtime.as_ref()).await?;
+    let rest = gather_retained_values(&rest, runtime.as_ref()).await?;
+    let options = parse_table2timetable_options(rest.view())?;
     let object = into_table_object(host, "table2timetable")?;
     let names = table_variable_names_from_object(&object)?;
     let variables = table_variables(&object)?;
@@ -231,7 +264,7 @@ pub(crate) async fn table2timetable_builtin(
         (Some(generated), names)
     } else if let Some(first_time_name) = names
         .iter()
-        .find(|name| variables.fields.get(*name).is_some_and(is_time_like_value))
+        .find(|name| variables.fields.get(name).is_some_and(is_time_like_value))
         .cloned()
     {
         let first_time_value = variables.fields.get(&first_time_name).cloned();
@@ -249,16 +282,28 @@ pub(crate) async fn table2timetable_builtin(
             "table2timetable",
         )?;
     }
-    let mut out_columns = Vec::with_capacity(out_names.len());
     for name in &out_names {
-        out_columns.push(variables.fields.get(name).cloned().ok_or_else(|| {
-            invalid_variable(format!("table2timetable: missing variable '{name}'"))
-        })?);
+        if !variables.fields.contains_key(name) {
+            return Err(invalid_variable(format!(
+                "table2timetable: missing variable '{name}'"
+            )));
+        }
     }
-    let mut out =
-        table_from_columns_with_class(TIMETABLE_CLASS, out_names, out_columns, row_names)?;
+    let out_columns = out_names.iter().map(|name| {
+        variables
+            .fields
+            .get(name)
+            .expect("validated output variable")
+    });
+    let mut out = table_from_retained_columns_with_class(
+        runtime.as_ref(),
+        TIMETABLE_CLASS,
+        out_names.clone(),
+        out_columns,
+        row_names,
+    )?;
     if let Value::Object(object) = &mut out {
-        set_timetable_row_times(object, times)?;
+        set_timetable_row_times(runtime.as_ref(), object, times)?;
     }
     Ok(out)
 }
@@ -282,12 +327,14 @@ fn table2timetable_time_variable_name(selector: &Value, names: &[String]) -> Bui
 
 #[runtime_builtin(
     name = "timetable2table",
+    context = true,
     binding_variant = "default",
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn timetable2table_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     if rest.chunks_exact(2).any(|pair| {
         scalar_text(&pair[0], "timetable2table option").is_ok_and(|name| {
@@ -312,31 +359,41 @@ pub(crate) async fn timetable2table_builtin(
             "timetable2table",
         )?;
     }
-    let host = gather_if_needed_async(&value)
-        .await
-        .map_err(map_control_flow)?;
-    let rest = gather_values(&rest).await?;
-    let convert_row_times = parse_timetable2table_convert_row_times(&rest)?;
+    let host = gather_retained_value(&value, runtime.as_ref()).await?;
+    let rest = gather_retained_values(&rest, runtime.as_ref()).await?;
+    let convert_row_times = parse_timetable2table_convert_row_times(rest.view())?;
     let object = into_timetable_object(host, "timetable2table")?;
     let mut names = table_variable_names_from_object(&object)?;
     let variables = table_variables(&object)?;
-    let mut columns = Vec::with_capacity(names.len() + usize::from(convert_row_times));
-    if convert_row_times {
-        if let Some(row_times) = timetable_row_times(&object)? {
-            columns.push(row_times);
-            names.insert(0, "Time".to_string());
+    let source_names = table_variable_names_from_object(&object)?;
+    let row_times = if convert_row_times {
+        timetable_row_times(&object)?
+    } else {
+        None
+    };
+    if row_times.is_some() {
+        names.insert(0, "Time".to_string());
+    }
+    for name in &source_names {
+        if !variables.fields.contains_key(name) {
+            return Err(invalid_variable(format!(
+                "timetable2table: missing variable '{name}'"
+            )));
         }
     }
-    for name in table_variable_names_from_object(&object)? {
-        columns.push(variables.fields.get(&name).cloned().ok_or_else(|| {
-            invalid_variable(format!("timetable2table: missing variable '{name}'"))
-        })?);
-    }
+    let columns = row_times.iter().chain(source_names.iter().map(|name| {
+        variables
+            .fields
+            .get(name)
+            .expect("validated source variable")
+    }));
     let row_names = selected_row_names(&object, &(0..table_height(&object)?).collect::<Vec<_>>())?;
-    table_from_columns_with_properties(names, columns, row_names)
+    table_from_retained_columns_with_class(runtime.as_ref(), TABLE_CLASS, names, columns, row_names)
 }
 
-fn parse_timetable2table_convert_row_times(args: &[Value]) -> BuiltinResult<bool> {
+fn parse_timetable2table_convert_row_times(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<bool> {
     if args.is_empty() {
         return Ok(true);
     }
@@ -357,21 +414,25 @@ fn parse_timetable2table_convert_row_times(args: &[Value]) -> BuiltinResult<bool
 #[runtime_builtin(
     name = "readtimetable",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::table::builtins"
 )]
-pub(crate) async fn readtimetable_builtin(path: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    ensure_numeric_row_times_extension(&rest, "readtimetable")?;
+pub(crate) async fn readtimetable_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    path: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    ensure_numeric_row_times_extension(rest.view(), "readtimetable")?;
     super::io::enforce_table_import_integer_control_gate(
-        &rest,
+        rest.view(),
         &READTIMETABLE_TYPED_INTEGER_CONTROL_EXTENSION,
         "readtimetable",
         &["VariableNamesLine"],
     )?;
-    let path = gather_if_needed_async(&path)
-        .await
-        .map_err(map_control_flow)?;
-    let rest = gather_values(&rest).await?;
-    let (readtable_args, timetable_args) = split_readtimetable_options(&rest)?;
-    let table = super::io::readtable_builtin(path, readtable_args).await?;
-    table2timetable_builtin(table, timetable_args).await
+    let path = gather_retained_value(&path, runtime.as_ref()).await?;
+    let rest = gather_retained_values(&rest, runtime.as_ref()).await?;
+    let (readtable_args, timetable_args) =
+        split_readtimetable_options(&rest, runtime.as_ref()).await?;
+    let table = super::io::readtable_builtin(runtime.clone(), path, readtable_args).await?;
+    table2timetable_builtin(runtime, table, timetable_args).await
 }

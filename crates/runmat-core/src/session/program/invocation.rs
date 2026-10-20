@@ -69,12 +69,14 @@ impl SessionProgramService {
                                 .source_id
                                 .and_then(|source| source.resolve_in(&nested_runtime)),
                         );
-                        runmat_vm::invoke_semantic_function_value_in_context(
+                        runmat_vm::invoke_semantic_function_with_rooted_arguments_and_dynamic_admission_in_context(
                             call.function,
-                            &call.arguments,
+                            call.arguments,
                             call.requested_outputs,
                             owner.functions(),
                             nested_runtime,
+                            None,
+                            None,
                         )
                         .await
                     })

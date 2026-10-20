@@ -51,7 +51,10 @@ fn dropping_template_download_releases_only_the_owned_conversion_result() {
         let mut call = Box::pin(super::super::single_builtin(
             Some(runtime),
             Value::GpuTensor(input.clone()),
-            vec![Value::from("like"), Value::Num(0.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("like"),
+                Value::Num(0.0),
+            ]),
         ));
         let mut context = Context::from_waker(futures::task::noop_waker_ref());
         assert!(matches!(call.as_mut().poll(&mut context), Poll::Pending));

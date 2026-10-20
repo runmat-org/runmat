@@ -3,7 +3,7 @@ use super::*;
 pub(super) fn cvpartition_compute(
     first: Value,
     second: Value,
-    rest: Vec<Value>,
+    rest: crate::call::FunctionArgumentView<'_>,
     admitted: AdmittedPartition,
     turn: Option<&mut random::RandomTurn>,
 ) -> BuiltinResult<PartitionSpec> {

@@ -34,11 +34,11 @@ pub(crate) fn plan(
                 .fields;
             let mut variables = Vec::with_capacity(fields.len());
             let mut right_values = RootedValuesBuilder::with_capacity(fields.len());
-            for (name, left) in fields {
+            for (name, left) in fields.iter() {
                 right_values
                     .push(other.clone())
                     .map_err(|error| error.to_string())?;
-                variables.push((name, left));
+                variables.push((name.to_owned(), left.clone()));
             }
             Ok(BinaryInputPlan::Structured(TabularBinaryPlan {
                 source,
@@ -52,11 +52,11 @@ pub(crate) fn plan(
                 .fields;
             let mut variables = Vec::with_capacity(fields.len());
             let mut right_values = RootedValuesBuilder::with_capacity(fields.len());
-            for (name, right) in fields {
+            for (name, right) in fields.iter() {
                 right_values
-                    .push(right)
+                    .push(right.clone())
                     .map_err(|error| error.to_string())?;
-                variables.push((name, other.clone()));
+                variables.push((name.to_owned(), other.clone()));
             }
             Ok(BinaryInputPlan::Structured(TabularBinaryPlan {
                 source,
@@ -69,7 +69,7 @@ pub(crate) fn plan(
 }
 
 fn pair_tabular(left: ObjectInstance, right: ObjectInstance) -> Result<TabularBinaryPlan, String> {
-    if left.class_name != right.class_name {
+    if left.class_name() != right.class_name() {
         return Err("tabular operands must have the same container class".into());
     }
     let left_variables = super::super::table_variables(&left).map_err(|error| error.to_string())?;
@@ -87,7 +87,7 @@ fn pair_tabular(left: ObjectInstance, right: ObjectInstance) -> Result<TabularBi
     let identity_rows = right_rows.iter().copied().eq(0..right_rows.len());
     let mut variables = Vec::with_capacity(left_variables.fields.len());
     let mut right_values = RootedValuesBuilder::with_capacity(left_variables.fields.len());
-    for (name, left_value) in left_variables.fields {
+    for (name, left_value) in left_variables.into_fields_unbounded() {
         let right_value = right_variables
             .fields
             .get(&name)

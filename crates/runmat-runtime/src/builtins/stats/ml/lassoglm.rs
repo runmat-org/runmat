@@ -170,7 +170,7 @@ pub(crate) async fn lassoglm_builtin(
     x: Value,
     y: Value,
     distr: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     let distribution = parse_distribution(&distr)?;
     let rest = admit_options(rest)?;

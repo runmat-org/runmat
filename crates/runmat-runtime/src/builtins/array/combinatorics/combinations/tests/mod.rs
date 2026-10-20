@@ -35,7 +35,11 @@ use futures::executor::block_on;
 use runmat_value::{ObjectInstance, Value};
 
 fn call(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    block_on(combinations_builtin(first, rest))
+    block_on(combinations_builtin(
+        None,
+        first,
+        crate::builtins::common::test_support::builtin_arguments(rest),
+    ))
 }
 
 fn table(value: Value) -> ObjectInstance {

@@ -255,7 +255,7 @@ fn runtime_knots(builtin: &'static str, value: &Value) -> BuiltinResult<Vec<Runt
             "knots must be a row or column cell array",
         ));
     };
-    if cell.data.len() < 2 || (cell.rows != 1 && cell.cols != 1) {
+    if cell.data().len() < 2 || (cell.rows != 1 && cell.cols != 1) {
         return Err(builtin_error(
             builtin,
             &ERROR_INPUT,
@@ -263,7 +263,7 @@ fn runtime_knots(builtin: &'static str, value: &Value) -> BuiltinResult<Vec<Runt
         ));
     }
     let knots = cell
-        .data
+        .data()
         .iter()
         .map(|value| {
             object_payload::<SignalKnotObject>(builtin, value, SIGNAL_KNOT_CLASS).and_then(

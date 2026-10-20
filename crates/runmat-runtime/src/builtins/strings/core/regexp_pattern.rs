@@ -5,7 +5,7 @@ use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
 use crate::builtins::strings::common::{scalar_text_input, text_input_admission};
-use crate::builtins::strings::core::compat::{compat_error, pattern_object};
+use crate::builtins::strings::core::compat::{compat_error, pattern_object_in_context};
 use crate::BuiltinResult;
 
 #[runtime_builtin(
@@ -33,5 +33,5 @@ pub(crate) async fn regexp_pattern_builtin(
         text_input_admission("regexpPattern", runtime, cause)
     })?
     .ok_or_else(|| compat_error("regexpPattern", "regexpPattern: expected a text scalar"))?;
-    Ok(pattern_object(text.as_str()))
+    pattern_object_in_context(runtime.as_ref(), text.as_str())
 }

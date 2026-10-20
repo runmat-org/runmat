@@ -47,7 +47,7 @@ fn typed_study_sequence_compiles_and_executes_through_the_vm() {
     ] {
         assert!(
             values.iter().any(
-                |value| matches!(value, Value::Object(object) if object.class_name == class_name)
+                |value| matches!(value, Value::Object(object) if object.class_name().display_name() == class_name)
             ),
             "VM result should retain {class_name}"
         );

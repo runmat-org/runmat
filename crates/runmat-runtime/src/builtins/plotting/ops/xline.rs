@@ -24,7 +24,7 @@ const BUILTIN_NAME: &str = "xline";
     binding_variant = "default",
     builtin_path = "crate::builtins::plotting::xline"
 )]
-pub fn xline_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub fn xline_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &XLINE_DESCRIPTOR,
         &XLINE_ERROR_TOO_MANY_OUTPUTS,
@@ -44,7 +44,7 @@ pub(crate) fn reference_line_builtin(
     orientation: ReferenceLineOrientation,
     invalid: &'static BuiltinErrorDescriptor,
     internal: &'static BuiltinErrorDescriptor,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     if args.is_empty() {
         return Err(annotation_error(
@@ -55,8 +55,11 @@ pub(crate) fn reference_line_builtin(
     }
     let coords = coordinates_from_value(&args[0], builtin)
         .map_err(|error| annotation_error(builtin, invalid, error))?;
-    let options = parse_reference_line_options(builtin, &args[1..])
-        .map_err(|error| annotation_error(builtin, invalid, error))?;
+    let options = parse_reference_line_options(
+        builtin,
+        args.view().range(1..).expect("reference-line option tail"),
+    )
+    .map_err(|error| annotation_error(builtin, invalid, error))?;
     let mut lines = coords
         .iter()
         .map(|&value| {
@@ -130,7 +133,7 @@ struct ReferenceLineOptions {
 
 fn parse_reference_line_options(
     builtin: &'static str,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<ReferenceLineOptions> {
     let mut style_args = Vec::new();
     let mut label = None;
@@ -385,7 +388,10 @@ mod tests {
             Value::Tensor(tensor(&[2.0, 3.0])),
         ]))
         .unwrap();
-        let handle = xline_builtin(vec![Value::Num(0.5), Value::String("--r".into())]).unwrap();
+        let handle = xline_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::Num(0.5), Value::String("--r".into())],
+        ))
+        .unwrap();
         assert!(matches!(handle, Value::Num(_)));
         let figure = clone_figure(current_figure_handle()).unwrap();
         assert_eq!(figure.len(), 2);
@@ -394,15 +400,17 @@ mod tests {
     #[test]
     fn xline_supports_label_and_name_value_style() {
         let _guard = setup();
-        let handle = xline_builtin(vec![
-            Value::Num(5.0),
-            Value::String("--".into()),
-            Value::String("Threshold".into()),
-            Value::String("LineWidth".into()),
-            Value::Num(3.0),
-            Value::String("LabelOrientation".into()),
-            Value::String("horizontal".into()),
-        ])
+        let handle = xline_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![
+                Value::Num(5.0),
+                Value::String("--".into()),
+                Value::String("Threshold".into()),
+                Value::String("LineWidth".into()),
+                Value::Num(3.0),
+                Value::String("LabelOrientation".into()),
+                Value::String("horizontal".into()),
+            ],
+        ))
         .unwrap();
         let Value::Num(handle) = handle else {
             panic!("expected scalar handle");
@@ -420,7 +428,10 @@ mod tests {
     #[test]
     fn xline_vector_returns_handle_vector() {
         let _guard = setup();
-        let handles = xline_builtin(vec![Value::Tensor(tensor(&[1.0, 2.0, 3.0]))]).unwrap();
+        let handles = xline_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::Tensor(tensor(&[1.0, 2.0, 3.0]))],
+        ))
+        .unwrap();
         let tensor = Tensor::try_from(&handles).unwrap();
         assert_eq!(tensor.materialize_f64().len(), 3);
     }
@@ -428,7 +439,10 @@ mod tests {
     #[test]
     fn xline_reads_typed_integer_coordinates_exactly() {
         let _guard = setup();
-        let handles = xline_builtin(vec![Value::Tensor(integer_tensor(&[1, 2, 3]))]).unwrap();
+        let handles = xline_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::Tensor(integer_tensor(&[1, 2, 3]))],
+        ))
+        .unwrap();
         let tensor = Tensor::try_from(&handles).unwrap();
         assert_eq!(tensor.materialize_f64().len(), 3);
     }
@@ -436,17 +450,21 @@ mod tests {
     #[test]
     fn xline_visible_accepts_only_exact_numeric_zero_or_one() {
         let _guard = setup();
-        xline_builtin(vec![
-            Value::Num(1.0),
-            Value::String("Visible".into()),
-            Value::Int(runmat_value::IntValue::U64(1)),
-        ])
+        xline_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![
+                Value::Num(1.0),
+                Value::String("Visible".into()),
+                Value::Int(runmat_value::IntValue::U64(1)),
+            ],
+        ))
         .expect("integer one is visible");
-        let error = xline_builtin(vec![
-            Value::Num(2.0),
-            Value::String("Visible".into()),
-            Value::Int(runmat_value::IntValue::I8(2)),
-        ])
+        let error = xline_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![
+                Value::Num(2.0),
+                Value::String("Visible".into()),
+                Value::Int(runmat_value::IntValue::I8(2)),
+            ],
+        ))
         .expect_err("integer two is not a visibility value");
         assert!(error.message.contains("0, or 1"));
     }
@@ -454,8 +472,14 @@ mod tests {
     #[test]
     fn xline_preserves_existing_axis_labels() {
         let _guard = setup();
-        xlabel_builtin(vec![Value::String("Time".into())]).unwrap();
-        xline_builtin(vec![Value::Num(5.0)]).unwrap();
+        xlabel_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::String("Time".into())],
+        ))
+        .unwrap();
+        xline_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![Value::Num(5.0)],
+        ))
+        .unwrap();
 
         let figure = clone_figure(current_figure_handle()).unwrap();
         let meta = figure.axes_metadata(0).unwrap();
@@ -467,13 +491,19 @@ mod tests {
 mod output_contract_tests {
     #[test]
     fn missing_required_input_uses_identity_diagnostic() {
-        let error = super::xline_builtin(vec![]).expect_err("missing annotation input");
+        let error = super::xline_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![],
+        ))
+        .expect_err("missing annotation input");
         assert_eq!(error.identifier(), Some("RunMat:xline:InvalidArgument"));
     }
     #[test]
     fn excessive_outputs_reject_before_argument_or_graphics_effects() {
         let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
-        let error = super::xline_builtin(vec![]).expect_err("excess outputs");
+        let error = super::xline_builtin(crate::builtins::common::test_support::builtin_arguments(
+            vec![],
+        ))
+        .expect_err("excess outputs");
         assert_eq!(error.identifier(), Some("RunMat:xline:TooManyOutputs"));
     }
 }

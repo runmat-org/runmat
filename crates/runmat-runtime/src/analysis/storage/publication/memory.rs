@@ -81,7 +81,7 @@ pub(in crate::analysis::storage) fn commit(
         prepared
             .runs
             .keys()
-            .cloned()
+            .map(ToOwned::to_owned)
             .map(|id| (id, receipt.identity)),
     );
     runs.extend(prepared.runs);

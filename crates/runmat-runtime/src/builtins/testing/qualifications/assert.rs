@@ -13,7 +13,7 @@ async fn assert_equal(
     receiver: Value,
     actual: Value,
     expected: Value,
-    diagnostics: Vec<Value>,
+    diagnostics: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     shared::qualify_binary(
         "assertEqual",
@@ -35,7 +35,7 @@ async fn assert_equal(
 async fn assert_true(
     receiver: Value,
     actual: Value,
-    diagnostics: Vec<Value>,
+    diagnostics: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     shared::qualify_logical(
         "assertTrue",
@@ -57,7 +57,7 @@ fn assert_that(
     receiver: Value,
     actual: Value,
     constraint: Value,
-    diagnostics: Vec<Value>,
+    diagnostics: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     shared::qualify_that(
         "assertThat",

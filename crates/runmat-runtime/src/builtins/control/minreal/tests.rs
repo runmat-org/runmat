@@ -14,7 +14,7 @@ fn reduce_model(model: &TfModel, tolerance: Value) -> TfModel {
     let output = futures::executor::block_on(minreal_builtin(
         None,
         model.to_value(NAME).expect("serialize input model"),
-        vec![tolerance],
+        crate::builtins::common::test_support::builtin_arguments(vec![tolerance]),
     ))
     .expect("execute minreal builtin");
     futures::executor::block_on(TfModel::from_value_async(output, NAME))

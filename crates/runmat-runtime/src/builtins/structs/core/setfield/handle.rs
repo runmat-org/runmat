@@ -1,9 +1,8 @@
 use super::assignment::assign_into_value;
-use super::assignment::root;
 use super::errors;
 use super::object::ensure_object_family_enabled;
 use crate::builtins::structs::core::field_path::FieldStep;
-use crate::execution::{RootedValue, RootedValueLease};
+use crate::execution::RootedValue;
 use crate::BuiltinResult;
 use runmat_builtins::{
     SETFIELD_ERROR_INVALID_HANDLE, SETFIELD_ERROR_NON_STRUCT_ASSIGNMENT,
@@ -12,14 +11,14 @@ use runmat_builtins::{
 use runmat_value::{HandleRef, Value};
 
 pub(super) async fn assign_into_handle(
+    runtime: Option<&crate::context::RuntimeContext>,
     handle: HandleRef,
     steps: &[FieldStep],
     rhs: Value,
 ) -> BuiltinResult<RootedValue> {
     let _receiver_root =
-        RootedValueLease::for_traced(&handle).map_err(|error| error.into_runtime_error())?;
-    let _rhs_root =
-        RootedValueLease::for_traced(&rhs).map_err(|error| error.into_runtime_error())?;
+        super::super::construction::input(runtime, &Value::HandleObject(handle.clone()))?;
+    let _rhs_root = super::super::construction::input(runtime, &rhs)?;
     ensure_object_family_enabled()?;
     if steps.is_empty() {
         return Err(errors::with_message(
@@ -32,11 +31,11 @@ pub(super) async fn assign_into_handle(
     }
     let current = runmat_gc::gc_clone_value(&handle.target)
         .map_err(|error| invalid_handle(&handle, Some(error.to_string())))?;
-    let updated = assign_into_value(current.clone(), steps, rhs).await?;
+    let updated = assign_into_value(runtime, current.clone(), steps, rhs).await?;
     runmat_gc::gc_with_value_mut(&handle.target, |target| -> BuiltinResult<()> {
         let target_valid = match target {
             Value::Object(obj) => !matches!(
-                obj.properties.get(crate::HANDLE_VALID_FLAG_PROPERTY),
+                obj.properties().get(crate::HANDLE_VALID_FLAG_PROPERTY),
                 Some(Value::Bool(false))
             ),
             _ => false,
@@ -55,7 +54,7 @@ pub(super) async fn assign_into_handle(
         Ok(())
     })
     .map_err(|error| invalid_handle(&handle, Some(error.to_string())))??;
-    root(Value::HandleObject(handle))
+    super::super::construction::root(runtime, Value::HandleObject(handle))
 }
 
 fn invalid_handle(handle: &HandleRef, detail: Option<String>) -> crate::RuntimeError {

@@ -155,7 +155,7 @@ impl Drop for FopenHandle {
 
 fn char_text(value: Value) -> String {
     match value {
-        Value::CharArray(ca) => ca.data.iter().collect(),
+        Value::CharArray(ca) => ca.data().iter().collect(),
         other => panic!("expected char array, got {other:?}"),
     }
 }
@@ -165,7 +165,7 @@ fn assert_empty_char(value: Value) {
         Value::CharArray(ca) => {
             assert_eq!(ca.rows, 1);
             assert_eq!(ca.cols, 0);
-            assert!(ca.data.is_empty());
+            assert!(ca.data().is_empty());
         }
         other => panic!("expected empty char array, got {other:?}"),
     }

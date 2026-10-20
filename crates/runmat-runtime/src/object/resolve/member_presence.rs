@@ -13,13 +13,13 @@ fn declared_or_stored(
     field: &runmat_types::MemberName,
 ) -> Result<MemberPresence, RuntimeError> {
     let selected = crate::class_registry::checked_receiver_projection(obj)?;
-    if obj.properties.contains_key(&field.0)
+    if obj.properties().contains_key(&field.0)
         || obj.has_dynamic_property(&field.0)
         || selected.as_ref().map_or_else(
-            || crate::class_registry::lookup_property(&obj.class_name, field).is_some(),
+            || crate::class_registry::lookup_property(obj.class_name(), field).is_some(),
             |projection| {
                 projection
-                    .receiver_property(&obj.class_name, field)
+                    .receiver_property(obj.class_name(), field)
                     .is_some()
             },
         )
@@ -43,7 +43,7 @@ pub(crate) fn has_stored_member(
                 return Err(invalid_handle());
             };
             if !handle.valid
-                || obj.class_name != handle.class_name
+                || obj.class_name() != &handle.class_name
                 || !crate::object_handle_flag_valid(obj)
             {
                 return Err(invalid_handle());

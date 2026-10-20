@@ -102,8 +102,8 @@ pub(super) fn duration_property(seconds: f64, name: &str) -> BuiltinResult<Durat
 fn nonempty_text_callback(value: &Value) -> Option<std::borrow::Cow<'_, str>> {
     match value {
         Value::String(text) if !text.trim().is_empty() => Some(std::borrow::Cow::Borrowed(text)),
-        Value::CharArray(chars) if chars.data.iter().any(|ch| !ch.is_whitespace()) => {
-            Some(std::borrow::Cow::Owned(chars.data.iter().collect()))
+        Value::CharArray(chars) if chars.data().iter().any(|ch| !ch.is_whitespace()) => {
+            Some(std::borrow::Cow::Owned(chars.data().iter().collect()))
         }
         _ => None,
     }
@@ -154,15 +154,19 @@ pub(super) async fn start_one_timer(
             config.visibility,
         )
         .map_err(admission_error)?;
-    let presentation = (|| {
-        set_property(&handle, "TasksExecuted", Value::Num(0.0))?;
-        set_property(&handle, "InstantPeriod", Value::Num(f64::NAN))?;
-        set_property(&handle, "AveragePeriod", Value::Num(f64::NAN))?;
-        set_property(&handle, "Running", Value::String("on".into()))
-    })();
+    let presentation = set_properties(
+        runtime,
+        &handle,
+        &[
+            ("TasksExecuted", Value::Num(0.0)),
+            ("InstantPeriod", Value::Num(f64::NAN)),
+            ("AveragePeriod", Value::Num(f64::NAN)),
+            ("Running", Value::String("on".into())),
+        ],
+    );
     if let Err(error) = presentation {
         runtime.timer_session().borrow_mut().stop(&handle);
-        let _ = set_property(&handle, "Running", Value::String("off".into()));
+        let _ = set_property(runtime, &handle, "Running", Value::String("off".into()));
         return Err(error);
     }
     let task_handle = handle.clone();
@@ -182,7 +186,7 @@ pub(super) async fn start_one_timer(
         Ok(lease) => lease,
         Err(error) => {
             runtime.timer_session().borrow_mut().stop(&handle);
-            let _ = set_property(&handle, "Running", Value::String("off".into()));
+            let _ = set_property(runtime, &handle, "Running", Value::String("off".into()));
             return Err(error);
         }
     };
@@ -228,7 +232,7 @@ async fn run_timer_task(
         .borrow_mut()
         .finish(&handle, generation);
     if let Some(call_stop) = finish {
-        let _ = set_property(&handle, "Running", Value::String("off".into()));
+        let _ = set_property(&runtime, &handle, "Running", Value::String("off".into()));
         if call_stop {
             let _ = run_callback(&runtime, &handle, TimerCallback::Stop).await;
         }
@@ -249,7 +253,7 @@ pub(super) async fn stop_one_timer(
     if let Some(lease) = lease {
         lease.cancel();
     }
-    set_property(handle, "Running", Value::String("off".into()))?;
+    set_property(runtime, handle, "Running", Value::String("off".into()))?;
     if call_stop && claimed {
         run_callback(runtime, handle, TimerCallback::Stop).await?;
     }
@@ -299,7 +303,7 @@ pub(super) async fn wait_one_timer(
                 .is_some_and(|record| record.generation == generation);
             if same_generation {
                 let _ = runtime.timer_session().borrow_mut().stop(handle);
-                let _ = set_property(handle, "Running", Value::String("off".into()));
+                let _ = set_property(runtime, handle, "Running", Value::String("off".into()));
             }
             return Err(timer_error(
                 &TIMER_ERROR_CALLBACK,

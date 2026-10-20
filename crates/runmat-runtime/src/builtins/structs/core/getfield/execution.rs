@@ -13,7 +13,7 @@ use runmat_value::Value;
 pub(super) async fn getfield(
     runtime: Option<&crate::context::RuntimeContext>,
     base: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
     enforce_public_builtin_extension: bool,
 ) -> BuiltinResult<RootedValue> {
     let work = getfield_in_scope(runtime, base, rest, enforce_public_builtin_extension);
@@ -26,7 +26,7 @@ pub(super) async fn getfield(
 pub(super) async fn getfield_in_scope(
     runtime: Option<&crate::context::RuntimeContext>,
     base: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
     enforce_public_builtin_extension: bool,
 ) -> BuiltinResult<RootedValue> {
     let _inputs_root = RootedValueLease::for_values(std::iter::once(&base).chain(rest.iter()))
@@ -112,10 +112,6 @@ async fn apply_indices(
 /// Resolve ordinary dot-member access without applying the compatibility gate
 /// for the public getfield object extension. Class and handle dot syntax is a
 /// language operation, not a call to that extension.
-pub(crate) async fn get_member_value(value: Value, name: &str) -> BuiltinResult<RootedValue> {
-    get_member_value_in_context(None, value, name).await
-}
-
 pub(crate) async fn get_member_value_in_context(
     runtime: Option<&crate::context::RuntimeContext>,
     value: Value,

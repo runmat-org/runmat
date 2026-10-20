@@ -8,7 +8,8 @@ use runmat_value::{
     record_host_copy, CellArray, CharArray, ComplexElement, ComplexStorage, ComplexTensor,
     HandleRef, HostComplexBuffer, HostCopyReason, HostIndexBuffer, HostNumericBuffer,
     IntegerComplexStorage, IntegerStorage, LogicalArray, NumericScalar, NumericStorage,
-    ObjectArray, ObjectInstance, SparseTensor, StructArray, StructValue, Tensor, Value,
+    ObjectArray, ObjectInstance, SparseTensor, StructArray, StructValue, Tensor,
+    UnboundedObjectBuilder, Value,
 };
 
 use crate::mxarray::{
@@ -64,7 +65,7 @@ impl MxValueContext {
         Ok(MxHandleToken {
             resource,
             generation,
-            class_name: value.class_name.clone(),
+            class_name: value.class_name.as_identity().clone(),
         })
     }
 
@@ -184,11 +185,11 @@ pub(crate) fn value_to_mx_for_interface_in_context(
         Value::StringArray(value) if interface == MxBoundaryInterface::CxxData => {
             record_host_copy(
                 HostCopyReason::CharacterEncoding,
-                value.data.iter().map(|text| text.len()).sum(),
+                value.data().iter().map(|text| text.len()).sum(),
             );
             MxArray::string(
                 value
-                    .data
+                    .data()
                     .iter()
                     .map(|text| text.as_str().to_owned())
                     .collect(),
@@ -207,7 +208,7 @@ pub(crate) fn value_to_mx_for_interface_in_context(
         Value::Struct(value) => struct_to_mx(value, mode, interface, context),
         Value::StructArray(value) => struct_array_to_mx(value, mode, interface, context),
         Value::Object(value) => object_to_mx(
-            &value.class_name,
+            value.class_name(),
             &[value],
             vec![1, 1],
             mode,
@@ -411,7 +412,7 @@ fn string_to_mx(value: &str) -> Result<MxArray, MxConversionError> {
 }
 
 fn char_to_mx(value: &CharArray) -> Result<MxArray, MxConversionError> {
-    let mut encoded = Vec::with_capacity(value.data.len());
+    let mut encoded = Vec::with_capacity(value.data().len());
     for character in value.to_column_major() {
         let codepoint = u32::from(character);
         let unit = u16::try_from(codepoint).map_err(|_| {
@@ -502,7 +503,7 @@ fn struct_array_to_mx(
     interface: MxBoundaryInterface,
     context: Option<&MxValueContext>,
 ) -> Result<MxArray, MxConversionError> {
-    let fields = value.field_names().cloned().collect::<Vec<_>>();
+    let fields = value.field_names().map(str::to_owned).collect::<Vec<_>>();
     let capacity = fields.len().checked_mul(value.len()).ok_or_else(|| {
         MxConversionError::new("structure array field storage exceeds platform limits")
     })?;
@@ -528,7 +529,7 @@ fn struct_to_mx(
     interface: MxBoundaryInterface,
     context: Option<&MxValueContext>,
 ) -> Result<MxArray, MxConversionError> {
-    let fields = value.field_names().cloned().collect::<Vec<_>>();
+    let fields = value.field_names().map(str::to_owned).collect::<Vec<_>>();
     let values = fields
         .iter()
         .map(|field| {
@@ -563,7 +564,7 @@ fn object_to_mx(
     }
     if objects
         .iter()
-        .any(|object| &object.class_name != class_name)
+        .any(|object| object.class_name() != class_name)
     {
         return Err(MxConversionError::new(
             "C Matrix object arrays must contain one concrete class",
@@ -571,7 +572,7 @@ fn object_to_mx(
     }
     let mut properties = objects
         .iter()
-        .flat_map(|object| object.properties.keys().cloned())
+        .flat_map(|object| object.properties().keys().map(str::to_owned))
         .collect::<Vec<_>>();
     properties.sort();
     properties.dedup();
@@ -580,7 +581,7 @@ fn object_to_mx(
         for object in objects {
             values.push(
                 object
-                    .properties
+                    .properties()
                     .get(property)
                     .map(|value| {
                         value_to_mx_for_interface_in_context(value, mode, interface, context)
@@ -771,15 +772,13 @@ fn object_from_mx(
     })?;
     let mut objects = Vec::with_capacity(numel);
     for element in 0..numel {
-        let mut object = ObjectInstance::new(class_name.clone());
+        let mut object = UnboundedObjectBuilder::new(class_name.clone());
         for (property_index, property) in properties.iter().enumerate() {
             if let Some(value) = values[property_index * numel + element].as_deref() {
-                object
-                    .properties
-                    .insert(property.clone(), value_from_mx_in_context(value, context)?);
+                object.insert(property.clone(), value_from_mx_in_context(value, context)?);
             }
         }
-        objects.push(object);
+        objects.push(object.finish());
     }
     if numel == 1 {
         return Ok(Value::Object(objects.pop().expect("one object element")));
@@ -1141,13 +1140,13 @@ mod tests {
     fn structure_arrays_use_field_major_mx_storage() {
         let elements = (0..4)
             .map(|index| {
-                let mut value = StructValue::new();
+                let mut value = runmat_value::UnboundedStructValueBuilder::with_capacity(2);
                 value.insert(
                     "id",
                     Value::Int(IntValue::U64(9_007_199_254_740_993 + index as u64)),
                 );
                 value.insert("weight", Value::Num(10.0 + index as f64));
-                value
+                value.finish()
             })
             .collect();
         let original = Value::StructArray(StructArray::new(elements, vec![2, 2]).unwrap());
@@ -1174,9 +1173,9 @@ mod tests {
     fn structure_array_boundary_preserves_nd_and_empty_shapes() {
         let nd_elements = (0..4)
             .map(|index| {
-                let mut value = StructValue::new();
+                let mut value = runmat_value::UnboundedStructValueBuilder::with_capacity(1);
                 value.insert("id", Value::Num(index as f64));
-                value
+                value.finish()
             })
             .collect();
         let nd = Value::StructArray(StructArray::new(nd_elements, vec![2, 1, 2]).unwrap());

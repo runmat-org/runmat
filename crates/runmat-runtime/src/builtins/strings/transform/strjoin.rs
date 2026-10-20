@@ -13,7 +13,10 @@ use std::borrow::Cow;
     binding_variant = "default",
     builtin_path = "crate::builtins::strings::transform::strjoin"
 )]
-pub async fn strjoin_builtin(input: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn strjoin_builtin(
+    input: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &STRJOIN_DESCRIPTOR,
         &STRJOIN_ERROR_TOO_MANY_OUTPUTS,
@@ -23,10 +26,7 @@ pub async fn strjoin_builtin(input: Value, rest: Vec<Value>) -> BuiltinResult<Va
         return Err(error(&STRJOIN_ERROR_ARGUMENT_COUNT));
     }
     let explicit = !rest.is_empty();
-    let delimiter = rest
-        .into_iter()
-        .next()
-        .unwrap_or_else(|| Value::string(" "));
+    let delimiter = rest.first().cloned().unwrap_or_else(|| Value::string(" "));
     // Preserve the established RunMat two-argument behavior, including column
     // vectors and char rows. Strict mode uses MATLAB vector semantics instead.
     if explicit
@@ -54,7 +54,7 @@ pub async fn strjoin_builtin(input: Value, rest: Vec<Value>) -> BuiltinResult<Va
         Value::String(text) => (vec![Cow::Borrowed(text.as_str())], false),
         Value::StringArray(array) if vector(&array.shape) => (
             array
-                .data
+                .data()
                 .iter()
                 .map(|text| Cow::Borrowed(text.as_str()))
                 .collect(),
@@ -62,7 +62,7 @@ pub async fn strjoin_builtin(input: Value, rest: Vec<Value>) -> BuiltinResult<Va
         ),
         Value::Cell(cell) if vector(&cell.shape) => {
             let items = cell
-                .data
+                .data()
                 .iter()
                 .map(|item| match item {
                     Value::CharArray(chars) => char_text(chars)
@@ -105,13 +105,13 @@ fn vector(shape: &[usize]) -> bool {
         && (shape.contains(&0) || shape.iter().filter(|dimension| **dimension > 1).count() <= 1)
 }
 fn char_text(chars: &CharArray) -> Option<String> {
-    (chars.rows <= 1 && matrix(&chars.shape)).then(|| chars.data.iter().copied().collect())
+    (chars.rows <= 1 && matrix(&chars.shape)).then(|| chars.data().iter().copied().collect())
 }
 fn text_scalar(value: &Value) -> Option<Cow<'_, str>> {
     match value {
         Value::String(text) => Some(Cow::Borrowed(text.as_str())),
-        Value::StringArray(array) if array.data.len() == 1 => {
-            Some(Cow::Borrowed(array.data[0].as_str()))
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Some(Cow::Borrowed(array.data()[0].as_str()))
         }
         Value::CharArray(chars) => char_text(chars).map(Cow::Owned),
         _ => None,
@@ -123,12 +123,12 @@ fn delimiters(value: &Value, count: usize) -> BuiltinResult<Vec<Cow<'_, str>>> {
     }
     let items = match value {
         Value::StringArray(array) if vector(&array.shape) => array
-            .data
+            .data()
             .iter()
             .map(|text| Cow::Borrowed(text.as_str()))
             .collect(),
         Value::Cell(cell) if vector(&cell.shape) => cell
-            .data
+            .data()
             .iter()
             .map(|item| text_scalar(item).ok_or_else(|| error(&STRJOIN_ERROR_INVALID_DELIMITER)))
             .collect::<BuiltinResult<Vec<_>>>()?,
@@ -146,7 +146,7 @@ fn rowwise(value: Value, delimiter: &str) -> BuiltinResult<Value> {
         Value::CharArray(chars) if matrix(&chars.shape) => {
             let rows = (0..chars.rows)
                 .map(|row| {
-                    chars.data[row * chars.cols..(row + 1) * chars.cols]
+                    chars.data()[row * chars.cols..(row + 1) * chars.cols]
                         .iter()
                         .copied()
                         .collect()
@@ -157,7 +157,7 @@ fn rowwise(value: Value, delimiter: &str) -> BuiltinResult<Value> {
         _ => return Err(error(&STRJOIN_ERROR_INVALID_INPUT)),
     }
     .map_err(|_| error(&STRJOIN_ERROR_INVALID_INPUT))?;
-    let rows = array.shape.first().copied().unwrap_or(array.data.len());
+    let rows = array.shape.first().copied().unwrap_or(array.data().len());
     let cols = array.shape.get(1).copied().unwrap_or(1);
     let (joined, shape) = if rows == 0 || cols == 0 {
         (Vec::new(), vec![0, 0])
@@ -165,7 +165,7 @@ fn rowwise(value: Value, delimiter: &str) -> BuiltinResult<Value> {
         let joined = (0..rows)
             .map(|row| {
                 (0..cols)
-                    .map(|col| array.data[row + col * rows].as_str())
+                    .map(|col| array.data()[row + col * rows].as_str())
                     .collect::<Vec<_>>()
                     .join(delimiter)
             })
@@ -179,3 +179,11 @@ fn rowwise(value: Value, delimiter: &str) -> BuiltinResult<Value> {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+pub(crate) async fn strjoin_builtin_source(input: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    strjoin_builtin(
+        input,
+        crate::call::BuiltinArguments::from_borrowed(&rest, None)?,
+    )
+    .await
+}

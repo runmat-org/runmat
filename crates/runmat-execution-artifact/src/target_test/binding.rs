@@ -1,7 +1,7 @@
 use runmat_execution::host::NativeSelectedProductBinding;
 use runmat_execution::{Digest, ProgramFunctionId, ProgramRevision};
-use runmat_types::FunctionId;
 use runmat_test::identity::{SuiteId, TestId};
+use runmat_types::FunctionId;
 use serde::{Deserialize, Serialize};
 
 use crate::program::{
@@ -107,9 +107,7 @@ impl NativePairedBuildBinding {
                     entry.compiled.function,
                     (entry.compiled.compiled_function, entry.compiled.body),
                 )
-                .is_some_and(|body| {
-                    body != (entry.compiled.compiled_function, entry.compiled.body)
-                })
+                .is_some_and(|body| body != (entry.compiled.compiled_function, entry.compiled.body))
             {
                 return Err(invalid(
                     "one semantic function has conflicting compiled coordinates",

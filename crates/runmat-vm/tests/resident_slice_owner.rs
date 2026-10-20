@@ -43,11 +43,11 @@ fn exact_integer_slices_use_source_owner_after_default_is_removed_or_replaced() 
         let result = vars
             .iter()
             .find_map(|value| match value {
-                Value::GpuTensor(slice) if slice.shape == vec![2, 1] => Some(slice),
+                Value::GpuTensor(slice) if slice.shape() == [2, 1] => Some(slice),
                 _ => None,
             })
             .expect("slice must retain resident integer storage");
-        assert_eq!(result.device_id, handle.device_id);
+        assert_eq!(result.device_id(), handle.device_id());
         let host = futures::executor::block_on(source.download_integer(result)).unwrap();
         assert_eq!(host.data, HostIntegerDataOwned::U64(vec![u64::MAX, 9]));
         let empty = runmat_runtime::indexing::read_slice::read_gpu_slice_from_plan(
@@ -64,7 +64,7 @@ fn exact_integer_slices_use_source_owner_after_default_is_removed_or_replaced() 
         let Value::GpuTensor(empty) = empty else {
             panic!("empty slice lost residency");
         };
-        assert_eq!(empty.device_id, handle.device_id);
+        assert_eq!(empty.device_id(), handle.device_id());
         let host = futures::executor::block_on(source.download_integer(&empty)).unwrap();
         assert_eq!(host.shape, vec![2, 0]);
         assert_eq!(host.data, HostIntegerDataOwned::U64(vec![]));

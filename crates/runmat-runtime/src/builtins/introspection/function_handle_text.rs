@@ -80,7 +80,7 @@ pub(crate) fn dispatch_str2func(value: Value) -> crate::BuiltinResult<Value> {
 
     let name = match value {
         Value::String(text) => normalize_handle_name(&text),
-        Value::StringArray(sa) if sa.data.len() == 1 => normalize_handle_name(&sa.data[0]),
+        Value::StringArray(sa) if sa.data().len() == 1 => normalize_handle_name(&sa.data()[0]),
         Value::StringArray(_) => {
             return Err(crate::runtime_descriptor_error_with_detail(
                 "str2func",
@@ -89,7 +89,7 @@ pub(crate) fn dispatch_str2func(value: Value) -> crate::BuiltinResult<Value> {
             ))
         }
         Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data.iter().collect();
+            let text: String = ca.data().iter().collect();
             normalize_handle_name(&text)
         }
         Value::CharArray(_) => {

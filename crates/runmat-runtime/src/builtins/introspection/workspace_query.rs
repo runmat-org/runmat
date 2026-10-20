@@ -120,7 +120,7 @@ fn option_token(value: &Value) -> Option<OptionToken> {
 }
 
 pub(super) fn parse_request(
-    values: &[Value],
+    values: crate::call::FunctionArgumentView<'_>,
     owner: WorkspaceQueryOwner,
 ) -> BuiltinResult<WorkspaceQuery> {
     let mut index = 0usize;
@@ -236,12 +236,12 @@ fn extract_name_list(value: &Value, owner: WorkspaceQueryOwner) -> BuiltinResult
         Value::String(text) => Ok(vec![text.as_str().to_owned()]),
         Value::CharArray(array) => Ok(char_array_rows_as_strings(array)),
         Value::StringArray(array) => Ok(array
-            .data
+            .data()
             .iter()
             .map(|text| text.as_str().to_owned())
             .collect()),
         Value::Cell(array) => array
-            .data
+            .data()
             .iter()
             .map(|item| {
                 value_to_string_scalar(item).ok_or_else(|| owner.reject(QueryError::CellMemberType))
@@ -257,8 +257,8 @@ fn value_to_string_scalar(value: &Value) -> Option<String> {
         Value::CharArray(array) if array.rows == 1 => {
             char_array_rows_as_strings(array).into_iter().next()
         }
-        Value::StringArray(array) if array.data.len() == 1 => {
-            Some(array.data[0].as_str().to_owned())
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Some(array.data()[0].as_str().to_owned())
         }
         _ => None,
     }
@@ -269,7 +269,7 @@ pub(super) fn char_array_rows_as_strings(array: &CharArray) -> Vec<String> {
     for row in 0..array.rows {
         let mut value = String::with_capacity(array.cols);
         for column in 0..array.cols {
-            value.push(array.data[row * array.cols + column]);
+            value.push(array.data()[row * array.cols + column]);
         }
         rows.push(value.trim_end_matches([' ', '\0']).to_string());
     }
@@ -284,15 +284,22 @@ mod tests {
     #[test]
     fn typed_parser_preserves_union_and_owner() {
         let query = parse_request(
-            &[Value::from("a*"), Value::from("-regexp"), Value::from("^b")],
+            crate::call::FunctionArgumentView::from_slice(&[
+                Value::from("a*"),
+                Value::from("-regexp"),
+                Value::from("^b"),
+            ]),
             WorkspaceQueryOwner::Who,
         )
         .expect("query");
         assert!(query.matches("alpha"));
         assert!(query.matches("beta"));
         assert!(!query.matches("gamma"));
-        let invalid = parse_request(&[Value::from("-regexp")], WorkspaceQueryOwner::Whos)
-            .expect_err("missing regex");
+        let invalid = parse_request(
+            crate::call::FunctionArgumentView::from_slice(&[Value::from("-regexp")]),
+            WorkspaceQueryOwner::Whos,
+        )
+        .expect_err("missing regex");
         assert_eq!(invalid.context.builtin.as_deref(), Some("whos"));
     }
 
@@ -318,8 +325,16 @@ mod tests {
     #[test]
     fn numeric_and_nested_numeric_selectors_reject_without_provider_access() {
         let numeric = Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).expect("tensor"));
-        assert!(parse_request(std::slice::from_ref(&numeric), WorkspaceQueryOwner::Who).is_err());
+        assert!(parse_request(
+            crate::call::FunctionArgumentView::from_slice(std::slice::from_ref(&numeric)),
+            WorkspaceQueryOwner::Who
+        )
+        .is_err());
         let cell = CellArray::new(vec![numeric], 1, 1).expect("cell");
-        assert!(parse_request(&[Value::Cell(cell)], WorkspaceQueryOwner::Whos).is_err());
+        assert!(parse_request(
+            crate::call::FunctionArgumentView::from_slice(&[Value::Cell(cell)]),
+            WorkspaceQueryOwner::Whos
+        )
+        .is_err());
     }
 }

@@ -46,7 +46,37 @@ pub(super) fn resolve_compiled_function(
     if metadata.kind == runmat_hir::FunctionKind::SyntheticEntrypoint {
         return Err("synthetic script entrypoint is not a callable definition".into());
     }
-    function_entrypoint(unit, &metadata.name.0, function)
+    compiled_function_entrypoint(unit, function)
+}
+
+/// Preserve an already-authenticated product label without allowing that text
+/// to select a body. Registered aliases must resolve to the exact selected
+/// compiler coordinate; nested/anonymous products may use only their body's
+/// descriptive label after origin-based selection.
+pub(super) fn resolve_compiled_function_with_label(
+    unit: &ExecutableUnit,
+    function: runmat_hir::FunctionId,
+    label: &str,
+) -> Result<PortableEntrypoint, String> {
+    let selected = resolve_compiled_function(unit, function)?;
+    let PortableEntrypoint::Callable {
+        name,
+        compiled_function,
+        function: portable_function,
+        kind,
+    } = selected
+    else {
+        unreachable!("compiled function selection is callable")
+    };
+    if label != name && unit.functions().resolve_name(label) != Some(compiled_function) {
+        return Err("portable entrypoint label does not identify its selected body".into());
+    }
+    Ok(PortableEntrypoint::Callable {
+        name: label.to_string(),
+        compiled_function,
+        function: portable_function,
+        kind,
+    })
 }
 
 pub(super) fn resolve_constructor_source(
@@ -228,6 +258,38 @@ fn function_entrypoint(
     } else {
         return Err("executable entrypoint has no exact admitted registry name".into());
     };
+    let selected = compiled_function_entrypoint(unit, function)?;
+    let PortableEntrypoint::Callable {
+        compiled_function,
+        function,
+        kind,
+        ..
+    } = selected
+    else {
+        unreachable!("compiled function selection is callable")
+    };
+    Ok(PortableEntrypoint::Callable {
+        name: registered_name.to_string(),
+        compiled_function,
+        function,
+        kind,
+    })
+}
+
+/// Select an already-authenticated body by its compiler coordinate. This is
+/// intentionally separate from textual lookup: nested and anonymous bodies
+/// are callable only through an immutable binding origin, never by name.
+fn compiled_function_entrypoint(
+    unit: &ExecutableUnit,
+    function: runmat_hir::FunctionId,
+) -> Result<PortableEntrypoint, String> {
+    let body = unit
+        .functions()
+        .get(function)
+        .ok_or_else(|| "executable entrypoint has no compiled function body".to_string())?;
+    if body.function != function {
+        return Err("executable entrypoint disagrees with its compiled function identity".into());
+    }
     let expected_origin = runmat_execution::FunctionBindingOrigin::from_revision(
         &unit.revision().program_revision,
         body.portable_function,
@@ -240,7 +302,7 @@ fn function_entrypoint(
         return Err("executable entrypoint disagrees with its immutable origin".into());
     }
     Ok(PortableEntrypoint::Callable {
-        name: registered_name.to_string(),
+        name: body.display_name.clone(),
         compiled_function: function,
         function: body.portable_function,
         kind: runmat_execution::ExecutableEntrypointKind::Function,

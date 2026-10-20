@@ -5,12 +5,12 @@ use runmat_value::{IntegerStorage, NumericDType, NumericScalar, Value};
 use crate::builtins::table::{table_from_columns, table_variables};
 
 fn call(value: Value) -> BuiltinResult<Value> {
-    block_on(macd_builtin(value))
+    block_on(macd_builtin(None, value))
 }
 
 fn call_with_mode(value: Value, extensions_enabled: bool) -> BuiltinResult<Value> {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(extensions_enabled);
-    block_on(macd_builtin(value))
+    block_on(macd_builtin(None, value))
 }
 
 fn matrix(rows: usize, columns: [[f64; 4]; 5]) -> Value {
@@ -256,7 +256,7 @@ fn two_outputs_return_macd_and_signal() {
 #[test]
 fn zero_outputs_return_empty_without_validating_input() {
     let _guard = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
-    let result = call(Value::String("not data".to_string())).unwrap();
+    let result = call(Value::String("not data".to_string().into())).unwrap();
     assert_eq!(result, Value::output_list(Vec::new()));
 }
 
@@ -329,7 +329,7 @@ fn table_input_is_case_insensitive_and_returns_table_with_close() {
     let Value::Object(object) = out else {
         panic!("expected table output");
     };
-    assert_eq!(object.class_name.display_name(), "table");
+    assert_eq!(object.class_name().display_name(), "table");
     let variables = table_variables(&object).unwrap();
     assert_eq!(variables.fields.len(), 1);
     let close = expect_tensor(variables.fields.get("Close").cloned().unwrap());
@@ -419,7 +419,7 @@ fn rejects_nonnumeric_price_variables() {
             "Close".to_string(),
         ],
         vec![
-            Value::String("not numeric".to_string()),
+            Value::String("not numeric".to_string().into()),
             Value::Tensor(Tensor::new(vec![0.5], vec![1, 1]).unwrap()),
             Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
             Value::Tensor(Tensor::new(vec![2.0], vec![1, 1]).unwrap()),

@@ -14,8 +14,8 @@ pub enum ArgToken {
     Unknown,
 }
 
-pub fn tokens_from_values(args: &[Value]) -> Vec<ArgToken> {
-    args.iter().map(token_from_value).collect()
+pub fn tokens_from_values<'a>(args: impl IntoIterator<Item = &'a Value>) -> Vec<ArgToken> {
+    args.into_iter().map(token_from_value).collect()
 }
 
 pub fn tokens_from_context(ctx: &ResolveContext) -> Vec<ArgToken> {
@@ -71,11 +71,11 @@ fn token_from_value(value: &Value) -> ArgToken {
         Value::Int(value) => ArgToken::Integer(value.clone()),
         Value::Bool(value) => ArgToken::Bool(*value),
         Value::String(text) => ArgToken::String(text.to_ascii_lowercase()),
-        Value::StringArray(arr) if arr.data.len() == 1 => {
-            ArgToken::String(arr.data[0].to_ascii_lowercase())
+        Value::StringArray(arr) if arr.data().len() == 1 => {
+            ArgToken::String(arr.data()[0].to_ascii_lowercase())
         }
         Value::CharArray(arr) if arr.rows == 1 => {
-            let text: String = arr.data.iter().collect();
+            let text: String = arr.data().iter().collect();
             ArgToken::String(text.to_ascii_lowercase())
         }
         Value::Tensor(tensor) => {
@@ -175,7 +175,7 @@ mod tests {
             Value::Num(2.0),
             Value::Int(IntValue::I32(3)),
             Value::Bool(true),
-            Value::String("All".to_string()),
+            Value::String("All".to_string().into()),
         ];
         assert_eq!(
             tokens_from_values(&args),

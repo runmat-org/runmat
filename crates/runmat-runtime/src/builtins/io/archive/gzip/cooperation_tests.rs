@@ -102,7 +102,7 @@ impl RuntimeExecutionServices for TurnService {
 
     fn claim_next_task_result(
         &self,
-        _: &[TaskHandle],
+        _: &[runmat_value::SharedTaskHandle],
     ) -> Result<TaskResultClaim, ExecutionServiceError> {
         Err(ExecutionServiceError::UnknownHandle)
     }
@@ -117,7 +117,7 @@ impl RuntimeExecutionServices for TurnService {
 
     fn complete_future(
         &self,
-        _: &FutureHandle,
+        _: crate::execution::FutureCompletionRef<'_>,
         _: Result<RootedValueSequence, ExecutionServiceError>,
     ) -> Result<(), ExecutionServiceError> {
         Err(ExecutionServiceError::UnknownHandle)

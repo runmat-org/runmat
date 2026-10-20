@@ -24,6 +24,8 @@ mod registration;
 mod revision;
 mod selected;
 mod event_data;
+mod object_literal;
+pub use object_literal::construct_class_literal_in_context;
 pub mod declaration;
 pub use event_data::{
     default_event_data, is_event_data_value, prepare_event_data, EventDataError, PreparedEventData,
@@ -163,7 +165,11 @@ impl Default for RuntimeClassState {
     fn default() -> Self {
         let classes = primitive_class_registry();
         let method_bindings = bind_class_methods(&classes, ClassRegistryRevision::Current(1));
-        let builtin_issuances = classes.keys().cloned().map(|class| (class, 1)).collect();
+        let builtin_issuances = classes
+            .keys()
+            .map(ToOwned::to_owned)
+            .map(|class| (class, 1))
+            .collect();
         Self {
             generation: 1,
             classes,
@@ -596,7 +602,13 @@ pub fn registered_public_static_method(name: &str) -> Option<RegisteredStaticMet
 }
 
 pub fn class_names() -> Vec<ClassIdentity> {
-    let mut names = with_state(|state| state.classes.keys().cloned().collect::<Vec<_>>());
+    let mut names = with_state(|state| {
+        state
+            .classes
+            .keys()
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>()
+    });
     if let Some(selected) = selected_projection() {
         let extra = selected
             .classes

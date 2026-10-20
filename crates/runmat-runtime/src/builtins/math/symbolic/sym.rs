@@ -18,7 +18,7 @@ const BUILTIN_NAME: &str = "sym";
     binding_variant = "default",
     builtin_path = "crate::builtins::math::symbolic::sym"
 )]
-async fn sym_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn sym_builtin(value: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &SYM_DESCRIPTOR,
         &SYM_ERROR_TOO_MANY_OUTPUTS,
@@ -76,6 +76,15 @@ fn parse_rational_literal(text: &str) -> Option<SymbolicExpr> {
 }
 
 #[cfg(test)]
+pub(crate) async fn sym_builtin_source(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    sym_builtin(
+        value,
+        crate::call::BuiltinArguments::from_borrowed(&rest, None)?,
+    )
+    .await
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -88,16 +97,16 @@ mod tests {
             ("9007199254740993/2", "9007199254740993/2"),
         ] {
             let result =
-                futures::executor::block_on(sym_builtin(Value::from(text), vec![])).unwrap();
+                futures::executor::block_on(sym_builtin_source(Value::from(text), vec![])).unwrap();
             assert_eq!(result.to_string(), expected);
         }
         let decimal =
-            futures::executor::block_on(sym_builtin(Value::from("3.25"), vec![])).unwrap();
+            futures::executor::block_on(sym_builtin_source(Value::from("3.25"), vec![])).unwrap();
         let Value::Symbolic(decimal) = decimal else {
             panic!("expected symbolic decimal");
         };
         assert_eq!(decimal.numeric_constant_value(), Some(3.25));
-        let result = futures::executor::block_on(sym_builtin(
+        let result = futures::executor::block_on(sym_builtin_source(
             Value::Int(runmat_value::IntValue::U64(u64::MAX)),
             vec![],
         ))
@@ -109,7 +118,7 @@ mod tests {
         )
         .unwrap();
         let result =
-            futures::executor::block_on(sym_builtin(Value::Tensor(tensor), vec![])).unwrap();
+            futures::executor::block_on(sym_builtin_source(Value::Tensor(tensor), vec![])).unwrap();
         assert_eq!(result.to_string(), i64::MIN.to_string());
     }
 
@@ -117,28 +126,32 @@ mod tests {
     fn invalid_rank_options_and_output_arity_have_stable_errors() {
         let chars = runmat_value::CharArray::new_with_shape(vec!['x', 'y'], vec![1, 1, 2]).unwrap();
         let error =
-            futures::executor::block_on(sym_builtin(Value::CharArray(chars), vec![])).unwrap_err();
-        assert_eq!(error.identifier(), SYM_ERRORS[2].identifier);
-        let error =
-            futures::executor::block_on(sym_builtin(Value::from("x"), vec![Value::from("real")]))
+            futures::executor::block_on(sym_builtin_source(Value::CharArray(chars), vec![]))
                 .unwrap_err();
+        assert_eq!(error.identifier(), SYM_ERRORS[2].identifier);
+        let error = futures::executor::block_on(sym_builtin_source(
+            Value::from("x"),
+            vec![Value::from("real")],
+        ))
+        .unwrap_err();
         assert_eq!(error.identifier(), SYM_ERRORS[0].identifier);
         let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
-        let error = futures::executor::block_on(sym_builtin(Value::from("x"), vec![])).unwrap_err();
+        let error =
+            futures::executor::block_on(sym_builtin_source(Value::from("x"), vec![])).unwrap_err();
         assert_eq!(error.identifier(), SYM_ERROR_TOO_MANY_OUTPUTS.identifier);
     }
 
     #[test]
     fn creates_symbolic_variable_from_text() {
-        let value =
-            futures::executor::block_on(sym_builtin(Value::from("x"), Vec::new())).expect("sym");
+        let value = futures::executor::block_on(sym_builtin_source(Value::from("x"), Vec::new()))
+            .expect("sym");
         assert_eq!(value.to_string(), "x");
     }
 
     #[test]
     fn creates_symbolic_constant_from_numeric_text() {
-        let value =
-            futures::executor::block_on(sym_builtin(Value::from("3.5"), Vec::new())).expect("sym");
+        let value = futures::executor::block_on(sym_builtin_source(Value::from("3.5"), Vec::new()))
+            .expect("sym");
         match value {
             Value::Symbolic(expr) => assert_eq!(expr.constant_value(), Some(3.5)),
             other => panic!("expected symbolic constant, got {other:?}"),
@@ -147,8 +160,9 @@ mod tests {
 
     #[test]
     fn creates_symbolic_rational_from_text() {
-        let value = futures::executor::block_on(sym_builtin(Value::from(" 2 / 6 "), Vec::new()))
-            .expect("sym");
+        let value =
+            futures::executor::block_on(sym_builtin_source(Value::from(" 2 / 6 "), Vec::new()))
+                .expect("sym");
         assert_eq!(value.to_string(), "1/3");
         match value {
             Value::Symbolic(expr) => assert_eq!(expr.numeric_constant_value(), Some(1.0 / 3.0)),
@@ -158,7 +172,7 @@ mod tests {
 
     #[test]
     fn creates_symbolic_rational_from_extreme_signed_text() {
-        let value = futures::executor::block_on(sym_builtin(
+        let value = futures::executor::block_on(sym_builtin_source(
             Value::from("-170141183460469231731687303715884105728 / -1"),
             Vec::new(),
         ))
@@ -168,7 +182,7 @@ mod tests {
 
     #[test]
     fn rejects_identifier_with_leading_underscore() {
-        let err = futures::executor::block_on(sym_builtin(Value::from("_x"), Vec::new()))
+        let err = futures::executor::block_on(sym_builtin_source(Value::from("_x"), Vec::new()))
             .expect_err("invalid identifier should error");
 
         assert_eq!(err.identifier.as_deref(), Some("RunMat:sym:InvalidText"));

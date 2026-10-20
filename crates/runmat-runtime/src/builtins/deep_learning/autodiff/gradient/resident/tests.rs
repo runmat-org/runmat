@@ -1,4 +1,5 @@
 use super::*;
+use crate::builtins::deep_learning::tests::fully_connected_layer_builtin;
 use crate::builtins::deep_learning::{layers::*, model, object};
 use futures::executor::block_on;
 use runmat_accelerate_api::{
@@ -8,8 +9,13 @@ use runmat_accelerate_api::{
 use runmat_value::CellArray;
 
 fn dense_network() -> crate::execution::RootedValue {
-    let input = block_on(feature_input_layer_builtin(Value::Num(2.0), vec![])).unwrap();
+    let input = block_on(feature_input_layer_builtin(
+        Value::Num(2.0),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap();
     let dense = block_on(fully_connected_layer_builtin(
+        None,
         Value::Num(1.0),
         vec![
             Value::String("Weights".into()),
@@ -26,8 +32,13 @@ fn dense_network() -> crate::execution::RootedValue {
 }
 
 fn scalar_network() -> crate::execution::RootedValue {
-    let input = block_on(feature_input_layer_builtin(Value::Num(1.0), vec![])).unwrap();
+    let input = block_on(feature_input_layer_builtin(
+        Value::Num(1.0),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap();
     let dense = block_on(fully_connected_layer_builtin(
+        None,
         Value::Num(1.0),
         vec![
             Value::String("Weights".into()),
@@ -62,9 +73,15 @@ fn public_single_resident_gradient_retains_native_precision() {
                 ("Format", Value::String("BC".into())),
                 ("Labels", Value::String("BC".into())),
             ],
-        );
-        let feature = block_on(feature_input_layer_builtin(Value::Num(1.0), vec![])).unwrap();
+        )
+        .expect("fixture object");
+        let feature = block_on(feature_input_layer_builtin(
+            Value::Num(1.0),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap();
         let dense = block_on(fully_connected_layer_builtin(
+            None,
             Value::Num(1.0),
             vec![
                 Value::String("Weights".into()),
@@ -82,14 +99,23 @@ fn public_single_resident_gradient_retains_native_precision() {
         let _activation = super::super::super::tape::TapeActivation::enter(tape);
         let input = super::super::super::tape::annotate_tree(input).unwrap();
         let network = super::super::super::tape::annotate_tree(network.value().clone()).unwrap();
-        let loss = block_on(model::forward_builtin(network, input.clone(), vec![])).unwrap();
+        let loss = block_on(model::forward_builtin(
+            network,
+            input.clone(),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap();
         provider.reset_telemetry();
-        let gradient = block_on(super::super::dlgradient_direct(loss, vec![input])).unwrap();
+        let gradient = block_on(super::super::dlgradient_direct(
+            loss,
+            crate::builtins::common::test_support::builtin_arguments(vec![input]),
+        ))
+        .unwrap();
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
         let Value::Object(gradient) = gradient else {
             panic!("dlarray expected")
         };
-        let Some(Value::GpuTensor(handle)) = gradient.properties.get("Data") else {
+        let Some(Value::GpuTensor(handle)) = gradient.properties().get("Data") else {
             panic!("resident gradient expected")
         };
         assert_eq!(handle_precision(handle), Some(ProviderPrecision::F32));
@@ -122,7 +148,8 @@ fn resident_reverse_traverses_two_networks_and_accumulates_reused_parameters() {
                 ("Format", Value::String("BC".into())),
                 ("Labels", Value::String("BC".into())),
             ],
-        );
+        )
+        .expect("fixture object");
         let tape = Rc::new(RefCell::new(super::super::super::tape::Tape::new()));
         let _activation = super::super::super::tape::TapeActivation::enter(tape);
         let input = super::super::super::tape::annotate_tree(input).unwrap();
@@ -132,16 +159,21 @@ fn resident_reverse_traverses_two_networks_and_accumulates_reused_parameters() {
         let first = block_on(model::forward_builtin(
             network.clone(),
             input.clone(),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .unwrap();
-        let second = block_on(model::forward_builtin(network.clone(), first, vec![])).unwrap();
+        let second = block_on(model::forward_builtin(
+            network.clone(),
+            first,
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap();
         let _requested =
             crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         provider.reset_telemetry();
         let gradients = block_on(super::super::dlgradient_direct(
             second,
-            vec![input, network],
+            crate::builtins::common::test_support::builtin_arguments(vec![input, network]),
         ))
         .unwrap();
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
@@ -151,7 +183,7 @@ fn resident_reverse_traverses_two_networks_and_accumulates_reused_parameters() {
         let Value::Object(dx) = &values[0] else {
             panic!("dlarray dx expected")
         };
-        let Some(Value::GpuTensor(dx)) = dx.properties.get("Data") else {
+        let Some(Value::GpuTensor(dx)) = dx.properties().get("Data") else {
             panic!("resident dx expected")
         };
         let dx =
@@ -165,19 +197,23 @@ fn resident_reverse_traverses_two_networks_and_accumulates_reused_parameters() {
             panic!("canonical parameter roles expected")
         };
         assert_eq!(
-            roles.data.iter().map(String::as_str).collect::<Vec<_>>(),
+            roles
+                .data()
+                .iter()
+                .map(|value| value.as_str())
+                .collect::<Vec<_>>(),
             ["Weights", "Bias"]
         );
         let Some(Value::Cell(parameters)) = variables.fields.get("Value") else {
             panic!("gradient values expected")
         };
-        assert_eq!(parameters.data.len(), 2);
+        assert_eq!(parameters.data().len(), 2);
         let expected = [12.5, 4.0];
-        for (value, expected) in parameters.data.iter().zip(expected) {
+        for (value, expected) in parameters.data().iter().zip(expected) {
             let Value::Object(parameter) = value else {
                 panic!("gradient dlarray expected")
             };
-            let Some(Value::GpuTensor(handle)) = parameter.properties.get("Data") else {
+            let Some(Value::GpuTensor(handle)) = parameter.properties().get("Data") else {
                 panic!("resident parameter gradient expected")
             };
             let actual =
@@ -202,14 +238,17 @@ fn truly_unconnected_resident_target_has_zero_gradient() {
                 .unwrap()
                 .with_provenance(GpuHandleProvenance::Explicit)
                 .unwrap();
-            super::super::super::tape::annotate_tree(object(
-                "dlarray",
-                vec![
-                    ("Data", Value::GpuTensor(handle)),
-                    ("Format", Value::String("BC".into())),
-                    ("Labels", Value::String("BC".into())),
-                ],
-            ))
+            super::super::super::tape::annotate_tree(
+                object(
+                    "dlarray",
+                    vec![
+                        ("Data", Value::GpuTensor(handle)),
+                        ("Format", Value::String("BC".into())),
+                        ("Labels", Value::String("BC".into())),
+                    ],
+                )
+                .expect("fixture object"),
+            )
             .unwrap()
         };
         let connected = wrapped(2.0);
@@ -217,14 +256,23 @@ fn truly_unconnected_resident_target_has_zero_gradient() {
         let network_owner = scalar_network();
         let network =
             super::super::super::tape::annotate_tree(network_owner.value().clone()).unwrap();
-        let loss = block_on(model::forward_builtin(network, connected, vec![])).unwrap();
+        let loss = block_on(model::forward_builtin(
+            network,
+            connected,
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap();
         provider.reset_telemetry();
-        let result = block_on(super::super::dlgradient_direct(loss, vec![disconnected])).unwrap();
+        let result = block_on(super::super::dlgradient_direct(
+            loss,
+            crate::builtins::common::test_support::builtin_arguments(vec![disconnected]),
+        ))
+        .unwrap();
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
         let Value::Object(result) = result else {
             panic!("dlarray expected")
         };
-        let Some(Value::GpuTensor(handle)) = result.properties.get("Data") else {
+        let Some(Value::GpuTensor(handle)) = result.properties().get("Data") else {
             panic!("resident zero expected")
         };
         assert_eq!(
@@ -250,14 +298,17 @@ fn connected_unsupported_resident_parent_rejects_before_reverse_provider_effects
                 .unwrap()
                 .with_provenance(GpuHandleProvenance::Explicit)
                 .unwrap();
-            super::super::super::tape::annotate_tree(object(
-                "dlarray",
-                vec![
-                    ("Data", Value::GpuTensor(handle)),
-                    ("Format", Value::String("BC".into())),
-                    ("Labels", Value::String("BC".into())),
-                ],
-            ))
+            super::super::super::tape::annotate_tree(
+                object(
+                    "dlarray",
+                    vec![
+                        ("Data", Value::GpuTensor(handle)),
+                        ("Format", Value::String("BC".into())),
+                        ("Labels", Value::String("BC".into())),
+                    ],
+                )
+                .expect("fixture object"),
+            )
             .unwrap()
         };
         let tape = Rc::new(RefCell::new(super::super::super::tape::Tape::new()));
@@ -277,10 +328,19 @@ fn connected_unsupported_resident_parent_rejects_before_reverse_provider_effects
         let network_owner = scalar_network();
         let network =
             super::super::super::tape::annotate_tree(network_owner.value().clone()).unwrap();
-        let loss = block_on(model::forward_builtin(network, connected, vec![])).unwrap();
+        let loss = block_on(model::forward_builtin(
+            network,
+            connected,
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap();
         provider.reset_telemetry();
         let before = provider.telemetry_snapshot();
-        let error = block_on(super::super::dlgradient_direct(loss, vec![leaf])).unwrap_err();
+        let error = block_on(super::super::dlgradient_direct(
+            loss,
+            crate::builtins::common::test_support::builtin_arguments(vec![leaf]),
+        ))
+        .unwrap_err();
         assert!(error.to_string().contains("no resident adjoint"));
         assert_eq!(provider.telemetry_snapshot(), before);
     });
@@ -304,7 +364,8 @@ fn public_scalar_resident_network_gradient_stays_on_provider() {
                 ("Format", Value::String("BC".into())),
                 ("Labels", Value::String("BC".into())),
             ],
-        );
+        )
+        .expect("fixture object");
         let tape = Rc::new(RefCell::new(super::super::super::tape::Tape::new()));
         let _activation = super::super::super::tape::TapeActivation::enter(tape);
         let network_owner = dense_network();
@@ -315,13 +376,16 @@ fn public_scalar_resident_network_gradient_stays_on_provider() {
         let loss = block_on(model::forward_builtin(
             network.clone(),
             input.clone(),
-            vec![],
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
         ))
         .unwrap();
         let _requested =
             crate::output_count::push_output_count(Some(2)).expect("output-count scope");
-        let gradients =
-            block_on(super::super::dlgradient_direct(loss, vec![input, network])).unwrap();
+        let gradients = block_on(super::super::dlgradient_direct(
+            loss,
+            crate::builtins::common::test_support::builtin_arguments(vec![input, network]),
+        ))
+        .unwrap();
         let Value::OutputList(gradients) = gradients else {
             panic!("input and network gradients expected")
         };
@@ -335,7 +399,7 @@ fn public_scalar_resident_network_gradient_stays_on_provider() {
         let Value::Object(gradient) = gradient else {
             panic!("dlarray gradient expected")
         };
-        let Some(Value::GpuTensor(output)) = gradient.properties.get("Data") else {
+        let Some(Value::GpuTensor(output)) = gradient.properties().get("Data") else {
             panic!("native resident gradient expected")
         };
         assert_eq!(output.shape(), &[1, 2]);
@@ -361,21 +425,25 @@ fn public_scalar_resident_network_gradient_stays_on_provider() {
             panic!("canonical Learnables Parameter column expected")
         };
         assert_eq!(
-            roles.data.iter().map(String::as_str).collect::<Vec<_>>(),
+            roles
+                .data()
+                .iter()
+                .map(|value| value.as_str())
+                .collect::<Vec<_>>(),
             ["Weights", "Bias"]
         );
         let Some(Value::Cell(values)) = variables.fields.get("Value") else {
             panic!("canonical Learnables Value column expected")
         };
-        assert_eq!(values.data.len(), 2);
+        assert_eq!(values.data().len(), 2);
         for (value, shape, expected) in [
-            (&values.data[0], &[1, 2][..], &[3.0, 4.0][..]),
-            (&values.data[1], &[1, 1][..], &[1.0][..]),
+            (&values.data()[0], &[1, 2][..], &[3.0, 4.0][..]),
+            (&values.data()[1], &[1, 1][..], &[1.0][..]),
         ] {
             let Value::Object(value) = value else {
                 panic!("Learnables gradient dlarray expected")
             };
-            let Some(Value::GpuTensor(handle)) = value.properties.get("Data") else {
+            let Some(Value::GpuTensor(handle)) = value.properties().get("Data") else {
                 panic!("native Learnables gradient expected")
             };
             assert_eq!(handle.shape(), shape);
@@ -409,14 +477,20 @@ fn canonical_dlgradient_uses_explicit_output_count_and_cancellation() {
                 ("Format", Value::String("BC".into())),
                 ("Labels", Value::String("BC".into())),
             ],
-        );
+        )
+        .expect("fixture object");
         let tape = Rc::new(RefCell::new(super::super::super::tape::Tape::new()));
         let _activation = super::super::super::tape::TapeActivation::enter(tape);
         let network_owner = dense_network();
         let network =
             super::super::super::tape::annotate_tree(network_owner.value().clone()).unwrap();
         let input = super::super::super::tape::annotate_tree(input).unwrap();
-        let loss = block_on(model::forward_builtin(network, input.clone(), vec![])).unwrap();
+        let loss = block_on(model::forward_builtin(
+            network,
+            input.clone(),
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .unwrap();
         let args = [loss, input];
         let bindings = crate::builtin::runtime_builtin_bindings_by_name("dlgradient");
         assert_eq!(bindings.len(), 1);

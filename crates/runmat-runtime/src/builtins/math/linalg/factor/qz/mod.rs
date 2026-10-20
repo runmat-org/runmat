@@ -59,8 +59,8 @@ fn parse_mode(option: Option<&Value>) -> BuiltinResult<Mode> {
     };
     let text = match option {
         Value::String(text) => text.as_str().to_owned(),
-        Value::StringArray(array) if array.data.len() == 1 => array.data[0].as_str().to_owned(),
-        Value::CharArray(chars) if chars.rows <= 1 => chars.data.iter().collect(),
+        Value::StringArray(array) if array.data().len() == 1 => array.data()[0].as_str().to_owned(),
+        Value::CharArray(chars) if chars.rows <= 1 => chars.data().iter().collect(),
         _ => return Err(invalid("qz mode must be 'complex' or 'real'")),
     };
     match text.trim().to_ascii_lowercase().as_str() {
@@ -402,7 +402,7 @@ fn publish_real(
 async fn qz_builtin(
     runtime: Option<RuntimeContext>,
     a: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     if !(1..=2).contains(&rest.len()) {
         return Err(invalid("qz requires a matrix pair and optional mode"));

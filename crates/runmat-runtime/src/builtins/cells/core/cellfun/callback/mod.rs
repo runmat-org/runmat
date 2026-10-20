@@ -32,20 +32,28 @@ impl Callable {
             .map_err(error_map::parse)
     }
 
-    pub(super) async fn call(
+    pub(super) async fn call_retained(
         &self,
-        arguments: &[Value],
+        context: Option<&crate::context::RuntimeContext>,
+        arguments: crate::call::BuiltinArguments,
         outputs: usize,
     ) -> BuiltinResult<RootedValue> {
         match self {
             Self::Mapped(callable) => callable
-                .invoke_with_outputs(arguments, outputs)
+                .invoke_retained(context, arguments, outputs)
                 .await
                 .map_err(error_map::call),
             Self::Shorthand(callable) => {
                 self.validate_outputs(outputs)?;
-                RootedValue::new(callable.call(arguments).await?)
-                    .map_err(|error| error.into_runtime_error())
+                let call = callable.call(arguments.view());
+                let value = match context {
+                    Some(context) => context.scope(call).await?,
+                    None => call.await?,
+                };
+                match context {
+                    Some(context) => RootedValue::in_context(value, context),
+                    None => RootedValue::new(value).map_err(|error| error.into_runtime_error()),
+                }
             }
         }
     }

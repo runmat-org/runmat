@@ -277,12 +277,12 @@ impl TypeSelector {
         let mut names = Vec::new();
         match value {
             Value::Cell(cell) => {
-                for item in &cell.data {
+                for item in cell.data() {
                     push_type_name(item, &mut names)?;
                 }
             }
             Value::StringArray(strings) => {
-                for item in &strings.data {
+                for item in strings.data() {
                     push_normalized_name(item, &mut names)?;
                 }
             }
@@ -306,7 +306,7 @@ impl TypeSelector {
 fn push_type_name(value: &Value, names: &mut Vec<String>) -> crate::BuiltinResult<()> {
     match value {
         Value::StringArray(strings) => {
-            for item in &strings.data {
+            for item in strings.data() {
                 push_normalized_name(item, names)?;
             }
             Ok(())
@@ -344,10 +344,10 @@ fn scalar_handle(value: &Value) -> Option<f64> {
 
 fn text_scalar(value: &Value) -> Option<String> {
     match value {
-        Value::CharArray(chars) => Some(chars.data.iter().collect()),
+        Value::CharArray(chars) => Some(chars.data().iter().collect()),
         Value::String(text) => Some(text.as_str().to_owned()),
-        Value::StringArray(strings) if strings.data.len() == 1 => {
-            strings.data.first().map(|text| text.as_str().to_owned())
+        Value::StringArray(strings) if strings.data().len() == 1 => {
+            strings.data().first().map(|text| text.as_str().to_owned())
         }
         _ => None,
     }
@@ -554,7 +554,10 @@ mod tests {
             Value::String("signal".into()),
         ])
         .unwrap();
-        let legend_handle = legend_builtin(vec![]).unwrap();
+        let legend_handle = legend_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        )
+        .unwrap();
         let axes = current_axes_state();
         let axes_handle = encode_axes_handle(axes.handle, axes.active_index);
 

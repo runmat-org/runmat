@@ -21,6 +21,7 @@ fn unreadable_program_preserves_known_prelaunch_consumption() {
     assert!(observed
         .result
         .unwrap_err()
+        .to_string()
         .contains("local artifact store failed"));
     assert_eq!(
         observed.execution.termination,
@@ -46,19 +47,25 @@ fn admit(driver: &LocalDriver, artifact_id: ArtifactId) -> runmat_execution_runn
         id: TaskId::derive(&[b"preflight"]),
         scope_id: driver.scope_id(),
         pool_id: driver.pool_id(),
-        program_artifact_id: artifact_id,
-        callable: Callable {
-            owner_identity: "test".into(),
-            qualified_name: "preflight".into(),
-            entrypoint_digest: Digest::sha256(b"preflight"),
-        },
+        schema_version: runmat_execution::task::TASK_REQUEST_SCHEMA_VERSION,
+        executable: runmat_execution::TaskExecutableIdentity::ProgramArtifact(artifact_id),
+        host: crate::test_support::host_requirement(),
+        invocation_context: runmat_execution::ProgramInvocationContext::Direct,
+        callable: Callable::for_program(
+            "test",
+            &runmat_execution::ProgramCallable::semantic(
+                runmat_execution::ProgramFunctionId(0),
+                Some("preflight".into()),
+            ),
+        ),
         inputs: Vec::new(),
         outputs: OutputContract {
+            owned_work: None,
             requested_outputs: 0,
         },
         resources: ResourceRequest {
             cpu_millicores: 1000,
-            memory_bytes: 1024,
+            memory_bytes: runmat_process_host::ipc::WORKER_PARENT_MONITOR_STACK_BYTES + 1024,
             scratch_bytes: 1024,
             max_wall_millis: 10000,
             max_artifact_bytes: 1024,
@@ -108,6 +115,9 @@ fn corrupt_stored_entrypoint_and_foreign_artifact_reject_before_process_launch()
         )
         .unwrap();
         let recipe = ProgramBuildRecipe {
+            accelerators: Vec::new(),
+            interop: runmat_types::InteropManifest::empty(),
+            foreign_policy: None,
             schema_version: runmat_execution_artifact::PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
             program_revision: ProgramRevision::new(
                 Digest::sha256(b"graph"),
@@ -124,6 +134,7 @@ fn corrupt_stored_entrypoint_and_foreign_artifact_reject_before_process_launch()
             .unwrap(),
             entrypoint: "test_attempt".into(),
             outputs: OutputContract {
+                owned_work: None,
                 requested_outputs: 0,
             },
             execution_mode: "interpreter".into(),
@@ -140,27 +151,34 @@ fn corrupt_stored_entrypoint_and_foreign_artifact_reject_before_process_launch()
         )
         .unwrap();
         let artifact_id = ArtifactId::derive(&[original.id.0.bytes()]);
-        let stored = crate::protocol::StoredProgram {
-            recipe: recipe.clone(),
-            artifact: if foreign {
-                ProgramArtifact::materialize(
-                    &recipe,
-                    ExecutableForm::TestAttemptV1,
-                    b"foreign".to_vec(),
-                )
-                .unwrap()
-            } else {
-                original
+        let stored = crate::protocol::StoredProgram::Direct(Box::new(
+            crate::protocol::StoredDirectProgram {
+                recipe: recipe.clone(),
+                artifact: if foreign {
+                    ProgramArtifact::materialize(
+                        &recipe,
+                        ExecutableForm::TestAttemptV1,
+                        b"foreign".to_vec(),
+                    )
+                    .unwrap()
+                } else {
+                    original
+                },
             },
-            function: if foreign { 0 } else { 7 },
-        };
+        ));
         driver
             .artifacts
             .put(artifact_id, &serde_json::to_vec(&stored).unwrap())
             .unwrap();
-        let request = admit(&driver, artifact_id);
+        let mut request = admit(&driver, artifact_id);
+        if !foreign {
+            request.task.callable.program = runmat_execution::ProgramCallable::semantic(
+                runmat_execution::ProgramFunctionId(7),
+                None,
+            );
+        }
         let observed = execute_attempt(&driver, &request, &TaskCompletion::new());
-        let error = observed.result.unwrap_err();
+        let error = observed.result.unwrap_err().to_string();
         assert!(
             error.contains(if foreign {
                 "original admitted artifact"
@@ -193,12 +211,18 @@ async fn shared_provider_preserves_prelaunch_cancellation_in_an_existing_runtime
     let driver =
         LocalDriver::new(config, ExecutionScopeId::derive(&[b"cancel-preflight"])).unwrap();
     let request = admit(&driver, ArtifactId::derive(&[b"missing-program"]));
-    let completion = TaskCompletion::new();
-    completion
-        .cancelled
-        .store(true, std::sync::atomic::Ordering::Release);
+    struct CancelledControl(std::sync::atomic::AtomicBool);
+    impl crate::process_provider::ProcessControl for CancelledControl {
+        fn cancellation(&self) -> &std::sync::atomic::AtomicBool {
+            &self.0
+        }
+        fn record_progress(&self, _: crate::protocol::ProgramProgress) {
+            panic!("prelaunch cancellation cannot publish progress")
+        }
+    }
+    let completion = CancelledControl(std::sync::atomic::AtomicBool::new(true));
     let observed = crate::process_provider::execute_attempt(
-        &NativeProcessProvider {
+        &crate::process_provider::NativeProcessProvider {
             config: &driver.config,
             artifacts: &driver.artifacts,
             objects: &driver.objects,
@@ -247,7 +271,7 @@ fn provider_failure_and_cancellation_commit_the_original_observation_and_account
         let observed = execute_attempt(&driver, &request, &completion);
         let original_execution = observed.execution.clone();
         let original_resources = observed.unsuccessful_resources.clone();
-        let (result, report) = observed.into_report(&request, &completion);
+        let (result, report) = observed.into_backend_report(&request, false);
         assert!(result.is_err());
         assert_eq!(report.attempt_id, request.id);
         assert_eq!(report.task_id, request.task_id);
@@ -278,7 +302,7 @@ fn provider_failure_and_cancellation_commit_the_original_observation_and_account
                 AttemptDisposition::Cancelled
             } else {
                 AttemptDisposition::Failed {
-                    kind: runmat_execution_runner::AttemptFailureKind::Execution,
+                    kind: runmat_execution_runner::AttemptFailureKind::Infrastructure,
                 }
             }
         );

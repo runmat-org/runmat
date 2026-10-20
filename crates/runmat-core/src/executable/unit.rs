@@ -35,6 +35,8 @@ mod class_products;
 mod selected_runtime;
 #[path = "unit/function_identity.rs"]
 mod function_identity;
+#[path = "unit/code_cache.rs"]
+mod code_cache;
 
 /// Immutable canonical compilation product reusable across invocations.
 #[derive(Clone, Debug)]
@@ -49,6 +51,7 @@ pub struct ExecutableUnit {
     layout: Rc<runmat_vm::VmAssemblyLayout>,
     functions: Rc<runmat_vm::FunctionRegistry>,
     portable_selection: Option<Rc<PortableSelection>>,
+    direct_code_cache: Rc<code_cache::DirectCodeCache>,
     /// Original compiler products this unit's deferred callables depend on.
     pub(super) original_dependencies:
         std::collections::BTreeMap<runmat_types::FunctionId, Rc<ExecutableUnit>>,
@@ -88,6 +91,7 @@ impl ExecutableUnit {
         {
             return Err("selected portable body is not owned by this compiled product".into());
         }
+        self.reset_direct_code_cache();
         self.portable_selection = Some(Rc::new(PortableSelection { current, imports }));
         Ok(self)
     }

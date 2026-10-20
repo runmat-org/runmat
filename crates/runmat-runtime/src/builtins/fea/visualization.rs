@@ -1,8 +1,8 @@
 use runmat_value::Value;
 
-use super::{builtin_error, BuiltinResult, ERROR_OPERATION, MESH_NAME, PLOT_NAME};
 #[cfg(feature = "plot-core")]
 use super::ERROR_INPUT;
+use super::{builtin_error, BuiltinResult, ERROR_OPERATION, MESH_NAME, PLOT_NAME};
 
 #[cfg(feature = "plot-core")]
 mod request;

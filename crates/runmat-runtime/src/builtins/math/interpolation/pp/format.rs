@@ -38,7 +38,7 @@ pub fn pp_to_value(pp: PiecewisePolynomial, name: &'static str) -> BuiltinResult
         .ok_or_else(|| interp_error(name, format!("{name}: coefficient shape overflow")))?;
     let coefs = Tensor::new(coefs, vec![rows, order])
         .map_err(|err| interp_error(name, format!("{name}: {err}")))?;
-    let mut st = StructValue::new();
+    let mut st = runmat_value::UnboundedStructValueBuilder::new();
     st.insert(
         "form",
         Value::string(PiecewiseForm::Polynomial.keyword().to_string()),
@@ -62,12 +62,12 @@ pub fn pp_to_value(pp: PiecewisePolynomial, name: &'static str) -> BuiltinResult
         Value::Num(dim as f64)
     };
     st.insert("dim", dim);
-    Ok(Value::Struct(st))
+    Ok(Value::Struct(st.finish()))
 }
 
 pub async fn pp_from_value(value: Value, name: &'static str) -> BuiltinResult<PiecewisePolynomial> {
     let value = materialize_if_resident(value).await?;
-    let Value::Struct(mut st) = value else {
+    let Value::Struct(st) = value else {
         return Err(interp_error(
             name,
             format!("{name}: first argument must be a pp struct"),
@@ -86,7 +86,8 @@ pub async fn pp_from_value(value: Value, name: &'static str) -> BuiltinResult<Pi
     }
     let breaks_value = st
         .fields
-        .remove("breaks")
+        .get("breaks")
+        .cloned()
         .ok_or_else(|| interp_error(name, format!("{name}: pp struct is missing breaks")))?;
     let breaks_host = materialize_if_resident(breaks_value).await?;
     ensure_exact_integer_field(&breaks_host, name, "breaks")?;
@@ -95,7 +96,8 @@ pub async fn pp_from_value(value: Value, name: &'static str) -> BuiltinResult<Pi
 
     let coefs_value = st
         .fields
-        .remove("coefs")
+        .get("coefs")
+        .cloned()
         .ok_or_else(|| interp_error(name, format!("{name}: pp struct is missing coefs")))?;
     let coefs_host = materialize_if_resident(coefs_value).await?;
     ensure_exact_integer_field(&coefs_host, name, "coefs")?;

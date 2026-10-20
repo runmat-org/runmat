@@ -44,7 +44,8 @@ pub(super) enum MeshedGeometryRegions {
 /// Outcome of exact meshing before the caller chooses its terminal response contract.
 pub(super) enum RemoteExactMeshingComposition {
     Completed(Box<CompletedRemoteExactMeshing>),
-    Terminal(RemotePoolExecutionOutcome),
+    // Ordinary driver transport control, not managed Value backing.
+    Terminal(Box<RemotePoolExecutionOutcome>),
 }
 
 pub(crate) async fn execute(
@@ -66,7 +67,7 @@ pub(crate) async fn execute(
             drop(materialization);
             package_completed(pool, &request, result)
         }
-        RemoteExactMeshingComposition::Terminal(outcome) => Ok(outcome),
+        RemoteExactMeshingComposition::Terminal(outcome) => Ok(*outcome),
     }
 }
 
@@ -81,7 +82,7 @@ pub(crate) async fn execute_geometry_root(
         RemoteExactMeshingComposition::Completed(completed) => {
             package_completed(pool, &request, completed.result)
         }
-        RemoteExactMeshingComposition::Terminal(outcome) => Ok(outcome),
+        RemoteExactMeshingComposition::Terminal(outcome) => Ok(*outcome),
     }
 }
 
@@ -116,7 +117,7 @@ pub(super) async fn execute_geometry_for_composition(
         Ok(success) => success,
         Err(message) => {
             return task_failure_outcome(pool, task_id, message)
-                .map(RemoteExactMeshingComposition::Terminal)
+                .map(|outcome| RemoteExactMeshingComposition::Terminal(Box::new(outcome)))
         }
     };
     let output_reference = match materialized
@@ -179,7 +180,7 @@ pub(super) async fn execute_geometry_for_composition(
     .input_objects()
     .to_vec();
     expected_inventory.push(output_reference.clone());
-    validate_reference_closure(&materialized.result_objects(), &expected_inventory)?;
+    validate_reference_closure(materialized.result_objects(), &expected_inventory)?;
     let mut meshing_request = decoded.request.meshing_request;
     if !crate::exact_geometry_admission::same_requested_tolerance(
         &meshing_request.tolerance,
@@ -216,7 +217,7 @@ pub(super) async fn execute_geometry_for_composition(
         Ok(result) => result,
         Err(error) => {
             return execution_failure_outcome(pool, error.to_string())
-                .map(RemoteExactMeshingComposition::Terminal)
+                .map(|outcome| RemoteExactMeshingComposition::Terminal(Box::new(outcome)))
         }
     };
     Ok(RemoteExactMeshingComposition::Completed(Box::new(
@@ -254,7 +255,7 @@ pub(super) async fn execute_for_composition(
         Ok(success) => success,
         Err(message) => {
             return task_failure_outcome(pool, task_id, message)
-                .map(RemoteExactMeshingComposition::Terminal)
+                .map(|outcome| RemoteExactMeshingComposition::Terminal(Box::new(outcome)))
         }
     };
     let admission_reference = match admitted.values().map_or(&[][..], |(outputs, _)| outputs) {
@@ -313,7 +314,7 @@ pub(super) async fn execute_for_composition(
     .input_objects()
     .to_vec();
     expected_admission_inventory.push(admission_reference.clone());
-    validate_reference_closure(&admitted.result_objects(), &expected_admission_inventory)?;
+    validate_reference_closure(admitted.result_objects(), &expected_admission_inventory)?;
     validate_source_entities(&admission, geometry.geometry_objects())?;
     let source_edge_ids = admission.source_edge_ids.clone();
     let source_face_ids = admission.source_face_ids.clone();
@@ -352,7 +353,7 @@ pub(super) async fn execute_for_composition(
         Ok(result) => result,
         Err(error) => {
             return execution_failure_outcome(pool, error.to_string())
-                .map(RemoteExactMeshingComposition::Terminal)
+                .map(|outcome| RemoteExactMeshingComposition::Terminal(Box::new(outcome)))
         }
     };
     let meshed_region_ids = result
@@ -490,7 +491,7 @@ fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {
 #[cfg(test)]
 mod tests {
     use runmat_execution::identity::ValueId;
-    use runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1;
+    use runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION;
     use runmat_execution::value::ValueRef;
     use runmat_geometry_core::PersistentEntityKind;
 
@@ -498,7 +499,7 @@ mod tests {
 
     fn reference(identity: &[u8]) -> ValueRef {
         ValueRef {
-            schema_version: VALUE_PAYLOAD_SCHEMA_V1,
+            schema_version: VALUE_PAYLOAD_SCHEMA_VERSION,
             id: ValueId::derive(&[b"admission-reference", identity]),
             logical_digest: runmat_execution::Digest::sha256(identity),
             encoded_length: identity.len() as u64,

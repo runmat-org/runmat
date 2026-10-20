@@ -96,7 +96,7 @@ pub(super) async fn prepare_timer_setter_value(
 
 pub(super) async fn prepare_timer_property_pairs(
     runtime: Option<&RuntimeContext>,
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     finding: bool,
 ) -> BuiltinResult<Vec<PreparedTimerPair>> {
     if !args.len().is_multiple_of(2) {
@@ -138,7 +138,7 @@ pub(super) async fn prepare_timer_property_pairs(
         } else if !finding {
             normalize_property_value(property, pair[1].clone())?;
         }
-        admitted.push((property, &pair[1]));
+        admitted.push((property, pair.get(1).expect("paired timer property value")));
     }
     let mut prepared = Vec::with_capacity(admitted.len());
     checkpoint_timer(runtime).await?;
@@ -149,6 +149,11 @@ pub(super) async fn prepare_timer_property_pairs(
         } else {
             input.clone()
         };
+        let value = if finding {
+            value
+        } else {
+            normalize_property_value(property, value)?
+        };
         prepared.push(PreparedTimerPair { property, value });
     }
     checkpoint_timer(runtime).await?;
@@ -156,6 +161,7 @@ pub(super) async fn prepare_timer_property_pairs(
 }
 
 pub(super) fn apply_name_value_pairs(
+    runtime: Option<&RuntimeContext>,
     object: &mut ObjectInstance,
     args: &[PreparedTimerPair],
     constructor: bool,
@@ -168,7 +174,6 @@ pub(super) fn apply_name_value_pairs(
                 format!("timer: property '{}' is read-only", property.name()),
             ));
         }
-        let value = normalize_property_value(property, pair.value.clone())?;
         if !constructor && running_is_on(object) && property.frozen_while_running() {
             return Err(timer_error(
                 &TIMER_ERROR_INVALID_PROPERTY,
@@ -178,9 +183,21 @@ pub(super) fn apply_name_value_pairs(
                 ),
             ));
         }
-        object.properties.insert(property.name().to_string(), value);
     }
-    Ok(())
+    crate::execution::object::replacement::replace_properties(
+        runtime,
+        object,
+        args.iter().map(|pair| (pair.property.name(), &pair.value)),
+        |message, source| {
+            crate::context::host_allocation::host_allocation_runtime_error(
+                runtime,
+                "RunMat:timer:Allocation",
+                message,
+                source,
+            )
+        },
+        |message| timer_error(&TIMER_ERROR_INVALID_PROPERTY, message),
+    )
 }
 
 #[cfg(test)]
@@ -191,36 +208,36 @@ mod tests {
     fn name_value_admission_keeps_typed_identity_through_assignment() {
         let pairs = futures::executor::block_on(prepare_timer_property_pairs(
             None,
-            &[
+            crate::call::FunctionArgumentView::from_slice(&[
                 Value::String(" eXeCuTiOnMoDe ".into()),
                 Value::String("FIXEDSPACING".into()),
                 Value::String("period".into()),
                 Value::Num(0.25),
-            ],
+            ]),
             false,
         ))
         .expect("typed timer options");
         assert_eq!(pairs[0].property, TimerProperty::ExecutionMode);
         assert_eq!(pairs[1].property, TimerProperty::Period);
         let mut object = default_timer_object("timer-test".into());
-        apply_name_value_pairs(&mut object, &pairs, true).expect("apply typed options");
+        apply_name_value_pairs(None, &mut object, &pairs, true).expect("apply typed options");
         assert_eq!(
-            object.properties.get("ExecutionMode"),
+            object.properties().get("ExecutionMode"),
             Some(&Value::String("fixedSpacing".into()))
         );
-        assert_eq!(object.properties.get("Period"), Some(&Value::Num(0.25)));
+        assert_eq!(object.properties().get("Period"), Some(&Value::Num(0.25)));
     }
 
     #[test]
     fn late_invalid_property_is_rejected_before_numeric_materialization() {
         let error = futures::executor::block_on(prepare_timer_property_pairs(
             None,
-            &[
+            crate::call::FunctionArgumentView::from_slice(&[
                 Value::String("Period".into()),
                 Value::Num(0.25),
                 Value::String("unknown".into()),
                 Value::Num(1.0),
-            ],
+            ]),
             false,
         ))
         .err()
@@ -229,12 +246,12 @@ mod tests {
 
         let error = futures::executor::block_on(prepare_timer_property_pairs(
             None,
-            &[
+            crate::call::FunctionArgumentView::from_slice(&[
                 Value::String("Period".into()),
                 Value::Num(0.25),
                 Value::String("Running".into()),
                 Value::String("on".into()),
-            ],
+            ]),
             false,
         ))
         .err()

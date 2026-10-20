@@ -90,7 +90,7 @@ impl<'a> ObjectiveEvaluator<'a> {
     async fn evaluate_with_gradient(&mut self, x: &[f64]) -> BuiltinResult<ObjectiveState> {
         self.cooperation.completed(x.len() as u64).await?;
         let callback =
-            crate::canonicalize_callback_handle_for_semantic_resolution(self.function.clone());
+            crate::canonicalize_callback_handle_for_semantic_resolution(self.function.clone())?;
         let arg = vector_to_value(NAME, x.to_vec(), &self.shape, self.scalar)?;
         let value = crate::call_feval_async_with_outputs(callback, &[arg], 2).await?;
         self.func_count += 1;
@@ -506,14 +506,14 @@ async fn hessian_value(
 }
 
 fn build_output_struct(outcome: &MinimizeOutcome) -> StructValue {
-    let mut fields = StructValue::new();
+    let mut fields = runmat_value::UnboundedStructValueBuilder::new();
     fields.insert("iterations", Value::Num(outcome.iterations as f64));
     fields.insert("funcCount", Value::Num(outcome.func_count as f64));
     fields.insert("algorithm", Value::from(ALGORITHM));
     fields.insert("firstorderopt", Value::Num(outcome.firstorderopt));
     fields.insert("stepsize", Value::Num(outcome.stepsize));
     fields.insert("message", Value::from(outcome.message.clone()));
-    fields
+    fields.finish()
 }
 
 fn build_message(

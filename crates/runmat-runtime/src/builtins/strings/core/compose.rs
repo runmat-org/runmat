@@ -78,7 +78,10 @@ fn remap_compose_flow(mut err: RuntimeError) -> RuntimeError {
     binding_variant = "default",
     builtin_path = "crate::builtins::strings::core::compose"
 )]
-async fn compose_builtin(format_spec: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn compose_builtin(
+    format_spec: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &COMPOSE_DESCRIPTOR,
         &COMPOSE_ERROR_TOO_MANY_OUTPUTS,
@@ -142,7 +145,7 @@ fn string_array_to_cellstr(formatted: StringArray) -> BuiltinResult<Value> {
     let rows = formatted.shape.first().copied().unwrap_or(1);
     let cols = formatted.shape.get(1).copied().unwrap_or(1);
     let values = formatted
-        .data
+        .data()
         .iter()
         .map(|text| Value::CharArray(CharArray::new_row(text.as_str())))
         .collect();
@@ -177,7 +180,10 @@ pub(crate) mod tests {
     use runmat_value::{IntValue, IntegerStorage, Tensor};
 
     fn compose_builtin(format_spec: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(super::compose_builtin(format_spec, rest))
+        futures::executor::block_on(super::compose_builtin(
+            format_spec,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     fn error_message(err: crate::RuntimeError) -> String {
@@ -192,7 +198,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![1, 1]);
-                assert_eq!(sa.data, vec!["Count 7".to_string()]);
+                assert_eq!(sa.data(), vec!["Count 7".to_string()]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -207,7 +213,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![1, 2]);
-                assert_eq!(sa.data, vec!["Item 1".to_string(), "Item 2".to_string()]);
+                assert_eq!(sa.data(), vec!["Item 1".to_string(), "Item 2".to_string()]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -223,7 +229,7 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![1, 2]);
-                assert_eq!(sa.data, vec!["alpha".to_string(), "beta".to_string()]);
+                assert_eq!(sa.data(), vec!["alpha".to_string(), "beta".to_string()]);
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -265,7 +271,7 @@ pub(crate) mod tests {
                 Value::StringArray(sa) => {
                     assert_eq!(sa.shape, vec![1, 3]);
                     assert_eq!(
-                        sa.data,
+                        sa.data(),
                         vec![
                             "Value 1".to_string(),
                             "Value 2".to_string(),
@@ -303,7 +309,7 @@ pub(crate) mod tests {
         match (cpu, gpu) {
             (Value::StringArray(expect), Value::StringArray(actual)) => {
                 assert_eq!(actual.shape, expect.shape);
-                assert_eq!(actual.data, expect.data);
+                assert_eq!(actual.data(), expect.data());
             }
             other => panic!("unexpected results {other:?}"),
         }
@@ -328,7 +334,7 @@ pub(crate) mod tests {
             else {
                 panic!("expected strings");
             };
-            assert_eq!(result.data, vec![expected]);
+            assert_eq!(result.data(), vec![expected]);
         }
     }
 
@@ -371,7 +377,7 @@ pub(crate) mod tests {
             panic!("expected cellstr");
         };
         assert!(
-            matches!(&cell.data[0], Value::CharArray(value) if value.data.iter().collect::<String>() == "7")
+            matches!(&cell.data()[0], Value::CharArray(value) if value.data().iter().collect::<String>() == "7")
         );
         assert!(matches!(
             compose_builtin(Value::from("%d"), vec![Value::Int(IntValue::I32(7))])

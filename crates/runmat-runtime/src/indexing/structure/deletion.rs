@@ -1,20 +1,15 @@
-use super::{mex, zero_based_indices};
+use super::mex;
+use crate::aggregate::structure::operations as struct_ops;
 use crate::indexing::plan::{effective_index_shape, IndexPlan};
 use crate::indexing::shape::column_major_strides;
 use crate::RuntimeError;
-use runmat_value::{StructArray, Value};
+use runmat_value::Value;
 use std::collections::HashSet;
 
 pub(super) fn delete_with_plan(base: Value, plan: &IndexPlan) -> Result<Value, RuntimeError> {
-    let (schema, shape) = match &base {
-        Value::Struct(structure) => (
-            structure.field_names().cloned().collect::<Vec<_>>(),
-            vec![1, 1],
-        ),
-        Value::StructArray(array) => (
-            array.field_names().cloned().collect::<Vec<_>>(),
-            array.shape().to_vec(),
-        ),
+    let shape = match &base {
+        Value::Struct(_) => vec![1, 1],
+        Value::StructArray(array) => array.shape().to_vec(),
         _ => {
             return Err(mex(
                 "StructAssignmentTypeMismatch",
@@ -25,9 +20,13 @@ pub(super) fn delete_with_plan(base: Value, plan: &IndexPlan) -> Result<Value, R
     if plan.indices.is_empty() {
         return Ok(base);
     }
-    let removal = zero_based_indices(plan).into_iter().collect::<HashSet<_>>();
+    let removal = plan
+        .indices
+        .iter()
+        .map(|&index| index as usize)
+        .collect::<HashSet<_>>();
     if plan.dims == 1 {
-        return delete_linear(base, schema, shape, removal);
+        return delete_linear(base, shape, removal);
     }
 
     let effective_shape = effective_index_shape(&shape, plan.dims)?;
@@ -51,9 +50,8 @@ pub(super) fn delete_with_plan(base: Value, plan: &IndexPlan) -> Result<Value, R
         .map(|(dimension, _)| dimension)
         .collect::<Vec<_>>();
     if partial.is_empty() {
-        return StructArray::empty(schema, vec![0, 0])
-            .map(Value::StructArray)
-            .map_err(|error| mex("StructDeletion", error));
+        return struct_ops::empty_like(&base, &[0, 0])
+            .map_err(|error| struct_ops::remap(error, |message| mex("StructDeletion", message)));
     }
     if partial.len() != 1
         || coordinate_sets
@@ -82,12 +80,11 @@ pub(super) fn delete_with_plan(base: Value, plan: &IndexPlan) -> Result<Value, R
             removed_coordinates.contains(&coordinate)
         })
         .collect::<HashSet<_>>();
-    remove_from_base(base, schema, &linear_removal, output_shape)
+    remove_from_base(base, &linear_removal, output_shape)
 }
 
 fn delete_linear(
     base: Value,
-    schema: Vec<String>,
     shape: Vec<usize>,
     removal: HashSet<usize>,
 ) -> Result<Value, RuntimeError> {
@@ -107,21 +104,20 @@ fn delete_linear(
     } else {
         vec![retained_len, 1]
     };
-    remove_from_base(base, schema, &removal, output_shape)
+    remove_from_base(base, &removal, output_shape)
 }
 
 fn remove_from_base(
     base: Value,
-    schema: Vec<String>,
     removal: &HashSet<usize>,
     output_shape: Vec<usize>,
 ) -> Result<Value, RuntimeError> {
     match base {
-        Value::Struct(_) => StructArray::empty(schema, output_shape).map(Value::StructArray),
-        Value::StructArray(array) => array.remove_linear(removal, output_shape),
+        value @ Value::Struct(_) => struct_ops::empty_like(&value, &output_shape),
+        Value::StructArray(array) => struct_ops::remove(&array, removal, &output_shape),
         _ => unreachable!("deletion admission checked the structure target"),
     }
-    .map_err(|error| mex("StructDeletion", error))
+    .map_err(|error| struct_ops::remap(error, |message| mex("StructDeletion", message)))
 }
 
 fn checked_shape_len(shape: &[usize]) -> Result<usize, RuntimeError> {

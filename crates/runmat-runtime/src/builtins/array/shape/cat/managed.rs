@@ -70,7 +70,7 @@ fn active(value: &Value, has_nonempty: bool) -> BuiltinResult<bool> {
 }
 
 fn output_extent(
-    values: &[Value],
+    values: FunctionArgumentView<'_>,
     axis: usize,
     concat_axis: usize,
     has_nonempty: bool,
@@ -146,7 +146,10 @@ struct CatGeometry {
     has_nonempty: bool,
 }
 
-fn inspect_geometry(dim_zero: usize, values: &[Value]) -> BuiltinResult<CatGeometry> {
+fn inspect_geometry(
+    dim_zero: usize,
+    values: FunctionArgumentView<'_>,
+) -> BuiltinResult<CatGeometry> {
     let mut has_nonempty = false;
     let mut rank = dim_zero
         .checked_add(1)
@@ -203,7 +206,7 @@ fn fill_elements(
     context: &RuntimeContext,
     receipt: &HostAllocationReceipt,
     dim_zero: usize,
-    values: &[Value],
+    values: FunctionArgumentView<'_>,
     shape: &[usize],
     geometry: &CatGeometry,
     mut write: impl FnMut(usize, &Value, usize) -> BuiltinResult<()>,
@@ -257,7 +260,7 @@ fn fill_elements(
 pub(super) fn numeric(
     context: &RuntimeContext,
     dim_zero: usize,
-    values: &[Value],
+    values: FunctionArgumentView<'_>,
 ) -> BuiltinResult<Value> {
     let geometry = inspect_geometry(dim_zero, values)?;
     let integer = leftmost_integer_target(values);
@@ -317,7 +320,7 @@ pub(super) fn numeric(
 pub(super) fn logical(
     context: &RuntimeContext,
     dim_zero: usize,
-    values: &[Value],
+    values: FunctionArgumentView<'_>,
 ) -> BuiltinResult<Value> {
     let geometry = inspect_geometry(dim_zero, values)?;
     let raw = ExactHostLogicalTensorAllocation::requested_bytes_for_dimensions(
@@ -421,7 +424,12 @@ mod tests {
         let ledger = ManagedHostEffectLedger::new(1 << 20);
         let context = runtime(&ledger);
         let single = Value::Tensor(Tensor::from_f32(vec![1.0, 2.0], vec![2, 1]).unwrap());
-        let numerical_value = numeric(&context, 1, &[single.clone(), single]).unwrap();
+        let numerical_value = numeric(
+            &context,
+            1,
+            FunctionArgumentView::from_slice(&[single.clone(), single]),
+        )
+        .unwrap();
         let Value::Tensor(numerical) = &numerical_value else {
             panic!("single tensor output")
         };
@@ -432,7 +440,12 @@ mod tests {
         );
 
         let logical_input = Value::LogicalArray(LogicalArray::new(vec![1, 0], vec![2, 1]).unwrap());
-        let logical_value = logical(&context, 1, &[logical_input.clone(), logical_input]).unwrap();
+        let logical_value = logical(
+            &context,
+            1,
+            FunctionArgumentView::from_slice(&[logical_input.clone(), logical_input]),
+        )
+        .unwrap();
         let Value::LogicalArray(logical) = &logical_value else {
             panic!("logical output")
         };
@@ -449,7 +462,12 @@ mod tests {
             )
             .unwrap(),
         );
-        let complex_value = complex(&context, 1, &[paired.clone(), paired]).unwrap();
+        let complex_value = complex(
+            &context,
+            1,
+            FunctionArgumentView::from_slice(&[paired.clone(), paired]),
+        )
+        .unwrap();
         let Value::ComplexTensor(complex_output) = &complex_value else {
             panic!("paired output")
         };
@@ -465,7 +483,10 @@ mod tests {
         let characters = character(
             &context,
             1,
-            &[Value::CharArray(CharArray::new_row("ab")), Value::Num(67.0)],
+            FunctionArgumentView::from_slice(&[
+                Value::CharArray(CharArray::new_row("ab")),
+                Value::Num(67.0),
+            ]),
         )
         .unwrap();
         let Value::CharArray(chars) = &characters else {
@@ -478,11 +499,11 @@ mod tests {
         let normalized = character(
             &context,
             1,
-            &[
+            FunctionArgumentView::from_slice(&[
                 Value::CharArray(empty.clone()),
                 Value::CharArray(rank_one.clone()),
                 Value::CharArray(CharArray::new_row("z")),
-            ],
+            ]),
         )
         .unwrap();
         let Value::CharArray(normalized_chars) = &normalized else {
@@ -492,11 +513,11 @@ mod tests {
         assert_eq!(normalized_chars.data().iter().collect::<String>(), "xyz");
         let ordinary = super::super::cat_host_values(
             1,
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::CharArray(empty),
                 Value::CharArray(rank_one),
                 Value::CharArray(CharArray::new_row("z")),
-            ],
+            ]),
             &super::super::LikeSpec::default(),
             None,
         )
@@ -506,7 +527,10 @@ mod tests {
         let selected = futures::executor::block_on(super::super::cat_builtin(
             Some(runtime(&ledger)),
             Value::Num(2.0),
-            vec![Value::CharArray(CharArray::new_row("ab")), Value::Num(67.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::CharArray(CharArray::new_row("ab")),
+                Value::Num(67.0),
+            ]),
         ))
         .unwrap();
         assert!(
@@ -529,11 +553,16 @@ mod tests {
 
         let denied = ManagedHostEffectLedger::new(0);
         let denied_context = runtime(&denied);
-        assert!(numeric(&denied_context, 0, &[Value::Num(1.0), Value::Num(2.0)]).is_err());
+        assert!(numeric(
+            &denied_context,
+            0,
+            FunctionArgumentView::from_slice(&[Value::Num(1.0), Value::Num(2.0)])
+        )
+        .is_err());
         assert!(character(
             &denied_context,
             1,
-            &[Value::CharArray(CharArray::new_row("a"))]
+            FunctionArgumentView::from_slice(&[Value::CharArray(CharArray::new_row("a"))])
         )
         .is_err());
         assert_eq!(denied.snapshot().live_reserved_bytes, 0);

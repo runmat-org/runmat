@@ -7,10 +7,10 @@ fn pdf_broadcasts_parameters_preserves_single_and_restores_residency() {
     let density = block_on(pdf_builtin(
         Value::String("Normal".into()),
         Value::Tensor(Tensor::from_f32(vec![0.0, 2.0], vec![2, 1]).unwrap()),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap()),
             Value::Num(1.0),
-        ],
+        ]),
     ))
     .expect("broadcast single pdf");
     let Value::Tensor(density) = density else {
@@ -29,7 +29,10 @@ fn pdf_broadcasts_parameters_preserves_single_and_restores_residency() {
         let density = block_on(pdf_builtin(
             Value::String("Normal".into()),
             Value::GpuTensor(handle),
-            vec![Value::Num(0.0), Value::Num(1.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(0.0),
+                Value::Num(1.0),
+            ]),
         ))
         .expect("resident integer pdf");
         assert!(matches!(density, Value::GpuTensor(_)));
@@ -43,7 +46,10 @@ fn pdf_logical_points_and_named_parameters_follow_numeric_evaluator() {
     let density = block_on(pdf_builtin(
         Value::from("Normal"),
         Value::Bool(false),
-        vec![Value::Bool(false), Value::Bool(true)],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Bool(false),
+            Value::Bool(true),
+        ]),
     ))
     .expect("logical values are evaluated as zero and one");
     let Value::Num(density) = density else {

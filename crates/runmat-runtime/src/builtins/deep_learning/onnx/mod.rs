@@ -42,7 +42,9 @@ use types::*;
     binding_variant = "default",
     builtin_path = "crate::builtins::deep_learning::onnx"
 )]
-pub(super) async fn export_onnx_network_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn export_onnx_network_builtin(
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if matches!(crate::output_count::current_output_count(), Some(n) if n > 0) {
         return Err(deep_learning_error(
             EXPORT_ONNX,

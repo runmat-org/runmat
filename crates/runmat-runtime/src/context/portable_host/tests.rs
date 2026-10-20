@@ -19,12 +19,15 @@ fn retaining_host_has_no_duplicate_buffer_and_evalc_remains_hidden() {
     );
     let runtime = context(host.clone());
     let _scope = runtime.enter();
-    crate::console::record_console_output(ConsoleStream::Stdout, "first");
+    crate::console::record_console_output(ConsoleStream::Stdout, "first")
+        .expect("retain first console write");
     let guard = crate::console::begin_capture().expect("capture admitted");
-    crate::console::record_console_output(ConsoleStream::Stderr, "hidden");
+    crate::console::record_console_output(ConsoleStream::Stderr, "hidden")
+        .expect("capture hidden console write");
     assert_eq!(guard.finish().expect("capture finished"), "hidden");
-    crate::console::record_clear_screen();
-    crate::console::record_console_output(ConsoleStream::Stderr, "last");
+    crate::console::record_clear_screen().expect("retain clear-screen record");
+    crate::console::record_console_output(ConsoleStream::Stderr, "last")
+        .expect("retain last console write");
     assert!(crate::console::take_thread_buffer().is_empty());
     let transcript = host.finish(true).unwrap();
     transcript.validate().unwrap();
@@ -137,7 +140,8 @@ fn interleaved_invocations_retain_only_their_original_console_writes() {
     let first_context = context(first.clone());
     let second_context = context(second.clone());
     async fn writes(label: &str) {
-        crate::console::record_console_output(ConsoleStream::Stdout, label);
+        crate::console::record_console_output(ConsoleStream::Stdout, label)
+            .expect("retain invocation stdout");
         let mut yielded = false;
         futures::future::poll_fn(|context| {
             if yielded {
@@ -149,7 +153,8 @@ fn interleaved_invocations_retain_only_their_original_console_writes() {
             }
         })
         .await;
-        crate::console::record_console_output(ConsoleStream::Stderr, label);
+        crate::console::record_console_output(ConsoleStream::Stderr, label)
+            .expect("retain invocation stderr");
     }
     futures::executor::block_on(futures::future::join(
         first_context.scope(writes("first")),
@@ -204,7 +209,8 @@ fn explicitly_unrequested_console_neither_retains_an_unbounded_buffer_nor_claims
     let _scope = runtime.enter();
     crate::console::reset_thread_buffer();
     for _ in 0..1000 {
-        crate::console::record_console_output(ConsoleStream::Stdout, "unrequested");
+        crate::console::record_console_output(ConsoleStream::Stdout, "unrequested")
+            .expect("discard unrequested output without buffering");
     }
     assert!(crate::console::take_thread_buffer().is_empty());
     assert_eq!(host.console_limits(), None);

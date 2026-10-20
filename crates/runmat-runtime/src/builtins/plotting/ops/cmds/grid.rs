@@ -7,7 +7,6 @@ use runmat_builtins::{
     GRID_DESCRIPTOR, GRID_ERROR_INVALID_ARGUMENT, GRID_ERROR_OUTPUTS, GRID_STATE_OUTPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::Value;
 enum GridMode {
     ToggleMajor,
     Major(bool),
@@ -18,7 +17,7 @@ enum GridMode {
     binding_variant = "default",
     builtin_path = "crate::builtins::plotting::cmds::grid"
 )]
-pub fn grid_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
+pub fn grid_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<bool> {
     crate::output_count::validate_fixed_outputs(&GRID_DESCRIPTOR, &GRID_ERROR_OUTPUTS, "grid")?;
     if crate::output_count::current_output_count() == Some(1) {
         crate::compatibility::ensure_builtin_extension_enabled(
@@ -27,7 +26,7 @@ pub fn grid_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
         )?;
     }
 
-    match parse_grid_mode(&args)? {
+    match parse_grid_mode(args.view())? {
         GridMode::ToggleMajor => {
             let enabled = toggle_grid();
             Ok(enabled)
@@ -43,7 +42,7 @@ pub fn grid_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
     }
 }
 
-fn parse_grid_mode(args: &[Value]) -> crate::BuiltinResult<GridMode> {
+fn parse_grid_mode(args: crate::call::FunctionArgumentView<'_>) -> crate::BuiltinResult<GridMode> {
     if args.len() > 1 {
         return Err(cmd_error_with_message(
             "grid",

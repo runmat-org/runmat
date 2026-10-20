@@ -32,12 +32,9 @@ async fn original_transitive_dependencies_survive_cold_native_execution_and_rede
     .await
     .unwrap();
     let unchanged = capture(&mut producer, &service).await;
-    assert_eq!(unchanged.program, original.program);
+    assert_eq!(unchanged.envelope(), original.envelope());
     drop(producer);
-    let envelope = runmat_execution::ExecutableUnitEnvelope::from_canonical_bytes(
-        original.program.as_deref().unwrap(),
-    )
-    .unwrap();
+    let envelope = original.envelope();
     assert_eq!(
         envelope.dependency_products.len(),
         2,
@@ -46,9 +43,7 @@ async fn original_transitive_dependencies_survive_cold_native_execution_and_rede
     let restored = ExecutableUnit::from_portable_envelope(&envelope).unwrap();
     assert_eq!(
         restored
-            .portable_envelope_for_function(runmat_types::ProgramFunctionId(
-                original.function as u32
-            ))
+            .portable_envelope_for_function(original.function_in(&restored))
             .unwrap(),
         envelope
     );
@@ -102,13 +97,13 @@ async fn original_transitive_dependencies_survive_cold_native_execution_and_rede
         let result = cold
             .invoke_portable_unit(
                 &envelope,
-                original.arguments.clone(),
-                original.requested_outputs,
+                original.call.invocation.arguments().to_vec(),
+                original.call.invocation.requested_outputs(),
                 &control,
             )
             .await
             .expect("original transitive product must execute without producer registry");
-        assert_eq!(result, Value::Num(27.0));
+        assert_eq!(result.as_slice(), &[Value::Num(27.0)]);
     }
 }
 
@@ -127,10 +122,7 @@ async fn nested_cold_future_capture_preserves_original_dependency_product() {
     .unwrap();
     let original = capture(&mut producer, &service).await;
     drop(producer);
-    let envelope = runmat_execution::ExecutableUnitEnvelope::from_canonical_bytes(
-        original.program.as_deref().unwrap(),
-    )
-    .unwrap();
+    let envelope = original.envelope();
     let mut cold = RunMatSession::with_options(false, false).unwrap();
     cold.set_compat_mode(runmat_parser::CompatMode::RunMat);
     let cold_capture = Rc::new(CapturingService::default());
@@ -138,22 +130,15 @@ async fn nested_cold_future_capture_preserves_original_dependency_product() {
     let value = cold
         .invoke_portable_unit(
             &envelope,
-            original.arguments,
-            original.requested_outputs,
+            original.call.invocation.arguments().to_vec(),
+            original.call.invocation.requested_outputs(),
             &crate::InvocationControl::default(),
         )
         .await
         .expect("nested capture needs the original leaf compiler authority");
-    assert!(matches!(value, Value::Future(_)));
-    let leaf = cold_capture
-        .original
-        .borrow_mut()
-        .take()
-        .expect("original leaf capture");
-    let captured = runmat_execution::ExecutableUnitEnvelope::from_canonical_bytes(
-        leaf.program.as_deref().unwrap(),
-    )
-    .unwrap();
+    assert!(matches!(value.as_slice(), [Value::Future(_)]));
+    let leaf = cold_capture.take_original();
+    let captured = leaf.envelope();
     assert_eq!(
         ExecutableUnit::from_portable_envelope(&captured)
             .unwrap()
@@ -161,5 +146,5 @@ async fn nested_cold_future_capture_preserves_original_dependency_product() {
             .text,
         leaf_source
     );
-    assert_eq!(cold_value(&leaf).await, Value::Num(12.0));
+    assert_eq!(cold_value(&leaf).await.as_slice(), &[Value::Num(12.0)]);
 }

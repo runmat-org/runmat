@@ -19,115 +19,45 @@ const ROTATION_TRANSFORM_CLASS: &str = "fea.RotationPeriodicTransform";
 const EMPTY_FIELDS: &[&str] = &[];
 const TRANSLATION_FIELDS: &[&str] = &["translation"];
 const ROTATION_FIELDS: &[&str] = &["origin", "axis", "angle"];
-const NO_INPUTS: [BuiltinParamDescriptor; 0] = [];
-const TRANSLATION_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "translation",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Typed fea.Translation vector from primary to secondary geometry.",
-}];
-const ROTATION_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "origin",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Typed fea.Position on the rotation axis.",
-    },
-    BuiltinParamDescriptor {
-        name: "axis",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Typed fea.Direction rotation axis.",
-    },
-    BuiltinParamDescriptor {
-        name: "angle",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Typed fea.Rotation angle from primary to secondary geometry.",
-    },
-];
-const IDENTITY_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "transform = fea.PeriodicTransform.identity()",
-    inputs: &NO_INPUTS,
-    outputs: &OUT_ANY,
-}];
-const TRANSLATION_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "transform = fea.PeriodicTransform.translation(translation)",
-    inputs: &TRANSLATION_INPUTS,
-    outputs: &OUT_ANY,
-}];
-const ROTATION_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "transform = fea.PeriodicTransform.rotation(origin, axis, angle)",
-    inputs: &ROTATION_INPUTS,
-    outputs: &OUT_ANY,
-}];
-pub(super) const IDENTITY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &IDENTITY_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-pub(super) const TRANSLATION_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &TRANSLATION_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-pub(super) const ROTATION_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ROTATION_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
 #[runtime_builtin(
     name = "fea.PeriodicTransform.identity",
-    category = "fea",
-    summary = "Create an identity periodic transform.",
-    keywords = "fea,periodic,transform,identity,typed",
-    descriptor(
-        crate::builtins::fea::constraints::support::periodic_transform::IDENTITY_DESCRIPTOR
-    ),
-    integer_audit(TYPED_CONSTRAINT_INTEGER_AUDIT),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::fea::constraints::support::periodic_transform"
 )]
-pub async fn periodic_transform_identity_builtin() -> BuiltinResult<Value> {
+pub async fn periodic_transform_identity_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+) -> BuiltinResult<Value> {
     ensure_periodic_transform_classes_registered();
-    Ok(Value::Object(ObjectInstance::new(IDENTITY_TRANSFORM_CLASS)))
+    transform_object(runtime.as_ref(), IDENTITY_TRANSFORM_CLASS, [])
 }
 
 #[runtime_builtin(
     name = "fea.PeriodicTransform.translation",
-    category = "fea",
-    summary = "Create a translational periodic transform.",
-    keywords = "fea,periodic,transform,translation,typed",
-    descriptor(
-        crate::builtins::fea::constraints::support::periodic_transform::TRANSLATION_DESCRIPTOR
-    ),
-    integer_audit(TYPED_CONSTRAINT_INTEGER_AUDIT),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::fea::constraints::support::periodic_transform"
 )]
-pub async fn periodic_transform_translation_builtin(translation: Value) -> BuiltinResult<Value> {
+pub async fn periodic_transform_translation_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    translation: Value,
+) -> BuiltinResult<Value> {
     translation_meters("fea.PeriodicTransform.translation", &translation)?;
-    transform_object(TRANSLATION_TRANSFORM_CLASS, [("translation", translation)])
+    transform_object(
+        runtime.as_ref(),
+        TRANSLATION_TRANSFORM_CLASS,
+        [("translation", translation)],
+    )
 }
 
 #[runtime_builtin(
     name = "fea.PeriodicTransform.rotation",
-    category = "fea",
-    summary = "Create a rotational periodic transform.",
-    keywords = "fea,periodic,transform,rotation,axis,typed",
-    descriptor(
-        crate::builtins::fea::constraints::support::periodic_transform::ROTATION_DESCRIPTOR
-    ),
-    integer_audit(TYPED_CONSTRAINT_INTEGER_AUDIT),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::fea::constraints::support::periodic_transform"
 )]
 pub async fn periodic_transform_rotation_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     origin: Value,
     axis: Value,
     angle: Value,
@@ -141,6 +71,7 @@ pub async fn periodic_transform_rotation_builtin(
         "radians",
     )?;
     transform_object(
+        runtime.as_ref(),
         ROTATION_TRANSFORM_CLASS,
         [("origin", origin), ("axis", axis), ("angle", angle)],
     )
@@ -158,15 +89,15 @@ pub(crate) fn periodic_transform_from_value(
         ));
     };
     let property = |name: &str| {
-        object.properties.get(name).ok_or_else(|| {
+        object.properties().get(name).ok_or_else(|| {
             builtin_error(
                 builtin,
                 &ERROR_INPUT,
-                format!("{}.{} is required", object.class_name, name),
+                format!("{}.{} is required", object.class_name(), name),
             )
         })
     };
-    match object.class_name.display_name() {
+    match object.class_name().display_name() {
         IDENTITY_TRANSFORM_CLASS => Ok(PeriodicTransform::Identity),
         TRANSLATION_TRANSFORM_CLASS => Ok(PeriodicTransform::Translation(Translation::new(
             translation_meters(builtin, property("translation")?)?,
@@ -193,15 +124,17 @@ pub(crate) fn periodic_transform_from_value(
 }
 
 fn transform_object<const N: usize>(
+    runtime: Option<&crate::context::RuntimeContext>,
     class_name: &str,
     properties: [(&str, Value); N],
 ) -> BuiltinResult<Value> {
     ensure_periodic_transform_classes_registered();
-    let mut object = ObjectInstance::new(class_name);
-    for (name, value) in properties {
-        object.properties.insert(name.into(), value);
-    }
-    Ok(Value::Object(object))
+    let object = crate::execution::object::construct_object_from_borrowed_fields(
+        runtime,
+        class_name,
+        properties.iter().map(|(name, value)| (*name, value)),
+    )?;
+    Ok(object.into_value_and_lease().0)
 }
 
 pub(super) fn ensure_periodic_transform_classes_registered() {
@@ -294,12 +227,13 @@ fn validate_nested_classes(
 ) -> Result<(), String> {
     for (field, class_name) in expected {
         if !matches!(
-            object.properties.get(*field),
-            Some(Value::Object(value)) if value.class_name.display_name() == *class_name
+            object.properties().get(field),
+            Some(Value::Object(value)) if value.class_name().display_name() == *class_name
         ) {
             return Err(format!(
                 "{}.{} must be a typed {class_name}",
-                object.class_name, field
+                object.class_name(),
+                field
             ));
         }
     }

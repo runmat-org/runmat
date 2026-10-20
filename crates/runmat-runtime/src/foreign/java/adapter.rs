@@ -13,9 +13,7 @@ use runmat_types::{
     CapabilityRequirement, ForeignAffinity, ForeignCapability, ForeignLifetime, ForeignOwnership,
     ForeignTypeIdentity,
 };
-use runmat_value::{
-    CellArray, CharArray, ForeignRef, ForeignResourceKey, ObjectInstance, Value, WeakForeignRef,
-};
+use runmat_value::{CellArray, CharArray, ForeignRef, ForeignResourceKey, Value, WeakForeignRef};
 
 use super::super::project_retirement::ProjectRetirementAuthority;
 use super::super::{
@@ -278,14 +276,15 @@ impl JavaAdapter {
 
     fn invoke_control_now(
         &self,
+        runtime: Option<&RuntimeContext>,
         call: ForeignCall,
     ) -> Result<runmat_value::ValueSequence, RuntimeError> {
         match call.symbol.as_str() {
             "status" => self
-                .status_value()
+                .status_value(runtime)
                 .and_then(super::super::single_output_sequence),
             "configure" => self
-                .configure_value(call.arguments)
+                .configure_value(runtime, call.arguments)
                 .and_then(super::super::single_output_sequence),
             _ => Err(invalid_conversion(
                 "unsupported synchronous Java control operation",
@@ -417,59 +416,65 @@ impl JavaAdapter {
         .map_err(invalid_conversion)
     }
 
-    fn status_value(&self) -> Result<Value, RuntimeError> {
+    fn status_value(&self, runtime: Option<&RuntimeContext>) -> Result<Value, RuntimeError> {
         let running = self.session.borrow().is_some();
         let installation = if let Some(session) = self.session.borrow().as_ref() {
             Some(session.installation().clone())
         } else {
             discover_jvm(&self.discovery.borrow()).ok()
         };
-        let mut status =
-            ObjectInstance::new(runmat_builtins::JAVA_ENVIRONMENT_CLASS.display_name());
-        status.properties.insert(
-            "Version".into(),
-            Value::string(
-                installation
-                    .as_ref()
-                    .map(|value| value.version.raw.clone())
-                    .unwrap_or_default(),
+        let fields = [
+            (
+                "Version",
+                Value::string(
+                    installation
+                        .as_ref()
+                        .map(|value| value.version.raw.clone())
+                        .unwrap_or_default(),
+                ),
             ),
-        );
-        status.properties.insert(
-            "Home".into(),
-            Value::string(
-                installation
-                    .as_ref()
-                    .map(|value| value.home.display().to_string())
-                    .unwrap_or_default(),
+            (
+                "Home",
+                Value::string(
+                    installation
+                        .as_ref()
+                        .map(|value| value.home.display().to_string())
+                        .unwrap_or_default(),
+                ),
             ),
-        );
-        status.properties.insert(
-            "Library".into(),
-            Value::string(
-                installation
-                    .as_ref()
-                    .map(|value| value.library.display().to_string())
-                    .unwrap_or_default(),
+            (
+                "Library",
+                Value::string(
+                    installation
+                        .as_ref()
+                        .map(|value| value.library.display().to_string())
+                        .unwrap_or_default(),
+                ),
             ),
-        );
-        status.properties.insert(
-            "Status".into(),
-            Value::String(if running { "loaded" } else { "notloaded" }.into()),
-        );
-        status.properties.insert(
-            "Configuration".into(),
-            Value::string({
-                let discovery = self.discovery.borrow();
-                discovery
-                    .explicit_home
-                    .as_ref()
-                    .or(discovery.environment_home.as_ref())
-                    .map(|path| path.display().to_string())
-                    .unwrap_or_else(|| "system".into())
-            }),
-        );
-        Ok(Value::Object(status))
+            (
+                "Status",
+                Value::String(if running { "loaded" } else { "notloaded" }.into()),
+            ),
+            (
+                "Configuration",
+                Value::string({
+                    let discovery = self.discovery.borrow();
+                    discovery
+                        .explicit_home
+                        .as_ref()
+                        .or(discovery.environment_home.as_ref())
+                        .map(|path| path.display().to_string())
+                        .unwrap_or_else(|| "system".into())
+                }),
+            ),
+        ];
+        crate::execution::object::construct_object_from_borrowed_fields(
+            runtime,
+            runmat_builtins::JAVA_ENVIRONMENT_CLASS.display_name(),
+            fields.iter().map(|(name, value)| (*name, value)),
+        )
+        // Environment status has no GC edges; retain its original generation.
+        .map(|status| status.value().clone())
     }
 
     fn usejava_value(&self, arguments: Vec<Value>) -> Result<Value, RuntimeError> {
@@ -490,6 +495,7 @@ impl JavaAdapter {
 
     fn configure_value(
         &self,
+        runtime: Option<&RuntimeContext>,
         arguments: crate::call::RootedFunctionArguments,
     ) -> Result<Value, RuntimeError> {
         if self.is_running() {
@@ -541,7 +547,7 @@ impl JavaAdapter {
                 }
             }
         }
-        self.status_value()
+        self.status_value(runtime)
     }
 }
 
@@ -675,8 +681,11 @@ impl ForeignAdapter for JavaAdapter {
             return Box::pin(async move { ForeignCallCompletion::invoked(Err(error)) });
         }
         if matches!(call.symbol.as_str(), "status" | "configure") {
-            let result =
-                crate::foreign::runtime::root_adapter_result(self.invoke_control_now(call));
+            let result = self
+                .invoke_control_now(Some(&context), call)
+                .and_then(|sequence| {
+                    crate::execution::RootedValueSequence::in_context(sequence, &context)
+                });
             return Box::pin(async move { ForeignCallCompletion::invoked(result) });
         }
         let Some(owner) = self.self_weak.upgrade() else {

@@ -91,12 +91,18 @@ pub(super) fn parse_fid(value: &Value) -> Result<i32, String> {
 
 pub(super) type FwriteArgs<'a> = (Option<&'a Value>, Option<&'a Value>, Option<&'a Value>);
 
-pub(super) fn classify_arguments(args: &[Value]) -> Result<FwriteArgs<'_>, String> {
+pub(super) fn classify_arguments<'a>(
+    args: crate::call::FunctionArgumentView<'a>,
+) -> Result<FwriteArgs<'a>, String> {
     match args.len() {
         0 => Ok((None, None, None)),
         1 => {
             if is_string_like(&args[0]) {
-                Ok((Some(&args[0]), None, None))
+                Ok((
+                    Some(args.get(0).expect("validated fwrite control arity")),
+                    None,
+                    None,
+                ))
             } else {
                 Err(
                     "fwrite: precision argument must be a string scalar or character vector"
@@ -112,9 +118,17 @@ pub(super) fn classify_arguments(args: &[Value]) -> Result<FwriteArgs<'_>, Strin
                 );
             }
             if is_numeric_like(&args[1]) {
-                Ok((Some(&args[0]), Some(&args[1]), None))
+                Ok((
+                    Some(args.get(0).expect("validated fwrite control arity")),
+                    Some(args.get(1).expect("validated fwrite control arity")),
+                    None,
+                ))
             } else if is_string_like(&args[1]) {
-                Ok((Some(&args[0]), None, Some(&args[1])))
+                Ok((
+                    Some(args.get(0).expect("validated fwrite control arity")),
+                    None,
+                    Some(args.get(1).expect("validated fwrite control arity")),
+                ))
             } else {
                 Err("fwrite: invalid argument combination (expected numeric skip or machine format string)".to_string())
             }
@@ -124,7 +138,11 @@ pub(super) fn classify_arguments(args: &[Value]) -> Result<FwriteArgs<'_>, Strin
             {
                 return Err("fwrite: expected arguments (precision, skip, machinefmt)".to_string());
             }
-            Ok((Some(&args[0]), Some(&args[1]), Some(&args[2])))
+            Ok((
+                Some(args.get(0).expect("validated fwrite control arity")),
+                Some(args.get(1).expect("validated fwrite control arity")),
+                Some(args.get(2).expect("validated fwrite control arity")),
+            ))
         }
         _ => Err("fwrite: too many input arguments".to_string()),
     }
@@ -134,7 +152,7 @@ pub(super) fn is_string_like(value: &Value) -> bool {
     match value {
         Value::String(_) => true,
         Value::CharArray(ca) => ca.rows == 1,
-        Value::StringArray(sa) => sa.data.len() == 1,
+        Value::StringArray(sa) => sa.data().len() == 1,
         _ => false,
     }
 }
@@ -323,8 +341,8 @@ pub(super) fn machine_format_from_label(label: &str) -> Result<MachineFormat, St
 pub(super) fn scalar_string(value: &Value, err: &str) -> Result<String, String> {
     match value {
         Value::String(s) => Ok(s.as_str().to_owned()),
-        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].as_str().to_owned()),
+        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data().iter().collect()),
+        Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].as_str().to_owned()),
         _ => Err(err.to_string()),
     }
 }

@@ -82,8 +82,11 @@ fn sub2ind_internal_error(message: impl Into<String>) -> RuntimeError {
     binding_variant = "default",
     builtin_path = "crate::builtins::array::indexing::sub2ind"
 )]
-async fn sub2ind_builtin(dims_val: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let resident_source = resident_owner::source(&dims_val, &rest);
+async fn sub2ind_builtin(
+    dims_val: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    let resident_source = resident_owner::source(&dims_val, rest.view());
     let resident_inputs: Vec<GpuTensorHandle> = std::iter::once(&dims_val)
         .chain(rest.iter())
         .filter_map(|value| match value {
@@ -103,7 +106,7 @@ async fn sub2ind_builtin(dims_val: Value, rest: Vec<Value>) -> crate::BuiltinRes
         ));
     }
 
-    if let Some(value) = try_gpu_sub2ind(&dims, &rest, resident_source.as_ref()).await? {
+    if let Some(value) = try_gpu_sub2ind(&dims, rest.view(), resident_source.as_ref()).await? {
         return Ok(value);
     }
 
@@ -123,7 +126,7 @@ async fn sub2ind_builtin(dims_val: Value, rest: Vec<Value>) -> crate::BuiltinRes
 
 async fn try_gpu_sub2ind(
     dims: &[usize],
-    subs: &[Value],
+    subs: crate::call::FunctionArgumentView<'_>,
     source: Option<&GpuTensorHandle>,
 ) -> crate::BuiltinResult<Option<Value>> {
     let Some(source) = source else {
@@ -397,6 +400,7 @@ pub(crate) mod tests {
     use runmat_value::{IntValue, IntegerStorage, Tensor, Value};
 
     fn sub2ind_builtin(dims_val: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+        let rest = crate::call::BuiltinArguments::from_borrowed(&rest, None)?;
         block_on(super::sub2ind_builtin(dims_val, rest))
     }
 

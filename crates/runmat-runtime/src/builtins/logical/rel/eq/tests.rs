@@ -175,7 +175,7 @@ fn eq_symbolic_array_with_scalar_builds_equations() {
             assert_eq!(array.shape, vec![1, 2]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),
@@ -206,7 +206,7 @@ fn eq_compatible_symbolic_arrays_build_equations() {
             assert_eq!(array.shape, vec![1, 2]);
             assert_eq!(
                 array
-                    .data
+                    .data()
                     .iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>(),

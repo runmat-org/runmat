@@ -7,7 +7,15 @@ use crate::builtins::common::grouping_keys::format_integer;
 #[cfg(test)]
 impl BoxplotOptions {
     pub(super) fn parse(args: Vec<Value>) -> BuiltinResult<Self> {
-        futures::executor::block_on(super::plan::BoxplotOptionPlan::admit(args, None)?.evaluate())
+        futures::executor::block_on(
+            super::plan::BoxplotOptionPlan::admit(
+                crate::execution::RootedValues::new(args)
+                    .map_err(|error| error.into_runtime_error())?
+                    .into(),
+                None,
+            )?
+            .evaluate(),
+        )
     }
 }
 
@@ -40,8 +48,10 @@ pub(super) fn text_scalar(value: &Value, label: &str) -> BuiltinResult<String> {
 pub(super) fn value_text_preserve_case(value: &Value, label: &str) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.as_str().to_owned()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].as_str().to_owned()),
-        Value::CharArray(array) if array.rows == 1 => Ok(array.data.iter().collect()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(array.data()[0].as_str().to_owned())
+        }
+        Value::CharArray(array) if array.rows == 1 => Ok(array.data().iter().collect()),
         _ => Err(invalid(format!("boxplot: {label} must be text"))),
     }
 }
@@ -50,13 +60,13 @@ pub(super) fn text_vector(value: &Value, label: &str) -> BuiltinResult<Vec<Strin
     match value {
         Value::String(text) => Ok(vec![text.as_str().to_owned()]),
         Value::StringArray(array) => Ok(array
-            .data
+            .data()
             .iter()
             .map(|text| text.as_str().to_owned())
             .collect()),
         Value::CharArray(array) => Ok(char_rows(array)),
         Value::Cell(cell) => cell
-            .data
+            .data()
             .iter()
             .map(|value| value_text_preserve_case(value, label))
             .collect(),
@@ -129,10 +139,10 @@ pub(super) fn parse_symbol(text: &str) -> BuiltinResult<(Option<MarkerStyle>, Op
 pub(super) fn parse_colors(value: &Value) -> BuiltinResult<Vec<Vec4>> {
     if let Some(text) = match value {
         Value::String(text) => Some(text.as_str().to_owned()),
-        Value::StringArray(array) if array.data.len() == 1 => {
-            Some(array.data[0].as_str().to_owned())
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Some(array.data()[0].as_str().to_owned())
         }
-        Value::CharArray(array) if array.rows == 1 => Some(array.data.iter().collect()),
+        Value::CharArray(array) if array.rows == 1 => Some(array.data().iter().collect()),
         _ => None,
     } {
         let colors = text

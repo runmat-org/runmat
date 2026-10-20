@@ -5,7 +5,7 @@ use super::execute;
 
 fn run(args: &[Value], predicate: fn(&runmat_filesystem::FsMetadata) -> bool) -> Value {
     futures::executor::block_on(execute::evaluate(
-        args,
+        crate::call::FunctionArgumentView::from_slice(args),
         "isfile",
         &ISFILE_ERROR_ARITY,
         &ISFILE_ERROR_PATH,
@@ -55,7 +55,7 @@ fn invalid_input_rejects_before_provider_access() {
             .handle,
     );
     let error = futures::executor::block_on(execute::evaluate(
-        &[resident],
+        crate::call::FunctionArgumentView::from_slice(&[resident]),
         "isfile",
         &ISFILE_ERROR_ARITY,
         &ISFILE_ERROR_PATH,
@@ -119,8 +119,13 @@ fn genuine_character_pages_reject_but_trailing_singletons_remain_rows() {
             Value::Cell(CellArray::new(vec![value], 1, 1).unwrap()),
         ] {
             assert_eq!(
-                super::input::parse(&[input], "isfile", &ISFILE_ERROR_ARITY, &ISFILE_ERROR_PATH)
-                    .is_ok(),
+                super::input::parse(
+                    crate::call::FunctionArgumentView::from_slice(&[input]),
+                    "isfile",
+                    &ISFILE_ERROR_ARITY,
+                    &ISFILE_ERROR_PATH
+                )
+                .is_ok(),
                 valid
             );
         }

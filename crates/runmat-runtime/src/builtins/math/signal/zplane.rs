@@ -18,7 +18,7 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 use crate::builtins::math::poly::roots;
 use crate::builtins::math::signal::common::{value_to_complex_vector, ComplexVectorInput};
-use crate::builtins::plotting::op_common::{apply_axes_target, split_leading_axes_handle};
+use crate::builtins::plotting::op_common::{apply_axes_target, split_leading_axes_arguments};
 use crate::builtins::plotting::plotting_error;
 use crate::builtins::plotting::state::{render_active_plot, PlotRenderOptions};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -61,12 +61,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::math::signal::zplane"
 )]
-async fn zplane_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn zplane_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     evaluate(args).await
 }
 
-pub async fn evaluate(args: Vec<Value>) -> BuiltinResult<Value> {
-    preflight_obvious_forms(&args)?;
+pub async fn evaluate(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    preflight_obvious_forms(args.view())?;
     // This includes an ambiguous leading axes candidate: complex integer
     // storage cannot encode an axes handle or enter the floating root kernel.
     // Check every authoritative class before exactness can download the first
@@ -102,8 +102,8 @@ pub async fn evaluate(args: Vec<Value>) -> BuiltinResult<Value> {
         .map_err(map_invalid_argument)?;
     }
     let (axes_target, args) =
-        split_leading_axes_handle(args, BUILTIN_NAME).map_err(map_invalid_argument)?;
-    preflight_zplane_inputs(&args)?;
+        split_leading_axes_arguments(args, BUILTIN_NAME).map_err(map_invalid_argument)?;
+    preflight_zplane_inputs(args.view())?;
     for (index, value) in args.iter().enumerate() {
         crate::builtins::common::validation::reject_typed_complex_integer(value, BUILTIN_NAME)
             .map_err(map_invalid_argument)?;
@@ -126,10 +126,12 @@ pub async fn evaluate(args: Vec<Value>) -> BuiltinResult<Value> {
 /// Reject malformed authoritative metadata before any numeric readback. A
 /// three-argument call may be either ax/b/a or z/p/k, so only facts invalid
 /// under both readings are checked before resolving the possible axes handle.
-fn preflight_obvious_forms(args: &[Value]) -> BuiltinResult<()> {
-    match args {
-        [sos] => preflight_sos(sos),
-        [first, second] => {
+fn preflight_obvious_forms(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<()> {
+    match args.len() {
+        1 => preflight_sos(args.first().expect("one zplane argument")),
+        2 => {
+            let first = args.get(0).expect("first zplane argument");
+            let second = args.get(1).expect("second zplane argument");
             // Could be ax,SOS. Only prove a coefficient form when the first
             // carrier cannot encode a scalar axes handle.
             if value_shape(first).is_some_and(|shape| {
@@ -143,7 +145,10 @@ fn preflight_obvious_forms(args: &[Value]) -> BuiltinResult<()> {
             }
             Ok(())
         }
-        [first, second, third] => {
+        3 => {
+            let first = args.get(0).expect("first zplane argument");
+            let second = args.get(1).expect("second zplane argument");
+            let third = args.get(2).expect("third zplane argument");
             preflight_vector(second)?;
             preflight_vector(third)?;
             if value_shape(first).is_some_and(|shape| shape.iter().any(|&n| n > 1)) {
@@ -152,7 +157,10 @@ fn preflight_obvious_forms(args: &[Value]) -> BuiltinResult<()> {
             }
             Ok(())
         }
-        [_, zeros, poles, gain] => {
+        4 => {
+            let zeros = args.get(1).expect("zplane zeros argument");
+            let poles = args.get(2).expect("zplane poles argument");
+            let gain = args.get(3).expect("zplane gain argument");
             preflight_vector(zeros)?;
             preflight_vector(poles)?;
             preflight_gain(gain)
@@ -161,14 +169,19 @@ fn preflight_obvious_forms(args: &[Value]) -> BuiltinResult<()> {
     }
 }
 
-fn preflight_zplane_inputs(args: &[Value]) -> BuiltinResult<()> {
-    match args {
-        [sos] => preflight_sos(sos),
-        [first, second] => {
+fn preflight_zplane_inputs(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<()> {
+    match args.len() {
+        1 => preflight_sos(args.first().expect("one zplane input")),
+        2 => {
+            let first = args.get(0).expect("first zplane input");
+            let second = args.get(1).expect("second zplane input");
             preflight_vector(first)?;
             preflight_vector(second)
         }
-        [zeros, poles, gain] => {
+        3 => {
+            let zeros = args.get(0).expect("zeros input");
+            let poles = args.get(1).expect("poles input");
+            let gain = args.get(2).expect("gain input");
             preflight_vector(zeros)?;
             preflight_vector(poles)?;
             preflight_gain(gain)
@@ -258,13 +271,14 @@ struct ZeroPoleData {
     poles: Vec<Complex<f64>>,
 }
 
-async fn parse_zero_pole_data(args: Vec<Value>) -> BuiltinResult<ZeroPoleData> {
+async fn parse_zero_pole_data(
+    mut args: crate::call::BuiltinArguments,
+) -> BuiltinResult<ZeroPoleData> {
     match args.len() {
-        1 => zeros_poles_from_sos(args.into_iter().next().expect("one arg")).await,
+        1 => zeros_poles_from_sos(args.pop_front().expect("one arg")).await,
         2 => {
-            let mut iter = args.into_iter();
-            let first = vector_input("first", iter.next().expect("first arg")).await?;
-            let second = vector_input("second", iter.next().expect("second arg")).await?;
+            let first = vector_input("first", args.pop_front().expect("first arg")).await?;
+            let second = vector_input("second", args.pop_front().expect("second arg")).await?;
             if treat_as_explicit_zero_pole_vectors(&first, &second) {
                 Ok(ZeroPoleData {
                     zeros: first.data,
@@ -275,10 +289,9 @@ async fn parse_zero_pole_data(args: Vec<Value>) -> BuiltinResult<ZeroPoleData> {
             }
         }
         3 => {
-            let mut iter = args.into_iter();
-            let zeros = vector_input("zeros", iter.next().expect("zeros arg")).await?;
-            let poles = vector_input("poles", iter.next().expect("poles arg")).await?;
-            validate_gain(iter.next().expect("gain arg")).await?;
+            let zeros = vector_input("zeros", args.pop_front().expect("zeros arg")).await?;
+            let poles = vector_input("poles", args.pop_front().expect("poles arg")).await?;
+            validate_gain(args.pop_front().expect("gain arg")).await?;
             Ok(ZeroPoleData {
                 zeros: zeros.data,
                 poles: poles.data,

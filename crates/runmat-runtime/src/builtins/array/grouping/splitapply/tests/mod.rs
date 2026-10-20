@@ -16,7 +16,7 @@ fn call(
     block_on(splitapply_builtin(
         Value::FunctionHandle(function.into()),
         first,
-        rest,
+        crate::builtins::common::test_support::builtin_arguments(rest),
     ))
 }
 

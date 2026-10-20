@@ -4,9 +4,7 @@ use super::*;
 use crate::context::{
     GraphicsSelectedBoundCallbackResponder, RuntimeContext, SessionSourceEvaluation,
 };
-use runmat_value::{
-    GraphicsCallbackResult, GraphicsCallbackRolePayload, NumericScalar, StructValue,
-};
+use runmat_value::{GraphicsCallbackResult, GraphicsCallbackRolePayload, NumericScalar};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -56,13 +54,13 @@ pub(super) fn prepare(
                 let value = token.resolve_in_context(&runtime)?;
                 let function = match value {
                     Value::Cell(cell) => {
-                        let Some(function) = cell.data.first() else {
+                        let Some(function) = cell.data().first() else {
                             return Err(super::super::super::plotting_error(
                                 "graphics",
                                 "callback cell is empty",
                             ));
                         };
-                        args.extend(cell.data.iter().skip(1).cloned());
+                        args.extend(cell.data().iter().skip(1).cloned());
                         function.clone()
                     }
                     function => function,
@@ -104,9 +102,9 @@ fn receiver_value(receiver: &GraphicsReceiverRef) -> BuiltinResult<Value> {
 fn arguments(payload: &GraphicsCallbackRolePayload) -> BuiltinResult<Vec<Value>> {
     match payload {
         GraphicsCallbackRolePayload::Action { figure, axes, .. } => {
-            let mut event = StructValue::new();
+            let mut event = runmat_value::UnboundedStructValueBuilder::new();
             event.insert("Axes", receiver_value(axes)?);
-            Ok(vec![receiver_value(figure)?, Value::Struct(event)])
+            Ok(vec![receiver_value(figure)?, Value::Struct(event.finish())])
         }
         GraphicsCallbackRolePayload::Filter { target, .. } => {
             let empty = Tensor::new(Vec::new(), vec![0, 0])

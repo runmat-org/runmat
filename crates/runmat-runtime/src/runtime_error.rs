@@ -115,9 +115,9 @@ pub fn error_from_exception(exception: runmat_value::MException) -> RuntimeError
     if let Some(original) = parts.original {
         return RuntimeError::from_shared_original(original);
     }
-    build_runtime_error(parts.message)
-        .with_identifier(parts.identifier)
-        .with_call_stack(parts.stack)
+    build_runtime_error(parts.message.into_string_unbounded())
+        .with_identifier(parts.identifier.into_string_unbounded())
+        .with_call_stack(parts.stack.into_strings_unbounded())
         .build()
 }
 
@@ -273,7 +273,11 @@ mod tests {
             .with_source(std::io::Error::other("typed original cause"))
             .build();
         let caught = exception_from_error(original);
-        assert_eq!(caught.stack, ["origin"]);
+        assert!(caught
+            .stack
+            .iter()
+            .map(runmat_value::Utf8Text::as_str)
+            .eq(["origin"]));
         let other_owner = caught.clone();
         let reraised = error_from_exception(caught);
         assert_eq!(reraised.identifier(), Some("RunMat:diagnostics:Inner"));

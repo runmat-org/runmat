@@ -131,7 +131,7 @@ pub fn value_is_non_nan(value: &Value) -> bool {
             .materialize_f64()
             .iter()
             .all(|(re, im)| !re.is_nan() && !im.is_nan()),
-        Value::Cell(c) => c.data.iter().all(value_is_non_nan),
+        Value::Cell(c) => c.data().iter().all(value_is_non_nan),
         _ => true,
     }
 }

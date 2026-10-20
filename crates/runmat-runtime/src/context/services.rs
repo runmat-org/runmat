@@ -1354,7 +1354,7 @@ pub enum RuntimeDistributedInvocation {
 #[derive(Debug, Clone)]
 pub struct RuntimeDistributedCallRequest {
     pub builtin: BuiltinId,
-    pub arguments: Vec<Value>,
+    pub arguments: crate::call::BuiltinArguments,
     pub literals: runmat_types::LiteralContext,
     pub requested_outputs: usize,
     pub outputs: Vec<runmat_types::ValueFact>,
@@ -1366,7 +1366,7 @@ pub struct RuntimeDistributedCallRequest {
 /// record never invents object references for locally retained partitions.
 #[derive(Debug, Clone)]
 pub struct RuntimeDistributedSnapshot {
-    pub handle: runmat_execution::DistributedValueHandle,
+    pub handle: runmat_value::SharedDistributedHandle,
     pub partitions: Vec<runmat_execution::DistributedPartitionLayout>,
 }
 
@@ -1417,29 +1417,29 @@ pub trait RuntimeDistributedService {
 
     fn inspect(
         &self,
-        handle: runmat_execution::DistributedValueHandle,
+        handle: runmat_value::SharedDistributedHandle,
     ) -> RuntimeServiceFuture<Result<RuntimeDistributedSnapshot, RuntimeError>>;
 
     fn export_local(
         &self,
-        handle: runmat_execution::DistributedValueHandle,
+        handle: runmat_value::SharedDistributedHandle,
         rank: LabRank,
     ) -> RuntimeServiceFuture<Result<runmat_execution::DistributedShardSnapshot, RuntimeError>>;
 
     fn local_part(
         &self,
-        handle: runmat_execution::DistributedValueHandle,
+        handle: runmat_value::SharedDistributedHandle,
         rank: LabRank,
     ) -> RuntimeServiceFuture<Result<crate::execution::RootedValue, RuntimeError>>;
 
     fn materialize(
         &self,
-        handle: runmat_execution::DistributedValueHandle,
+        handle: runmat_value::SharedDistributedHandle,
     ) -> RuntimeServiceFuture<Result<crate::execution::RootedValue, RuntimeError>>;
 
     fn redistribute(
         &self,
-        handle: runmat_execution::DistributedValueHandle,
+        handle: runmat_value::SharedDistributedHandle,
         scheme: DistributionScheme,
     ) -> RuntimeServiceFuture<Result<runmat_execution::DistributedValueHandle, RuntimeError>>;
 
@@ -1450,7 +1450,7 @@ pub trait RuntimeDistributedService {
 
     fn composite_entry(
         &self,
-        handle: runmat_execution::CompositeHandle,
+        handle: runmat_value::SharedCompositeHandle,
         rank: LabRank,
     ) -> RuntimeServiceFuture<Result<Option<crate::execution::RootedValue>, RuntimeError>>;
 }

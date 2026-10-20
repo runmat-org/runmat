@@ -7,7 +7,7 @@ fn pagefun_extensions_follow_compatibility_mode() {
         let error = block_on(pagefun_builtin(
             Value::FunctionHandle("mtimes".into()),
             Value::Tensor(matrix()),
-            vec![Value::Tensor(matrix())],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(matrix())]),
         ))
         .expect_err("MATLAB mode rejects all-host pagefun");
         assert_eq!(
@@ -20,7 +20,7 @@ fn pagefun_extensions_follow_compatibility_mode() {
         block_on(pagefun_builtin(
             Value::FunctionHandle("mtimes".into()),
             Value::Tensor(matrix()),
-            vec![Value::Tensor(matrix())],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(matrix())]),
         ))
         .expect("RunMat mode accepts all-host pagefun");
     }
@@ -32,7 +32,9 @@ fn pagefun_extensions_follow_compatibility_mode() {
             pagefun_builtin(
                 Value::from("@mtimes"),
                 Value::GpuTensor(handle.clone()),
-                vec![Value::GpuTensor(handle.clone())],
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(
+                    handle.clone(),
+                )]),
             )
         };
         {
@@ -59,7 +61,7 @@ fn pagefun_mtimes_char_array_handle() {
     let result = pagefun_impl(
         Value::CharArray(func),
         Value::Tensor(lhs),
-        vec![Value::Tensor(rhs)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(rhs)]),
     );
     let result = block_on(result).expect("pagefun char array");
     match result {
@@ -78,7 +80,7 @@ fn pagefun_mtimes_external_function_handle() {
     let result = pagefun_impl(
         Value::ExternalFunctionHandle("mtimes".into()),
         Value::Tensor(lhs),
-        vec![Value::Tensor(rhs)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(rhs)]),
     );
     let result = block_on(result).expect("pagefun external function handle");
     match result {
@@ -105,7 +107,7 @@ fn pagefun_mtimes_semantic_function_handle() {
             },
         )),
         Value::Tensor(lhs),
-        vec![Value::Tensor(rhs)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(rhs)]),
     );
     let result = block_on(result).expect("pagefun semantic function handle");
     match result {
@@ -126,7 +128,7 @@ fn pagefun_mtimes_string_array_handle() {
     let result = pagefun_impl(
         Value::StringArray(strings),
         Value::Tensor(lhs),
-        vec![Value::Tensor(rhs)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(rhs)]),
     );
     let result = block_on(result).expect("pagefun string array");
     match result {
@@ -147,7 +149,7 @@ fn pagefun_char_array_multirow_error() {
     let err = pagefun_impl(
         Value::CharArray(chars),
         Value::Tensor(lhs),
-        vec![Value::Tensor(rhs)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(rhs)]),
     );
     let err = block_on(err).expect_err("expected multi-row char array error");
     assert!(
@@ -167,7 +169,7 @@ fn pagefun_string_array_multi_value_error() {
     let err = pagefun_impl(
         Value::StringArray(strings),
         Value::Tensor(lhs),
-        vec![Value::Tensor(rhs)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(rhs)]),
     );
     let err = block_on(err).expect_err("expected multi-element string array error");
     assert!(
@@ -185,7 +187,7 @@ fn pagefun_unsupported_operation_identifier() {
     let err = pagefun_impl(
         Value::FunctionHandle("plus".into()),
         Value::Tensor(lhs),
-        vec![Value::Tensor(rhs)],
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(rhs)]),
     );
     let err = block_on(err).expect_err("expected unsupported operation");
     assert_eq!(
@@ -201,7 +203,7 @@ fn pagefun_invalid_arity_identifier() {
     let err = pagefun_impl(
         Value::FunctionHandle("mtimes".into()),
         Value::Tensor(lhs),
-        vec![],
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
     );
     let err = block_on(err).expect_err("expected invalid arity");
     assert_eq!(err.identifier(), PAGEFUN_ERROR_INVALID_ARITY.identifier);

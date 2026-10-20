@@ -349,25 +349,6 @@ fn publication(outcome: WorkspacePublicationOutcome) -> FeaChangeSetPublication 
     }
 }
 
-#[cfg(test)]
-mod publication_tests {
-    use super::*;
-
-    #[test]
-    fn source_change_retains_uncertain_original_receipt_as_a_distinct_disposition() {
-        let id = WorkspacePublicationId([31; 16]);
-        let revision = runmat_filesystem::workspace::WorkspaceRevision([79; 32]);
-        let outcome = publication(WorkspacePublicationOutcome::DurabilityIndeterminate {
-            receipt: runmat_filesystem::workspace::WorkspacePublicationReceipt { id, revision },
-        });
-        assert!(
-            matches!(outcome, FeaChangeSetPublication::DurabilityIndeterminate {
-            id: original_id, revision: original_revision,
-        } if original_id.0 == id.0 && original_revision.0 == revision.0)
-        );
-    }
-}
-
 fn excerpt(text: &str, offset: u32) -> Result<FeaSourceExcerpt, String> {
     let start = offset as usize;
     if start > text.len() || !text.is_char_boundary(start) {
@@ -414,5 +395,24 @@ impl Stage {
             }
             _ => Err("unsupported source proposal path format".into()),
         }
+    }
+}
+
+#[cfg(test)]
+mod publication_tests {
+    use super::*;
+
+    #[test]
+    fn source_change_retains_uncertain_original_receipt_as_a_distinct_disposition() {
+        let id = WorkspacePublicationId([31; 16]);
+        let revision = runmat_filesystem::workspace::WorkspaceRevision([79; 32]);
+        let outcome = publication(WorkspacePublicationOutcome::DurabilityIndeterminate {
+            receipt: runmat_filesystem::workspace::WorkspacePublicationReceipt { id, revision },
+        });
+        assert!(
+            matches!(outcome, FeaChangeSetPublication::DurabilityIndeterminate {
+            id: original_id, revision: original_revision,
+        } if original_id.0 == id.0 && original_revision.0 == revision.0)
+        );
     }
 }

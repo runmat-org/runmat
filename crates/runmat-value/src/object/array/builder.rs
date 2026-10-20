@@ -135,11 +135,57 @@ impl ObjectArrayBuilder {
         permit: &dyn ExactHostAllocationPermit,
     ) -> Result<Self, ObjectArrayBuildError> {
         Self::quote(&class_name, count, shape, provenance_capacity)?;
+        let shape = SharedShape::new_admitted_from_slice(shape, permit)?;
+        Self::try_new_retaining_shape(class_name, count, shape, provenance_capacity, permit)
+    }
+    pub fn quote_storage_retaining_shape(
+        count: usize,
+        shape: &SharedShape,
+        provenance_capacity: usize,
+    ) -> Result<ObjectArrayQuote, ObjectArrayBuildError> {
+        let mut quote = Self::quote_storage(count, shape, provenance_capacity)?;
+        quote.requested_bytes -= SharedShape::requested_bytes_for_rank(shape.len())?;
+        quote.retained_claims -= 1;
+        if let Some(bytes) = shape.unclaimed_shared_bytes()? {
+            quote.requested_bytes = quote
+                .requested_bytes
+                .checked_add(bytes)
+                .ok_or(ExactHostNumericAllocationError::LayoutOverflow)?;
+            quote.retained_claims += 1;
+        }
+        Ok(quote)
+    }
+    pub fn quote_retaining_shape(
+        class: &SharedClassIdentity,
+        count: usize,
+        shape: &SharedShape,
+        provenance_capacity: usize,
+    ) -> Result<ObjectArrayQuote, ObjectArrayBuildError> {
+        let mut quote = Self::quote_storage_retaining_shape(count, shape, provenance_capacity)?;
+        if !class.has_retained_claim() {
+            quote.requested_bytes = quote
+                .requested_bytes
+                .checked_add(class.requested_bytes()?)
+                .ok_or(ExactHostNumericAllocationError::LayoutOverflow)?;
+            quote.retained_claims += 1;
+        }
+        Ok(quote)
+    }
+    /// Retain the one canonical shape generation, promoting it in place only
+    /// if its original allocation has not yet acquired a claim.
+    pub fn try_new_retaining_shape(
+        class_name: SharedClassIdentity,
+        count: usize,
+        shape: SharedShape,
+        provenance_capacity: usize,
+        permit: &dyn ExactHostAllocationPermit,
+    ) -> Result<Self, ObjectArrayBuildError> {
+        Self::quote_retaining_shape(&class_name, count, &shape, provenance_capacity)?;
+        shape.try_promote_shared_claim(permit)?;
         let class_name = class_name
             .try_admit_exact(permit)
             .map_err(|e| ObjectArrayBuildError::Allocation(e.source()))?;
         let data = OutputListStorage::try_begin(count, permit)?;
-        let shape = SharedShape::new_admitted_from_slice(shape, permit)?;
         let provenance = ExactArrayStorage::try_begin(provenance_capacity, permit)?;
         let capacity = index_capacity(provenance_capacity)?;
         let mut index = ExactArrayStorage::try_begin(capacity, permit)?;

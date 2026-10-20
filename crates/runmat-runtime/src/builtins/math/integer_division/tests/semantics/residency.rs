@@ -13,10 +13,12 @@ fn idivide_preserves_exact_supported_gpu_residency() {
             Tensor::new_integer(IntegerStorage::U64(vec![2, 3]), vec![1, 2]).expect("divisor");
         let dividend = gpu_helpers::upload_tensor(provider, &dividend).expect("dividend upload");
         let divisor = gpu_helpers::upload_tensor(provider, &divisor).expect("divisor upload");
-        let result = block_on(idivide_builtin(vec![
-            Value::GpuTensor(dividend),
-            Value::GpuTensor(divisor),
-        ]))
+        let result = block_on(idivide_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::GpuTensor(dividend),
+                Value::GpuTensor(divisor),
+            ]),
+        ))
         .expect("resident idivide");
         assert!(matches!(result, Value::GpuTensor(_)));
         assert_eq!(
@@ -37,10 +39,12 @@ fn resident_singleton_retains_full_nd_shape() {
         let input =
             Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX - 1]), vec![1, 1, 1]).unwrap();
         let source = gpu_helpers::upload_tensor(provider, &input).unwrap();
-        let output = block_on(idivide_builtin(vec![
-            Value::GpuTensor(source.clone()),
-            Value::Int(IntValue::U64(2)),
-        ]))
+        let output = block_on(idivide_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::GpuTensor(source.clone()),
+                Value::Int(IntValue::U64(2)),
+            ]),
+        ))
         .unwrap();
         let Value::GpuTensor(output) = output else {
             panic!("resident singleton");
@@ -75,10 +79,12 @@ fn idivide_preserves_actual_wgpu_residency() {
     let divisor = Tensor::new_integer(IntegerStorage::U8(vec![3]), vec![1, 1]).expect("divisor");
     let dividend = gpu_helpers::upload_tensor(provider, &dividend).expect("dividend upload");
     let divisor = gpu_helpers::upload_tensor(provider, &divisor).expect("divisor upload");
-    let quotient = block_on(idivide_builtin(vec![
-        Value::GpuTensor(dividend),
-        Value::GpuTensor(divisor),
-    ]))
+    let quotient = block_on(idivide_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::GpuTensor(dividend),
+            Value::GpuTensor(divisor),
+        ]),
+    ))
     .expect("idivide");
     assert!(matches!(quotient, Value::GpuTensor(_)));
     assert_eq!(

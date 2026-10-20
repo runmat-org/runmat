@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::*;
 use runmat_execution::value::{CallableOwner, InlineValue, ValuePayload};
-use runmat_value::{CellArray, StructValue};
+use runmat_value::CellArray;
 
 pub(in crate::builtins::fea) const FROZEN_GENERATORS_PROPERTY: &str = "frozen_generators";
 pub(in crate::builtins::fea) const FROZEN_STUDY_GENERATORS_PROPERTY: &str =
@@ -37,13 +37,19 @@ impl FrozenGeneratorInventory {
         object: &mut ObjectInstance,
     ) -> BuiltinResult<()> {
         if self.is_empty() {
-            object.properties.remove(FROZEN_GENERATORS_PROPERTY);
+            crate::builtins::fea::object_api::remove(
+                MODEL_NAME,
+                object,
+                FROZEN_GENERATORS_PROPERTY,
+            )?;
             return Ok(());
         }
-        object.properties.insert(
-            FROZEN_GENERATORS_PROPERTY.into(),
+        crate::builtins::fea::object_api::replace(
+            MODEL_NAME,
+            object,
+            FROZEN_GENERATORS_PROPERTY,
             encode_bindings(&self.bindings)?,
-        );
+        )?;
         Ok(())
     }
 
@@ -164,32 +170,38 @@ impl FrozenStudyGeneratorInventory {
         object: &mut ObjectInstance,
     ) -> BuiltinResult<()> {
         if self.studies.is_empty() {
-            object.properties.remove(FROZEN_STUDY_GENERATORS_PROPERTY);
+            crate::builtins::fea::object_api::remove(
+                SWEEP_NAME,
+                object,
+                FROZEN_STUDY_GENERATORS_PROPERTY,
+            )?;
             return Ok(());
         }
         let mut rows = Vec::with_capacity(self.studies.len());
         for (study_id, inventory) in &self.studies {
-            let mut row = StructValue::new();
+            let mut row = runmat_value::UnboundedStructValueBuilder::new();
             row.insert("study_id", Value::String(study_id.clone().into()));
             row.insert("bindings", encode_bindings(inventory.bindings())?);
-            rows.push(Value::Struct(row));
+            rows.push(Value::Struct(row.finish()));
         }
-        object.properties.insert(
-            FROZEN_STUDY_GENERATORS_PROPERTY.into(),
+        crate::builtins::fea::object_api::replace(
+            SWEEP_NAME,
+            object,
+            FROZEN_STUDY_GENERATORS_PROPERTY,
             Value::Cell(
                 CellArray::new(rows, 1, self.studies.len())
                     .map_err(|error| builtin_error(SWEEP_NAME, &ERROR_INTERNAL, error))?,
             ),
-        );
+        )?;
         Ok(())
     }
 
-    fn remove_from(
+    fn decode_property(
         builtin: &'static str,
-        object: &mut ObjectInstance,
+        value: Option<&Value>,
         studies: &[crate::analysis::AnalysisStudySpec],
     ) -> BuiltinResult<Self> {
-        let Some(value) = object.properties.remove(FROZEN_STUDY_GENERATORS_PROPERTY) else {
+        let Some(value) = value else {
             return Self::new(
                 builtin,
                 &studies
@@ -207,7 +219,7 @@ impl FrozenStudyGeneratorInventory {
             ));
         };
         let mut decoded = BTreeMap::new();
-        for value in &cell.data {
+        for value in cell.data() {
             let Value::Struct(row) = value else {
                 return Err(builtin_error(
                     builtin,
@@ -272,13 +284,7 @@ impl FrozenStudyGeneratorInventory {
         value: Option<&Value>,
         studies: &[crate::analysis::AnalysisStudySpec],
     ) -> BuiltinResult<Self> {
-        let mut carrier = ObjectInstance::new("runmat.internal.fea.sweep-bindings");
-        if let Some(value) = value {
-            carrier
-                .properties
-                .insert(FROZEN_STUDY_GENERATORS_PROPERTY.into(), value.clone());
-        }
-        Self::remove_from(builtin, &mut carrier, studies)
+        Self::decode_property(builtin, value, studies)
     }
 
     pub(in crate::builtins::fea) fn for_study(&self, study_id: &str) -> FrozenGeneratorInventory {
@@ -293,13 +299,16 @@ impl FrozenStudyGeneratorInventory {
 fn encode_bindings(bindings: &[FrozenSignalGenerator]) -> BuiltinResult<Value> {
     let mut values = Vec::with_capacity(bindings.len());
     for binding in bindings {
-        let mut row = StructValue::new();
-        row.insert("signal_id", Value::String(binding.signal_id.0.clone().into()));
+        let mut row = runmat_value::UnboundedStructValueBuilder::new();
+        row.insert(
+            "signal_id",
+            Value::String(binding.signal_id.0.clone().into()),
+        );
         row.insert(
             "callable",
             super::callable_to_value("FEA signal", binding.callable.clone())?,
         );
-        values.push(Value::Struct(row));
+        values.push(Value::Struct(row.finish()));
     }
     Ok(Value::Cell(
         CellArray::new(values, 1, bindings.len())
@@ -318,7 +327,7 @@ fn decode_bindings(
             "frozen generators must be a cell array",
         ));
     };
-    cell.data
+    cell.data()
         .iter()
         .map(|value| {
             let Value::Struct(row) = value else {

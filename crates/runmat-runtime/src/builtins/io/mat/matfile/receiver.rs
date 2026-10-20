@@ -1,28 +1,30 @@
 use super::*;
 
 pub(super) fn matfile_object(
+    runtime: Option<&crate::context::RuntimeContext>,
     source: &str,
     writable: bool,
     authority: runmat_value::ForeignRef,
-) -> ObjectInstance {
-    let mut object = ObjectInstance::new(MATFILE_CLASS.owned()).with_matfile_authority(authority);
-    object.properties.insert(
-        PROPERTIES_FIELD.to_string(),
-        properties_struct(source.to_string(), writable),
-    );
-    object
-}
-
-fn properties_struct(source: String, writable: bool) -> Value {
-    let mut st = StructValue::new();
-    st.insert(SOURCE_FIELD, Value::string(source));
-    st.insert(WRITABLE_FIELD, Value::Bool(writable));
-    Value::Struct(st)
+) -> BuiltinResult<RootedValue> {
+    let fields = [
+        (SOURCE_FIELD, Value::string(source)),
+        (WRITABLE_FIELD, Value::Bool(writable)),
+    ];
+    let properties = crate::execution::structure::construct_struct_from_fields_in_optional_context(
+        runtime,
+        fields.iter().map(|(name, value)| (*name, value)),
+    )?;
+    crate::execution::object::construct_object_from_fields_with_native(
+        runtime,
+        MATFILE_CLASS.display_name(),
+        std::iter::once((PROPERTIES_FIELD, properties.value())),
+        Some(crate::execution::object::ObjectNativeInitialization::MatfileAuthority(authority)),
+    )
 }
 
 pub(super) fn into_matfile_object(value: Value, builtin: &str) -> BuiltinResult<ObjectInstance> {
     match value {
-        Value::Object(object) if object.class_name == MATFILE_CLASS => Ok(object),
+        Value::Object(object) if object.is_class(MATFILE_CLASS) => Ok(object),
         other => Err(matfile_error_with(
             &MATFILE_ERROR_INVALID_ARGUMENT,
             format!("{builtin}: receiver must be a {MATFILE_CLASS} object, got {other:?}"),
@@ -41,7 +43,9 @@ pub(super) struct PreparedWritablePair {
 
 pub(super) struct PreparedWritableOptions(pub(super) Vec<PreparedWritablePair>);
 
-pub(super) fn prepare_writable_options(rest: Vec<Value>) -> BuiltinResult<PreparedWritableOptions> {
+pub(super) fn prepare_writable_options(
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<PreparedWritableOptions> {
     if !rest.len().is_multiple_of(2) {
         return Err(matfile_error_with(
             &MATFILE_ERROR_INVALID_OPTION,
@@ -188,9 +192,9 @@ pub(super) fn replace_or_append(entries: &mut Vec<(String, Value)>, field: Strin
 fn value_to_string_scalar(value: &Value) -> Option<String> {
     match value {
         Value::String(s) => Some(s.as_str().to_owned()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
-        Value::StringArray(StringArray { data, .. }) if data.len() == 1 => {
-            Some(data[0].as_str().to_owned())
+        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data().iter().collect()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Some(array.data()[0].as_str().to_owned())
         }
         _ => None,
     }

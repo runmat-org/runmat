@@ -785,7 +785,10 @@ pub(crate) mod wasm {
             Ok("high_contrast") => ThemeVariant::HighContrast,
             _ => return PlotThemeConfig::default(),
         };
-        PlotThemeConfig { variant, ..PlotThemeConfig::default() }
+        PlotThemeConfig {
+            variant,
+            ..PlotThemeConfig::default()
+        }
     }
 
     pub(super) fn take_surface_host_actions_impl(

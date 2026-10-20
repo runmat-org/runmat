@@ -38,13 +38,15 @@ pub(crate) async fn dispatch_with_graphics(
         (Some(command), None) => execute_command(command, cli, config, graphics).await,
         (None, Some(script_path)) => {
             script::execute_script_with_graphics(
-                script_path,
-                vec![],
-                emit_bytecode,
+                script::ScriptInvocation {
+                    script: script_path,
+                    args: vec![],
+                    emit_bytecode_path: emit_bytecode,
+                    fea_json: false,
+                    execution: crate::cli::ExecutionTargetArgs::default(),
+                },
                 cli,
                 config,
-                false,
-                crate::cli::ExecutionTargetArgs::default(),
                 graphics,
             )
             .await
@@ -79,13 +81,15 @@ async fn execute_command(
             args,
         } => {
             script::execute_script_with_graphics(
-                file,
-                args,
-                cli.emit_bytecode.clone(),
+                script::ScriptInvocation {
+                    script: file,
+                    args,
+                    emit_bytecode_path: cli.emit_bytecode.clone(),
+                    fea_json: json,
+                    execution,
+                },
                 cli,
                 config,
-                json,
-                execution,
                 graphics,
             )
             .await

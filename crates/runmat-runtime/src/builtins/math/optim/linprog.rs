@@ -79,7 +79,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 async fn linprog_builtin_registered(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     crate::output_count::validate_bounded_outputs(
         &LINPROG_DESCRIPTOR,
@@ -790,12 +790,12 @@ fn empty_double() -> Value {
 }
 
 fn build_output_struct(outcome: &LinprogOutcome) -> StructValue {
-    let mut fields = StructValue::new();
+    let mut fields = runmat_value::UnboundedStructValueBuilder::new();
     fields.insert("iterations", Value::Num(outcome.iterations as f64));
     fields.insert("algorithm", Value::from(ALGORITHM));
     fields.insert("constrviolation", Value::Num(outcome.constrviolation));
     fields.insert("message", Value::from(outcome.message.clone()));
-    fields
+    fields.finish()
 }
 
 #[cfg(test)]
@@ -816,13 +816,21 @@ mod tests {
         );
         source.cancel(CancellationReason::User);
         let args = vec![V::Num(1.0), empty(), empty()];
-        let error = block_on(linprog_builtin_registered(Some(runtime), args))
-            .expect_err("cancelled solver");
+        let error = block_on(linprog_builtin_registered(
+            Some(runtime),
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
+        .expect_err("cancelled solver");
         assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
         assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
         let error = block_on(linprog_builtin_registered(
             None,
-            vec![V::Num(1.0), empty(), empty(), V::Num(1.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                V::Num(1.0),
+                empty(),
+                empty(),
+                V::Num(1.0),
+            ]),
         ))
         .expect_err("lone nonempty Aeq remains a grammar failure");
         assert_eq!(
@@ -831,8 +839,11 @@ mod tests {
         );
         assert!(error.message().contains("Aeq requires a matching beq"));
         let _outputs = crate::output_count::push_output_count(Some(5)).expect("output-count scope");
-        let error = block_on(linprog_builtin_registered(None, Vec::new()))
-            .expect_err("output preflight before argument parsing");
+        let error = block_on(linprog_builtin_registered(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect_err("output preflight before argument parsing");
         assert_eq!(
             error.identifier(),
             LINPROG_ERROR_INVALID_ARGUMENT.identifier

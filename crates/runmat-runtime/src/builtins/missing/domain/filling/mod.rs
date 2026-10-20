@@ -39,7 +39,7 @@ pub(super) struct FillOptions {
 }
 
 impl FillOptions {
-    pub(super) fn parse(mut args: Vec<Value>) -> BuiltinResult<Self> {
+    pub(super) fn parse(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<Self> {
         if args.is_empty() {
             return Err(invalid_argument("fillmissing: method is required"));
         }
@@ -58,7 +58,8 @@ impl FillOptions {
                         "fillmissing: constant method needs a fill value",
                     ));
                 }
-                let fill = args.remove(idx);
+                let fill = args[idx].clone();
+                idx += 1;
                 FillMethod::Constant(fill)
             }
             FillMissingMethodKind::Previous => FillMethod::Previous,
@@ -196,7 +197,7 @@ pub(super) fn fill_missing_value(
         Value::Object(object) if is_tabular_object(&object) => {
             fill_missing_table(runtime, object, options)
         }
-        Value::Cell(cell) => fill_missing_cell(cell, options),
+        Value::Cell(cell) => fill_missing_cell(runtime, cell, options),
         Value::ComplexTensor(_) => Err(unsupported_type(
             "fillmissing: complex arrays are not supported yet",
         )),
@@ -230,7 +231,7 @@ pub(super) fn fill_missing_table(
     let width = table_width(&object)?;
     let names = table_variable_names_from_object(&object)?;
     let variables = table_variables(&object)?;
-    let mut output_vars = StructValue::new();
+    let mut output_vars = runmat_value::UnboundedStructValueBuilder::new();
     let mut mask_data = vec![0u8; height * width];
     for (col, name) in names.iter().enumerate() {
         let value = variables
@@ -247,9 +248,21 @@ pub(super) fn fill_missing_table(
         }
         output_vars.insert(name.clone(), filled);
     }
-    object
-        .properties
-        .insert("__table_variables".to_string(), Value::Struct(output_vars));
+    crate::execution::object::replacement::replace_property(
+        runtime,
+        &mut object,
+        "__table_variables",
+        Value::Struct(output_vars.finish()),
+        |message, source| {
+            crate::context::host_allocation::host_allocation_runtime_error(
+                runtime,
+                "RunMat:fillmissing:Allocation",
+                message,
+                source,
+            )
+        },
+        internal_error,
+    )?;
     Ok((
         Value::Object(object),
         LogicalArray::new(mask_data, vec![height, width]).map_err(internal_error)?,
@@ -311,10 +324,16 @@ pub(super) fn fill_missing_string_array(
             return managed_text::fill_missing_string_array(runtime, array, options, &lines);
         }
     }
-    let mut data = match array.data.try_into_owned() {
-        Ok(values) => values.into_iter().collect::<Vec<_>>(),
-        Err(shared) => shared.iter().cloned().collect::<Vec<_>>(),
-    };
+    let (mut owner, shape, _rows, _cols) = array.into_parts();
+    if !owner.is_unique() {
+        owner
+            .make_unique_unbounded()
+            .map_err(|error| internal_error(error.to_string()))?;
+    }
+    let mut owner = owner.try_into_owned().map_err(|_| {
+        internal_error("fillmissing: shared string owner requires a prepared output")
+    })?;
+    let data = owner.as_mut_slice();
     let mut mask: Vec<u8> = data
         .iter()
         .map(|text| u8::from(is_missing_text(text)))
@@ -329,39 +348,47 @@ pub(super) fn fill_missing_string_array(
                 }
             }
         }
-        FillMethod::Previous => fill_neighbor_text(&mut data, &lines, Neighbor::Previous),
-        FillMethod::Next => fill_neighbor_text(&mut data, &lines, Neighbor::Next),
-        FillMethod::Nearest => fill_nearest_text(&mut data, &lines),
+        FillMethod::Previous => fill_neighbor_text(data, &lines, Neighbor::Previous),
+        FillMethod::Next => fill_neighbor_text(data, &lines, Neighbor::Next),
+        FillMethod::Nearest => fill_nearest_text(data, &lines),
         _ => {
             return Err(unsupported_type(
                 "fillmissing: string arrays support constant, previous, next, and nearest",
             ))
         }
     }
-    for (flag, text) in mask.iter_mut().zip(&data) {
+    for (flag, text) in mask.iter_mut().zip(data.iter()) {
         if is_missing_text(text) {
             *flag = 0;
         }
     }
     Ok((
         Value::StringArray(
-            StringArray::from_texts_unbounded(data, array.shape.as_slice().to_vec())
-                .map_err(internal_error)?,
+            StringArray::from_shared_storage(
+                owner.try_into_storage().map_err(|_| {
+                    internal_error("fillmissing: string owner could not be republished")
+                })?,
+                shape.clone(),
+            )
+            .map_err(internal_error)?,
         ),
-        LogicalArray::new(mask, array.shape.as_slice().to_vec()).map_err(internal_error)?,
+        LogicalArray::new(mask, shape.as_slice().to_vec()).map_err(internal_error)?,
     ))
 }
 
 pub(super) fn fill_missing_cell(
+    runtime: Option<&RuntimeContext>,
     cell: CellArray,
     options: &FillOptions,
 ) -> BuiltinResult<(Value, LogicalArray)> {
-    let mut data = match cell.data.try_into_owned() {
-        Ok(values) => values.into_iter().collect::<Vec<_>>(),
-        Err(shared) => shared.iter().cloned().collect::<Vec<_>>(),
-    };
+    let rows = cell.rows;
+    let cols = cell.cols;
+    let (mut cell, _roots) = crate::execution::structure::replacement::cell(&cell, runtime)?;
+    let data = cell.try_data_mut_unique().ok_or_else(|| {
+        internal_error("fillmissing: prepared Cell output owner is unexpectedly shared")
+    })?;
     let mut mask = Vec::with_capacity(data.len());
-    for item in &data {
+    for item in data.iter() {
         mask.push(u8::from(any_missing(item)?));
     }
     match &options.method {
@@ -378,13 +405,13 @@ pub(super) fn fill_missing_cell(
             ))
         }
     }
-    for (flag, item) in mask.iter_mut().zip(&data) {
+    for (flag, item) in mask.iter_mut().zip(data.iter()) {
         if any_missing(item)? {
             *flag = 0;
         }
     }
     Ok((
-        Value::Cell(CellArray::new(data, cell.rows, cell.cols).map_err(internal_error)?),
-        LogicalArray::new(mask, vec![cell.rows, cell.cols]).map_err(internal_error)?,
+        Value::Cell(cell),
+        LogicalArray::new(mask, vec![rows, cols]).map_err(internal_error)?,
     ))
 }

@@ -69,11 +69,11 @@ fn host_literal_value(value: &Value) -> bool {
     // control in some argument positions. Keep those literals on dispatch.
     let like_token = match value {
         Value::String(text) => text.eq_ignore_ascii_case("like"),
-        Value::StringArray(array) if array.data.len() == 1 => {
-            array.data[0].eq_ignore_ascii_case("like")
+        Value::StringArray(array) if array.data().len() == 1 => {
+            array.data()[0].eq_ignore_ascii_case("like")
         }
         Value::CharArray(array) if array.rows == 1 => array
-            .data
+            .data()
             .iter()
             .copied()
             .map(|ch| ch.to_ascii_lowercase())

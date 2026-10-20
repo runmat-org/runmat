@@ -18,8 +18,8 @@ impl<'a> TextCellScalar<'a> {
     pub(super) fn from_value(value: &'a Value) -> Option<Self> {
         match value {
             Value::String(text) => Some(Self::String(text)),
-            Value::StringArray(array) if array.data.len() == 1 => {
-                Some(Self::String(&array.data[0]))
+            Value::StringArray(array) if array.data().len() == 1 => {
+                Some(Self::String(&array.data()[0]))
             }
             Value::CharArray(array) if array.rows <= 1 => Some(Self::Char(array)),
             _ => None,
@@ -30,7 +30,7 @@ impl<'a> TextCellScalar<'a> {
         match self {
             Self::String(text) => (*text).to_string(),
             Self::Char(array) if array.rows == 0 => String::new(),
-            Self::Char(array) => char_row_to_string_slice(&array.data, array.cols, 0),
+            Self::Char(array) => char_row_to_string_slice(array.data(), array.cols, 0),
         }
     }
 

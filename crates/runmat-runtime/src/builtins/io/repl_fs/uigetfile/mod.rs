@@ -69,14 +69,14 @@ fn host_io_error(source: std::io::Error) -> RuntimeError {
 )]
 async fn uigetfile_builtin(
     runtime: Option<crate::context::RuntimeContext>,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &UIGETFILE_DESCRIPTOR,
         &UIGETFILE_ERROR_TOO_MANY_OUTPUTS,
         NAME,
     )?;
-    let options = parse_options(&args)?;
+    let options = parse_options(args.view())?;
     let request = runmat_filesystem::resolve_open_file_dialog_request(&options.request)
         .map_err(host_io_error)?;
     let selection = crate::context::select_file_open(runtime.as_ref(), request)
@@ -85,7 +85,7 @@ async fn uigetfile_builtin(
     outputs_for_selection(selection, &options)
 }
 
-fn parse_options(args: &[Value]) -> BuiltinResult<UigetfileOptions> {
+fn parse_options(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<UigetfileOptions> {
     let mut end = args.len();
     let mut multiselect = false;
     while end >= 2 {

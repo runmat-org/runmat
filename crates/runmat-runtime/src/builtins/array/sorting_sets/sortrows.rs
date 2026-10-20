@@ -718,7 +718,7 @@ fn sortrows_char_array_with_args(
     let rows = ca.rows;
     let cols = ca.cols;
 
-    if rows <= 1 || cols == 0 || ca.data.is_empty() || args.columns.is_empty() {
+    if rows <= 1 || cols == 0 || ca.data().is_empty() || args.columns.is_empty() {
         let indices = identity_indices(rows)?;
         return Ok(SortRowsEvaluation {
             sorted: Value::CharArray(ca),
@@ -907,8 +907,8 @@ fn compare_char_rows(ca: &CharArray, args: &SortRowsArgs, a: usize, b: usize) ->
         }
         let idx_a = a * ca.cols + spec.index;
         let idx_b = b * ca.cols + spec.index;
-        let va = ca.data[idx_a];
-        let vb = ca.data[idx_b];
+        let va = ca.data()[idx_a];
+        let vb = ca.data()[idx_b];
         let ord = match spec.direction {
             SortDirection::Ascend => va.cmp(&vb),
             SortDirection::Descend => vb.cmp(&va),
@@ -944,12 +944,12 @@ fn reorder_char_rows(
     cols: usize,
     order: &[usize],
 ) -> crate::BuiltinResult<CharArray> {
-    let mut data = vec!['\0'; ca.data.len()];
+    let mut data = vec!['\0'; ca.data().len()];
     for (dest_row, &src_row) in order.iter().enumerate() {
         for col in 0..cols {
             let src_idx = src_row * cols + col;
             let dst_idx = dest_row * cols + col;
-            data[dst_idx] = ca.data[src_idx];
+            data[dst_idx] = ca.data()[src_idx];
         }
     }
     CharArray::new(data, rows, cols).map_err(|e| sortrows_internal_error(format!("sortrows: {e}")))
@@ -1447,14 +1447,14 @@ fn parse_directions(value: &Value) -> crate::BuiltinResult<Option<Vec<SortDirect
     let strings = match value {
         Value::StringArray(array) => Some(
             array
-                .data
+                .data()
                 .iter()
                 .map(|text| Cow::Borrowed(text.as_str()))
                 .collect::<Vec<_>>(),
         ),
         Value::Cell(cell) => {
-            let mut strings = Vec::with_capacity(cell.data.len());
-            for value in &cell.data {
+            let mut strings = Vec::with_capacity(cell.data().len());
+            for value in cell.data() {
                 let Some(direction) = tensor::value_to_string(value) else {
                     return Err(sortrows_error_with(
                         &SORTROWS_ERROR_INVALID_ARGUMENT,
@@ -2014,7 +2014,7 @@ pub(crate) mod tests {
                 assert_eq!(ca.cols, 4);
                 let strings: Vec<String> = (0..ca.rows)
                     .map(|r| {
-                        ca.data[r * ca.cols..(r + 1) * ca.cols]
+                        ca.data()[r * ca.cols..(r + 1) * ca.cols]
                             .iter()
                             .collect::<String>()
                     })

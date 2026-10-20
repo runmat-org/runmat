@@ -104,7 +104,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 async fn atan_builtin(
     runtime: Option<RuntimeContext>,
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<RootedValue> {
     let _inputs = RootedValueLease::for_values(std::iter::once(&value).chain(rest.iter()))
         .map_err(|cause| cause.into_runtime_error())?;
@@ -119,7 +119,7 @@ async fn atan_builtin(
     if !rest.is_empty() {
         crate::compatibility::ensure_builtin_extension_enabled(&ATAN_LIKE_EXTENSION, BUILTIN_NAME)?;
     }
-    let template = parse_output_template(&rest)?;
+    let template = parse_output_template(rest.view())?;
     let template = admit_output_template(template)?;
     crate::builtins::common::validation::reject_typed_complex_integer_for(
         &value,
@@ -266,7 +266,7 @@ fn atan_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
 
 fn atan_char_array(array: CharArray) -> BuiltinResult<Value> {
     let data = array
-        .data
+        .data()
         .iter()
         .map(|&ch| (ch as u32 as f64).atan())
         .collect::<Vec<_>>();
@@ -294,7 +294,12 @@ pub(crate) mod tests {
 
     fn atan_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        block_on(super::atan_builtin(None, value, rest)).map(|owned| owned.value().clone())
+        block_on(super::atan_builtin(
+            None,
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
+        .map(|owned| owned.value().clone())
     }
 
     #[test]
@@ -303,7 +308,7 @@ pub(crate) mod tests {
         let integer = block_on(super::atan_builtin(
             None,
             Value::Int(runmat_value::IntValue::I8(1)),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .map(|owned| owned.value().clone())
         .expect_err("integer input must be gated");
@@ -311,9 +316,13 @@ pub(crate) mod tests {
             integer.identifier(),
             ATAN_INTEGER_INPUT_EXTENSION.error_identifier
         );
-        let logical = block_on(super::atan_builtin(None, Value::Bool(true), Vec::new()))
-            .map(|owned| owned.value().clone())
-            .expect_err("logical input must be gated");
+        let logical = block_on(super::atan_builtin(
+            None,
+            Value::Bool(true),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .map(|owned| owned.value().clone())
+        .expect_err("logical input must be gated");
         assert_eq!(
             logical.identifier(),
             ATAN_LOGICAL_INPUT_EXTENSION.error_identifier
@@ -322,7 +331,7 @@ pub(crate) mod tests {
         let character = block_on(super::atan_builtin(
             None,
             Value::CharArray(chars),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .map(|owned| owned.value().clone())
         .expect_err("character input must be gated");
@@ -333,15 +342,22 @@ pub(crate) mod tests {
         let like = block_on(super::atan_builtin(
             None,
             Value::Num(1.0),
-            vec![Value::from("like"), Value::Num(0.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("like"),
+                Value::Num(0.0),
+            ]),
         ))
         .map(|owned| owned.value().clone())
         .expect_err("like form must be gated");
         assert_eq!(like.identifier(), ATAN_LIKE_EXTENSION.error_identifier);
         let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
-        let arity = block_on(super::atan_builtin(None, Value::Num(0.0), Vec::new()))
-            .map(|owned| owned.value().clone())
-            .expect_err("excess outputs must reject");
+        let arity = block_on(super::atan_builtin(
+            None,
+            Value::Num(0.0),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+        ))
+        .map(|owned| owned.value().clone())
+        .expect_err("excess outputs must reject");
         assert_eq!(arity.identifier(), ATAN_ERROR_TOO_MANY_OUTPUTS.identifier);
     }
 
@@ -553,7 +569,7 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape(), &[1, chars.cols]);
-                for (value, ch) in t.materialize_f64().iter().zip(chars.data.iter()) {
+                for (value, ch) in t.materialize_f64().iter().zip(chars.data().iter()) {
                     let expected = (*ch as u32 as f64).atan();
                     assert!((value - expected).abs() < 1e-12);
                 }

@@ -31,7 +31,9 @@ fn real_value(value: &Value, index: usize) -> BuiltinResult<NumericScalar> {
     .ok_or_else(|| error_with_detail(&BLKDIAG_ERROR_INVALID_INPUT, "nonreal sparse block"))
 }
 
-fn output_class(values: &[Value]) -> BuiltinResult<ExactHostSparseClass> {
+fn output_class(
+    values: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<ExactHostSparseClass> {
     let integer = values.iter().find_map(|value| match value {
         Value::SparseTensor(sparse) => sparse
             .integer_storage()
@@ -136,7 +138,10 @@ fn complex_value(value: &Value, index: usize) -> BuiltinResult<(f64, f64)> {
     .ok_or_else(|| error_with_detail(&BLKDIAG_ERROR_INVALID_INPUT, "complex sparse value missing"))
 }
 
-pub(super) fn assemble(context: &RuntimeContext, values: &[Value]) -> BuiltinResult<Value> {
+pub(super) fn assemble(
+    context: &RuntimeContext,
+    values: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Value> {
     let class = output_class(values)?;
     let mut rows = 0usize;
     let mut cols = 0usize;

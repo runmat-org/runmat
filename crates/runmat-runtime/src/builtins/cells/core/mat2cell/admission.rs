@@ -9,19 +9,36 @@ pub(super) async fn gather_input(value: Value) -> BuiltinResult<Value> {
     gather_if_needed_async(&value).await
 }
 
-pub(super) async fn gather_partitions(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {
-    let mut gathered = Vec::with_capacity(values.len());
-    for value in values {
-        reject_explicit_residency(&value, "partition vector")?;
-        if is_typed_integer(&value) {
-            crate::compatibility::ensure_builtin_extension_enabled(
-                &MAT2CELL_INTEGER_PARTITIONS_EXTENSION,
-                "mat2cell",
-            )?;
+pub(super) async fn gather_partitions(
+    values: crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    if !values.iter().any(crate::dispatcher::value_contains_gpu) {
+        for value in &values {
+            validate_partition(value)?;
         }
-        gathered.push(gather_if_needed_async(&value).await?);
+        return Ok(values);
     }
-    Ok(gathered)
+    // Keep validation adjacent to each download: an invalid earlier
+    // partition must reject before a later provider can be called.
+    values
+        .try_map_preserving_roots_async(values.len(), runtime, async |index| {
+            let value = &values[index];
+            validate_partition(value)?;
+            gather_if_needed_async(value).await
+        })
+        .await
+}
+
+fn validate_partition(value: &Value) -> BuiltinResult<()> {
+    reject_explicit_residency(value, "partition vector")?;
+    if is_typed_integer(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &MAT2CELL_INTEGER_PARTITIONS_EXTENSION,
+            "mat2cell",
+        )?;
+    }
+    Ok(())
 }
 
 fn reject_explicit_residency(value: &Value, role: &str) -> BuiltinResult<()> {

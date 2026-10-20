@@ -126,19 +126,19 @@ impl<'a> HostNetworkPlan<'a> {
         function: &'static str,
     ) -> BuiltinResult<Self> {
         validate_sequential_connections(network, function)?;
-        let Some(Value::Cell(layers)) = network.properties.get("Layers") else {
+        let Some(Value::Cell(layers)) = network.properties().get("Layers") else {
             return Err(fail(function, "network is missing Layers"));
         };
-        validate_sequential_topology(&layers.data, function)?;
-        let Some(Value::Object(first)) = layers.data.first() else {
+        validate_sequential_topology(layers.data(), function)?;
+        let Some(Value::Object(first)) = layers.data().first() else {
             return Err(fail(function, "network must start with an input layer"));
         };
-        let first_kind = K::from_identity(&first.class_name)
+        let first_kind = K::from_identity(first.class_name())
             .ok_or_else(|| fail(function, "unsupported first layer"))?;
         if !first_kind.is_input() {
             return Err(fail(function, "network must start with an input layer"));
         }
-        if network.properties.get("Initialized") != Some(&Value::Bool(true)) {
+        if network.properties().get("Initialized") != Some(&Value::Bool(true)) {
             return Err(fail(
                 function,
                 "network parameters and state must be initialized before forward execution",
@@ -147,7 +147,7 @@ impl<'a> HostNetworkPlan<'a> {
         let (parameters, state) = resources::views(network, function)?;
         let shapes = resources::ResourceShapes::filled(&parameters, &state, function)?;
         let (input_axes, axes, precision, input_payload_kind, steps) =
-            admit_layers(&layers.data, first, first_kind, input, &shapes, function)?;
+            admit_layers(layers.data(), first, first_kind, input, &shapes, function)?;
         Ok(Self {
             network,
             input,
@@ -183,7 +183,7 @@ pub(in crate::builtins::deep_learning) fn admit_training_geometry(
     let Some(Value::Object(first)) = layers.first() else {
         return Err(fail(function, "network must start with an input layer"));
     };
-    let first_kind = K::from_identity(&first.class_name)
+    let first_kind = K::from_identity(first.class_name())
         .ok_or_else(|| fail(function, "unsupported first layer"))?;
     if !first_kind.is_input() {
         return Err(fail(function, "network must start with an input layer"));
@@ -229,7 +229,7 @@ fn admit_layers(
         let Value::Object(layer) = value else {
             unreachable!("admitted layer")
         };
-        let kind = K::from_identity(&layer.class_name)
+        let kind = K::from_identity(layer.class_name())
             .ok_or_else(|| fail(function, "unsupported layer"))?;
         if input_payload_kind == InputPayloadKind::Complex
             && !(kind.is_input() || kind == K::GlobalAveragePooling1D || kind.is_output())

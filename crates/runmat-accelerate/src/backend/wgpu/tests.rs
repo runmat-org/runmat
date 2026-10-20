@@ -95,7 +95,7 @@ async fn cholesky_qr_matches_host_qr() {
     let tensor_gram = Tensor::new(gram.clone(), vec![cols, cols]).expect("Gram tensor");
     let chol_eval = runmat_runtime::builtins::math::linalg::factor::chol::evaluate(
         Value::Tensor(tensor_gram),
-        &[],
+        runmat_runtime::call::FunctionArgumentView::from_slice(&[]),
     )
     .await
     .expect("chol");

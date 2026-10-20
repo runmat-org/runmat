@@ -240,10 +240,12 @@ fn bound_interface(
         },
     };
     let mut object = serializable_to_object_value(builtin, &ERROR_INTERNAL, class_name, &value)?;
-    object.properties.insert(
-        "geometry_revision".into(),
+    crate::builtins::fea::object_api::replace(
+        builtin,
+        &mut object,
+        "geometry_revision",
         Value::Int(IntValue::U32(geometry_revision)),
-    );
+    )?;
     Ok(Value::Object(object))
 }
 
@@ -467,9 +469,13 @@ mod tests {
         let Value::Object(object) = &mut secondary else {
             panic!("geometry.region should be an object")
         };
-        object
-            .properties
-            .insert("region_id".into(), Value::String("secondary".into()));
+        crate::builtins::fea::object_api::replace(
+            "fea.fixture",
+            object,
+            "region_id",
+            Value::String("secondary".into()),
+        )
+        .expect("ordinary fixture property edit");
         (primary, secondary)
     }
 
@@ -544,7 +550,9 @@ mod tests {
         ];
 
         for (value, class_name) in values {
-            assert!(matches!(&value, Value::Object(object) if object.class_name == class_name));
+            assert!(
+                matches!(&value, Value::Object(object) if object.class_name().display_name() == class_name)
+            );
             let interface: GeometryBoundInterface =
                 object_payload("fea.typed-interface.test", &value, class_name).unwrap();
             interface
@@ -625,14 +633,16 @@ mod tests {
         ))
         .unwrap();
 
-        let model = create_model_object_from_args(vec![
-            Value::String("model".into()),
-            asset,
-            Value::String("Steps".into()),
-            super::super::modeling::static_test_steps_value(),
-            Value::String("Interfaces".into()),
-            interface.clone(),
-        ])
+        let model = create_model_object_from_args(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("model".into()),
+                asset,
+                Value::String("Steps".into()),
+                super::super::modeling::static_test_steps_value(),
+                Value::String("Interfaces".into()),
+                interface.clone(),
+            ]),
+        )
         .expect("matching interface should compose");
         let model: AnalysisModel = object_payload(MODEL_NAME, &model, FEA_MODEL_CLASS).unwrap();
         assert_eq!(model.interfaces.len(), 1);
@@ -640,14 +650,16 @@ mod tests {
         assert_eq!(model.interfaces[0].secondary.region_id, "secondary");
 
         let foreign = load_stl_fixture(&tmp.path().join("part-b.stl"), 2.0);
-        let error = create_model_object_from_args(vec![
-            Value::String("foreign".into()),
-            foreign,
-            Value::String("Steps".into()),
-            super::super::modeling::static_test_steps_value(),
-            Value::String("Interfaces".into()),
-            interface,
-        ])
+        let error = create_model_object_from_args(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("foreign".into()),
+                foreign,
+                Value::String("Steps".into()),
+                super::super::modeling::static_test_steps_value(),
+                Value::String("Interfaces".into()),
+                interface,
+            ]),
+        )
         .expect_err("foreign interface must be rejected");
         assert!(error.message().contains("belongs to geometry"));
     }

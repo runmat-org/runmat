@@ -21,13 +21,13 @@ pub(super) fn format_char_array(array: &CharArray, mode: RenderMode) -> Vec<Stri
 
 pub(super) fn format_string_array(array: &StringArray, mode: RenderMode) -> Vec<String> {
     let shape = canonical_dims(&array.shape);
-    let total = array.data.len();
+    let total = array.data().len();
     if matches!(mode, RenderMode::Nested) {
         if total == 0 {
             return vec![format!("{} string array", dims_to_string(&shape))];
         }
         if total == 1 {
-            return vec![quote_double(&array.data[0])];
+            return vec![quote_double(&array.data()[0])];
         }
         return vec![format!("[{} string]", dims_to_string(&shape))];
     }
@@ -42,7 +42,7 @@ pub(super) fn format_string_array(array: &StringArray, mode: RenderMode) -> Vec<
     }
     format_table(rows, cols, 0, 1, Align::Left, |r, c| {
         let idx = r + c * rows;
-        quote_double(&array.data[idx])
+        quote_double(&array.data()[idx])
     })
 }
 
@@ -95,7 +95,7 @@ pub(super) fn format_cell(cell: &CellArray) -> Vec<String> {
     }
     format_table(rows, cols, CELL_ROW_INDENT, 1, Align::Left, |r, c| {
         let idx = r * cols + c;
-        let handle = cell.data[idx].clone();
+        let handle = cell.data()[idx].clone();
         let value = handle;
         summarize_for_cell(&value)
     })
@@ -171,20 +171,20 @@ pub(super) fn summarize_for_cell(value: &Value) -> String {
             }
         }
         Value::StringArray(array) => {
-            if array.data.is_empty() {
+            if array.data().is_empty() {
                 format!("{} string", dims_to_string(&canonical_dims(&array.shape)))
-            } else if array.data.len() == 1 {
-                quote_double(&array.data[0])
+            } else if array.data().len() == 1 {
+                quote_double(&array.data()[0])
             } else {
                 format!("[{} string]", dims_to_string(&canonical_dims(&array.shape)))
             }
         }
         Value::Symbolic(expr) => expr.to_string(),
         Value::SymbolicArray(array) => {
-            if array.data.is_empty() {
+            if array.data().is_empty() {
                 "[]".to_string()
-            } else if array.data.len() == 1 {
-                array.data[0].to_string()
+            } else if array.data().len() == 1 {
+                array.data()[0].to_string()
             } else {
                 format!("[{} sym]", dims_to_string(&canonical_dims(&array.shape)))
             }

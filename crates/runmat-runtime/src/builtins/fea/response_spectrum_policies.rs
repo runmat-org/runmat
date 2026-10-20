@@ -491,10 +491,10 @@ pub(super) fn ensure_spectrum_policy_classes_registered() {
 }
 
 fn validate_value_object(object: &ObjectInstance) -> Result<(), String> {
-    if object.properties.contains_key("value") {
+    if object.properties().contains_key("value") {
         Ok(())
     } else {
-        Err(format!("{}.value is required", object.class_name))
+        Err(format!("{}.value is required", object.class_name()))
     }
 }
 
@@ -507,7 +507,7 @@ mod tests {
     #[tokio::test]
     async fn direction_is_normalized_and_portable() {
         let value = parameters::spectrum_direction(
-            coordinate_frame_global_builtin()
+            coordinate_frame_global_builtin(None)
                 .await
                 .expect("global frame"),
             Tensor::new(vec![3.0, 4.0, 0.0], vec![1, 3])

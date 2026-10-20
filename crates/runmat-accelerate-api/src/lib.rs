@@ -110,12 +110,12 @@ pub use numeric_upload::{
 };
 pub use numerical_domain::{NumericalDomainEvidence, RoundDigitsMode};
 pub use placement::*;
-pub use sparse::*;
 pub use power::{
     ExactSingleBasePower, PowerInputDescription, PowerResultDomain, PowerScalarControl,
     PowerScalarWorkload, RealPowerArithmeticMode, RealPowerOperand,
 };
 pub use residency::{clear_residency_checked, ResidencyCleanupError, ResidencyRestoreGuard};
+pub use sparse::*;
 
 type ResidencyMarkFn = fn(&GpuTensorHandle);
 type ResidencyClearFn = fn(GpuHandleIdentity) -> Result<(), ResidencyCleanupError>;

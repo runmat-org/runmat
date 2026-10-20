@@ -1,3 +1,4 @@
+use super::colorbar::colorbar_builtin_source;
 use super::*;
 use runmat_value::Value;
 
@@ -25,17 +26,59 @@ fn graphics_mode_pages_reject_before_creating_or_mutating_a_figure() {
 fn command_cases() -> [(Command, Vec<Value>); 8] {
     [
         (
-            |args| axis_builtin(args).map(|_| ()),
+            |args| {
+                axis_builtin(crate::builtins::common::test_support::builtin_arguments(
+                    args,
+                ))
+                .map(|_| ())
+            },
             vec![Value::String("manual".into())],
         ),
-        (|args| box_builtin(args).map(|_| ()), vec![]),
-        (|args| cla_builtin(args).map(|_| ()), vec![]),
-        (|args| colorbar_builtin(args).map(|_| ()), vec![]),
-        (|args| colormap_builtin(args).map(|_| ()), vec![]),
-        (|args| grid_builtin(args).map(|_| ()), vec![]),
-        (|args| hidden_builtin(args).map(|_| ()), vec![]),
         (
-            |args| shading_builtin(args).map(|_| ()),
+            |args| {
+                box_builtin(crate::builtins::common::test_support::builtin_arguments(
+                    args,
+                ))
+                .map(|_| ())
+            },
+            vec![],
+        ),
+        (|args| cla_builtin(args).map(|_| ()), vec![]),
+        (|args| colorbar_builtin_source(args).map(|_| ()), vec![]),
+        (
+            |args| {
+                colormap_builtin(crate::builtins::common::test_support::builtin_arguments(
+                    args,
+                ))
+                .map(|_| ())
+            },
+            vec![],
+        ),
+        (
+            |args| {
+                grid_builtin(crate::builtins::common::test_support::builtin_arguments(
+                    args,
+                ))
+                .map(|_| ())
+            },
+            vec![],
+        ),
+        (
+            |args| {
+                hidden_builtin(crate::builtins::common::test_support::builtin_arguments(
+                    args,
+                ))
+                .map(|_| ())
+            },
+            vec![],
+        ),
+        (
+            |args| {
+                shading_builtin(crate::builtins::common::test_support::builtin_arguments(
+                    args,
+                ))
+                .map(|_| ())
+            },
             vec![Value::String("flat".into())],
         ),
     ]

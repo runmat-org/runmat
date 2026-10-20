@@ -11,16 +11,28 @@ mod details;
 mod vader_sentiment_scores;
 mod encode;
 mod scalar_text_control;
+mod html_tree;
+mod word_encoding;
+mod bag_of_ngrams;
+mod fast_text_word_embedding;
+mod read_word_embedding;
+mod train_word_embedding;
 
 pub use self::add_dependency_details::*;
 pub use self::add_entity_details::*;
 pub use self::add_lemma_details::*;
 pub use self::add_part_of_speech_details::*;
+pub use self::bag_of_ngrams::*;
 pub use self::details::*;
 pub use self::encode::*;
+pub use self::fast_text_word_embedding::*;
+pub use self::html_tree::*;
 pub use self::normalize_words::*;
+pub use self::read_word_embedding::*;
 pub use self::stopwords::*;
+pub use self::train_word_embedding::*;
 pub use self::vader_sentiment_scores::*;
+pub use self::word_encoding::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(stopwords::ENTRIES.iter().copied());
@@ -32,4 +44,10 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(details::ENTRIES.iter().copied());
     values.extend(vader_sentiment_scores::ENTRIES.iter().copied());
     values.extend(encode::ENTRIES.iter().copied());
+    values.extend(html_tree::ENTRIES.iter().copied());
+    values.extend(word_encoding::ENTRIES.iter().copied());
+    values.extend(bag_of_ngrams::ENTRIES.iter().copied());
+    values.extend(fast_text_word_embedding::ENTRIES.iter().copied());
+    values.extend(read_word_embedding::ENTRIES.iter().copied());
+    values.extend(train_word_embedding::ENTRIES.iter().copied());
 }

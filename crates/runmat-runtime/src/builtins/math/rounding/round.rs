@@ -116,7 +116,7 @@ impl RoundStrategy {
 async fn round_builtin(
     runtime: Option<RuntimeContext>,
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<RootedValue> {
     let _inputs = RootedValueLease::for_values(std::iter::once(&value).chain(rest.iter()))
         .map_err(|error| error.into_runtime_error())?;
@@ -130,7 +130,7 @@ async fn round_builtin(
             BUILTIN_NAME,
         )?;
     }
-    let strategy = parse_arguments(&rest)?;
+    let strategy = parse_arguments(rest.view())?;
     if !matches!(strategy, RoundStrategy::Integer) && has_exact_integer_storage(&value) {
         return Err(builtin_error_with_detail(
             &ROUND_ERROR_INVALID_INPUT,
@@ -336,7 +336,7 @@ fn round_complex_tensor(ct: ComplexTensor, strategy: RoundStrategy) -> BuiltinRe
 }
 
 fn round_char_array(ca: CharArray, strategy: RoundStrategy) -> BuiltinResult<Value> {
-    let mut data = Vec::with_capacity(ca.data.len());
+    let mut data = Vec::with_capacity(ca.data().len());
     for ch in ca.to_column_major() {
         data.push(round_scalar(ch as u32 as f64, strategy));
     }
@@ -367,7 +367,7 @@ fn round_scalar_f32(value: f32, strategy: RoundStrategy) -> f32 {
     }
 }
 
-fn parse_arguments(args: &[Value]) -> BuiltinResult<RoundStrategy> {
+fn parse_arguments(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<RoundStrategy> {
     match args.len() {
         0 => Ok(RoundStrategy::Integer),
         1 => {
@@ -513,7 +513,12 @@ pub(crate) mod tests {
     }
 
     fn round_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::round_builtin(None, value, rest)).map(|owned| owned.value().clone())
+        block_on(super::round_builtin(
+            None,
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
+        .map(|owned| owned.value().clone())
     }
 
     fn assert_error_contains(err: &crate::RuntimeError, needle: &str) {

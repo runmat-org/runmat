@@ -4,7 +4,7 @@ use crate::builtins::common::shape::value_dimensions;
 use crate::builtins::introspection::class_identity::class_name_for_value;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::handle_is_logical;
-use runmat_value::{StructValue, Value};
+use runmat_value::Value;
 use std::collections::HashSet;
 
 #[derive(Debug)]
@@ -55,7 +55,7 @@ impl WhosRecord {
     }
 
     pub(super) fn into_value(self) -> BuiltinResult<Value> {
-        let mut st = StructValue::new();
+        let mut st = runmat_value::UnboundedStructValueBuilder::new();
         st.fields
             .insert("name".to_string(), Value::string(self.name));
         st.fields
@@ -76,7 +76,7 @@ impl WhosRecord {
             .insert("nesting".to_string(), Value::string(self.nesting));
         st.fields
             .insert("persistent".to_string(), Value::Bool(self.persistent));
-        Ok(Value::Struct(st))
+        Ok(Value::Struct(st.finish()))
     }
 }
 
@@ -117,16 +117,16 @@ pub(super) fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> Bu
         },
         Value::Bool(_) => 1,
         Value::LogicalArray(la) => la.data.len(),
-        Value::CharArray(ca) => ca.data.len().saturating_mul(2),
+        Value::CharArray(ca) => ca.data().len().saturating_mul(2),
         Value::String(s) => s.encode_utf16().count().saturating_mul(2),
         Value::StringArray(sa) => sa
-            .data
+            .data()
             .iter()
             .map(|s| s.encode_utf16().count().saturating_mul(2))
             .fold(0usize, usize::saturating_add),
         Value::Symbolic(expr) => expr.to_string().encode_utf16().count().saturating_mul(2),
         Value::SymbolicArray(array) => array
-            .data
+            .data()
             .iter()
             .map(|expr| expr.to_string().encode_utf16().count().saturating_mul(2))
             .fold(0usize, usize::saturating_add),
@@ -154,7 +154,7 @@ pub(super) fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> Bu
             .saturating_mul(2),
         Value::Cell(ca) => {
             let mut total = 0usize;
-            for handle in &ca.data {
+            for handle in ca.data() {
                 let ptr = handle as *const Value as usize;
                 if seen.insert(ptr) {
                     let value = handle;
@@ -207,7 +207,7 @@ pub(super) fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> Bu
         }
         Value::Object(obj) => {
             let mut total = 0usize;
-            for value in obj.properties.values() {
+            for value in obj.properties().values() {
                 total = total.saturating_add(value_memory_bytes(value, seen)?);
             }
             total

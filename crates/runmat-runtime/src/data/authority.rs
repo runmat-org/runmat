@@ -355,16 +355,16 @@ fn resolve(
 mod tests;
 
 fn presentation_matches(object: &ObjectInstance, handle: &AuthorizedHandle) -> bool {
-    if object.properties.get("__data_path") != Some(&Value::string(handle.public_path.clone())) {
+    if object.properties().get("__data_path") != Some(&Value::string(handle.public_path.clone())) {
         return false;
     }
     match &handle.role {
         HandleRole::Dataset => true,
         HandleRole::Array(name) => {
-            object.properties.get("__array_name") == Some(&Value::string(name.clone()))
+            object.properties().get("__array_name") == Some(&Value::string(name.clone()))
         }
         HandleRole::Transaction(tx_id) => {
-            object.properties.get("__tx_id") == Some(&Value::string(tx_id.clone()))
+            object.properties().get("__tx_id") == Some(&Value::string(tx_id.clone()))
         }
     }
 }

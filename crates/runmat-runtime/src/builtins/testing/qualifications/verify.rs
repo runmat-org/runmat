@@ -13,7 +13,7 @@ async fn verify_equal(
     receiver: Value,
     actual: Value,
     expected: Value,
-    diagnostics: Vec<Value>,
+    diagnostics: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     shared::qualify_binary(
         "verifyEqual",
@@ -36,7 +36,7 @@ async fn verify_not_equal(
     receiver: Value,
     actual: Value,
     expected: Value,
-    diagnostics: Vec<Value>,
+    diagnostics: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     shared::qualify_binary(
         "verifyNotEqual",
@@ -58,7 +58,7 @@ async fn verify_not_equal(
 async fn verify_true(
     receiver: Value,
     actual: Value,
-    diagnostics: Vec<Value>,
+    diagnostics: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     shared::qualify_logical(
         "verifyTrue",
@@ -79,7 +79,7 @@ async fn verify_true(
 async fn verify_false(
     receiver: Value,
     actual: Value,
-    diagnostics: Vec<Value>,
+    diagnostics: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     shared::qualify_logical(
         "verifyFalse",
@@ -101,7 +101,7 @@ async fn verify_greater_than(
     receiver: Value,
     actual: Value,
     expected: Value,
-    diagnostics: Vec<Value>,
+    diagnostics: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     shared::qualify_binary(
         "verifyGreaterThan",
@@ -124,7 +124,7 @@ async fn verify_less_than(
     receiver: Value,
     actual: Value,
     expected: Value,
-    diagnostics: Vec<Value>,
+    diagnostics: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     shared::qualify_binary(
         "verifyLessThan",
@@ -146,7 +146,7 @@ async fn verify_less_than(
 async fn verify_empty(
     receiver: Value,
     actual: Value,
-    diagnostics: Vec<Value>,
+    diagnostics: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     shared::qualify_empty(
         "verifyEmpty",
@@ -167,7 +167,7 @@ async fn verify_empty(
 async fn verify_not_empty(
     receiver: Value,
     actual: Value,
-    diagnostics: Vec<Value>,
+    diagnostics: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     shared::qualify_empty(
         "verifyNotEmpty",
@@ -189,7 +189,7 @@ fn verify_that(
     receiver: Value,
     actual: Value,
     constraint: Value,
-    diagnostics: Vec<Value>,
+    diagnostics: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     shared::qualify_that(
         "verifyThat",

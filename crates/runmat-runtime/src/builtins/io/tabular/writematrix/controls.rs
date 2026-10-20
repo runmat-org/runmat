@@ -1,6 +1,8 @@
 use super::*;
 
-pub(super) fn parse_options(args: &[Value]) -> BuiltinResult<WriteMatrixOptions> {
+pub(super) fn parse_options(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<WriteMatrixOptions> {
     if args.is_empty() {
         return Ok(WriteMatrixOptions::default());
     }
@@ -18,7 +20,9 @@ pub(super) fn parse_options(args: &[Value]) -> BuiltinResult<WriteMatrixOptions>
     Ok(options)
 }
 
-pub(super) fn preflight_host_options(args: &[Value]) -> BuiltinResult<()> {
+pub(super) fn preflight_host_options(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     let mut checked = WriteMatrixOptions::default();
     for pair in args.chunks_exact(2) {
         if matches!(pair[0], Value::GpuTensor(_)) {

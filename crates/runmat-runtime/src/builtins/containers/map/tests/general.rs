@@ -310,7 +310,7 @@ fn keys_values_iskey_remove() {
     let map = containers_map_builtin(vec![keys, values]).expect("map");
     let key_list = containers_map_keys(map.clone()).expect("keys");
     match key_list {
-        Value::Cell(cell) => assert_eq!(cell.data.len(), 3),
+        Value::Cell(cell) => assert_eq!(cell.data().len(), 3),
         other => panic!("expected cell array, got {other:?}"),
     }
     let mask = containers_map_is_key(
@@ -381,7 +381,7 @@ fn map_handle_rejects_missing_typed_payload() {
     let target = runmat_gc::gc_allocate(Value::Object(ObjectInstance::new(CLASS_IDENTITY)))
         .expect("storage");
     let handle = Value::HandleObject(HandleRef {
-        class_name: CLASS_IDENTITY.owned(),
+        class_name: CLASS_IDENTITY.owned().into(),
         target,
         valid: true,
     });

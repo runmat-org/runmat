@@ -75,8 +75,8 @@ pub fn materialize_selected_paired_native_artifacts(
         binding: pair.binding.clone(),
         application_recipe,
         test_recipe,
-        application_artifact: application.id.clone(),
-        test_artifact: tests.id.clone(),
+        application_artifact: application.id,
+        test_artifact: tests.id,
     };
     manifest
         .validate_with_artifacts(&application, &tests)
@@ -185,7 +185,12 @@ pub fn emit_selected_paired_native_objects(
     let bodies = common
         .functions
         .iter()
-        .map(|function| (function.id, (function.portable_id, function.mir_body_digest)))
+        .map(|function| {
+            (
+                function.id,
+                (function.portable_id, function.mir_body_digest),
+            )
+        })
         .collect::<BTreeMap<_, _>>();
     let (application_function, application_body) = bodies
         .get(&frozen.entrypoint())
@@ -267,8 +272,7 @@ pub fn emit_selected_paired_native_objects(
             .iter()
             .map(|entry| (entry.compiled.compiled_function, entry.compiled.clone()))
             .collect::<BTreeMap<_, _>>()
-            .into_iter()
-            .map(|(_, entry)| entry)
+            .into_values()
             .collect(),
     };
     application_header

@@ -7,9 +7,13 @@ use super::pipelines::SparseCgPipelines;
 use super::workspace::CgWorkspace;
 use crate::backend::wgpu::dispatch::observation::ProfiledEncoder;
 
-pub(super) struct CgInputs<'a> {
+pub(super) struct CgOperator<'a> {
     pub(super) matrix: &'a DeviceSparseMatrix,
     pub(super) preconditioner: &'a DeviceSparsePreconditioner,
+}
+
+pub(super) struct CgInputs<'a> {
+    pub(super) operator: CgOperator<'a>,
     pub(super) rhs: &'a BufferEntry,
     pub(super) initial_guess: Option<&'a BufferEntry>,
 }
@@ -40,9 +44,9 @@ pub(super) fn encode_initialization(
         &pipelines.spmv,
         "runmat-sparse-cg-initial-spmv",
         &[
-            inputs.matrix.pattern.row_offsets.as_ref(),
-            inputs.matrix.pattern.column_indices.as_ref(),
-            inputs.matrix.values.as_ref(),
+            inputs.operator.matrix.pattern.row_offsets.as_ref(),
+            inputs.operator.matrix.pattern.column_indices.as_ref(),
+            inputs.operator.matrix.values.as_ref(),
             workspace.solution.as_ref(),
             workspace.product.as_ref(),
             workspace.state.as_ref(),
@@ -57,7 +61,7 @@ pub(super) fn encode_initialization(
         &[
             inputs.rhs.buffer.as_ref(),
             workspace.product.as_ref(),
-            inputs.preconditioner.inverse_diagonal.as_ref(),
+            inputs.operator.preconditioner.inverse_diagonal.as_ref(),
             workspace.residual.as_ref(),
             workspace.preconditioned.as_ref(),
             workspace.direction.as_ref(),
@@ -70,9 +74,11 @@ pub(super) fn encode_initialization(
         emission,
         encoder,
         pipelines,
-        workspace.residual.as_ref(),
-        workspace.residual.as_ref(),
-        workspace.residual_squared.as_ref(),
+        DotProduct {
+            left: workspace.residual.as_ref(),
+            right: workspace.residual.as_ref(),
+            output: workspace.residual_squared.as_ref(),
+        },
         workspace,
     )?;
     encode_dot(
@@ -80,9 +86,11 @@ pub(super) fn encode_initialization(
         emission,
         encoder,
         pipelines,
-        workspace.residual.as_ref(),
-        workspace.preconditioned.as_ref(),
-        workspace.rho.as_ref(),
+        DotProduct {
+            left: workspace.residual.as_ref(),
+            right: workspace.preconditioned.as_ref(),
+            output: workspace.rho.as_ref(),
+        },
         workspace,
     )?;
     dispatch(
@@ -105,8 +113,7 @@ pub(super) fn encode_iteration(
     emission: &WgpuEmission<'_>,
     encoder: &mut ProfiledEncoder<'_>,
     pipelines: &SparseCgPipelines,
-    matrix: &DeviceSparseMatrix,
-    preconditioner: &DeviceSparsePreconditioner,
+    operator: CgOperator<'_>,
     workspace: &CgWorkspace,
     vector_groups: u32,
 ) -> anyhow::Result<()> {
@@ -116,9 +123,9 @@ pub(super) fn encode_iteration(
         &pipelines.spmv,
         "runmat-sparse-cg-spmv",
         &[
-            matrix.pattern.row_offsets.as_ref(),
-            matrix.pattern.column_indices.as_ref(),
-            matrix.values.as_ref(),
+            operator.matrix.pattern.row_offsets.as_ref(),
+            operator.matrix.pattern.column_indices.as_ref(),
+            operator.matrix.values.as_ref(),
             workspace.direction.as_ref(),
             workspace.product.as_ref(),
             workspace.state.as_ref(),
@@ -130,9 +137,11 @@ pub(super) fn encode_iteration(
         emission,
         encoder,
         pipelines,
-        workspace.direction.as_ref(),
-        workspace.product.as_ref(),
-        workspace.denominator.as_ref(),
+        DotProduct {
+            left: workspace.direction.as_ref(),
+            right: workspace.product.as_ref(),
+            output: workspace.denominator.as_ref(),
+        },
         workspace,
     )?;
     dispatch(
@@ -162,9 +171,11 @@ pub(super) fn encode_iteration(
         emission,
         encoder,
         pipelines,
-        workspace.residual.as_ref(),
-        workspace.residual.as_ref(),
-        workspace.residual_squared.as_ref(),
+        DotProduct {
+            left: workspace.residual.as_ref(),
+            right: workspace.residual.as_ref(),
+            output: workspace.residual_squared.as_ref(),
+        },
         workspace,
     )?;
     dispatch(
@@ -173,7 +184,7 @@ pub(super) fn encode_iteration(
         &pipelines.apply_preconditioner,
         "runmat-sparse-cg-apply-preconditioner",
         &[
-            preconditioner.inverse_diagonal.as_ref(),
+            operator.preconditioner.inverse_diagonal.as_ref(),
             workspace.residual.as_ref(),
             workspace.preconditioned.as_ref(),
             workspace.state.as_ref(),
@@ -185,9 +196,11 @@ pub(super) fn encode_iteration(
         emission,
         encoder,
         pipelines,
-        workspace.residual.as_ref(),
-        workspace.preconditioned.as_ref(),
-        workspace.rho.as_ref(),
+        DotProduct {
+            left: workspace.residual.as_ref(),
+            right: workspace.preconditioned.as_ref(),
+            output: workspace.rho.as_ref(),
+        },
         workspace,
     )?;
     dispatch(
@@ -217,14 +230,18 @@ pub(super) fn encode_iteration(
     Ok(())
 }
 
+struct DotProduct<'a> {
+    left: &'a wgpu::Buffer,
+    right: &'a wgpu::Buffer,
+    output: &'a wgpu::Buffer,
+}
+
 fn encode_dot(
     provider: &WgpuProvider,
     emission: &WgpuEmission<'_>,
     encoder: &mut ProfiledEncoder<'_>,
     pipelines: &SparseCgPipelines,
-    left: &wgpu::Buffer,
-    right: &wgpu::Buffer,
-    output: &wgpu::Buffer,
+    product: DotProduct<'_>,
     workspace: &CgWorkspace,
 ) -> anyhow::Result<()> {
     dispatch(
@@ -233,12 +250,12 @@ fn encode_dot(
         &pipelines.dot_partials,
         "runmat-sparse-cg-dot-partials",
         &[
-            left,
-            right,
+            product.left,
+            product.right,
             workspace.dot_partials.as_ref(),
             workspace.state.as_ref(),
         ],
-        vector_groups(provider, left),
+        vector_groups(provider, product.left),
     )?;
     dispatch(
         emission,
@@ -247,7 +264,7 @@ fn encode_dot(
         "runmat-sparse-cg-dot-finalize",
         &[
             workspace.dot_partials.as_ref(),
-            output,
+            product.output,
             workspace.state.as_ref(),
         ],
         1,

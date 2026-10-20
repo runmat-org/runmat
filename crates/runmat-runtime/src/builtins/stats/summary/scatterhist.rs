@@ -191,22 +191,34 @@ fn internal(message: impl Into<String>) -> RuntimeError {
     error(&SCATTERHIST_ERROR_INTERNAL, message)
 }
 
+#[cfg(test)]
+pub(crate) async fn scatterhist_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    let args =
+        crate::execution::RootedValues::new(args).map_err(|error| error.into_runtime_error())?;
+    scatterhist_builtin_registered(None, args.into()).await
+}
+
 #[runtime_builtin(
     name = "scatterhist",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::stats::summary::scatterhist"
 )]
-pub(crate) async fn scatterhist_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(crate) async fn scatterhist_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     if args.len() < 2 {
         return Err(invalid("scatterhist: expected x and y inputs"));
     }
-    let mut data = args;
-    let options = data.split_off(2);
-    admit_data_compatibility(&data)?;
-    let observations = admit_host_visible(&data)?;
+    let options = args.range(2..)?;
+    let _option_sources = options.fork();
+    let data = args.into_range(..2)?;
+    admit_data_compatibility(data.view())?;
+    let observations = admit_host_visible(data.view())?;
     let option_plan = ScatterhistOptionPlan::admit(options, observations)?;
-    let data = gather_values(data).await?;
-    let (x, y, _) = parse_xy_and_rest(data)?;
+    let data = gather_values(data, runtime.as_ref()).await?;
+    let (x, y) = parse_xy(data.view())?;
     let options = option_plan.evaluate(x.len()).await?;
     let series = grouped_series(&x, &y, &options)?;
     let axes = render_scatterhist(&series, &options)?;

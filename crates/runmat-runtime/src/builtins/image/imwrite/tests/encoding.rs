@@ -36,7 +36,7 @@ fn last_write_mode_overwrite_allows_png_after_earlier_append() {
     let image = Value::Tensor(tensor(vec![0.5], vec![1, 1], NumericDType::F64));
     call(vec![
         image,
-        Value::String(path.to_string_lossy().into_owned()),
+        Value::String(path.to_string_lossy().into_owned().into()),
         Value::String("WriteMode".into()),
         Value::String("append".into()),
         Value::String("WriteMode".into()),
@@ -53,7 +53,7 @@ fn direct_rgba_png_preserves_alpha_channel() {
     let rgba = typed_tensor(IntegerStorage::U8(vec![10, 20, 30, 40]), vec![1, 1, 4]);
     call(vec![
         Value::Tensor(rgba),
-        Value::String(path.to_string_lossy().into_owned()),
+        Value::String(path.to_string_lossy().into_owned().into()),
     ])
     .unwrap();
     let decoded = image::open(&path).unwrap().into_rgba8();

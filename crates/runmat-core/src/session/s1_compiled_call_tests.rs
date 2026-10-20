@@ -97,7 +97,10 @@ fn compiled_strcmp_reuses_session_feedback(force_native: bool) {
     session.runtime_context = session.runtime_context.clone().with_service_ports(ports);
     let invocation = crate::ProcedureInvocation {
         target: crate::ProcedureTarget::Function("s1Compare".into()),
-        arguments: vec![Value::String("same".into()), Value::String("same".into())],
+        arguments: crate::ProcedureArguments::Source(vec![
+            Value::String("same".into()),
+            Value::String("same".into()),
+        ]),
         requested_outputs: 1,
     };
     for call in 0..3 {
@@ -197,7 +200,7 @@ fn ready_native_and_interpreter_share_one_complete_call_receipt() {
             &unit,
             crate::ProcedureInvocation {
                 target: crate::ProcedureTarget::Function("readyPlacement".into()),
-                arguments: vec![Value::Num(4.0)],
+                arguments: crate::ProcedureArguments::Source(vec![Value::Num(4.0)]),
                 requested_outputs: 1,
             },
             &crate::InvocationControl::default(),

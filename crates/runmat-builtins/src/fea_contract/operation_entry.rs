@@ -12,6 +12,8 @@ pub enum OperationEffectProfile {
     EvidenceWrite,
     /// Queries existing run artifacts without changing them.
     ArtifactRead,
+    /// May persist a supplied typed mesh to the configured artifact store.
+    ArtifactWrite,
     /// Figure creation reads run artifacts and changes graphics state.
     Figure,
 }
@@ -60,6 +62,18 @@ pub const fn entry(definition: OperationEntryDefinition) -> BuiltinCatalogEntry 
             // The configured artifact store may be in memory. FilesystemRead
             // records the default backend's possible effect, not a universal
             // capability prerequisite for this identity.
+            &[],
+        ),
+        OperationEffectProfile::ArtifactWrite => (
+            BuiltinPurity::Impure,
+            BuiltinSemanticKind::Filesystem,
+            &[
+                EffectKind::EnvironmentRead,
+                EffectKind::FilesystemWrite,
+                EffectKind::MaySuspend,
+                EffectKind::MayThrow,
+            ],
+            // Like artifact reads, persistence may use an in-memory store.
             &[],
         ),
         OperationEffectProfile::Figure => (

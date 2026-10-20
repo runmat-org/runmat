@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use runmat_builtins::{BuiltinErrorDescriptor, MatFileOptionName};
 use runmat_macros::runtime_builtin;
-use runmat_value::{ObjectInstance, StringArray, StructValue, Value};
+use runmat_value::{ObjectInstance, Value};
 
 use super::authority::{issue_matfile, resolve_matfile, MatFsPath};
 use super::cooperation::MatCodecCooperation;
@@ -48,8 +48,8 @@ use runmat_builtins::{
 pub async fn matfile_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     filename: Value,
-    rest: Vec<Value>,
-) -> BuiltinResult<Value> {
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<RootedValue> {
     ensure_matfile_class_registered();
     let controls = prepare_writable_options(rest)?;
     let path = normalise_path(&filename)?;
@@ -87,11 +87,7 @@ pub async fn matfile_builtin(
             public_path.clone(),
             writable,
         )?;
-        Ok(Value::Object(matfile_object(
-            &public_path,
-            writable,
-            reference,
-        )))
+        matfile_object(runtime.as_ref(), &public_path, writable, reference)
     }
     .await;
     super::admission::finish(receipt, &result);

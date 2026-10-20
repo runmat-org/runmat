@@ -85,7 +85,7 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 async fn dlmread_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     path: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
     let mut cooperation = TabularCooperation::new(runtime.as_ref(), BUILTIN_NAME);
     if matches!(&path, Value::GpuTensor(_))

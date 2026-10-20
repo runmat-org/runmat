@@ -62,12 +62,21 @@ fn invalid_options_operands_shapes_and_outputs_never_download() {
             Value::Tensor(Tensor::new_integer(IntegerStorage::U8(vec![1; 3]), vec![1, 3]).unwrap()),
         ],
     ] {
-        assert!(block_on(idivide_builtin(arguments)).is_err());
+        assert!(block_on(idivide_builtin(
+            crate::builtins::common::test_support::builtin_arguments(arguments)
+        ))
+        .is_err());
         assert_eq!(provider.downloads.load(Ordering::Relaxed), 0);
         assert_eq!(allocation.probe.retirements(), 0);
     }
     let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
-    assert!(block_on(idivide_builtin(vec![source(), Value::Int(IntValue::U8(1))])).is_err());
+    assert!(block_on(idivide_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            source(),
+            Value::Int(IntValue::U8(1))
+        ])
+    ))
+    .is_err());
     assert_eq!(provider.downloads.load(Ordering::Relaxed), 0);
     assert_eq!(allocation.probe.retirements(), 0);
     allocation.handle.release().unwrap();
@@ -78,10 +87,12 @@ fn invalid_options_operands_shapes_and_outputs_never_download() {
 fn empty_nd_division_preserves_shape_without_inspecting_unused_zero_divisor() {
     let shape = vec![2, 0, 3];
     let input = Tensor::new_integer(IntegerStorage::I16(vec![]), shape.clone()).unwrap();
-    let Value::Tensor(output) = block_on(idivide_builtin(vec![
-        Value::Tensor(input),
-        Value::Int(IntValue::I16(0)),
-    ]))
+    let Value::Tensor(output) = block_on(idivide_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Tensor(input),
+            Value::Int(IntValue::I16(0)),
+        ]),
+    ))
     .unwrap() else {
         panic!("empty dense output");
     };

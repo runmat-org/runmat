@@ -1,0 +1,5 @@
+error: canonical variadic bindings require BuiltinArguments to retain their argument owner
+ --> tests/ui/fail_canonical_vec_arguments.rs:4:19
+  |
+4 | fn captured(args: Vec<runmat_value::Value>) -> Result<runmat_value::Value, String> {
+  |                   ^^^^^^^^^^^^^^^^^^^^^^^^

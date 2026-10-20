@@ -9,7 +9,7 @@ pub(super) fn authority(value: &Value, class: StaticClassIdentity) -> Option<For
         return None;
     };
     object
-        .class_name
+        .class_name()
         .is(class)
         .then(|| object.tcp_authority().cloned())
         .flatten()

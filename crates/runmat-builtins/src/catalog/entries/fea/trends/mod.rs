@@ -1,6 +1,7 @@
 use crate::fea_contract::{
     catalog_entry::{self, ConstructorDocumentationDefinition},
-    integer::{FEA_TRENDS_DESCRIPTOR, FEA_TRENDS_INTEGER_CAPABILITIES},
+    descriptors::FEA_TRENDS_DESCRIPTOR,
+    integer::FEA_TRENDS_INTEGER_CAPABILITIES,
     operation_entry::{self, OperationEffectProfile, OperationEntryDefinition},
     operation_inference::{infer_evidence, FeaEvidenceKind},
 };

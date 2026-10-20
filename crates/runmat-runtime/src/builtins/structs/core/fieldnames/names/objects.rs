@@ -3,8 +3,8 @@ use runmat_value::{HandleRef, Listener, ObjectInstance, Value};
 use std::collections::{BTreeSet, HashSet};
 
 pub(super) fn object(object: &ObjectInstance) -> Vec<String> {
-    let mut names = class_properties(&object.class_name);
-    names.extend(object.properties.keys().cloned());
+    let mut names = class_properties(object.class_name());
+    names.extend(object.properties().keys().map(str::to_owned));
     names.into_iter().collect()
 }
 

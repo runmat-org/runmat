@@ -8,7 +8,7 @@ pub(super) const PRODUCER_MARKER: &str = "--original-environment-producer";
 const NAME: &str = "RUNMAT_DURABLE_ORIGINAL";
 const SOURCE: &str = "function [value, absent] = original_output_values(); value = getenv('RUNMAT_DURABLE_ORIGINAL'); absent = getenv('HOME'); setenv('RUNMAT_DURABLE_ORIGINAL','child'); end";
 
-async fn original() -> DeferredCall {
+async fn original() -> CapturedCall {
     let mut call = call_source(2, SOURCE).await;
     call.environment = EnvironmentSnapshot::new(vec![(NAME.into(), "captured".into())]).unwrap();
     call
@@ -20,9 +20,10 @@ pub(super) async fn produce() {
         .expect("original handle destination");
     let config = NativeExecutionConfig::for_current_executable().unwrap();
     let service = NativeExecutionService::new(config.clone()).unwrap();
+    let original = original().await;
     let job = service
         .submit_job(
-            original().await,
+            original.call.clone(),
             DurableJobOptions {
                 idempotency_key: Some("original-environment-producer-exit".into()),
                 retention_millis: runmat_execution_runner_native::supervisor::MIN_RETENTION_MILLIS,
@@ -79,13 +80,21 @@ pub(super) async fn verify_producer_exit(_config: &NativeExecutionConfig) {
         [(NAME.into(), "captured".into())]
     );
     let response = cold.response.unwrap();
-    let ProgramExecutionResponse::ExternalizedSuccess { outputs, .. } = response else {
+    let ProgramExecutionResponse::GraphSuccess { graph } = response else {
         panic!("original durable environment lost its output ordinals: {response:?}");
     };
     assert_eq!(
-        outputs
+        graph
+            .roots
             .iter()
-            .map(runmat_runtime::execution::value_codec::decode_inline_value)
+            .map(|root| {
+                let runmat_execution::value::GraphNode::Leaf { value } =
+                    &graph.nodes[root.0 as usize]
+                else {
+                    panic!("original environment output must be a character leaf");
+                };
+                runmat_runtime::execution::value_codec::decode_inline_value(value)
+            })
             .collect::<Result<Vec<_>, _>>()
             .unwrap(),
         vec![

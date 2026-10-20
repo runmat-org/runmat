@@ -100,7 +100,7 @@ async fn ode23_builtin_registered(
     function: Value,
     tspan: Value,
     y0: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     ode23_in_runtime(runtime.as_ref(), function, tspan, y0, rest).await
 }
@@ -110,7 +110,7 @@ async fn ode23_builtin(
     function: Value,
     tspan: Value,
     y0: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     ode23_in_runtime(None, function, tspan, y0, rest).await
 }
@@ -120,7 +120,7 @@ async fn ode23_in_runtime(
     function: Value,
     tspan: Value,
     y0: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
     check_cancellation(NAME, runtime)?;
     if rest.len() > 1 {
@@ -184,7 +184,7 @@ mod tests {
             Value::FunctionHandle("decay".into()),
             Value::Tensor(Tensor::new(vec![0.0, 0.5, 1.0], vec![1, 3]).unwrap()),
             Value::Num(1.0),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         )))
         .unwrap();
 
@@ -222,7 +222,7 @@ mod tests {
             crate::user_functions::test_support::exact_local_value("ode_decay", binding),
             Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap()),
             Value::Num(1.0),
-            Vec::new(),
+            crate::builtins::common::test_support::builtin_arguments(Vec::new()),
         ))
         .unwrap();
 
@@ -244,7 +244,10 @@ mod tests {
             Value::FunctionHandle("decay".into()),
             Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap()),
             Value::Num(1.0),
-            vec![Value::Num(1.0), Value::Num(2.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(1.0),
+                Value::Num(2.0),
+            ]),
         ))
         .expect_err("expected too many inputs error");
         assert_eq!(err.identifier(), ODE23_ERROR_INVALID_ARGUMENT.identifier);

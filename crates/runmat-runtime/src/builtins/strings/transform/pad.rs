@@ -476,7 +476,7 @@ fn pad_string(text: Utf8Text, options: PadOptions) -> BuiltinResult<Value> {
 }
 
 fn pad_string_array(array: StringArray, options: PadOptions) -> BuiltinResult<Value> {
-    let StringArray { data, shape, .. } = array;
+    let (data, shape, _, _) = array.into_parts();
     let mut auto_len: usize = 0;
     if matches!(options.target, PadTarget::Auto) {
         for text in &data {
@@ -515,20 +515,10 @@ fn pad_string_array(array: StringArray, options: PadOptions) -> BuiltinResult<Va
 }
 
 fn pad_char_array(array: CharArray, options: PadOptions) -> BuiltinResult<Value> {
-    let CharArray {
-        data,
-        shape,
-        rows,
-        cols,
-    } = array;
-    if rows == 0 {
-        return Ok(Value::CharArray(CharArray {
-            data,
-            shape,
-            rows,
-            cols,
-        }));
+    if array.rows == 0 {
+        return Ok(Value::CharArray(array));
     }
+    let (data, _, rows, cols) = array.into_parts();
 
     let mut rows_text: Vec<String> = Vec::with_capacity(rows);
     let mut auto_len = 0usize;
@@ -577,7 +567,7 @@ async fn pad_cell_array(cell: CellArray, options: PadOptions) -> BuiltinResult<V
     let mut auto_len = 0usize;
 
     for idx in 0..total {
-        let value = &cell.data[idx];
+        let value = &cell.data()[idx];
         let gathered = gather_if_needed_async(value).await.map_err(map_flow)?;
         let item = match gathered {
             Value::String(text) => {
@@ -593,8 +583,8 @@ async fn pad_cell_array(cell: CellArray, options: PadOptions) -> BuiltinResult<V
                     is_missing,
                 }
             }
-            Value::StringArray(sa) if sa.data.len() == 1 => {
-                let text = sa.data.first().cloned().unwrap_or_default();
+            Value::StringArray(sa) if sa.data().len() == 1 => {
+                let text = sa.data().first().cloned().unwrap_or_default();
                 let is_missing = is_missing_string(&text);
                 let len = if is_missing { 0 } else { string_length(&text) };
                 if !is_missing {
@@ -611,7 +601,7 @@ async fn pad_cell_array(cell: CellArray, options: PadOptions) -> BuiltinResult<V
                 let text = if ca.rows == 0 {
                     String::new()
                 } else {
-                    char_row_to_string_slice(&ca.data, ca.cols, 0)
+                    char_row_to_string_slice(ca.data(), ca.cols, 0)
                 };
                 let len = string_length(&text);
                 auto_len = auto_len.max(len);
@@ -807,8 +797,8 @@ fn value_to_single_string(value: &Value) -> Option<String> {
     match value {
         Value::String(text) => Some(text.as_str().to_owned()),
         Value::StringArray(sa) => {
-            if sa.data.len() == 1 {
-                Some(sa.data[0].as_str().to_owned())
+            if sa.data().len() == 1 {
+                Some(sa.data()[0].as_str().to_owned())
             } else {
                 None
             }
@@ -817,7 +807,7 @@ fn value_to_single_string(value: &Value) -> Option<String> {
             if ca.rows == 0 {
                 Some(String::new())
             } else {
-                Some(char_row_to_string_slice(&ca.data, ca.cols, 0))
+                Some(char_row_to_string_slice(ca.data(), ca.cols, 0))
             }
         }
         _ => None,
@@ -972,8 +962,8 @@ pub(crate) mod tests {
         let result = pad_builtin(Value::StringArray(strings), Vec::new()).expect("pad");
         match result {
             Value::StringArray(sa) => {
-                assert_eq!(sa.data[0], "GPU       ");
-                assert_eq!(sa.data[1], "Accelerate");
+                assert_eq!(sa.data()[0], "GPU       ");
+                assert_eq!(sa.data()[1], "Accelerate");
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -987,8 +977,8 @@ pub(crate) mod tests {
             pad_builtin(Value::StringArray(strings), vec![Value::String("*".into())]).expect("pad");
         match result {
             Value::StringArray(sa) => {
-                assert_eq!(sa.data[0], "A**");
-                assert_eq!(sa.data[1], "Run");
+                assert_eq!(sa.data()[0], "A**");
+                assert_eq!(sa.data()[1], "Run");
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -1005,8 +995,8 @@ pub(crate) mod tests {
         .expect("pad");
         match result {
             Value::StringArray(sa) => {
-                assert_eq!(sa.data[0], "7000");
-                assert_eq!(sa.data[1], "5120");
+                assert_eq!(sa.data()[0], "7000");
+                assert_eq!(sa.data()[1], "5120");
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -1024,8 +1014,8 @@ pub(crate) mod tests {
         .expect("pad");
         match result {
             Value::StringArray(sa) => {
-                assert_eq!(sa.data[0], "     Mary");
-                assert_eq!(sa.data[1], "Elizabeth");
+                assert_eq!(sa.data()[0], "     Mary");
+                assert_eq!(sa.data()[1], "Elizabeth");
             }
             other => panic!("expected string array, got {other:?}"),
         }
@@ -1050,7 +1040,7 @@ pub(crate) mod tests {
                 assert_eq!(ca.rows, 2);
                 assert_eq!(ca.cols, 5);
                 let expected: Vec<char> = "GPU  run  ".chars().collect();
-                assert_eq!(ca.data, expected);
+                assert_eq!(ca.data(), expected);
             }
             other => panic!("expected char array, got {other:?}"),
         }

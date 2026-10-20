@@ -105,7 +105,7 @@ pub(crate) fn foreign_callback_request_rooted(
             requested_outputs,
             metadata: CallableMetadata {
                 call_kind: CallableCallKind::Direct,
-                display_name,
+                display_name: display_name.map(Into::into),
                 ..CallableMetadata::default()
             },
         },
@@ -152,7 +152,7 @@ pub fn invoke_foreign_callback(
 mod tests {
     use super::*;
     use crate::context::{RuntimeCallRequest, RuntimeCallService, RuntimeServicePorts};
-    use crate::execution::RuntimeExecutionService;
+    use crate::execution::{RetainedValueReadLease, RuntimeExecutionService};
     use runmat_types::SymbolName;
     use runmat_value::ValueSequence;
     use std::cell::RefCell;
@@ -311,7 +311,7 @@ mod tests {
             )
             .expect("prepare request");
             let queued = invoke_foreign_callback(runtime, request);
-            drop(callback);
+            drop(owner);
             initial.unroot().expect("transfer supplied root to request");
             runmat_gc::gc_collect_major().expect("collect with unpolled callback");
             assert!(runmat_gc::gc_clone_value(&handle).is_ok());

@@ -93,9 +93,9 @@ pub(super) fn is_empty_option_value(value: &Value) -> bool {
     match value {
         Value::Tensor(tensor) => tensor::tensor_element_len(tensor) == 0,
         Value::LogicalArray(array) => array.data.is_empty(),
-        Value::Cell(cell) => cell.data.is_empty(),
-        Value::StringArray(array) => array.data.is_empty(),
-        Value::CharArray(array) => array.data.is_empty(),
+        Value::Cell(cell) => cell.data().is_empty(),
+        Value::StringArray(array) => array.data().is_empty(),
+        Value::CharArray(array) => array.data().is_empty(),
         _ => false,
     }
 }

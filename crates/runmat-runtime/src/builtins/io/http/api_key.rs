@@ -58,12 +58,12 @@ impl PreparedApiKey {
         for name in source.fields.keys() {
             match runmat_builtins::WebOptionField::decode(name) {
                 Some(runmat_builtins::WebOptionField::KeyName) => {
-                    prepared.name_field = Some(name.clone());
-                    prepared.field_names.push(name.clone());
+                    prepared.name_field = Some(name.to_owned());
+                    prepared.field_names.push(name.to_owned());
                 }
                 Some(runmat_builtins::WebOptionField::KeyValue) => {
-                    prepared.value_field = Some(name.clone());
-                    prepared.field_names.push(name.clone());
+                    prepared.value_field = Some(name.to_owned());
+                    prepared.field_names.push(name.to_owned());
                 }
                 _ => {}
             }
@@ -140,9 +140,9 @@ fn validate_components(
 fn text_scalar(value: &Value) -> Option<String> {
     match value {
         Value::String(value) => Some(value.as_str().to_owned()),
-        Value::CharArray(value) if value.rows == 1 => Some(value.data.iter().collect()),
-        Value::StringArray(value) if value.data.len() == 1 => {
-            Some(value.data[0].as_str().to_owned())
+        Value::CharArray(value) if value.rows == 1 => Some(value.data().iter().collect()),
+        Value::StringArray(value) if value.data().len() == 1 => {
+            Some(value.data()[0].as_str().to_owned())
         }
         _ => None,
     }
@@ -184,26 +184,31 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn exact_integer_header_and_empty_defaults() {
-        let mut source = StructValue::new();
+        let mut source = runmat_value::UnboundedStructValueBuilder::new();
         source
             .fields
             .insert("KeyName".into(), Value::from("X-Sequence"));
         source
             .fields
             .insert("KeyValue".into(), Value::Int(IntValue::U64(u64::MAX)));
+        let mut source = source.finish();
         assert_eq!(
             PreparedApiKey::parse(&source).finish(&source).unwrap(),
             Some(("X-Sequence".into(), u64::MAX.to_string()))
         );
-        source.fields.insert("KeyName".into(), Value::from(""));
-        source.fields.insert("KeyValue".into(), Value::from(""));
+        source
+            .try_replace_unique("KeyName", Value::from(""))
+            .expect("unique field");
+        source
+            .try_replace_unique("KeyValue", Value::from(""))
+            .expect("unique field");
         assert_eq!(
             PreparedApiKey::parse(&source).finish(&source).unwrap(),
             None
         );
         source
-            .fields
-            .insert("KeyValue".into(), Value::from("secret"));
+            .try_replace_unique("KeyValue", Value::from("secret"))
+            .expect("unique field");
         assert!(matches!(
             PreparedApiKey::parse(&source).finish(&source),
             Err(ApiKeyError::MissingName)
@@ -212,25 +217,28 @@ mod tests {
 
     #[test]
     fn independently_known_name_is_validated_before_resident_value_and_case_alias_is_last_wins() {
-        let mut source = StructValue::new();
+        let mut source = runmat_value::UnboundedStructValueBuilder::new();
         source
             .fields
             .insert("KeyName".into(), Value::from("bad\nname"));
         source
             .fields
             .insert("KeyValue".into(), Value::from("value"));
+        let source = source.finish();
         let prepared = PreparedApiKey::parse(&source);
         assert!(matches!(
             prepared.preflight_known(&source),
             Err(ApiKeyError::InvalidHeaderName(_))
         ));
 
+        let mut source = runmat_value::UnboundedStructValueBuilder::from_structure(source);
         source
             .fields
             .insert("KEYNAME".into(), Value::from("X-First"));
         source
             .fields
             .insert("keyname".into(), Value::from("X-Last"));
+        let source = source.finish();
         let prepared = PreparedApiKey::parse(&source);
         assert_eq!(
             prepared.finish(&source).unwrap(),

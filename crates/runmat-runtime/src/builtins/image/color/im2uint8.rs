@@ -61,7 +61,7 @@ fn im2uint8_map_error(
 async fn im2uint8_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<crate::execution::RootedValue> {
     if rest.len() > 1 {
         return Err(im2uint8_error(&IM2UINT8_ERROR_TOO_MANY_INPUTS));
@@ -71,7 +71,7 @@ async fn im2uint8_builtin(
         &IM2UINT8_ERROR_TOO_MANY_OUTPUTS,
         NAME,
     )?;
-    let mode = parse_indexed_mode(&rest)?;
+    let mode = parse_indexed_mode(rest.view())?;
     ensure_resident_integer_class_supported(&value, mode)?;
     let resident_source = match &value {
         Value::GpuTensor(handle) => Some(handle.clone()),
@@ -218,7 +218,9 @@ fn ensure_resident_integer_class_supported(
     }
 }
 
-fn parse_indexed_mode(rest: &[Value]) -> BuiltinResult<ImageIndexMode> {
+fn parse_indexed_mode(
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<ImageIndexMode> {
     let Some(value) = rest.first() else {
         return Ok(ImageIndexMode::Intensity);
     };

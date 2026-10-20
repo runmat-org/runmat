@@ -186,10 +186,12 @@ fn boundary_to_object(
             boundary,
         },
     )?;
-    object.properties.insert(
-        "geometry_revision".into(),
+    crate::builtins::fea::object_api::replace(
+        builtin,
+        &mut object,
+        "geometry_revision",
         Value::Int(IntValue::U32(geometry_revision)),
-    );
+    )?;
     Ok(Value::Object(object))
 }
 
@@ -468,7 +470,9 @@ mod tests {
         ];
 
         for (value, class_name) in boundaries {
-            assert!(matches!(&value, Value::Object(object) if object.class_name == class_name));
+            assert!(
+                matches!(&value, Value::Object(object) if object.class_name().display_name() == class_name)
+            );
             let boundary = decode(&value, class_name);
             let geometry = geometry_asset_from_value_with_builtin(&asset, "fea.boundary.test")
                 .expect("geometry should decode");
@@ -496,42 +500,51 @@ mod tests {
             pressure,
         ))
         .unwrap();
-        let model = create_model_object_from_args(vec![
-            Value::String("model".into()),
-            asset,
-            Value::String("Steps".into()),
-            super::super::modeling::static_test_steps_value(),
-            Value::String("Boundaries".into()),
-            boundary.clone(),
-        ])
+        let model = create_model_object_from_args(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("model".into()),
+                asset,
+                Value::String("Steps".into()),
+                super::super::modeling::static_test_steps_value(),
+                Value::String("Boundaries".into()),
+                boundary.clone(),
+            ]),
+        )
         .expect("matching boundary should compose");
         let model: AnalysisModel = object_payload(MODEL_NAME, &model, FEA_MODEL_CLASS).unwrap();
         assert_eq!(model.boundaries.len(), 1);
 
         let foreign = load_stl_fixture(&tmp.path().join("part-b.stl"), 2.0);
-        let error = create_model_object_from_args(vec![
-            Value::String("foreign".into()),
-            foreign,
-            Value::String("Steps".into()),
-            super::super::modeling::static_test_steps_value(),
-            Value::String("Boundaries".into()),
-            boundary.clone(),
-        ])
+        let error = create_model_object_from_args(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("foreign".into()),
+                foreign,
+                Value::String("Steps".into()),
+                super::super::modeling::static_test_steps_value(),
+                Value::String("Boundaries".into()),
+                boundary.clone(),
+            ]),
+        )
         .expect_err("foreign boundary must be rejected");
         assert!(error.message().contains("belongs to geometry"));
 
         let Value::Object(mut mislabeled) = boundary else {
             unreachable!("boundary constructor returned an object")
         };
-        mislabeled.class_name = FEA_THERMAL_BOUNDARY_CLASS.into();
-        let error = create_model_object_from_args(vec![
-            Value::String("mislabeled".into()),
-            load_stl_fixture(&tmp.path().join("part-a-copy.stl"), 1.0),
-            Value::String("Steps".into()),
-            super::super::modeling::static_test_steps_value(),
-            Value::String("Boundaries".into()),
-            Value::Object(mislabeled),
-        ])
+        mislabeled = crate::builtins::common::test_support::reclassify_object_unbounded(
+            &mislabeled,
+            FEA_THERMAL_BOUNDARY_CLASS,
+        );
+        let error = create_model_object_from_args(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("mislabeled".into()),
+                load_stl_fixture(&tmp.path().join("part-a-copy.stl"), 1.0),
+                Value::String("Steps".into()),
+                super::super::modeling::static_test_steps_value(),
+                Value::String("Boundaries".into()),
+                Value::Object(mislabeled),
+            ]),
+        )
         .expect_err("a boundary operator must match its family class");
         assert!(error.message().contains("boundary operator belongs to"));
     }
@@ -564,14 +577,17 @@ mod tests {
             (FEA_ACOUSTIC_BOUNDARY_CLASS, "impedance"),
             (FEA_FLUID_BOUNDARY_CLASS, "outletPressure"),
         ] {
-            let (registered, owner) = crate::class_registry::lookup_method(class_name, method)
-                .unwrap_or_else(|| panic!("missing {class_name}.{method}"));
-            assert_eq!(owner, class_name);
+            let (registered, owner) = crate::class_registry::lookup_method(
+                &runmat_types::ClassIdentity::from(class_name),
+                &runmat_types::MethodName::from(method),
+            )
+            .unwrap_or_else(|| panic!("missing {class_name}.{method}"));
+            assert_eq!(owner.display_name(), class_name);
             assert!(registered.is_static);
         }
         assert!(crate::class_registry::lookup_method(
-            FEA_FLUID_BOUNDARY_CLASS,
-            "prescribedVelocity"
+            &runmat_types::ClassIdentity::from(FEA_FLUID_BOUNDARY_CLASS),
+            &runmat_types::MethodName::from("prescribedVelocity")
         )
         .is_none());
     }

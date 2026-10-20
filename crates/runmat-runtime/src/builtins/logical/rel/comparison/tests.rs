@@ -79,5 +79,5 @@ fn named_symbolic_relations_broadcast_arrays() {
         panic!("expected a symbolic array");
     };
     assert_eq!(result.shape, vec![2, 3]);
-    assert_eq!(result.data.len(), 6);
+    assert_eq!(result.data().len(), 6);
 }

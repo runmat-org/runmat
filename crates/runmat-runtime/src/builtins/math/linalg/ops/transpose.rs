@@ -106,10 +106,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::ops::transpose"
 )]
-pub(super) async fn transpose_builtin(mut args: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn transpose_builtin(
+    mut args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
     let value = match args.len() {
         0 => return Err(builtin_error(&TRANSPOSE_ERROR_INVALID_ARGUMENT)),
-        1 => args.remove(0),
+        1 => args
+            .pop_front()
+            .expect("validated single transpose argument"),
         _ => return Err(invalid_argument("transpose: too many input arguments")),
     };
     match value {
@@ -128,10 +132,13 @@ pub(super) async fn transpose_builtin(mut args: Vec<Value>) -> BuiltinResult<Val
         Value::StructArray(array) => {
             ensure_vector_or_matrix_shape(array.shape())?;
             let order = transpose_order(array.shape().len());
-            array
-                .permute(&order)
+            crate::aggregate::structure::operations::permute(array, &order)
                 .map(Value::StructArray)
-                .map_err(invalid_input)
+                .map_err(|error| {
+                    crate::aggregate::structure::operations::remap(error, |message| {
+                        invalid_input(message)
+                    })
+                })
         }
         Value::Complex(re, im) => Ok(Value::Complex(re, im)),
         Value::Num(n) => Ok(Value::Num(n)),
@@ -229,17 +236,17 @@ fn transpose_logical_array(la: LogicalArray) -> BuiltinResult<LogicalArray> {
 fn transpose_char_array(ca: CharArray) -> BuiltinResult<CharArray> {
     let rows = ca.rows;
     let cols = ca.cols;
-    if ca.data.is_empty() {
+    if ca.data().is_empty() {
         return CharArray::new(Vec::new(), cols, rows)
             .map_err(|e| internal_error(format!("{NAME}: {e}")));
     }
-    let mut out = vec!['\0'; ca.data.len()];
+    let mut out = vec!['\0'; ca.data().len()];
     for r in 0..rows {
         for c in 0..cols {
             let src = r * cols + c;
             let dst = c * rows + r;
-            if src < ca.data.len() && dst < out.len() {
-                out[dst] = ca.data[src];
+            if src < ca.data().len() && dst < out.len() {
+                out[dst] = ca.data()[src];
             }
         }
     }
@@ -255,13 +262,13 @@ fn transpose_string_array(sa: StringArray) -> BuiltinResult<StringArray> {
     if rank <= 2 {
         let rows = sa.rows;
         let cols = sa.cols;
-        let mut out = vec![runmat_value::Utf8Text::default(); sa.data.len()];
+        let mut out = vec![runmat_value::Utf8Text::default(); sa.data().len()];
         for r in 0..rows {
             for c in 0..cols {
                 let src = r + c * rows;
                 let dst = c + r * cols;
-                if src < sa.data.len() && dst < out.len() {
-                    out[dst] = sa.data[src].clone();
+                if src < sa.data().len() && dst < out.len() {
+                    out[dst] = sa.data()[src].clone();
                 }
             }
         }
@@ -287,11 +294,11 @@ fn transpose_string_array(sa: StringArray) -> BuiltinResult<StringArray> {
 fn transpose_cell_array(ca: CellArray) -> BuiltinResult<CellArray> {
     let rows = ca.rows;
     let cols = ca.cols;
-    let mut out = Vec::with_capacity(ca.data.len());
+    let mut out = Vec::with_capacity(ca.data().len());
     for c in 0..cols {
         for r in 0..rows {
             let idx = r * cols + c;
-            out.push(ca.data[idx].clone());
+            out.push(ca.data()[idx].clone());
         }
     }
     CellArray::new(out, cols, rows).map_err(|e| internal_error(format!("{NAME}: {e}")))
@@ -394,11 +401,15 @@ pub(crate) mod tests {
     use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, Tensor};
 
     fn call_transpose(value: Value) -> BuiltinResult<Value> {
-        block_on(super::transpose_builtin(vec![value]))
+        block_on(super::transpose_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![value]),
+        ))
     }
 
     fn call_transpose_args(args: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::transpose_builtin(args))
+        block_on(super::transpose_builtin(
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
 
     fn all_integer_matrix_storages() -> [IntegerStorage; 8] {
@@ -739,7 +750,7 @@ pub(crate) mod tests {
             Value::CharArray(out) => {
                 assert_eq!(out.rows, 3);
                 assert_eq!(out.cols, 2);
-                assert_eq!(out.data, vec!['r', 'm', 'u', 'a', 'n', 't']);
+                assert_eq!(out.data(), vec!['r', 'm', 'u', 'a', 'n', 't']);
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -754,7 +765,7 @@ pub(crate) mod tests {
             Value::StringArray(out) => {
                 assert_eq!(out.shape, vec![3, 1]);
                 assert_eq!(
-                    out.data,
+                    out.data(),
                     vec!["a".to_string(), "b".to_string(), "c".to_string()]
                 );
             }

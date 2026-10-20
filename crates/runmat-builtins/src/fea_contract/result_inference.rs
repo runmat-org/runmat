@@ -3,7 +3,8 @@
 
 use super::constructor_inference::host_text;
 use super::identities::{
-    FEA_COMPARE_CLASS, FEA_FIELD_CLASS, FEA_RESULTS_CLASS, FEA_RUN_RESULT_CLASS, FEA_STUDY_CLASS,
+    FEA_COMPARE_CLASS, FEA_FIELD_CLASS, FEA_RESULTS_CLASS, FEA_RUN_RESULT_CLASS,
+    FEA_STEP_RUN_RESULT_CLASS, FEA_STUDY_CLASS,
 };
 use super::options::FeaPlotOption;
 use super::results_option::ResultsOption;
@@ -44,9 +45,13 @@ fn possible_run_reference(value: &ValueFact, accept_results: bool) -> bool {
         || possible_object(
             value,
             if accept_results {
-                &[FEA_RUN_RESULT_CLASS, FEA_RESULTS_CLASS]
+                &[
+                    FEA_RUN_RESULT_CLASS,
+                    FEA_STEP_RUN_RESULT_CLASS,
+                    FEA_RESULTS_CLASS,
+                ]
             } else {
-                &[FEA_RUN_RESULT_CLASS]
+                &[FEA_RUN_RESULT_CLASS, FEA_STEP_RUN_RESULT_CLASS]
             },
         )
 }
@@ -214,10 +219,10 @@ pub fn infer_result(
             object_result(FEA_RESULTS_CLASS)
         }
         FeaResultKind::Field => {
-            if request.arguments.len() != 2 {
+            if !(2..=3).contains(&request.arguments.len()) {
                 diagnostics.push(argument_error(
                     "RM-CATALOG-FEA-ARITY",
-                    "fea.field requires results or run and one field id",
+                    "fea.field requires results or run, a typed field selector, and an optional fea.Frequency sample",
                     request.arguments.len(),
                 ));
             }
@@ -232,15 +237,30 @@ pub fn infer_result(
                     0,
                 ));
             }
-            if request
-                .arguments
-                .get(1)
-                .is_some_and(|value| !host_text(value))
-            {
+            if request.arguments.get(1).is_some_and(|value| {
+                !possible_object(
+                    value,
+                    &[
+                        StaticClassIdentity::new("fea.StructuralField"),
+                        StaticClassIdentity::new("fea.ResponseSpectrumField"),
+                        StaticClassIdentity::new("fea.RandomResponseField"),
+                        StaticClassIdentity::new("fea.OutputField"),
+                    ],
+                )
+            }) {
                 diagnostics.push(argument_error(
                     "RM-CATALOG-FEA-FIELD-ID",
-                    "fea.field id must be host text",
+                    "fea.field selector must be a typed host field selector",
                     1,
+                ));
+            }
+            if request.arguments.get(2).is_some_and(|value| {
+                !possible_object(value, &[StaticClassIdentity::new("fea.Frequency")])
+            }) {
+                diagnostics.push(argument_error(
+                    "RM-CATALOG-FEA-SAMPLE",
+                    "fea.field sample must be a host fea.Frequency",
+                    2,
                 ));
             }
             object_result(FEA_FIELD_CLASS)

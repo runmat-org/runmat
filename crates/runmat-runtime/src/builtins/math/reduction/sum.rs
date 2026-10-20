@@ -120,7 +120,7 @@ pub(crate) async fn sum_builtin(
     runtime: Option<RuntimeContext>,
     observation: Option<crate::dispatcher::direct_call_observation::CallAdmissionSink>,
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<RootedValue> {
     sum_for_invocation_observed(
         runtime.as_ref(),
@@ -136,7 +136,7 @@ pub(crate) async fn sum_builtin(
 #[cfg(test)]
 async fn sum_with_nan_policy(
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
     imposed_nan_mode: Option<ReductionNaN>,
 ) -> crate::BuiltinResult<Value> {
     sum_for_invocation(None, value, rest, imposed_nan_mode, SumInvocation::Sum).await
@@ -146,7 +146,7 @@ async fn sum_with_nan_policy(
 async fn sum_for_invocation(
     runtime: Option<&RuntimeContext>,
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
     imposed_nan_mode: Option<ReductionNaN>,
     invocation: SumInvocation,
 ) -> crate::BuiltinResult<Value> {
@@ -158,7 +158,7 @@ async fn sum_for_invocation(
 pub(crate) async fn sum_for_invocation_observed(
     runtime: Option<&RuntimeContext>,
     value: Value,
-    rest: Vec<Value>,
+    rest: crate::call::BuiltinArguments,
     imposed_nan_mode: Option<ReductionNaN>,
     invocation: SumInvocation,
     observation: Option<crate::dispatcher::direct_call_observation::CallAdmissionSink>,
@@ -172,7 +172,7 @@ pub(crate) async fn sum_for_invocation_observed(
         ));
     }
     let input_meta = InputMeta::from_value(&value);
-    let mut parsed = parse_arguments(&rest).await?;
+    let mut parsed = parse_arguments(rest.view()).await?;
     parsed.invocation = invocation;
     parsed.nan_mode = match invocation {
         SumInvocation::NanSum => ReductionNaN::Omit,
@@ -397,7 +397,9 @@ impl IntClass {
     }
 }
 
-async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
+async fn parse_arguments(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<ParsedArguments> {
     let mut selection = DimSelection::Auto;
     let mut selection_set = false;
     let mut nan_mode = ReductionNaN::Include;
@@ -1292,7 +1294,13 @@ pub(crate) mod tests {
     use runmat_value::{IntValue, IntegerStorage};
 
     fn sum_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::sum_builtin(None, None, value, rest)).map(|owned| owned.value().clone())
+        block_on(super::sum_builtin(
+            None,
+            None,
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
+        .map(|owned| owned.value().clone())
     }
 
     fn values(tensor: &Tensor) -> Vec<f64> {

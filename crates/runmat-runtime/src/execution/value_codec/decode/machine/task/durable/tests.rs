@@ -1,11 +1,11 @@
 use super::*;
 use crate::execution::RootedValueMember;
 use runmat_execution::value::{DurableStructArrayField, InlineValue, ValuePayload};
-use runmat_value::HandleRef;
+use runmat_value::{HandleRef, ObjectArrayAdmission, ObjectInstance};
 
 fn handle_value(class: &str, target: runmat_gc::GcHandle) -> Value {
     Value::HandleObject(HandleRef {
-        class_name: runmat_types::ClassIdentity::new(class).unwrap(),
+        class_name: runmat_types::ClassIdentity::new(class).unwrap().into(),
         target,
         valid: true,
     })
@@ -19,12 +19,12 @@ fn object_array_handle_storage_uses_real_managed_targets_and_rejects_mixing() {
         let class = runmat_types::ClassIdentity::new("ManagedArray").unwrap();
         let handles = vec![
             HandleRef {
-                class_name: class.clone(),
+                class_name: class.clone().into(),
                 target: first.handle(),
                 valid: true,
             },
             HandleRef {
-                class_name: class.clone(),
+                class_name: class.clone().into(),
                 target: second.handle(),
                 valid: true,
             },
@@ -69,11 +69,15 @@ fn struct_admission_retains_managed_children_until_pending_owner_drops() {
                 values: vec![ValuePayload::Inline(Box::new(InlineValue::I32(1)))],
             }],
         };
+        let control = ControlOwner::new(None).unwrap();
+        let mut partials = control.vector(1, "root").unwrap();
+        partials.push(child, "root").unwrap();
         let mut task = StructArrayTask::new(
             &source,
-            TakenValues::from_partials(vec![child]),
-            "root".into(),
-        );
+            TakenValues::from_partials(partials, None).unwrap(),
+            control.path("root").unwrap(),
+        )
+        .unwrap();
         while task.admission.is_none() {
             let (completed, value) = task.advance(1).unwrap();
             assert_eq!(completed, 1);

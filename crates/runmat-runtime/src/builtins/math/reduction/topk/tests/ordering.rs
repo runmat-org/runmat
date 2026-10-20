@@ -9,11 +9,11 @@ async fn topk_abs_comparison_handles_signed_min_without_overflow() {
     let evaluation = evaluate_topk(
         TopKKind::Max,
         input,
-        &[
+        crate::call::FunctionArgumentView::from_slice(&[
             Value::Num(1.0),
             Value::from("ComparisonMethod"),
             Value::from("abs"),
-        ],
+        ]),
     )
     .await
     .expect("topk");
@@ -30,11 +30,11 @@ async fn topk_abs_comparison_uses_phase_for_equal_real_magnitudes() {
         let evaluation = evaluate_topk(
             kind,
             tensor(vec![-3.0, 3.0], vec![2, 1]),
-            &[
+            crate::call::FunctionArgumentView::from_slice(&[
                 Value::Num(2.0),
                 Value::from("ComparisonMethod"),
                 Value::from("abs"),
-            ],
+            ]),
         )
         .await
         .expect("absolute topk");
@@ -55,11 +55,11 @@ async fn maxk_real_abs_comparison_uses_magnitude() {
     let eval = evaluate_topk(
         TopKKind::Max,
         input,
-        &[
+        crate::call::FunctionArgumentView::from_slice(&[
             Value::Num(1.0),
             Value::from("ComparisonMethod"),
             Value::from("abs"),
-        ],
+        ]),
     )
     .await
     .unwrap();
@@ -75,11 +75,11 @@ async fn maxk_supports_complex_comparison_method_real() {
     let eval = evaluate_topk(
         TopKKind::Max,
         input,
-        &[
+        crate::call::FunctionArgumentView::from_slice(&[
             Value::Num(2.0),
             Value::from("ComparisonMethod"),
             Value::from("real"),
-        ],
+        ]),
     )
     .await
     .unwrap();

@@ -46,7 +46,7 @@ pub(in super::super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocument
         BuiltinDocumentationFaq { question: "Does addSentenceDetails support abbreviation tables?", answer: "Yes. The table needs Abbreviation and Usage variables, with text or categorical regular, inner, reference, or unit usage." },
         BuiltinDocumentationFaq { question: "Does addSentenceDetails execute on the GPU?", answer: "No. It updates host tokenizedDocument metadata." },
     ],
-    links: &[SOURCE], media: &[],
+    links: &[SOURCE, BuiltinDocumentationLink { label: "addTypeDetails", target: BuiltinDocumentationLinkTarget::Builtin("addTypeDetails") }], media: &[],
     evidence: BuiltinDocumentationEvidence {
         implementation: &[SOURCE],
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "sentence details and controls", location: "builtins::strings::text_analytics::details::tests" }],

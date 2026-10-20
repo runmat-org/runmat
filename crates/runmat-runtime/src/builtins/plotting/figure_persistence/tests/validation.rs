@@ -11,11 +11,11 @@ fn saveas_rejects_unsupported_extensions_and_explicit_format_wins() {
     .expect_err("jpg is unsupported");
     assert!(jpg_err.message().contains("not available yet"));
 
-    let request = parse_saveas_args(&[
+    let request = parse_saveas_args(crate::call::FunctionArgumentView::from_slice(&[
         Value::Num(fig),
         Value::String("plot.fig".into()),
         Value::String("png".into()),
-    ])
+    ]))
     .expect("explicit format takes precedence");
     assert_eq!(request.format, SaveFormat::Png);
     assert_eq!(request.output_path, PathBuf::from("plot.fig"));
@@ -60,17 +60,17 @@ fn openfig_reuse_returns_the_session_owned_open_copy() {
     let _ = std::fs::remove_file(&path);
     block_on(savefig_builtin(vec![
         Value::Num(figure),
-        Value::String(path.to_string_lossy().into_owned()),
+        Value::String(path.to_string_lossy().into_owned().into()),
     ]))
     .expect("save reusable figure");
     reset_plot_state();
 
     let first = block_on(openfig_builtin(vec![Value::String(
-        path.to_string_lossy().into_owned(),
+        path.to_string_lossy().into_owned().into(),
     )]))
     .expect("open new copy");
     let reused = block_on(openfig_builtin(vec![
-        Value::String(path.to_string_lossy().into_owned()),
+        Value::String(path.to_string_lossy().into_owned().into()),
         Value::String("reuse".into()),
     ]))
     .expect("reuse open copy");
@@ -87,7 +87,7 @@ fn openfig_reuse_does_not_cross_runtime_sessions() {
     let _ = std::fs::remove_file(&path);
     block_on(savefig_builtin(vec![
         Value::Num(figure),
-        Value::String(path.to_string_lossy().into_owned()),
+        Value::String(path.to_string_lossy().into_owned().into()),
     ]))
     .expect("save reusable figure");
     reset_plot_state();
@@ -97,24 +97,30 @@ fn openfig_reuse_does_not_cross_runtime_sessions() {
     let second_runtime = crate::context::RuntimeContext::new(std::rc::Rc::new(
         crate::execution::RuntimeExecutionService::new(),
     ));
-    let filename = Value::String(path.to_string_lossy().into_owned());
+    let filename = Value::String(path.to_string_lossy().into_owned().into());
 
     let first = block_on(execute_openfig(
         Some(first_runtime.clone()),
         Some(1),
-        vec![filename.clone()],
+        crate::builtins::common::test_support::builtin_arguments(vec![filename.clone()]),
     ))
     .expect("first session opens copy");
     let first_reused = block_on(execute_openfig(
         Some(first_runtime),
         Some(1),
-        vec![filename.clone(), Value::String("reuse".into())],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            filename.clone(),
+            Value::String("reuse".into()),
+        ]),
     ))
     .expect("first session reuses copy");
     let second = block_on(execute_openfig(
         Some(second_runtime),
         Some(1),
-        vec![filename, Value::String("reuse".into())],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            filename,
+            Value::String("reuse".into()),
+        ]),
     ))
     .expect("second session opens independent copy");
     assert_eq!(first_reused, first);
@@ -132,13 +138,13 @@ fn openfig_reuse_reimports_a_complete_bundle_after_one_copy_closes() {
     let _ = std::fs::remove_file(&path);
     block_on(savefig_builtin(vec![
         Value::Tensor(tensor(&[first, second])),
-        Value::String(path.to_string_lossy().into_owned()),
+        Value::String(path.to_string_lossy().into_owned().into()),
     ]))
     .expect("save figure bundle");
     reset_plot_state();
 
     let opened = block_on(openfig_builtin(vec![Value::String(
-        path.to_string_lossy().into_owned(),
+        path.to_string_lossy().into_owned().into(),
     )]))
     .expect("open complete bundle");
     let Value::Tensor(opened) = opened else {
@@ -153,7 +159,7 @@ fn openfig_reuse_reimports_a_complete_bundle_after_one_copy_closes() {
     close_figure(Some(FigureHandle::from(handles[0] as u32))).expect("close one imported copy");
 
     let reopened = block_on(openfig_builtin(vec![
-        Value::String(path.to_string_lossy().into_owned()),
+        Value::String(path.to_string_lossy().into_owned().into()),
         Value::String("reuse".into()),
     ]))
     .expect("partial reuse entry must reimport the whole bundle");
@@ -191,7 +197,7 @@ fn openfig_validates_the_complete_archive_before_importing_any_figure() {
     let before = figure_handles();
 
     block_on(openfig_builtin(vec![Value::String(
-        path.to_string_lossy().into_owned(),
+        path.to_string_lossy().into_owned().into(),
     )]))
     .expect_err("invalid second scene rejects whole archive");
     assert_eq!(figure_handles(), before);

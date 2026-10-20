@@ -42,7 +42,8 @@ fn fwrite_classifies_resident_skip_before_gathering() {
             .handle,
     );
     let args = vec![Value::from("uint8"), resident];
-    let (_, skip, _) = classify_arguments(&args).expect("classified controls");
+    let (_, skip, _) = classify_arguments(crate::call::FunctionArgumentView::from_slice(&args))
+        .expect("classified controls");
     let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
     let error = preflight_control(skip.expect("skip"), ControlRole::Skip).unwrap_err();
     assert_eq!(

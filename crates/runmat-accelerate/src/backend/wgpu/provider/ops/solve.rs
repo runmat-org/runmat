@@ -345,7 +345,7 @@ impl WgpuProvider {
         let tensor = self.host_tensor_from_handle(label, factor).await?;
         let eval = runmat_runtime::builtins::math::linalg::factor::svd::evaluate(
             Value::Tensor(tensor),
-            &[],
+            runmat_runtime::call::FunctionArgumentView::from_slice(&[]),
         )
         .await
         .map_err(runtime_flow_to_provider_error)?;

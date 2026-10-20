@@ -34,7 +34,10 @@ fn perfcurve_rejects_bad_option_header_before_score_download() {
             tensor(&[1.0, 0.0, 1.0, 0.0], &[4, 1]),
             Value::GpuTensor(handle),
             Value::Num(1.0),
-            vec![Value::from("UnknownOption"), Value::Num(1.0)],
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::from("UnknownOption"),
+                Value::Num(1.0),
+            ]),
         ))
         .expect_err("invalid option must be rejected before score download");
         assert!(err.message().contains("unsupported option 'unknownoption'"));
@@ -48,12 +51,12 @@ fn perfcurve_typed_option_identity_keeps_extension_position() {
         tensor(&[1.0, 0.0, 1.0, 0.0], &[4, 1]),
         tensor(&[0.9, 0.8, 0.4, 0.1], &[4, 1]),
         Value::Num(1.0),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("UnknownOption"),
             Value::Num(1.0),
             Value::from("Weights"),
             int_tensor(IntegerStorage::U8(vec![1, 1, 1, 1]), &[4, 1]),
-        ],
+        ]),
     ))
     .expect_err("known later option must retain integer extension gate");
     assert_eq!(
@@ -83,7 +86,7 @@ fn perfcurve_rank_zero_score_reaches_observation_count_admission() {
         tensor(&[1.0, 0.0], &[2]),
         tensor(&[0.5], &[]),
         Value::Num(1.0),
-        Vec::new(),
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
     ))
     .expect_err("one rank-zero score cannot match two labels");
     assert!(error
@@ -110,7 +113,7 @@ fn wide_integer_class_identity_and_exact_score_boundary() {
             &[4, 1],
         ),
         Value::Int(runmat_value::IntValue::U64(positive)),
-        vec![],
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
     ))
     .expect("exactly representable wide scores and adjacent exact class labels");
     match result {
@@ -124,7 +127,7 @@ fn wide_integer_class_identity_and_exact_score_boundary() {
             &[4, 1],
         ),
         Value::Int(runmat_value::IntValue::U64(positive)),
-        vec![],
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
     ))
     .expect_err("nonrepresentable wide score must reject");
     assert_eq!(error.identifier(), None);
@@ -142,7 +145,10 @@ fn finite_large_priors_normalize_without_overflow() {
         tensor(&[1.0, 0.0, 1.0, 0.0], &[4, 1]),
         tensor(&[0.9, 0.8, 0.4, 0.1], &[4, 1]),
         Value::Num(1.0),
-        vec![Value::from("Prior"), tensor(&[1.0e308, 1.0e308], &[1, 2])],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("Prior"),
+            tensor(&[1.0e308, 1.0e308], &[1, 2]),
+        ]),
     ))
     .expect("finite large prior pair");
     assert!((output_num(&result, 3) - 0.75).abs() < 1.0e-12);
@@ -159,8 +165,13 @@ fn finite_large_observation_weights_have_explicit_empirical_boundary_and_stable_
     };
     let weights = || vec![Value::from("Weights"), tensor(&[1.0e308; 4], &[4, 1])];
     let (labels, scores, positive) = input();
-    let error = block_on(perfcurve_builtin(labels, scores, positive, weights()))
-        .expect_err("empirical count total cannot fit in double");
+    let error = block_on(perfcurve_builtin(
+        labels,
+        scores,
+        positive,
+        crate::builtins::common::test_support::builtin_arguments(weights()),
+    ))
+    .expect_err("empirical count total cannot fit in double");
     assert!(error
         .message()
         .contains("weight exceeds finite double range"));
@@ -169,8 +180,13 @@ fn finite_large_observation_weights_have_explicit_empirical_boundary_and_stable_
     let (labels, scores, positive) = input();
     let mut controls = weights();
     controls.extend([Value::from("Prior"), Value::from("uniform")]);
-    let result = block_on(perfcurve_builtin(labels, scores, positive, controls))
-        .expect("normalized prior keeps finite class masses");
+    let result = block_on(perfcurve_builtin(
+        labels,
+        scores,
+        positive,
+        crate::builtins::common::test_support::builtin_arguments(controls),
+    ))
+    .expect("normalized prior keeps finite class masses");
     assert!((output_num(&result, 3) - 0.75).abs() < 1.0e-12);
 }
 
@@ -181,12 +197,12 @@ fn finite_extreme_costs_keep_expected_cost_curve_finite() {
         tensor(&[1.0, 0.0, 1.0, 0.0], &[4, 1]),
         tensor(&[0.9, 0.8, 0.4, 0.1], &[4, 1]),
         Value::Num(1.0),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::from("XCrit"),
             Value::from("ecost"),
             Value::from("Cost"),
             tensor(&[1.0e308; 4], &[2, 2]),
-        ],
+        ]),
     ))
     .expect("finite nonnegative cost matrix is admitted");
     for expected_cost in output_tensor(&result, 0).materialize_f64() {
@@ -206,8 +222,12 @@ fn empirical_and_uniform_priors_select_different_roc_operating_points() {
         ))
         .expect("imbalanced ROC curve")
     };
-    let empirical = run(vec![]);
-    let uniform = run(vec![Value::from("Prior"), Value::from("uniform")]);
+    let empirical = run(crate::builtins::common::test_support::builtin_arguments(
+        vec![],
+    ));
+    let uniform = run(crate::builtins::common::test_support::builtin_arguments(
+        vec![Value::from("Prior"), Value::from("uniform")],
+    ));
     assert_eq!(
         output_tensor(&empirical, 4).materialize_f64(),
         vec![0.0, 0.0]
@@ -253,7 +273,7 @@ async fn default_roc_returns_thresholds_auc_and_optimal_point() {
         tensor(&[1.0, 0.0, 1.0, 0.0], &[4, 1]),
         tensor(&[0.9, 0.8, 0.4, 0.1], &[4, 1]),
         Value::Num(1.0),
-        vec![],
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
     )
     .await
     .unwrap();
@@ -284,14 +304,14 @@ async fn perfcurve_accepts_typed_integer_labels_scores_and_weights() {
         int_tensor(IntegerStorage::U8(vec![1, 0, 1, 0]), &[4, 1]),
         int_tensor(IntegerStorage::U16(vec![9, 8, 4, 1]), &[4, 1]),
         Value::Int(runmat_value::IntValue::U8(1)),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::String("Weights".into()),
             int_tensor(IntegerStorage::U8(vec![1, 2, 1, 1]), &[4, 1]),
             Value::String("Prior".into()),
             int_tensor(IntegerStorage::U8(vec![1, 1]), &[1, 2]),
             Value::String("Cost".into()),
             int_tensor(IntegerStorage::U8(vec![0, 1, 1, 0]), &[2, 2]),
-        ],
+        ]),
     )
     .await
     .unwrap();
@@ -320,7 +340,7 @@ async fn supports_text_labels_negclass_weights_and_precision_recall() {
         labels,
         tensor(&[0.9, 0.8, 0.4, 0.2, f64::NAN], &[5, 1]),
         Value::String("hit".into()),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::String("NegClass".into()),
             Value::String("miss".into()),
             Value::String("Weights".into()),
@@ -329,7 +349,7 @@ async fn supports_text_labels_negclass_weights_and_precision_recall() {
             Value::String("reca".into()),
             Value::String("YCrit".into()),
             Value::String("prec".into()),
-        ],
+        ]),
     )
     .await
     .unwrap();
@@ -345,7 +365,7 @@ async fn supports_text_labels_negclass_weights_and_precision_recall() {
     match &result {
         Value::OutputList(values) => match &values[6] {
             Value::Cell(names) => assert_eq!(
-                names.data,
+                names.data(),
                 vec![Value::CharArray(CharArray::new_row("miss"))]
             ),
             other => panic!("expected cell names, got {other:?}"),
@@ -361,7 +381,10 @@ async fn xvals_nearest_returns_actual_points_and_interpolation_sorts_targets() {
         tensor(&[1.0, 0.0, 1.0, 0.0], &[4, 1]),
         tensor(&[0.9, 0.8, 0.4, 0.1], &[4, 1]),
         Value::Num(1.0),
-        vec![Value::String("XVals".into()), tensor(&[0.6, 0.0], &[1, 2])],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::String("XVals".into()),
+            tensor(&[0.6, 0.0], &[1, 2]),
+        ]),
     )
     .await
     .unwrap();
@@ -374,12 +397,12 @@ async fn xvals_nearest_returns_actual_points_and_interpolation_sorts_targets() {
         tensor(&[1.0, 0.0, 1.0, 0.0], &[4, 1]),
         tensor(&[0.9, 0.8, 0.4, 0.1], &[4, 1]),
         Value::Num(1.0),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::String("XVals".into()),
             tensor(&[0.5, 0.0], &[1, 2]),
             Value::String("UseNearest".into()),
             Value::Bool(false),
-        ],
+        ]),
     )
     .await
     .unwrap();
@@ -392,7 +415,7 @@ async fn rejects_missing_classes_and_bad_option_shapes() {
         tensor(&[1.0, 1.0], &[2, 1]),
         tensor(&[0.2, 0.3], &[2, 1]),
         Value::Num(2.0),
-        vec![],
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
     )
     .await
     .unwrap_err();
@@ -402,7 +425,10 @@ async fn rejects_missing_classes_and_bad_option_shapes() {
         tensor(&[1.0, 0.0], &[2, 1]),
         tensor(&[0.2, 0.3], &[2, 1]),
         Value::Num(1.0),
-        vec![Value::String("Weights".into()), tensor(&[1.0], &[1, 1])],
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::String("Weights".into()),
+            tensor(&[1.0], &[1, 1]),
+        ]),
     )
     .await
     .unwrap_err();
@@ -412,12 +438,12 @@ async fn rejects_missing_classes_and_bad_option_shapes() {
         tensor(&[1.0, 0.0], &[2, 1]),
         tensor(&[0.2, 0.3], &[2, 1]),
         Value::Num(1.0),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::String("TVals".into()),
             tensor(&[0.2], &[1, 1]),
             Value::String("XVals".into()),
             tensor(&[0.0], &[1, 1]),
-        ],
+        ]),
     )
     .await
     .unwrap_err();
@@ -431,12 +457,12 @@ async fn handles_nan_addtofalse_logical_aliases_and_non_roc_optimal_point() {
         Value::LogicalArray(runmat_value::LogicalArray::new(vec![1, 0, 1, 0], vec![4, 1]).unwrap()),
         tensor(&[0.9, f64::NAN, f64::NAN, 0.1], &[4, 1]),
         Value::String("true".into()),
-        vec![
+        crate::builtins::common::test_support::builtin_arguments(vec![
             Value::String("ProcessNaN".into()),
             Value::String("addtofalse".into()),
             Value::String("YCrit".into()),
             Value::String("ecost".into()),
-        ],
+        ]),
     )
     .await
     .unwrap();
