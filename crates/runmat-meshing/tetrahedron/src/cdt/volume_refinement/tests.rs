@@ -17,35 +17,19 @@ use crate::cdt::{
 };
 
 pub(super) fn region() -> PersistentEntityId {
-    PersistentEntityId {
-        kind: PersistentEntityKind::Region,
-        source_topology_id: "solid".to_owned(),
-        assembly_path: Vec::new(),
-    }
+    PersistentEntityId::new(PersistentEntityKind::Region, "solid".to_owned(), Vec::new())
 }
 
 fn named_region(value: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind: PersistentEntityKind::Region,
-        source_topology_id: value.to_owned(),
-        assembly_path: Vec::new(),
-    }
+    PersistentEntityId::new(PersistentEntityKind::Region, value.to_owned(), Vec::new())
 }
 
 fn face(value: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind: PersistentEntityKind::Face,
-        source_topology_id: value.to_owned(),
-        assembly_path: Vec::new(),
-    }
+    PersistentEntityId::new(PersistentEntityKind::Face, value.to_owned(), Vec::new())
 }
 
 fn edge(value: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind: PersistentEntityKind::Edge,
-        source_topology_id: value.to_owned(),
-        assembly_path: Vec::new(),
-    }
+    PersistentEntityId::new(PersistentEntityKind::Edge, value.to_owned(), Vec::new())
 }
 
 fn topology(points: [[f64; 3]; 4]) -> DelaunayVolumeTopology {

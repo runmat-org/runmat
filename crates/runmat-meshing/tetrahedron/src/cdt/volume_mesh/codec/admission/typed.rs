@@ -126,7 +126,12 @@ impl Inventory<'_, '_> {
         let length = self.decoder.str().map_err(invalid)?.len();
         self.add(length as u64)
     }
+    /// One shared identity allocation per dictionary entity; handles live in their slots.
     fn entity(&mut self) -> Result<(), CanonicalCodecError> {
+        self.add(
+            (std::mem::size_of::<runmat_geometry_core::PersistentEntityIdData>()
+                + 2 * std::mem::size_of::<usize>()) as u64,
+        )?;
         self.fields(|profile, key| match key {
             "kind" => profile.skip(),
             "source_topology_id" => profile.string(),
@@ -229,7 +234,9 @@ impl Inventory<'_, '_> {
             "mutation" => match refined {
                 Some(true) => profile.node(),
                 Some(false) => profile.mutation(),
-                None => Err(invalid("volume quality mutation kind must precede its payload")),
+                None => Err(invalid(
+                    "volume quality mutation kind must precede its payload",
+                )),
             },
             _ => Err(invalid("unknown volume quality mutation field")),
         })

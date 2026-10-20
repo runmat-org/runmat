@@ -6,6 +6,7 @@ use runmat_geometry_core::{
 };
 
 struct Inventory<'a> {
+    seen: std::collections::HashSet<usize>,
     bytes: u64,
     control: &'a dyn GeometryEvaluationControl,
 }
@@ -21,12 +22,12 @@ impl Inventory<'_> {
                 .ok_or_else(overflow)?,
         )
     }
+    /// Records hold handles (in their slots); each distinct shared identity
+    /// allocation is charged once per inventory.
     fn entity(&mut self, entity: &PersistentEntityId) -> Result<(), GeometryEvaluationError> {
         self.control.checkpoint()?;
-        self.add(entity.source_topology_id.capacity())?;
-        self.vector::<String>(entity.assembly_path.capacity())?;
-        for component in &entity.assembly_path {
-            self.add(component.capacity())?;
+        if self.seen.insert(entity.shared_address()) {
+            self.add(entity.shared_heap_bytes() as usize)?;
         }
         Ok(())
     }
@@ -46,6 +47,7 @@ impl ExactFaceMesh {
         control: &dyn GeometryEvaluationControl,
     ) -> Result<u64, GeometryEvaluationError> {
         let mut inventory = Inventory {
+            seen: Default::default(),
             bytes: std::mem::size_of::<Self>() as u64,
             control,
         };
@@ -94,6 +96,7 @@ impl crate::ExactSurfaceMesh {
         control: &dyn GeometryEvaluationControl,
     ) -> Result<u64, GeometryEvaluationError> {
         let mut inventory = Inventory {
+            seen: Default::default(),
             bytes: std::mem::size_of::<Self>() as u64,
             control,
         };

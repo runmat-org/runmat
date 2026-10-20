@@ -65,22 +65,22 @@ pub(super) fn execute() -> SolvedPipeline {
     let mut mesh =
         runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     for (face_index, face) in mesh.topology.boundary_faces.iter_mut().enumerate() {
-        face.provenance.push(PersistentEntityId {
-            kind: PersistentEntityKind::Face,
-            source_topology_id: if face_index == 0 { "root" } else { "tip" }.into(),
-            assembly_path: vec!["root".into()],
-        });
+        face.provenance.push(PersistentEntityId::new(
+            PersistentEntityKind::Face,
+            if face_index == 0 { "root" } else { "tip" }.into(),
+            vec!["root".into()],
+        ));
         face.provenance.sort();
     }
     if let Some(assignment) = solve.model.material_assignments.first() {
-        let region = PersistentEntityId {
-            kind: PersistentEntityKind::Region,
-            source_topology_id: assignment
+        let region = PersistentEntityId::new(
+            PersistentEntityKind::Region,
+            assignment
                 .selected_region_id()
                 .expect("fixture uses selected material region")
                 .to_owned(),
-            assembly_path: vec!["root".into()],
-        };
+            vec!["root".into()],
+        );
         mesh.topology.volume_elements[0].region_id = region.clone();
         mesh.topology.regions[0].region_id = region;
     }

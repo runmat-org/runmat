@@ -98,11 +98,11 @@ fn thermal_reference_model() -> (
                 .all(|node| coordinates[node][2].abs() <= 1.0e-12)
         })
         .expect("canonical tetrahedron has a z=0 base face");
-    let base_region = PersistentEntityId {
-        kind: PersistentEntityKind::Face,
-        source_topology_id: "thermal_base".into(),
-        assembly_path: vec!["root".into()],
-    };
+    let base_region = PersistentEntityId::new(
+        PersistentEntityKind::Face,
+        "thermal_base".into(),
+        vec!["root".into()],
+    );
     base_face.provenance.push(base_region.clone());
     base_face.provenance.sort();
     let base_nodes = base_face.node_ids.clone();

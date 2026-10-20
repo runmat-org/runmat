@@ -342,27 +342,29 @@ fn shell_model_and_mesh() -> (AnalysisModel, SolverMeshArtifact) {
 fn model_and_mesh() -> (AnalysisModel, SolverMeshArtifact) {
     let mut mesh = crate::assembly::solver_solid::tests::artifact(ElementOrder::Tet4);
     let attached_coordinates = mesh.topology.nodes[0].coordinates_m;
-    mesh.topology.nodes[0].provenance.push(PersistentEntityId {
-        kind: PersistentEntityKind::Vertex,
-        source_topology_id: "beam_root".into(),
-        assembly_path: vec!["root".into()],
-    });
+    mesh.topology.nodes[0]
+        .provenance
+        .push(PersistentEntityId::new(
+            PersistentEntityKind::Vertex,
+            "beam_root".into(),
+            vec!["root".into()],
+        ));
     mesh.topology.nodes[0].provenance.sort();
     for face in &mut mesh.topology.boundary_faces {
-        face.provenance.push(PersistentEntityId {
-            kind: PersistentEntityKind::Face,
-            source_topology_id: "root".into(),
-            assembly_path: vec!["root".into()],
-        });
+        face.provenance.push(PersistentEntityId::new(
+            PersistentEntityKind::Face,
+            "root".into(),
+            vec!["root".into()],
+        ));
         face.provenance.sort();
     }
     mesh.topology.boundary_faces[1]
         .provenance
-        .push(PersistentEntityId {
-            kind: PersistentEntityKind::Face,
-            source_topology_id: "solid_load".into(),
-            assembly_path: vec!["root".into()],
-        });
+        .push(PersistentEntityId::new(
+            PersistentEntityKind::Face,
+            "solid_load".into(),
+            vec!["root".into()],
+        ));
     mesh.topology.boundary_faces[1].provenance.sort();
     mesh.canonical_digest = StableDigest::ZERO;
     mesh.seal_canonical_digest().unwrap();

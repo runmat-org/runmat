@@ -35,9 +35,9 @@ fn cyclic_references_preserve_traversal_with_one_canonical_rotation() {
 }
 
 fn id(name: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind: PersistentEntityKind::Coedge,
-        source_topology_id: name.into(),
-        assembly_path: vec!["part".into()],
-    }
+    PersistentEntityId::new(
+        PersistentEntityKind::Coedge,
+        name.into(),
+        vec!["part".into()],
+    )
 }

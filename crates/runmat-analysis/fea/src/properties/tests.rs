@@ -221,11 +221,11 @@ fn thermal_solid_capabilities_fail_before_assembly_without_restricting_generic_p
 #[test]
 fn compiled_map_uses_bound_entity_sets_instead_of_logical_region_names() {
     let mut mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
-    let selected = runmat_geometry_core::PersistentEntityId {
-        kind: runmat_geometry_core::PersistentEntityKind::Solid,
-        source_topology_id: "selected-solid".into(),
-        assembly_path: vec!["root".into()],
-    };
+    let selected = runmat_geometry_core::PersistentEntityId::new(
+        runmat_geometry_core::PersistentEntityKind::Solid,
+        "selected-solid".into(),
+        vec!["root".into()],
+    );
     mesh.topology.volume_elements[0]
         .provenance
         .push(selected.clone());
@@ -237,11 +237,11 @@ fn compiled_map_uses_bound_entity_sets_instead_of_logical_region_names() {
     target
         .bind_resolved_entities(vec![
             selected,
-            runmat_geometry_core::PersistentEntityId {
-                kind: runmat_geometry_core::PersistentEntityKind::Solid,
-                source_topology_id: "another-solid".into(),
-                assembly_path: vec!["root".into()],
-            },
+            runmat_geometry_core::PersistentEntityId::new(
+                runmat_geometry_core::PersistentEntityKind::Solid,
+                "another-solid".into(),
+                vec!["root".into()],
+            ),
         ])
         .unwrap();
     model.material_assignments[0].target = target;

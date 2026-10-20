@@ -157,12 +157,3 @@ pub(super) fn invalid(reason: impl Into<String>) -> DelaunayVolumeMeshError {
         reason,
     )
 }
-pub(super) fn entity_heap(entity: &PersistentEntityId) -> u64 {
-    entity.source_topology_id.len() as u64
-        + entity.assembly_path.len() as u64 * std::mem::size_of::<String>() as u64
-        + entity
-            .assembly_path
-            .iter()
-            .map(|part| part.len() as u64)
-            .sum::<u64>()
-}

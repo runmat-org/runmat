@@ -60,11 +60,11 @@ fn representative_grid_preserves_complete_topology_and_quality_through_working_t
                 DelaunayFacetProvenance {
                     node_identities: identities,
                     chart_id: identity(u64::MAX - 1000),
-                    entity_ids: vec![PersistentEntityId {
-                        kind: PersistentEntityKind::Face,
-                        source_topology_id: "representative-outer-boundary".into(),
-                        assembly_path: Vec::new(),
-                    }],
+                    entity_ids: vec![PersistentEntityId::new(
+                        PersistentEntityKind::Face,
+                        "representative-outer-boundary".into(),
+                        Vec::new(),
+                    )],
                     region_ids: vec![region("representative-working-region")],
                 }
             })

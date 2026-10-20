@@ -3,16 +3,15 @@ use runmat_meshing_core::NeverCancelled;
 
 #[test]
 fn dictionary_expansion_uses_the_charged_capacity_even_for_tiny_contexts() {
-    let entity = PersistentEntityId {
-        kind: runmat_geometry_core::PersistentEntityKind::Region,
-        source_topology_id: "region".into(),
-        assembly_path: vec!["assembly".into(), "body".into()],
-    };
+    let entity = PersistentEntityId::new(
+        runmat_geometry_core::PersistentEntityKind::Region,
+        "region".into(),
+        vec!["assembly".into(), "body".into()],
+    );
     for count in [0, 1, 2, 3, 5, 65] {
         let table = vec![entity.clone()];
         let indices = vec![0; count];
-        let bytes = count as u64
-            * (std::mem::size_of::<PersistentEntityId>() as u64 + entity_heap(&entity));
+        let bytes = count as u64 * std::mem::size_of::<PersistentEntityId>() as u64;
         let mut budget = ExpansionBudget {
             remaining: bytes,
             allocations: None,

@@ -8,11 +8,7 @@ use crate::cdt::{
 };
 
 fn entity(kind: PersistentEntityKind, value: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: value.to_owned(),
-        assembly_path: Vec::new(),
-    }
+    PersistentEntityId::new(kind, value.to_owned(), Vec::new())
 }
 
 fn region(value: &str) -> PersistentEntityId {

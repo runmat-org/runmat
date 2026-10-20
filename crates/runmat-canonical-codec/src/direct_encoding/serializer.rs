@@ -8,6 +8,22 @@ use serde::{ser, Serialize};
 pub(super) struct Serializer<'a, 'control> {
     pub(super) output: &'a mut Vec<u8>,
     pub(super) state: &'a mut State<'control>,
+    /// Probed field names when this value is struct-shaped (see `probe`).
+    pub(super) keys: Option<Vec<&'static str>>,
+}
+impl<'a, 'control> Serializer<'a, 'control> {
+    /// Serializer for one child value, carrying that value's probed struct fields.
+    pub(super) fn child<T: Serialize + ?Sized>(
+        output: &'a mut Vec<u8>,
+        state: &'a mut State<'control>,
+        value: &T,
+    ) -> Self {
+        Self {
+            output,
+            state,
+            keys: super::probe::struct_keys(value),
+        }
+    }
 }
 impl Serializer<'_, '_> {
     fn scalar(
@@ -178,7 +194,7 @@ impl<'a, 'control> ser::Serializer for Serializer<'a, 'control> {
         _: &'static str,
         len: usize,
     ) -> Result<Self::SerializeStruct, Self::Error> {
-        Map::new(self, Some(len))
+        Map::structure(self, len)
     }
     fn serialize_struct_variant(
         mut self,
@@ -188,7 +204,7 @@ impl<'a, 'control> ser::Serializer for Serializer<'a, 'control> {
         len: usize,
     ) -> Result<Self::SerializeStructVariant, Self::Error> {
         self.variant(variant)?;
-        Map::new(self, Some(len))
+        Map::structure(self, len)
     }
     fn collect_str<T: std::fmt::Display + ?Sized>(self, value: &T) -> Result<(), Self::Error> {
         self.serialize_str(&value.to_string())

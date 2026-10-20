@@ -12,7 +12,11 @@ pub(super) fn retained_bytes(
     provenance: &DelaunayVolumeProvenance,
     control: &dyn GeometryEvaluationControl,
 ) -> Result<u64, GeometryEvaluationError> {
-    let mut inventory = Inventory { bytes: 0, control };
+    let mut inventory = Inventory {
+        seen: Default::default(),
+        bytes: 0,
+        control,
+    };
     let DelaunayVolumeTopology {
         nodes,
         tetrahedra,
@@ -87,6 +91,7 @@ pub(super) fn retained_bytes(
     Ok(inventory.bytes)
 }
 struct Inventory<'a> {
+    seen: std::collections::HashSet<usize>,
     bytes: u64,
     control: &'a dyn GeometryEvaluationControl,
 }
@@ -116,16 +121,11 @@ impl Inventory<'_> {
         }
         Ok(())
     }
+    /// Records hold handles (in their slots); each distinct shared identity
+    /// allocation is charged once per inventory.
     fn entity(&mut self, entity: &PersistentEntityId) -> Result<(), GeometryEvaluationError> {
-        let PersistentEntityId {
-            kind: _,
-            source_topology_id,
-            assembly_path,
-        } = entity;
-        self.add(source_topology_id.capacity() as u64)?;
-        self.vector(assembly_path)?;
-        for part in assembly_path {
-            self.add(part.capacity() as u64)?;
+        if self.seen.insert(entity.shared_address()) {
+            self.add(entity.shared_heap_bytes())?;
         }
         Ok(())
     }

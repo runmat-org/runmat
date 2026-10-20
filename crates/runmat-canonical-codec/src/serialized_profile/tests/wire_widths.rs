@@ -23,7 +23,7 @@ fn check<T: Serialize>(value: &T) {
         profile.encoded_bytes_upper_bound - ENVELOPE_BYTES,
         actual_body_size(value)
     );
-    assert!(profile.resident_workspace_bytes_estimate >= 4 * profile.encoded_bytes_upper_bound);
+    assert!(profile.resident_workspace_bytes_estimate >= profile.encoded_bytes_upper_bound);
 }
 
 #[test]

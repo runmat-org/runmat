@@ -55,17 +55,17 @@ pub(in crate::cdt::volume_sliver) fn assigned(
     let regions = topology
         .tetrahedra
         .iter()
-        .map(|cell| PersistentEntityId {
-            kind: PersistentEntityKind::Region,
-            source_topology_id: if topology.nodes[cell.vertex_indices[0] as usize].coordinates_m[0]
-                >= 20.
-            {
-                "unrelated-part"
-            } else {
-                "local-part"
-            }
-            .into(),
-            assembly_path: Vec::new(),
+        .map(|cell| {
+            PersistentEntityId::new(
+                PersistentEntityKind::Region,
+                if topology.nodes[cell.vertex_indices[0] as usize].coordinates_m[0] >= 20. {
+                    "unrelated-part"
+                } else {
+                    "local-part"
+                }
+                .into(),
+                Vec::new(),
+            )
         })
         .collect();
     crate::cdt::assign_delaunay_volume_regions(

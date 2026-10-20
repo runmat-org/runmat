@@ -333,6 +333,7 @@ fn bad_map_protocol_and_declared_lengths_are_rejected() {
 #[test]
 fn all_counter_arithmetic_is_checked() {
     let mut counter = Counter {
+        child_peak: 0,
         integer_value_bounds: false,
         live_map_metadata: 0,
         peak_map_metadata: 0,

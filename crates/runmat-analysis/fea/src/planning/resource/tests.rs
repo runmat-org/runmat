@@ -259,11 +259,11 @@ fn structural_fixture() -> (
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     let mut mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     for face in &mut mesh.topology.boundary_faces {
-        face.provenance.push(PersistentEntityId {
-            kind: runmat_meshing_core::PersistentEntityKind::Face,
-            source_topology_id: "root".into(),
-            assembly_path: vec!["root".into()],
-        });
+        face.provenance.push(PersistentEntityId::new(
+            runmat_meshing_core::PersistentEntityKind::Face,
+            "root".into(),
+            vec!["root".into()],
+        ));
         face.provenance.sort();
     }
     mesh.canonical_digest = StableDigest::ZERO;
@@ -282,27 +282,29 @@ fn mixed_structural_fixture() -> (
 ) {
     let mut mesh = crate::assembly::solver_solid::tests::artifact(ElementOrder::Tet4);
     let attached_coordinates = mesh.topology.nodes[0].coordinates_m;
-    mesh.topology.nodes[0].provenance.push(PersistentEntityId {
-        kind: runmat_meshing_core::PersistentEntityKind::Vertex,
-        source_topology_id: "beam_root".into(),
-        assembly_path: vec!["root".into()],
-    });
+    mesh.topology.nodes[0]
+        .provenance
+        .push(PersistentEntityId::new(
+            runmat_meshing_core::PersistentEntityKind::Vertex,
+            "beam_root".into(),
+            vec!["root".into()],
+        ));
     mesh.topology.nodes[0].provenance.sort();
     for face in &mut mesh.topology.boundary_faces {
-        face.provenance.push(PersistentEntityId {
-            kind: runmat_meshing_core::PersistentEntityKind::Face,
-            source_topology_id: "root".into(),
-            assembly_path: vec!["root".into()],
-        });
+        face.provenance.push(PersistentEntityId::new(
+            runmat_meshing_core::PersistentEntityKind::Face,
+            "root".into(),
+            vec!["root".into()],
+        ));
         face.provenance.sort();
     }
     mesh.topology.boundary_faces[1]
         .provenance
-        .push(PersistentEntityId {
-            kind: runmat_meshing_core::PersistentEntityKind::Face,
-            source_topology_id: "solid_load".into(),
-            assembly_path: vec!["root".into()],
-        });
+        .push(PersistentEntityId::new(
+            runmat_meshing_core::PersistentEntityKind::Face,
+            "solid_load".into(),
+            vec!["root".into()],
+        ));
     mesh.topology.boundary_faces[1].provenance.sort();
     mesh.canonical_digest = StableDigest::ZERO;
     mesh.seal_canonical_digest().unwrap();
@@ -328,11 +330,11 @@ fn mixed_structural_fixture() -> (
 #[test]
 fn foundation_preflight_charges_selected_quadrature_and_retained_plan_copies() {
     let (mut model, mut mesh, _, _) = structural_fixture();
-    let selected = PersistentEntityId {
-        kind: runmat_meshing_core::PersistentEntityKind::Face,
-        source_topology_id: "selected_foundation_face".into(),
-        assembly_path: vec!["root".into()],
-    };
+    let selected = PersistentEntityId::new(
+        runmat_meshing_core::PersistentEntityKind::Face,
+        "selected_foundation_face".into(),
+        vec!["root".into()],
+    );
     mesh.topology.boundary_faces[0].provenance.push(selected);
     mesh.topology.boundary_faces[0].provenance.sort();
     mesh.canonical_digest = StableDigest::ZERO;
@@ -742,8 +744,8 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
         class: runmat_execution::resource::AcceleratorClass::new("test-gpu").unwrap(),
         count: 1,
         minimum_allocation_bytes: 1024 * 1024 * 1024,
-            provider: None,
-            required_features: Default::default(),
+        provider: None,
+        required_features: Default::default(),
     };
     let accelerated = build_structural_resource_plan(
         Some(&mesh),
@@ -759,7 +761,9 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
     assert!(accelerated
         .request
         .required_capabilities
-        .contains(&Capability::Accelerator(runmat_execution::resource::AcceleratorClass::new("test-gpu").unwrap())));
+        .contains(&Capability::Accelerator(
+            runmat_execution::resource::AcceleratorClass::new("test-gpu").unwrap()
+        )));
 }
 
 #[test]

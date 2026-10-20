@@ -682,9 +682,5 @@ fn canonical_triangle(nodes: [StableDigest; 3]) -> [StableDigest; 3] {
 }
 
 fn entity(kind: PersistentEntityKind, value: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: value.to_owned(),
-        assembly_path: vec!["root".to_owned()],
-    }
+    PersistentEntityId::new(kind, value.to_owned(), vec!["root".to_owned()])
 }

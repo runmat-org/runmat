@@ -4140,11 +4140,11 @@ fn write_fixture_solver_mesh_artifact(
             .selected_region_id()
             .expect("fixture uses selected material region")
             .to_owned();
-        let region_identity = PersistentEntityId {
-            kind: PersistentEntityKind::Region,
-            source_topology_id: assigned_region.clone(),
-            assembly_path: vec!["root".to_owned()],
-        };
+        let region_identity = PersistentEntityId::new(
+            PersistentEntityKind::Region,
+            assigned_region.clone(),
+            vec!["root".to_owned()],
+        );
         for element in &mut mesh.topology.volume_elements {
             element.region_id = region_identity.clone();
         }
@@ -4188,11 +4188,11 @@ fn write_fixture_solver_mesh_artifact(
             index % boundary_face_count
         };
         let face = &mut mesh.topology.boundary_faces[face_index];
-        face.provenance.push(PersistentEntityId {
-            kind: PersistentEntityKind::Region,
-            source_topology_id: region_id,
-            assembly_path: vec!["root".to_owned()],
-        });
+        face.provenance.push(PersistentEntityId::new(
+            PersistentEntityKind::Region,
+            region_id,
+            vec!["root".to_owned()],
+        ));
         face.provenance.sort();
         face.provenance.dedup();
     }

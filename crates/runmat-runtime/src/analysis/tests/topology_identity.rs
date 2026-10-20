@@ -4,14 +4,18 @@ use super::*;
 fn render_topology_preserves_repeated_occurrence_selection_identities() {
     let mut mesh =
         runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
-    let first = PersistentEntityId {
-        kind: PersistentEntityKind::Face,
-        source_topology_id: "shared-face".into(),
-        assembly_path: vec!["root".into(), "instance-a".into()],
-    };
-    let second = PersistentEntityId {
-        assembly_path: vec!["root".into(), "instance-b".into()],
-        ..first.clone()
+    let first = PersistentEntityId::new(
+        PersistentEntityKind::Face,
+        "shared-face".into(),
+        vec!["root".into(), "instance-a".into()],
+    );
+    let second = {
+        let __base = &(first.clone());
+        PersistentEntityId::new(
+            __base.kind,
+            __base.source_topology_id.clone(),
+            vec!["root".into(), "instance-b".into()],
+        )
     };
     mesh.topology.boundary_faces[0].provenance = vec![first.clone()];
     mesh.topology.boundary_faces[1].provenance = vec![second.clone()];

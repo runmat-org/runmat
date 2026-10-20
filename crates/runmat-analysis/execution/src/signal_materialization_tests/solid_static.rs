@@ -18,11 +18,11 @@ fn generated_face_force_matches_explicit_tet4_static_balance_and_analytic_shear(
     for (index, name) in [(0, "root"), (1, "tip")] {
         mesh.topology.boundary_faces[index]
             .provenance
-            .push(PersistentEntityId {
-                kind: PersistentEntityKind::Face,
-                source_topology_id: name.into(),
-                assembly_path: vec!["root".into()],
-            });
+            .push(PersistentEntityId::new(
+                PersistentEntityKind::Face,
+                name.into(),
+                vec!["root".into()],
+            ));
         mesh.topology.boundary_faces[index].provenance.sort();
     }
     mesh.seal_canonical_digest().unwrap();

@@ -27,11 +27,11 @@ fn publication_case(side: u32, thin: bool) {
                 DelaunayFacetProvenance {
                     node_identities,
                     chart_id: identity(u64::MAX - 1000),
-                    entity_ids: vec![runmat_geometry_core::PersistentEntityId {
-                        kind: runmat_geometry_core::PersistentEntityKind::Face,
-                        source_topology_id: "representative-outer-boundary".into(),
-                        assembly_path: Vec::new(),
-                    }],
+                    entity_ids: vec![runmat_geometry_core::PersistentEntityId::new(
+                        runmat_geometry_core::PersistentEntityKind::Face,
+                        "representative-outer-boundary".into(),
+                        Vec::new(),
+                    )],
                     region_ids: vec![region("representative-working-region")],
                 }
             })

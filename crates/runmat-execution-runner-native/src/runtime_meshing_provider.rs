@@ -226,11 +226,7 @@ mod tests {
         kind: runmat_geometry_core::PersistentEntityKind,
         source: &str,
     ) -> runmat_geometry_core::PersistentEntityId {
-        runmat_geometry_core::PersistentEntityId {
-            kind,
-            source_topology_id: source.into(),
-            assembly_path: vec!["root".into()],
-        }
+        runmat_geometry_core::PersistentEntityId::new(kind, source.into(), vec!["root".into()])
     }
 
     #[test]

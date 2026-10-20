@@ -512,11 +512,11 @@ mod tests {
     }
 
     fn face(source: &str, occurrence: &str) -> PersistentEntityId {
-        PersistentEntityId {
-            kind: PersistentEntityKind::Face,
-            source_topology_id: source.into(),
-            assembly_path: vec!["root".into(), occurrence.into()],
-        }
+        PersistentEntityId::new(
+            PersistentEntityKind::Face,
+            source.into(),
+            vec!["root".into(), occurrence.into()],
+        )
     }
 
     #[test]

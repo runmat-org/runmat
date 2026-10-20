@@ -45,35 +45,15 @@ impl DecodedFace {
             .get(index as usize)
             .ok_or_else(|| invalid("entity index outside original dictionary"))
     }
-    fn entity_heap(entity: &PersistentEntityId) -> Result<u64, ExactSurfaceMeshError> {
-        let paths = entity
-            .assembly_path
-            .len()
-            .checked_mul(std::mem::size_of::<String>())
-            .ok_or_else(|| invalid("entity path inventory overflow"))?;
-        entity
-            .assembly_path
-            .iter()
-            .try_fold(
-                paths
-                    .checked_add(entity.source_topology_id.len())
-                    .ok_or_else(|| invalid("entity string inventory overflow"))?,
-                |sum, path| {
-                    sum.checked_add(path.len())
-                        .ok_or_else(|| invalid("entity string inventory overflow"))
-                },
-            )
-            .and_then(|bytes| {
-                u64::try_from(bytes).map_err(|_| invalid("entity byte inventory overflow"))
-            })
-    }
     /// Additional rich ownership while the indexed DTO is still live. The decoder
     /// owner must admit its separate DTO storage before invoking Serde.
     pub fn expansion_bytes(
         &self,
         control: &dyn MeshingCancellationSignal,
     ) -> Result<u64, ExactSurfaceMeshError> {
-        let mut bytes = Self::entity_heap(self.entity(self.source_face)?)?;
+        // Dictionary clones are handles sharing the decoded identity allocation.
+        self.entity(self.source_face)?;
+        let mut bytes = 0u64;
         let mut add = |value: u64| {
             bytes = bytes
                 .checked_add(value)
@@ -97,13 +77,13 @@ impl DecodedFace {
                 .checked_mul(std::mem::size_of::<ExactFaceMeshNodeUse>() as u64)
                 .ok_or_else(|| invalid("node-use expansion overflow"))?)?;
             for (face, _, _, _, edges) in uses {
-                add(Self::entity_heap(self.entity(*face)?)?)?;
+                self.entity(*face)?;
                 add((edges.len() as u64)
                     .checked_mul(std::mem::size_of::<ExactFaceMeshEdgeParameter>() as u64)
                     .ok_or_else(|| invalid("edge parameter expansion overflow"))?)?;
                 for (coedge, edge, _) in edges {
-                    add(Self::entity_heap(self.entity(*coedge)?)?)?;
-                    add(Self::entity_heap(self.entity(*edge)?)?)?;
+                    self.entity(*coedge)?;
+                    self.entity(*edge)?;
                 }
             }
         }
@@ -111,14 +91,14 @@ impl DecodedFace {
             if index.is_multiple_of(128) {
                 checkpoint(control)?;
             }
-            add(Self::entity_heap(self.entity(*face)?)?)?;
+            self.entity(*face)?;
         }
         for (index, (coedge, edge, _, _)) in self.boundary_segments.iter().enumerate() {
             if index.is_multiple_of(128) {
                 checkpoint(control)?;
             }
-            add(Self::entity_heap(self.entity(*coedge)?)?)?;
-            add(Self::entity_heap(self.entity(*edge)?)?)?;
+            self.entity(*coedge)?;
+            self.entity(*edge)?;
         }
         Ok(bytes)
     }

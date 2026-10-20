@@ -129,11 +129,7 @@ fn request_intersects_and_canonicalizes_derived_contributions() {
 }
 
 fn id(kind: PersistentEntityKind, source: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: source.into(),
-        assembly_path: vec!["root".into()],
-    }
+    PersistentEntityId::new(kind, source.into(), vec!["root".into()])
 }
 
 #[test]

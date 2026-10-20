@@ -69,6 +69,7 @@ fn profile<T: Serialize + ?Sized>(
         live_map_metadata: 0,
         peak_map_metadata: 0,
         integer_value_bounds,
+        child_peak: 0,
     };
     counter.encoded(ENVELOPE_BYTES)?;
     value.serialize(Profiler::value(&mut counter, 0))?;

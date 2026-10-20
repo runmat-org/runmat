@@ -71,11 +71,11 @@ pub fn mixed_solid_beam_model(attached_coordinates_m: [f64; 3]) -> AnalysisModel
                 node_id: 101,
                 coordinates_m: attached_coordinates_m,
                 solid_attachment: Some(ConformalSolidAttachment::GeometryVertex {
-                    entity: PersistentEntityId {
-                        kind: PersistentEntityKind::Vertex,
-                        source_topology_id: "beam_root".into(),
-                        assembly_path: vec!["root".into()],
-                    },
+                    entity: PersistentEntityId::new(
+                        PersistentEntityKind::Vertex,
+                        "beam_root".into(),
+                        vec!["root".into()],
+                    ),
                 }),
             },
             StructuralNode {

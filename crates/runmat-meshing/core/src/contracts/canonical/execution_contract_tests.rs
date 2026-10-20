@@ -14,11 +14,7 @@ fn stage_input(byte: u8) -> MeshingInputRef {
 }
 
 fn entity(kind: PersistentEntityKind, id: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: id.into(),
-        assembly_path: vec!["root".into()],
-    }
+    PersistentEntityId::new(kind, id.into(), vec!["root".into()])
 }
 
 pub(super) fn batch_partition() -> MeshingPartitionDescriptor {

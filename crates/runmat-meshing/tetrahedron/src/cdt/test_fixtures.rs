@@ -163,11 +163,7 @@ fn region_and_exterior_sides(
 }
 
 fn entity(kind: PersistentEntityKind, source_topology_id: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: source_topology_id.to_owned(),
-        assembly_path: Vec::new(),
-    }
+    PersistentEntityId::new(kind, source_topology_id.to_owned(), Vec::new())
 }
 
 fn same_facet_multi_steiner_coordinates() -> [[f64; 3]; 12] {

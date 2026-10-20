@@ -34,7 +34,8 @@ mod units;
 mod validation_storage;
 
 pub use analysis_identity::{
-    GeometryContractError, GeometryTolerancePolicy, PersistentEntityId, PersistentEntityKind,
+    GeometryContractError, GeometryTolerancePolicy, PersistentEntityId, PersistentEntityIdData,
+    PersistentEntityKind,
 };
 pub use assembly::AssemblyNode;
 pub use authoring::*;

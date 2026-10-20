@@ -1442,11 +1442,7 @@ fn node(value: u8) -> StableDigest {
 }
 
 fn id(kind: PersistentEntityKind, name: &str) -> PersistentEntityId {
-    PersistentEntityId {
-        kind,
-        source_topology_id: name.into(),
-        assembly_path: vec!["part".into()],
-    }
+    PersistentEntityId::new(kind, name.into(), vec!["part".into()])
 }
 
 struct Control;
