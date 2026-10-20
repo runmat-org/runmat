@@ -118,7 +118,9 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
         inventory_limits: limits,
     })
     .unwrap();
-    let field_response = driver.execute(&fields.host, &fields.program, None).await;
+    let field_response = driver
+        .execute(&fields.host, &fields.program, Some(&fields.resource_plan))
+        .await;
     let imported_fields = import_structural_recovered_fields(
         driver.store(),
         field_response.response,

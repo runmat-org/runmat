@@ -77,6 +77,7 @@ impl MeshingStageKernel for AdmissionKernel {
             ..MeshingStageCheckpoint::default()
         };
         invocation.control.checkpoint(checkpoint.clone())?;
+        charge_returned_records(&invocation, 2 * 700);
         Ok(ValidatedMeshingStageOutput {
             invariant_summary_digest: stable(90),
             streams: vec![MeshingChunkStream {
@@ -87,6 +88,17 @@ impl MeshingStageKernel for AdmissionKernel {
             final_checkpoint: checkpoint,
         })
     }
+}
+
+/// Kernels own the byte capacity of the records they return; the stage
+/// rejects records whose capacity was never charged to its allocation budget.
+fn charge_returned_records(invocation: &MeshingStageInvocation<'_, '_>, bytes: u64) {
+    use runmat_geometry_core::GeometryEvaluationControl as _;
+    invocation
+        .control
+        .geometry_evaluation_control()
+        .consume_allocation_bytes(bytes)
+        .expect("conformance kernel records fit the stage allocation budget");
 }
 
 struct SearchBudgetKernel;
@@ -130,6 +142,7 @@ impl ExactInputKernel {
             ..MeshingStageCheckpoint::default()
         };
         invocation.control.checkpoint(checkpoint.clone())?;
+        charge_returned_records(&invocation, 2 * 700);
         Ok(ValidatedMeshingStageOutput {
             invariant_summary_digest: stable(92),
             streams: vec![MeshingChunkStream {
@@ -659,7 +672,11 @@ async fn remote_conformance() {
         let mut full_executor = RemoteExactMeshingExecutor::new(
             Arc::clone(&pool),
             full_dag.2.clone(),
-            MeshingExecutionPolicy::default(),
+            // The remote worker advertises one core; the pool rejects larger requests.
+            MeshingExecutionPolicy {
+                cpu_millicores: worker_inventory().cpu_millicores,
+                ..MeshingExecutionPolicy::default()
+            },
             limits().inventory.max_object_bytes,
         )
         .unwrap();
@@ -696,7 +713,8 @@ async fn remote_conformance() {
             .evidence
             .validate(&full_result.artifact)
             .unwrap();
-        assert_eq!(full_result.artifact.topology.volume_elements.len(), 4);
+        let elements = full_result.artifact.topology.volume_elements.len() as u64;
+        assert!(elements > 4 && elements <= full_dag.1.resources.maximum_elements);
         assert!(!full_executor.drain_progress().is_empty());
 
         let mut exact_serial_store = TestStore::default();
@@ -829,6 +847,7 @@ fn full_dag_fixture(
     request.resources.maximum_elements = 10_000;
     request.resources.maximum_search_work = 1_000_000;
     request.resources.maximum_iterations = 1_000_000;
+    request.resources.maximum_memory_bytes = 64_000_000;
     request.resources.maximum_wall_time_ms = 120_000;
     (geometry, request, access)
 }
@@ -908,6 +927,19 @@ impl CacheImport for TestStore {
     fn read_verified(&self, digest: Digest) -> ArtifactResult<Option<Vec<u8>>> {
         Ok(self.0.get(&digest).cloned())
     }
+
+    fn read_verified_bounded(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+    ) -> ArtifactResult<Option<Vec<u8>>> {
+        match self.0.get(&digest) {
+            Some(bytes) if bytes.len() as u64 > maximum_bytes => Err(
+                runmat_execution_artifact::ArtifactError::Limit("object exceeds its read bound".into()),
+            ),
+            bytes => Ok(bytes.cloned()),
+        }
+    }
 }
 
 impl CacheExport for TestStore {
@@ -954,7 +986,7 @@ fn register_host_invocation(
 fn worker_inventory() -> ResourceInventory {
     ResourceInventory {
         cpu_millicores: 1_000,
-        memory_bytes: 4_000_000,
+        memory_bytes: 64_000_000,
         scratch_bytes: 4_000_000,
         accelerators: Vec::new(),
         capabilities: worker_capabilities(),

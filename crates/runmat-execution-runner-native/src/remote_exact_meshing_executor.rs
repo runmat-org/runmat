@@ -154,7 +154,10 @@ impl RemoteExactMeshingExecutor {
                     runmat_execution::security::ExecutionTrustTier::CustomerTrusted,
                 ]),
                 artifact_access: self.artifact_access.clone(),
-                cpu_millicores: self.policy.cpu_millicores,
+                cpu_millicores: crate::exact_meshing_executor::stage_cpu_millicores(
+                    self.policy.cpu_millicores,
+                    stage.host(),
+                ),
                 maximum_egress_bytes: self.policy.maximum_egress_bytes,
                 maximum_relay_bytes: self.policy.maximum_relay_bytes,
                 deadline_unix_millis: self.policy.deadline_unix_millis,

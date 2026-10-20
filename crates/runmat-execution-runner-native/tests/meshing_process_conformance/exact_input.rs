@@ -102,6 +102,11 @@ fn execute_native_dag(
     request.quality.volume.minimum_scaled_jacobian = 0.01;
     request.resources.maximum_search_work = 1_000_000;
     request.resources.maximum_iterations = 1_000_000;
+    // Geometry-derived proximity sizing places two elements across the
+    // tetrahedron's opposite edges, so the mesh is several hundred elements.
+    request.resources.maximum_nodes = 10_000;
+    request.resources.maximum_elements = 10_000;
+    request.resources.maximum_memory_bytes = 64_000_000;
 
     let mut executor =
         NativeExactMeshingExecutor::new(&session, MeshingExecutionPolicy::default()).unwrap();
@@ -130,7 +135,8 @@ fn execute_native_dag(
     )
     .unwrap();
     result.evidence.validate(&result.artifact).unwrap();
-    assert_eq!(result.artifact.topology.volume_elements.len(), 4);
+    let elements = result.artifact.topology.volume_elements.len() as u64;
+    assert!(elements > 4 && elements <= result.artifact.resolved_request.resources.maximum_elements);
     assert!(!executor.drain_progress().is_empty());
     result.artifact
 }
