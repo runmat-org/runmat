@@ -15,21 +15,25 @@ pub(super) fn decode<T: CanonicalMeshingContract>(
         T::validate_canonical,
     )
 }
-/// Requested storage for directly decoding a canonical meshing value. Typed
-/// decoding builds no JSON tree; it owns the decoded columns and, for compact
-/// solver topologies, the records rebuilt from them with their own entity
-/// identities. Three typed wire estimates cover both generations together.
+/// Requested storage for directly decoding a canonical meshing value. Typed decoding builds
+/// no JSON tree. A compact solver topology decodes its columns at exact length (the typed
+/// wire estimate) and then rebuilds its records, whose added storage is inventoried from
+/// the wire. Other contracts retain three typed wire estimates for decoder growth slack.
 pub(crate) fn topology_decode_admission(
     value: &[u8],
     control: &dyn runmat_canonical_codec::CanonicalCodecControl,
 ) -> Result<u64, runmat_canonical_codec::CanonicalCodecError> {
-    runmat_canonical_codec::canonical_value_typed_resident_bytes_estimate(value, control)?
-        .checked_mul(3)
-        .ok_or_else(|| runmat_canonical_codec::CanonicalCodecError {
-            kind: runmat_canonical_codec::CanonicalCodecErrorKind::ResourceLimit,
-            field: "meshing decode admission",
-            reason: "byte count overflow".into(),
-        })
+    let typed =
+        runmat_canonical_codec::canonical_value_typed_resident_bytes_estimate(value, control)?;
+    let overflow = || runmat_canonical_codec::CanonicalCodecError {
+        kind: runmat_canonical_codec::CanonicalCodecErrorKind::ResourceLimit,
+        field: "meshing decode admission",
+        reason: "byte count overflow".into(),
+    };
+    match super::super::topology_wire::rebuilt_record_bytes(value, control)? {
+        Some(records) => typed.checked_add(records).ok_or_else(overflow),
+        None => typed.checked_mul(3).ok_or_else(overflow),
+    }
 }
 
 pub(crate) fn decode_validated<T: CanonicalMeshingContract>(
