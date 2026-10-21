@@ -267,10 +267,12 @@ async fn authored_named_spatial_input_retains_deferred_authority_until_actual_me
         for chunk in &resolved.program().chunks {
             let response = crate::execute_host_program_request(chunk.request.clone()).await;
             response.validate_against(&chunk.request).unwrap();
-            let runmat_execution_artifact::ProgramExecutionResponse::Success { value } = response
+            let runmat_execution_artifact::ProgramExecutionResponse::Success { outputs: values } =
+                response
             else {
                 panic!("named density callable failed: {response:?}")
             };
+            let [value] = <[_; 1]>::try_from(values).expect("one generator output");
             outputs.push(runmat_analysis_execution::GeneratorChunkOutput {
                 chunk_identity: chunk.plan.identity,
                 value,
