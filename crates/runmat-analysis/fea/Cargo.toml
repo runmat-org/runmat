@@ -17,7 +17,6 @@ runmat-execution = { workspace = true }
 runmat-geometry-core = { workspace = true }
 runmat-meshing-core = { workspace = true }
 runmat-accelerate-api = { workspace = true }
-faer = { version = "=0.24.4", default-features = false, features = ["std", "linalg", "sparse-linalg"] }
 futures = "0.3"
 serde = { workspace = true, features = ["rc"] }
 sha2 = { workspace = true }

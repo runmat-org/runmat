@@ -5,11 +5,34 @@
 //! Krylov methods stall. This module is the single entry point those kernels use for an
 //! exact sparse LU with partial pivoting. It owns no physics; callers assemble triplets in
 //! SI units and receive the solution plus the measured relative residual of the ORIGINAL
-//! system. The shared parallel solver layer can replace the factorization behind these
-//! two functions without changing any caller.
-use faer::prelude::Solve;
-use faer::sparse::{SparseColMat, Triplet};
-use faer::{c64, MatMut};
+//! system. The factorization is the shared sparse layer's direct LU (`runmat-sparse-solvers`),
+//! run on the ambient admitted CPU plan with FEA cancellation.
+use runmat_sparse_solvers::c64;
+use runmat_sparse_solvers::direct::{DirectOptions, DirectSolver, FactorKind, FactorScalar};
+use runmat_sparse_solvers::TripletBuilder;
+
+/// Factor and solve one square system with the shared direct LU.
+fn shared_lu<T: FactorScalar + Send + Sync>(
+    dimension: usize,
+    triplets: TripletBuilder<T>,
+    rhs: &[T],
+) -> Result<Vec<T>, SparseDirectError> {
+    let matrix = triplets.build();
+    let plan = super::shared_sparse::ambient_plan();
+    super::shared_sparse::with_plan(plan, || {
+        let solver = DirectSolver::<T>::new(
+            matrix.as_ref().into(),
+            DirectOptions::new(FactorKind::Lu),
+            super::shared_sparse::control(),
+        )
+        .map_err(|error| SparseDirectError::Factorization(error.to_string()))?;
+        let mut x = vec![T::zero(); dimension];
+        solver
+            .solve_refined(matrix.as_ref().into(), rhs, &mut x, 1)
+            .map_err(|error| SparseDirectError::Factorization(error.to_string()))?;
+        Ok(x)
+    })
+}
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum SparseDirectError {
@@ -59,7 +82,7 @@ pub fn solve_complex(
             relative_residual: 0.0,
         });
     }
-    let mut triplets = Vec::with_capacity(entries.len());
+    let mut triplets = TripletBuilder::<c64>::with_capacity(dimension, dimension, entries.len());
     for entry in entries {
         if entry.row >= dimension
             || entry.column >= dimension
@@ -70,24 +93,13 @@ pub fn solve_complex(
                 "entry index out of range or non-finite".into(),
             ));
         }
-        triplets.push(Triplet::new(
-            entry.row,
-            entry.column,
-            c64::new(entry.real, entry.imaginary),
-        ));
+        triplets.push(entry.row, entry.column, c64::new(entry.real, entry.imaginary));
     }
     if rhs.iter().any(|(a, b)| !a.is_finite() || !b.is_finite()) {
         return Err(SparseDirectError::Invalid("non-finite rhs".into()));
     }
-    let matrix = SparseColMat::<usize, c64>::try_new_from_triplets(dimension, dimension, &triplets)
-        .map_err(|error| SparseDirectError::Invalid(format!("{error:?}")))?;
-    drop(triplets);
-    let lu = matrix
-        .sp_lu()
-        .map_err(|error| SparseDirectError::Factorization(format!("{error:?}")))?;
-    let mut values: Vec<c64> = rhs.iter().map(|(a, b)| c64::new(*a, *b)).collect();
-    lu.solve_in_place(MatMut::from_column_major_slice_mut(&mut values, dimension, 1));
-    drop(lu);
+    let values: Vec<c64> = rhs.iter().map(|(a, b)| c64::new(*a, *b)).collect();
+    let values = shared_lu(dimension, triplets, &values)?;
     if values.iter().any(|v| !v.re.is_finite() || !v.im.is_finite()) {
         return Err(SparseDirectError::Breakdown);
     }
@@ -121,27 +133,19 @@ pub fn solve_real(
             relative_residual: 0.0,
         });
     }
-    let mut triplets = Vec::with_capacity(entries.len());
+    let mut triplets = TripletBuilder::<f64>::with_capacity(dimension, dimension, entries.len());
     for &(row, column, value) in entries {
         if row >= dimension || column >= dimension || !value.is_finite() {
             return Err(SparseDirectError::Invalid(
                 "entry index out of range or non-finite".into(),
             ));
         }
-        triplets.push(Triplet::new(row, column, value));
+        triplets.push(row, column, value);
     }
     if rhs.iter().any(|v| !v.is_finite()) {
         return Err(SparseDirectError::Invalid("non-finite rhs".into()));
     }
-    let matrix = SparseColMat::<usize, f64>::try_new_from_triplets(dimension, dimension, &triplets)
-        .map_err(|error| SparseDirectError::Invalid(format!("{error:?}")))?;
-    drop(triplets);
-    let lu = matrix
-        .sp_lu()
-        .map_err(|error| SparseDirectError::Factorization(format!("{error:?}")))?;
-    let mut values = rhs.to_vec();
-    lu.solve_in_place(MatMut::from_column_major_slice_mut(&mut values, dimension, 1));
-    drop(lu);
+    let values = shared_lu(dimension, triplets, rhs)?;
     if values.iter().any(|v| !v.is_finite()) {
         return Err(SparseDirectError::Breakdown);
     }
