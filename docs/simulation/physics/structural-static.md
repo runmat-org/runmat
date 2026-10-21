@@ -11,7 +11,7 @@ A RunMat study connects geometry, material, mesh, supports, and loads in one rea
 | Surface traction or volume loads | The structure's equilibrium response |
 | Linear or quadratic tetrahedral elements | Fields on the resulting solver mesh |
 
-This procedure models small-strain elastic behaviour. Inertia, plasticity, changing contact, and large displacement belong to their corresponding dynamic or nonlinear procedures.
+This procedure models small-strain elastic behavior. Inertia, plasticity, changing contact, and large displacement belong to their corresponding dynamic or nonlinear procedures.
 
 ## Explore a steel cantilever
 
@@ -31,13 +31,13 @@ Rotate the solver mesh to inspect the beam. The fixed end is the x = 0 face; the
 
 <!-- fea:example:cantilever-static:displacement -->
 
-Colour shows **displacement magnitude in metres**. The fixed end stays in place and the free end moves downward. The displayed shape exaggerates the deformation to make it visible; the scale beneath the figure applies to the shape, while the legend reports physical displacement.
+Color shows **displacement magnitude in meters**. The fixed end stays in place and the free end moves downward. The displayed shape exaggerates the deformation to make it visible; the scale beneath the figure applies to the shape, while the legend reports physical displacement.
 
 ### Find the stressed region
 
 <!-- fea:example:cantilever-static:stress -->
 
-Colour shows **element von Mises stress in pascals**, projected from the quadratic elements’ integration points. Each surface triangle displays its owning element’s value; this is an element field, without visual smoothing. Look near the fixed end, where the support resists bending. Von Mises stress is a scalar summary of the stress components; the study also retains the underlying structural result fields.
+Color shows **element von Mises stress in pascals**, projected from the quadratic elements’ integration points. Each surface triangle displays its owning element’s value; this is an element field, without visual smoothing. Look near the fixed end, where the support resists bending. Von Mises stress is a scalar summary of the stress components; the study also retains the underlying structural result fields.
 
 All three views come from the same saved solve. You can rotate and zoom immediately after the viewer loads; exploring these results does not run an analysis on your machine.
 
@@ -84,7 +84,7 @@ For this beam, compare the displacement near the free end as you refine the mesh
 <details>
 <summary>Material, mesh, and display details</summary>
 
-The source declares density **7,850 kg/m³**. This traction-only static case uses no mass-dependent load. The requested mesh deviation is **1 mm**. Geometry and displacement use metres; stress uses pascals. The undeformed outline in the displacement view helps distinguish the original shape from the exaggerated deformation.
+The source declares density **7,850 kg/m³**. This traction-only static case uses no mass-dependent load. The requested mesh deviation is **1 mm**. Geometry and displacement use meters; stress uses pascals. The undeformed outline in the displacement view helps distinguish the original shape from the exaggerated deformation.
 
 </details>
 

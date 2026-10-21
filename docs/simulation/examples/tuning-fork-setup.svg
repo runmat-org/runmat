@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="760" height="280" viewBox="0 0 760 280" role="img" aria-labelledby="title desc">
-<title id="title">Tuning-fork geometry and restraint</title><desc id="desc">Two 65 millimetre free tines connect through a bridge to a fixed stem. Stiffness and mass determine the natural modes; no driving force is prescribed.</desc>
+<title id="title">Tuning-fork geometry and restraint</title><desc id="desc">Two 65 millimeter free tines connect through a bridge to a fixed stem. Stiffness and mass determine the natural modes; no driving force is prescribed.</desc>
 <defs><pattern id="support" width="8" height="8" patternUnits="userSpaceOnUse"><path d="M0 8L8 0" stroke="#9ca3af" stroke-width="1.5"/></pattern></defs>
 <rect width="760" height="280" rx="8" fill="#111318"/>
 <g font-family="system-ui,sans-serif" font-size="15" fill="#e5e7eb">

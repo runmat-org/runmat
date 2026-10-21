@@ -41,11 +41,11 @@ Using the finer result as the denominator, displacement changes by **0.025%** an
 
 <!-- fea:example:cantilever-static:displacement -->
 
-The colour legend reports physical displacement in metres. The deformation is enlarged for visibility, with the scale stated under the figure. Read the numerical values when comparing meshes; visually similar exaggerated shapes can hide a meaningful difference.
+The color legend reports physical displacement in meters. The deformation is enlarged for visibility, with the scale stated under the figure. Read the numerical values when comparing meshes; visually similar exaggerated shapes can hide a meaningful difference.
 
 <!-- fea:example:cantilever-static:stress -->
 
-Stress colour is an original element field. Adjacent triangles can belong to elements with different projected stresses; no visual smoothing has been applied. The largest element value is not automatically a mesh-independent design stress. Sharp corners and idealized supports can make a local peak especially sensitive to refinement.
+Stress color is an original element field. Adjacent triangles can belong to elements with different projected stresses; no visual smoothing has been applied. The largest element value is not automatically a mesh-independent design stress. Sharp corners and idealized supports can make a local peak especially sensitive to refinement.
 
 ## Repeat the comparison in RunMat
 

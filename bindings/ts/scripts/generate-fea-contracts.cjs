@@ -474,6 +474,7 @@ function main() {
   severity: FeaDiagnosticSeverity;
   phase: FeaDiagnosticPhase;
   location: FeaSourceLocation | null;
+  label?: string;
   related: FeaRelatedDiagnostic[];
   availability: FeaSourceAvailability;
 }`,

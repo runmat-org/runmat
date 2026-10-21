@@ -454,7 +454,7 @@ loss is volumetric, `thermal.heat_flux` for a thin resolved heater, or an electr
 when current distribution must determine $q'''=\mathbf J\cdot\mathbf E$. If a component dissipates
 total power $P$ uniformly in selected volume $V$, the source density is $q'''=P/V$.
 
-Do not apply $P$ as though it were $q'''$: watts and watts per cubic metre are different typed
+Do not apply $P$ as though it were $q'''$: watts and watts per cubic meter are different typed
 quantities. After projection, verify that $\int_V q'''\,dV=P$ and that the source did not spread into
 non-dissipating encapsulant, substrate, or coolant.
 

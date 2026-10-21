@@ -52,15 +52,9 @@ pub(super) fn lower(
     }
 
     let (model_key, model_expression) = model_binding(context.bound, declaration, diagnostics)?;
-    let model = context.models.get(&model_key).or_else(|| {
-        lower::error(
-            declaration,
-            model_expression.span,
-            "study model is not available as a valid typed model",
-            diagnostics,
-        );
-        None
-    })?;
+    // A model that failed to lower has already reported its own located diagnostics; repeating
+    // that failure at every dependent study would only add cascade errors.
+    let model = context.models.get(&model_key)?;
     let inputs = super::super::input::lower_definitions(context.bound, declaration, diagnostics);
     let geometry_arguments = geometry_arguments(
         context.bound,
@@ -77,6 +71,12 @@ pub(super) fn lower(
         diagnostics,
     );
     let model_closure = model_closure(context.models, model)?;
+    require_sections_for_structural_domains(
+        declaration,
+        model_expression.span,
+        &model_closure,
+        diagnostics,
+    );
     let mut sequence = lower::lower_study(declaration, &model_closure, diagnostics)?;
     let outputs = super::output::lower_outputs(context.bound, declaration, diagnostics);
     let formulation_requirement = formulation_requirement(declaration, diagnostics);
@@ -187,6 +187,61 @@ fn formulation_requirement(
                 diagnostics,
             );
             FormulationRequirement::Production
+        }
+    }
+}
+
+/// A material assigned to a face or an edge declares a shell or beam domain, which has no
+/// thickness or cross-section of its own. Without a section (or a layup for a shell) on the same
+/// region, the study would solve a body that has no material where the author meant one.
+fn require_sections_for_structural_domains(
+    declaration: &CheckedFeaDeclaration,
+    span: runmat_types::Span,
+    closure: &[&AuthoredModel],
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) {
+    use runmat_analysis_core::{AuthoredPropertyAssignment, AuthoredPropertyTarget, AuthoredRegionSource};
+    let has_section = |target: &AuthoredPropertyTarget| {
+        closure.iter().any(|model| {
+            model.property_assignments.iter().any(|assignment| match assignment {
+                AuthoredPropertyAssignment::Section { target: section, .. } => section == target,
+                AuthoredPropertyAssignment::Layup { target: layup, .. } => {
+                    matches!(target, AuthoredPropertyTarget::Shell(shell) if shell == layup)
+                }
+                AuthoredPropertyAssignment::Orientation { .. } => false,
+            })
+        })
+    };
+    for model in closure {
+        for assignment in &model.material_assignments {
+            let (kind, needs) = match &assignment.target {
+                AuthoredPropertyTarget::Shell(_) => ("face", "a shell section or layup"),
+                AuthoredPropertyTarget::Beam(_) => ("edge", "a beam section"),
+                AuthoredPropertyTarget::Solid(_) | AuthoredPropertyTarget::Cell(_) => continue,
+            };
+            if has_section(&assignment.target) {
+                continue;
+            }
+            let (AuthoredPropertyTarget::Shell(source) | AuthoredPropertyTarget::Beam(source)) =
+                &assignment.target
+            else {
+                continue;
+            };
+            let region = match source {
+                AuthoredRegionSource::Geometry(region) => {
+                    format!("geometry.{}.region.{}", region.geometry_id, region.region_id)
+                }
+                AuthoredRegionSource::ModelInput(input) => format!("input.{}", input.input_id),
+            };
+            lower::error(
+                declaration,
+                span,
+                format!(
+                    "model `{}` assigns a material to {kind} region `{region}`, which needs {needs}; assign the material to a solid region or add the section",
+                    model.model_id
+                ),
+                diagnostics,
+            );
         }
     }
 }

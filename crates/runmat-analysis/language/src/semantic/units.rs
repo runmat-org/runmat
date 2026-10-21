@@ -119,6 +119,65 @@ pub fn parse_unit_expression(source: &str) -> Result<ParsedUnit, UnitExpressionE
     })
 }
 
+/// What a dimension measures and its coherent SI unit, for diagnostics that name the expected unit.
+pub(crate) fn dimension_requirement(dimension: PhysicalDimension) -> Option<(&'static str, &'static str)> {
+    let force_per = |denominator: PhysicalDimension| PhysicalDimension::FORCE.divide(denominator);
+    let power_per = |denominator: PhysicalDimension| PhysicalDimension::POWER.divide(denominator);
+    let current_time = PhysicalDimension::ELECTRIC_CURRENT.multiply(PhysicalDimension::TIME)?;
+    let table = [
+        (Some(PhysicalDimension::DIMENSIONLESS), "dimensionless", "1"),
+        (Some(PhysicalDimension::LENGTH), "length", "m"),
+        (Some(PhysicalDimension::AREA), "area", "m^2"),
+        (Some(PhysicalDimension::VOLUME), "volume", "m^3"),
+        (Some(PhysicalDimension::TIME), "time", "s"),
+        (Some(PhysicalDimension::FREQUENCY), "frequency", "Hz"),
+        (Some(PhysicalDimension::MASS), "mass", "kg"),
+        (Some(PhysicalDimension::DENSITY), "mass per volume", "kg/m^3"),
+        (Some(PhysicalDimension::TEMPERATURE), "temperature", "K"),
+        (Some(PhysicalDimension::VELOCITY), "length per time", "m/s"),
+        (Some(PhysicalDimension::ACCELERATION), "length per time squared", "m/s^2"),
+        (Some(PhysicalDimension::FORCE), "force", "N"),
+        (Some(PhysicalDimension::MOMENT), "force times length", "N*m"),
+        (Some(PhysicalDimension::PRESSURE), "force per area", "Pa"),
+        (force_per(PhysicalDimension::VOLUME), "force per volume", "N/m^3"),
+        (force_per(PhysicalDimension::LENGTH), "force per length", "N/m"),
+        (Some(PhysicalDimension::POWER), "power", "W"),
+        (Some(PhysicalDimension::HEAT_FLUX), "power per area", "W/m^2"),
+        (power_per(PhysicalDimension::VOLUME), "power per volume", "W/m^3"),
+        (Some(PhysicalDimension::THERMAL_CONDUCTIVITY), "thermal conductivity", "W/(m*K)"),
+        (Some(PhysicalDimension::SPECIFIC_HEAT), "specific heat", "J/(kg*K)"),
+        (Some(PhysicalDimension::ELECTRIC_CURRENT), "electric current", "A"),
+        (Some(PhysicalDimension::ELECTRIC_POTENTIAL), "electric potential", "V"),
+        (Some(current_time), "electric charge", "C"),
+        (
+            PhysicalDimension::ELECTRIC_CURRENT.divide(PhysicalDimension::AREA),
+            "current per area",
+            "A/m^2",
+        ),
+        (current_time.divide(PhysicalDimension::VOLUME), "charge per volume", "C/m^3"),
+        (Some(PhysicalDimension::MAGNETIC_FLUX_DENSITY), "magnetic flux density", "T"),
+        (
+            PhysicalDimension::MAGNETIC_FLUX_DENSITY.multiply(PhysicalDimension::LENGTH),
+            "flux density times length",
+            "T*m",
+        ),
+        (
+            PhysicalDimension::VOLUME.divide(PhysicalDimension::TIME),
+            "volume per time",
+            "m^3/s",
+        ),
+        (
+            PhysicalDimension::MASS.divide(PhysicalDimension::TIME),
+            "mass per time",
+            "kg/s",
+        ),
+    ];
+    table
+        .into_iter()
+        .find(|(candidate, _, _)| *candidate == Some(dimension))
+        .map(|(_, description, unit)| (description, unit))
+}
+
 fn is_unit_character(value: u8) -> bool {
     value.is_ascii_alphabetic() || value == b'_'
 }
@@ -198,6 +257,18 @@ mod tests {
         assert_eq!(
             parse_unit_expression("GiB").unwrap().dimension,
             PhysicalDimension::INFORMATION
+        );
+    }
+
+    #[test]
+    fn names_expected_si_units_for_dimensions() {
+        assert_eq!(
+            dimension_requirement(PhysicalDimension::PRESSURE),
+            Some(("force per area", "Pa"))
+        );
+        assert_eq!(
+            dimension_requirement(parse_unit_expression("W/m^3").unwrap().dimension),
+            Some(("power per volume", "W/m^3"))
         );
     }
 

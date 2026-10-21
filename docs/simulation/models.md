@@ -69,6 +69,11 @@ load downward {
 load_case service { include load.downward }
 ```
 
+A model that declares no `load_case` applies all of its loads together in one default case,
+`load_case.default`, so a minimal model needs no case line. Once a model declares any
+`load_case`, every load must be included in a declared case explicitly; a load left out is
+rejected rather than silently dropped or silently applied.
+
 Time-, frequency-, or parameter-dependent action uses a quantity-typed signal:
 
 ```fea

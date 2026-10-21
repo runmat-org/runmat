@@ -13,7 +13,7 @@ A steady study asks for the temperature after the system reaches equilibrium. A 
 
 ## Explore an electronics heat sink
 
-**How does heat entering a mounting face reach the cooling fins?** This example imports a real finned heat-sink STEP model from the KiCad library. A distributed heater supplies approximately **10 W** to its flat mounting face. Aluminium conducts that heat into the fins, while a prescribed convection boundary exchanges heat with **25 °C air**.
+**How does heat entering a mounting face reach the cooling fins?** This example imports a real finned heat-sink STEP model from the KiCad library. A distributed heater supplies approximately **10 W** to its flat mounting face. Aluminum conducts that heat into the fins, while a prescribed convection boundary exchanges heat with **25 °C air**.
 
 <!-- fea:example:heatsink-steady:setup -->
 
@@ -29,19 +29,19 @@ Rotate the model to see the flat base, the thin fins and the three mounting hole
 
 <!-- fea:example:heatsink-steady:temperature -->
 
-Colour shows solved temperature in **kelvin**. The ambient is 298.15 K; subtract 273.15 to read Celsius. Look for the temperature difference between the heated base and the fins. The displayed range comes from the saved field, and rotation or zoom does not run another thermal solve.
+Color shows solved temperature in **kelvin**. The ambient is 298.15 K; subtract 273.15 to read Celsius. Look for the temperature difference between the heated base and the fins. The displayed range comes from the saved field, and rotation or zoom does not run another thermal solve.
 
 ### See where the heat travels
 
 <!-- fea:example:heatsink-steady:heat-flux -->
 
-Colour shows **element heat-flux magnitude in W/m²**, recovered from the solved temperature gradient. It measures heat flow per unit area, rather than total heater power. The complete project retains all three vector components, including direction; this contour displays their magnitude. Compare the base and fin roots with the fin tips to see how the conducting path distributes the heater input.
+Color shows **element heat-flux magnitude in W/m²**, recovered from the solved temperature gradient. It measures heat flow per unit area, rather than total heater power. The complete project retains all three vector components, including direction; this contour displays their magnitude. Compare the base and fin roots with the fin tips to see how the conducting path distributes the heater input.
 
 Temperature answers how hot the solid is; heat flux describes energy transport. To check the whole model’s energy balance, compare integrated heater input with integrated convection loss.
 
 ## Build and modify this study in RunMat
 
-The complete project opens in RunMat Desktop with the original STEP geometry, editable study and saved results. The excerpts below come directly from that study: import and mesh the solid, assign aluminium, apply the heater and convection boundaries, then request temperature and heat-flux fields. The face aliases identify this STEP model; select the corresponding heating and cooling faces when using another part.
+The complete project opens in RunMat Desktop with the original STEP geometry, editable study and saved results. The excerpts below come directly from that study: import and mesh the solid, assign aluminum, apply the heater and convection boundaries, then request temperature and heat-flux fields. The face aliases identify this STEP model; select the corresponding heating and cooling faces when using another part.
 
 <!-- fea:example:heatsink-steady:edit -->
 

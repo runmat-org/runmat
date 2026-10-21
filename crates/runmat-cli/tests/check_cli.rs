@@ -882,3 +882,66 @@ fn strip_ansi(bytes: &[u8]) -> Vec<u8> {
     }
     output
 }
+
+/// The homepage "Physics simulation as code" figure: `runmat check cantilever.fea` on the
+/// cantilever-static study with the traction authored in N and no `load_case` line.
+#[test]
+fn fea_check_prints_located_diagnostics_like_m_files() {
+    let temp = TempDir::new().unwrap();
+    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    fs::create_dir_all(temp.path().join("geometry")).unwrap();
+    fs::copy(
+        repository.join("docs/simulation/examples/geometry/cantilever.step"),
+        temp.path().join("geometry/cantilever.step"),
+    )
+    .unwrap();
+    let source = fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/home_study_check/cantilever.fea"),
+    )
+    .unwrap();
+    fs::write(temp.path().join("cantilever.fea"), &source).unwrap();
+
+    let output = runmat_with_env(
+        &temp,
+        &["check", "cantilever.fea"],
+        &[
+            ("NO_COLOR", "1"),
+            ("RUNMAT_PACKAGE_CACHE_DIR", &temp.path().join("cache").to_string_lossy()),
+        ],
+    );
+    assert!(!output.status.success(), "{output:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&strip_ansi(&output.stdout)),
+        concat!(
+            "error[fea.semantic.model]: traction must be force per area, found N\n",
+            " --> cantilever.fea:28:48\n",
+            "   |\n",
+            "28 | traction on geometry.beam.region.tip = [0, 0, -100000] N\n",
+            "   |                                        ^^^^^^^^^^^^^^^^^ expected Pa\n",
+            "checked cantilever.fea: 1 error(s), 0 warning(s)\n",
+        ),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // With the unit corrected, the same file checks cleanly: the load joins the default case.
+    fs::write(
+        temp.path().join("cantilever.fea"),
+        source.replace("-100000] N", "-100000] Pa"),
+    )
+    .unwrap();
+    let output = runmat_with_env(
+        &temp,
+        &["check", "cantilever.fea"],
+        &[
+            ("NO_COLOR", "1"),
+            ("RUNMAT_PACKAGE_CACHE_DIR", &temp.path().join("cache").to_string_lossy()),
+        ],
+    );
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&strip_ansi(&output.stdout)),
+        "checked cantilever.fea: 0 error(s), 0 warning(s)\n"
+    );
+}

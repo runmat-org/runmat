@@ -21,12 +21,13 @@ function fixture() {
     const register = { schema_version: 1, posture: "discovery_only", requirements: manual.topics[0].requirements.map(id => ({ id, obligations: [], witnesses: [] })) };
     writeFileSync(join(root, "requirements.json"), JSON.stringify(register));
     writeFileSync(join(root, "builtins.json"), '{"builtins":[]}');
+    writeFileSync(join(root, "builtin-documentation.json"), JSON.stringify({ schema_version: 2, builtins: [{ key: "disp", module_stem: "disp", authority: "legacy_sidecar", title: "disp" }, { key: "abs", module_stem: "abs", authority: "catalog", title: "abs" }] }));
     const catalogPath = join(root, "docs/simulation/examples/catalog.json");
     const catalog = JSON.parse(readFileSync(catalogPath)); catalog.examples = [catalog.examples.find(example => example.id === "two-body-static")]; catalog.examples[0].snapshot = false;
     manual.topics[0].examples = ["two-body-static"];
     writeFileSync(join(root, "docs/simulation/manual.json"), JSON.stringify(manual));
     writeFileSync(catalogPath, JSON.stringify(catalog));
-    const options = { source: root, output: join(root, "target/docs/source"), requirementsPath: join(root, "requirements.json"), builtinDescriptorsPath: join(root, "builtins.json") };
+    const options = { source: root, output: join(root, "target/docs/source"), requirementsPath: join(root, "requirements.json"), builtinDescriptorsPath: join(root, "builtins.json"), builtinDocumentationPath: join(root, "builtin-documentation.json") };
     return { root, options };
 }
 test("repeat exports preserve exact manifests and complete deterministic example archives", () => {
@@ -43,6 +44,9 @@ test("repeat exports preserve exact manifests and complete deterministic example
         assert.equal(example.package_identity.entry, example.entry);
         assert.deepEqual(example.package_identity.files, example.files.map(({ content, ...metadata }) => metadata));
         assert.equal(JSON.parse(readFileSync(join(options.output, "fea/evidence-index.json"))).records.length, 0);
+        // Catalog-owned builtin documentation is exported alongside the remaining sidecars.
+        assert.equal(JSON.parse(readFileSync(join(options.output, "builtins/reference/abs.json"))).authority, "catalog");
+        assert.equal(JSON.parse(readFileSync(join(options.output, "builtins/reference/disp.json"))).title, "disp");
     }
     finally {
         rmSync(root, { recursive: true, force: true });

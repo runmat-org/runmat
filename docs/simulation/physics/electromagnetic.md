@@ -89,7 +89,7 @@ frequencies and become part of result identity.
 - `terminal_voltage` applies an electric-potential signal to a terminal region.
 - `electric_current` applies a total current and preserves its resultant during projection.
 - `electric_charge` applies a total charge.
-- `current_density` applies amperes per square metre and preserves intensity.
+- `current_density` applies amperes per square meter and preserves intensity.
 - `magnetic_vector_potential` applies a vector-potential signal.
 
 Use direct `load` syntax for constant data and `signal` plus `excitation` for frequency- or

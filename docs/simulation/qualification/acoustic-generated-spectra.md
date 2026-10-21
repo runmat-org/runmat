@@ -62,6 +62,6 @@ The focused process-conformance run passed all three drives: 24 real generator
 tasks and 300 local numerical frequency entries, with exact field/phase/power,
 provenance, fan-in ordering and cold-decoding assertions above. Local encrypted
 QUIC transport requires socket permission in a sandbox; permission denial is not
-a numerical failure. Shared `complex` catalogue admission uses its canonical pure
+a numerical failure. Shared `complex` catalog admission uses its canonical pure
 contract, without changing generator effect policy or its numerical implementation.
 This closes this bounded explicit/generated source comparison, not all Stage 8 gates.
