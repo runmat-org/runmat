@@ -177,11 +177,11 @@ pub(super) fn solve_transient(
                 &balance,
                 input.residual_target,
             );
-            let mut refined = solve_checked(
+            let mut refined = super::solve_refinement(
                 &operator,
                 input.requested_solver_backend,
                 input.algebra,
-                Some(&solve.solution),
+                &solve.solution,
                 operators,
                 target,
             )?;

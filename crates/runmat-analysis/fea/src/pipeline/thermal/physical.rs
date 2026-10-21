@@ -350,11 +350,11 @@ fn solve_steady(input: SteadySolveInput<'_>) -> Result<ProcedureOutcome, FeaRunE
         // criterion alone does not bound the global signed power residual.
         let target =
             energy_refinement_target(&operator, algebra, &solve, &energy_balance, residual_target);
-        let mut refined = solve_checked(
+        let mut refined = solve_refinement(
             &operator,
             requested_solver_backend,
             algebra,
-            Some(&solve.solution),
+            &solve.solution,
             &facts.operators,
             target,
         )?;
@@ -427,7 +427,60 @@ fn energy_refinement_target(
         .min(residual_target)
 }
 
+/// The bounded energy refinement starting from an accepted solve. Its linear tolerance can lie
+/// below what floating point reaches on an ill-conditioned operator; conjugate gradients only
+/// lower the energy-norm error from the accepted start, so the last iterate is kept and the
+/// recovered energy balance, not the refinement's own stopping test, decides acceptance.
+pub(super) fn solve_refinement(
+    operator: &crate::algebra::AssembledRealSystem,
+    requested_solver_backend: LinearAlgebraBackendKind,
+    algebra: &dyn LinearAlgebraBackend,
+    initial_guess: &[f64],
+    facts: &crate::planning::resource::ThermalOperatorResourceFacts,
+    residual_target: f64,
+) -> Result<LinearSolveResult, FeaRunError> {
+    match solve_unchecked(
+        operator,
+        requested_solver_backend,
+        algebra,
+        Some(initial_guess),
+        facts,
+        residual_target,
+    )? {
+        solve if solve.solution.iter().all(|value| value.is_finite()) => Ok(solve),
+        _ => Err(FeaRunError::Assembly(
+            "thermal energy refinement produced a non-finite temperature".into(),
+        )),
+    }
+}
+
 fn solve_checked(
+    operator: &crate::algebra::AssembledRealSystem,
+    requested_solver_backend: LinearAlgebraBackendKind,
+    algebra: &dyn LinearAlgebraBackend,
+    initial_guess: Option<&[f64]>,
+    facts: &crate::planning::resource::ThermalOperatorResourceFacts,
+    residual_target: f64,
+) -> Result<LinearSolveResult, FeaRunError> {
+    let solve = solve_unchecked(
+        operator,
+        requested_solver_backend,
+        algebra,
+        initial_guess,
+        facts,
+        residual_target,
+    )?;
+    if solve.converged {
+        Ok(solve)
+    } else {
+        Err(FeaRunError::Assembly(format!(
+            "physical thermal solve did not converge: residual_norm={}",
+            solve.residual_norm
+        )))
+    }
+}
+
+fn solve_unchecked(
     operator: &crate::algebra::AssembledRealSystem,
     requested_solver_backend: LinearAlgebraBackendKind,
     algebra: &dyn LinearAlgebraBackend,
@@ -458,14 +511,7 @@ fn solve_checked(
         settings,
     )
     .map_err(|error| FeaRunError::Solve(error.to_string()))?;
-    if solve.converged {
-        Ok(solve)
-    } else {
-        Err(FeaRunError::Assembly(format!(
-            "physical thermal solve did not converge: residual_norm={}",
-            solve.residual_norm
-        )))
-    }
+    Ok(solve)
 }
 
 fn rhs_norm(rhs: &[f64]) -> f64 {

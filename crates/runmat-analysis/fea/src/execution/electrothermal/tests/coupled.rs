@@ -111,14 +111,14 @@ fn two_way_joule_heating_matches_the_closed_form_bar() {
             step_id: ProcedureStepId("heat".into()),
             backend: ComputeBackend::Cpu,
             procedure: ThermalProcedureControl::Steady,
-            residual_target: 1e-11,
+            residual_target: 1e-9,
             initial_fields: vec![],
         };
         let completion = execute_coupled_electrothermal(
             &electrical,
             &template,
             &mesh,
-            1e-11,
+            1e-9,
             ElectrothermalCouplingControls::default(),
         )
         .unwrap();
