@@ -2,7 +2,7 @@
 //! No global dense matrix, saturation proxy, first-material selection or trial-state mutation.
 use std::collections::{BTreeMap, BTreeSet};
 
-use runmat_analysis_core::AnalysisModel;
+use runmat_analysis_core::{AnalysisModel, AnalysisProcedure, StructuralKinematics};
 use runmat_canonical_codec::{encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
 use runmat_meshing_core::{ElementOrder, SolverMeshArtifact, StableDigest};
@@ -26,6 +26,8 @@ use crate::{
 mod authority;
 mod contact_layout;
 mod evaluation;
+mod follower;
+pub(crate) use follower::FollowerLoadOperator;
 mod history;
 mod preparation;
 pub(crate) mod resources;
@@ -133,6 +135,7 @@ struct PreparedElement {
 
 pub(crate) struct CanonicalNonlinearSolidBasis {
     identity: Digest,
+    kinematics: StructuralKinematics,
     integration_identity: Digest,
     mesh_digest: StableDigest,
     property_identity: CompiledPropertyMapIdentity,

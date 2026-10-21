@@ -7,6 +7,8 @@ pub enum StructuralOperatorImplementation {
     Tet10LinearElasticity,
     Tet4SmallStrainContinuum,
     Tet10SmallStrainContinuum,
+    Tet4TotalLagrangianContinuum,
+    Tet10TotalLagrangianContinuum,
     EulerBernoulliBeam3d,
     Mitc3TriangularShell,
     SyntheticDiagonalChain,
@@ -67,6 +69,7 @@ pub enum TemporalImplementation {
 pub enum ConstitutiveImplementation {
     IsotropicLinearElasticity,
     SmallStrainJ2IsotropicHardening,
+    GreenLagrangeJ2IsotropicHardening,
     ReducedThermalCoefficientProfile,
     ElementOwnedIsotropicThermalExpansion,
     IsotropicThermalConduction,
@@ -142,6 +145,9 @@ pub enum SourceImplementation {
     CanonicalVolumeProjection,
     CanonicalBoundaryProjection,
     CanonicalBoundaryPressureIntegration,
+    /// Force, traction or pressure integrated over the deformed boundary at every Newton
+    /// iterate, with its load stiffness (total Lagrangian solids only).
+    CanonicalFollowerBoundaryIntegration,
     CanonicalPointProjection,
     AcousticHashedTargetGraphProjection,
     BoundaryResultantMomentProjection,

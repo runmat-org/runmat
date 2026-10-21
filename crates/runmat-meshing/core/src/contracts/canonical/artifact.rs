@@ -2,6 +2,7 @@ use super::{
     artifact_workspace::{reserve, unique},
     solver_boundary_edge_identity, solver_boundary_face_identity, solver_volume_element_identity,
     validate_finite, validate_token, CanonicalMeshingContract, ElementOrder, FieldTopologyLocation,
+    MeshDimension,
     MeshingCancellationSignal, MeshingContractError, MeshingRequest, NeverCancelled,
     PersistentEntityId, PersistentEntityKind, SolverMeshArtifact, SolverMeshTopology, StableDigest,
     SOLVER_MESH_ARTIFACT_SCHEMA_VERSION,
@@ -12,6 +13,15 @@ const MAX_ENTITY_PROVENANCE: usize = 32;
 impl SolverMeshArtifact {
     pub fn validate(&self) -> Result<(), MeshingContractError> {
         self.validate_canonical()
+    }
+
+    /// Solver elements of the requested dimension: tetrahedra, sheet triangles, or segments.
+    pub fn generated_element_count(&self) -> u64 {
+        (match self.resolved_request.dimension {
+            MeshDimension::Solid => self.topology.volume_elements.len(),
+            MeshDimension::Surface => self.topology.boundary_faces.len(),
+            MeshDimension::Curve => self.topology.boundary_edges.len(),
+        }) as u64
     }
 
     pub(super) fn validate_payload_with_cancellation(
@@ -39,7 +49,33 @@ impl SolverMeshTopology {
         cancellation: &dyn MeshingCancellationSignal,
     ) -> Result<(), MeshingContractError> {
         require_nonempty("mesh nodes", &self.nodes)?;
-        require_nonempty("volume elements", &self.volume_elements)?;
+        match request.dimension {
+            MeshDimension::Solid => require_nonempty("volume elements", &self.volume_elements)?,
+            MeshDimension::Surface | MeshDimension::Curve => {
+                // Shell and beam discretizations carry no volume cells or cell classification.
+                if !self.volume_elements.is_empty()
+                    || !self.neighbors.is_empty()
+                    || !self.regions.is_empty()
+                    || !self.conformal_interfaces.is_empty()
+                    || !self.contacts.is_empty()
+                {
+                    return Err(MeshingContractError::invalid(
+                        "mesh topology",
+                        "surface and curve meshes contain no volume elements or cell classification",
+                    ));
+                }
+                let missing = match request.dimension {
+                    MeshDimension::Surface => self.boundary_faces.is_empty(),
+                    _ => !self.boundary_faces.is_empty() || self.boundary_edges.is_empty(),
+                };
+                if missing {
+                    return Err(MeshingContractError::invalid(
+                        "mesh topology",
+                        "surface meshes require triangles; curve meshes require only segments",
+                    ));
+                }
+            }
+        }
         if self.nodes.len() as u64 > request.resources.maximum_nodes
             || self.volume_elements.len() as u64 > request.resources.maximum_elements
         {
@@ -128,7 +164,13 @@ impl SolverMeshTopology {
             cancellation,
         )?;
         drop(element_identities);
-        self.validate_boundaries(&node_ids, &element_ids, &face_ids, cancellation)?;
+        self.validate_boundaries(
+            request.dimension,
+            &node_ids,
+            &element_ids,
+            &face_ids,
+            cancellation,
+        )?;
         super::artifact_order::validate_order_topology(self, request, &node_ids, cancellation)?;
         super::artifact_classification::validate_classification(
             self,
@@ -142,6 +184,7 @@ impl SolverMeshTopology {
 
     fn validate_boundaries(
         &self,
+        dimension: MeshDimension,
         node_ids: &[u64],
         element_ids: &[u64],
         face_ids: &[u64],
@@ -153,7 +196,16 @@ impl SolverMeshTopology {
             if face.node_ids.len() != face.order.node_count()
                 || !unique(&face.node_ids)
                 || !all_references_exist(&face.node_ids, node_ids)
-                || !(1..=2).contains(&face.adjacent_volume_element_ids.len())
+                || match dimension {
+                    MeshDimension::Solid => {
+                        !(1..=2).contains(&face.adjacent_volume_element_ids.len())
+                    }
+                    // A sheet triangle is itself the shell element; it bounds no volume.
+                    MeshDimension::Surface | MeshDimension::Curve => {
+                        !face.adjacent_volume_element_ids.is_empty()
+                            || face.role != super::BoundaryFaceRole::Exterior
+                    }
+                }
                 || !strictly_increasing(&face.adjacent_volume_element_ids)
                 || !all_references_exist(&face.adjacent_volume_element_ids, element_ids)
                 || face.adjacent_volume_element_ids.iter().any(|element| {
@@ -165,16 +217,17 @@ impl SolverMeshTopology {
                         .contains(node)
                     })
                 })
-                || match face.role {
-                    super::BoundaryFaceRole::ConformalInterface => {
-                        face.adjacent_volume_element_ids.len() != 2
-                    }
-                    super::BoundaryFaceRole::Exterior
-                    | super::BoundaryFaceRole::ContactPrimary
-                    | super::BoundaryFaceRole::ContactSecondary => {
-                        face.adjacent_volume_element_ids.len() != 1
-                    }
-                }
+                || (dimension.is_solid()
+                    && match face.role {
+                        super::BoundaryFaceRole::ConformalInterface => {
+                            face.adjacent_volume_element_ids.len() != 2
+                        }
+                        super::BoundaryFaceRole::Exterior
+                        | super::BoundaryFaceRole::ContactPrimary
+                        | super::BoundaryFaceRole::ContactSecondary => {
+                            face.adjacent_volume_element_ids.len() != 1
+                        }
+                    })
             {
                 return Err(MeshingContractError::invalid(
                     "boundary face",
@@ -205,6 +258,7 @@ impl SolverMeshTopology {
                 || !unique(&edge.node_ids)
                 || !all_references_exist(&edge.node_ids, node_ids)
                 || edge.adjacent_boundary_face_ids.is_empty()
+                    != (dimension == MeshDimension::Curve)
                 || !strictly_increasing(&edge.adjacent_boundary_face_ids)
                 || !all_references_exist(&edge.adjacent_boundary_face_ids, face_ids)
                 || edge.adjacent_boundary_face_ids.iter().any(|face_id| {

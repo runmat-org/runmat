@@ -111,9 +111,20 @@ fn block_admission_binds_inputs_output_and_cumulative_history() {
         )
         .unwrap();
         assert!(bytes >= actual.encoded_bytes_upper_bound);
+        // Blocks are encoded directly into reserved output; no value tree is built.
+        let encoding = runmat_canonical_codec::profile_canonical_encoding(
+            &block,
+            runmat_canonical_codec::CanonicalLimits::new(
+                1024 * 1024 * 1024,
+                100_000_000,
+                65_536,
+                64,
+            ),
+        )
+        .unwrap();
         assert!(
             facts.output.construction_resident_bytes_admission_budget.0
-                >= actual.materialization_resident_bytes_estimate
+                >= encoding.resident_workspace_bytes_estimate
         );
         for altered in 0..3 {
             let mut insufficient = facts.clone();

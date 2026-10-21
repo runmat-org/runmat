@@ -142,10 +142,14 @@ impl SolverMeshValidation {
         self.geometry.validate()?;
         self.resolved_request_digest
             .validate_nonzero("validated solver request digest")?;
-        if self.node_count == 0 || self.volume_element_count == 0 {
+        if self.node_count == 0
+            || (self.volume_element_count == 0
+                && self.boundary_face_count == 0
+                && self.boundary_edge_count == 0)
+        {
             return Err(MeshingContractError::invalid(
                 "solver mesh validation inventory",
-                "validated solver topology must contain nodes and volume elements",
+                "validated solver topology must contain nodes and elements",
             ));
         }
         Ok(())

@@ -153,7 +153,7 @@ fn validate_callable(
     label: &str,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) {
-    if !facts.effects.is_side_effect_free() {
+    if !facts.effects.is_deterministic_value_function() {
         error(
             declaration,
             declaration.span,

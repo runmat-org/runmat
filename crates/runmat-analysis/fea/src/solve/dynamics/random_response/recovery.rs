@@ -105,42 +105,134 @@ impl<'a> FrequencyResponse<'a> {
         &self.layout
     }
 
-    pub(super) fn evaluate(&self, frequency_hz: f64) -> Result<Vec<f64>, FeaRunError> {
+    pub(super) fn mode_count(&self) -> usize {
+        self.modes.len()
+    }
+
+    /// Real part of the modal response covariance density `H S Hᴴ` (row-major, modes × modes).
+    ///
+    /// Recovered quantities are real linear combinations of modal coordinates, so their spectral
+    /// density is `phiᵀ Re(H S Hᴴ) phi`; the imaginary part cancels exactly in that quadratic form.
+    pub(super) fn modal_density(&self, frequency_hz: f64) -> Result<Vec<f64>, FeaRunError> {
         let coordinates = self.modal_coordinate_transfers(frequency_hz)?;
         let channel_count = self.spectrum.channels.len();
         let spectral_matrix = interpolate_spectral_matrix(self.spectrum, frequency_hz)?;
-        let mut densities = Vec::with_capacity(self.layout.total_length);
+        if spectral_matrix.len() != channel_count * channel_count {
+            return Err(FeaRunError::Solve(
+                "random-response transfer and spectral matrix shapes differ".into(),
+            ));
+        }
+        let mode_count = self.modes.len();
+        // Row i of H S: (H S)_{i,b} = Σ_a H_{i,a} S_{a,b}.
+        let weighted = coordinates
+            .iter()
+            .map(|row| {
+                (0..channel_count)
+                    .map(|column| {
+                        row.iter()
+                            .enumerate()
+                            .fold(Complex::default(), |sum, (channel, value)| {
+                                sum + *value * spectral_matrix[channel * channel_count + column]
+                            })
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        let mut density = vec![0.0; mode_count * mode_count];
+        for row in 0..mode_count {
+            for column in row..mode_count {
+                let value = weighted[row]
+                    .iter()
+                    .zip(&coordinates[column])
+                    .fold(Complex::default(), |sum, (left, right)| {
+                        sum + *left * right.conjugate()
+                    });
+                density[row * mode_count + column] = value.real;
+                density[column * mode_count + row] = value.real;
+            }
+            let diagonal = density[row * mode_count + row];
+            if !diagonal.is_finite() {
+                return Err(FeaRunError::Solve(
+                    "random-response modal covariance density is not finite".into(),
+                ));
+            }
+            if diagonal < 0.0 {
+                let scale = response_density(&coordinates[row], &spectral_matrix)?;
+                density[row * mode_count + row] = scale;
+            }
+        }
+        Ok(density)
+    }
 
+    /// Projects an integrated modal covariance onto every DOF and recovered field component.
+    pub(super) fn project(&self, covariance: &[f64]) -> Result<Vec<f64>, FeaRunError> {
+        let mode_count = self.modes.len();
+        if covariance.len() != mode_count * mode_count
+            || covariance.iter().any(|value| !value.is_finite())
+        {
+            return Err(FeaRunError::Solve(
+                "random-response modal covariance is malformed".into(),
+            ));
+        }
+        let mut variances = Vec::with_capacity(self.layout.total_length);
+        let mut shape = vec![0.0; mode_count];
+        let quadratic = |shape: &[f64]| -> Result<f64, FeaRunError> {
+            let mut value = 0.0;
+            let mut scale = 0.0;
+            for row in 0..mode_count {
+                for column in 0..mode_count {
+                    let term = shape[row] * covariance[row * mode_count + column] * shape[column];
+                    value += term;
+                    scale += term.abs();
+                }
+            }
+            if value < -(64.0 * f64::EPSILON * mode_count as f64 * scale) {
+                return Err(FeaRunError::Solve(
+                    "random-response modal covariance projects to a negative variance".into(),
+                ));
+            }
+            Ok(value.max(0.0))
+        };
         for dof in 0..self.layout.dof_count {
-            let mut transfer = vec![Complex::default(); channel_count];
-            for (mode_index, mode) in self.modes.iter().enumerate() {
-                for (channel_index, value) in transfer.iter_mut().enumerate() {
-                    *value += coordinates[mode_index][channel_index].scale(mode.dof_shape()[dof]);
-                }
+            for (slot, mode) in shape.iter_mut().zip(self.modes) {
+                *slot = mode.dof_shape()[dof];
             }
-            densities.push(response_density(&transfer, &spectral_matrix)?);
+            variances.push(quadratic(&shape)?);
         }
-
-        for field in &self.layout.fields {
+        let field_values = self
+            .layout
+            .fields
+            .iter()
+            .map(|field| {
+                self.modal_fields
+                    .iter()
+                    .map(|inventory| {
+                        inventory
+                            .get(&field.quantity)
+                            .map(|(_, values)| values.as_slice())
+                            .ok_or_else(|| {
+                                FeaRunError::Solve(
+                                    "random-response modal field inventory changed".into(),
+                                )
+                            })
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        for (field, modal_values) in self.layout.fields.iter().zip(&field_values) {
             for component in 0..field.length {
-                let mut transfer = vec![Complex::default(); channel_count];
-                for (mode_index, inventory) in self.modal_fields.iter().enumerate() {
-                    let (_, values) = inventory.get(&field.quantity).ok_or_else(|| {
-                        FeaRunError::Solve("random-response modal field inventory changed".into())
-                    })?;
-                    for (channel_index, value) in transfer.iter_mut().enumerate() {
-                        *value += coordinates[mode_index][channel_index].scale(values[component]);
-                    }
+                for (slot, values) in shape.iter_mut().zip(modal_values) {
+                    *slot = values[component];
                 }
-                densities.push(response_density(&transfer, &spectral_matrix)?);
+                variances.push(quadratic(&shape)?);
             }
         }
-        if densities.len() != self.layout.total_length {
+        if variances.len() != self.layout.total_length {
             return Err(FeaRunError::Solve(
                 "random-response spectral projection differs from its recovery layout".into(),
             ));
         }
-        Ok(densities)
+        Ok(variances)
     }
 
     fn modal_coordinate_transfers(

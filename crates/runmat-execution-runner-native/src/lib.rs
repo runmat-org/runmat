@@ -5,6 +5,12 @@ mod test_support;
 
 mod accelerator_placement;
 mod machine_capacity;
+
+/// Memory this host can admit for local work: three quarters of what is currently available
+/// (bounded by any container limit). The same authority sizes local analysis admission.
+pub fn local_memory_capacity_bytes() -> std::io::Result<u64> {
+    machine_capacity::memory_bytes()
+}
 pub use accelerator_placement::active_provider_resource;
 mod analysis_acoustic;
 mod analysis_electrical;
@@ -41,6 +47,7 @@ mod analysis_prestressed_modal_frequency;
 mod analysis_progress;
 mod analysis_random_response;
 mod analysis_response_spectrum;
+mod analysis_statistical_observations;
 mod analysis_sequence;
 mod analysis_task;
 mod analysis_task_pool;

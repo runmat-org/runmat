@@ -173,6 +173,7 @@ fn validate_structural_identity(
     let input = StructuralRealizationInput {
         assemblies,
         procedure: request.procedure,
+        kinematics: requested_kinematics(request),
         coupling: expected_coupling,
         sources,
         boundary_transfers: structural_boundaries,
@@ -254,4 +255,24 @@ fn first_incompatible_axis(
         return FormulationAdmissionRejectionReason::UnregisteredRealization;
     };
     FormulationAdmissionRejectionReason::IncompatibleAxis(axis)
+}
+
+/// The kinematics a structural request realizes is carried by its spatial operator identity.
+fn requested_kinematics(
+    request: &FormulationAdmissionRequest,
+) -> runmat_analysis_core::StructuralKinematics {
+    let total_lagrangian = request.realization.components.iter().any(|component| {
+        matches!(
+            component.spatial_operator,
+            SpatialOperatorImplementation::Structural(
+                runmat_analysis_core::StructuralOperatorImplementation::Tet4TotalLagrangianContinuum
+                    | runmat_analysis_core::StructuralOperatorImplementation::Tet10TotalLagrangianContinuum
+            )
+        )
+    });
+    if total_lagrangian {
+        runmat_analysis_core::StructuralKinematics::LargeDeformation
+    } else {
+        runmat_analysis_core::StructuralKinematics::SmallStrain
+    }
 }

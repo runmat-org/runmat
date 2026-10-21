@@ -419,8 +419,9 @@ fn valid_chunks(chunks: &[GeometrySourceChunk], encoded_length: u64, digest: Dig
 }
 
 fn validate_output_sets(output: &GeometryMaterializationOutput) -> AnalysisBridgeResult<()> {
+    // Solids carry tetrahedral analyses; sheet faces carry shell and beam analyses.
     let topology_ids = match &output.document.model {
-        GeometryModel::ExactBRep { model } => model.solid_count,
+        GeometryModel::ExactBRep { model } => model.solid_count.max(model.face_count),
         GeometryModel::FacetedSolid { .. } => 0,
     };
     if topology_ids == 0

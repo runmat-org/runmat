@@ -242,7 +242,10 @@ fn validate_run(run: &ExactMeshingDagRun<'_>) -> Result<(), ExactMeshingDagRunEr
             "edge and face partition sizes must be nonzero".into(),
         ));
     }
-    if run.geometry.geometry_objects().topology.regions.is_empty() {
+    let topology = &run.geometry.geometry_objects().topology;
+    if (run.request.dimension.is_solid() && topology.regions.is_empty())
+        || (!run.request.dimension.is_solid() && topology.faces.is_empty())
+    {
         return Err(ExactMeshingDagRunError::Stage(
             MeshingStageExecutionError::Failure(Box::new(MeshingFailure {
                 schema_version: MESHING_FAILURE_SCHEMA_VERSION,
@@ -253,7 +256,12 @@ fn validate_run(run: &ExactMeshingDagRun<'_>) -> Result<(), ExactMeshingDagRunEr
                 witnesses: Vec::new(),
                 request_values: Vec::new(),
                 achieved_values: Vec::new(),
-                remediation: "select geometry containing at least one closed solid region".into(),
+                remediation: if run.request.dimension.is_solid() {
+                    "select geometry containing at least one closed solid region".into()
+                } else {
+                    "select geometry containing at least one face for shell or beam meshing"
+                        .into()
+                },
             })),
         ));
     }

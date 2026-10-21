@@ -283,8 +283,31 @@ impl CanonicalNonlinearSolidBasis {
             CanonicalLimits::new(512 * 1024 * 1024, 8_000_000, 4096, 64),
         )
         .map_err(|e| NonlinearSolidError::Authority(e.to_string()))?;
+        // The kinematic description is part of the operator: total Lagrangian solids publish a
+        // distinct basis identity, while small-strain identities keep their established schema.
+        let kinematics = model
+            .sequence
+            .steps
+            .iter()
+            .find(|step| step.procedure == AnalysisProcedure::Nonlinear)
+            .map_or(StructuralKinematics::SmallStrain, |step| {
+                step.structural_kinematics()
+            });
+        let identity = match kinematics {
+            StructuralKinematics::SmallStrain => Digest::sha256(bytes),
+            StructuralKinematics::LargeDeformation => Digest::sha256(
+                encode_contract(
+                    b"runmat-fea-nonlinear-solid-basis-total-lagrangian/v1\0",
+                    "nonlinear-solid-basis-total-lagrangian",
+                    &Digest::sha256(bytes),
+                    CanonicalLimits::new(4096, 64, 64, 8),
+                )
+                .map_err(|e| NonlinearSolidError::Authority(e.to_string()))?,
+            ),
+        };
         Ok(Self {
-            identity: Digest::sha256(bytes),
+            identity,
+            kinematics,
             integration_identity: plan.identity(),
             mesh_digest: mesh.canonical_digest,
             property_identity: properties.identity,

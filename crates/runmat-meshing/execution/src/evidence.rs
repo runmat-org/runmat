@@ -74,8 +74,7 @@ fn aggregate_resources(
     Ok(MeshingResourceUsage {
         generated_nodes: u64::try_from(artifact.topology.nodes.len())
             .map_err(|_| invalid("solver node inventory exceeds u64"))?,
-        generated_elements: u64::try_from(artifact.topology.volume_elements.len())
-            .map_err(|_| invalid("solver element inventory exceeds u64"))?,
+        generated_elements: artifact.generated_element_count(),
         peak_memory_bytes,
         peak_scratch_bytes,
         wall_time_ms,

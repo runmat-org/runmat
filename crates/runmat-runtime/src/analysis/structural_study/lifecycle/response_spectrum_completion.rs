@@ -265,11 +265,39 @@ pub(in crate::analysis) fn complete_response_spectrum_study(
     .map_err(|error| completion_error(&prepared, error.to_string()))?
     .into_identity();
     response_options.solver_mesh_artifact_path = prepared.solver_mesh_artifact_path.clone();
+    // Authored outputs observe the step's recovered statistical fields on the canonical mesh.
+    let observations = numerical.response_observations.as_ref();
+    if observations.is_some() == response_step.procedure_step.observations.is_empty()
+        || observations.map(|catalog| catalog.identity())
+            != numerical.response_publication.source_observations
+    {
+        return Err(completion_error(
+            &prepared,
+            "response-spectrum observations differ from authored outputs or their publication",
+        ));
+    }
+    if let Some(catalog) = observations {
+        catalog
+            .validate_source_result(
+                producer,
+                runmat_analysis_fea::execution::AccuracySourceKind::StructuralModalResponseSpectrum,
+                response_result_identity,
+            )
+            .and_then(|()| {
+                catalog.validate_for(
+                    &response_step.procedure_step,
+                    runmat_analysis_fea::execution::ObservationHistorySourceContext::VolumeMesh {
+                        mesh: &solver_mesh,
+                    },
+                )
+            })
+            .map_err(|error| completion_error(&prepared, error.to_string()))?;
+    }
     let accuracy_request = runmat_analysis_fea::execution::AccuracyEvaluationRequest::new(
         producer,
         runmat_analysis_fea::execution::AccuracySourceKind::StructuralModalResponseSpectrum,
         response_result_identity,
-        None,
+        observations,
         response_step.procedure_step.accuracy.clone(),
     )
     .map_err(|error| completion_error(&prepared, error.to_string()))?;

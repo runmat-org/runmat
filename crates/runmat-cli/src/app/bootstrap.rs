@@ -336,7 +336,12 @@ fn configure_analysis_from_config(config: &RunMatRuntimeConfig) -> Result<()> {
             .study_artifact_root
             .clone()
             .or_else(|| Some(artifact_root.join("studies"))),
-        publication_staging_bytes: analysis::FeaRuntimeConfig::default().publication_staging_bytes,
+        // Publication staging is resident; it is admitted against this host's memory, the same
+        // authority that sizes local analysis work, not a fixed model-independent ceiling.
+        publication_staging_bytes: runmat_execution_runner_native::local_memory_capacity_bytes()
+            .map_err(|err| {
+                anyhow::anyhow!("Failed to discover local memory for FEA publication: {err}")
+            })?,
     })
     .map_err(|err| anyhow::anyhow!("Failed to configure FEA runtime: {err}"))?;
     Ok(())

@@ -20,6 +20,7 @@ fn request() -> MeshingRequest {
     MeshingRequest {
         schema_version: MESHING_REQUEST_SCHEMA_VERSION,
         element_order: ElementOrder::Tet10,
+        dimension: crate::MeshDimension::Solid,
         deterministic_seed: 7,
         algorithms: algorithms(),
         tolerance: GeometryTolerancePolicy {

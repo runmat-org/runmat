@@ -48,6 +48,8 @@ impl SolidNewtonProblem<'_> {
         work: &mut SolidAttemptWork,
     ) -> Result<(), SolidNewtonError> {
         if self.contact.is_some() {
+            // The certified direct correction rejects a singular reduced tangent (an open pair
+            // can leave a body unanchored); a zero load must give a zero correction.
             let zero = vec![0.; self.reduction.reduced_dof_count];
             let correction = self.correction(tangent, &zero, factor, work)?;
             if correction.iter().any(|v| *v != 0.) {
@@ -111,8 +113,12 @@ impl SolidNewtonProblem<'_> {
         u: &[f64],
         material: &NonlinearSolidState,
         contact: Option<&ContactConfigurationState>,
+        factor: f64,
     ) -> Result<SolidTrialEvaluation, SolidNewtonError> {
         let mut evaluation = self.evaluate(u, material)?;
+        if let Some(follower) = self.follower {
+            self.add_follower_loads(follower, u, factor, &mut evaluation)?;
+        }
         let Some(c) = &self.contact else {
             if contact.is_some() {
                 return Err(SolidNewtonError::Invalid(
@@ -171,6 +177,63 @@ impl SolidNewtonProblem<'_> {
         })
     }
 }
+impl SolidNewtonProblem<'_> {
+    /// Folds `-λ f(u)` and `-λ ∂f/∂u` of the follower loads into the body evaluation, so the
+    /// residual stays `f_int - λ f_dead` and constraint reactions include follower loading.
+    fn add_follower_loads(
+        &self,
+        follower: &crate::assembly::nonlinear_solid::FollowerLoadOperator,
+        u: &[f64],
+        factor: f64,
+        evaluation: &mut NonlinearSolidEvaluation,
+    ) -> Result<(), SolidNewtonError> {
+        let loads = self
+            .basis
+            .evaluate_follower_loads(follower, u)
+            .map_err(body_error)?;
+        let mut tangent = RealSparseAssembler::with_pattern(
+            self.basis
+                .contact_pattern()
+                .try_clone()
+                .map_err(constraint_error)?,
+            OperatorRole::EffectiveTangent,
+            MatrixProperties::GENERAL,
+        )
+        .map_err(constraint_error)?;
+        let body = &evaluation.tangent;
+        for contribution in body.contributions() {
+            tangent.add_contribution(contribution.clone());
+        }
+        tangent.add_contribution(crate::algebra::ContributionProvenance {
+            domain: crate::algebra::ContributionDomain::Structural,
+            contribution_id: crate::algebra::ContributionId("follower_load_stiffness".into()),
+        });
+        for row in 0..body.rows() {
+            for entry in body.pattern().row_range(row) {
+                tangent.add(row, body.pattern().column(entry), body.values()[entry]);
+            }
+        }
+        for block in &loads.blocks {
+            let width = block.rows.len();
+            for (i, &row) in block.rows.iter().enumerate() {
+                for (j, &column) in block.rows.iter().enumerate() {
+                    tangent.add(row, column, -factor * block.values[i * width + j]);
+                }
+            }
+        }
+        for (internal, load) in evaluation.internal_force.iter_mut().zip(&loads.force) {
+            *internal -= factor * load;
+            if !internal.is_finite() {
+                return Err(SolidNewtonError::Evaluation(
+                    "follower load force overflow".into(),
+                ));
+            }
+        }
+        evaluation.tangent = tangent.finish().map_err(constraint_error)?;
+        Ok(())
+    }
+}
+
 fn body_error(error: NonlinearSolidError) -> SolidNewtonError {
     match error {
         NonlinearSolidError::Cancelled => SolidNewtonError::Cancelled,

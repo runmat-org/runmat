@@ -400,6 +400,13 @@ impl NumericalPlanIdentity {
     ) -> AnalysisExecutionResult<Self> {
         Self::derive("acoustic-harmonic-numerical-plan", &(workload, topology))
     }
+    /// Native copy of a statistical step's fields from its exact solver result and mesh.
+    pub fn from_statistical_field_recovery(
+        source: SolverResultIdentity,
+        topology: Digest,
+    ) -> AnalysisExecutionResult<Self> {
+        Self::derive("statistical-field-recovery-numerical-plan", &(source, topology))
+    }
     /// Thermal numerical intent is independent of task placement and transport chunking.
     pub fn from_thermal_intent(
         intent: ThermalNumericalIntentIdentity,

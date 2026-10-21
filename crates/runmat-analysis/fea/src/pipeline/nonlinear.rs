@@ -36,6 +36,7 @@ const TENSOR_COMPONENT_COUNT: usize = 6;
 const NONLINEAR_DISPLACEMENT_HISTORY_SOURCE: &str = "structural.nonlinear.displacement";
 const NONLINEAR_ROTATION_HISTORY_SOURCE: &str = "structural.nonlinear.rotation";
 mod blocks;
+mod contact;
 mod observations;
 mod preflight;
 mod preparation;
@@ -61,6 +62,28 @@ pub fn run_nonlinear_with_options(
 ) -> Result<FeaNonlinearRunResult, FeaRunError> {
     let prepared = preparation::prepare(model, backend, &options)?;
     let solver_admission = preflight::tangent_admission(&prepared.resource_plan)?;
+    let maximum_resident_bytes = prepared
+        .execution_step
+        .accuracy
+        .resources
+        .maximum_resident_bytes;
+    let contact_inputs = match options.solver_mesh.as_ref() {
+        Some(mesh) => contact::prepare_inputs(
+            model,
+            mesh,
+            &prepared.summary,
+            options.contact_enforcement.clone().unwrap_or_default(),
+            maximum_resident_bytes,
+        )?,
+        None => None,
+    };
+    let contact_operator = contact_inputs
+        .as_ref()
+        .map(|inputs| contact::prepare_operator(model, inputs, prepared.summary.dof_count))
+        .transpose()?;
+    let contact_execution = contact_operator
+        .as_ref()
+        .map(|operator| contact::execution(operator, &options, maximum_resident_bytes));
 
     emit_phase(
         "fea.run_nonlinear",
@@ -76,7 +99,7 @@ pub fn run_nonlinear_with_options(
         &options,
         crate::solve::nonlinear::NonlinearExecution {
             backend,
-            contact: None,
+            contact: contact_execution,
             solver_admission: Some(solver_admission),
         },
         prepared.load_factor_start,

@@ -1,7 +1,8 @@
 use super::header::{self, AnalysisHeader, ProcedureHeader};
 use super::{requirements, values};
 use crate::{
-    CheckedFeaDeclaration, CheckedFeaStatement, CheckedFeaStatementKind, FeaDiagnostic,
+    CheckedExpressionKind, CheckedFeaDeclaration, CheckedFeaStatement, CheckedFeaStatementKind,
+    FeaDiagnostic,
     FeaDiagnosticLocation, FeaDiagnosticPhase,
 };
 use runmat_analysis_core::{
@@ -10,7 +11,8 @@ use runmat_analysis_core::{
     RandomExcitationId, ReferenceStatePolicy, ResponseSpectrumId, SequenceDependency,
     SequenceDependencyReason, SolutionSpace, StateCompleteness, StateId, StateKind, StateOutput,
     StatePersistence, StateSource, StateTransition, StateTransitionMethod, StateUse,
-    StructuralRandomResponseSettings, TopologyTransitionPolicy, TransitionId,
+    StructuralKinematics, StructuralNonlinearSettings, StructuralRandomResponseSettings,
+    TopologyTransitionPolicy, TransitionId,
 };
 use std::collections::BTreeSet;
 
@@ -355,7 +357,31 @@ fn lower_procedure(
             )
         }
         ("structural", "nonlinear") => {
-            let mut step = ProcedureStep::structural_nonlinear(id);
+            let kinematics = match values::assignment(statements, "kinematics").map(|v| &v.kind) {
+                None => None,
+                Some(CheckedExpressionKind::Enum(name)) if name == "small_strain" => {
+                    Some(StructuralKinematics::SmallStrain)
+                }
+                Some(CheckedExpressionKind::Enum(name)) if name == "large_deformation" => {
+                    Some(StructuralKinematics::LargeDeformation)
+                }
+                Some(_) => {
+                    error(
+                        declaration,
+                        procedure.span,
+                        "structural nonlinear `kinematics` must be `small_strain` or `large_deformation`",
+                        diagnostics,
+                    );
+                    return None;
+                }
+            };
+            let mut step = match kinematics {
+                Some(kinematics) => ProcedureStep::structural_nonlinear_with(
+                    id,
+                    StructuralNonlinearSettings { kinematics },
+                ),
+                None => ProcedureStep::structural_nonlinear(id),
+            };
             step.independent_domain =
                 requirements::load_factor(declaration, procedure, statements, diagnostics)?;
             step

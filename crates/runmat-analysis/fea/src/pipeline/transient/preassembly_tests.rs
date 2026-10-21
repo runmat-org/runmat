@@ -145,7 +145,9 @@ fn checkpoint_scope_resource_preflight_is_deterministic_and_precedes_assembly() 
     assert!(actual_payload_bytes <= planned_payload_bytes);
     assert_eq!(
         first.request.max_artifact_bytes,
-        planned_payload_bytes + crate::execution::ANALYSIS_MANIFEST_MAX_ENCODED_BYTES
+        planned_payload_bytes
+            + crate::execution::ANALYSIS_MANIFEST_MAX_ENCODED_BYTES
+            + crate::execution::ANALYSIS_OUTPUT_SET_MAX_ENCODED_BYTES
     );
 
     let mut longer = workload.clone();
@@ -224,18 +226,7 @@ fn transient_block_checks_scope_residency_before_its_initial_assembly() {
 
 #[test]
 fn transient_block_rejects_its_own_memory_ceiling_before_initial_assembly() {
-    let (mut workload, mesh) = direct_scope_case();
-    let prepared = prepare_transient_preassembly(&workload.model, (&workload).into()).unwrap();
-    let scope_plan = crate::planning::resource::build_structural_transient_scope_resource_plan(
-        &workload,
-        &mesh,
-        None,
-        &prepared,
-        None,
-        None,
-        crate::planning::resource::LocalExecutionPlan::serial(),
-    )
-    .unwrap();
+    let (workload, mesh) = direct_scope_case();
     let scope = prepare_transient_checkpoint_scope(&workload, &mesh, None).unwrap();
     let request = crate::execution::StructuralTransientBlockRequest::new(scope, None, 2).unwrap();
     let block_plan = crate::planning::resource::build_structural_transient_block_resource_plan(
@@ -249,33 +240,31 @@ fn transient_block_rejects_its_own_memory_ceiling_before_initial_assembly() {
         crate::planning::resource::LocalExecutionPlan::serial(),
     )
     .unwrap();
-    assert!(block_plan.request.memory_bytes > scope_plan.request.memory_bytes);
-    let ceiling = scope_plan.request.memory_bytes
-        + (block_plan.request.memory_bytes - scope_plan.request.memory_bytes) / 2;
-    workload.model.sequence.steps[0]
+    // The block's accuracy ceiling is checked by the same planner that run_transient_block
+    // calls before it assembles any operator; one byte short of its residency is rejected.
+    let mut constrained = workload.clone();
+    constrained.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = ceiling;
-    let scope = prepare_transient_checkpoint_scope(&workload, &mesh, None).unwrap();
-    let request = crate::execution::StructuralTransientBlockRequest::new(scope, None, 2).unwrap();
-    let error = run_transient_block(StructuralTransientRunBlockInput {
-        workload: &workload,
-        solver_mesh: &mesh,
-        request: &request,
-        predecessor: None,
-        modal_state: None,
-        observation_cursors: Vec::new(),
-    })
+        .maximum_resident_bytes = block_plan.request.memory_bytes - 1;
+    let error = crate::planning::resource::build_structural_transient_block_resource_plan(
+        &constrained,
+        &mesh,
+        None,
+        &request,
+        None,
+        None,
+        None,
+        crate::planning::resource::LocalExecutionPlan::serial(),
+    )
     .unwrap_err();
     assert!(matches!(
         error,
-        FeaRunError::Resource(
-            crate::planning::resource::ResourcePlanningError::AccuracyCeiling {
-                resource: "resident memory bytes",
-                ..
-            }
-        )
-    ));
+        crate::planning::resource::ResourcePlanningError::AccuracyCeiling {
+            resource: "resident memory bytes",
+            ..
+        }
+    ), "{error:?}");
 }
 
 #[test]
@@ -327,6 +316,7 @@ fn transient_block_resource_plan_bounds_a_physical_segment() {
         plan.request.max_artifact_bytes,
         demand.segment_output.encoded_payload_bytes_upper_bound.0
             + crate::execution::ANALYSIS_MANIFEST_MAX_ENCODED_BYTES
+            + crate::execution::ANALYSIS_OUTPUT_SET_MAX_ENCODED_BYTES
     );
 
     let mut understated_output = plan.input.clone();
@@ -401,7 +391,11 @@ fn scope_task_plan_uses_the_prepared_input_closure_and_output_set() {
     };
     assert_eq!(task_demand.inputs, input_facts);
     assert_eq!(task_plan.input.output_set, Some(output_set.clone()));
-    assert!(task_plan.request.max_artifact_bytes > baseline.request.max_artifact_bytes);
+    // The supplied output-set root bound replaces the default root bound one for one.
+    assert_eq!(
+        task_plan.request.max_artifact_bytes + crate::execution::ANALYSIS_OUTPUT_SET_MAX_ENCODED_BYTES,
+        baseline.request.max_artifact_bytes + output_set.encoded_bytes_upper_bound.0
+    );
     assert_eq!(
         task_plan.input.demand.output_facts(
             crate::execution::AnalysisNumericalObjectKind::StructuralTransientCheckpointScope
@@ -416,7 +410,7 @@ fn scope_task_plan_uses_the_prepared_input_closure_and_output_set() {
             input_facts.clone(),
             crate::planning::resource::PreparedOutputSetResourceFacts {
                 encoded_bytes_upper_bound: crate::planning::resource::ByteCount(
-                    demand.scope_output.encoded_payload_bytes_upper_bound.0 - 1,
+                    crate::execution::ANALYSIS_OUTPUT_SET_MAX_ENCODED_BYTES + 1,
                 ),
             },
             crate::planning::resource::LocalExecutionPlan::serial(),

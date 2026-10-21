@@ -4,7 +4,7 @@ use runmat_geometry_core::GeometryTolerancePolicy;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    AlgorithmVersionSet, CancellationPolicy, CurveQualityTargets, ElementOrder,
+    AlgorithmVersionSet, CancellationPolicy, CurveQualityTargets, ElementOrder, MeshDimension,
     MeshingContractError, MeshingQualityTargets, MeshingRequest, MeshingResourceBudget,
     MetricCombinationRule, MetricFieldRequest, MetricTensor3, SurfaceQualityTargets,
     VolumeQualityTargets, MESHING_REQUEST_SCHEMA_VERSION,
@@ -14,6 +14,8 @@ use super::{
 #[serde(deny_unknown_fields)]
 pub struct MeshingRequestSettings {
     pub element_order: ElementOrder,
+    #[serde(default, skip_serializing_if = "MeshDimension::is_solid")]
+    pub dimension: MeshDimension,
     pub deterministic_seed: u64,
     pub target_edge_length_m: f64,
     pub maximum_chordal_deviation_m: f64,
@@ -26,6 +28,7 @@ impl Default for MeshingRequestSettings {
     fn default() -> Self {
         Self {
             element_order: ElementOrder::Tet4,
+            dimension: MeshDimension::Solid,
             deterministic_seed: 0,
             target_edge_length_m: 0.01,
             maximum_chordal_deviation_m: 0.0001,
@@ -110,6 +113,7 @@ pub fn resolve_meshing_request(
     let request = MeshingRequest {
         schema_version: MESHING_REQUEST_SCHEMA_VERSION,
         element_order: settings.element_order,
+        dimension: settings.dimension,
         deterministic_seed: settings.deterministic_seed,
         algorithms: production_algorithm_versions(),
         tolerance,
