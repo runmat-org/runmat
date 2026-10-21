@@ -36,6 +36,14 @@ pub fn inspect_geometry_declarations<H: GeometryInspectionSource + ?Sized>(
             else {
                 continue;
             };
+            let shared_interfaces = declaration.body.statements.iter().any(|statement| {
+                matches!(&statement.kind, FeaStatementKind::Assignment { target, value, .. }
+                    if target.segments.len() == 1
+                        && target.segments[0].text == "interfaces"
+                        && matches!(&value.kind, FeaExpressionKind::Reference(reference)
+                            if reference.segments.len() == 1
+                                && reference.segments[0].text == "shared"))
+            });
             let source_path =
                 match resolve_logical_path(&bound.graph.source_root, module_path, &relative_path) {
                     Ok(path) => path,
@@ -54,6 +62,7 @@ pub fn inspect_geometry_declarations<H: GeometryInspectionSource + ?Sized>(
                 logical_path: source_path.clone(),
                 source_units,
                 expected_content_digest: None,
+                shared_interfaces,
             }) {
                 Ok(facts) => {
                     inspections.insert(

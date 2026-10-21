@@ -49,7 +49,7 @@ pub(super) fn inspect_geometry_bytes(
     let key = (
         logical_path.to_string(),
         content_digest,
-        format!("{:?}", request.source_units),
+        format!("{:?}/{}", request.source_units, request.shared_interfaces),
     );
     if let Some(cached) = inspection_cache::get(&key) {
         return Ok(cached);
@@ -95,16 +95,36 @@ fn inspect_uncached(
             logical_path,
             bytes,
             format,
-            &ExactCadImportOptions {
-                source_units: units,
-                ..ExactCadImportOptions::default()
+            &{
+                let mut options = ExactCadImportOptions {
+                    source_units: units,
+                    ..ExactCadImportOptions::default()
+                };
+                options.analysis.healing.shared_interfaces = request.shared_interfaces;
+                options
             },
             &GeometryImportContext::new(),
         )
     })
     .transpose();
+    let mut authored_names = std::collections::BTreeMap::<String, Vec<String>>::new();
     let (topology_digest, exact_topology) = match exact {
         Ok(Some(exact)) => {
+            for (id, names) in &exact.entity_names {
+                let role = match id.kind {
+                    runmat_geometry_core::PersistentEntityKind::Face => "face",
+                    runmat_geometry_core::PersistentEntityKind::Solid => "solid",
+                    _ => continue,
+                };
+                authored_names
+                    .entry(role.to_string())
+                    .or_default()
+                    .extend(names.iter().cloned());
+            }
+            for names in authored_names.values_mut() {
+                names.sort();
+                names.dedup();
+            }
             let closure = exact.build_closure().map_err(|error| {
                 diagnostic(
                     "fea.host.geometry_inspection_failed",
@@ -138,6 +158,7 @@ fn inspect_uncached(
         capabilities: capabilities(&imported.asset, exchange.as_ref(), exact_topology),
         exchange,
         resolved_units: Some(units),
+        authored_names,
     })
 }
 

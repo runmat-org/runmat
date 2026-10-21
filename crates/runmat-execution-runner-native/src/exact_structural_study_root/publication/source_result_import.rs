@@ -24,6 +24,10 @@ pub fn import_structural_study_result(
     limits: ObjectInventoryLimits,
 ) -> NativeExecutionResult<ExactStructuralStudyResult> {
     expected.validate()?;
+    let planning = expected
+        .planning
+        .structural()
+        .ok_or_else(|| protocol("family study results use the family importer"))?;
     let ProgramExecutionResponse::ExternalizedSuccess { outputs, .. } = &response else {
         return Err(protocol(
             "structural study execution did not return a result closure",
@@ -86,7 +90,7 @@ pub fn import_structural_study_result(
             regions: &geometry_output.regions,
             materials: &materials,
             mesh: &mesh.artifact,
-            planning: expected.planning,
+            planning,
         },
         &expected.initial_fields,
     )

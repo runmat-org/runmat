@@ -275,6 +275,7 @@ fn authored_tetrahedron(order: ElementOrder) -> AuthoredAcousticFixture {
             ..Default::default()
         },
         exchange: None,
+        shared_interfaces: false,
     });
     let study = RealizedStudy {
         module_path: MODULE.into(),

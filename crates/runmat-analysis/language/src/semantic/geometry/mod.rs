@@ -110,6 +110,13 @@ fn definition(
             error(declaration, file_span, message, diagnostics);
             return None;
         };
+        if inspection
+            .facts
+            .capabilities
+            .contains(&GeometryInspectionCapability::PersistentIds)
+        {
+            check_authored_names(declaration, &regions, inspection, diagnostics);
+        }
         imported_source(declaration, inspection, diagnostics)
     } else if let Some(statements) = construct {
         if declaration.source.is_some() {
@@ -188,7 +195,78 @@ fn imported_source(
         topology_digest: GeometryDigest::from_bytes(inspection.facts.topology_digest.0),
         capabilities: capabilities(inspection),
         exchange: inspection.facts.exchange.clone(),
+        shared_interfaces: imported_interfaces(declaration, diagnostics),
     })
+}
+
+/// `interfaces = shared` joins touching bodies so their coincident faces become one shared face
+/// (a conformal multi-body mesh); `interfaces = separate` (the default) keeps each part's faces.
+fn imported_interfaces(
+    declaration: &CheckedFeaDeclaration,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> bool {
+    let Some(value) = assignment(&declaration.statements, "interfaces") else {
+        return false;
+    };
+    match &value.kind {
+        CheckedExpressionKind::Enum(policy) if policy == "shared" => true,
+        CheckedExpressionKind::Enum(policy) if policy == "separate" => false,
+        _ => {
+            error(
+                declaration,
+                value.span,
+                "geometry interfaces must be `shared` or `separate`",
+                diagnostics,
+            );
+            false
+        }
+    }
+}
+
+/// A `select name` must match a name the inspected source carries for that role.
+fn check_authored_names(
+    declaration: &CheckedFeaDeclaration,
+    regions: &[GeometryRegionDefinition],
+    inspection: &CheckedGeometryInspection,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) {
+    for region in regions {
+        let GeometryRegionSelector::Name(name) = &region.selector else {
+            continue;
+        };
+        let role = match region.role {
+            GeometryRegionRole::Face => "face",
+            GeometryRegionRole::Solid | GeometryRegionRole::Cell => "solid",
+            GeometryRegionRole::Vertex | GeometryRegionRole::Edge => continue,
+        };
+        let available = inspection
+            .facts
+            .authored_names
+            .get(role)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        if available.iter().any(|candidate| candidate == name) {
+            continue;
+        }
+        let message = if available.is_empty() {
+            format!(
+                "region `{}` selects {role} name \"{name}\", but `{}` names no {role}s",
+                region.region_id, inspection.source_path
+            )
+        } else {
+            format!(
+                "region `{}` selects {role} name \"{name}\", which `{}` does not carry; named {role}s: {}",
+                region.region_id,
+                inspection.source_path,
+                available
+                    .iter()
+                    .map(|candidate| format!("\"{candidate}\""))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        };
+        error(declaration, declaration.span, message, diagnostics);
+    }
 }
 
 fn named_block<'a>(

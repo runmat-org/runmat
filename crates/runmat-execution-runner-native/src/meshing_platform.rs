@@ -3,7 +3,7 @@
 use runmat_execution::Digest;
 use runmat_meshing_core::{PlatformBuildIdentity, StableDigest};
 
-pub(crate) fn native_meshing_capability_cohort() -> String {
+pub fn native_meshing_capability_cohort() -> String {
     format!("native-{}-{}", std::env::consts::ARCH, std::env::consts::OS)
 }
 
