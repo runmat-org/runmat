@@ -4,13 +4,16 @@ use super::*;
 use crate::assembly::dofs::{StructuralDofAddress, StructuralDofLayout, StructuralNodeDofSet};
 use runmat_canonical_codec::{profile_serialized, CanonicalLimits};
 
+/// The authority is encoded directly (`encode_contract`), never projected into a value tree:
+/// its construction holds the canonical wire bytes plus at most one growth reallocation.
 fn incremental<T: Serialize>(value: &T) -> Result<u64, NonlinearSolidError> {
     profile_serialized(
         value,
         CanonicalLimits::new(512 * 1024 * 1024, 8_000_000, 4096, 64),
     )
     .map_err(|e| invalid(&e.to_string()))?
-    .materialization_bytes_without_envelope()
+    .encoded_bytes_upper_bound
+    .checked_mul(2)
     .ok_or_else(overflow)
 }
 
@@ -32,7 +35,9 @@ pub(super) fn construction_bytes(
         CanonicalLimits::new(512 * 1024 * 1024, 8_000_000, 4096, 64),
     )
     .map_err(|e| invalid(&e.to_string()))?
-    .materialization_resident_bytes_estimate;
+    .encoded_bytes_upper_bound
+    .checked_mul(2)
+    .ok_or_else(overflow)?;
     // The admitted uncoupled solid basis has three translations per node.
     // Profile the actual row/node schema without allocating a layout inventory.
     let node = incremental(&StructuralNodeDofSet::translational())?;

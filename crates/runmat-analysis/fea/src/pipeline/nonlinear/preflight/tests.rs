@@ -227,6 +227,24 @@ fn diag_resource_scaling_with_mesh_size() {
         for limit in [8usize, 4096] {
             let plan = prepare_with_output_limit(&model, &model.sequence.steps[0], ComputeBackend::Cpu, &options, limit).unwrap();
             let FeaResourceDemand::StructuralNonlinearPipeline(demand) = &plan.input.demand else { panic!() };
+            let integration = crate::topology::CanonicalSolidIntegrationPlan::derive(
+                &mesh,
+                crate::topology::CanonicalSolidIntegrationRule::Keast15,
+            )
+            .unwrap();
+            let properties = crate::properties::compile_structural_property_map(&model, Some(&mesh))
+                .unwrap()
+                .identity;
+            let storage = crate::assembly::nonlinear_solid::resources::NonlinearSolidStorageDemand::derive(
+                &integration,
+                &properties,
+                mesh.topology.nodes.len() * 3,
+                1,
+                limit,
+                options.line_search,
+            )
+            .unwrap();
+            eprintln!("DIAG storage cells={cells} limit={limit} points={} {storage:?}", integration.total_point_count());
             eprintln!("DIAG cells={cells} limit={limit} request_memory={} breakdown={:?} persistent={} artifact={} solve={:?}",
                 plan.request.memory_bytes, plan.breakdown, demand.additional_persistent_bytes.0,
                 demand.operator.publication.result_artifact_bytes.0, demand.operator.solve);
