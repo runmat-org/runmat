@@ -14,9 +14,8 @@ pub use response::{
     CanonicalElectricalResponse, ElectricalConstitutiveResponse, ElectricalTerminalResponse,
 };
 use runmat_analysis_core::{
-    AnalysisModel, AnalysisProcedure, ElectromagneticDomain, FormulationRequirement,
-    IndependentDomain, PhysicsFamily, ProcedureSettings, ProcedureStep, RestartPolicy,
-    SolutionSpace, StateCompleteness, StateKind,
+    AnalysisModel, AnalysisProcedure, ElectromagneticDomain, IndependentDomain, PhysicsFamily,
+    ProcedureSettings, ProcedureStep, RestartPolicy, SolutionSpace, StateCompleteness, StateKind,
 };
 use runmat_meshing_core::SolverMeshArtifact;
 pub use sources::{CanonicalElectricalSource, ElectricalChargeSources};
@@ -54,14 +53,12 @@ pub fn solve_canonical_static(
     model: &AnalysisModel,
     mesh: &SolverMeshArtifact,
     step_id: &str,
-    requirement: FormulationRequirement,
     residual_target: f64,
 ) -> Result<CanonicalElectricalResponse, ElectricalStaticError> {
     solve_canonical_static_with_admission(
         model,
         mesh,
         step_id,
-        requirement,
         residual_target,
         None,
         None,
@@ -73,13 +70,12 @@ pub(crate) fn solve_canonical_static_with_admission(
     model: &AnalysisModel,
     mesh: &SolverMeshArtifact,
     step_id: &str,
-    requirement: FormulationRequirement,
     residual_target: f64,
     admission: Option<&crate::planning::resource::SolverAdmissionResourcePolicy>,
     element_conductivity_s_per_m: Option<&[f64]>,
     sample: crate::excitation::ExcitationSamplePoint<'_>,
 ) -> Result<CanonicalElectricalResponse, ElectricalStaticError> {
-    let step = validate_canonical_input(model, step_id, requirement, residual_target)?;
+    let step = validate_canonical_input(model, step_id, residual_target)?;
     let Some(ElectromagneticDomain::Static { equation }) = &model.electromagnetic else {
         unreachable!("validated static electrical domain")
     };
@@ -112,7 +108,6 @@ pub(crate) fn solve_conduction_with_conductivity(
     let step = validate_canonical_input(
         model,
         step_id,
-        FormulationRequirement::Production,
         residual_target,
     )?;
     if !matches!(
@@ -146,10 +141,8 @@ pub(crate) fn solve_conduction_with_conductivity(
 pub(crate) fn validate_canonical_input<'a>(
     model: &'a AnalysisModel,
     step_id: &str,
-    requirement: FormulationRequirement,
     residual_target: f64,
 ) -> Result<&'a ProcedureStep, ElectricalStaticError> {
-    let _ = requirement;
     if !residual_target.is_finite() || residual_target <= 0.0 || residual_target >= 1.0 {
         return Err(ElectricalStaticError::InvalidInput(
             "relative residual target".into(),

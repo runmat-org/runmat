@@ -563,7 +563,7 @@ fn generic_procedure(
         ),
         _ => return unsupported(declaration, header, diagnostics),
     };
-    Some(ProcedureStep::experimental(
+    Some(ProcedureStep::new(
         id,
         family,
         procedure,

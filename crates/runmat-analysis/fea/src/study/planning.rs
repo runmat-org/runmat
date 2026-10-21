@@ -2,8 +2,8 @@ use crate::pipeline::modal_governance::ModalConvergencePolicy;
 use std::collections::BTreeMap;
 
 use runmat_analysis_core::{
-    AccuracyTolerance, AnalysisProcedure, ErrorContributionKind, FormulationRequirement,
-    PhysicsFamily, ProcedureStep, SolutionSpace,
+    AccuracyTolerance, AnalysisProcedure, ErrorContributionKind, PhysicsFamily, ProcedureStep,
+    SolutionSpace,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -84,7 +84,6 @@ const fn open_unit_interval(value: f64) -> bool {
 #[serde(deny_unknown_fields)]
 pub struct StructuralStudyPlanningPolicy {
     pub backend: ComputeBackend,
-    pub formulation_requirement: FormulationRequirement,
     pub numerics: StructuralNumericalPlanningPolicy,
 }
 
@@ -104,9 +103,6 @@ pub fn plan_structural_study_with_fields(
     fields: &[crate::execution::InitialFieldBinding],
 ) -> Result<StructuralStudyWorkloads, StructuralStudyPlanningError> {
     policy.numerics.validate()?;
-    if policy.formulation_requirement != study.formulation_requirement {
-        return Err(StructuralStudyPlanningError::FormulationRequirementMismatch);
-    }
     initial_fields::validate_inventory(&study.model, fields)?;
     if study.model.sequence.steps.iter().all(is_linear_static_step) {
         return plan_linear_sequence(study, policy);
@@ -163,7 +159,6 @@ fn linear_workload(
         model: study.model.clone(),
         step_id: step.step_id.clone(),
         backend: policy.backend,
-        formulation_requirement: policy.formulation_requirement,
         preconditioner: SpdPreconditionerKind::Jacobi,
         algebra_backend,
         observation_execution: ObservationExecutionPolicy::scalable(),
@@ -240,8 +235,6 @@ pub enum StructuralStudyPlanningError {
     },
     #[error("structural numerical planning policy is outside its finite bounds")]
     InvalidNumericalPolicy,
-    #[error("structural planning policy differs from the compiled formulation requirement")]
-    FormulationRequirementMismatch,
     #[error("procedure step `{step_id}` refinement limit exceeds the execution contract")]
     RefinementLimitOverflow { step_id: String },
     #[error(transparent)]

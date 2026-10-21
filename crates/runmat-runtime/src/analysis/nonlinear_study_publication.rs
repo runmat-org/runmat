@@ -114,7 +114,6 @@ pub fn prepare_nonlinear_solid_study_publication(
     let execution = super::AnalysisExecutionStep {
         step_id: step_id.clone(),
         backend: runmat_analysis_fea::ComputeBackend::Cpu,
-        requirement: completed.workload.controls.formulation_requirement,
         solver_options: AnalysisSolverOptions::StructuralNonlinear(options.clone()),
     };
     let prepared = super::structural_study::standalone_completion(

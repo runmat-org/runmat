@@ -66,7 +66,6 @@ impl ThermalWorkload {
             &self.model,
             &self.step_id,
             self.backend,
-            self.formulation_requirement,
             self.procedure,
             self.residual_target,
             &self.initial_fields,

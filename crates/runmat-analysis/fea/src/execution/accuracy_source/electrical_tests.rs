@@ -5,8 +5,8 @@ use crate::{
     results::accuracy::{evaluate_accuracy, AccuracyStatus},
 };
 use runmat_analysis_core::{
-    AccuracyCriterion, AccuracyPlan, AccuracyTarget, AccuracyTolerance, FormulationRequirement,
-    ProcedureStepId, RegionTarget, StaticElectricalEquation,
+    AccuracyCriterion, AccuracyPlan, AccuracyTarget, AccuracyTolerance, ProcedureStepId,
+    RegionTarget, StaticElectricalEquation,
 };
 use runmat_meshing_core::ElementOrder;
 
@@ -33,7 +33,6 @@ fn electrical_receipts_supply_only_retained_algebraic_equilibrium_evidence() {
             let workload = ElectricalStaticWorkload {
                 model,
                 step_id: ProcedureStepId("potential".into()),
-                formulation_requirement: FormulationRequirement::Experimental,
                 relative_residual_target: 1e-11,
         element_temperature_k: None,
         operating_time_s: None,
@@ -57,7 +56,7 @@ fn electrical_receipts_supply_only_retained_algebraic_equilibrium_evidence() {
                 source.source_result(),
                 result.source_result_identity().unwrap()
             );
-            let mut plan = AccuracyPlan::experimental_baseline("electrical_accuracy");
+            let mut plan = AccuracyPlan::baseline("electrical_accuracy");
             plan.criteria = [
                 (
                     "residual",
@@ -95,7 +94,6 @@ fn electrical_receipts_supply_only_retained_algebraic_equilibrium_evidence() {
                 AccuracySourceKind::ElectricalStatic,
                 receipt.source_result(),
                 None,
-                FormulationRequirement::Experimental,
                 plan,
             )
             .unwrap();
@@ -132,7 +130,6 @@ fn electrical_receipts_supply_only_retained_algebraic_equilibrium_evidence() {
                 request.source_kind,
                 request.source_result,
                 None,
-                request.formulation_requirement,
                 request.plan.clone(),
             )
             .unwrap();

@@ -35,7 +35,7 @@ pub use response::CanonicalAcousticResponse;
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AcousticHarmonicPolicy {
-    /// None explicitly requests only physical closure in the experimental CPU
+    /// None explicitly requests only physical closure in the CPU
     /// library. Authored study planning always requests source-independent proof.
     #[serde(deserialize_with = "deserialize_uniqueness")]
     pub uniqueness: Option<crate::solve::uniqueness::SparseUniquenessPolicy>,
@@ -48,7 +48,7 @@ pub struct AcousticHarmonicPolicy {
 fn deserialize_uniqueness<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<crate::solve::uniqueness::SparseUniquenessPolicy>, D::Error> {
-    // An explicit null is an experimental request, not a missing-field default.
+    // An explicit null is a physical-closure-only request, not a missing-field default.
     serde::Deserialize::deserialize(deserializer)
 }
 

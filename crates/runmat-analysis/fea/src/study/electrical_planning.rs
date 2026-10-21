@@ -1,7 +1,6 @@
 //! Explicit authored scalar electrical intent; placement and execution remain downstream.
 use runmat_analysis_core::{
     AccuracyTolerance, AnalysisConstraint, ElectricalConstraintKind, ErrorContributionKind,
-    FormulationRequirement,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -15,7 +14,6 @@ mod tests;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ElectricalStudyPlanningPolicy {
-    pub formulation_requirement: FormulationRequirement,
     /// Steady conduction at a solved temperature field (an electrothermal operating point):
     /// one temperature per canonical volume element; conductivity follows each material's
     /// temperature law. `None` uses the materials' reference conductivity.
@@ -32,9 +30,6 @@ pub fn plan_electrical_study(
     study: &CompiledAnalysisStudy,
     policy: ElectricalStudyPlanningPolicy,
 ) -> Result<ElectricalStaticWorkload, ElectricalStudyPlanningError> {
-    if policy.formulation_requirement != study.formulation_requirement {
-        return Err(ElectricalStudyPlanningError::FormulationRequirementMismatch);
-    }
     let [step] = study.model.sequence.steps.as_slice() else {
         return Err(ElectricalStudyPlanningError::UnsupportedSequence);
     };
@@ -52,7 +47,6 @@ pub fn plan_electrical_study(
     let workload = ElectricalStaticWorkload {
         model: study.model.clone(),
         step_id: step.step_id.clone(),
-        formulation_requirement: policy.formulation_requirement,
         relative_residual_target,
         element_temperature_k: policy.element_temperature_k.clone(),
         operating_time_s: policy.operating_time_s,
@@ -73,8 +67,6 @@ pub fn plan_electrical_study(
 
 #[derive(Debug, Error)]
 pub enum ElectricalStudyPlanningError {
-    #[error("electrical planning requirement differs from the compiled study")]
-    FormulationRequirementMismatch,
     #[error("electrical planning requires a standalone singleton step")]
     UnsupportedSequence,
     #[error("electrical planning requires an authored relative algebraic accuracy target")]

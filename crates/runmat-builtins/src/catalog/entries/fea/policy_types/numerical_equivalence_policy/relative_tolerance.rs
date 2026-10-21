@@ -50,8 +50,8 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
     ],
     faqs: &[
         faq(
-            "What does the experimental baseline use?",
-            "`fea.AccuracyPlan.experimentalBaseline` uses `relativeTolerance(1e-10)`.",
+            "What does the baseline plan use?",
+            "`fea.AccuracyPlan.baseline` uses `relativeTolerance(1e-10)`.",
         ),
     ],
     links: &[

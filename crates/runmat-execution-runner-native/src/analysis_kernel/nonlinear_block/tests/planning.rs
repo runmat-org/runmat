@@ -58,9 +58,6 @@ fn authored_j2_planning_rejects_invalid_controls_and_substituted_topology_or_pro
     let mut controls = workload.controls.clone();
     controls.tolerance = f64::NAN;
     assert!(plan_nonlinear_solid_study_product(study.clone(), &mesh, controls).is_err());
-    let mut controls = workload.controls.clone();
-    controls.formulation_requirement = FormulationRequirement::Production;
-    assert!(plan_nonlinear_solid_study_product(study.clone(), &mesh, controls).is_err());
     assert!(plan_nonlinear_solid_study_product(
         study.clone(),
         &slab_mesh(2),

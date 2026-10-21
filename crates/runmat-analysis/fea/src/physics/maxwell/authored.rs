@@ -17,10 +17,9 @@ pub use validation::validate_canonical_input;
 pub fn harmonic_frequencies(
     model: &AnalysisModel,
     step_id: &str,
-    requirement: FormulationRequirement,
     residual_target: f64,
 ) -> Result<Vec<f64>, MaxwellError> {
-    let step = validate_canonical_input(model, step_id, requirement, residual_target)?;
+    let step = validate_canonical_input(model, step_id, residual_target)?;
     let IndependentDomain::FrequencyHertz(frequencies) = &step.independent_domain else {
         return Err(invalid("missing harmonic frequencies"));
     };
@@ -90,12 +89,11 @@ pub fn compile_canonical_input(
     model: &AnalysisModel,
     mesh: &SolverMeshArtifact,
     step_id: &str,
-    requirement: FormulationRequirement,
     residual_target: f64,
     frequency_hz: f64,
 ) -> Result<MaxwellInput, MaxwellError> {
     super::resources::require_selected_ceiling(model, mesh, step_id)?;
-    let step = validate_canonical_input(model, step_id, requirement, residual_target)?;
+    let step = validate_canonical_input(model, step_id, residual_target)?;
     let IndependentDomain::FrequencyHertz(frequencies) = &step.independent_domain else {
         return Err(invalid("missing harmonic frequencies"));
     };
@@ -175,7 +173,6 @@ pub fn solve_canonical_harmonic(
     model: &AnalysisModel,
     mesh: &SolverMeshArtifact,
     step_id: &str,
-    requirement: FormulationRequirement,
     residual_target: f64,
     frequency_hz: f64,
 ) -> Result<MaxwellResponse, MaxwellError> {
@@ -183,7 +180,6 @@ pub fn solve_canonical_harmonic(
         model,
         mesh,
         step_id,
-        requirement,
         residual_target,
         frequency_hz,
     )?;

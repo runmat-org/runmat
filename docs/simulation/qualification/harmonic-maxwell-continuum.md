@@ -78,7 +78,7 @@ measured process allocation or scheduler-attempt reconciliation.
 The authored/retained suite passes both mesh orders, source-bound cold import,
 constitutive/power checks and substitution negatives (two groups); local resource
 preflight passes three groups. Four language tests and all 124 core tests pass.
-These checks do not establish production qualification.
+These checks do not establish Stage qualification.
 
 ## Native task and retained-field boundary
 
@@ -101,8 +101,8 @@ observation evaluation, complete ElectromagneticComplex state publication and
 accuracy evaluation through shared artifact-store programs. Exact phase values
 survive cold imports and partition transport. These are native task-chain witnesses,
 not by themselves a completed authored-study root, independent spatial evidence, process-isolated
-restart, resource measurement or production release evidence. Missing mandatory
-spatial evidence remains Indeterminate and blocks production publication.
+restart, resource measurement or release evidence. Missing mandatory
+spatial evidence remains Indeterminate and blocks publication.
 
 ## Authored whole-study composition and proxy cutover
 
@@ -124,22 +124,22 @@ cannot fill an incomplete result. No numerical solve occurs during reopening.
 The native authored witness uses a unit PEC cube, impressed Jy=(0.6+0.8i) A/m²,
 sigma=3 S/m, mu=mu0, epsilon=4 epsilon0 and omega=10^6 rad/s. A separately derived
 double sine Fourier series supplies complex E/B and peak ohmic power; truncation
-is checked independently. The coarse CAD mesh has deliberately broad experimental
-E/B L2 and power bounds, not production convergence tolerances. Both affine
+is checked independently. The coarse CAD mesh has deliberately broad witness
+E/B L2 and power bounds, not qualified convergence tolerances. Both affine
 geometry orders use the same lowest-order Maxwell approximation.
 
 The full native authored witness passes for both orders, including all cold-root
 and substitution checks. Relative complex E/B L2 errors are 0.33870749/0.36726383;
 relative peak-power error is 0.09854191. Independent Fourier truncation bounds are
 4.25753e-6 for E and 5.42806e-4 for B. These coarse-mesh results satisfy only the
-explicit experimental witness bounds, not the remaining production gates.
+explicit witness bounds, not the remaining qualification gates.
 
 The witness persists the entire original catalog, drops producer/session handles,
 reopens the filesystem object store, compares exact complex completion and
 republishes it. It rejects wrong trusted roots, omitted objects, repeated/missing
 accuracy closure, rehashed accounting/property substitution, sweeps and numerical
 restart. This cold reopening is not a process-separated numerical restart,
-measured memory bound, remote solve or production qualification.
+measured memory bound, remote solve or Stage qualification.
 
 The old reduced-edge harmonic graph, fabricated vector-potential A fields,
 raw runtime fallback, obsolete solver contracts/options and proxy sweep payload
@@ -169,7 +169,7 @@ taking a static limit. Exact zero forcing remains valid.
 ## Scope and open gates
 
 This work implements numerical continuum and bounded authored/native completed-study
-boundaries, not numerical restart or production qualification. Initial uniqueness
+boundaries, not numerical restart or Stage qualification. Initial uniqueness
 admission requires positive frequency and strictly positive conductivity in every
 element. A converged residual alone cannot establish uniqueness at lossless cavity
 resonance; a genuine spectral/nonresonance authority remains mandatory for lossless

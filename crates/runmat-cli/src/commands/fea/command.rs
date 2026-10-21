@@ -18,7 +18,7 @@ pub(super) async fn execute(
             let checked = super::source::check_source(&file, cli, config).await?;
             let report = checked.check_result();
             if !report.status.is_valid() {
-                return print_check_failure(&report, json);
+                return print_check_failure(&checked, &file, &report, json);
             }
             let selector = root_selector(&root);
             let selected = selector
@@ -58,14 +58,14 @@ pub(super) async fn execute(
                         styles.identifier(root.id())
                     );
                 }
-                print_diagnostics(&report);
+                print_diagnostics(&checked, &file, &report);
             }
             Ok(())
         }
         FeaCommand::Plan { file, root, json } => {
             let file = resolve_script_input(file)?;
             let checked = super::source::check_source(&file, cli, config).await?;
-            require_valid(&checked, json)?;
+            require_valid(&checked, &file, json)?;
             super::plan::print(&resolve_root(&checked, &root)?, json)
         }
         FeaCommand::Run {
@@ -76,14 +76,14 @@ pub(super) async fn execute(
         } => {
             let file = resolve_script_input(file)?;
             let checked = super::source::check_source(&file, cli, config).await?;
-            require_valid(&checked, json)?;
+            require_valid(&checked, &file, json)?;
             let selected = resolve_root(&checked, &root)?;
             super::run::execute(file, checked, selected, execution, cli, config, json).await
         }
         FeaCommand::Snapshot { file, study, out } => {
             let file = resolve_script_input(file)?;
             let checked = super::source::check_source(&file, cli, config).await?;
-            require_valid(&checked, true)?;
+            require_valid(&checked, &file, true)?;
             let selected = resolve_root(&checked, &FeaRootArgs { study, sweep: None })?;
             super::snapshot::capture(&checked, selected, &out).await
         }
@@ -102,7 +102,7 @@ pub(super) async fn execute(
         } => {
             let file = resolve_script_input(file)?;
             let checked = super::source::check_source(&file, cli, config).await?;
-            require_valid(&checked, json)?;
+            require_valid(&checked, &file, json)?;
             let selected = resolve_root(&checked, &FeaRootArgs { study, sweep: None })?;
             let ResolvedFeaRoot::Study(study) = selected else {
                 anyhow::bail!("reassessment requires one study; select it with --study");
@@ -139,32 +139,51 @@ pub(super) async fn execute(
     }
 }
 
-fn require_valid(source: &super::source::NativeCheckedFeaSource, json: bool) -> Result<()> {
+fn require_valid(
+    source: &super::source::NativeCheckedFeaSource,
+    file: &std::path::Path,
+    json: bool,
+) -> Result<()> {
     let report = source.check_result();
     if report.status.is_valid() {
         Ok(())
     } else {
-        print_check_failure(&report, json)
+        print_check_failure(source, file, &report, json)
     }
 }
 
-fn print_check_failure(report: &FeaSourceCheckResult, json: bool) -> Result<()> {
+fn print_check_failure(
+    source: &super::source::NativeCheckedFeaSource,
+    file: &std::path::Path,
+    report: &FeaSourceCheckResult,
+    json: bool,
+) -> Result<()> {
     if json {
         println!("{}", serde_json::to_string_pretty(report)?);
     } else {
-        eprintln!("FEA source check is {}", report.status);
-        print_diagnostics(report);
+        print_diagnostics(source, file, report);
     }
     Err(AlreadyReportedCliError.into())
 }
 
-fn print_diagnostics(report: &FeaSourceCheckResult) {
-    for diagnostic in &report.diagnostics {
-        eprintln!(
-            "{:?} {}: {}",
-            diagnostic.severity, diagnostic.code, diagnostic.message
-        );
+/// Prints located diagnostics to stderr in the `runmat check` form, with its summary line.
+fn print_diagnostics(
+    source: &super::source::NativeCheckedFeaSource,
+    file: &std::path::Path,
+    report: &FeaSourceCheckResult,
+) {
+    if report.diagnostics.is_empty() {
+        return;
     }
+    let styles = presentation::stderr();
+    let sources = crate::commands::check::FeaDiagnosticSources::new(
+        file,
+        &source.root_module,
+        &source.source_root,
+    );
+    let counts =
+        crate::commands::check::print_fea_diagnostics(&report.diagnostics, &sources, &styles, true);
+    eprintln!("{}", counts.summary(file, &styles));
 }
 
 fn root_selector(args: &FeaRootArgs) -> Option<FeaRootSelector> {

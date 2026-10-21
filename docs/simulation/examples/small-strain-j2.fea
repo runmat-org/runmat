@@ -23,7 +23,7 @@ model pull {
  load_case pull { include load.end }
 }
 study plastic {
- geometry = geometry.part; mesh = mesh.volume; model = model.pull; formulation = experimental
+ geometry = geometry.part; mesh = mesh.volume; model = model.pull
  analysis solve {
   structural nonlinear { start_load_factor = 0; end_load_factor = 1 }
   accuracy { algebraic_relative_tolerance = 1e-8 }

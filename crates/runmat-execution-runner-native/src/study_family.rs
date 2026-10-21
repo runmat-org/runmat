@@ -242,7 +242,6 @@ pub(crate) fn plan_family_study(
                     context.mesh,
                     runmat_analysis_fea::study::ThermalStudyPlanningPolicy {
                         backend: runmat_analysis_fea::ComputeBackend::Cpu,
-                        formulation_requirement: compiled.formulation_requirement,
                         element_heat_source: None,
                     },
                 )

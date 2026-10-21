@@ -103,7 +103,6 @@ pub fn prepare_electrical_study_publication(
     let execution = super::AnalysisExecutionStep {
         step_id: completed.workload.step_id.clone(),
         backend: runmat_analysis_fea::ComputeBackend::Cpu,
-        requirement: completed.workload.formulation_requirement,
         solver_options: super::AnalysisSolverOptions::ElectricalStatic(options.clone()),
     };
     let prepared = super::structural_study::standalone_completion(

@@ -44,11 +44,10 @@ model harmonic_bracket {
     load_case service { include load.service_force }
 }
 
-study structural_harmonic_experimental {
+study structural_harmonic {
     geometry = geometry.bracket
     mesh = mesh.bracket
     model = model.harmonic_bracket
-    formulation = experimental
     analysis response {
         structural harmonic {
             frequencies = [20, 40] Hz

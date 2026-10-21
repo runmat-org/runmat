@@ -46,7 +46,6 @@ pub(super) fn validate(
         || step.family != PhysicsFamily::Electromagnetic
         || step.procedure != AnalysisProcedure::Static
         || step.independent_domain != IndependentDomain::Static
-        || completed.workload.formulation_requirement != completed.compiled.formulation_requirement
     {
         return Err("electrical publication differs from its original authored static workload".into());
     }
@@ -54,7 +53,6 @@ pub(super) fn validate(
     let plan = runmat_analysis_fea::study::plan_electrical_study(
         &completed.compiled,
         runmat_analysis_fea::study::ElectricalStudyPlanningPolicy {
-            formulation_requirement: completed.workload.formulation_requirement,
             element_temperature_k: completed.workload.element_temperature_k.clone(),
             operating_time_s: completed.workload.operating_time_s,
         },
@@ -95,7 +93,6 @@ pub(super) fn validate(
             .source_result_identity()
             .map_err(|e| e.to_string())?,
         completed.observation_catalog.as_ref(),
-        completed.workload.formulation_requirement,
         step.accuracy.clone(),
     )
     .map_err(|e| e.to_string())?;

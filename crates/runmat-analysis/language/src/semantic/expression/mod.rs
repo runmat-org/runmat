@@ -68,6 +68,8 @@ pub enum CheckedExpressionKind {
         value: Box<CheckedExpression>,
         scale_bits: u64,
         offset_bits: u64,
+        /// The unit exactly as authored, for diagnostics that name what was found.
+        unit: String,
     },
     Missing,
 }
@@ -211,6 +213,7 @@ impl<C: AnalysisOperationCatalog + ?Sized> ExpressionChecker<'_, C> {
                                 value: Box::new(value),
                                 scale_bits: unit.scale_bits,
                                 offset_bits: unit.offset_bits,
+                                unit: unit_source.trim().to_string(),
                             },
                             value_type,
                         )

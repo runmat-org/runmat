@@ -43,7 +43,6 @@ pub(super) fn run(
         model,
         &thermal_step.step_id,
         backend,
-        options.formulation_requirement,
         options.procedure,
         options.residual_target,
         &options.initial_fields,

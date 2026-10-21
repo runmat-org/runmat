@@ -4,7 +4,7 @@ use super::{
     StepIdentity,
 };
 use crate::admission::AnalysisRunIdentity;
-use runmat_analysis_core::{AnalysisModel, FormulationRequirement, Frequency, ProcedureStepId};
+use runmat_analysis_core::{AnalysisModel, Frequency, ProcedureStepId};
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
 use runmat_meshing_core::SolverMeshArtifact;
@@ -33,7 +33,6 @@ const LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 1_000_000
 pub struct MaxwellHarmonicWorkload {
     pub model: AnalysisModel,
     pub step_id: ProcedureStepId,
-    pub formulation_requirement: FormulationRequirement,
     pub relative_residual_target: f64,
     /// One of the step's authored frequencies; each frequency is its own workload.
     pub frequency: Frequency,
@@ -43,14 +42,12 @@ impl MaxwellHarmonicWorkload {
         crate::physics::maxwell::validate_canonical_input(
             &self.model,
             self.step_id.as_str(),
-            self.formulation_requirement,
             self.relative_residual_target,
         )
         .map_err(invalid)?;
         let frequencies = crate::physics::maxwell::harmonic_frequencies(
             &self.model,
             self.step_id.as_str(),
-            self.formulation_requirement,
             self.relative_residual_target,
         )
         .map_err(invalid)?;
@@ -73,7 +70,6 @@ impl MaxwellHarmonicWorkload {
             &self.model,
             mesh,
             self.step_id.as_str(),
-            self.formulation_requirement,
             self.relative_residual_target,
             self.frequency.hertz,
         )
@@ -111,8 +107,7 @@ impl MaxwellHarmonicWorkload {
         mesh: &SolverMeshArtifact,
     ) -> AnalysisExecutionResult<AnalysisRunIdentity> {
         self.validate()?;
-        crate::admission::admit_canonical_maxwell(mesh, self.formulation_requirement)
-            .map_err(invalid)
+        crate::admission::admit_canonical_maxwell(mesh).map_err(invalid)
     }
     /// Serial numerical execution, not scheduler/resource or publication admission.
     pub fn execute(

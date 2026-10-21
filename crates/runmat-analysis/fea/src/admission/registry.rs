@@ -1,15 +1,13 @@
 use runmat_analysis_core::{
     is_exposed_analysis_identity, CouplingImplementation, ExactFormulationRealization,
-    FormulationAdmissionRejectionReason, FormulationAxis, FormulationMaturity,
-    FormulationRequirement, PhysicsFamily, RecoveryImplementation, SolutionSpace,
-    SpatialOperatorImplementation, StructuralFormulationRealization,
+    FormulationAdmissionRejectionReason, FormulationAxis, PhysicsFamily, RecoveryImplementation,
+    SolutionSpace, SpatialOperatorImplementation, StructuralFormulationRealization,
 };
 
 pub(super) fn require_available(
     family: PhysicsFamily,
     procedure: runmat_analysis_core::AnalysisProcedure,
     solution_space: SolutionSpace,
-    requirement: FormulationRequirement,
 ) -> Result<(), FormulationAdmissionRejectionReason> {
     if solution_space != SolutionSpace::Direct
         && !(family == PhysicsFamily::Structural
@@ -20,20 +18,14 @@ pub(super) fn require_available(
     if !is_exposed_analysis_identity(family, procedure, solution_space) {
         return Err(FormulationAdmissionRejectionReason::UnsupportedFamilyProcedure);
     }
-    let qualifications = available_qualifications(family, procedure);
-    if qualifications.is_empty() {
+    if !has_registered_formulation(family, procedure) {
         return Err(FormulationAdmissionRejectionReason::UnsupportedFamilyProcedure);
-    }
-    if requirement == FormulationRequirement::Production
-        && !qualifications.contains(&FormulationMaturity::Production)
-    {
-        return Err(FormulationAdmissionRejectionReason::ProductionQualificationMissing);
     }
     Ok(())
 }
 
 use super::{
-    realizations::{registered_formulations, RegisteredFormulation},
+    realizations::registered_formulations,
     structural::{
         structural_exact_realization, thermomechanical_exact_realization,
         StructuralRealizationInput, ThermomechanicalRealizationInput,
@@ -41,9 +33,9 @@ use super::{
     FormulationAdmissionRequest,
 };
 
-pub(super) fn qualification(
+pub(super) fn admit(
     request: &FormulationAdmissionRequest,
-) -> Result<FormulationMaturity, FormulationAdmissionRejectionReason> {
+) -> Result<(), FormulationAdmissionRejectionReason> {
     if request.solution_space != SolutionSpace::Direct
         && !(request.family == PhysicsFamily::Structural
             && is_exposed_analysis_identity(
@@ -58,7 +50,7 @@ pub(super) fn qualification(
         return Err(FormulationAdmissionRejectionReason::UnsupportedFamilyProcedure);
     }
 
-    let qualification = if request.family == PhysicsFamily::Structural
+    if request.family == PhysicsFamily::Structural
         || request.family
             == PhysicsFamily::Coupled(runmat_analysis_core::CoupledPhysicsFamily::Thermomechanical)
     {
@@ -67,16 +59,15 @@ pub(super) fn qualification(
         if request.realization != expected {
             return Err(first_incompatible_axis(&request.realization, &expected));
         }
-        registered_structural_formulation(expected).qualification()
     } else {
         let registered = registered_formulations(request.family, request.procedure);
         if registered.is_empty() {
             return Err(FormulationAdmissionRejectionReason::UnsupportedFamilyProcedure);
         }
-        let Some(entry) = registered
+        if !registered
             .iter()
-            .find(|entry| entry.realization() == &request.realization)
-        else {
+            .any(|entry| entry.realization() == &request.realization)
+        {
             let reason = registered
                 .first()
                 .map(|expected| {
@@ -84,78 +75,31 @@ pub(super) fn qualification(
                 })
                 .unwrap_or(FormulationAdmissionRejectionReason::UnregisteredRealization);
             return Err(reason);
-        };
-        entry.qualification()
-    };
-
-    Ok(qualification)
+        }
+    }
+    Ok(())
 }
 
-fn available_qualifications(
+fn has_registered_formulation(
     family: PhysicsFamily,
     procedure: runmat_analysis_core::AnalysisProcedure,
-) -> Vec<FormulationMaturity> {
+) -> bool {
     if family
         == PhysicsFamily::Coupled(runmat_analysis_core::CoupledPhysicsFamily::Thermomechanical)
         && procedure == runmat_analysis_core::AnalysisProcedure::Nonlinear
     {
-        return Vec::new();
+        return false;
     }
     if matches!(
         family,
         PhysicsFamily::Structural
             | PhysicsFamily::Coupled(runmat_analysis_core::CoupledPhysicsFamily::Thermomechanical)
     ) {
-        if is_exposed_analysis_identity(family, procedure, SolutionSpace::Direct)
+        is_exposed_analysis_identity(family, procedure, SolutionSpace::Direct)
             || is_exposed_analysis_identity(family, procedure, SolutionSpace::ModalReduced)
-        {
-            structural_available_qualifications()
-        } else {
-            Vec::new()
-        }
     } else {
-        let mut qualifications = Vec::new();
-        for entry in registered_formulations(family, procedure) {
-            if !qualifications.contains(&entry.qualification()) {
-                qualifications.push(entry.qualification());
-            }
-        }
-        qualifications
+        !registered_formulations(family, procedure).is_empty()
     }
-}
-
-fn registered_structural_formulation(
-    exact_realization: ExactFormulationRealization,
-) -> RegisteredFormulation {
-    let qualification = qualification_from_exact_whitelist(
-        &exact_realization,
-        &production_structural_realizations(),
-    );
-    RegisteredFormulation::new(exact_realization, qualification)
-}
-
-fn qualification_from_exact_whitelist(
-    exact_realization: &ExactFormulationRealization,
-    production_realizations: &[ExactFormulationRealization],
-) -> FormulationMaturity {
-    if production_realizations.contains(exact_realization) {
-        FormulationMaturity::Production
-    } else {
-        FormulationMaturity::Experimental
-    }
-}
-
-fn production_structural_realizations() -> Vec<ExactFormulationRealization> {
-    // Empty until a complete exact realization passes its production verification gate.
-    Vec::new()
-}
-
-fn structural_available_qualifications() -> Vec<FormulationMaturity> {
-    let mut qualifications = vec![FormulationMaturity::Experimental];
-    if !production_structural_realizations().is_empty() {
-        qualifications.push(FormulationMaturity::Production);
-    }
-    qualifications
 }
 
 fn validate_structural_identity(
@@ -310,43 +254,4 @@ fn first_incompatible_axis(
         return FormulationAdmissionRejectionReason::UnregisteredRealization;
     };
     FormulationAdmissionRejectionReason::IncompatibleAxis(axis)
-}
-
-#[cfg(test)]
-mod tests {
-    use runmat_analysis_core::{
-        AnalysisProcedure, BoundaryTransferImplementation, CouplingImplementation,
-        SourceImplementation, StructuralOperatorImplementation, StructuralRecoveryImplementation,
-    };
-
-    use super::*;
-
-    #[test]
-    fn qualification_whitelist_matches_the_complete_exact_realization() {
-        let canonical = structural_exact_realization(StructuralRealizationInput {
-            assemblies: vec![StructuralFormulationRealization::new(
-                StructuralOperatorImplementation::Tet4LinearElasticity,
-                Some(StructuralRecoveryImplementation::Tet4ConstantStrain),
-            )],
-            procedure: AnalysisProcedure::Static,
-            coupling: CouplingImplementation::Uncoupled,
-            sources: vec![SourceImplementation::CanonicalBoundaryProjection],
-            boundary_transfers: vec![BoundaryTransferImplementation::CanonicalBoundaryProjection],
-        })
-        .expect("canonical Tet4 exact realization should be valid");
-        let mut different_projection = canonical.clone();
-        different_projection.components[0].sources =
-            vec![SourceImplementation::UniformNodeDistribution];
-
-        let hypothetical_production = vec![canonical.clone()];
-        assert_eq!(
-            qualification_from_exact_whitelist(&canonical, &hypothetical_production),
-            FormulationMaturity::Production
-        );
-        assert_eq!(
-            qualification_from_exact_whitelist(&different_projection, &hypothetical_production),
-            FormulationMaturity::Experimental
-        );
-        assert!(production_structural_realizations().is_empty());
-    }
 }

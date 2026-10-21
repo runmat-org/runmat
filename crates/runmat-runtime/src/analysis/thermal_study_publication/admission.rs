@@ -37,7 +37,6 @@ pub(super) fn validate(
             step.procedure,
             AnalysisProcedure::Static | AnalysisProcedure::TransientResponse
         )
-        || completed.workload.formulation_requirement != completed.compiled.formulation_requirement
     {
         return Err("thermal publication workload differs from standalone authored study".into());
     }

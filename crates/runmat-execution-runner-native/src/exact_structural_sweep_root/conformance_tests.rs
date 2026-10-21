@@ -1289,7 +1289,6 @@ fn box_structural_workload() -> StructuralLinearWorkload {
         model,
         step_id,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         preconditioner: SpdPreconditionerKind::Jacobi,
         algebra_backend: LinearAlgebraBackendKind::CpuReference,
         observation_execution:
@@ -1313,7 +1312,6 @@ fn box_direct_transient_workload() -> StructuralTransientWorkload {
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         solver: runmat_analysis_fea::execution::StructuralTransientSolverPlan::Direct,
         time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 2 },
         residual_target: 1.0e-8,
@@ -1361,7 +1359,6 @@ fn box_structural_frequency_workload() -> StructuralFrequencyWorkload {
         model,
         step_id: step.step_id,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         plan: FrequencyResponsePlan::new(20.0, &[40.0], &[]).unwrap(),
@@ -1385,7 +1382,6 @@ fn box_structural_modal_workload() -> StructuralModalWorkload {
         model,
         step_id: step.step_id,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         truncation: ModalTruncationPolicy::requested(3),
@@ -1427,7 +1423,6 @@ fn box_modal_transient_workloads() -> runmat_analysis_execution::StructuralStudy
         model: model.clone(),
         step_id: ProcedureStepId("modes".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         truncation: ModalTruncationPolicy::requested(3),
@@ -1442,7 +1437,6 @@ fn box_modal_transient_workloads() -> runmat_analysis_execution::StructuralStudy
         model,
         step_id: ProcedureStepId("response".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 2 },
         residual_target: 1.0e-8,
     };
@@ -1527,7 +1521,6 @@ pub(crate) fn box_modal_response_spectrum_workloads(
         model: model.clone(),
         step_id: modal_step.step_id.clone(),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         truncation: ModalTruncationPolicy::requested(12),
@@ -1541,7 +1534,6 @@ pub(crate) fn box_modal_response_spectrum_workloads(
         model,
         step_id: response_step.step_id.clone(),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
     };
@@ -1621,7 +1613,6 @@ pub(crate) fn box_random_response_workloads() -> runmat_analysis_execution::Stru
         model: model.clone(),
         step_id: modal_step.step_id.clone(),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         truncation: ModalTruncationPolicy::requested(3),
@@ -1635,7 +1626,6 @@ pub(crate) fn box_random_response_workloads() -> runmat_analysis_execution::Stru
         model,
         step_id: response_step.step_id.clone(),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         integration_policy: runmat_analysis_fea::solve::dynamics::RandomResponseIntegrationPolicy {
@@ -1711,7 +1701,6 @@ fn box_buckling_workloads() -> runmat_analysis_execution::StructuralStudyWorkloa
         model: preload_workload.model.clone(),
         step_id: ProcedureStepId("buckling".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         solver: StructuralBucklingSolverPolicy::new(1, 1.0e-8, 256).unwrap(),

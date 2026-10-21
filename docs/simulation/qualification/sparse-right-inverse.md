@@ -83,10 +83,10 @@ than claiming exact floating-matrix rank from a small null-vector residual.
 `AcousticStudyPlanningPolicy` requires explicit candidate controls, independent
 of physical residual/power targets. The bounded default is candidate tolerance1e-6,
 restart64 and128 iterations per column. It is only a construction policy: acceptance
-still requires the outward defect below1. The experimental direct library can
+still requires the outward defect below1. The direct library can
 explicitly request no diagnostic; missing controls are not silently defaulted when
 decoding its numerical policy. These unrequested results establish physical closure
-only and acquire no uniqueness or production qualification.
+only and acquire no uniqueness or qualification.
 
 The original affine-reduced real CSR is certified once before physical-RHS acceptance
 and reused by every power-refinement correction. Any indeterminate outcome rejects

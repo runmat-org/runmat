@@ -928,7 +928,7 @@ mod tests {
                 cell(Vec::new()),
                 cell(vec![state]),
                 cell(vec![observation]),
-                super::super::accuracy::experimental_plan("acceptance".into())
+                super::super::accuracy::baseline_plan("acceptance".into())
                     .await
                     .expect("accuracy"),
                 restart_fresh().await.expect("restart"),

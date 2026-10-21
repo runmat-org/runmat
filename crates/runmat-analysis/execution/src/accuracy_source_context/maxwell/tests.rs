@@ -131,7 +131,6 @@ fn original_complex_catalog_and_missing_catalog_authenticate_both_orders() {
             AccuracySourceKind::MaxwellHarmonic,
             receipt.source_result(),
             Some(&publication),
-            w.formulation_requirement,
             w.model.sequence.steps[0].accuracy.clone(),
         )
         .unwrap();
@@ -142,7 +141,6 @@ fn original_complex_catalog_and_missing_catalog_authenticate_both_orders() {
             AccuracySourceKind::MaxwellHarmonic,
             receipt.source_result(),
             None,
-            w.formulation_requirement,
             w.model.sequence.steps[0].accuracy.clone(),
         )
         .unwrap();
@@ -192,7 +190,6 @@ fn workload() -> MaxwellHarmonicWorkload {
     MaxwellHarmonicWorkload {
         model,
         step_id: ProcedureStepId("field".into()),
-        formulation_requirement: FormulationRequirement::Experimental,
         relative_residual_target: 1e-10,
         frequency: runmat_analysis_core::Frequency::new(1e8),
     }
@@ -245,7 +242,6 @@ fn request(
         AccuracySourceKind::MaxwellHarmonic,
         r.source_result(),
         None,
-        w.formulation_requirement,
         w.model.sequence.steps[0].accuracy.clone(),
     )
     .unwrap()
@@ -274,7 +270,6 @@ fn cold_context_both_orders_authenticates_exact_original_receipt_and_authored_ac
             original.source_kind,
             original.source_result,
             None,
-            FormulationRequirement::Production,
             original.plan.clone(),
         )
         .unwrap();

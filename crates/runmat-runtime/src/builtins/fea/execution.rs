@@ -1,6 +1,6 @@
 use std::sync::Once;
 
-use runmat_analysis_core::{FormulationRequirement, ProcedureStep};
+use runmat_analysis_core::ProcedureStep;
 use runmat_analysis_fea::ComputeBackend;
 
 use super::*;
@@ -12,12 +12,11 @@ use crate::builtins::fea::study_values::{
 use runmat_builtins::fea_contract::policy_types::classes;
 
 const BACKEND_CLASS: &str = classes::COMPUTE_BACKEND.display_name();
-const REQUIREMENT_CLASS: &str = classes::FORMULATION_REQUIREMENT.display_name();
 const SOLVER_OPTIONS_CLASS: &str = classes::SOLVER_OPTIONS.display_name();
 const EXECUTION_STEP_CLASS: &str = classes::EXECUTION_STEP.display_name();
 const EXECUTION_PLAN_CLASS: &str = classes::EXECUTION_PLAN.display_name();
 
-const EXECUTION_STEP_FIELDS: &[&str] = &["step_id", "backend", "requirement", "solver_options"];
+const EXECUTION_STEP_FIELDS: &[&str] = &["step_id", "backend", "solver_options"];
 const EXECUTION_PLAN_FIELDS: &[&str] = &["steps"];
 
 macro_rules! choice {
@@ -40,18 +39,6 @@ choice!(
     "fea.ComputeBackend.gpu",
     BACKEND_CLASS,
     ComputeBackend::Gpu
-);
-choice!(
-    requirement_production,
-    "fea.FormulationRequirement.production",
-    REQUIREMENT_CLASS,
-    FormulationRequirement::Production
-);
-choice!(
-    requirement_experimental,
-    "fea.FormulationRequirement.experimental",
-    REQUIREMENT_CLASS,
-    FormulationRequirement::Experimental
 );
 
 fn procedure_step(name: &'static str, value: &Value) -> BuiltinResult<ProcedureStep> {
@@ -84,12 +71,7 @@ pub async fn solver_defaults(step: Value) -> BuiltinResult<Value> {
     binding_variant = "default",
     builtin_path = "crate::builtins::fea::execution"
 )]
-pub async fn execution_step(
-    step: Value,
-    backend: Value,
-    requirement: Value,
-    options: Value,
-) -> BuiltinResult<Value> {
+pub async fn execution_step(step: Value, backend: Value, options: Value) -> BuiltinResult<Value> {
     const NAME: &str = "fea.ExecutionStep.new";
     let step = procedure_step(NAME, &step)?;
     let options: AnalysisSolverOptions = from_typed_value(NAME, SOLVER_OPTIONS_CLASS, &options)?;
@@ -103,7 +85,6 @@ pub async fn execution_step(
     let execution = AnalysisExecutionStep {
         step_id: step.step_id,
         backend: from_typed_value(NAME, BACKEND_CLASS, &backend)?,
-        requirement: from_typed_value(NAME, REQUIREMENT_CLASS, &requirement)?,
         solver_options: options,
     };
     serializable_to_object(NAME, &ERROR_INTERNAL, EXECUTION_STEP_CLASS, &execution)
@@ -130,17 +111,12 @@ pub async fn execution_plan(sequence: Value, steps: Value) -> BuiltinResult<Valu
     binding_variant = "default",
     builtin_path = "crate::builtins::fea::execution"
 )]
-pub async fn execution_plan_defaults(
-    sequence: Value,
-    backend: Value,
-    requirement: Value,
-) -> BuiltinResult<Value> {
+pub async fn execution_plan_defaults(sequence: Value, backend: Value) -> BuiltinResult<Value> {
     const NAME: &str = "fea.ExecutionPlan.defaults";
     let sequence = super::sequences::sequence_from_value(NAME, &sequence)?;
-    let plan = AnalysisExecutionPlan::for_sequence_with_requirement(
+    let plan = AnalysisExecutionPlan::for_sequence(
         &sequence,
         from_typed_value(NAME, BACKEND_CLASS, &backend)?,
-        from_typed_value(NAME, REQUIREMENT_CLASS, &requirement)?,
     )
     .map_err(|message| builtin_error(NAME, &ERROR_INPUT, message))?;
     serializable_to_object(NAME, &ERROR_INTERNAL, EXECUTION_PLAN_CLASS, &plan)
@@ -153,7 +129,7 @@ pub(super) fn execution_plan_from_value(
     object_payload(name, value, EXECUTION_PLAN_CLASS)
 }
 
-const EXECUTION_STUDY_CLASSES: [ImmutableStudyClass; 5] = [
+const EXECUTION_STUDY_CLASSES: [ImmutableStudyClass; 4] = [
     ImmutableStudyClass {
         class_name: BACKEND_CLASS,
         type_identity: "runmat.fea.compute-backend",
@@ -161,15 +137,6 @@ const EXECUTION_STUDY_CLASSES: [ImmutableStudyClass; 5] = [
         methods: &[
             ("cpu", "fea.ComputeBackend.cpu"),
             ("gpu", "fea.ComputeBackend.gpu"),
-        ],
-    },
-    ImmutableStudyClass {
-        class_name: REQUIREMENT_CLASS,
-        type_identity: "runmat.fea.formulation-requirement",
-        fields: VALUE_FIELD,
-        methods: &[
-            ("production", "fea.FormulationRequirement.production"),
-            ("experimental", "fea.FormulationRequirement.experimental"),
         ],
     },
     ImmutableStudyClass {
@@ -228,19 +195,11 @@ mod tests {
         )
         .await
         .unwrap();
-        let plan = execution_plan_defaults(
-            sequence.clone(),
-            backend_cpu().await.unwrap(),
-            requirement_experimental().await.unwrap(),
-        )
-        .await
-        .unwrap();
+        let plan = execution_plan_defaults(sequence.clone(), backend_cpu().await.unwrap())
+            .await
+            .unwrap();
         let plan = execution_plan_from_value("test", &plan).unwrap();
         assert_eq!(plan.steps.len(), 2);
-        assert!(plan
-            .steps
-            .iter()
-            .all(|step| step.requirement == FormulationRequirement::Experimental));
     }
 
     #[tokio::test]
@@ -254,14 +213,9 @@ mod tests {
             .unwrap();
         let static_options = solver_defaults(static_step).await.unwrap();
 
-        let error = execution_step(
-            modal_step,
-            backend_cpu().await.unwrap(),
-            requirement_production().await.unwrap(),
-            static_options,
-        )
-        .await
-        .unwrap_err();
+        let error = execution_step(modal_step, backend_cpu().await.unwrap(), static_options)
+            .await
+            .unwrap_err();
 
         assert!(error
             .to_string()
@@ -289,14 +243,9 @@ mod tests {
         .await
         .unwrap();
         let first_options = solver_defaults(first.clone()).await.unwrap();
-        let first_execution = execution_step(
-            first,
-            backend_cpu().await.unwrap(),
-            requirement_production().await.unwrap(),
-            first_options,
-        )
-        .await
-        .unwrap();
+        let first_execution = execution_step(first, backend_cpu().await.unwrap(), first_options)
+            .await
+            .unwrap();
 
         let error = execution_plan(sequence, first_execution).await.unwrap_err();
         assert!(error

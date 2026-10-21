@@ -49,7 +49,6 @@ pub(super) fn verify(
     let completion: analysis::AnalysisStudyRunData =
         serde_json::from_slice(&std::fs::read(source_root.join("published.json")).unwrap())
             .unwrap();
-    assert!(!completion.production_publishable);
     assert_eq!(completion.states.len(), 3);
     let store = FilesystemAnalysisArtifactStore::new(source_root.join("runs"));
     let run_id = &completion.steps[0].run_id;

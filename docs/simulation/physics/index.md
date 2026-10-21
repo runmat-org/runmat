@@ -11,7 +11,7 @@ common failure modes.
 
 | Study | Guide | Typed `.fea` contract | Native `.fea` execution |
 | --- | --- | --- | --- |
-| Stress, deformation, modes, vibration, or buckling | [Structural analysis](./structural) | Available | Experimental structural path |
+| Stress, deformation, modes, vibration, or buckling | [Structural analysis](./structural) | Available | Available |
 | Steady or transient temperature | [Heat transfer](./thermal) | Available | Not yet connected end to end |
 | Electric or magnetic fields | [Electromagnetics](./electromagnetic) | Available | Not yet connected end to end |
 | Pressure modes or sound propagation | [Acoustics](./acoustic) | Available | Not yet connected end to end |
@@ -35,20 +35,20 @@ physics, so moving a qualified study to a cluster cannot change its equations.
 
 | Family | Procedures understood by the checker | Currently registered low-level realization |
 | --- | --- | --- |
-| Structural | static, preload, modal, transient, modal transient, harmonic, modal harmonic, prestressed modal, buckling, prestressed harmonic, modal response spectrum, random response, nonlinear | Multiple experimental structural paths; public typed executor is structural-only |
+| Structural | static, preload, modal, transient, modal transient, harmonic, modal harmonic, prestressed modal, buckling, prestressed harmonic, modal response spectrum, random response, nonlinear | Multiple structural realizations; public typed executor is structural-only |
 | Thermal | steady, transient | Tet4/Tet10 Galerkin conduction; steady linear and backward-Euler transient |
-| Electromagnetic | static, transient, harmonic, nonlinear | Experimental reduced edge-graph curl–curl harmonic only |
-| Acoustic | static, modal, transient, harmonic, nonlinear | Experimental reduced Helmholtz graph |
-| Fluid | steady, transient, harmonic, nonlinear | Experimental reduced channel steady/transient only |
-| Thermomechanical | steady, transient, nonlinear | Experimental one-pass prescribed-temperature structural response |
+| Electromagnetic | static, transient, harmonic, nonlinear | Reduced edge-graph curl–curl harmonic only |
+| Acoustic | static, modal, transient, harmonic, nonlinear | Reduced Helmholtz graph |
+| Fluid | steady, transient, harmonic, nonlinear | Reduced channel steady/transient only |
+| Thermomechanical | steady, transient, nonlinear | One-pass prescribed-temperature structural response |
 | Electrothermal | steady, transient, nonlinear | None |
-| Conjugate heat transfer | steady, transient, nonlinear | Experimental reduced partitioned flow/thermal transfer |
-| Fluid–structure interaction | steady, transient, nonlinear | Experimental reduced partitioned relaxation |
+| Conjugate heat transfer | steady, transient, nonlinear | Reduced partitioned flow/thermal transfer |
+| Fluid–structure interaction | steady, transient, nonlinear | Reduced partitioned relaxation |
 
 The checker accepts the generic `static`/`steady`, `transient`, `harmonic`, and `nonlinear` shapes
 where the family contract exposes them. A registered low-level realization is still not a public
 typed execution path. Admission requires an exact family, procedure, topology, source projection,
-boundary transfer, coupling, backend, and formulation-maturity match.
+boundary transfer, coupling, and backend match.
 
 ## How does RunMat keep physics and execution separate?
 

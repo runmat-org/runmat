@@ -1,5 +1,5 @@
 //! Retained one-way Joule loss through actual admitted workers and cold completion replay.
-use runmat_analysis_core::{FormulationRequirement, PartialAccessPolicy, RequiredAccuracyEvidence};
+use runmat_analysis_core::{PartialAccessPolicy, RequiredAccuracyEvidence};
 use runmat_analysis_execution::{
     import_thermal_study_root, prepare_thermal_study_root, AnalysisOutputPolicy,
     ThermalStudyPreparation, ThermalStudyScope,
@@ -47,7 +47,6 @@ pub(super) async fn run() {
         let compiled = CompiledAnalysisStudy {
             module_path: "conformance/electrothermal.fea".into(),
             study_id: "one_way_heat".into(),
-            formulation_requirement: FormulationRequirement::Experimental,
             study_inputs: vec![],
             assessments: Vec::new(),
             outputs: vec![],
@@ -60,7 +59,6 @@ pub(super) async fn run() {
             "heat",
             ThermalStudyPlanningPolicy {
                 backend: ComputeBackend::Cpu,
-                formulation_requirement: FormulationRequirement::Experimental,
                 element_heat_source: None,
             },
         )

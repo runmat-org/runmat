@@ -1,9 +1,7 @@
 use super::*;
 use crate::analysis::{analysis_run_linear_static_with_options, tests, AnalysisRunOptions};
 use crate::operations::OperationContext;
-use runmat_analysis_core::{
-    FieldLocation, FormulationRequirement, ObservationQuantity, ObservationValueShape,
-};
+use runmat_analysis_core::{FieldLocation, ObservationQuantity, ObservationValueShape};
 use runmat_analysis_fea::{
     execution::{
         FieldRecoveryPlan, FieldRecoveryRequest, FieldRecoverySource, FieldTopologyIdentity,
@@ -23,7 +21,6 @@ fn source() -> (AnalysisRunResult, RecoveredFieldArtifact) {
     let mut run = analysis_run_linear_static_with_options(
         &tests::sample_model(),
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisRunOptions::default(),
         OperationContext::new(None, None),
     )

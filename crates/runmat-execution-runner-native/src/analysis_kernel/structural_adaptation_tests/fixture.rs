@@ -77,7 +77,7 @@ pub(super) fn model(mesh: &SolverMeshArtifact) -> AnalysisModel {
 }
 
 pub(super) fn plan() -> AccuracyPlan {
-    let mut plan = AccuracyPlan::experimental_baseline("adaptive");
+    let mut plan = AccuracyPlan::baseline("adaptive");
     plan.exceeded_limit = AccuracyLimitAction::Refine;
     plan.resources.maximum_refinement_cycles = 4;
     plan.criteria = [

@@ -1,7 +1,5 @@
 use super::*;
-use runmat_analysis_core::{
-    AnalysisSequence, FormulationRequirement, ProcedureStep, Temperature, ThermalDomain,
-};
+use runmat_analysis_core::{AnalysisSequence, ProcedureStep, Temperature, ThermalDomain};
 use runmat_analysis_fea::{
     fixtures::{fixture_model, FixtureId},
     properties::compile_property_map,
@@ -47,7 +45,6 @@ pub(crate) fn preparation() -> ThermalStudyPreparation {
     let compiled = CompiledAnalysisStudy {
         module_path: "tests/thermal.fea".into(),
         study_id: "thermal".into(),
-        formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: Vec::new(),
         assessments: Vec::new(),
         outputs: Vec::new(),
@@ -59,7 +56,6 @@ pub(crate) fn preparation() -> ThermalStudyPreparation {
         &compiled,
         ThermalStudyPlanningPolicy {
             backend: ComputeBackend::Cpu,
-            formulation_requirement: FormulationRequirement::Experimental,
             element_heat_source: None,
         },
     )
@@ -270,7 +266,6 @@ fn original_temperature_fields_survive_borrowed_authored_intent_validation() {
         &p.product.compiled,
         ThermalStudyPlanningPolicy {
             backend: ComputeBackend::Cpu,
-            formulation_requirement: FormulationRequirement::Experimental,
             element_heat_source: None,
         },
         input.initial_fields,

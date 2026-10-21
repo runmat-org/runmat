@@ -137,7 +137,7 @@ must be rejected as conflicting ownership.
 
 The closed interface set currently provides structural tie and frictionless/Coulomb contact, but no
 cohesive-zone, adhesive, or finite-normal/tangential-stiffness interface. Do not tune contact penalty
-to stand in for a physical adhesive law. A production cohesive interface needs traction-separation,
+to stand in for a physical adhesive law. A complete cohesive interface needs traction-separation,
 damage/fracture-energy, mixed-mode, thickness, and state-retention semantics.
 
 ## How do I model thermal contact that changes with pressure?

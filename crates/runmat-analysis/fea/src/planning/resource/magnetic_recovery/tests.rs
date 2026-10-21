@@ -2,7 +2,6 @@ use super::*;
 use crate::execution::MagnetostaticWorkload;
 use crate::physics::{electrical::tests::mesh, magnetic::test_support::authored_model};
 use crate::results::field::canonical_field_partitions;
-use runmat_analysis_core::FormulationRequirement;
 use runmat_meshing_core::ElementOrder;
 
 #[test]
@@ -12,7 +11,6 @@ fn magnetic_recovery_profiles_cover_actual_catalog_identity_and_storage_both_ord
         let workload = MagnetostaticWorkload {
             model: authored_model(0.0),
             step_id: runmat_analysis_core::ProcedureStepId("potential".into()),
-            formulation_requirement: FormulationRequirement::Experimental,
             relative_residual_target: 1e-10,
         };
         let result = workload.execute(&mesh).unwrap();
@@ -82,7 +80,6 @@ fn magnetic_recovery_shape_rejects_missing_or_relabelled_native_inventory() {
     let workload = MagnetostaticWorkload {
         model: authored_model(0.0),
         step_id: runmat_analysis_core::ProcedureStepId("potential".into()),
-        formulation_requirement: FormulationRequirement::Experimental,
         relative_residual_target: 1e-10,
     };
     let result = workload.execute(&mesh).unwrap();

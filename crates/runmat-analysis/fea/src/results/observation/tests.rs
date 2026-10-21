@@ -1811,11 +1811,9 @@ fn typed_event_histories_preserve_source_attribution_and_ordering() {
         ObservationEvent::Series(SeriesObservationEvent::PeakResponse)
     );
     series_attribution.validate().unwrap();
-    let accuracy = crate::results::accuracy::evaluate_accuracy(
-        &AccuracyPlan::experimental_baseline("event-accuracy"),
-        &[],
-    )
-    .unwrap();
+    let accuracy =
+        crate::results::accuracy::evaluate_accuracy(&AccuracyPlan::baseline("event-accuracy"), &[])
+            .unwrap();
     let accuracy_attribution = ObservationEventAttribution::Accuracy(AccuracyEventAttribution {
         event: AccuracyObservationEvent::CriterionCrossing,
         sample,
@@ -2449,7 +2447,6 @@ fn explicit_structural_nodes_resolve_and_evaluate_without_a_solver_mesh() {
         step_id: model.sequence.steps[0].step_id.clone(),
         model: model.clone(),
         backend: crate::ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         preconditioner: crate::solve::preconditioner::SpdPreconditionerKind::Jacobi,
         algebra_backend: crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
         observation_execution: ObservationExecutionPolicy::serial(),

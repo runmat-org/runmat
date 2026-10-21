@@ -52,4 +52,4 @@ not resolve the fine case and was removed, including its extra workspace.
 
 The complete authored refinement matrix, wider boundaries, formal spatial
 accuracy, measured resources, observations, restart/placement and blocking release
-evidence remain required. No Stage 8 or production gate is promoted.
+evidence remain required. No Stage 8 gate is promoted.

@@ -9,7 +9,6 @@ fn compiled() -> CompiledAnalysisStudy {
     CompiledAnalysisStudy {
         module_path: "tests/magnetic.fea".into(),
         study_id: "magnetic".into(),
-        formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: vec![],
         assessments: Vec::new(),
         outputs: vec![],
@@ -20,9 +19,7 @@ fn compiled() -> CompiledAnalysisStudy {
 }
 
 fn policy() -> MagneticStudyPlanningPolicy {
-    MagneticStudyPlanningPolicy {
-        formulation_requirement: FormulationRequirement::Experimental,
-    }
+    MagneticStudyPlanningPolicy {}
 }
 
 #[test]
@@ -66,13 +63,6 @@ fn accuracy_sequence_and_requirement_fail_closed() {
     assert!(matches!(
         plan_magnetic_study(&changed, policy()),
         Err(MagneticStudyPlanningError::UnsupportedSequence)
-    ));
-    let production = MagneticStudyPlanningPolicy {
-        formulation_requirement: FormulationRequirement::Production,
-    };
-    assert!(matches!(
-        plan_magnetic_study(&study, production),
-        Err(MagneticStudyPlanningError::FormulationRequirementMismatch)
     ));
 }
 

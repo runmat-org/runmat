@@ -193,14 +193,12 @@ fn validate_authored(
     source.validate()?;
     let model = source.model();
     let step = source.procedure_step()?;
-    let formulation = source.formulation_requirement();
     let producer = StepIdentity::from_solver_contract(
         SequenceIdentity::from_solver_contract(&model.sequence)?,
         step,
     )?;
     if producer != request.producer
         || request.plan != step.accuracy
-        || request.formulation_requirement != formulation
         || observations.is_some() == step.observations.is_empty()
     {
         return Err(AnalysisBridgeError::Identity(

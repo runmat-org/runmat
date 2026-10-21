@@ -158,7 +158,7 @@ constraint vector_potential_ground {
 }
 ```
 
-The edge-based experimental realization constrains compatible tangential edge DOFs on the resolved
+The edge-based realization constrains compatible tangential edge DOFs on the resolved
 boundary. Inspect boundary-localization evidence; a named region that maps to no boundary edges must
 fail rather than become a global penalty.
 

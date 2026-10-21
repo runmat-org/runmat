@@ -231,7 +231,6 @@ fn execute(quadratic: bool, generated: bool) -> Vec<Vec<f64>> {
         "{:?}",
         retained.quality_reasons
     );
-    assert!(!retained.production_publishable);
     let AnalysisStudyStepNumericalResultData::StructuralFrequency(result) =
         retained.numerical_result
     else {
@@ -424,7 +423,6 @@ study response {
     geometry = geometry.part
     mesh = mesh.volume
     model = model.structure
-    formulation = experimental
     analysis harmonic {
         structural harmonic { frequencies = [0.07957747154594767 Hz, 0.15915494309189535 Hz] }
     }

@@ -408,8 +408,7 @@ fn semantic_state_and_reuse_transition_bind_exact_content_and_topology() {
 #[test]
 fn semantic_state_round_trips_a_typed_modal_basis_and_rejects_field_substitution() {
     use runmat_analysis_core::{
-        FormulationRequirement, ProcedureStep, StateCompleteness, StateId, StateKind, StateOutput,
-        StatePersistence,
+        ProcedureStep, StateCompleteness, StateId, StateKind, StateOutput, StatePersistence,
     };
 
     let mut model =
@@ -419,7 +418,6 @@ fn semantic_state_round_trips_a_typed_modal_basis_and_rejects_field_substitution
         &model,
         crate::ComputeBackend::Cpu,
         crate::ModalSolveOptions {
-            formulation_requirement: FormulationRequirement::Experimental,
             ..crate::ModalSolveOptions::default()
         },
     )
@@ -558,7 +556,6 @@ fn structural_linear_workload_round_trips_without_a_mesh_path() {
         model,
         step_id,
         backend: crate::ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         preconditioner: crate::solve::preconditioner::SpdPreconditionerKind::Jacobi,
         algebra_backend: crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
         observation_execution: crate::results::observation::ObservationExecutionPolicy::scalable(),

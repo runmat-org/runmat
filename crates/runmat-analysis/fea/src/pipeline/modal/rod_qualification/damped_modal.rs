@@ -58,7 +58,6 @@ fn modal_basis(
         ModalSolveOptions {
             solver_mesh: Some(mesh.clone()),
             truncation: ModalTruncationPolicy::requested(requested),
-            formulation_requirement: FormulationRequirement::Experimental,
             ..ModalSolveOptions::default()
         },
     )

@@ -11,7 +11,6 @@ fn workload(current: f64) -> MagnetostaticWorkload {
     MagnetostaticWorkload {
         model: authored_model(current),
         step_id: ProcedureStepId("potential".into()),
-        formulation_requirement: FormulationRequirement::Experimental,
         relative_residual_target: 1e-10,
     }
 }

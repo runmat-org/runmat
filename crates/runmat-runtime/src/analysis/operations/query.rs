@@ -1283,9 +1283,7 @@ fn analysis_results_op_with_field_inventory(
         },
         run_status: run_result.run_status,
         numerically_acceptable: run_result.numerically_acceptable,
-        production_publishable: run_result.production_publishable,
         quality_reasons: run_result.quality_reasons.clone(),
-        production_publication_reasons: run_result.production_publication_reasons.clone(),
         provenance: run_result.provenance.clone(),
         summary,
     };

@@ -1,8 +1,8 @@
 //! Authored thermal intent, independent of task placement and transport.
 use runmat_analysis_core::{
-    AccuracyTolerance, AnalysisProcedure, ErrorContributionKind, FormulationRequirement,
-    IndependentDomain, ObservationRequest, PhysicsFamily, ProcedureSettings, RestartPolicy,
-    SamplingPolicy, SolutionSpace, StateKind,
+    AccuracyTolerance, AnalysisProcedure, ErrorContributionKind, IndependentDomain,
+    ObservationRequest, PhysicsFamily, ProcedureSettings, RestartPolicy, SamplingPolicy,
+    SolutionSpace, StateKind,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -22,7 +22,6 @@ mod tests;
 #[serde(deny_unknown_fields)]
 pub struct ThermalStudyPlanningPolicy {
     pub backend: ComputeBackend,
-    pub formulation_requirement: FormulationRequirement,
     /// A solved upstream loss field that heats this analysis (`heat_source = analysis.<p>.state.<s>`).
     pub element_heat_source: Option<ElementHeatSource>,
 }
@@ -76,9 +75,6 @@ pub fn plan_thermal_study_with_fields(
     policy: ThermalStudyPlanningPolicy,
     initial_fields: Vec<crate::execution::InitialFieldBinding>,
 ) -> Result<ThermalWorkload, ThermalStudyPlanningError> {
-    if policy.formulation_requirement != study.formulation_requirement {
-        return Err(ThermalStudyPlanningError::FormulationRequirementMismatch);
-    }
     let step = validation::standalone_step(study)?;
     plan_selected(study, &step.step_id.0, policy, false, initial_fields)
 }
@@ -110,16 +106,12 @@ fn plan_selected(
     mixed_context: bool,
     initial_fields: Vec<crate::execution::InitialFieldBinding>,
 ) -> Result<ThermalWorkload, ThermalStudyPlanningError> {
-    if policy.formulation_requirement != study.formulation_requirement {
-        return Err(ThermalStudyPlanningError::FormulationRequirementMismatch);
-    }
     let (step, procedure, residual_target) = authored_controls(&study.model, step_id)?;
     let workload = ThermalWorkload {
         initial_fields,
         model: study.model.clone(),
         step_id: step.step_id.clone(),
         backend: policy.backend,
-        formulation_requirement: policy.formulation_requirement,
         procedure,
         residual_target,
     };
@@ -262,8 +254,6 @@ fn validate_sources(
 
 #[derive(Debug, Error)]
 pub enum ThermalStudyPlanningError {
-    #[error("thermal planning policy differs from the compiled formulation requirement")]
-    FormulationRequirementMismatch,
     #[error("thermal workload differs from the compiled authored intent")]
     WorkloadMismatch,
     #[error("thermal planning requires a fresh independent step with only authored physical thermal initial selection; standalone planning additionally requires a single-step sequence")]

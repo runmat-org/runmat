@@ -3,7 +3,7 @@
 This Stage 4 complement isolates temporal integration, original dynamic reactions,
 momentum accounting, and cold portable-object continuation from spatial initial-field
 interpolation error. It does not qualify the separate sine-mode free-decay envelope
-or promote structural dynamics to production.
+or qualify structural dynamics as a whole.
 
 ## Independent manufactured problem
 

@@ -158,7 +158,6 @@ impl PreparedStructuralStudyIntent {
                         (runmat_analysis_fea::execution::StructuralStepWorkload::Thermal { workload }, crate::analysis::AnalysisSolverOptions::ThermalDiffusion(options))
                             if workload.step_id == step.procedure_step.step_id
                                 && workload.backend == step.authored_execution.backend
-                                && workload.formulation_requirement == step.authored_execution.requirement
                                 && options.residual_warn_threshold == workload.residual_target
                                 && options.snapshot_count == match workload.procedure { runmat_analysis_fea::ThermalProcedureControl::Steady => 1, runmat_analysis_fea::ThermalProcedureControl::BackwardEuler { snapshot_count } => snapshot_count }
                                 && options.solver_mesh_artifact_path.is_none() => {},
@@ -180,8 +179,6 @@ impl PreparedStructuralStudyIntent {
                             crate::analysis::AnalysisSolverOptions::StructuralModes(options),
                         ) if workload.step_id() == &step.procedure_step.step_id
                             && workload.backend() == step.authored_execution.backend
-                            && workload.formulation_requirement()
-                                == step.authored_execution.requirement
                             && workload.observation_execution()
                                 == ObservationExecutionPolicy::scalable()
                             && workload.truncation() == options.truncation
@@ -196,8 +193,6 @@ impl PreparedStructuralStudyIntent {
                             crate::analysis::AnalysisSolverOptions::StructuralModes(options),
                         ) if template.step_id == step.procedure_step.step_id
                             && template.backend == step.authored_execution.backend
-                            && template.formulation_requirement
-                                == step.authored_execution.requirement
                             && template.observation_execution
                                 == ObservationExecutionPolicy::scalable()
                             && template.truncation == options.truncation
@@ -212,8 +207,6 @@ impl PreparedStructuralStudyIntent {
                             crate::analysis::AnalysisSolverOptions::StructuralFrequency(options),
                         ) if template.step_id == step.procedure_step.step_id
                             && template.backend == step.authored_execution.backend
-                            && template.formulation_requirement
-                                == step.authored_execution.requirement
                             && template.observation_execution
                                 == ObservationExecutionPolicy::scalable()
                             && match template.solver {
@@ -242,8 +235,6 @@ impl PreparedStructuralStudyIntent {
                             crate::analysis::AnalysisSolverOptions::StructuralBuckling(options),
                         ) if template.step_id == step.procedure_step.step_id
                             && template.backend == step.authored_execution.backend
-                            && template.formulation_requirement
-                                == step.authored_execution.requirement
                             && template.observation_execution
                                 == ObservationExecutionPolicy::scalable()
                             && template.solver == options.solver
@@ -256,8 +247,6 @@ impl PreparedStructuralStudyIntent {
                             crate::analysis::AnalysisSolverOptions::StructuralTransient(options),
                         ) if template.step_id == step.procedure_step.step_id
                             && template.backend == step.authored_execution.backend
-                            && template.formulation_requirement
-                                == step.authored_execution.requirement
                             && template.time_step_policy.interval_count()
                                 == options.time_step_policy.interval_count()
                             && template.residual_target == options.residual_target
@@ -271,8 +260,6 @@ impl PreparedStructuralStudyIntent {
                             crate::analysis::AnalysisSolverOptions::StructuralResponseSpectrum(options),
                         ) if template.step_id == step.procedure_step.step_id
                             && template.backend == step.authored_execution.backend
-                            && template.formulation_requirement
-                                == step.authored_execution.requirement
                             && template.observation_execution
                                 == ObservationExecutionPolicy::scalable()
                             && options.precision_mode == crate::analysis::PrecisionMode::Fp64
@@ -284,8 +271,6 @@ impl PreparedStructuralStudyIntent {
                             crate::analysis::AnalysisSolverOptions::StructuralRandomResponse(options),
                         ) if template.step_id == step.procedure_step.step_id
                             && template.backend == step.authored_execution.backend
-                            && template.formulation_requirement
-                                == step.authored_execution.requirement
                             && template.observation_execution
                                 == ObservationExecutionPolicy::scalable()
                             && template.integration_policy == options.integration
@@ -357,7 +342,6 @@ impl PreparedStructuralStudyIntent {
                 };
                 if workload.step_id != step.procedure_step.step_id
                     || workload.backend != step.authored_execution.backend
-                    || workload.formulation_requirement != step.authored_execution.requirement
                     || workload.solver
                         != runmat_analysis_fea::execution::StructuralTransientSolverPlan::Direct
                     || workload.time_step_policy != expected_time_step_policy
@@ -396,7 +380,6 @@ impl PreparedStructuralStudyIntent {
                 };
                 if workload.step_id() != &step.procedure_step.step_id
                     || workload.backend() != step.authored_execution.backend
-                    || workload.formulation_requirement() != step.authored_execution.requirement
                     || workload.observation_execution() != ObservationExecutionPolicy::scalable()
                     || !matches!(
                         options.solver,
@@ -424,7 +407,6 @@ impl PreparedStructuralStudyIntent {
                 };
                 if workload.step_id() != &step.procedure_step.step_id
                     || workload.backend() != step.authored_execution.backend
-                    || workload.formulation_requirement() != step.authored_execution.requirement
                     || workload.observation_execution() != ObservationExecutionPolicy::scalable()
                     || workload.truncation() != options.truncation
                     || workload.convergence() != options.convergence

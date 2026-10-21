@@ -3,7 +3,7 @@
 ## Scope and decision
 
 This is a shared topology/numerical prerequisite for Stage 7 magnetostatics and
-harmonic Maxwell, **not a qualified formulation or production admission**. The
+harmonic Maxwell, **not a qualified formulation**. The
 existing reduced pipeline EM operator is not replaced or qualified by this work.
 No native solve, gauge, magnetic source, recovery, restart, or release gate is
 claimed. In particular, no scalar electrostatic solve is renamed magnetostatics.

@@ -89,10 +89,10 @@ pub(super) fn require_step_class(
 macro_rules! step_builtin {
     ($function:ident, $descriptor:ident, $name:literal, $class:expr, $build:expr) => {
         #[runtime_builtin(
-                                            name = $name,
-                                            binding_variant = "default",
-                                            builtin_path = "crate::builtins::fea::steps"
-                                        )]
+                                                    name = $name,
+                                                    binding_variant = "default",
+                                                    builtin_path = "crate::builtins::fea::steps"
+                                                )]
         pub async fn $function(id: Value) -> BuiltinResult<Value> {
             crate::builtins::fea::constraints::fixed_outputs(&runmat_builtins::$descriptor, $name)?;
             let id = scalar_string(&id, $name, &ERROR_INPUT)?;

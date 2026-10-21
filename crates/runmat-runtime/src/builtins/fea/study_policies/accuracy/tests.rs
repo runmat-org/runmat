@@ -203,11 +203,11 @@ fn accuracy_choices_return_typed_catalog_values() {
         UnavailableEvidencePolicy::Fail
     );
     assert_choice!(
-        unavailable_experimental,
-        "fea.UnavailableEvidencePolicy.markIndeterminateExperimental",
+        unavailable_mark_indeterminate,
+        "fea.UnavailableEvidencePolicy.markIndeterminate",
         UNAVAILABLE_CLASS,
         unavailable,
-        UnavailableEvidencePolicy::MarkIndeterminateExperimental
+        UnavailableEvidencePolicy::MarkIndeterminate
     );
     assert_choice!(
         limit_refine,
@@ -236,12 +236,5 @@ fn accuracy_choices_return_typed_catalog_values() {
         LIMIT_ACTION_CLASS,
         limit_action,
         AccuracyLimitAction::Fail
-    );
-    assert_choice!(
-        limit_warn,
-        "fea.AccuracyLimitAction.warnExperimental",
-        LIMIT_ACTION_CLASS,
-        limit_action,
-        AccuracyLimitAction::WarnExperimental
     );
 }

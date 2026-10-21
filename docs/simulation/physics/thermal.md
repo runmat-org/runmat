@@ -6,7 +6,7 @@ from boundary conditions: conductivity, density, and specific heat belong to sol
 regions; temperatures and fluxes target compatible regions on the same admitted geometry.
 
 The typed `.fea` contracts and tetrahedral thermal finite-element assembly are implemented.
-Experimental compiled-study execution supports a thermal prefix feeding a same-mesh thermomechanical
+Compiled-study execution supports a thermal prefix feeding a same-mesh thermomechanical
 preload and supported buckling, prestressed modal, direct harmonic or modal-reduced harmonic
 consumer. This is not blanket admission of standalone thermal or arbitrary coupled graphs.
 Authored models now preserve explicit thermal reference temperatures, and
@@ -14,13 +14,13 @@ Authored models now preserve explicit thermal reference temperatures, and
 The authored thermal-to-modal fixture passes actual-CAD execution after pre-execution driver/worker
 replacement and cold import from declared objects. Other outer-root consumer/order combinations
 and mid-phase restart remain unqualified; the equations below describe implemented assembly,
-not production qualification. See the
-[thermal-prestress example](../examples/thermal-prestress-experimental.fea) and
+not a validation claim. See the
+[thermal-prestress example](../examples/thermal-prestress.fea) and
 [state-transfer contract](./thermomechanical#how-do-i-transfer-a-solved-temperature-field-into-structural-analysis).
 
 ## Retained thermal field histories
 
-The experimental thermal pipeline exposes temperature (K), temperature gradient (K/m), heat flux
+The thermal pipeline exposes temperature (K), temperature gradient (K/m), heat flux
 (W/m²), and `thermal_energy_storage_rate_density` (W/m³) to the shared history evaluator.
 The last quantity is a scalar element field: the volume average of
 `rho * c_p * dT/dt`, stored in `thermal.energy_storage_rate` snapshots. It is distinct from
@@ -30,11 +30,11 @@ power; an average retains W/m³. Exact requested history times are inserted into
 The insulated uniform-heating reference uses `Q = rho * c_p`, giving a 1 K/s temperature rise
 and storage-rate density equal to Q for accepted time steps, independently of element volume.
 Both Tet4 and Tet10 history outputs are checked against that analytic value. This does not qualify
-the unfinished public thermal executor or production qualification.
+the unfinished public thermal executor.
 
 ### Native coordination boundary
 
-The native library has an experimental single-step thermal coordinator for steady or
+The native library has a single-step thermal coordinator for steady or
 backward-Euler Tet4/Tet10 studies. It schedules the solve, shared observation partitions and
 reductions, retained-history checkpoints/finalization, accuracy evaluation, every declared
 temperature state, and final publication. Local and remote task-pool entrypoints use the same
@@ -53,7 +53,7 @@ The full outer-root consumer/order matrix, genuine durable whole-chain qualifica
 bounded driver imports, checkpoint-prefix lineage for evicted samples and restart remain open gates.
 Resource reservations are conservative admission bounds, not measured memory-use evidence.
 Convergence, energy balance, thermoelastic transfer and formulation-specific release evidence
-remain required before any production claim.
+remain open.
 
 ### Authored observations and selective reads
 
@@ -128,7 +128,7 @@ nullspace instead of inventing a reference temperature.
 | `thermal steady` | Tet4/Tet10 Galerkin conduction plus a sparse linear solve | Conductivity and a well-posed reference/Robin boundary |
 | `thermal transient` | The same spatial operator with consistent capacity and backward Euler | Conductivity, density, specific heat, time samples, and initial temperature |
 
-Both registered realizations are experimental. Recovery computes solver-mesh temperature gradients
+Recovery computes solver-mesh temperature gradients
 and heat-flow/energy-balance evidence; canonical volume and boundary projection are required by the
 registered mesh-backed branches.
 
@@ -156,7 +156,6 @@ study steady_temperature {
     geometry = geometry.part
     mesh = mesh.part
     model = model.heated_part
-    formulation = experimental
     analysis temperature { thermal steady {} }
     output temperature = analysis.temperature.field.node.temperature
 }

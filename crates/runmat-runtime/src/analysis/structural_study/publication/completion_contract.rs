@@ -68,12 +68,8 @@ pub(in crate::analysis) fn standalone_completion(
     let [step] = compiled.model.sequence.steps.as_slice() else {
         return Err("standalone completion requires one authored procedure step".into());
     };
-    if execution.step_id != step.step_id
-        || execution.requirement != compiled.formulation_requirement
-    {
-        return Err(
-            "standalone execution differs from compiled step or formulation requirement".into(),
-        );
+    if execution.step_id != step.step_id {
+        return Err("standalone execution differs from the compiled step".into());
     }
     let operation = crate::analysis::execution_dispatch::execution_operation(&execution, step)
         .ok_or("standalone completion execution options differ from authored procedure")?;
@@ -109,7 +105,6 @@ pub(in crate::analysis) fn standalone_thermal_completion(
     let execution = AnalysisExecutionStep {
         step_id: step.step_id.clone(),
         backend: thermal.workload.backend,
-        requirement: thermal.workload.formulation_requirement,
         solver_options: AnalysisSolverOptions::ThermalDiffusion(options.clone()),
     };
     PreparedStudyCompletion {

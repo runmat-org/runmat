@@ -89,7 +89,6 @@ study static {
     geometry = geometry.bracket
     mesh = mesh.volume
     model = model.loaded
-    formulation = experimental
     analysis solve { structural static {} }
     output displacement = analysis.solve.field.node.displacement
     output peak = max(magnitude(output.displacement), over = geometry.bracket.region.pad)
@@ -230,7 +229,6 @@ study static {
     geometry = geometry.part
     mesh = mesh.volume
     model = model.structure
-    formulation = experimental
     analysis solve {
         structural static {}
     }
@@ -604,7 +602,6 @@ study static {
     geometry = geometry.part
     mesh = mesh.volume
     model = model.structure
-    formulation = experimental
     analysis solve { structural static {} }
     output displacement = analysis.solve.field.node.displacement
 }
@@ -816,7 +813,6 @@ study static {
 
     let planning_policy = runmat_analysis_fea::study::StructuralStudyPlanningPolicy {
         backend: runmat_analysis_fea::ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         numerics: runmat_analysis_fea::study::StructuralNumericalPlanningPolicy::production(),
     };
     let product = runmat_analysis_fea::study::build_structural_study_product(

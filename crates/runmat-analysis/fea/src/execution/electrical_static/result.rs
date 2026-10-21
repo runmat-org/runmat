@@ -221,7 +221,6 @@ impl ElectricalStaticSolverResult {
         let step = crate::physics::electrical::validate_canonical_input(
             &workload.model,
             workload.step_id.as_str(),
-            workload.formulation_requirement,
             workload.relative_residual_target,
         )
         .map_err(invalid)?;

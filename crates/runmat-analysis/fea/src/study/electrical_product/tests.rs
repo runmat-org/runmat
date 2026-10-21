@@ -1,6 +1,5 @@
 use super::*;
 use crate::physics::electrical::tests::{mesh, model};
-use runmat_analysis_core::FormulationRequirement;
 use runmat_meshing_core::ElementOrder;
 
 fn compiled(
@@ -21,7 +20,6 @@ fn compiled(
     CompiledAnalysisStudy {
         module_path: "tests/electrical.fea".into(),
         study_id: "electrical".into(),
-        formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: vec![],
         assessments: Vec::new(),
         outputs: vec![],

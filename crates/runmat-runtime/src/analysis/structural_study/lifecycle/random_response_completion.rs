@@ -273,7 +273,6 @@ pub(in crate::analysis) fn complete_random_response_study(
         family: response_step.procedure_step.family,
         procedure: response_step.procedure_step.procedure,
         solution_space: response_step.procedure_step.solution_space,
-        requirement: response_step.authored_execution.requirement,
         realization,
     })
     .map_err(|error| completion_error(&prepared, error.to_string()))?
@@ -284,7 +283,6 @@ pub(in crate::analysis) fn complete_random_response_study(
         runmat_analysis_fea::execution::AccuracySourceKind::StructuralRandomResponse,
         response_result_identity,
         None,
-        response_step.authored_execution.requirement,
         response_step.procedure_step.accuracy.clone(),
     )
     .map_err(|error| completion_error(&prepared, error.to_string()))?;
@@ -319,11 +317,6 @@ pub(in crate::analysis) fn complete_random_response_study(
     .map_err(|error| completion_error(&prepared, error))?;
     let accuracy = numerical.response_accuracy;
     let completed_accuracy = super::accuracy_completion::classify_accuracy(&accuracy);
-    let (production_publishable, reasons) =
-        super::super::super::result_policy::evaluate_identity_production_publication(
-            &response_identity,
-            completed_accuracy.numerically_acceptable,
-        );
     let persisted = super::statistical_persistence::admit_statistical_persistence(
         super::statistical_persistence::StatisticalPersistenceRequest {
             identity: &response_identity,
@@ -335,8 +328,6 @@ pub(in crate::analysis) fn complete_random_response_study(
             ),
             solver_mesh: &solver_mesh,
             accuracy: &completed_accuracy,
-            production_publishable,
-            production_publication_reasons: &reasons,
             fields: runmat_analysis_fea::results::statistical_fields::random_response_fields(
                 numerical.response_result.numerical(),
             ),
@@ -350,9 +341,7 @@ pub(in crate::analysis) fn complete_random_response_study(
         numerically_acceptable: completed_accuracy.numerically_acceptable,
         solver_convergence: completed_accuracy.solver_convergence,
         result_quality: completed_accuracy.result_quality,
-        production_publishable,
         quality_reasons: completed_accuracy.quality_reasons,
-        production_publication_reasons: reasons,
         provenance: persisted.provenance,
         numerical_result: crate::analysis::StructuralRandomResponseResultsData {
             numerical_receipt: numerical.response_numerical_receipt,

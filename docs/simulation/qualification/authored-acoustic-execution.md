@@ -1,6 +1,6 @@
 # Authored canonical acoustic execution envelope
 
-This is a bounded experimental execution envelope, not Stage 8 production qualification.
+This is a bounded execution envelope, not Stage 8 qualification.
 The authored local CLI path admits one fresh, direct harmonic acoustic step at one frequency,
 with its complete `AcousticComplex` output state. It uses the canonical mesh Helmholtz worker,
 not the legacy graph acoustic solver. Unsupported observations, multi-frequency semantic states,
@@ -28,7 +28,8 @@ witness is execution evidence, not an independent continuum accuracy reference. 
 duct/cavity, phase, velocity and power evidence remains in [canonical-acoustic.md](canonical-acoustic.md).
 
 Residual and equation-based power closure do not supply missing spatial/field/frequency convergence.
-Mandatory unavailable accuracy evidence remains indeterminate and blocks production publication.
+Mandatory unavailable accuracy evidence remains indeterminate; the result publishes, marked
+indeterminate, only under a `markIndeterminate` unavailable-evidence policy and is otherwise blocked.
 Reservations are conservative estimates, not measured peak-memory qualification. Process exit
 and cold artifact reopening do not prove failed-process replacement, retry recovery or restart.
 Wider boundaries, observations, spectra, remote/distributed execution, measured resources and

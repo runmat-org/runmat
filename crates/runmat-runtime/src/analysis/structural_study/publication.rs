@@ -40,9 +40,7 @@ pub(in crate::analysis) struct CompletedStructuralResponseSpectrumStep {
     pub run_status: RunStatus,
     pub solver_convergence: QualityGate,
     pub result_quality: QualityGate,
-    pub production_publishable: bool,
     pub quality_reasons: Vec<crate::analysis::QualityReason>,
-    pub production_publication_reasons: Vec<crate::analysis::ProductionPublicationReason>,
     pub provenance: crate::analysis::RunProvenance,
     pub numerical_result: crate::analysis::StructuralResponseSpectrumResultsData,
     pub persistence: AnalysisRunResult,
@@ -55,9 +53,7 @@ pub(in crate::analysis) struct CompletedStructuralRandomResponseStep {
     pub run_status: RunStatus,
     pub solver_convergence: QualityGate,
     pub result_quality: QualityGate,
-    pub production_publishable: bool,
     pub quality_reasons: Vec<crate::analysis::QualityReason>,
-    pub production_publication_reasons: Vec<crate::analysis::ProductionPublicationReason>,
     pub provenance: crate::analysis::RunProvenance,
     pub numerical_result: crate::analysis::StructuralRandomResponseResultsData,
     pub persistence: AnalysisRunResult,
@@ -77,11 +73,9 @@ struct CompletedRunFacts {
     run_id: String,
     run_status: RunStatus,
     numerically_acceptable: bool,
-    production_publishable: bool,
     solver_convergence: QualityGate,
     result_quality: QualityGate,
     quality_reasons: Vec<crate::analysis::QualityReason>,
-    production_publication_reasons: Vec<crate::analysis::ProductionPublicationReason>,
     provenance: crate::analysis::RunProvenance,
     numerical_result: CompletedNumericalResult,
     standard_persistence: Option<AnalysisRunResult>,
@@ -212,15 +206,16 @@ pub(in crate::analysis) fn complete_study_run_prepared(
                     &completion,
                 )?;
                 entry_scoped_state_steps.insert(authored.procedure_step.step_id.clone());
-                let published = completion
-                    .publish(&study_fingerprint, &staging)
-                    .map_err(|error| {
-                        completion_storage_error(
-                            &context,
-                            "RM.FEA.RUN_STUDY.STATE_ARTIFACT_STORE_FAILED",
-                            error,
-                        )
-                    })?;
+                let published =
+                    completion
+                        .publish(&study_fingerprint, &staging)
+                        .map_err(|error| {
+                            completion_storage_error(
+                                &context,
+                                "RM.FEA.RUN_STUDY.STATE_ARTIFACT_STORE_FAILED",
+                                error,
+                            )
+                        })?;
                 crate::analysis::AnalysisStudyStepNumericalResultData::AcousticFrequency(Box::new(
                     published,
                 ))
@@ -259,7 +254,6 @@ pub(in crate::analysis) fn complete_study_run_prepared(
         let resolved_execution = AnalysisExecutionStep {
             step_id: authored.authored_execution.step_id,
             backend: authored.authored_execution.backend,
-            requirement: authored.authored_execution.requirement,
             solver_options: completed.resolved_solver_options,
         };
         let evidence_artifact_path = staging
@@ -280,11 +274,9 @@ pub(in crate::analysis) fn complete_study_run_prepared(
                     "run_id": run.run_id,
                     "run_status": run.run_status,
                     "numerically_acceptable": run.numerically_acceptable,
-                    "production_publishable": run.production_publishable,
                     "solver_convergence": run.solver_convergence,
                     "result_quality": run.result_quality,
                     "quality_reasons": run.quality_reasons,
-                    "production_publication_reasons": run.production_publication_reasons,
                     "provenance": run.provenance,
                     "numerical_result": numerical_result,
                 }),
@@ -306,11 +298,9 @@ pub(in crate::analysis) fn complete_study_run_prepared(
             run_id: run.run_id,
             run_status: run.run_status,
             numerically_acceptable: run.numerically_acceptable,
-            production_publishable: run.production_publishable,
             solver_convergence: run.solver_convergence,
             result_quality: run.result_quality,
             quality_reasons: run.quality_reasons,
-            production_publication_reasons: run.production_publication_reasons,
             provenance: run.provenance,
             numerical_result,
             evidence_artifact_path,
@@ -410,7 +400,6 @@ pub(in crate::analysis) fn complete_study_run_prepared(
         worst_gate(gate, step.result_quality)
     });
     let numerically_acceptable = step_results.iter().all(|step| step.numerically_acceptable);
-    let production_publishable = step_results.iter().all(|step| step.production_publishable);
     let evidence_artifact_path = staging
         .persist_evidence(
             &study_fingerprint,
@@ -428,7 +417,6 @@ pub(in crate::analysis) fn complete_study_run_prepared(
                 "operation_sequence": operation_sequence.clone(),
                 "run_status": run_status,
                 "numerically_acceptable": numerically_acceptable,
-                "production_publishable": production_publishable,
                 "solver_convergence": solver_convergence,
                 "result_quality": result_quality,
             }),
@@ -454,7 +442,6 @@ pub(in crate::analysis) fn complete_study_run_prepared(
             operation_sequence,
             run_status,
             numerically_acceptable,
-            production_publishable,
             solver_convergence,
             result_quality,
             evidence_artifact_path,

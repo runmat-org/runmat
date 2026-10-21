@@ -72,7 +72,6 @@ fn retained_result() -> MagnetostaticSolverResult {
     let result = MagnetostaticWorkload {
         model,
         step_id: ProcedureStepId("potential".into()),
-        formulation_requirement: FormulationRequirement::Experimental,
         relative_residual_target: 1e-10,
     }
     .execute(&canonical_tetrahedron_solver_mesh(ElementOrder::Tet4))

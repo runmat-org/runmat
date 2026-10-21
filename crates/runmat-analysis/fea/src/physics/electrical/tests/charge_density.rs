@@ -219,28 +219,14 @@ fn charge_sources_reject_conduction_unmatched_region_complex_and_wrong_target() 
     wrong.electromagnetic = Some(ElectromagneticDomain::Static {
         equation: StaticElectricalEquation::SteadyConduction,
     });
-    assert!(solve_canonical_static(
-        &wrong,
-        &mesh,
-        "potential",
-        FormulationRequirement::Experimental,
-        1e-11
-    )
-    .is_err());
+    assert!(solve_canonical_static(&wrong, &mesh, "potential", 1e-11).is_err());
     for target in [
         RegionTarget::volume("missing"),
         RegionTarget::boundary("slab_left"),
     ] {
         let mut wrong = input.clone();
         wrong.excitations[0].excitation_mut().target = ExcitationTarget::Region(target);
-        assert!(solve_canonical_static(
-            &wrong,
-            &mesh,
-            "potential",
-            FormulationRequirement::Experimental,
-            1e-11
-        )
-        .is_err());
+        assert!(solve_canonical_static(&wrong, &mesh, "potential", 1e-11).is_err());
     }
     let mut wrong = input;
     let PhysicalSignal::ElectricChargeDensity(signal) = &mut wrong.signals[0] else {
@@ -259,12 +245,5 @@ fn charge_sources_reject_conduction_unmatched_region_complex_and_wrong_target() 
         interpolation: SignalInterpolation::Linear,
         extrapolation: SignalExtrapolation::HoldEndpoint,
     });
-    assert!(solve_canonical_static(
-        &wrong,
-        &mesh,
-        "potential",
-        FormulationRequirement::Experimental,
-        1e-11
-    )
-    .is_err());
+    assert!(solve_canonical_static(&wrong, &mesh, "potential", 1e-11).is_err());
 }

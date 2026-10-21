@@ -17,7 +17,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
         "`resources`.",
     ),
     keywords: &["fea", "accuracy", "plan", "acceptance", "evidence", "resources"],
-    related: &["fea.AccuracyCriterion.new", "fea.AccuracyResourceCeiling.new", "fea.NumericalEquivalencePolicy.relativeTolerance", "fea.AccuracyPlan.experimentalBaseline", "fea.ProcedureStep.configure"],
+    related: &["fea.AccuracyCriterion.new", "fea.AccuracyResourceCeiling.new", "fea.NumericalEquivalencePolicy.relativeTolerance", "fea.AccuracyPlan.baseline", "fea.ProcedureStep.configure"],
     sections: &[
         section(
             "Behavior",
@@ -32,14 +32,13 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
                     "Study validation requires at least one criterion, at least one mandatory criterion, ",
                     "unique criterion identifiers, positive tolerances, a positive equivalence tolerance,",
                     " and nonzero sample, wall-time, and memory ceilings. The limit action must be ",
-                    "licensed: `refine` needs refinement cycles, `tightenSolver` needs solver ",
-                    "tightenings, and `warnExperimental` needs the `markIndeterminateExperimental` ",
-                    "unavailable-evidence policy.",
+                    "licensed: `refine` needs refinement cycles and `tightenSolver` needs solver ",
+                    "tightenings.",
                 ),
                 concat!(
                     "When a mandatory criterion is not established, the step's semantic state is not ",
-                    "published. With `fea.UnavailableEvidencePolicy.markIndeterminateExperimental()`, ",
-                    "missing evidence is reported as indeterminate and experimental instead of failing.",
+                    "published. With `fea.UnavailableEvidencePolicy.markIndeterminate()`, ",
+                    "missing evidence is reported as indeterminate instead of failing.",
                 ),
             ],
         ),

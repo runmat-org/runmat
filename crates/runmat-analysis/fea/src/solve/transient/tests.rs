@@ -782,7 +782,7 @@ fn assembled_free_oscillator_converges_quadratically_in_native_state() {
         &model,
         &excitations,
         None,
-        StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+        StructuralFormulationRequirement::SyntheticOperator,
     )
     .expect("the oscillator reference must exercise an admitted assembled operator");
     assert_eq!(summary.operator.constrained_dofs(), &[true, false, true]);

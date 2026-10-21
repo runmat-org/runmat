@@ -4,9 +4,9 @@ Acoustic pressure and normal velocity are conjugate boundary variables. A rigid 
 $v_n=0$; an impedance boundary imposes $p=Zv_n$; a radiation boundary approximates an outgoing-wave
 relation. They change the Helmholtz boundary operator in different ways.
 
-The experimental native typed executor supports standalone canonical acoustic harmonic studies;
-see the retained [authored duct evidence](../qualification/acoustic-right-lu.md). This is not
-production qualification of all acoustic declarations or a general exterior-wave solver.
+The native typed executor supports standalone canonical acoustic harmonic studies;
+see the retained [authored duct evidence](../qualification/acoustic-right-lu.md). It does not cover
+every acoustic declaration and is not a general exterior-wave solver.
 
 | Kind | Quantity/fields | Use |
 | --- | --- | --- |

@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="760" height="260" viewBox="0 0 760 260" role="img" aria-labelledby="title desc">
-<title id="title">Heat input and cooling of a finned heat sink</title><desc id="desc">Distributed heater power enters a flat aluminium base. The base conducts heat into fins; a prescribed film coefficient represents heat exchange with ambient air.</desc>
+<title id="title">Heat input and cooling of a finned heat sink</title><desc id="desc">Distributed heater power enters a flat aluminum base. The base conducts heat into fins; a prescribed film coefficient represents heat exchange with ambient air.</desc>
 <defs><marker id="hot" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0L8 4L0 8" fill="#f6b760"/></marker><marker id="cool" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0L8 4L0 8" fill="#79b5f8"/></marker></defs>
 <rect width="760" height="260" rx="8" fill="#111318"/>
 <g font-family="system-ui,sans-serif" font-size="15" fill="#e5e7eb">
@@ -8,5 +8,5 @@
 <path d="M205 115V42M325 115V42M445 115V42" stroke="#79b5f8" stroke-width="2" marker-end="url(#cool)"/>
 <path d="M250 232V190M350 232V190M450 232V190" stroke="#f6b760" stroke-width="3" marker-end="url(#hot)"/>
 <text x="538" y="154">Heater input</text><text x="538" y="177" fill="#f6b760">≈ 10 W at base</text><text x="538" y="200" fill="#aeb7c4">Distributed heat flux</text>
-<text x="184" y="252" fill="#aeb7c4">Conduction in aluminium · schematic, not to scale</text>
+<text x="184" y="252" fill="#aeb7c4">Conduction in aluminum · schematic, not to scale</text>
 </g></svg>

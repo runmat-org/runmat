@@ -1,5 +1,5 @@
 use super::*;
-use runmat_analysis_core::{AccuracyPlan, FormulationRequirement};
+use runmat_analysis_core::AccuracyPlan;
 use runmat_analysis_fea::{
     execution::{
         AccuracySourceKind, AnalysisNumericalObjectKind, SequenceIdentity, SolverResultIdentity,
@@ -21,8 +21,7 @@ fn shared_accuracy_authentication_and_actual_decode_profiles_precede_typed_decod
         AccuracySourceKind::FluidSteady,
         result,
         None,
-        FormulationRequirement::Experimental,
-        AccuracyPlan::experimental_baseline("auth"),
+        AccuracyPlan::baseline("auth"),
     )
     .unwrap();
     let input = crate::prepare_analysis_objects(

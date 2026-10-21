@@ -160,6 +160,7 @@ pub(super) fn expression(
             value: inner,
             scale_bits,
             offset_bits,
+            ..
         } => {
             let scalar = expression(declaration, inner, AuthoredInputType::Real, diagnostics)?;
             let scaled = AuthoredNumericExpression {
