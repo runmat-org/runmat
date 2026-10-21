@@ -684,6 +684,15 @@ fn static_state(family: PhysicsFamily) -> StateKind {
         PhysicsFamily::Electromagnetic => StateKind::ElectromagneticStatic,
         PhysicsFamily::Acoustic => StateKind::AcousticComplex,
         PhysicsFamily::Fluid => StateKind::Fluid,
+        // A thermomechanical step solves the structure under its temperature field, and an
+        // electrothermal step the temperature under Joule heating; their primary states are
+        // those solutions. Other couplings exchange interface state.
+        PhysicsFamily::Coupled(runmat_analysis_core::CoupledPhysicsFamily::Thermomechanical) => {
+            StateKind::StructuralPrimary
+        }
+        PhysicsFamily::Coupled(runmat_analysis_core::CoupledPhysicsFamily::Electrothermal) => {
+            StateKind::Thermal
+        }
         PhysicsFamily::Coupled(_) => StateKind::CoupledInterface,
     }
 }
