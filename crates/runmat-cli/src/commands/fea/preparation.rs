@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use runmat_analysis_core::AuthoredStudyInputBinding;
 use runmat_analysis_language::ResolvedAnalysisStudy;
 use runmat_config::runtime::RunMatRuntimeConfig;
@@ -8,32 +8,13 @@ use super::source::NativeCheckedFeaSource;
 
 pub(super) type PreparedTypedStudy = runmat_execution_runner_native::PreparedFeaStudy;
 
-pub(super) fn ensure_remote_structural(
-    sequence: &runmat_analysis_core::AnalysisSequence,
-) -> Result<()> {
-    if sequence
-        .steps
-        .iter()
-        .any(|step| step.family != runmat_analysis_core::PhysicsFamily::Structural)
-    {
-        bail!("RM.FEA.TYPED_EXECUTION.REMOTE_PHYSICS_UNSUPPORTED: authored remote execution requires a structural study; standalone thermal authored roots are not implemented");
-    }
-    Ok(())
-}
-
-pub(super) fn require_remote_root(
-    root: runmat_execution_runner_native::PreparedFeaStudyRoot,
+/// Encode the one portable root that every authored family uses for remote submission.
+pub(super) fn portable_root(
+    root: runmat_execution_runner_native::StructuralStudyRootPreparation,
 ) -> Result<runmat_execution_runner_native::PreparedStructuralStudyRoot> {
-    match root {
-        runmat_execution_runner_native::PreparedFeaStudyRoot::Structural(root) => Ok(root),
-        runmat_execution_runner_native::PreparedFeaStudyRoot::Electrical(_) => bail!("RM.FEA.TYPED_EXECUTION.REMOTE_PHYSICS_UNSUPPORTED: standalone electrical authored roots are not implemented for remote submission"),
-        runmat_execution_runner_native::PreparedFeaStudyRoot::Magnetic(_) => bail!("RM.FEA.TYPED_EXECUTION.REMOTE_PHYSICS_UNSUPPORTED: standalone magnetic authored roots are not implemented for remote submission"),
-        runmat_execution_runner_native::PreparedFeaStudyRoot::Maxwell(_) => bail!("RM.FEA.TYPED_EXECUTION.REMOTE_PHYSICS_UNSUPPORTED: authored harmonic Maxwell roots are not qualified for remote submission"),
-        runmat_execution_runner_native::PreparedFeaStudyRoot::Nonlinear(_) => bail!("RM.FEA.TYPED_EXECUTION.REMOTE_PHYSICS_UNSUPPORTED: authored J2 roots are not qualified for remote submission"),
-        runmat_execution_runner_native::PreparedFeaStudyRoot::Fluid(_) => bail!("RM.FEA.TYPED_EXECUTION.REMOTE_PHYSICS_UNSUPPORTED: authored canonical steady fluid roots are not qualified for remote submission"),
-        runmat_execution_runner_native::PreparedFeaStudyRoot::Acoustic(_) => bail!("RM.FEA.TYPED_EXECUTION.REMOTE_PHYSICS_UNSUPPORTED: standalone acoustic authored roots are not implemented for remote submission"),
-        runmat_execution_runner_native::PreparedFeaStudyRoot::Thermal(_) => bail!("RM.FEA.TYPED_EXECUTION.REMOTE_PHYSICS_UNSUPPORTED: standalone thermal authored roots are not implemented for remote submission"),
-    }
+    runmat_execution_runner_native::prepare_structural_study_root(root)
+        .map_err(anyhow::Error::new)
+        .context("encode the portable study root")
 }
 
 pub(super) async fn prepare_study(
@@ -70,29 +51,4 @@ pub(super) struct FeaComputeAllocation {
 
 pub(super) fn artifact_access(authority: &str) -> ArtifactAccess {
     runmat_execution_runner_native::checked_fea_artifact_access(authority)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use runmat_analysis_core::{AnalysisSequence, ProcedureStep};
-
-    #[test]
-    fn remote_authored_thermal_and_fluid_are_rejected_before_preparation_or_submission() {
-        for step in [
-            ProcedureStep::thermal_steady("heat"),
-            ProcedureStep::thermal_transient("heat"),
-            ProcedureStep::fluid_static("flow"),
-        ] {
-            let error =
-                ensure_remote_structural(&AnalysisSequence::from_steps("thermal", vec![step]))
-                    .unwrap_err();
-            assert!(error.to_string().contains("REMOTE_PHYSICS_UNSUPPORTED"));
-        }
-        assert!(ensure_remote_structural(&AnalysisSequence::from_steps(
-            "structural",
-            vec![ProcedureStep::structural_static("solid")]
-        ))
-        .is_ok());
-    }
 }

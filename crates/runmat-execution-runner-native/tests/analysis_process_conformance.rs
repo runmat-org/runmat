@@ -72,6 +72,9 @@ use runmat_meshing_core::{ElementOrder, PersistentEntityId, PersistentEntityKind
 #[path = "analysis_process_conformance/assessment.rs"]
 mod assessment;
 #[cfg(feature = "occt-native")]
+#[path = "analysis_process_conformance/remote_families.rs"]
+mod remote_families;
+#[cfg(feature = "occt-native")]
 #[path = "analysis_process_conformance/assessment_publication.rs"]
 mod assessment_publication;
 #[path = "analysis_process_conformance/electrothermal.rs"]
@@ -158,7 +161,9 @@ fn main() {
         return;
     }
     let mut runtime = if std::env::args_os().any(|argument| {
-        argument == "--fluid-authored-only" || argument == "--nonlinear-authored-only"
+        argument == "--fluid-authored-only"
+            || argument == "--nonlinear-authored-only"
+            || argument == "--remote-families-only"
     }) {
         tokio::runtime::Builder::new_multi_thread()
     } else {
@@ -168,6 +173,14 @@ fn main() {
 }
 
 async fn parent() {
+    if std::env::args_os().any(|argument| argument == "--remote-families-only") {
+        #[cfg(feature = "occt-native")]
+        remote_families::run().await;
+        #[cfg(not(feature = "occt-native"))]
+        panic!("remote family conformance requires occt-native");
+        #[cfg(feature = "occt-native")]
+        return;
+    }
     if std::env::args_os().any(|argument| argument == "--fluid-massflow-only") {
         fluid_mass_flow::run().await;
         return;
