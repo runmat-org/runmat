@@ -2,6 +2,7 @@
 #include "exact_assembly.hxx"
 #include "exact_healing.hxx"
 #include "exact_shared_interfaces.hxx"
+#include "exact_names.hxx"
 #include "exact_xcaf_healing.hxx"
 
 #include <BRep_Builder.hxx>
@@ -28,6 +29,11 @@
 #include <Quantity_Color.hxx>
 #include <ShapeAnalysis_Edge.hxx>
 #include <TopoDS_Compound.hxx>
+#include <StepShape_AdvancedFace.hxx>
+#include <TransferBRep.hxx>
+#include <XSControl_TransferReader.hxx>
+#include <Transfer_TransientProcess.hxx>
+#include <Interface_InterfaceModel.hxx>
 #include <STEPCAFControl_Reader.hxx>
 #include <StepData_StepModel.hxx>
 #include <XSControl_Reader.hxx>
@@ -294,6 +300,69 @@ CadDocument finish_xcaf_document(CadDocument result) {
   return result;
 }
 
+// OCCT's sub-shape name reading misses faces of a solid's inner shells (BREP_WITH_VOIDS cavities,
+// such as an electrode cavity in an insulator). Every named ADVANCED_FACE in the file is mapped
+// through the transfer result to its kernel face and labeled in the part that owns it, unless
+// OCCT already labeled it.
+static void label_named_step_faces(const Handle(XSControl_WorkSession)& session, CadDocument& document) {
+  if (session.IsNull() || !document.has_xcaf || document.shape_tool.IsNull()) {
+    return;
+  }
+  const Handle(Interface_InterfaceModel) model = session->Model();
+  const Handle(XSControl_TransferReader) transfer = session->TransferReader();
+  if (model.IsNull() || transfer.IsNull()) {
+    return;
+  }
+  std::vector<std::pair<TopoDS_Shape, std::string>> named;
+  for (Standard_Integer index = 1; index <= model->NbEntities(); ++index) {
+    const Handle(StepShape_AdvancedFace) face =
+        Handle(StepShape_AdvancedFace)::DownCast(model->Value(index));
+    if (face.IsNull() || face->Name().IsNull() || face->Name()->Length() == 0) {
+      continue;
+    }
+    const TopoDS_Shape shape = TransferBRep::ShapeResult(transfer->TransientProcess(), face);
+    if (shape.IsNull() || shape.ShapeType() != TopAbs_FACE) {
+      continue;
+    }
+    named.emplace_back(shape, std::string(face->Name()->ToCString()));
+  }
+  if (named.empty()) {
+    return;
+  }
+  TDF_LabelSequence labels;
+  document.shape_tool->GetShapes(labels);
+  for (Standard_Integer index = 1; index <= labels.Length(); ++index) {
+    const TDF_Label& definition = labels.Value(index);
+    if (!XCAFDoc_ShapeTool::IsSimpleShape(definition)) {
+      continue;
+    }
+    TopTools_IndexedMapOfShape faces;
+    TopExp::MapShapes(XCAFDoc_ShapeTool::GetShape(definition), TopAbs_FACE, faces);
+    std::unordered_map<const TopoDS_TShape*, Standard_Integer> by_tshape;
+    for (Standard_Integer face = 1; face <= faces.Extent(); ++face) {
+      by_tshape.emplace(faces(face).TShape().get(), face);
+    }
+    for (const auto& [shape, name] : named) {
+      const auto found = by_tshape.find(shape.TShape().get());
+      if (found == by_tshape.end()) {
+        continue;
+      }
+      const TopoDS_Shape& face = faces(found->second);
+      TDF_Label existing;
+      if (document.shape_tool->FindSubShape(definition, face, existing) &&
+          !exact_label_name(existing).empty()) {
+        continue;
+      }
+      const TDF_Label label = existing.IsNull()
+                                  ? document.shape_tool->AddSubShape(definition, face)
+                                  : existing;
+      if (!label.IsNull()) {
+        TDataStd_Name::Set(label, TCollection_ExtendedString(name.c_str(), Standard_True));
+      }
+    }
+  }
+}
+
 CadDocument read_step_shape(const std::string& path,
                             std::istream& stream,
                             const OcctImportOptions& options) {
@@ -339,7 +408,9 @@ CadDocument read_step_shape(const std::string& path,
     throw std::runtime_error("OCCT STEP XCAF transfer failed");
   }
   check_cancelled(options);
-  return finish_xcaf_document(std::move(result));
+  CadDocument finished = finish_xcaf_document(std::move(result));
+  label_named_step_faces(reader.Reader().WS(), finished);
+  return finished;
 }
 
 CadDocument read_iges_shape(const std::string& path,

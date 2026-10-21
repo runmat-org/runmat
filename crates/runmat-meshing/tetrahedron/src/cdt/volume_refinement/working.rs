@@ -195,16 +195,10 @@ impl WorkingRefinement {
                         }
                         return Err(failure.into());
                     }
-                    if !self.progress_policy.accepts(trial.quality(), &parent) {
+                    if let Some(reason) = self.progress_policy.rejection(trial.quality(), &parent) {
                         excluded.insert(candidate.node.identity);
                         rejected += 1;
-                        report_rejection(
-                            attempts,
-                            rejected,
-                            "quality_spectrum",
-                            "complete trial quality did not improve under its declared progress policy",
-                            &source,
-                        );
+                        report_rejection(attempts, rejected, "quality_spectrum", reason, &source);
                         continue;
                     }
                     trial.commit();
