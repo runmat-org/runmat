@@ -38,25 +38,22 @@ pub(super) fn solve(
     let (solution, iterations) = if n == 0 {
         (Vec::new(), 0)
     } else {
-        let pattern = assembled.saddle.pattern();
-        let offsets = pattern.row_offsets();
-        let columns = pattern.column_indices();
-        let values = assembled.saddle.values();
-        let mut entries = Vec::with_capacity(values.len());
-        for row in 0..n {
-            for k in offsets[row] as usize..offsets[row + 1] as usize {
-                entries.push((row, columns[k] as usize, values[k]));
+        // Weak Coulomb-gauge saddle [curl-curl G; Gᵀ 0]: symmetric indefinite, factored
+        // directly (Bunch–Kaufman, signed-regularized LDLᵀ fallback) with refinement.
+        let (solution, _) = crate::solve::shared_sparse::solve_direct_real(
+            &assembled.saddle,
+            &assembled.scaled_rhs,
+            crate::solve::shared_sparse::DirectStructure::SaddlePoint {
+                primal_count: assembled.boundary.free_edges.len(),
+            },
+        )
+        .map_err(|error| match error {
+            runmat_sparse_solvers::SolverError::Cancelled => {
+                MagnetostaticError::NotConverged("cancelled".into())
             }
-        }
-        let solved = crate::solve::sparse_direct::solve_real(n, &entries, &assembled.scaled_rhs)
-            .map_err(|e| MagnetostaticError::NotConverged(e.to_string()))?;
-        if !solved.relative_residual.is_finite() || solved.relative_residual > tolerance {
-            return Err(MagnetostaticError::NotConverged(format!(
-                "sparse direct residual={:e}",
-                solved.relative_residual
-            )));
-        }
-        (solved.solution, 1)
+            other => MagnetostaticError::NotConverged(format!("sparse direct saddle solve: {other}")),
+        })?;
+        (solution, 1)
     };
     let free_count = assembled.boundary.free_edges.len();
     let free = &solution[..free_count];
@@ -101,38 +98,57 @@ pub(super) fn solve(
         .len()
         .checked_mul(15)
         .ok_or_else(|| MagnetostaticError::InvalidInput("magnetic sample count overflow".into()))?;
+    // Element samples are recovered on the admitted pool; the energy/work sums then run in
+    // canonical point order, so totals are identical to a serial recovery.
+    let per_element = crate::algebra::element_assembly::ordered_map_range(
+        assembled.volumes.len(),
+        |index| {
+            let data = &assembled.volumes[index];
+            let indices = assembled.edge_space.element_edge_indices(index).unwrap();
+            let mut element_samples = Vec::with_capacity(15);
+            let mut terms = Vec::with_capacity(15);
+            assembled
+                .edge_space
+                .visit_element_quadrature(assembled.projection, index, |point| {
+                    let potential: [f64; 3] = std::array::from_fn(|axis| {
+                        (0..6)
+                            .map(|i| edge_circulations[indices[i]] * point.values[i][axis])
+                            .sum()
+                    });
+                    let flux: [f64; 3] = std::array::from_fn(|axis| {
+                        (0..6)
+                            .map(|i| edge_circulations[indices[i]] * point.curls[i][axis])
+                            .sum()
+                    });
+                    let field = flux.map(|v| v / data.permeability_h_per_m);
+                    terms.push((
+                        0.5 * point.volume_weight_m3 * dot_canonical(&flux, &field),
+                        point.volume_weight_m3
+                            * dot_canonical(&potential, &data.current_density_a_per_m2),
+                    ));
+                    element_samples.push(MagneticFieldSample {
+                        element_identity: data.element_identity,
+                        position_m: point.position_m,
+                        volume_weight_m3: point.volume_weight_m3,
+                        vector_potential_wb_per_m: potential,
+                        flux_density_t: flux,
+                        magnetic_field_a_per_m: field,
+                    });
+                })
+                .map_err(|e| MagnetostaticError::Topology(e.to_string()))?;
+            Ok::<_, MagnetostaticError>((element_samples, terms))
+        },
+    );
     let mut samples = Vec::with_capacity(count);
     let mut energy = 0.0;
     let mut work = 0.0;
-    for (index, data) in assembled.volumes.iter().enumerate() {
-        let indices = assembled.edge_space.element_edge_indices(index).unwrap();
-        assembled
-            .edge_space
-            .visit_element_quadrature(assembled.projection, index, |point| {
-                let potential: [f64; 3] = std::array::from_fn(|axis| {
-                    (0..6)
-                        .map(|i| edge_circulations[indices[i]] * point.values[i][axis])
-                        .sum()
-                });
-                let flux: [f64; 3] = std::array::from_fn(|axis| {
-                    (0..6)
-                        .map(|i| edge_circulations[indices[i]] * point.curls[i][axis])
-                        .sum()
-                });
-                let field = flux.map(|v| v / data.permeability_h_per_m);
-                energy += 0.5 * point.volume_weight_m3 * dot_canonical(&flux, &field);
-                work += point.volume_weight_m3
-                    * dot_canonical(&potential, &data.current_density_a_per_m2);
-                samples.push(MagneticFieldSample {
-                    element_identity: data.element_identity,
-                    position_m: point.position_m,
-                    volume_weight_m3: point.volume_weight_m3,
-                    vector_potential_wb_per_m: potential,
-                    flux_density_t: flux,
-                    magnetic_field_a_per_m: field,
-                });
-            })
-            .map_err(|e| MagnetostaticError::Topology(e.to_string()))?;
+    for element in per_element {
+        let (element_samples, terms) = element?;
+        for (energy_term, work_term) in terms {
+            energy += energy_term;
+            work += work_term;
+        }
+        samples.extend(element_samples);
     }
     let scale = (2.0 * energy).abs().max(work.abs());
     let closure = if scale > 0.0 {

@@ -43,6 +43,7 @@ use crate::{
 mod publication;
 
 pub struct StructuralFrequencyExecutionPreparation {
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub workload: StructuralFrequencyWorkload,
     pub mesh: SolverMeshArtifact,
     pub prestress_state: Option<CanonicalSemanticState>,
@@ -190,6 +191,7 @@ pub(crate) async fn execute_with_pool(
         .transpose()
         .map_err(protocol)?;
     let entry_tasks = prepare_structural_frequency_fanout(StructuralFrequencyFanoutPreparation {
+        local_execution: preparation.local_execution,
         workload: workload_objects.clone(),
         mesh: mesh_objects.clone(),
         prestress_state: prestress_state_objects.clone(),
@@ -242,6 +244,7 @@ pub(crate) async fn execute_with_pool(
         .map(|(task, imported)| {
             prepare_structural_frequency_field_recovery(
                 StructuralFrequencyFieldRecoveryPreparation {
+                    local_execution: preparation.local_execution,
                     source_host: task.host.clone(),
                     workload: workload_objects.clone(),
                     mesh: mesh_objects.clone(),

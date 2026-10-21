@@ -58,6 +58,7 @@ impl FluidStudyResultClosure {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct FluidStudyReplayContext {
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub policy: FluidStudyPlanningPolicy,
     pub mesh: SolverMeshArtifact,
     pub frozen_project_digest: Option<Digest>,
@@ -121,6 +122,7 @@ impl CompletedFluidStudy {
             ));
         }
         Ok(FluidStudyPreparation {
+            local_execution: self.replay.local_execution,
             policy: self.replay.policy,
             product: FluidStudyProduct {
                 compiled: self.compiled.clone(),

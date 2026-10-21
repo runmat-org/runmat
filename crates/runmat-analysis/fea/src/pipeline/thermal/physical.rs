@@ -325,6 +325,7 @@ fn solve_steady(input: SteadySolveInput<'_>) -> Result<ProcedureOutcome, FeaRunE
         initial_increment.as_deref(),
         &facts.operators,
         residual_target,
+        None,
     )?;
     drop(initial_increment);
     // Prescribed coordinates are known exactly; avoid losing them in a shift/unshift
@@ -357,6 +358,7 @@ fn solve_steady(input: SteadySolveInput<'_>) -> Result<ProcedureOutcome, FeaRunE
             &solve.solution,
             &facts.operators,
             target,
+            None,
         )?;
         backend_evidence::retain(
             &mut accelerator_evidence,
@@ -438,6 +440,7 @@ pub(super) fn solve_refinement(
     initial_guess: &[f64],
     facts: &crate::planning::resource::ThermalOperatorResourceFacts,
     residual_target: f64,
+    preparation: Option<&mut crate::algebra::LinearPreparationReuse>,
 ) -> Result<LinearSolveResult, FeaRunError> {
     match solve_unchecked(
         operator,
@@ -446,6 +449,7 @@ pub(super) fn solve_refinement(
         Some(initial_guess),
         facts,
         residual_target,
+        preparation,
     )? {
         solve if solve.solution.iter().all(|value| value.is_finite()) => Ok(solve),
         _ => Err(FeaRunError::Assembly(
@@ -454,13 +458,14 @@ pub(super) fn solve_refinement(
     }
 }
 
-fn solve_checked(
+pub(super) fn solve_checked(
     operator: &crate::algebra::AssembledRealSystem,
     requested_solver_backend: LinearAlgebraBackendKind,
     algebra: &dyn LinearAlgebraBackend,
     initial_guess: Option<&[f64]>,
     facts: &crate::planning::resource::ThermalOperatorResourceFacts,
     residual_target: f64,
+    preparation: Option<&mut crate::algebra::LinearPreparationReuse>,
 ) -> Result<LinearSolveResult, FeaRunError> {
     let solve = solve_unchecked(
         operator,
@@ -469,6 +474,7 @@ fn solve_checked(
         initial_guess,
         facts,
         residual_target,
+        preparation,
     )?;
     if solve.converged {
         Ok(solve)
@@ -487,6 +493,7 @@ fn solve_unchecked(
     initial_guess: Option<&[f64]>,
     facts: &crate::planning::resource::ThermalOperatorResourceFacts,
     residual_target: f64,
+    preparation: Option<&mut crate::algebra::LinearPreparationReuse>,
 ) -> Result<LinearSolveResult, FeaRunError> {
     for matrix in [
         operator.operators().stiffness(),
@@ -502,9 +509,12 @@ fn solve_unchecked(
         Some(facts.solver_admission()),
     );
     settings.relative_tolerance = settings.relative_tolerance.min(residual_target);
+    // Reused preparation keeps the proving Cholesky factor across solves with an unchanged
+    // operator (fixed-step transients, refinement re-solves).
+    settings.preparation = preparation;
     let solve = solve_operator_system_scoped(
         operator,
-        SpdPreconditionerKind::Jacobi,
+        SpdPreconditionerKind::Auto,
         requested_solver_backend,
         algebra,
         initial_guess,

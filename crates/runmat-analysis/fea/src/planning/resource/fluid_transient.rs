@@ -104,14 +104,16 @@ pub fn build_fluid_transient_block_resource_plan(
     request: &FluidTransientBlockWorkload,
     mesh: &SolverMeshArtifact,
     facts: PreparedPhaseResourceFacts,
+    local_execution: LocalExecutionPlan,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
     let projection = derive_fluid_transient_block_resource_projection(request, mesh)?;
-    plan_from_projection(request, projection, facts)
+    plan_from_projection(request, projection, facts, local_execution)
 }
 pub(crate) fn plan_from_projection(
     request: &FluidTransientBlockWorkload,
     projection: FluidTransientBlockResourceProjection,
     facts: PreparedPhaseResourceFacts,
+    local_execution: LocalExecutionPlan,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
     if facts.inputs.encoded_payload_bytes != projection.canonical_input_bytes
         || facts.inputs.decoded_resident_bytes_admission_budget
@@ -135,7 +137,7 @@ pub(crate) fn plan_from_projection(
         output_set: Some(facts.output_set),
         accuracy_ceiling: ceiling,
         worker: WorkerResourcePolicy {
-            cpu_millicores: 1000,
+            cpu_millicores: local_execution.checked_cpu_millicores().map_err(invalid)?,
             maximum_wall_milliseconds: ceiling.maximum_wall_time_milliseconds,
             fixed_memory_bytes: ByteCount(16 * 1024 * 1024),
             fixed_scratch_bytes: ByteCount(8 * 1024 * 1024),
@@ -165,10 +167,11 @@ impl PreparedFluidTransientResources {
         self,
         request: &FluidTransientBlockWorkload,
         facts: PreparedPhaseResourceFacts,
+        local_execution: LocalExecutionPlan,
     ) -> Result<FeaResourcePlan, ResourcePlanningError> {
         if request.identity().map_err(invalid)? != self.projection.workload {
             return Err(invalid("fluid transient resource source changed"));
         }
-        plan_from_projection(request, self.projection, facts)
+        plan_from_projection(request, self.projection, facts, local_execution)
     }
 }

@@ -60,6 +60,7 @@ pub struct CompletedMagneticStudy {
 }
 
 pub struct MagneticStudyPreparation {
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub policy: MagneticStudyPlanningPolicy,
     pub product: MagneticStudyProduct,
     pub mesh: SolverMeshArtifact,
@@ -144,6 +145,7 @@ impl MagneticStudyCoordinator {
     pub fn prepare_solve(&mut self) -> AnalysisBridgeResult<&PreparedMagnetostaticTask> {
         self.require(MagneticStudyPhase::ReadyForSolve)?;
         let task = prepare_magnetostatic_task(MagnetostaticTaskPreparation {
+            local_execution: self.preparation.local_execution,
             authored_study_digest: self.definition_digest,
             frozen_project_digest: self.preparation.frozen_project_digest,
             program_revision: self.preparation.program_revision.clone(),
@@ -311,6 +313,7 @@ impl MagneticStudyCoordinator {
         let tail = self.tail.expect("completed shared terminal lifecycle");
         Ok(CompletedMagneticStudy {
             replay: completion::MagneticStudyReplayContext {
+                local_execution: self.preparation.local_execution,
                 policy: self.preparation.policy,
                 mesh: self.preparation.mesh,
                 frozen_project_digest: self.preparation.frozen_project_digest,

@@ -33,6 +33,7 @@ const TASK_PREFIX: &[u8] = b"runmat-analysis-transient-scope-task/v1\0";
 const TASK_LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024, 8_192, 65_536, 64);
 
 pub struct StructuralTransientScopeTaskPreparation {
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub workload: StructuralTransientWorkload,
     pub mesh: SolverMeshArtifact,
     pub modal_state: Option<CanonicalSemanticState>,
@@ -105,6 +106,7 @@ pub fn prepare_structural_transient_scope_task(
             preparation.modal_state.as_ref(),
             prepared_input_resource_facts(&numerical_inputs)?,
             projected_output_set_resource_facts(),
+            preparation.local_execution,
         )?;
     let (study, step, execution_plan) =
         transient_scope_task_identity(&preparation.workload, &preparation.mesh, &resource_plan)?;

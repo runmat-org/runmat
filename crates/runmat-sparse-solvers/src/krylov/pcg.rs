@@ -62,7 +62,7 @@ pub async fn pcg_async<T: Scalar, O: KrylovOps<T>>(
         operator_applications: counters.operator,
         preconditioner_applications: counters.preconditioner,
     };
-    if residual <= tol || rhs_norm == 0.0 && residual == 0.0 {
+    if residual <= tol || rhs_norm == 0.0 {
         if rhs_norm == 0.0 {
             x.iter_mut().for_each(|v| *v = T::zero());
             return Ok(finish(StopFlag::Converged, 0, 0.0, history, &counters));

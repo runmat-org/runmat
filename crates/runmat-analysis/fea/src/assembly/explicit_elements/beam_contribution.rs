@@ -29,6 +29,7 @@ pub(super) struct BeamElementContribution {
 
 pub(super) fn compute(
     structural: &StructuralModel,
+    nodes: &super::ExplicitNodeIndex,
     element: &StructuralElement,
     beam: &BeamElementModel,
     properties: &CompiledPropertyMap,
@@ -36,8 +37,8 @@ pub(super) fn compute(
     canonical_node_indices: &[usize],
     topology_digest: runmat_execution::Digest,
 ) -> Result<BeamElementContribution, StructuralAssemblyError> {
-    let explicit_i = structural_node_index(structural, beam.node_ids[0], element)?;
-    let explicit_j = structural_node_index(structural, beam.node_ids[1], element)?;
+    let explicit_i = structural_node_index(nodes, beam.node_ids[0], element)?;
+    let explicit_j = structural_node_index(nodes, beam.node_ids[1], element)?;
     let node_i = canonical_node_indices[explicit_i];
     let node_j = canonical_node_indices[explicit_j];
     let element_identity = explicit_element_identity(

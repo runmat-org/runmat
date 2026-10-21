@@ -8,7 +8,8 @@ use crate::{
 use runmat_analysis_fea::execution::AnalysisNumericalObjectKind;
 use runmat_analysis_fea::execution::{AcousticHarmonicWorkload, AnalysisTransportProfiler};
 use runmat_analysis_fea::planning::resource::{
-    build_acoustic_resource_plan, FeaResourcePlan, PreparedAcousticResourceFacts,
+    build_acoustic_resource_plan, FeaResourcePlan, LocalExecutionPlan,
+    PreparedAcousticResourceFacts,
 };
 use runmat_execution::Digest;
 use runmat_execution_artifact::ObjectNamespace;
@@ -56,7 +57,19 @@ pub fn rederive_acoustic_harmonic_resource_plan(
     }
     let result_output = projected_acoustic_harmonic_output(workload, mesh, policy)?;
     let state_profiles_output = projected_acoustic_state_profiles_output(workload, mesh, policy)?;
+    let declaration = inputs
+        .iter()
+        .find(|input| input.manifest.kind == AnalysisNumericalObjectKind::ResourcePlan)
+        .ok_or_else(|| AnalysisBridgeError::Invalid("acoustic resource plan missing".into()))?;
+    let declared = FeaResourcePlan::from_canonical_bytes(&declaration.payload())?;
+    if declaration.manifest.logical_identity != declared.identity.digest() {
+        return Err(AnalysisBridgeError::Identity(
+            "acoustic CPU allocation differs from its resource identity",
+        ));
+    }
     let facts = PreparedAcousticResourceFacts {
+        local_execution: LocalExecutionPlan::from_cpu_millicores(declared.request.cpu_millicores)
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
         inputs: prepared_input_resource_facts_without_resource_plan(inputs)?,
         result_output,
         state_profiles_output,
@@ -72,6 +85,7 @@ pub fn prepare_acoustic_harmonic_inputs(
     workload: &AcousticHarmonicWorkload,
     mesh: &SolverMeshArtifact,
     policy: AnalysisOutputPolicy,
+    local_execution: LocalExecutionPlan,
 ) -> AnalysisBridgeResult<PreparedAcousticHarmonicInputs> {
     let result_output = projected_acoustic_harmonic_output(workload, mesh, policy)?;
     let state_profiles_output = projected_acoustic_state_profiles_output(workload, mesh, policy)?;
@@ -96,6 +110,7 @@ pub fn prepare_acoustic_harmonic_inputs(
     )?;
     let inputs = vec![workload_objects, mesh_objects];
     let facts = PreparedAcousticResourceFacts {
+        local_execution,
         inputs: prepared_input_resource_facts(&inputs)?,
         result_output,
         state_profiles_output,

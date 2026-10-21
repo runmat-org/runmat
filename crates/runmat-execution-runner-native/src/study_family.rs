@@ -219,6 +219,7 @@ pub(crate) fn plan_family_study(
             let step = single_step(&product.compiled.model, kind)?;
             (
                 FamilyStudyPreparation::Acoustic(Box::new(AcousticStudyPreparation {
+                    local_execution: context.local_execution,
                     policy: *policy,
                     product,
                     mesh,
@@ -266,6 +267,7 @@ pub(crate) fn plan_family_study(
             let step = single_step(&product.compiled.model, kind)?;
             (
                 FamilyStudyPreparation::Electrical(Box::new(ElectricalStudyPreparation {
+                    local_execution: context.local_execution,
                     policy,
                     product,
                     mesh,
@@ -291,6 +293,7 @@ pub(crate) fn plan_family_study(
             let step = single_step(&product.compiled.model, kind)?;
             (
                 FamilyStudyPreparation::Magnetic(Box::new(MagneticStudyPreparation {
+                    local_execution: context.local_execution,
                     policy: *policy,
                     product,
                     mesh,
@@ -316,6 +319,7 @@ pub(crate) fn plan_family_study(
             let step = single_step(&product.compiled.model, kind)?;
             (
                 FamilyStudyPreparation::Maxwell(Box::new(MaxwellStudyPreparation {
+                    local_execution: context.local_execution,
                     policy: *policy,
                     product,
                     mesh,
@@ -342,6 +346,7 @@ pub(crate) fn plan_family_study(
             step.0 = step.0.min(product.workload.policy.maximum_resident_bytes);
             (
                 FamilyStudyPreparation::Fluid(Box::new(FluidStudyPreparation {
+                    local_execution: context.local_execution,
                     policy: *policy,
                     product,
                     mesh,
@@ -367,6 +372,7 @@ pub(crate) fn plan_family_study(
             let step = single_step(&product.compiled.model, kind)?;
             (
                 FamilyStudyPreparation::NonlinearSolid(Box::new(NonlinearSolidStudyPreparation {
+                    local_execution: context.local_execution,
                     accepted_block_limit: usize::try_from(policy.accepted_block_limit)
                         .map_err(|error| error.to_string())?,
                     product,

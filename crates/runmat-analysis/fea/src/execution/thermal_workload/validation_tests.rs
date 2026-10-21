@@ -11,7 +11,8 @@ fn original_model_checks_and_owned_planning_topology() {
         "sha256:2ce7f67375b1f52086fdb52ae9ae92b2fe297c8172c26a7fd975eb4b9f67c971",
         "sha256:f53a9ec51f87413ad224c924d396732dfa7b642cf8d00dc8e8a8ae02fbf5b6a7",
     ];
-    for (case, count) in [1, 4, 32].into_iter().enumerate() {
+    let mut actual = Vec::new();
+    for count in [1, 4, 32] {
         let mut model =
             crate::fixtures::fixture_model(crate::fixtures::FixtureId::CantileverLinearStatic);
         let original = model.sequence.steps[0].clone();
@@ -52,9 +53,10 @@ fn original_model_checks_and_owned_planning_topology() {
             )
             .unwrap(),
         );
-        assert_eq!(identity.to_string(), expected[case]);
+        actual.push(identity.to_string());
         println!("MODEL_VALIDATION count={count} checked_peak={checked_peak} owned_peak={owned_peak} owned_live={owned_live}");
     }
+    assert_eq!(actual, expected);
 }
 
 #[test]

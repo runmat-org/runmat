@@ -8,7 +8,7 @@ use runmat_analysis_fea::{
     },
     planning::resource::{
         build_nonlinear_solid_block_resource_plan, nonlinear_solid_block_payload_bytes_upper_bound,
-        FeaResourcePlan, PreparedNonlinearSolidBlockResourceFacts,
+        FeaResourcePlan, LocalExecutionPlan, PreparedNonlinearSolidBlockResourceFacts,
     },
 };
 use runmat_execution::{value::ValueRefKind, Digest, ProgramRevision};
@@ -22,6 +22,7 @@ pub use admission::require_nonlinear_solid_source_decode_budget;
 pub use result::{import_nonlinear_solid_block, ImportedNonlinearSolidBlock};
 
 pub struct NonlinearSolidBlockPreparation {
+    pub local_execution: LocalExecutionPlan,
     pub authored_study_digest: Digest,
     pub frozen_project_digest: Option<Digest>,
     pub program_revision: ProgramRevision,
@@ -85,6 +86,7 @@ fn plan(
     previous: Option<&NonlinearSolidBlockArtifact>,
     inputs: &[PreparedAnalysisObjects],
     policy: AnalysisOutputPolicy,
+    local_execution: LocalExecutionPlan,
 ) -> AnalysisBridgeResult<FeaResourcePlan> {
     let bytes = nonlinear_solid_block_payload_bytes_upper_bound(workload, mesh, request)?;
     Ok(build_nonlinear_solid_block_resource_plan(
@@ -93,6 +95,7 @@ fn plan(
         request,
         previous,
         PreparedNonlinearSolidBlockResourceFacts {
+            local_execution,
             inputs: prepared_input_resource_facts_without_resource_plan(inputs)?,
             output: output::project(Kind::NonlinearSolidBlockArtifact, bytes, policy)?,
             receipt_output: output::project(
@@ -166,6 +169,7 @@ pub fn prepare_nonlinear_solid_block_task(
         previous.as_ref(),
         &inputs,
         policy,
+        p.local_execution,
     )?;
     inputs.push(objects(
         Kind::ResourcePlan,
@@ -264,11 +268,21 @@ pub fn rederive_nonlinear_solid_block_resource_plan(
             ));
         }
     }
-    let rederived = plan(workload, mesh, request, previous, inputs, policy)?;
     let carried = inputs
         .iter()
         .find(|input| input.manifest.kind == Kind::ResourcePlan)
         .ok_or_else(|| invalid("nonlinear resource input missing"))?;
+    let declared = FeaResourcePlan::from_canonical_bytes(&carried.payload())?;
+    let rederived = plan(
+        workload,
+        mesh,
+        request,
+        previous,
+        inputs,
+        policy,
+        LocalExecutionPlan::from_cpu_millicores(declared.request.cpu_millicores)
+            .map_err(invalid)?,
+    )?;
     if carried
         != &objects(
             Kind::ResourcePlan,

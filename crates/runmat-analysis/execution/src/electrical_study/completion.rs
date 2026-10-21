@@ -58,6 +58,7 @@ impl ElectricalStudyResultClosure {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct ElectricalStudyReplayContext {
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub policy: ElectricalStudyPlanningPolicy,
     pub mesh: SolverMeshArtifact,
     pub frozen_project_digest: Option<Digest>,
@@ -94,6 +95,7 @@ impl CompletedElectricalStudy {
             ));
         }
         Ok(ElectricalStudyPreparation {
+            local_execution: self.replay.local_execution,
             policy: self.replay.policy.clone(),
             product: ElectricalStudyProduct {
                 compiled: self.compiled.clone(),

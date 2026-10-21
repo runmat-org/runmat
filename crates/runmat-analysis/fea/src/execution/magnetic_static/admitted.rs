@@ -2,7 +2,7 @@
 //! runner's responsibility.
 use super::*;
 use crate::planning::resource::{
-    build_magnetostatic_resource_plan, FeaResourceDemand, FeaResourcePlan,
+    build_magnetostatic_resource_plan, FeaResourceDemand, FeaResourcePlan, LocalExecutionPlan,
     PreparedMagnetostaticResourceFacts,
 };
 impl MagnetostaticWorkload {
@@ -24,6 +24,10 @@ impl MagnetostaticWorkload {
             self,
             mesh,
             PreparedMagnetostaticResourceFacts {
+                local_execution: LocalExecutionPlan::from_cpu_millicores(
+                    plan.request.cpu_millicores,
+                )
+                .map_err(invalid)?,
                 inputs: demand.inputs.clone(),
                 result_output: demand.result_output.clone(),
                 receipt_output: demand.receipt_output.clone(),

@@ -72,7 +72,9 @@ pub(super) fn execute(
             "static electrical execution identity differs from numerical intent and allocation",
         ));
     }
-    let result = workload.execute_with_resource_plan(&mesh, &resource_plan)?;
+    let result = super::with_admitted_cpu_pool(&resource_plan, || {
+        Ok(workload.execute_with_resource_plan(&mesh, &resource_plan)?)
+    })?;
     let receipt = ElectricalNumericalReceiptArtifact::new(&workload, &result, &mesh)?;
     let bytes = result.canonical_bytes()?;
     let bound = runmat_analysis_fea::planning::resource::electrical_static_result_payload_bytes_upper_bound(

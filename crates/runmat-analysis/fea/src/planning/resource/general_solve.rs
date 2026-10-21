@@ -80,8 +80,6 @@ impl GeneralSparseSolveResourceDemand {
         let required = GeneralSolveEnvelope::for_counts(
             usize::try_from(self.dimension.0).map_err(|_| GeneralSolveError::Overflow)?,
             usize::try_from(self.nonzero_upper_bound.0).map_err(|_| GeneralSolveError::Overflow)?,
-            usize::try_from(self.maximum_row_nonzeros.0)
-                .map_err(|_| GeneralSolveError::Overflow)?,
             self.controls.policy(),
         )?;
         if required.resident_bytes > self.admission.resident_bytes
@@ -93,7 +91,7 @@ impl GeneralSparseSolveResourceDemand {
         Ok(())
     }
     /// Recheck original numerical controls and actual CSR against planned support;
-    /// the solver separately constructs a fresh source-independent certificate.
+    /// the solver separately constructs a fresh factorization certificate.
     pub fn admit_operator(
         self,
         matrix: &RealSparseMatrix,

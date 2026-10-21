@@ -98,7 +98,9 @@ pub(super) fn execute(
             "fluid solve requires its own typed resource demand",
         ));
     };
-    let result = workload.execute_with_resource_plan(&mesh, &plan)?;
+    let result = super::with_admitted_cpu_pool(&plan, || {
+        Ok(workload.execute_with_resource_plan(&mesh, &plan)?)
+    })?;
     let receipt = FluidNumericalReceiptArtifact::new(&workload, &result, &mesh)?;
     let result_bytes = result.canonical_bytes()?;
     let receipt_bytes = receipt.canonical_bytes()?;

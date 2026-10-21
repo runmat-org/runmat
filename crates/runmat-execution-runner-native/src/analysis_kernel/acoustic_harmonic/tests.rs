@@ -55,6 +55,26 @@ fn task_with_boundary(
     SolverMeshArtifact,
     PreparedAcousticHarmonicTask,
 ) {
+    task_with_threads(
+        order,
+        chunk,
+        constraint_name,
+        radiation,
+        runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+    )
+}
+
+fn task_with_threads(
+    order: ElementOrder,
+    chunk: usize,
+    constraint_name: &str,
+    radiation: bool,
+    local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
+) -> (
+    AcousticHarmonicWorkload,
+    SolverMeshArtifact,
+    PreparedAcousticHarmonicTask,
+) {
     let mut model = runmat_analysis_fea::fixtures::fixture_model(
         runmat_analysis_fea::fixtures::FixtureId::CantileverLinearStatic,
     );
@@ -111,6 +131,7 @@ fn task_with_boundary(
     let mesh = canonical_tetrahedron_solver_mesh(order);
     let digest = Digest::sha256("acoustic-native-test");
     let prepared = prepare_acoustic_harmonic_task(AcousticHarmonicTaskPreparation {
+        local_execution,
         authored_study_digest: digest,
         frozen_project_digest: None,
         program_revision: ProgramRevision::new(
@@ -459,4 +480,35 @@ fn native_acoustic_rejects_wrong_output_and_execution_identity() {
             output_policy: policy
         })
         .is_err());
+}
+
+#[test]
+fn native_acoustic_plan_carries_admitted_threads_and_kernel_runs_on_that_pool() {
+    let threads =
+        runmat_analysis_fea::planning::resource::LocalExecutionPlan::from_cpu_millicores(2_000)
+            .unwrap();
+    let (workload, mesh, task) =
+        task_with_threads(ElementOrder::Tet4, 1024, "pressure", false, threads);
+    assert_eq!(task.resource_plan.request.cpu_millicores, 2_000);
+    let policy = AnalysisOutputPolicy::new(1024, ObjectInventoryLimits::default()).unwrap();
+    assert_eq!(
+        rederive_acoustic_harmonic_resource_plan(&workload, &mesh, &task.inputs, policy).unwrap(),
+        task.resource_plan
+    );
+    let threaded = NativeAnalysisKernel
+        .execute(AnalysisKernelInvocation {
+            kind: AnalysisWorkKind::SolveAcousticHarmonic,
+            host: &task.host,
+            inputs: &task.inputs,
+            output_policy: policy,
+        })
+        .unwrap();
+    let objects = threaded
+        .into_iter()
+        .next()
+        .unwrap()
+        .into_prepared(1024, ObjectInventoryLimits::default())
+        .unwrap();
+    let result = AcousticHarmonicSolverResult::from_canonical_bytes(&objects.payload()).unwrap();
+    result.validate_for(&workload, &mesh).unwrap();
 }

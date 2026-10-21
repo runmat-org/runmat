@@ -64,6 +64,7 @@ fn native_magnetic_authored_plan_accuracy_preserves_unknown_spatial_evidence() {
         let product =
             plan_magnetic_study_product(compiled, &mesh, MagneticStudyPlanningPolicy {}).unwrap();
         let task = prepare_magnetostatic_task(MagnetostaticTaskPreparation {
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             authored_study_digest: product.compiled.definition_digest().unwrap(),
             frozen_project_digest: None,
             program_revision: original.program.request.recipe.program_revision.clone(),

@@ -1,9 +1,4 @@
-use runmat_analysis_core::MechanicalDampingModel;
-
-use crate::{
-    algebra::RealSparseAssembler,
-    assembly::elements::beam::{BeamSection, BeamTransform12, BEAM_ELEMENT_DOF_COUNT},
-};
+use crate::assembly::elements::beam::{BeamSection, BeamTransform12, BEAM_ELEMENT_DOF_COUNT};
 
 pub(super) fn lumped_beam_mass(
     section: BeamSection,
@@ -37,34 +32,3 @@ pub(super) fn lumped_beam_mass(
     element_mass
 }
 
-pub(super) fn add_rayleigh_element_damping<const D: usize>(
-    damping: &mut RealSparseAssembler,
-    element_dofs: &[usize; D],
-    stiffness: &[[f64; D]; D],
-    lumped_mass: &[f64; D],
-    law: MechanicalDampingModel,
-) -> bool {
-    let MechanicalDampingModel::Rayleigh {
-        mass_coefficient,
-        stiffness_coefficient,
-    } = law
-    else {
-        return false;
-    };
-    for (local_row, global_row) in element_dofs.iter().copied().enumerate() {
-        for (local_column, global_column) in element_dofs.iter().copied().enumerate() {
-            let mass = if local_row == local_column {
-                lumped_mass[local_row]
-            } else {
-                0.0
-            };
-            damping.add(
-                global_row,
-                global_column,
-                mass_coefficient.per_second * mass
-                    + stiffness_coefficient.seconds * stiffness[local_row][local_column],
-            );
-        }
-    }
-    true
-}

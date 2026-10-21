@@ -134,13 +134,15 @@ pub async fn prepare_study_with_role(
                 .and_then(|policy| policy.resources.workers)
                 .map(|range| range.maximum.max(1))
         })
-        .unwrap_or_else(|| (crate::machine_capacity::cpu_millicores() / 1_000).min(32));
+        // One worker by default: a single study's numerical tasks take every core through the
+        // thread plan; additional co-located workers are an explicit fan-out choice.
+        .unwrap_or(1);
     let cpu_threads_per_worker = crate::machine_capacity::study_allocation(
         workers,
         resolved
             .execution_policy
             .as_ref()
-            .map(|policy| policy.resources.cpu_threads_per_worker),
+            .and_then(|policy| policy.resources.cpu_threads_per_worker),
     )?;
     let local_thread_count = u16::try_from(cpu_threads_per_worker)
         .map_err(|_| "CPU threads per worker exceed the FEA contract maximum".to_string())?;

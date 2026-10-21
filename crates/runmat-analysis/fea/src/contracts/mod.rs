@@ -54,6 +54,10 @@ pub enum SolverPreconditioner {
     None,
     Jacobi,
     Ilu0,
+    /// Smoothed-aggregation algebraic multigrid V-cycle.
+    Amg,
+    /// Exact sparse Cholesky factor (the inner solve of a composite method is direct).
+    SparseCholesky,
     BlockJacobi,
     FiniteVolumePressureBalance,
     ThermalCfdProjection,
@@ -65,6 +69,8 @@ impl SolverPreconditioner {
         match kind {
             SpdPreconditionerKind::Jacobi => Self::Jacobi,
             SpdPreconditionerKind::Ilu0 => Self::Ilu0,
+            SpdPreconditionerKind::Amg => Self::Amg,
+            SpdPreconditionerKind::Auto | SpdPreconditionerKind::Direct => Self::SparseCholesky,
         }
     }
 
@@ -73,6 +79,8 @@ impl SolverPreconditioner {
             Self::None => "none",
             Self::Jacobi => "jacobi",
             Self::Ilu0 => "ilu0",
+            Self::Amg => "amg",
+            Self::SparseCholesky => "sparse_cholesky",
             Self::BlockJacobi => "block_jacobi",
             Self::FiniteVolumePressureBalance => "finite_volume_pressure_balance",
             Self::ThermalCfdProjection => "thermal_cfd_projection",
@@ -221,7 +229,7 @@ pub struct LinearStaticSolveOptions {
 impl Default for LinearStaticSolveOptions {
     fn default() -> Self {
         Self {
-            preconditioner_kind: SpdPreconditionerKind::Jacobi,
+            preconditioner_kind: SpdPreconditionerKind::Auto,
             algebra_backend_kind: LinearAlgebraBackendKind::CpuReference,
             solver_mesh_artifact_path: None,
             solver_mesh: None,

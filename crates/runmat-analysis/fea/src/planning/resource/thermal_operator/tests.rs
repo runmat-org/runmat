@@ -85,7 +85,7 @@ fn thermal_support_covers_actual_operators_and_exact_proof_work() {
         )
         .unwrap_err();
         assert!(
-            rejected.to_string().contains("OutsidePlannedPattern"),
+            rejected.to_string().contains("outside the symbolic pattern"),
             "{rejected}"
         );
         let live_assembly_arrays = std::mem::size_of_val(assembly.applied_source.as_slice())

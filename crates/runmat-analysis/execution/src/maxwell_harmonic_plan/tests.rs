@@ -79,6 +79,8 @@ fn canonical_prepare_and_rederived_resource_authority_fit_both_orders_and_chunk_
                 AnalysisOutputPolicy::new(chunk, ObjectInventoryLimits::default()).unwrap();
             let task =
                 crate::prepare_maxwell_harmonic_task(crate::MaxwellHarmonicTaskPreparation {
+                    local_execution:
+                        runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
                     authored_study_digest: Digest::sha256("authored"),
                     frozen_project_digest: None,
                     program_revision: revision(),
@@ -141,5 +143,42 @@ fn tiny_authored_ceiling_and_wrong_input_inventory_are_rejected() {
         .accuracy
         .resources
         .maximum_resident_bytes = 1;
-    assert!(prepare_maxwell_harmonic_inputs(&w, &m, policy).is_err());
+    assert!(prepare_maxwell_harmonic_inputs(
+        &w,
+        &m,
+        policy,
+        runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial()
+    )
+    .is_err());
+}
+
+#[test]
+fn maxwell_plan_carries_admitted_threads_and_worker_rederivation_converges() {
+    let w = workload();
+    let m = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    let policy = AnalysisOutputPolicy::new(1024, ObjectInventoryLimits::default()).unwrap();
+    let task = crate::prepare_maxwell_harmonic_task(crate::MaxwellHarmonicTaskPreparation {
+        local_execution:
+            runmat_analysis_fea::planning::resource::LocalExecutionPlan::from_cpu_millicores(4_000)
+                .unwrap(),
+        authored_study_digest: Digest::sha256("authored"),
+        frozen_project_digest: None,
+        program_revision: revision(),
+        artifact_access: ArtifactAccess {
+            authorization_scope: "maxwell-bridge-test".into(),
+            encryption_context: Digest::sha256("scope"),
+        },
+        workload: w.clone(),
+        mesh: m.clone(),
+        output_policy: policy,
+        required_capabilities: BTreeSet::new(),
+    })
+    .unwrap();
+    assert_eq!(task.resource_plan.request.cpu_millicores, 4_000);
+    let plan = rederive_maxwell_harmonic_resource_plan(&w, &m, &task.inputs, policy).unwrap();
+    assert_eq!(plan, task.resource_plan);
+    assert_eq!(
+        w.execute_with_resource_plan(&m, &plan).unwrap(),
+        w.execute(&m).unwrap()
+    );
 }

@@ -81,7 +81,8 @@ fn canonical_harmonic_maxwell_is_exact_order_bound_and_distinct_from_static_and_
             identity
         );
         identities.push(identity);
-        assert!(admit_canonical_maxwell(&mesh).is_err());
+        // Re-admission of the same mesh is deterministic.
+        assert_eq!(&admit_canonical_maxwell(&mesh).unwrap(), identities.last().unwrap());
     }
 }
 

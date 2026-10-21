@@ -60,12 +60,39 @@ pub(super) fn rejected_system_result(
         device_apply_k_attempt_count: 0,
         accelerator_evidence: None,
         solution: vec![0.0; operator.dof_count()],
-        solver_method: SolverMethod::MatrixFreePcg,
-        preconditioner: SolverPreconditioner::from_spd(preconditioner),
+        solver_method: requested_provenance(preconditioner).0,
+        preconditioner: requested_provenance(preconditioner).1,
         diagnostics: vec![FeaDiagnostic {
             code: code.to_string(),
             severity: FeaDiagnosticSeverity::Error,
             message,
         }],
     }
+}
+
+/// Provenance of a requested SPD selection before the policy resolves it (rejections, empty
+/// systems).
+pub(crate) fn requested_provenance(
+    kind: SpdPreconditionerKind,
+) -> (SolverMethod, SolverPreconditioner) {
+    match kind {
+        SpdPreconditionerKind::Auto | SpdPreconditionerKind::Direct => {
+            (SolverMethod::SparseDirectCholesky, SolverPreconditioner::None)
+        }
+        other => (SolverMethod::AssembledPcg, SolverPreconditioner::from_spd(other)),
+    }
+}
+
+/// Constraint matrices that admit no affine reduction cannot be solved.
+pub(crate) fn rejected_constraint_system(
+    summary: &super::StructuralLinearSystemView<'_>,
+    message: String,
+) -> LinearSolveResult {
+    rejected_system_result(
+        summary.operator,
+        LinearAlgebraBackendKind::CpuReference,
+        SpdPreconditionerKind::Auto,
+        "FEA_INVALID_MULTIPLIER_CONSTRAINT_SYSTEM",
+        message,
+    )
 }

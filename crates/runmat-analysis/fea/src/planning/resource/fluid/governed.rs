@@ -3,6 +3,7 @@ use crate::planning::resource::*;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PreparedFluidSteadyResourceFacts {
+    pub local_execution: LocalExecutionPlan,
     pub inputs: PreparedInputResourceFacts,
     pub result_output: PreparedOutputResourceFacts,
     pub receipt_output: PreparedOutputResourceFacts,
@@ -18,9 +19,12 @@ pub fn fluid_steady_result_payload_bytes_upper_bound(
         .0)
 }
 
-pub(super) fn worker(workload: &FluidSteadyWorkload) -> WorkerResourcePolicy {
-    WorkerResourcePolicy {
-        cpu_millicores: 1000,
+pub(super) fn worker(
+    workload: &FluidSteadyWorkload,
+    local_execution: LocalExecutionPlan,
+) -> Result<WorkerResourcePolicy, ResourcePlanningError> {
+    Ok(WorkerResourcePolicy {
+        cpu_millicores: local_execution.checked_cpu_millicores().map_err(invalid)?,
         maximum_wall_milliseconds: workload.model.sequence.steps[0]
             .accuracy
             .resources
@@ -29,7 +33,7 @@ pub(super) fn worker(workload: &FluidSteadyWorkload) -> WorkerResourcePolicy {
         fixed_scratch_bytes: ByteCount(8 * 1024 * 1024),
         required_capabilities: Default::default(),
         accelerators: Vec::new(),
-    }
+    })
 }
 pub(super) fn ceiling(
     workload: &FluidSteadyWorkload,
@@ -87,7 +91,7 @@ pub fn build_fluid_steady_resource_plan(
             receipt_output: prepared.receipt_output,
         }),
         output_set: Some(prepared.output_set),
-        worker: worker(workload),
+        worker: worker(workload, prepared.local_execution)?,
         accuracy_ceiling: ceiling(workload)?,
     })
 }

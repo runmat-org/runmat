@@ -8,14 +8,11 @@ use crate::{
     },
     assembly::AssemblySummary,
     pipeline::structural_linearization::StructuralLinearizationArtifact,
-    solve::{
-        preconditioner::{build_spd_preconditioner, SpdPreconditionerKind},
-        spd_linear::{solve_spd_system_cg, SpdCgSolveOptions},
-        symmetric_eigen::symmetric_eigendecomposition,
-    },
+    solve::preconditioner::SpdPreconditionerKind,
 };
 
 const POSITIVE_MULTIPLIER_TOLERANCE: f64 = 1.0e-12;
+/// Classical Gram–Schmidt passes per block in the shared block Lanczos (CGS2).
 pub(crate) const BUCKLING_ORTHOGONALIZATION_PASSES: usize = 2;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -45,8 +42,6 @@ pub enum BucklingSolveError {
     SparseOperatorConstruction(#[source] crate::algebra::RealSparseMatrixError),
     #[error("buckling elastic operator admission failed: {0}")]
     OperatorAdmission(#[source] crate::algebra::RealSystemError),
-    #[error("buckling elastic preconditioner construction failed: {0}")]
-    Preconditioner(#[source] crate::solve::preconditioner::PreconditionerError),
     #[error("buckling inner elastic solve failed its forcing bound: {0}")]
     InnerSolve(String),
     #[error(
@@ -124,109 +119,65 @@ pub fn solve_eigenvalue_buckling(
         vec![0.0; dimension],
     )
     .map_err(BucklingSolveError::OperatorAdmission)?;
-    let prepared = system
-        .prepare_linear()
-        .map_err(BucklingSolveError::OperatorAdmission)?;
-    let (preconditioner_kind, preconditioner) =
-        match build_spd_preconditioner(&prepared, SpdPreconditionerKind::Ilu0) {
-            Ok(preconditioner) => (SpdPreconditionerKind::Ilu0, preconditioner),
-            Err(_) => (
-                SpdPreconditionerKind::Jacobi,
-                build_spd_preconditioner(&prepared, SpdPreconditionerKind::Jacobi)
-                    .map_err(BucklingSolveError::Preconditioner)?,
-            ),
-        };
-
-    let subspace_dimension = dimension.min(requested_mode_count.saturating_add(4));
-    let mut basis = deterministic_basis(dimension, subspace_dimension);
-    orthonormalize_k(&system, &mut basis);
-    if basis.len() != subspace_dimension {
-        return Err(BucklingSolveError::DegenerateSubspace("initialization"));
-    }
-    let mut previous: Vec<f64> = Vec::new();
-    let mut modes = Vec::new();
-    for iteration in 1..=maximum_iterations {
-        let mut filtered = Vec::with_capacity(subspace_dimension);
-        for vector in &basis {
-            let rhs = spmv(&geometric, vector)
-                .map_err(|error| BucklingSolveError::ConstraintReduction(format!("{error:?}")))?
-                .into_iter()
-                .map(|value| -value)
-                .collect::<Vec<_>>();
-            let attempt = solve_spd_system_cg(
-                &system,
-                &rhs,
-                SpdCgSolveOptions {
-                    max_iters: dimension.saturating_mul(20).max(200),
-                    tol: relative_tolerance * 0.1,
-                    prepared_accelerator_system: None,
-                    cpu_preconditioner: Some(preconditioner.as_ref()),
-                    initial_guess: None,
-                },
-            );
-            if !attempt.converged {
-                let applied =
-                    spmv(system.operators().stiffness(), &attempt.vector).map_err(|error| {
-                        BucklingSolveError::ConstraintReduction(format!("{error:?}"))
-                    })?;
-                let residual_norm = rhs
-                    .iter()
-                    .zip(applied)
-                    .map(|(expected, actual)| (expected - actual).powi(2))
-                    .sum::<f64>()
-                    .sqrt();
-                let rhs_norm = rhs.iter().map(|value| value * value).sum::<f64>().sqrt();
-                let relative_residual = if rhs_norm == 0.0 {
-                    residual_norm
-                } else {
-                    residual_norm / rhs_norm
-                };
-                let forcing_bound = relative_tolerance.sqrt();
-                if !relative_residual.is_finite() || relative_residual > forcing_bound {
-                    return Err(BucklingSolveError::InnerSolve(format!(
-                        "relative residual {relative_residual} exceeds {forcing_bound} using {preconditioner_kind:?}",
-                    )));
-                }
+    // The coercivity proof of K is a sparse Cholesky; that factor drives the Lanczos operator
+    // K⁻¹(−K_G) in the K inner product.
+    let prepared = crate::solve::shared_sparse::with_plan(
+        crate::planning::resource::LocalExecutionPlan::serial(),
+        || system.prepare_linear(),
+    )
+    .map_err(BucklingSolveError::OperatorAdmission)?;
+    let factor = prepared
+        .admissibility()
+        .and_then(|evidence| evidence.factor())
+        .map(|factor| factor.0.clone());
+    let stiffness_arrays = crate::solve::shared_sparse::CsrArrays::of(system.operators().stiffness());
+    let geometric_arrays = crate::solve::shared_sparse::CsrArrays::of(&geometric);
+    let options = runmat_sparse_solvers::eigen::EigenOptions {
+        count: requested_mode_count.min(dimension),
+        tolerance: (0.1 * relative_tolerance).min(1.0e-10),
+        max_restarts: maximum_iterations,
+        ..Default::default()
+    };
+    let result = crate::solve::shared_sparse::with_plan(
+        crate::planning::resource::LocalExecutionPlan::serial(),
+        || {
+            let (k, kg) = (stiffness_arrays.view(), geometric_arrays.view());
+            match factor.as_deref() {
+                Some(solver) => runmat_sparse_solvers::eigen::buckling_with_factor(
+                    k,
+                    kg,
+                    solver,
+                    &options,
+                    crate::solve::shared_sparse::control(),
+                ),
+                None => runmat_sparse_solvers::eigen::buckling(
+                    k,
+                    kg,
+                    &options,
+                    crate::solve::shared_sparse::control(),
+                ),
             }
-            filtered.push(attempt.vector);
-        }
-        orthonormalize_k(&system, &mut filtered);
-        if filtered.len() < requested_mode_count {
-            return Err(BucklingSolveError::DegenerateSubspace("inverse iteration"));
-        }
-        let active_dimension = filtered.len();
-        let projected = projected_negative_geometric(&geometric, &filtered)?;
-        let (_, rotations) = symmetric_eigendecomposition(projected, active_dimension);
-        basis = rotate_basis(&filtered, &rotations);
-        orthonormalize_k(&system, &mut basis);
-        modes = build_modes(&system, &geometric, &reduction, &basis)?;
-        modes.truncate(requested_mode_count);
-        let current = modes
+        },
+    )
+    .map_err(|error| BucklingSolveError::InnerSolve(error.to_string()))?;
+    let basis = (0..result.values.len())
+        .map(|index| {
+            let mut vector = result.vectors[index * dimension..(index + 1) * dimension].to_vec();
+            canonicalize_sign(&mut vector);
+            vector
+        })
+        .collect::<Vec<_>>();
+    let mut modes = build_modes(&system, &geometric, &reduction, &basis)?;
+    modes.truncate(requested_mode_count);
+    let converged = result.converged
+        && modes.len() == requested_mode_count
+        && modes
             .iter()
-            .map(|mode| mode.load_factor)
-            .collect::<Vec<_>>();
-        let stable = previous.len() == current.len()
-            && previous.iter().zip(&current).all(|(left, right)| {
-                (left - right).abs() <= relative_tolerance * left.abs().max(right.abs()).max(1.0)
-            });
-        let residuals_converged = modes.len() == requested_mode_count
-            && modes
-                .iter()
-                .all(|mode| mode.residual_norm <= relative_tolerance);
-        if stable && residuals_converged {
-            return Ok(BucklingSolveResult {
-                converged: true,
-                iteration_count: iteration,
-                preconditioner: preconditioner_kind,
-                modes,
-            });
-        }
-        previous = current;
-    }
+            .all(|mode| mode.residual_norm <= relative_tolerance);
     Ok(BucklingSolveResult {
-        converged: false,
-        iteration_count: maximum_iterations,
-        preconditioner: preconditioner_kind,
+        converged,
+        iteration_count: result.restarts.max(1),
+        preconditioner: SpdPreconditionerKind::Direct,
         modes,
     })
 }
@@ -276,83 +227,6 @@ fn build_modes(
     }
     modes.sort_by(|left, right| left.load_factor.total_cmp(&right.load_factor));
     Ok(modes)
-}
-
-fn projected_negative_geometric(
-    geometric: &RealSparseMatrix,
-    basis: &[Vec<f64>],
-) -> Result<Vec<f64>, BucklingSolveError> {
-    let dimension = basis.len();
-    let applied = basis
-        .iter()
-        .map(|vector| spmv(geometric, vector))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| BucklingSolveError::ConstraintReduction(format!("{error:?}")))?;
-    let mut projected = vec![0.0; dimension * dimension];
-    for row in 0..dimension {
-        for column in row..dimension {
-            let value = -dot(&basis[row], &applied[column]);
-            projected[row * dimension + column] = value;
-            projected[column * dimension + row] = value;
-        }
-    }
-    Ok(projected)
-}
-
-fn orthonormalize_k(system: &AssembledRealSystem, vectors: &mut Vec<Vec<f64>>) {
-    let mut accepted: Vec<Vec<f64>> = Vec::with_capacity(vectors.len());
-    for mut vector in vectors.drain(..) {
-        for _ in 0..BUCKLING_ORTHOGONALIZATION_PASSES {
-            for previous in &accepted {
-                let projection = dot(
-                    previous,
-                    &spmv(system.operators().stiffness(), &vector).unwrap(),
-                );
-                for (value, basis) in vector.iter_mut().zip(previous) {
-                    *value -= projection * basis;
-                }
-            }
-        }
-        let applied = spmv(system.operators().stiffness(), &vector).unwrap();
-        let norm = dot(&vector, &applied).max(0.0).sqrt();
-        if norm > 1.0e-12 {
-            for value in &mut vector {
-                *value /= norm;
-            }
-            canonicalize_sign(&mut vector);
-            accepted.push(vector);
-        }
-    }
-    *vectors = accepted;
-}
-
-fn rotate_basis(basis: &[Vec<f64>], rotations: &[f64]) -> Vec<Vec<f64>> {
-    let dimension = basis.len();
-    (0..dimension)
-        .map(|output| {
-            let mut vector = vec![0.0; basis[0].len()];
-            for input in 0..dimension {
-                for (value, basis_value) in vector.iter_mut().zip(&basis[input]) {
-                    *value += rotations[input * dimension + output] * basis_value;
-                }
-            }
-            vector
-        })
-        .collect()
-}
-
-fn deterministic_basis(rows: usize, columns: usize) -> Vec<Vec<f64>> {
-    (0..columns)
-        .map(|column| {
-            (0..rows)
-                .map(|row| {
-                    let phase = ((row + 1) * (column + 1)) as f64;
-                    (phase * 0.754_877_666_246_692_7).sin()
-                        + (phase * 0.569_840_290_998_053_2).cos()
-                })
-                .collect()
-        })
-        .collect()
 }
 
 fn dot(left: &[f64], right: &[f64]) -> f64 {

@@ -71,10 +71,12 @@ impl AnalysisPayloadBuilder {
             staged.push(owned);
         }
         let first_chunk_ordinal = self.chunks.len() as u32;
-        for bytes in staged {
+        // Chunk digests are independent; hash them on the admitted pool when one is installed.
+        let digests = runmat_cpu_execution::ordered_map(&staged, |bytes| Digest::sha256(bytes));
+        for (bytes, digest) in staged.into_iter().zip(digests) {
             self.chunks.push(AnalysisChunkDescriptor {
                 ordinal: self.chunks.len() as u32,
-                digest: Digest::sha256(&bytes),
+                digest,
                 encoded_length: bytes.len() as u64,
             });
             self.payload_chunks.push(bytes);

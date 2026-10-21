@@ -67,7 +67,7 @@ impl NonlinearSolidNumericalReceiptArtifact {
             != crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference
             || block.result.solver_method
                 != crate::contracts::SolverMethod::IncrementalNewtonRaphson
-            || block.result.preconditioner != crate::contracts::SolverPreconditioner::Jacobi
+            || block.result.preconditioner != crate::contracts::SolverPreconditioner::SparseCholesky
             || !block.result.accelerator_evidence.is_empty()
             || block.result.device_apply_k_count != 0
             || block.result.device_apply_k_attempt_count != 0

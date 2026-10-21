@@ -247,6 +247,7 @@ fn execute_frequency(
     )
     .unwrap();
     let fanout = prepare_structural_frequency_fanout(StructuralFrequencyFanoutPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         workload: workload_objects.clone(),
         mesh: mesh_objects.clone(),
         prestress_state: prestress_state.clone(),
@@ -280,6 +281,8 @@ fn execute_frequency(
         if recover_fields {
             let recovery = prepare_structural_frequency_field_recovery(
                 StructuralFrequencyFieldRecoveryPreparation {
+                    local_execution:
+                        runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
                     source_host: task.host.clone(),
                     workload: workload_objects.clone(),
                     mesh: mesh_objects.clone(),
@@ -356,6 +359,8 @@ fn execute_frequency(
     if recover_fields && recovery_sources.len() > 1 {
         assert!(prepare_structural_frequency_field_recovery(
             StructuralFrequencyFieldRecoveryPreparation {
+                local_execution:
+                    runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
                 source_host: recovery_sources[0].0.clone(),
                 workload: workload_objects.clone(),
                 mesh: mesh_objects.clone(),
@@ -534,6 +539,7 @@ fn standalone_frequency_preparation_rederives_its_resource_envelope() {
     )
     .unwrap();
     let mut fanout = prepare_structural_frequency_fanout(StructuralFrequencyFanoutPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         workload: workload_objects.clone(),
         mesh: mesh_objects.clone(),
         prestress_state: None,

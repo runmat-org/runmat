@@ -38,6 +38,7 @@ pub struct StructuralModalTransientStudyPreparation {
 
 /// Binds a published modal basis into the authored transient consumer.
 pub struct StructuralModalTransientStudyCoordinator {
+    local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     producer: StructuralModalProducerCoordinator,
     mesh: SolverMeshArtifact,
     transient_template: StructuralModalTransientTemplate,
@@ -98,6 +99,7 @@ impl StructuralModalTransientStudyCoordinator {
                 accelerator_requests: preparation.accelerator_requests,
             })?;
         Ok(Self {
+            local_execution: preparation.local_execution,
             producer,
             mesh: preparation.mesh,
             transient_template: (**template).clone(),
@@ -149,6 +151,7 @@ impl StructuralModalTransientStudyCoordinator {
         )?;
         let workload = self.transient_template.clone().bind(transition)?;
         prepare_structural_transient_sequence(StructuralTransientSequencePreparationInput {
+            local_execution: self.local_execution,
             workload: &workload,
             mesh: &self.mesh,
             modal_state: Some(&state.state),
