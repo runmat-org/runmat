@@ -350,16 +350,12 @@ pub(crate) fn build_structural_transient_scope_resource_plan(
                         collective_count: Count(0),
                     },
                     publication: CheckpointArtifactPolicy {
-                        // The bounded output set accounts for the scope payload itself.
-                        result_artifact_bytes: ByteCount(
-                            crate::execution::ANALYSIS_MANIFEST_MAX_ENCODED_BYTES,
-                        ),
+                        // The scope payload and its manifest; the output-set root is separate.
+                        result_artifact_bytes: ByteCount(scope_transport_bytes),
                         checkpoint_bytes: ByteCount(0),
                         artifact_overhead_bytes: ByteCount(0),
                         relay_bytes: ByteCount(0),
-                        result_egress_bytes: ByteCount(
-                            crate::execution::ANALYSIS_MANIFEST_MAX_ENCODED_BYTES,
-                        ),
+                        result_egress_bytes: ByteCount(scope_transport_bytes),
                         checkpoint_egress_bytes: ByteCount(0),
                     },
                     partitioning: PartitioningPolicy::Monolithic,

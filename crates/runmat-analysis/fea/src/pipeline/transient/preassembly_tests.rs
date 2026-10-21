@@ -138,7 +138,9 @@ fn checkpoint_scope_resource_preflight_is_deterministic_and_precedes_assembly() 
     assert!(actual_payload_bytes <= planned_payload_bytes);
     assert_eq!(
         first.request.max_artifact_bytes,
-        planned_payload_bytes + crate::execution::ANALYSIS_MANIFEST_MAX_ENCODED_BYTES
+        planned_payload_bytes
+            + crate::execution::ANALYSIS_MANIFEST_MAX_ENCODED_BYTES
+            + crate::execution::ANALYSIS_OUTPUT_SET_MAX_ENCODED_BYTES
     );
 
     let mut longer = workload.clone();
@@ -228,9 +230,9 @@ fn transient_block_rejects_its_own_memory_ceiling_before_initial_assembly() {
         &workload, &mesh, None, &request, None, None, None,
     )
     .unwrap();
-    assert!(block_plan.request.memory_bytes > scope_plan.request.memory_bytes);
-    let ceiling = scope_plan.request.memory_bytes
-        + (block_plan.request.memory_bytes - scope_plan.request.memory_bytes) / 2;
+    assert!(scope_plan.request.memory_bytes > 0);
+    // One byte below the block's own admitted residency.
+    let ceiling = block_plan.request.memory_bytes - 1;
     workload.model.sequence.steps[0]
         .accuracy
         .resources
@@ -299,6 +301,7 @@ fn transient_block_resource_plan_bounds_a_physical_segment() {
         plan.request.max_artifact_bytes,
         demand.segment_output.encoded_payload_bytes_upper_bound.0
             + crate::execution::ANALYSIS_MANIFEST_MAX_ENCODED_BYTES
+            + crate::execution::ANALYSIS_OUTPUT_SET_MAX_ENCODED_BYTES
     );
 
     let mut understated_output = plan.input.clone();
@@ -365,7 +368,11 @@ fn scope_task_plan_uses_the_prepared_input_closure_and_output_set() {
     };
     assert_eq!(task_demand.inputs, input_facts);
     assert_eq!(task_plan.input.output_set, Some(output_set.clone()));
-    assert!(task_plan.request.max_artifact_bytes > baseline.request.max_artifact_bytes);
+    // The supplied output-set root bound replaces the default root bound one for one.
+    assert_eq!(
+        task_plan.request.max_artifact_bytes + crate::execution::ANALYSIS_OUTPUT_SET_MAX_ENCODED_BYTES,
+        baseline.request.max_artifact_bytes + output_set.encoded_bytes_upper_bound.0
+    );
     assert_eq!(
         task_plan.input.demand.output_facts(
             crate::execution::AnalysisNumericalObjectKind::StructuralTransientCheckpointScope

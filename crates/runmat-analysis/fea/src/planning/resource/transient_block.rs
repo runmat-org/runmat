@@ -313,12 +313,13 @@ pub fn build_structural_transient_block_resource_plan(
         )?),
         retained_bytes: ByteCount(segment_construction),
     };
+    // The segment payload and its manifest; the output-set root is charged separately.
     operator.publication = CheckpointArtifactPolicy {
-        result_artifact_bytes: ByteCount(crate::execution::ANALYSIS_MANIFEST_MAX_ENCODED_BYTES),
+        result_artifact_bytes: ByteCount(segment_closure),
         checkpoint_bytes: ByteCount(0),
         artifact_overhead_bytes: ByteCount(0),
         relay_bytes: ByteCount(0),
-        result_egress_bytes: ByteCount(crate::execution::ANALYSIS_MANIFEST_MAX_ENCODED_BYTES),
+        result_egress_bytes: ByteCount(segment_closure),
         checkpoint_egress_bytes: ByteCount(0),
     };
     operator.partitioning = PartitioningPolicy::Monolithic;
