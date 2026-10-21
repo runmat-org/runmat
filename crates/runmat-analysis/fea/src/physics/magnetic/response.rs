@@ -1,6 +1,5 @@
 use super::{assembly::MagneticAssembly, MagnetostaticError};
 use crate::algebra::{dot_canonical, spmv};
-use crate::solve::krylov::restarted_gmres;
 use runmat_meshing_core::StableDigest;
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -37,22 +36,22 @@ pub(super) fn solve(
     let (solution, iterations) = if n == 0 {
         (Vec::new(), 0)
     } else {
-        let result = restarted_gmres(
+        // Weak Coulomb-gauge saddle [curl-curl G; Gᵀ 0]: symmetric indefinite, factored
+        // directly (Bunch–Kaufman, signed-regularized LDLᵀ fallback) with refinement.
+        let (solution, _) = crate::solve::shared_sparse::solve_direct_real(
+            &assembled.saddle,
             &assembled.scaled_rhs,
-            &vec![0.0; n],
-            super::resources::gmres_policy(n, tolerance)?,
-            |x| spmv(&assembled.saddle, x).map_err(|e| MagnetostaticError::Operator(e.into())),
-            |a, b| Ok(dot_canonical(a, b)),
-            || false,
-        )?
-        .ok_or_else(|| MagnetostaticError::NotConverged("invalid Krylov contract".into()))?;
-        if !result.converged {
-            return Err(MagnetostaticError::NotConverged(format!(
-                "GMRES iterations={}, residual={:e}",
-                result.iterations, result.residual_norm
-            )));
-        }
-        (result.solution, result.iterations)
+            crate::solve::shared_sparse::DirectStructure::SaddlePoint {
+                primal_count: assembled.boundary.free_edges.len(),
+            },
+        )
+        .map_err(|error| match error {
+            runmat_sparse_solvers::SolverError::Cancelled => {
+                MagnetostaticError::NotConverged("cancelled".into())
+            }
+            other => MagnetostaticError::NotConverged(format!("sparse direct saddle solve: {other}")),
+        })?;
+        (solution, 1)
     };
     let free_count = assembled.boundary.free_edges.len();
     let free = &solution[..free_count];

@@ -59,7 +59,7 @@ fn derive_for(
             model: &workload.model,
             step,
             backend: crate::ComputeBackend::Cpu,
-            preconditioner: SpdPreconditionerKind::Jacobi,
+            preconditioner: SpdPreconditionerKind::Auto,
             observation_execution: ObservationExecutionPolicy::serial(),
             mesh: Some(mesh),
             constraints: &constraints,

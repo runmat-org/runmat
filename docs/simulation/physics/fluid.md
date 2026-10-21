@@ -31,7 +31,7 @@ constitutive model applies. A full discretization must satisfy momentum and cont
 mass-balance evidence.
 
 The canonical operator uses owner-oriented face incidence, Newtonian viscous stresses and conservative
-advective fluxes. Shared GMRES correction solves with fixed-support ILU(0) act on current velocity and pressure fluctuations;
+advective fluxes. Correction solves use the shared sparse layer's restarted GMRES with strict fixed-support ILU(0); they act on current velocity and pressure fluctuations;
 the pressure reference is retained separately, avoiding an absolute-pressure round trip. Acceptance
 checks momentum, continuity, constitutive flux and local/global physical balance.
 

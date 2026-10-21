@@ -64,6 +64,8 @@ pub(super) fn solve_transient(
     let mut device_apply_count = 0_u32;
     let mut device_apply_attempt_count = 0_u32;
     let mut accelerator_evidence = Vec::new();
+    // One factorization serves every step whose effective operator is unchanged.
+    let mut preparation = crate::algebra::LinearPreparationReuse::default();
     for step_index in 1..solve_times.len() {
         check_cancelled("fea.run_thermal")?;
         let previous_time_s = solve_times[step_index - 1];
@@ -146,6 +148,7 @@ pub(super) fn solve_transient(
             Some(&previous),
             operators,
             input.residual_target,
+            Some(&mut preparation),
         )?;
         host_sync_count = host_sync_count.saturating_add(solve.host_sync_count);
         device_apply_count = device_apply_count.saturating_add(solve.device_apply_k_count);
@@ -195,6 +198,7 @@ pub(super) fn solve_transient(
                 Some(&solve.solution),
                 operators,
                 target,
+                Some(&mut preparation),
             )?;
             host_sync_count = host_sync_count.saturating_add(refined.host_sync_count);
             device_apply_count = device_apply_count.saturating_add(refined.device_apply_k_count);

@@ -125,11 +125,15 @@ pub fn build_structural_buckling_resource_plan(
         reduced_geometric.column_indices().len(),
         "reduced geometric stiffness nonzeros",
     )?;
-    let dense_projected = checked_mul(subspace, subspace, "buckling Ritz matrix")?;
+    // Shared block Lanczos on K⁻¹(−K_G): basis max(2s + 12, s + 48) with block 6, plus
+    // restart/Ritz copies; projected matrices of the basis size.
+    let basis = checked_add(checked_mul(subspace, 2, "buckling Lanczos basis")?, 12, "buckling Lanczos basis")?
+        .max(checked_add(subspace, 48, "buckling Lanczos basis")?);
+    let dense_projected = checked_mul(checked_mul(basis, basis, "buckling projected matrix")?, 4, "buckling projected matrices")?;
     let subspace_vectors = checked_mul(
-        checked_mul(reduced_dimension, subspace, "buckling subspace vectors")?,
-        6,
-        "buckling live subspace vectors",
+        reduced_dimension,
+        checked_add(checked_mul(basis, 2, "buckling basis copies")?, subspace + 36, "buckling vectors")?,
+        "buckling live Lanczos vectors",
     )?;
     let reduced_sparse_values = checked_add(
         reduced_stiffness_nonzeros,

@@ -17,7 +17,24 @@ const SYMMETRY_RELATIVE_TOLERANCE: f64 = 1.0e-12;
 mod energy;
 mod symbolic;
 
-pub(crate) use symbolic::{CoercivitySymbolicPlan, CoercivityWorkEnvelope};
+pub(crate) use symbolic::CoercivityWorkEnvelope;
+
+/// A numeric Cholesky factorization of exactly the certified operator, shared between the
+/// coercivity proof and the direct solve (one factorization serves both).
+#[derive(Clone)]
+pub(crate) struct SharedFactor(pub std::sync::Arc<runmat_sparse_solvers::direct::DirectSolver<f64>>);
+
+impl PartialEq for SharedFactor {
+    fn eq(&self, other: &Self) -> bool {
+        std::sync::Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl std::fmt::Debug for SharedFactor {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("SharedFactor")
+    }
+}
 
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum CoercivityError {
@@ -67,10 +84,12 @@ pub struct CoercivityCertificate {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum CoercivityProof {
-    SparseLdl {
+    /// Supernodal Cholesky with nested dissection: every scaled pivot is strictly positive.
+    SparseCholesky {
         minimum_scaled_pivot_bits: u64,
         factor_nonzero_count: u64,
-        update_count: u64,
+        flop_count: u64,
+        resident_bytes: u64,
     },
     AnchoredLocalEnergy {
         lower_bound_bits: u64,
@@ -88,6 +107,9 @@ pub struct PreparedSolverAdmissibility {
     source_nullspace_identity: Option<Digest>,
     prepared_rhs_identity: Digest,
     identity: Digest,
+    /// The proving factorization when the proof was a sparse Cholesky (process-local).
+    #[serde(skip)]
+    factor: Option<SharedFactor>,
 }
 
 impl CoercivityCertificate {
@@ -96,17 +118,12 @@ impl CoercivityCertificate {
     pub(crate) fn work_counts(&self) -> (u64, u64, u64, u64) {
         let dimension = u64::try_from(self.dimension).expect("proved dimension fits u64");
         match self.proof {
-            CoercivityProof::SparseLdl {
+            CoercivityProof::SparseCholesky {
                 factor_nonzero_count,
-                update_count,
+                flop_count,
+                resident_bytes,
                 ..
-            } => (
-                dimension,
-                factor_nonzero_count,
-                update_count,
-                symbolic::symbolic_resident_bytes(dimension, factor_nonzero_count)
-                    .expect("proved symbolic residency fits u64"),
-            ),
+            } => (dimension, factor_nonzero_count, flop_count, resident_bytes),
             CoercivityProof::AnchoredLocalEnergy {
                 scalar_operations,
                 resident_bytes,
@@ -115,7 +132,10 @@ impl CoercivityCertificate {
         }
     }
 
-    pub(super) fn prove(matrix: &RealSparseMatrix) -> Result<Self, CoercivityError> {
+    /// Proves strict positivity of the inertia by a sparse Cholesky factorization of the
+    /// diagonally scaled operator and returns the factorization for reuse by the solve.
+    pub(super) fn prove(matrix: &RealSparseMatrix) -> Result<(Self, SharedFactor), CoercivityError> {
+        use runmat_sparse_solvers::direct::{DirectOptions, DirectSolver, FactorKind};
         let dimension = matrix.rows();
         if dimension == 0
             || matrix.columns() != dimension
@@ -130,13 +150,6 @@ impl CoercivityCertificate {
         {
             return Err(CoercivityError::NonPositivePivot { pivot });
         }
-        let scales = diagonal
-            .iter()
-            .map(|value| value.sqrt())
-            .collect::<Vec<_>>();
-        let symbolic = CoercivitySymbolicPlan::derive_for_matrix(matrix)?;
-        symbolic.validate_for(matrix.pattern())?;
-        let mut rows = symbolic.factor_rows();
         for row in 0..dimension {
             for entry in matrix.pattern().row_range(row) {
                 let column = matrix.pattern().column(entry);
@@ -146,59 +159,45 @@ impl CoercivityCertificate {
                 if (value - transpose).abs() > symmetry_scale * SYMMETRY_RELATIVE_TOLERANCE {
                     return Err(CoercivityError::AsymmetricValues);
                 }
-                let ordered_row = symbolic.inverse_order()[row];
-                let ordered_column = symbolic.inverse_order()[column];
-                if ordered_row >= ordered_column && value != 0.0 {
-                    let scaled = value / (scales[row] * scales[column]);
-                    let entry = factor_entry_mut(&mut rows, ordered_row, ordered_column)?;
-                    *entry = scaled;
-                }
             }
         }
-
+        let arrays = crate::solve::shared_sparse::CsrArrays::of(matrix);
+        let solver = DirectSolver::<f64>::new(
+            arrays.view().into(),
+            DirectOptions {
+                refinement_steps: 2,
+                ..DirectOptions::new(FactorKind::Cholesky)
+            },
+            crate::solve::shared_sparse::control(),
+        )
+        .map_err(|error| match error {
+            runmat_sparse_solvers::SolverError::NotPositiveDefinite { pivot }
+            | runmat_sparse_solvers::SolverError::Singular { pivot } => {
+                CoercivityError::NonPositivePivot { pivot }
+            }
+            runmat_sparse_solvers::SolverError::OutOfMemory { .. }
+            | runmat_sparse_solvers::SolverError::OverBudget { .. } => CoercivityError::ResourceLimit {
+                pivot: 0,
+                factor_nonzero_count: 0,
+                factor_nonzero_limit: 0,
+                update_count: 0,
+                update_limit: 0,
+            },
+            _ => CoercivityError::SymbolicOrdering,
+        })?;
+        // Scaled pivots l_jj² / a_jj are the pivots of D^{-1/2} A D^{-1/2}; a tiny one is a
+        // numerical mechanism even when it is positive.
+        let pivots = solver.pivots().ok_or(CoercivityError::SymbolicOrdering)?;
         let tolerance = f64::EPSILON * (dimension.max(1) as f64) * 64.0;
         let mut minimum_scaled_pivot = f64::INFINITY;
-        for pivot_index in 0..dimension {
-            let pivot = *factor_entry_mut(&mut rows, pivot_index, pivot_index)?;
-            if !pivot.is_finite() || pivot <= tolerance {
-                return Err(CoercivityError::NonPositivePivot {
-                    pivot: symbolic.elimination_order()[pivot_index],
-                });
+        for (index, (&pivot, &scale)) in pivots.iter().zip(&diagonal).enumerate() {
+            let scaled = pivot / scale;
+            if !scaled.is_finite() || scaled <= tolerance {
+                return Err(CoercivityError::NonPositivePivot { pivot: index });
             }
-            minimum_scaled_pivot = minimum_scaled_pivot.min(pivot);
-            let neighbors = &symbolic.pivot_neighbors()[pivot_index];
-            let mut factors = Vec::with_capacity(neighbors.len());
-            for row in neighbors.iter().copied() {
-                let value = *factor_entry_mut(&mut rows, row, pivot_index)?;
-                let factor = value / pivot;
-                if !factor.is_finite() {
-                    return Err(CoercivityError::NonPositivePivot {
-                        pivot: symbolic.elimination_order()[pivot_index],
-                    });
-                }
-                *factor_entry_mut(&mut rows, row, pivot_index)? = factor;
-                factors.push((row, factor));
-            }
-            for left in 0..factors.len() {
-                for right in 0..=left {
-                    let (left_row, left_factor) = factors[left];
-                    let (right_row, right_factor) = factors[right];
-                    let (row, column) = if left_row >= right_row {
-                        (left_row, right_row)
-                    } else {
-                        (right_row, left_row)
-                    };
-                    let update = left_factor * pivot * right_factor;
-                    let entry = factor_entry_mut(&mut rows, row, column)?;
-                    *entry -= update;
-                    if !entry.is_finite() {
-                        return Err(CoercivityError::NonPositivePivot {
-                            pivot: symbolic.elimination_order()[pivot_index],
-                        });
-                    }
-                }
-            }
+            minimum_scaled_pivot = minimum_scaled_pivot.min(scaled);
         }
+        let estimate = solver.symbolic().estimate();
         let pattern_identity = matrix
             .pattern_identity()
             .map_err(|error| CoercivityError::Encoding(error.to_string()))?;
@@ -209,15 +208,16 @@ impl CoercivityCertificate {
             pattern_identity,
             values_identity,
             dimension,
-            proof: CoercivityProof::SparseLdl {
+            proof: CoercivityProof::SparseCholesky {
                 minimum_scaled_pivot_bits: minimum_scaled_pivot.to_bits(),
-                factor_nonzero_count: symbolic.factor_nonzero_count(),
-                update_count: symbolic.update_count(),
+                factor_nonzero_count: estimate.factor_entries,
+                flop_count: symbolic::flop_count(&estimate),
+                resident_bytes: estimate.peak_bytes(),
             },
             identity: Digest::sha256([]),
         };
         certificate.identity = certificate.expected_identity()?;
-        Ok(certificate)
+        Ok((certificate, SharedFactor(std::sync::Arc::new(solver))))
     }
 
     pub(crate) fn validate_for(&self, matrix: &RealSparseMatrix) -> Result<(), CoercivityError> {
@@ -240,7 +240,7 @@ impl CoercivityCertificate {
 
     fn proof_is_positive(&self) -> bool {
         let bits = match self.proof {
-            CoercivityProof::SparseLdl {
+            CoercivityProof::SparseCholesky {
                 minimum_scaled_pivot_bits,
                 ..
             } => minimum_scaled_pivot_bits,
@@ -272,18 +272,6 @@ impl CoercivityCertificate {
     }
 }
 
-fn factor_entry_mut(
-    rows: &mut [Vec<(usize, f64)>],
-    row: usize,
-    column: usize,
-) -> Result<&mut f64, CoercivityError> {
-    let entries = rows.get_mut(row).ok_or(CoercivityError::SymbolicOrdering)?;
-    let entry = entries
-        .binary_search_by_key(&column, |(candidate, _)| *candidate)
-        .map_err(|_| CoercivityError::SymbolicOrdering)?;
-    Ok(&mut entries[entry].1)
-}
-
 impl PreparedSolverAdmissibility {
     pub(super) fn prove(
         matrix: &RealSparseMatrix,
@@ -294,14 +282,20 @@ impl PreparedSolverAdmissibility {
             .map(|source| source.bind_prepared(matrix, rhs))
             .transpose()
             .map_err(|error| CoercivityError::Encoding(error.to_string()))?;
-        let coercivity = CoercivityCertificate::prove(matrix)?;
+        let (coercivity, factor) = CoercivityCertificate::prove(matrix)?;
         Self::bind(
             coercivity,
             rhs,
             source_prepared
                 .as_ref()
                 .map(PreparedNullspaceEvidence::identity),
+            Some(factor),
         )
+    }
+
+    /// The Cholesky factorization that proved coercivity, when available.
+    pub(crate) fn factor(&self) -> Option<&SharedFactor> {
+        self.factor.as_ref()
     }
 
     pub(super) fn validate_for(
@@ -327,11 +321,12 @@ impl PreparedSolverAdmissibility {
         matrix: &RealSparseMatrix,
         rhs: &[f64],
     ) -> Result<Self, CoercivityError> {
-        Self::bind_existing_with_source(coercivity, matrix, rhs, None)
+        Self::bind_existing_with_source(coercivity, None, matrix, rhs, None)
     }
 
     pub(super) fn bind_existing_with_source(
         coercivity: CoercivityCertificate,
+        factor: Option<SharedFactor>,
         matrix: &RealSparseMatrix,
         rhs: &[f64],
         source: Option<&NullspaceEliminationEvidence>,
@@ -347,6 +342,7 @@ impl PreparedSolverAdmissibility {
             source_prepared
                 .as_ref()
                 .map(PreparedNullspaceEvidence::identity),
+            factor,
         )
     }
 
@@ -354,6 +350,7 @@ impl PreparedSolverAdmissibility {
         coercivity: CoercivityCertificate,
         rhs: &[f64],
         source_nullspace_identity: Option<Digest>,
+        factor: Option<SharedFactor>,
     ) -> Result<Self, CoercivityError> {
         let prepared_rhs_identity = digest(RHS_DOMAIN, &rhs)?;
         let mut evidence = Self {
@@ -361,6 +358,7 @@ impl PreparedSolverAdmissibility {
             source_nullspace_identity,
             prepared_rhs_identity,
             identity: Digest::sha256([]),
+            factor,
         };
         evidence.identity = evidence.expected_identity()?;
         Ok(evidence)
@@ -408,12 +406,10 @@ mod tests {
         let operator = matrix([[4.0, 1.0, 1.0], [1.0, 3.0, 0.0], [1.0, 0.0, 2.0]]);
         let evidence =
             PreparedSolverAdmissibility::prove(&operator, &[1.0, 2.0, 3.0], None).unwrap();
-        let symbolic = CoercivitySymbolicPlan::derive_for_matrix(&operator).unwrap();
-        assert_eq!(
-            evidence.coercivity.work_counts().1,
-            symbolic.factor_nonzero_count()
-        );
-        assert_eq!(evidence.coercivity.work_counts().2, symbolic.update_count());
+        let estimate = symbolic::analyze(operator.pattern()).unwrap();
+        assert_eq!(evidence.coercivity.work_counts().1, estimate.factor_entries);
+        assert_eq!(evidence.coercivity.work_counts().2, symbolic::flop_count(&estimate));
+        assert!(evidence.factor().is_some());
         evidence.validate_for(&operator, &[1.0, 2.0, 3.0]).unwrap();
         assert_eq!(
             evidence.validate_for(&operator, &[1.0, 2.0, 4.0]),
@@ -426,11 +422,11 @@ mod tests {
         let mechanism = matrix([[1.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 1.0]]);
         let indefinite = matrix([[1.0, 2.0, 0.0], [2.0, 1.0, 0.0], [0.0, 0.0, 1.0]]);
         assert!(matches!(
-            CoercivityCertificate::prove(&mechanism),
+            CoercivityCertificate::prove(&mechanism).map(|(c, _)| c),
             Err(CoercivityError::NonPositivePivot { .. })
         ));
         assert!(matches!(
-            CoercivityCertificate::prove(&indefinite),
+            CoercivityCertificate::prove(&indefinite).map(|(c, _)| c),
             Err(CoercivityError::NonPositivePivot { .. })
         ));
     }
@@ -439,7 +435,7 @@ mod tests {
     fn symmetric_metadata_cannot_hide_asymmetric_values() {
         let asymmetric = matrix([[2.0, 1.0, 0.0], [0.0, 2.0, 0.0], [0.0, 0.0, 1.0]]);
         assert_eq!(
-            CoercivityCertificate::prove(&asymmetric),
+            CoercivityCertificate::prove(&asymmetric).map(|(c, _)| c),
             Err(CoercivityError::AsymmetricValues)
         );
     }

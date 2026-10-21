@@ -95,7 +95,10 @@ pub fn build_magnetostatic_resource_plan(
     // sparse plan discovery can allocate. No physical matrices/fields are built.
     let projection = AnalysisProjection::derive(m).map_err(invalid)?;
     let system = MagneticSystemPlan::derive(&projection).map_err(invalid)?;
-    let krylov = estimate::magnetic_static::krylov_envelope(system.saddle_pattern().rows())?;
+    let krylov = estimate::magnetic_static::krylov_envelope(
+        system.saddle_pattern().rows(),
+        system.saddle_pattern().column_indices().len() as u64,
+    )?;
     // The numeric preflight already sums support/properties/planned assembly,
     // matrices, shared GMRES and retained sampling/result-clone lifetimes. Add
     // encoded result scratch and exact result wire materialization explicitly.

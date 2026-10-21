@@ -2,9 +2,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-    algebra::{spmv, PreparedModalSystem},
+    algebra::PreparedModalSystem,
     assembly::AssemblySummary,
-    solve::krylov::{restarted_gmres, right_diagonal::DiagonalRightPreconditioner, GmresPolicy},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -75,7 +74,7 @@ pub enum DirectHarmonicError {
     },
 }
 
-/// Solve the full sparse complex structural system through a matrix-free real block operator.
+/// Solve the full sparse complex structural system `(K − ω²M + iωC) u = f` by sparse LU.
 pub fn solve_direct_harmonic(
     summary: &AssemblySummary,
     imaginary_load: &[f64],
@@ -112,77 +111,95 @@ pub fn solve_direct_harmonic(
             relative_residual: 0.0,
         });
     }
-    let mut right_hand_side = reduced_real;
-    right_hand_side.extend(reduced_imaginary);
-    // Right stiffness-Jacobi changes coordinates, not equilibrium or its residual norm.
-    // It does not assert that the frequency-dependent dynamic operator is positive definite.
-    let mut diagonal = prepared.operators().stiffness().diagonal_values();
-    diagonal.extend_from_within(..);
-    let preconditioner = DiagonalRightPreconditioner::new(&diagonal)
-        .map_err(|error| DirectHarmonicError::Preconditioning(error.to_string()))?;
-    drop(diagonal);
-    let apply = |value: &[f64]| {
-        Ok(apply_dynamic_block(
-            &prepared,
+    if reduced_real
+        .iter()
+        .chain(&reduced_imaginary)
+        .all(|value| *value == 0.0)
+    {
+        return Ok(DirectHarmonicResponse {
             angular_frequency_rad_s,
-            &preconditioner.apply(value)?,
-        ))
-    };
-    let result = restarted_gmres(
-        &right_hand_side,
-        &vec![0.0; reduced_size * 2],
-        GmresPolicy {
-            relative_tolerance: policy.relative_tolerance,
-            restart: policy.restart,
-            maximum_iterations: policy.maximum_iterations,
-        },
-        apply,
-        |left, right| Ok(dot(left, right)),
-        crate::is_fea_cancelled,
-    )
-    .map_err(
-        |error: crate::solve::krylov::right_diagonal::DiagonalRightPreconditionerError| {
-            DirectHarmonicError::Preconditioning(error.to_string())
-        },
-    )?
-    .ok_or(DirectHarmonicError::Breakdown)?;
-    if result.cancelled {
-        return Err(DirectHarmonicError::Cancelled);
+            displacement_real: vec![0.0; summary.dof_count],
+            displacement_imaginary: vec![0.0; summary.dof_count],
+            iterations: 0,
+            residual_norm: 0.0,
+            relative_residual: 0.0,
+        });
     }
-    if result.breakdown {
-        return Err(DirectHarmonicError::Breakdown);
-    }
-    let load_norm = dot(&right_hand_side, &right_hand_side).sqrt();
-    let relative_residual = if load_norm > 0.0 {
-        result.residual_norm / load_norm
-    } else {
-        0.0
+    // Complex dynamic stiffness K − ω²M + iωC on the reduced space, solved by sparse LU (the
+    // matrix is complex symmetric, not Hermitian) with iterative refinement.
+    use runmat_sparse_solvers::{
+        c64,
+        direct::{DirectOptions, DirectSolver, FactorKind},
     };
-    if !result.converged {
+    let omega = angular_frequency_rad_s;
+    let operators = prepared.operators();
+    let dynamic = crate::solve::shared_sparse::complex_combination(&[
+        (c64::new(1.0, 0.0), operators.stiffness()),
+        (c64::new(-omega * omega, 0.0), operators.mass()),
+        (c64::new(0.0, omega), operators.damping()),
+    ])
+    .map_err(|error| DirectHarmonicError::Preconditioning(error.to_string()))?;
+    let rhs: Vec<c64> = reduced_real
+        .iter()
+        .zip(&reduced_imaginary)
+        .map(|(&re, &im)| c64::new(re, im))
+        .collect();
+    crate::progress::check_cancelled("fea.direct_harmonic").map_err(|_| DirectHarmonicError::Cancelled)?;
+    let mut solution = vec![c64::new(0.0, 0.0); reduced_size];
+    let solved = crate::solve::shared_sparse::with_plan(
+        crate::planning::resource::LocalExecutionPlan::serial(),
+        || -> Result<_, runmat_sparse_solvers::SolverError> {
+            let solver = DirectSolver::<c64>::new(
+                dynamic.as_ref().into(),
+                DirectOptions {
+                    refinement_steps: 3,
+                    ..DirectOptions::new(FactorKind::Lu)
+                },
+                crate::solve::shared_sparse::control(),
+            )?;
+            solver.solve_refined(dynamic.as_ref().into(), &rhs, &mut solution, 1)
+        },
+    );
+    match solved {
+        Ok(_) => {}
+        Err(runmat_sparse_solvers::SolverError::Cancelled) => return Err(DirectHarmonicError::Cancelled),
+        Err(runmat_sparse_solvers::SolverError::Singular { .. }) => return Err(DirectHarmonicError::Breakdown),
+        Err(error) => return Err(DirectHarmonicError::Preconditioning(error.to_string())),
+    }
+    let mut action = vec![c64::new(0.0, 0.0); reduced_size];
+    dynamic.as_ref().spmv(&solution, &mut action);
+    let residual_norm = rhs
+        .iter()
+        .zip(&action)
+        .map(|(b, a)| (b - a).norm_sqr())
+        .sum::<f64>()
+        .sqrt();
+    let load_norm = rhs.iter().map(|b| b.norm_sqr()).sum::<f64>().sqrt();
+    let relative_residual = if load_norm > 0.0 { residual_norm / load_norm } else { 0.0 };
+    if !relative_residual.is_finite() || relative_residual > policy.relative_tolerance {
         return Err(DirectHarmonicError::NotConverged {
-            iterations: result.iterations,
+            iterations: 1,
             maximum_iterations: policy.maximum_iterations,
             restart: policy.restart,
             reduced_dof_count: reduced_size,
-            residual_norm: result.residual_norm,
+            residual_norm,
             relative_residual,
         });
     }
-    let physical_solution = preconditioner
-        .apply(&result.solution)
-        .map_err(|error| DirectHarmonicError::Preconditioning(error.to_string()))?;
+    let real: Vec<f64> = solution.iter().map(|value| value.re).collect();
+    let imaginary: Vec<f64> = solution.iter().map(|value| value.im).collect();
     let displacement_real = prepared
-        .expand(&physical_solution[..reduced_size])
+        .expand(&real)
         .map_err(|error| DirectHarmonicError::ConstraintReduction(error.to_string()))?;
     let displacement_imaginary = prepared
-        .expand(&physical_solution[reduced_size..])
+        .expand(&imaginary)
         .map_err(|error| DirectHarmonicError::ConstraintReduction(error.to_string()))?;
     Ok(DirectHarmonicResponse {
         angular_frequency_rad_s,
         displacement_real,
         displacement_imaginary,
-        iterations: result.iterations,
-        residual_norm: result.residual_norm,
+        iterations: 1,
+        residual_norm,
         relative_residual,
     })
 }
@@ -220,50 +237,6 @@ fn prepare(summary: &AssemblySummary) -> Result<PreparedModalSystem, DirectHarmo
             .map_err(|error| DirectHarmonicError::ConstraintReduction(error.to_string())),
     }
 }
-
-fn apply_dynamic_block(
-    prepared: &PreparedModalSystem,
-    angular_frequency_rad_s: f64,
-    value: &[f64],
-) -> Vec<f64> {
-    let size = prepared.operators().dof_count();
-    if value.len() != size * 2 {
-        return Vec::new();
-    }
-    let real = &value[..size];
-    let imaginary = &value[size..];
-    let apply_part = |input: &[f64]| {
-        let stiffness = spmv(prepared.operators().stiffness(), input).unwrap_or_default();
-        let mass = spmv(prepared.operators().mass(), input).unwrap_or_default();
-        stiffness
-            .into_iter()
-            .zip(mass)
-            .map(|(stiffness, mass)| stiffness - angular_frequency_rad_s.powi(2) * mass)
-            .collect::<Vec<_>>()
-    };
-    let real_dynamic = apply_part(real);
-    let imaginary_dynamic = apply_part(imaginary);
-    let real_damping = spmv(prepared.operators().damping(), real).unwrap_or_default();
-    let imaginary_damping = spmv(prepared.operators().damping(), imaginary).unwrap_or_default();
-    real_dynamic
-        .iter()
-        .zip(&imaginary_damping)
-        .map(|(dynamic, damping)| dynamic - angular_frequency_rad_s * damping)
-        .chain(
-            imaginary_dynamic
-                .iter()
-                .zip(&real_damping)
-                .map(|(dynamic, damping)| dynamic + angular_frequency_rad_s * damping),
-        )
-        .collect()
-}
-
-fn dot(left: &[f64], right: &[f64]) -> f64 {
-    left.iter().zip(right).map(|(a, b)| a * b).sum()
-}
-
-#[cfg(test)]
-mod failure_tests;
 
 #[cfg(test)]
 mod tests {

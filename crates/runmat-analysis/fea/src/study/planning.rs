@@ -159,7 +159,7 @@ fn linear_workload(
         step_id: step.step_id.clone(),
         backend: policy.backend,
         formulation_requirement: policy.formulation_requirement,
-        preconditioner: SpdPreconditionerKind::Jacobi,
+        preconditioner: SpdPreconditionerKind::Auto,
         algebra_backend,
         observation_execution: ObservationExecutionPolicy::scalable(),
         require_solver_mesh_for_solid: true,

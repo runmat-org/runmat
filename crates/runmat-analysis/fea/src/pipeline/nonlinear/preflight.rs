@@ -102,7 +102,7 @@ fn prepare_for(
             model,
             step,
             backend,
-            preconditioner: SpdPreconditionerKind::Jacobi,
+            preconditioner: SpdPreconditionerKind::Auto,
             observation_execution: ObservationExecutionPolicy::serial(),
             mesh: options.solver_mesh.as_ref(),
             constraints,

@@ -115,7 +115,10 @@ pub fn build_maxwell_harmonic_resource_plan(
     }
     let system = MaxwellSystemPlan::derive(m).map_err(invalid)?;
     let dimension = system.block_pattern().rows();
-    let krylov = estimate::maxwell_harmonic::krylov_envelope(dimension)?;
+    let krylov = estimate::maxwell_harmonic::krylov_envelope(
+        dimension,
+        system.block_pattern().column_indices().len() as u64,
+    )?;
     let reservation = add(
         add(
             numerical.total_bytes,

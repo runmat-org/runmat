@@ -185,15 +185,17 @@ fn from_counts(
         mul(support_entries, 512)?,
         mul(add(add(edges, dimension)?, 2)?, 256)?,
     ])?;
-    // The shared recurrence owns its own allocation bound. Reserve magnetic
-    // borrowed RHS/initial and post-solve physical/gauge callback/check buffers
-    // separately; no physics-private duplicate Arnoldi/Hessenberg inventory.
+    // The saddle is factored directly by the shared sparse layer (symmetric indefinite,
+    // nested dissection); reserve its count-based factor model. RHS/solution and post-solve
+    // physical/gauge check buffers are reserved separately.
     let workspace = if host_dimension == 0 {
         0
     } else {
-        GmresWorkEnvelope::derive(host_dimension, gmres_policy(host_dimension, 1e-10)?)
-            .map_err(|error| resource(format!("shared GMRES envelope: {error:?}")))?
-            .resident_bytes_upper_bound
+        runmat_sparse_solvers::estimate::direct_reservation_bytes(
+            host_dimension,
+            usize::try_from(support_entries).map_err(|_| resource("saddle entry count overflow"))?,
+            false,
+        )
     };
     let krylov = sum(&[workspace, mul(mul(dimension, 10)?, 16)?, 4096])?;
     let numerical = add(matrices, krylov)?;
@@ -227,22 +229,6 @@ fn from_counts(
         assembly_and_solver_bytes: numerical,
         retained_response_bytes: retained,
         total_bytes: total,
-    })
-}
-
-pub(crate) fn gmres_policy(
-    dimension: usize,
-    tolerance: f64,
-) -> Result<GmresPolicy, MagnetostaticError> {
-    let maximum_iterations = dimension
-        .checked_mul(40)
-        .map(|n| n.max(128))
-        .filter(|n| u32::try_from(*n).is_ok())
-        .ok_or_else(|| resource("GMRES iteration count overflow"))?;
-    Ok(GmresPolicy {
-        relative_tolerance: tolerance,
-        restart: dimension.min(128),
-        maximum_iterations,
     })
 }
 

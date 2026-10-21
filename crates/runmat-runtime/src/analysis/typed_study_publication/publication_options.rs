@@ -240,6 +240,8 @@ fn linear_options(preconditioner: SpdPreconditionerKind) -> AnalysisSolverOption
         deterministic_mode: true,
         precision_mode: PrecisionMode::Fp64,
         preconditioner_mode: match preconditioner {
+            SpdPreconditionerKind::Auto | SpdPreconditionerKind::Direct => PreconditionerMode::Auto,
+            SpdPreconditionerKind::Amg => PreconditionerMode::Amg,
             SpdPreconditionerKind::Jacobi => PreconditionerMode::Jacobi,
             SpdPreconditionerKind::Ilu0 => PreconditionerMode::Ilu,
         },

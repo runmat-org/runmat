@@ -7,9 +7,10 @@ pub(super) fn linear_workload_matches_prepared_execution(
     options: &AnalysisRunOptions,
 ) -> bool {
     let expected_preconditioner = match options.preconditioner_mode {
-        PreconditionerMode::Auto | PreconditionerMode::Jacobi => SpdPreconditionerKind::Jacobi,
+        PreconditionerMode::Auto => SpdPreconditionerKind::Auto,
+        PreconditionerMode::Jacobi => SpdPreconditionerKind::Jacobi,
         PreconditionerMode::Ilu => SpdPreconditionerKind::Ilu0,
-        PreconditionerMode::Amg => SpdPreconditionerKind::Jacobi,
+        PreconditionerMode::Amg => SpdPreconditionerKind::Amg,
     };
     let backend_matches = match execution.backend {
         runmat_analysis_fea::ComputeBackend::Cpu => {

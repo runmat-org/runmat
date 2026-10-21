@@ -122,14 +122,6 @@ pub fn solve_general_system(
             let x = ilu.apply(y, crate::is_fea_cancelled).map_err(ilu_error)?;
             spmv(matrix, &x).map_err(|_| GeneralSolveError::Operator)
         },
-        |a, b| {
-            let d = crate::algebra::dot_canonical(a, b);
-            if d.is_finite() {
-                Ok(d)
-            } else {
-                Err(GeneralSolveError::Operator)
-            }
-        },
         crate::is_fea_cancelled,
     )?
     .ok_or(GeneralSolveError::Operator)?;

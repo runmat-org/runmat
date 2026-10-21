@@ -500,7 +500,7 @@ mod tests {
             step_id,
             backend: ComputeBackend::Cpu,
             formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
-            preconditioner: SpdPreconditionerKind::Jacobi,
+            preconditioner: SpdPreconditionerKind::Auto,
             algebra_backend: LinearAlgebraBackendKind::CpuReference,
             observation_execution:
                 runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),

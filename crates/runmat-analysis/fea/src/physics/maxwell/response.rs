@@ -1,11 +1,10 @@
-//! Shared general GMRES over the complete real complex block; physical acceptance.
+//! Sparse direct LU over the complete real complex block; physical acceptance.
 use super::{
     assembly::MaxwellAssembly, complex::ComplexVector3, invalid, operator, recovery, ComplexPhasor,
     MaxwellError,
 };
 use crate::{
     algebra::{dot_canonical, spmv},
-    solve::krylov::{restarted_gmres, GmresPolicy},
 };
 use runmat_execution::Digest;
 use runmat_meshing_core::StableDigest;
@@ -74,31 +73,14 @@ pub(super) fn solve(
     let (solution, iterations) = if n == 0 {
         (Vec::new(), 0)
     } else {
-        let maximum_iterations = n
-            .checked_mul(40)
-            .map(|v| v.max(128))
-            .filter(|v| u32::try_from(*v).is_ok())
-            .ok_or_else(|| invalid("Maxwell GMRES iteration envelope overflow"))?;
-        let result = restarted_gmres(
+        // Complete real block of the complex electric-field system, factored by sparse LU.
+        let (solution, _) = crate::solve::shared_sparse::solve_direct_real(
+            &assembled.block,
             &assembled.rhs,
-            &vec![0.0; n],
-            GmresPolicy {
-                relative_tolerance: tolerance,
-                restart: n.min(128),
-                maximum_iterations,
-            },
-            |x| spmv(&assembled.block, x).map_err(operator),
-            |a, b| Ok(dot_canonical(a, b)),
-            || false,
-        )?
-        .ok_or_else(|| MaxwellError::NotConverged("invalid shared Krylov contract".into()))?;
-        if !result.converged || result.cancelled {
-            return Err(MaxwellError::NotConverged(format!(
-                "general GMRES iterations={}, residual={:e}",
-                result.iterations, result.residual_norm
-            )));
-        }
-        (result.solution, result.iterations)
+            crate::solve::shared_sparse::DirectStructure::General,
+        )
+        .map_err(|error| MaxwellError::NotConverged(format!("sparse direct LU: {error}")))?;
+        (solution, 1)
     };
     let action = spmv(&assembled.block, &solution).map_err(operator)?;
     let defect: Vec<_> = action

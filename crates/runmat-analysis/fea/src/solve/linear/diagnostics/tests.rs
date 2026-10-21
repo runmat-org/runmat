@@ -4,14 +4,14 @@ use super::*;
 fn successful_profile_bounds_each_supported_placement_outcome() {
     let bound = crate::solve::linear::successful_diagnostics_profile().unwrap();
     let mut largest_actual_count = 0;
-    for preconditioner in [SpdPreconditionerKind::Jacobi, SpdPreconditionerKind::Ilu0] {
+    for strategy in all_strategies() {
         for messages in [
-            vec![SuccessfulDiagnostic::CpuMethod(preconditioner)],
+            vec![SuccessfulDiagnostic::CpuMethod(strategy)],
             vec![
                 SuccessfulDiagnostic::AdmissionFallback,
-                SuccessfulDiagnostic::CpuMethod(preconditioner),
+                SuccessfulDiagnostic::CpuMethod(strategy),
             ],
-            vec![SuccessfulDiagnostic::AcceleratorMethod(preconditioner)],
+            vec![SuccessfulDiagnostic::AcceleratorMethod(SpdPreconditionerKind::Jacobi)],
         ] {
             let actual: Vec<_> = messages.iter().map(|value| value.diagnostic()).collect();
             largest_actual_count = largest_actual_count.max(actual.len());

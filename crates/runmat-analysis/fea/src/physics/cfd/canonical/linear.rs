@@ -102,14 +102,6 @@ pub(super) fn solve(
                 .map_err(ilu_error)?;
             spmv(a, &x).map_err(|e| Error::Operator(e.to_string()))
         },
-        |x, y| {
-            let sum = crate::algebra::dot_canonical(x, y);
-            if sum.is_finite() {
-                Ok(sum)
-            } else {
-                Err(Error::Invalid("nonfinite Krylov dot"))
-            }
-        },
         crate::is_fea_cancelled,
     )?
     .ok_or(Error::Invalid("GMRES returned no correction inventory"))?;
