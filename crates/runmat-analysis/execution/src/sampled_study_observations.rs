@@ -40,8 +40,17 @@ impl SampledStudyObservations {
         source: &impl CacheImport,
         preparation: ObservationPreparation,
     ) -> AnalysisBridgeResult<PreparedObservationFanout> {
-        let task =
-            prepare_observation_fanout(source, preparation, RecoveredFieldSample::Final, None)?;
+        Self::prepare_fanout_at(source, preparation, RecoveredFieldSample::Final)
+    }
+
+    /// Fan out at the retained sample coordinate of a single-sample source (for example one
+    /// authored frequency of a sweep).
+    pub fn prepare_fanout_at(
+        source: &impl CacheImport,
+        preparation: ObservationPreparation,
+        sample: RecoveredFieldSample,
+    ) -> AnalysisBridgeResult<PreparedObservationFanout> {
+        let task = prepare_observation_fanout(source, preparation, sample, None)?;
         if task.partitions.is_empty() {
             return Err(invalid(
                 "sampled authored observations have no executable partitions",
