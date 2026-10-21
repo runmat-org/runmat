@@ -102,7 +102,7 @@ pub async fn gmres_async<T: Scalar, O: KrylovOps<T>>(
     let mut coefficients = vec![T::zero(); m + 1];
     let mut iterations = 0usize;
     let mut outer = 0usize;
-    let mut flag;
+    let flag;
     let (mut best_residual, mut best_iteration) = (f64::INFINITY, 0usize);
     let mut previous_residual = f64::INFINITY;
     let mut stagnant = 0usize;

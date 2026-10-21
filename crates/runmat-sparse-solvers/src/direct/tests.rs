@@ -244,3 +244,40 @@ fn least_squares_qr_matches_normal_equations() {
     a.as_ref().spmv_transpose(&r, &mut atr, false);
     assert!(par::norm2(&atr) < 1e-10 * par::norm2(&b));
 }
+
+#[test]
+fn norm_estimates_match_dense_references() {
+    // Nonsymmetric tridiagonal with known inverse norm (dense reference).
+    let n = 60;
+    let mut t = TripletBuilder::new(n, n);
+    for i in 0..n {
+        t.push(i, i, 3.0 + (i % 5) as f64);
+        if i > 0 {
+            t.push(i, i - 1, -1.2);
+        }
+        if i + 1 < n {
+            t.push(i, i + 1, -0.7);
+        }
+    }
+    let a = t.build();
+    let solver = DirectSolver::<f64>::new(a.as_ref().into(), DirectOptions::new(FactorKind::Lu), SolveControl::NONE).unwrap();
+    // Dense inverse 1-norm.
+    let dense = a.as_ref().to_dense();
+    let mut exact = 0.0f64;
+    for j in 0..n {
+        let mut e = vec![0.0; n];
+        e[j] = 1.0;
+        let column = dense_solve(&dense, &e, n);
+        exact = exact.max(column.iter().map(|v| v.abs()).sum());
+    }
+    let estimate = solver.estimate_inverse_norm1().unwrap();
+    assert!(estimate <= exact * (1.0 + 1e-12) && estimate >= 0.3 * exact, "{estimate} vs {exact}");
+    let defect = solver.estimate_right_inverse_defect1(a.as_ref().into()).unwrap();
+    assert!(defect < 1e-12, "{defect}");
+    // Transpose solve.
+    let b = par::seeded_vector::<f64>(n, 3);
+    let mut x = b.clone();
+    solver.solve_transpose_in_place(&mut x, 1).unwrap();
+    let at = a.as_ref().transpose(false);
+    assert!(relative_residual(&at, &x, &b) < 1e-13);
+}

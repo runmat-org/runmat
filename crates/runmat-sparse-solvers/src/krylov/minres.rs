@@ -38,7 +38,7 @@ pub async fn minres_async<T: Scalar, O: KrylovOps<T>>(
     let mut history = Vec::new();
     let mut iteration = 0usize;
     let mut verification_rounds = 0usize;
-    let mut flag = StopFlag::MaxIterations;
+    let flag;
     let (mut best_residual, mut best_iteration) = (f64::INFINITY, 0usize);
     let mut true_residual;
 

@@ -107,7 +107,7 @@ pub fn lobpcg(
     let mut x = par::seeded_vector::<f64>(n * block, 0x6c6f_6270_6367);
     let mut p_block: Option<Vec<f64>> = None;
     let mut theta = vec![0.0; block];
-    let mut converged_count = 0;
+    let mut converged_count;
     let mut iterations = 0;
     let mut applications = 0;
     let mut kx = vec![0.0; n * block];

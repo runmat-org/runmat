@@ -242,10 +242,10 @@ impl<T: Scalar> Ilut<T> {
     pub fn new(matrix: CsrRef<'_, T>, options: IlutOptions) -> SolverResult<Self> {
         let n = matrix.nrows();
         let mut l_ptr = vec![0usize];
-        let mut l_idx = Vec::new();
-        let mut l_val = Vec::new();
+        let mut l_idx: Vec<usize> = Vec::new();
+        let mut l_val: Vec<T> = Vec::new();
         let mut u_ptr = vec![0usize];
-        let mut u_idx = Vec::new();
+        let mut u_idx: Vec<usize> = Vec::new();
         let mut u_val: Vec<T> = Vec::new();
         let mut work = vec![T::zero(); n];
         let mut present = vec![false; n];

@@ -35,7 +35,6 @@ pub(crate) struct LanczosOutput {
     pub theta: Vec<f64>,
     /// Ritz vectors (`n × theta.len()`, column-major, `B`-orthonormal).
     pub vectors: Vec<f64>,
-    pub residual_estimates: Vec<f64>,
     pub converged: usize,
     pub restarts: usize,
     pub operator_applications: usize,
@@ -55,7 +54,6 @@ pub(crate) fn thick_restart_block_lanczos(
         return Ok(LanczosOutput {
             theta: Vec::new(),
             vectors: Vec::new(),
-            residual_estimates: Vec::new(),
             converged: 0,
             restarts: 0,
             operator_applications: 0,
@@ -162,7 +160,6 @@ pub(crate) fn thick_restart_block_lanczos(
             return Ok(LanczosOutput {
                 theta: order.iter().take(count).map(|&i| theta[i]).collect(),
                 vectors,
-                residual_estimates: estimates[..count].to_vec(),
                 converged: converged.min(count),
                 restarts,
                 operator_applications: applications,

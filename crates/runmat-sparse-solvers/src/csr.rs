@@ -356,6 +356,15 @@ impl<'a, T: Scalar> CsrRef<'a, T> {
         self.values.iter().map(|v| v.abs2()).sum::<f64>().sqrt()
     }
 
+    /// One norm (max column sum).
+    pub fn norm_one(&self) -> f64 {
+        let mut sums = vec![0.0f64; self.ncols];
+        for (&col, value) in self.col_idx.iter().zip(self.values) {
+            sums[col] += value.abs();
+        }
+        sums.into_iter().fold(0.0, f64::max)
+    }
+
     /// Infinity norm (max row sum).
     pub fn norm_inf(&self) -> f64 {
         (0..self.nrows)

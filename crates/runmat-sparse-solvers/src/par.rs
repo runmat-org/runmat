@@ -101,7 +101,7 @@ pub fn norm_inf<T: Scalar>(x: &[T]) -> f64 {
 }
 
 /// Ordered map over `0..len`; parallel inside an admitted pool, serial otherwise.
-pub fn map_range<R: Send>(len: usize, min_len: usize, work: impl Fn(usize) -> R + Sync) -> Vec<R> {
+pub fn map_range<R: Send>(len: usize, min_len: usize, work: impl Fn(usize) -> R + Sync + Send) -> Vec<R> {
     if threads() > 1 && len >= 2 * min_len.max(1) {
         (0..len)
             .into_par_iter()

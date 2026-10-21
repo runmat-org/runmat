@@ -91,8 +91,8 @@ impl Graph {
             if na.binary_search(&b).is_err() {
                 return false;
             }
-            let mut ia = na.iter().copied().filter(|&x| x != b).chain(std::iter::once(a)).collect::<Vec<_>>();
-            let mut ib = nb.iter().copied().filter(|&x| x != a).chain(std::iter::once(b)).collect::<Vec<_>>();
+            let mut ia = na.iter().copied().chain(std::iter::once(a)).collect::<Vec<_>>();
+            let mut ib = nb.iter().copied().chain(std::iter::once(b)).collect::<Vec<_>>();
             ia.sort_unstable();
             ib.sort_unstable();
             ia == ib

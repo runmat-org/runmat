@@ -9,7 +9,6 @@ use super::{
 };
 use crate::error::{SolverError, SolverResult};
 use crate::par;
-use crate::scalar::Scalar;
 
 pub(super) fn analyze<T: FactorScalar>(
     matrix: SparseInput<'_, T>,
@@ -142,6 +141,32 @@ pub(super) fn solve<T: FactorScalar>(
     } else {
         let mut buffer = faer::dyn_stack::MemBuffer::new(inner.solve_in_place_scratch::<T>(k, par));
         lu.solve_in_place_with_conj(Conj::No, view, par, faer::dyn_stack::MemStack::new(&mut buffer));
+    }
+    if let Some(position) = rhs.iter().position(|value| !value.is_finite()) {
+        return Err(SolverError::Singular { pivot: position % n.max(1) });
+    }
+    Ok(())
+}
+
+/// Solves `Aᵀ X = B` with the factorization of `A`.
+pub(super) fn solve_transpose<T: FactorScalar>(
+    symbolic: &SymbolicFactorization,
+    numeric: &NumericLu<usize, T>,
+    rhs: &mut [T],
+    k: usize,
+) -> SolverResult<()> {
+    let inner = symbolic_of(symbolic);
+    let n = inner.nrows();
+    let par = par::faer_par();
+    let lu = LuRef::new_unchecked(inner, numeric);
+    let view = MatMut::from_column_major_slice_mut(rhs, n, k);
+    if symbolic.input_transposed {
+        // The factor is of Aᵀ: a plain solve is a transpose solve of A.
+        let mut buffer = faer::dyn_stack::MemBuffer::new(inner.solve_in_place_scratch::<T>(k, par));
+        lu.solve_in_place_with_conj(Conj::No, view, par, faer::dyn_stack::MemStack::new(&mut buffer));
+    } else {
+        let mut buffer = faer::dyn_stack::MemBuffer::new(inner.solve_transpose_in_place_scratch::<T>(k, par));
+        lu.solve_transpose_in_place_with_conj(Conj::No, view, par, faer::dyn_stack::MemStack::new(&mut buffer));
     }
     if let Some(position) = rhs.iter().position(|value| !value.is_finite()) {
         return Err(SolverError::Singular { pivot: position % n.max(1) });

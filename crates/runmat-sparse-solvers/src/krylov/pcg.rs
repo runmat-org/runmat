@@ -148,8 +148,6 @@ pub async fn pcg_async<T: Scalar, O: KrylovOps<T>>(
             residual = par::norm2(r);
             if residual <= tol {
                 flag = StopFlag::Converged;
-                best_residual = residual;
-                best_iteration = iteration;
                 break;
             }
             verification_rounds += 1;

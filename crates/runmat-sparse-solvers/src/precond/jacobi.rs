@@ -97,18 +97,6 @@ impl<T: Scalar> BlockJacobi<T> {
     pub fn block_size(&self) -> usize {
         self.block
     }
-    /// Applies the inverse block of `node` to `r` (length `block`).
-    pub(crate) fn apply_block(&self, node: usize, r: &[T], z: &mut [T]) {
-        let b = self.block;
-        let inverse = &self.inverses[node * b * b..(node + 1) * b * b];
-        for a in 0..b {
-            let mut sum = T::zero();
-            for c in 0..b {
-                sum += inverse[c * b + a] * r[c];
-            }
-            z[a] = sum;
-        }
-    }
 }
 
 impl<T: Scalar> Preconditioner<T> for BlockJacobi<T> {

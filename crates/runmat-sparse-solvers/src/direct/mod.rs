@@ -466,6 +466,75 @@ impl<T: FactorScalar> DirectSolver<T> {
         Ok(())
     }
 
+    /// Solves `Aᵀ X = B` in place (for condition estimation and adjoint problems).
+    pub fn solve_transpose_in_place(&self, rhs: &mut [T], k: usize) -> SolverResult<()> {
+        let n = self.dimension();
+        if rhs.len() != n * k {
+            return Err(SolverError::Dimension("transpose rhs length".into()));
+        }
+        match &self.numeric {
+            NumericInner::Lu(numeric) => lu::solve_transpose(&self.symbolic, numeric, rhs, k),
+            _ => {
+                // Hermitian A: Aᵀ = conj(A), so Aᵀ x = b  ⇔  A conj(x) = conj(b).
+                for value in rhs.iter_mut() {
+                    *value = value.conj();
+                }
+                self.solve_in_place(rhs, k)?;
+                for value in rhs.iter_mut() {
+                    *value = value.conj();
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// Hager–Higham estimate of `‖A⁻¹‖₁` (a few solves with `A` and `Aᵀ`; LAPACK `rcond` style).
+    pub fn estimate_inverse_norm1(&self) -> SolverResult<f64> {
+        let n = self.dimension();
+        estimate_norm1(
+            n,
+            |x| {
+                let mut y = x.to_vec();
+                self.solve_in_place(&mut y, 1)?;
+                Ok(y)
+            },
+            |x| {
+                let mut y = x.to_vec();
+                self.solve_transpose_in_place(&mut y, 1)?;
+                Ok(y)
+            },
+        )
+    }
+
+    /// Estimate of `‖I − A F⁻¹‖₁` for the factorization `F ≈ A` (the right-inverse defect of
+    /// the factorization). A value below one certifies that `A` is nonsingular whenever the
+    /// estimate bounds the true norm; the caller applies its own safety factor.
+    pub fn estimate_right_inverse_defect1(&self, matrix: SparseInput<'_, T>) -> SolverResult<f64> {
+        let n = self.dimension();
+        let apply = |x: &[T], transpose: bool| -> SolverResult<Vec<T>> {
+            let mut y = x.to_vec();
+            if transpose {
+                // (I − A F⁻¹)ᵀ x = x − F⁻ᵀ Aᵀ x
+                let mut at = vec![T::zero(); n];
+                matrix_transpose_apply(matrix, x, &mut at);
+                self.solve_transpose_in_place(&mut at, 1)?;
+                for i in 0..n {
+                    y[i] -= at[i];
+                }
+            } else {
+                let mut z = x.to_vec();
+                self.solve_in_place(&mut z, 1)?;
+                let mut az = vec![T::zero(); n];
+                matrix_apply(matrix, &z, &mut az);
+                for i in 0..n {
+                    y[i] -= az[i];
+                }
+            }
+            Ok(y)
+        };
+        estimate_norm1(n, |x| apply(x, false), |x| apply(x, true))
+    }
+
     /// Solves with iterative refinement against the original matrix (which must be the matrix
     /// that was factorized). `x` receives the solution.
     pub fn solve_refined(
@@ -526,6 +595,77 @@ impl<T: FactorScalar> DirectSolver<T> {
     pub fn pivots(&self) -> Option<Vec<f64>> {
         cholesky::pivots(&self.symbolic, &self.numeric)
     }
+}
+
+fn matrix_apply<T: Scalar>(matrix: SparseInput<'_, T>, x: &[T], y: &mut [T]) {
+    match matrix {
+        SparseInput::Csr(m) => m.spmv(x, y),
+        SparseInput::Csc(m) => m.as_transpose_csr().spmv_transpose(x, y, false),
+    }
+}
+
+fn matrix_transpose_apply<T: Scalar>(matrix: SparseInput<'_, T>, x: &[T], y: &mut [T]) {
+    match matrix {
+        SparseInput::Csr(m) => m.spmv_transpose(x, y, false),
+        SparseInput::Csc(m) => m.as_transpose_csr().spmv(x, y),
+    }
+}
+
+/// Hager's 1-norm estimator (Higham's refinement, at most five sweeps) for an operator given by
+/// its action and the action of its transpose.
+pub(crate) fn estimate_norm1<T: Scalar>(
+    n: usize,
+    apply: impl Fn(&[T]) -> SolverResult<Vec<T>>,
+    apply_transpose: impl Fn(&[T]) -> SolverResult<Vec<T>>,
+) -> SolverResult<f64> {
+    if n == 0 {
+        return Ok(0.0);
+    }
+    let mut x = vec![T::from_f64(1.0 / n as f64); n];
+    let mut estimate = 0.0f64;
+    let mut previous_index = usize::MAX;
+    for sweep in 0..5 {
+        let y = apply(&x)?;
+        let norm: f64 = y.iter().map(|v| v.abs()).sum();
+        if sweep > 0 && norm <= estimate {
+            break;
+        }
+        estimate = norm;
+        let signs: Vec<T> = y
+            .iter()
+            .map(|v| {
+                let a = v.abs();
+                if a == 0.0 {
+                    T::one()
+                } else {
+                    v.scale(1.0 / a)
+                }
+            })
+            .collect();
+        let z = apply_transpose(&signs)?;
+        let (index, max) = z
+            .iter()
+            .enumerate()
+            .map(|(i, v)| (i, v.abs()))
+            .fold((0usize, 0.0f64), |best, item| if item.1 > best.1 { item } else { best });
+        let ztx: f64 = z.iter().zip(&x).map(|(a, b)| (a.conj() * *b).re()).sum();
+        if max <= ztx || index == previous_index {
+            break;
+        }
+        previous_index = index;
+        x.iter_mut().for_each(|v| *v = T::zero());
+        x[index] = T::one();
+    }
+    // Higham's alternating-sign vector guards against estimator underestimation.
+    let alternating: Vec<T> = (0..n)
+        .map(|i| {
+            let sign = if i % 2 == 0 { 1.0 } else { -1.0 };
+            T::from_f64(sign * (1.0 + i as f64 / (n.max(2) - 1) as f64))
+        })
+        .collect();
+    let y = apply(&alternating)?;
+    let alternative = 2.0 * y.iter().map(|v| v.abs()).sum::<f64>() / (3.0 * n as f64);
+    Ok(estimate.max(alternative))
 }
 
 fn check_pattern<T: Scalar>(
