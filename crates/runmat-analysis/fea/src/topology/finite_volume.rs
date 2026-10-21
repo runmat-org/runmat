@@ -180,10 +180,13 @@ impl FiniteVolumeTopology {
         Ok(())
     }
 
+    /// Count-only reservation for the cells `selection` admits; the boundary-face count is
+    /// the whole projection's, an upper bound for any region subset.
     pub fn reserve(
         source: &AnalysisProjection,
         policy: FiniteVolumeProjectionPolicy,
+        selection: &FiniteVolumeCellSelection,
     ) -> Result<FiniteVolumeReservation, FiniteVolumeProjectionError> {
-        derive::reserve(source, policy)
+        derive::reserve(source, policy, selection)
     }
 }

@@ -16,11 +16,18 @@ use std::collections::BTreeMap;
 pub(super) fn reserve(
     source: &AnalysisProjection,
     policy: Policy,
+    selection: &FiniteVolumeCellSelection,
 ) -> Result<FiniteVolumeReservation, Error> {
+    let selected = || {
+        source
+            .elements
+            .iter()
+            .filter(|e| selection.includes(&e.region_id))
+    };
     reserve_regions(
-        source.elements.len(),
+        selected().count(),
         source.boundary_faces.len(),
-        source.elements.iter().map(|e| &e.region_id),
+        selected().map(|e| &e.region_id),
         policy,
     )
 }
@@ -135,7 +142,7 @@ pub(super) fn derive(
     policy: Policy,
     selection: FiniteVolumeCellSelection,
 ) -> Result<FiniteVolumeTopology, Error> {
-    let reservation = reserve(source, policy)?;
+    let reservation = reserve(source, policy, &selection)?;
     let mut order = (0..source.elements.len())
         .filter(|&i| selection.includes(&source.elements[i].region_id))
         .collect::<Vec<_>>();

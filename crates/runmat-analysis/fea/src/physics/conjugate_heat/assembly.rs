@@ -19,7 +19,7 @@ use runmat_analysis_core::{
     ThermalInterfaceTransfer,
 };
 use runmat_meshing_core::BoundaryFaceRole;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Node degrees of freedom. A node on an interface with a temperature jump has a second,
 /// side-owned degree of freedom used by the elements of that interface's second side.
@@ -361,31 +361,37 @@ pub(super) fn assemble(input: &ConjugateHeatInput<'_>) -> Result<AssembledEnergy
         ));
     }
     let interfaces = plan_interfaces(input, &velocity)?;
-    // Second-side ownership: the elements on the second side of every jump interface.
+    // Second-side ownership is by region: every element of a region on the second side of a
+    // jump interface takes the second-side identity of the jump nodes it touches, including
+    // elements meeting the interface only along an edge or at a vertex. Face adjacency alone
+    // would let those elements short-circuit the jump through the first-side value.
     let mut jump_nodes = BTreeMap::<usize, ()>::new();
+    let mut first_regions = BTreeSet::new();
+    let mut second_regions = BTreeSet::new();
     for plan in &interfaces {
         if plan.law == InterfaceLaw::Perfect {
             continue;
         }
-        for &(face, _, second) in &plan.faces {
-            elements[second].second_side = true;
+        for &(face, first, second) in &plan.faces {
+            first_regions.insert(&p.elements[first].region_id);
+            second_regions.insert(&p.elements[second].region_id);
             for &node in &p.boundary_faces[face].node_indices {
                 jump_nodes.insert(node, ());
             }
         }
     }
-    // A second-side element that also touches a first-side jump node across another
-    // interface would need two jump identities at one node; that topology is rejected.
-    for plan in &interfaces {
-        if plan.law == InterfaceLaw::Perfect {
-            continue;
-        }
-        for &(_, first, _) in &plan.faces {
-            if elements[first].second_side {
-                return Err(Error::Unsupported(
-                    "an element on both sides of temperature-jump interfaces",
-                ));
-            }
+    // A region on both sides of temperature-jump interfaces would need two jump identities
+    // at one node; that topology is rejected.
+    if first_regions.iter().any(|r| second_regions.contains(r)) {
+        return Err(Error::Unsupported(
+            "a region on both sides of temperature-jump interfaces",
+        ));
+    }
+    for (index, e) in p.elements.iter().enumerate() {
+        if second_regions.contains(&e.region_id)
+            && e.node_indices.iter().any(|n| jump_nodes.contains_key(n))
+        {
+            elements[index].second_side = true;
         }
     }
     let dofs = Dofs {

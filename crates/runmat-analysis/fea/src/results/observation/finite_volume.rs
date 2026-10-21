@@ -132,7 +132,7 @@ pub fn finite_volume_observation_topology_resident_bytes(
         .clone_resident_bytes_estimate()
         .map_err(invalid)?
         .checked_add(
-            FiniteVolumeTopology::reserve(projection, geometry.policy)
+            FiniteVolumeTopology::reserve(projection, geometry.policy, &geometry.selection)
                 .map_err(invalid)?
                 .scratch_bytes as u64,
         )

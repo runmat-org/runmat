@@ -25,7 +25,7 @@ pub(super) fn reserve(
     t: &FiniteVolumeTopology,
     p: CanonicalFluidPolicy,
 ) -> Result<CanonicalFluidReservation, Error> {
-    let geometry = FiniteVolumeTopology::reserve(source, t.policy)
+    let geometry = FiniteVolumeTopology::reserve(source, t.policy, &t.selection)
         .map_err(|_| Error::Resource("source geometry admission"))?;
     if geometry.cell_count != t.cells.len() {
         return Err(Error::Invalid("finite-volume source count"));

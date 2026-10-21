@@ -205,6 +205,7 @@ impl<'a> ConjugateHeatProblem<'a> {
         let (values, iterations) = solve_linear(
             &self.system.constrained,
             &self.system.constrained_rhs,
+            &self.system.dirichlet,
             self.input.policy,
         )?;
         let (temperature_k, second) = self.system.dofs.split(&values)?;
@@ -271,7 +272,12 @@ impl<'a> ConjugateHeatProblem<'a> {
                 None => self.system.rhs[d] + stored[d] / duration_s - lifted[d],
             })
             .collect::<Vec<_>>();
-        let (values, iterations) = solve_linear(&constrained, &rhs, self.input.policy)?;
+        let (values, iterations) = solve_linear(
+            &constrained,
+            &rhs,
+            &self.system.dirichlet,
+            self.input.policy,
+        )?;
         let (temperature_k, second) = self.system.dofs.split(&values)?;
         let evidence = evidence::evaluate(
             &self.input,
@@ -362,9 +368,12 @@ impl<'a> ConjugateHeatProblem<'a> {
     }
 }
 
+/// Identity rows hold prescribed temperatures exactly: the Krylov iterate meets them only to
+/// the solver tolerance, so they are restored to their authored values after the solve.
 fn solve_linear(
     a: &RealSparseMatrix,
     b: &[f64],
+    prescribed: &[Option<f64>],
     policy: ConjugateHeatPolicy,
 ) -> Result<(Vec<f64>, u64), ConjugateHeatError> {
     let preconditioner = SparseRightIlu::factor(a, crate::is_fea_cancelled).map_err(ilu_error)?;
@@ -402,9 +411,14 @@ fn solve_linear(
             relative_residual: result.relative_residual,
         });
     }
-    let x = preconditioner
+    let mut x = preconditioner
         .apply(&result.solution, crate::is_fea_cancelled)
         .map_err(ilu_error)?;
+    for (value, prescribed) in x.iter_mut().zip(prescribed) {
+        if let Some(prescribed) = prescribed {
+            *value = *prescribed;
+        }
+    }
     if x.iter().any(|v| !v.is_finite()) {
         return Err(ConjugateHeatError::Invalid(
             "nonfinite temperature solution",
