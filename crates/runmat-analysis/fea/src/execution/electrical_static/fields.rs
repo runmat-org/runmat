@@ -250,3 +250,48 @@ pub(in crate::execution) fn native_electrical_field_definition(
     )
     .map_err(invalid)
 }
+
+/// Exact native definition inventory of an electrical recovery request, without arrays.
+pub fn electrical_native_field_definitions(
+    request: &FieldRecoveryRequest,
+) -> AnalysisExecutionResult<Vec<RecoveredFieldDefinition>> {
+    request.validate()?;
+    let FieldTopologyIdentity::VolumeMesh { .. } = request.topology else {
+        return Err(invalid("electrical native fields live on the canonical volume mesh"));
+    };
+    let [potential, field, flux, density] = request.plan.requirements.as_slice() else {
+        return Err(invalid("electrical native inventory has four fields"));
+    };
+    let equation = match (flux.quantity, density.quantity) {
+        (ObservationQuantity::ElectricCurrentDensity, ObservationQuantity::JoulePowerDensity) => {
+            StaticElectricalEquation::SteadyConduction
+        }
+        (ObservationQuantity::ElectricDisplacement, ObservationQuantity::ElectricEnergyDensity) => {
+            StaticElectricalEquation::Electrostatics
+        }
+        _ => return Err(invalid("electrical native inventory quantities differ")),
+    };
+    let nodes = usize::try_from(potential.cost.output_entity_count).map_err(invalid)?;
+    let elements = usize::try_from(field.cost.output_entity_count).map_err(invalid)?;
+    if native_electrical_field_plan(equation, nodes, elements)? != request.plan {
+        return Err(invalid("electrical native inventory differs from canonical shape"));
+    }
+    let ids = match equation {
+        StaticElectricalEquation::SteadyConduction => [
+            "electrical.potential",
+            "electrical.electric_field",
+            "electrical.current_density",
+            "electrical.joule_power_density",
+        ],
+        StaticElectricalEquation::Electrostatics => [
+            "electrical.potential",
+            "electrical.electric_field",
+            "electrical.electric_displacement",
+            "electrical.electric_energy_density",
+        ],
+    };
+    ids.into_iter()
+        .zip(&request.plan.requirements)
+        .map(|(id, requirement)| native_electrical_field_definition(id, requirement))
+        .collect()
+}

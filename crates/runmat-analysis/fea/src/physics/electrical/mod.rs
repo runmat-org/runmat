@@ -179,7 +179,6 @@ pub(crate) fn validate_canonical_input<'a>(
             output.kind != StateKind::ElectromagneticStatic
                 || output.completeness != StateCompleteness::Complete
         })
-        || !step.observations.is_empty()
         || !step.activations.is_empty()
         || model.sequence.steps.len() != 1
         || !model.sequence.dependencies.is_empty()

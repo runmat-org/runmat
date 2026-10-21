@@ -84,6 +84,4 @@ fn invalid(error: impl std::fmt::Display) -> MaxwellError {
 fn topology(error: impl std::fmt::Display) -> MaxwellError {
     MaxwellError::Topology(error.to_string())
 }
-fn operator(error: impl std::fmt::Display) -> MaxwellError {
-    MaxwellError::Operator(error.to_string())
-}
+

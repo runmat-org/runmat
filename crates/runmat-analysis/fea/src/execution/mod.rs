@@ -38,7 +38,8 @@ pub use maxwell_harmonic::{
 };
 mod error;
 pub use electrical_static::{
-    ElectricalNumericalReceipt, ElectricalNumericalReceiptArtifact, ElectricalStaticSolverResult,
+    electrical_native_field_definitions, ElectricalNumericalReceipt,
+    ElectricalNumericalReceiptArtifact, ElectricalStaticSolverResult,
     ElectricalStaticWorkload, ELECTRICAL_RECEIPT_MAX_ENCODED_BYTES,
 };
 mod field;

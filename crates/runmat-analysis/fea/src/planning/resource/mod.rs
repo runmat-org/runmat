@@ -18,7 +18,12 @@ pub use fluid_transient::{
     prepare_fluid_transient_resources, FluidTransientBlockResourceProjection,
     PreparedFluidTransientResources,
 };
+mod electrical_recovery;
 mod magnetic_recovery;
+pub use electrical_recovery::{
+    build_electrical_field_recovery_resource_plan, electrical_field_recovery_partition_count,
+    electrical_field_recovery_shape, electrical_recovery_source_validation_workspace,
+};
 mod magnetic_static;
 mod maxwell_harmonic;
 mod maxwell_recovery;
@@ -28,7 +33,7 @@ pub use acoustic::{
 };
 pub use contract::AcousticHarmonicResourceDemand;
 pub use contract::ElectricalStaticResourceDemand;
-pub use contract::MagneticFieldRecoveryResourceDemand;
+pub use contract::{ElectricalFieldRecoveryResourceDemand, MagneticFieldRecoveryResourceDemand};
 pub use contract::MaxwellFieldRecoveryResourceDemand;
 pub use contract::{MagneticGmresResourceEnvelope, MagnetostaticResourceDemand};
 pub use contract::{MaxwellDirectFactorEnvelope, MaxwellHarmonicResourceDemand};
