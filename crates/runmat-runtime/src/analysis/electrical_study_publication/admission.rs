@@ -47,6 +47,8 @@ pub(super) fn validate(
         &completed.compiled,
         runmat_analysis_fea::study::ElectricalStudyPlanningPolicy {
             formulation_requirement: completed.workload.formulation_requirement,
+            element_temperature_k: completed.workload.element_temperature_k.clone(),
+            operating_time_s: completed.workload.operating_time_s,
         },
     )
     .map_err(|e| e.to_string())?;

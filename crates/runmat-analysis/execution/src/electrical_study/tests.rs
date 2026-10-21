@@ -65,6 +65,8 @@ pub(crate) fn preparation() -> ElectricalStudyPreparation {
     };
     let policy = ElectricalStudyPlanningPolicy {
         formulation_requirement: FormulationRequirement::Experimental,
+        element_temperature_k: None,
+        operating_time_s: None,
     };
     let workload = plan_electrical_study(&compiled, policy).unwrap();
     ElectricalStudyPreparation {

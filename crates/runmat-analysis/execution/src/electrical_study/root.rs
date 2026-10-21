@@ -94,7 +94,7 @@ impl PreparationWire {
         if output_policy.chunk_bytes() != self.chunk_bytes {
             return Err(invalid("noncanonical electrical output chunk size"));
         }
-        let workload = plan_electrical_study(&self.compiled, self.policy)
+        let workload = plan_electrical_study(&self.compiled, self.policy.clone())
             .map_err(|error| invalid(&error.to_string()))?;
         if workload != self.workload {
             return Err(invalid(

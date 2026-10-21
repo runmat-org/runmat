@@ -96,7 +96,7 @@ impl ElectricalStudyCoordinator {
             .compiled
             .validate_against(&preparation.mesh)
             .map_err(|error| invalid(error.to_string()))?;
-        let expected = plan_electrical_study(&preparation.product.compiled, preparation.policy)
+        let expected = plan_electrical_study(&preparation.product.compiled, preparation.policy.clone())
             .map_err(|error| invalid(error.to_string()))?;
         if expected != preparation.product.workload {
             return Err(AnalysisBridgeError::Identity(
@@ -333,7 +333,7 @@ impl ElectricalStudyCoordinator {
         self.phase() == ElectricalStudyPhase::Complete
     }
     pub fn policy(&self) -> ElectricalStudyPlanningPolicy {
-        self.preparation.policy
+        self.preparation.policy.clone()
     }
     pub fn selected_step(&self) -> &runmat_analysis_core::ProcedureStep {
         self.preparation.selected_step()

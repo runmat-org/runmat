@@ -34,6 +34,8 @@ fn compiled(equation: StaticElectricalEquation) -> CompiledAnalysisStudy {
 fn policy() -> ElectricalStudyPlanningPolicy {
     ElectricalStudyPlanningPolicy {
         formulation_requirement: FormulationRequirement::Experimental,
+        element_temperature_k: None,
+        operating_time_s: None,
     }
 }
 
@@ -90,6 +92,8 @@ fn unsupported_lifecycle_and_missing_accuracy_are_not_silently_lowered() {
     assert!(plan_electrical_study(&changed, policy()).is_err());
     let mismatched = ElectricalStudyPlanningPolicy {
         formulation_requirement: FormulationRequirement::Production,
+        element_temperature_k: None,
+        operating_time_s: None,
     };
     assert!(matches!(
         plan_electrical_study(&study, mismatched),

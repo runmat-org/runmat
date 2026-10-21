@@ -65,7 +65,7 @@ pub(super) struct ElectricalStudyReplayContext {
 
 impl CompletedElectricalStudy {
     pub fn policy(&self) -> ElectricalStudyPlanningPolicy {
-        self.replay.policy
+        self.replay.policy.clone()
     }
 
     pub fn result_closures(&self) -> &[ElectricalStudyResultClosure] {
@@ -82,7 +82,7 @@ impl CompletedElectricalStudy {
             &self.result.result,
             &self.replay.mesh,
         )?;
-        let workload = plan_electrical_study(&self.compiled, self.replay.policy)
+        let workload = plan_electrical_study(&self.compiled, self.replay.policy.clone())
             .map_err(|error| invalid(error.to_string()))?;
         if workload != self.workload {
             return Err(invalid(

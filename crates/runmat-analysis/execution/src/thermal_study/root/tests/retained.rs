@@ -79,6 +79,8 @@ fn retained_preparation() -> ThermalStudyPreparation {
         step_id: ProcedureStepId("potential".into()),
         formulation_requirement: FormulationRequirement::Experimental,
         relative_residual_target: 1e-10,
+        element_temperature_k: None,
+        operating_time_s: None,
     };
     let result = electrical.execute(&input.mesh).unwrap();
     let expected = result.source_result_identity().unwrap();

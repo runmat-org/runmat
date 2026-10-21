@@ -51,6 +51,7 @@ fn workload() -> MaxwellHarmonicWorkload {
         step_id: ProcedureStepId("field".into()),
         formulation_requirement: FormulationRequirement::Experimental,
         relative_residual_target: 1e-10,
+        frequency: runmat_analysis_core::Frequency::new(1e8),
     }
 }
 fn revision() -> ProgramRevision {

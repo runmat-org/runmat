@@ -146,6 +146,7 @@ pub(super) fn workload() -> MaxwellHarmonicWorkload {
         step_id: ProcedureStepId("potential".into()),
         formulation_requirement: FormulationRequirement::Experimental,
         relative_residual_target: 1e-10,
+        frequency: runmat_analysis_core::Frequency::new(FREQUENCY),
     }
 }
 pub(super) fn mesh(order: ElementOrder) -> SolverMeshArtifact {

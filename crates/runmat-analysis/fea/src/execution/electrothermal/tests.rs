@@ -25,6 +25,8 @@ fn electrical_workload(voltage: f64, gauge: f64) -> ElectricalStaticWorkload {
         step_id: ProcedureStepId("potential".into()),
         formulation_requirement: FormulationRequirement::Experimental,
         relative_residual_target: 1e-11,
+        element_temperature_k: None,
+        operating_time_s: None,
     }
 }
 

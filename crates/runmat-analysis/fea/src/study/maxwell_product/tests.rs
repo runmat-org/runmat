@@ -17,14 +17,7 @@ fn both_affine_orders_preserve_exact_compiled_model_properties_and_complex_sourc
             formulation.realization(),
             &crate::admission::canonical_maxwell_realization(order)
         );
-        let physical = crate::physics::maxwell::compile_canonical_input(
-            &product.workload.model,
-            &mesh,
-            product.workload.step_id.as_str(),
-            product.workload.formulation_requirement,
-            product.workload.relative_residual_target,
-        )
-        .unwrap();
+        let physical = product.workload.compile_input(&mesh).unwrap();
         assert_eq!(
             physical.angular_frequency_rad_per_s,
             std::f64::consts::TAU * 1e8
