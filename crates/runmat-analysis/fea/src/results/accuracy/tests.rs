@@ -74,7 +74,7 @@ fn mandatory_evidence_governs_status_and_production_publication() {
 }
 
 #[test]
-fn missing_mandatory_evidence_is_indeterminate_and_blocks_production() {
+fn missing_mandatory_evidence_is_indeterminate_and_blocks_by_default() {
     let plan = AccuracyPlan::baseline("accuracy");
     let evaluation = evaluate_accuracy(&plan, &[]).unwrap();
     assert_eq!(evaluation.report.status, AccuracyStatus::Indeterminate);
@@ -82,10 +82,14 @@ fn missing_mandatory_evidence_is_indeterminate_and_blocks_production() {
         publication_gate(&plan, &evaluation).unwrap().decision,
         PublicationDecision::Block
     );
-    assert_eq!(
-        publication_gate(&plan, &evaluation).unwrap().decision,
-        PublicationDecision::Allow
-    );
+
+    // Publishing an indeterminate result is an explicit authored choice; it stays labeled.
+    let mut opted_in = AccuracyPlan::baseline("accuracy");
+    opted_in.unavailable_evidence = runmat_analysis_core::UnavailableEvidencePolicy::MarkIndeterminate;
+    let evaluation = evaluate_accuracy(&opted_in, &[]).unwrap();
+    let gate = publication_gate(&opted_in, &evaluation).unwrap();
+    assert_eq!(gate.decision, PublicationDecision::Allow);
+    assert_eq!(gate.status, AccuracyStatus::Indeterminate);
 }
 
 #[test]

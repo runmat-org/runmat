@@ -117,8 +117,9 @@ pub struct AccuracyResourceCeiling {
 }
 
 impl AccuracyPlan {
-    /// Baseline plan: a mandatory relative algebraic residual bound of 1e-8; evidence the solver
-    /// cannot produce is reported as indeterminate rather than silently passing.
+    /// Baseline plan: a mandatory relative algebraic residual bound of 1e-8. Every solver produces
+    /// that evidence, so a result without it is indeterminate and is not published; a study may
+    /// opt into publishing such results, labeled indeterminate, with `MarkIndeterminate`.
     pub fn baseline(id: impl Into<String>) -> Self {
         Self {
             accuracy_plan_id: AccuracyPlanId(id.into()),
@@ -130,7 +131,7 @@ impl AccuracyPlan {
                 evidence: RequiredAccuracyEvidence::ResidualBound,
                 mandatory: true,
             }],
-            unavailable_evidence: UnavailableEvidencePolicy::MarkIndeterminate,
+            unavailable_evidence: UnavailableEvidencePolicy::Fail,
             exceeded_limit: AccuracyLimitAction::Fail,
             equivalence: NumericalEquivalencePolicy::RelativeTolerance(1.0e-10),
             resources: AccuracyResourceCeiling {
