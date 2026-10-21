@@ -1,9 +1,8 @@
 //! Authored canonical acoustic intent, independent of task placement and transport.
 
 use runmat_analysis_core::{
-    AccuracyTolerance, AnalysisProcedure, ErrorContributionKind, FormulationRequirement, Frequency,
-    IndependentDomain, PhysicsFamily, ProcedureSettings, RestartPolicy, SolutionSpace,
-    StateCompleteness, StateKind,
+    AccuracyTolerance, AnalysisProcedure, ErrorContributionKind, Frequency, IndependentDomain,
+    PhysicsFamily, ProcedureSettings, RestartPolicy, SolutionSpace, StateCompleteness, StateKind,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -27,16 +26,14 @@ mod tests;
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AcousticStudyPlanningPolicy {
-    pub formulation_requirement: FormulationRequirement,
     pub power_balance_relative_tolerance: f64,
     /// Limit on the factorization certificate's contraction bound for every frequency.
     pub contraction_limit: f64,
 }
 
 impl AcousticStudyPlanningPolicy {
-    pub const fn experimental() -> Self {
+    pub const fn standard() -> Self {
         Self {
-            formulation_requirement: FormulationRequirement::Experimental,
             power_balance_relative_tolerance: 1.0e-8,
             contraction_limit: crate::solve::certificate::DEFAULT_CONTRACTION_LIMIT,
         }
@@ -94,9 +91,6 @@ pub fn plan_acoustic_study(
 ) -> Result<AcousticStudyPlan, AcousticStudyPlanningError> {
     policy.validate()?;
     study.definition_digest()?;
-    if policy.formulation_requirement != study.formulation_requirement {
-        return Err(AcousticStudyPlanningError::FormulationRequirementMismatch);
-    }
     let [step] = study.model.sequence.steps.as_slice() else {
         return Err(AcousticStudyPlanningError::UnsupportedSequence);
     };
@@ -161,7 +155,6 @@ pub fn plan_acoustic_study(
                 model: study.model.clone(),
                 step_id: step.step_id.clone(),
                 frequency: Frequency::new(entry.frequency_hz()),
-                formulation_requirement: policy.formulation_requirement,
                 solver,
                 power_balance_relative_tolerance: policy.power_balance_relative_tolerance,
             };
@@ -181,8 +174,6 @@ const fn open_unit_interval(value: f64) -> bool {
 
 #[derive(Debug, Error)]
 pub enum AcousticStudyPlanningError {
-    #[error("acoustic planning policy differs from the compiled formulation requirement")]
-    FormulationRequirementMismatch,
     #[error("acoustic planning requires exactly one fresh independent procedure step")]
     UnsupportedSequence,
     #[error("acoustic planning currently supports only direct harmonic response")]

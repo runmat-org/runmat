@@ -46,7 +46,6 @@ study plane_poiseuille {
     geometry = geometry.channel
     mesh = mesh.channel
     model = model.plane_channel
-    formulation = experimental
     analysis flow { fluid steady {} }
     output velocity = analysis.flow.field.cell.fluid_velocity
     output pressure = analysis.flow.field.cell.fluid_pressure

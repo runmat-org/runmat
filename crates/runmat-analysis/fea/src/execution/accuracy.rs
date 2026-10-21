@@ -1,4 +1,4 @@
-use runmat_analysis_core::{AccuracyPlan, FormulationRequirement};
+use runmat_analysis_core::AccuracyPlan;
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use serde::{Deserialize, Serialize};
 
@@ -138,7 +138,6 @@ pub struct AccuracyEvaluationRequest {
     pub source_kind: AccuracySourceKind,
     pub source_result: SolverResultIdentity,
     pub source_observations: Option<ObservationPublicationCatalogIdentity>,
-    pub formulation_requirement: FormulationRequirement,
     pub plan: AccuracyPlan,
 }
 
@@ -151,7 +150,6 @@ struct AccuracyEvaluationRequestWire {
     source_kind: AccuracySourceKind,
     source_result: SolverResultIdentity,
     source_observations: Option<ObservationPublicationCatalogIdentity>,
-    formulation_requirement: FormulationRequirement,
     plan: AccuracyPlan,
 }
 
@@ -166,7 +164,6 @@ impl TryFrom<AccuracyEvaluationRequestWire> for AccuracyEvaluationRequest {
             source_kind: wire.source_kind,
             source_result: wire.source_result,
             source_observations: wire.source_observations,
-            formulation_requirement: wire.formulation_requirement,
             plan: wire.plan,
         };
         request.validate()?;
@@ -180,7 +177,6 @@ impl AccuracyEvaluationRequest {
         source_kind: AccuracySourceKind,
         source_result: SolverResultIdentity,
         observations: Option<&ObservationPublicationCatalog>,
-        formulation_requirement: FormulationRequirement,
         plan: AccuracyPlan,
     ) -> AnalysisExecutionResult<Self> {
         let source_observations = match observations {
@@ -202,7 +198,6 @@ impl AccuracyEvaluationRequest {
                 source_kind,
                 source_result,
                 source_observations,
-                formulation_requirement,
                 &plan,
             ),
         )?;
@@ -213,7 +208,6 @@ impl AccuracyEvaluationRequest {
             source_kind,
             source_result,
             source_observations,
-            formulation_requirement,
             plan,
         };
         request.validate()?;
@@ -239,7 +233,6 @@ impl AccuracyEvaluationRequest {
                 self.source_kind,
                 self.source_result,
                 self.source_observations,
-                self.formulation_requirement,
                 &self.plan,
             ),
         )?;

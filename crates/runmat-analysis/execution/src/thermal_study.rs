@@ -266,7 +266,6 @@ impl ThermalStudyCoordinator {
                     .collect(),
                 sequence: SequenceIdentity::from_solver_contract(&workload.model.sequence)?,
                 step: self.preparation.selected_step().clone(),
-                formulation_requirement: workload.formulation_requirement,
                 program_revision: self.preparation.program_revision.clone(),
                 chunk_bytes: self.preparation.output_policy.chunk_bytes(),
                 inventory_limits: self.preparation.output_policy.inventory_limits(),

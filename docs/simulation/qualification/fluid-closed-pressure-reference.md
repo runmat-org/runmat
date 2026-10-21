@@ -24,7 +24,7 @@ Cancellation is honored by outer iteration and shared Krylov execution.
 These are requested bounds, not measured RSS. Closed-domain analytic translation,
 constant pressure and corruption/authority/compatibility tests establish the tested
 CPU envelope. General cavity accuracy and mandatory spatial evidence remain open;
-this is not Stage9 or production qualification.
+this is not Stage 9 qualification.
 
 A closed pressure reconstruction still needs an affinely spanning cell-centroid
 inventory. The original six-cell cube has coplanar centroids and is rejected;

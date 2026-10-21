@@ -62,8 +62,6 @@ pub(super) fn admit(
         series_reductions: Vec::new(),
         fields,
     };
-    let (production_publishable, production_publication_reasons) =
-        evaluate_production_publication(&run, accuracy.numerically_acceptable);
     let provenance = RunProvenance {
         requested_backend: run.requested_backend,
         execution_backend: run.execution_backend,
@@ -92,9 +90,7 @@ pub(super) fn admit(
         result_quality: accuracy.result_quality,
         run_status: accuracy.run_status,
         numerically_acceptable: accuracy.numerically_acceptable,
-        production_publishable,
         quality_reasons: accuracy.quality_reasons,
-        production_publication_reasons,
         provenance,
     };
     Ok(OperationEnvelope::new(

@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use runmat_analysis_core::{AnalysisModel, FormulationRequirement};
+use runmat_analysis_core::AnalysisModel;
 use runmat_analysis_fea::{
     run_linear_static_with_options, ComputeBackend, LinearStaticSolveOptions,
 };
@@ -19,20 +19,12 @@ use super::{
 pub(super) fn analysis_run_linear_static_with_executor(
     model: &AnalysisModel,
     backend: ComputeBackend,
-    formulation_requirement: FormulationRequirement,
     options: AnalysisRunOptions,
     context: OperationContext,
     executor: Option<&dyn StructuralLinearExecutor>,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     publish_standalone_run(
-        execute_linear_static_with_executor(
-            model,
-            backend,
-            formulation_requirement,
-            options,
-            context,
-            executor,
-        )?,
+        execute_linear_static_with_executor(model, backend, options, context, executor)?,
         "RM.FEA.RUN_LINEAR_STATIC.ARTIFACT_STORE_FAILED",
     )
 }
@@ -40,19 +32,12 @@ pub(super) fn analysis_run_linear_static_with_executor(
 pub(super) fn execute_linear_static_with_executor(
     model: &AnalysisModel,
     backend: ComputeBackend,
-    formulation_requirement: FormulationRequirement,
     options: AnalysisRunOptions,
     context: OperationContext,
     executor: Option<&dyn StructuralLinearExecutor>,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     let _solver_context = install_fea_solver_context();
-    let prepared = analysis_prepare_linear_static_run_op(
-        model,
-        backend,
-        formulation_requirement,
-        options,
-        context,
-    )?;
+    let prepared = analysis_prepare_linear_static_run_op(model, backend, options, context)?;
     let run = if let Some(executor) = executor {
         let mesh = prepared.solver_mesh.as_ref().ok_or_else(|| {
             operation_error(
@@ -98,7 +83,6 @@ pub(super) fn execute_linear_static_with_executor(
             &prepared.workload.model,
             prepared.workload.backend,
             LinearStaticSolveOptions {
-                formulation_requirement: prepared.workload.formulation_requirement,
                 preconditioner_kind: prepared.workload.preconditioner,
                 algebra_backend_kind: prepared.workload.algebra_backend,
                 solver_mesh_artifact_path: prepared.options.solver_mesh_artifact_path.clone(),

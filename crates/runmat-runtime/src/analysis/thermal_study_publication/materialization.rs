@@ -72,8 +72,6 @@ pub(in crate::analysis) fn admit(
     crate::analysis::study_result::thermal_observation_admission::project(
         completed, source, &mut run,
     )?;
-    let (production_publishable, production_publication_reasons) =
-        evaluate_production_publication(&run, accuracy.numerically_acceptable);
     let provenance = RunProvenance {
         requested_backend: run.requested_backend,
         execution_backend: run.execution_backend,
@@ -114,9 +112,7 @@ pub(in crate::analysis) fn admit(
         result_quality: accuracy.result_quality,
         run_status: accuracy.run_status,
         numerically_acceptable: accuracy.numerically_acceptable,
-        production_publishable,
         quality_reasons: accuracy.quality_reasons,
-        production_publication_reasons,
         provenance,
     };
     Ok(crate::operations::OperationEnvelope::new(

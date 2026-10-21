@@ -3,46 +3,31 @@ use crate::{
     admission::{admit_nonstructural, registered_formulations},
     contracts::{validate_solver_formulation_compatibility, SolverMethod, SolverPreconditioner},
 };
-use runmat_analysis_core::{FormulationAdmissionRejectionReason, FormulationMaturity};
 use runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh;
 
 #[test]
-fn volume_charge_has_distinct_experimental_identity_and_no_conduction_admission() {
+fn volume_charge_has_distinct_identity_and_no_conduction_admission() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
         let mesh = canonical_tetrahedron_solver_mesh(order);
         let charged = admit_canonical_electrical_static(
             StaticElectricalEquation::Electrostatics,
             CanonicalElectricalSource::VolumeCharge,
             &mesh,
-            FormulationRequirement::Experimental,
         )
         .unwrap();
         let free = admit_canonical_electrical_static(
             StaticElectricalEquation::Electrostatics,
             CanonicalElectricalSource::SourceFree,
             &mesh,
-            FormulationRequirement::Experimental,
         )
         .unwrap();
         assert_ne!(charged, free);
-        for (equation, requirement) in [
-            (
-                StaticElectricalEquation::Electrostatics,
-                FormulationRequirement::Production,
-            ),
-            (
-                StaticElectricalEquation::SteadyConduction,
-                FormulationRequirement::Experimental,
-            ),
-        ] {
-            assert!(admit_canonical_electrical_static(
-                equation,
-                CanonicalElectricalSource::VolumeCharge,
-                &mesh,
-                requirement,
-            )
-            .is_err());
-        }
+        assert!(admit_canonical_electrical_static(
+            StaticElectricalEquation::SteadyConduction,
+            CanonicalElectricalSource::VolumeCharge,
+            &mesh,
+        )
+        .is_err());
     }
 }
 
@@ -68,13 +53,11 @@ fn equation_and_topology_select_four_distinct_registry_identities() {
                 equation,
                 CanonicalElectricalSource::SourceFree,
                 &mesh,
-                FormulationRequirement::Experimental,
             )
             .unwrap();
             assert_eq!(identity.family(), PhysicsFamily::Electromagnetic);
             assert_eq!(identity.procedure(), AnalysisProcedure::Static);
             assert_eq!(identity.solution_space(), SolutionSpace::Direct);
-            assert_eq!(identity.qualification(), FormulationMaturity::Experimental);
             assert_eq!(
                 identity.realization(),
                 &realization(equation, order, CanonicalElectricalSource::SourceFree)
@@ -114,29 +97,25 @@ fn equation_and_topology_select_four_distinct_registry_identities() {
 }
 
 #[test]
-fn production_and_cross_equation_or_harmonic_identity_splicing_fail_closed() {
+fn cross_equation_or_harmonic_identity_splicing_fails_closed() {
     for equation in [
         StaticElectricalEquation::Electrostatics,
         StaticElectricalEquation::SteadyConduction,
     ] {
         for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
             let mesh = canonical_tetrahedron_solver_mesh(order);
-            let error = admit_canonical_electrical_static(
+            admit_canonical_electrical_static(
                 equation,
                 CanonicalElectricalSource::SourceFree,
                 &mesh,
-                FormulationRequirement::Production,
             )
-            .unwrap_err();
-            assert!(matches!(error, FeaRunError::FormulationAdmission(rejection)
-                if rejection.reason == FormulationAdmissionRejectionReason::ProductionQualificationMissing));
+            .expect("canonical source-free electrical identity is admitted");
             let mut mixed = realization(equation, order, CanonicalElectricalSource::SourceFree);
             mixed.temporals = vec![TemporalImplementation::MaxwellComplexElectricFieldGeneralSolve];
             assert!(admit_formulation(FormulationAdmissionRequest {
                 family: PhysicsFamily::Electromagnetic,
                 procedure: AnalysisProcedure::Static,
                 solution_space: SolutionSpace::Direct,
-                requirement: FormulationRequirement::Experimental,
                 realization: mixed,
             })
             .is_err());
@@ -153,7 +132,6 @@ fn production_and_cross_equation_or_harmonic_identity_splicing_fail_closed() {
                 family: PhysicsFamily::Electromagnetic,
                 procedure: AnalysisProcedure::Static,
                 solution_space: SolutionSpace::Direct,
-                requirement: FormulationRequirement::Experimental,
                 realization: crossed,
             })
             .is_err());
@@ -170,7 +148,6 @@ fn generic_nonstructural_selector_cannot_guess_a_static_electrical_equation() {
         Some(&mesh),
         SourceImplementation::NotApplicable,
         BoundaryTransferImplementation::CanonicalBoundaryProjection,
-        FormulationRequirement::Experimental,
     )
     .is_err());
 }

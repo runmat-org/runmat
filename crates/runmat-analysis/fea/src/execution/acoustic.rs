@@ -8,9 +8,9 @@ use crate::{
     },
 };
 use runmat_analysis_core::{
-    validate_model, AnalysisModel, AnalysisProcedure, BoundaryTransferImplementation,
-    FormulationRequirement, Frequency, PhysicsFamily, ProcedureStep, ProcedureStepId,
-    SourceImplementation, StateCompleteness, StateKind,
+    validate_model, AnalysisModel, AnalysisProcedure, BoundaryTransferImplementation, Frequency,
+    PhysicsFamily, ProcedureStep, ProcedureStepId, SourceImplementation, StateCompleteness,
+    StateKind,
 };
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
@@ -46,7 +46,6 @@ pub struct AcousticHarmonicWorkload {
     pub model: AnalysisModel,
     pub step_id: ProcedureStepId,
     pub frequency: Frequency,
-    pub formulation_requirement: FormulationRequirement,
     pub solver: AcousticHarmonicPolicy,
     pub power_balance_relative_tolerance: f64,
 }
@@ -121,7 +120,6 @@ impl AcousticHarmonicWorkload {
             Some(mesh),
             SourceImplementation::CanonicalBoundaryProjection,
             BoundaryTransferImplementation::CanonicalBoundaryProjection,
-            self.formulation_requirement,
         )
         .map_err(invalid)?;
         validate_solver_formulation_compatibility(

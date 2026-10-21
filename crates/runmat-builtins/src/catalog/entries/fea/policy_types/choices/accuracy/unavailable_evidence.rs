@@ -14,13 +14,13 @@ pub(super) mod fail {
         section(
             "Behavior",
             &[
-                "When a mandatory criterion has no matching evidence, the plan is indeterminate and publication is blocked, for production and experimental formulations alike.",
+                "When a mandatory criterion has no matching evidence, the plan is indeterminate and publication is blocked.",
             ],
         ),
         section(
             "When to use it",
             &[
-                "Use it for production acceptance, where an unverified result must not be published.",
+                "Use it for acceptance where an unverified result must not be published.",
             ],
         ),
         USE_PLAN,
@@ -35,10 +35,10 @@ pub(super) mod fail {
     ];
     const FAQS: &[BuiltinDocumentationFaq] = &[];
     const RELATED: &[&str] = &[
-        "fea.UnavailableEvidencePolicy.markIndeterminateExperimental",
+        "fea.UnavailableEvidencePolicy.markIndeterminate",
         "fea.AccuracyPlan.new",
         "fea.AccuracyResourceCeiling.new",
-        "fea.AccuracyPlan.experimentalBaseline",
+        "fea.AccuracyPlan.baseline",
         "fea.ProcedureStep.configure",
     ];
     const DOCUMENTATION: BuiltinDocumentation = documentation(ConstructorDocumentationDefinition {
@@ -75,55 +75,55 @@ pub(super) mod fail {
     );
 }
 
-pub(super) mod mark_indeterminate_experimental {
+pub(super) mod mark_indeterminate {
     use super::*;
 
     const SECTIONS: &[BuiltinDocumentationSection] = &[
         section(
             "Behavior",
             &[
-                "For an experimental formulation, an indeterminate plan (a mandatory criterion without evidence) still publishes, and the result is marked degraded. A production formulation is still blocked.",
-                "It is the only unavailable-evidence policy that permits the `warnExperimental` limit action, and it is what `fea.AccuracyPlan.experimentalBaseline(id)` uses.",
+                "An indeterminate plan (a mandatory criterion without evidence) still publishes, with its accuracy status reported as indeterminate and the result marked degraded. An unsatisfied plan is still blocked.",
+                "It is what `fea.AccuracyPlan.baseline(id)` uses.",
             ],
         ),
         section(
             "When to use it",
             &[
-                "Use it while developing or diagnosing a formulation whose evidence producers are not complete yet.",
+                "Use it when a study should still publish its fields while reporting that a criterion could not be evaluated. Use `fail` when every mandatory criterion must be established before anything publishes.",
             ],
         ),
         USE_PLAN,
     ];
     const EXAMPLES: &[BuiltinExample] = &[
         example(
-            "mark-indeterminate-experimental",
-            "Use markIndeterminateExperimental in an accuracy plan",
-            "value = fea.UnavailableEvidencePolicy.markIndeterminateExperimental();\ncriterion = fea.AccuracyCriterion.new(\"equilibrium\", fea.AccuracyTarget.globalEquilibrium(), fea.ErrorContribution.algebraic(), ...\n    fea.AccuracyTolerance.relative(1e-8), fea.RequiredAccuracyEvidence.residualBound(), true);\nplan = fea.AccuracyPlan.new(\"acceptance\", {criterion}, value, fea.AccuracyLimitAction.warnExperimental(), ...\n    fea.NumericalEquivalencePolicy.relativeTolerance(1e-12), fea.AccuracyResourceCeiling.new(0, 0, 100, 600000, 2000000000));",
-            "assert(strcmp(class(value), 'fea.UnavailableEvidencePolicy'));\nassert(strcmp(value.value, 'mark_indeterminate_experimental'));\nassert(strcmp(class(plan), 'fea.AccuracyPlan'));",
+            "mark-indeterminate",
+            "Use markIndeterminate in an accuracy plan",
+            "value = fea.UnavailableEvidencePolicy.markIndeterminate();\ncriterion = fea.AccuracyCriterion.new(\"equilibrium\", fea.AccuracyTarget.globalEquilibrium(), fea.ErrorContribution.algebraic(), ...\n    fea.AccuracyTolerance.relative(1e-8), fea.RequiredAccuracyEvidence.residualBound(), true);\nplan = fea.AccuracyPlan.new(\"acceptance\", {criterion}, value, fea.AccuracyLimitAction.fail(), ...\n    fea.NumericalEquivalencePolicy.relativeTolerance(1e-12), fea.AccuracyResourceCeiling.new(0, 0, 100, 600000, 2000000000));",
+            "assert(strcmp(class(value), 'fea.UnavailableEvidencePolicy'));\nassert(strcmp(value.value, 'mark_indeterminate'));\nassert(strcmp(class(plan), 'fea.AccuracyPlan'));",
         ),
     ];
     const FAQS: &[BuiltinDocumentationFaq] = &[
         faq(
-            "Does this make an experimental result publishable as production?",
-            "No. Formulation maturity and publication status stay independent; this policy only lets an explicitly experimental result publish as degraded.",
+            "Does this let a result that misses its tolerance publish?",
+            "No. It only governs criteria whose evidence is unavailable. A criterion that is evaluated and not satisfied blocks publication.",
         ),
     ];
     const RELATED: &[&str] = &[
         "fea.UnavailableEvidencePolicy.fail",
         "fea.AccuracyPlan.new",
         "fea.AccuracyResourceCeiling.new",
-        "fea.AccuracyPlan.experimentalBaseline",
+        "fea.AccuracyPlan.baseline",
         "fea.ProcedureStep.configure",
     ];
     const DOCUMENTATION: BuiltinDocumentation = documentation(ConstructorDocumentationDefinition {
-        title: "fea.UnavailableEvidencePolicy.markIndeterminateExperimental",
-        summary: "Publish an indeterminate experimental result as degraded instead of failing.",
-        description: "`fea.UnavailableEvidencePolicy.markIndeterminateExperimental()` returns the closed `fea.UnavailableEvidencePolicy` value `mark_indeterminate_experimental`. It takes no arguments.",
+        title: "fea.UnavailableEvidencePolicy.markIndeterminate",
+        summary: "Publish a result whose evidence is unavailable as indeterminate instead of failing.",
+        description: "`fea.UnavailableEvidencePolicy.markIndeterminate()` returns the closed `fea.UnavailableEvidencePolicy` value `mark_indeterminate`. It takes no arguments.",
         keywords: &[
             "fea",
             "accuracy",
             "UnavailableEvidencePolicy",
-            "markIndeterminateExperimental",
+            "markIndeterminate",
             "evidence",
         ],
         related: RELATED,
@@ -138,9 +138,9 @@ pub(super) mod mark_indeterminate_experimental {
 
     policy_entry!(
         CATALOG_ENTRY,
-        name: "fea.UnavailableEvidencePolicy.markIndeterminateExperimental",
+        name: "fea.UnavailableEvidencePolicy.markIndeterminate",
         result: crate::fea_contract::policy_types::classes::UNAVAILABLE_EVIDENCE_POLICY,
-        signature: "value = fea.UnavailableEvidencePolicy.markIndeterminateExperimental()",
+        signature: "value = fea.UnavailableEvidencePolicy.markIndeterminate()",
         inputs: [],
         output: ("value", "Typed fea.UnavailableEvidencePolicy value."),
         integer_capabilities: &[],
@@ -149,7 +149,5 @@ pub(super) mod mark_indeterminate_experimental {
     );
 }
 
-pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[
-    &fail::CATALOG_ENTRY,
-    &mark_indeterminate_experimental::CATALOG_ENTRY,
-];
+pub(super) const ENTRIES: &[&BuiltinCatalogEntry] =
+    &[&fail::CATALOG_ENTRY, &mark_indeterminate::CATALOG_ENTRY];

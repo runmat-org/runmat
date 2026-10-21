@@ -43,7 +43,6 @@ fn workload() -> AcousticHarmonicWorkload {
         model,
         step_id: ProcedureStepId("acoustic".into()),
         frequency: Frequency::new(0.2),
-        formulation_requirement: FormulationRequirement::Experimental,
         solver: AcousticHarmonicPolicy {
             relative_tolerance: 1e-10,
             ..Default::default()
@@ -151,8 +150,8 @@ fn canonical_results_fit_admitted_tet4_tet10_payload_and_policy_identity_is_dete
 }
 
 #[test]
-fn acoustic_prepared_byte_facts_and_production_fail_closed() {
-    let mut workload = workload();
+fn acoustic_prepared_byte_facts_fail_closed() {
+    let workload = workload();
     let mesh = slab_mesh(1);
     for field in 0..11 {
         let mut prepared = facts(&workload, &mesh);
@@ -198,8 +197,6 @@ fn acoustic_prepared_byte_facts_and_production_fail_closed() {
         }
         assert!(build_acoustic_resource_plan(&workload, &mesh, prepared).is_err());
     }
-    workload.formulation_requirement = FormulationRequirement::Production;
-    assert!(acoustic_harmonic_result_payload_bytes_upper_bound(&workload, &mesh).is_err());
 }
 
 #[test]

@@ -40,7 +40,6 @@ study pipe_poiseuille {
     geometry = geometry.pipe
     mesh = mesh.pipe
     model = model.round_pipe
-    formulation = experimental
     analysis flow { fluid steady {} }
     output velocity = analysis.flow.field.cell.fluid_velocity
     output pressure = analysis.flow.field.cell.fluid_pressure

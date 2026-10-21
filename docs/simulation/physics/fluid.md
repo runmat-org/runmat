@@ -37,7 +37,7 @@ advective fluxes. Shared GMRES correction solves with fixed-support ILU(0) act o
 the pressure reference is retained separately, avoiding an absolute-pressure round trip. Acceptance
 checks momentum, continuity, constitutive flux and local/global physical balance.
 
-Reduced channel/correlation operators still used by experimental coupled paths are separate from this
+Reduced channel/correlation operators still used by coupled paths are separate from this
 canonical route. They do not establish 3D CFD, CHT or FSI qualification. Arbitrary turbulence,
 separation and boundary-layer accuracy require their own independent evidence and supported operators.
 
@@ -82,12 +82,11 @@ study steady_channel {
     geometry = geometry.channel
     mesh = mesh.channel
     model = model.channel_flow
-    formulation = experimental
     analysis flow { fluid steady {} }
 }
 ```
 
-This is an experimental steady authoring example; execution also requires admissible geometry,
+This is a steady authoring example; execution also requires admissible geometry,
 resolved boundaries, resources and the step's accuracy evidence.
 The material region must provide density and viscosity appropriate to the intended formulation.
 

@@ -3,7 +3,7 @@
 This bounded Stage 5 chain uses the shared immutable `InitialFieldBinding`, not a
 thermal-private artifact loader. Scalar/vector admission is generic; thermal is
 the first integrated numerical consumer. It is not whole authored-study dispatch,
-process restart, arbitrary topology transfer, or production qualification.
+process restart, arbitrary topology transfer, or family qualification.
 
 ## Independent reference
 
@@ -120,4 +120,4 @@ generated/artifact source-energy equivalence, generic authored family dispatch,
 solver-specific process restart, measured residency, complete accuracy admission,
 temperature-dependent closure and blocking release evidence remain required.
 Other physics consumers must integrate the shared binding before claiming support.
-No Stage 5 or production gate is promoted by this slice alone.
+No Stage 5 gate is promoted by this slice alone.

@@ -109,7 +109,6 @@ fn run(observation_policy: Option<runmat_analysis_core::PartialAccessPolicy>, or
             &prepared.compiled,
             StructuralStudyPlanningPolicy {
                 backend: runmat_analysis_fea::ComputeBackend::Cpu,
-                formulation_requirement: prepared.compiled.formulation_requirement,
                 numerics: StructuralNumericalPlanningPolicy::production(),
             },
         )

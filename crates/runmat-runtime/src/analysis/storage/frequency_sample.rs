@@ -110,7 +110,6 @@ pub(super) fn validate_artifact(
             runmat_analysis_fea::execution::AccuracySourceKind::AcousticHarmonic,
             summary.source_result,
             None,
-            expected.formulation_requirement,
             expected
                 .model
                 .sequence
@@ -255,15 +254,6 @@ pub(super) fn validate_artifact(
             )
     {
         return Err("acoustic frequency artifact quality classification is inconsistent".into());
-    }
-    let (publishable, reasons) = result_policy::evaluate_identity_production_publication(
-        &artifact.step.identity,
-        artifact.step.numerically_acceptable,
-    );
-    if artifact.step.production_publishable != publishable
-        || artifact.step.production_publication_reasons != reasons
-    {
-        return Err("acoustic frequency artifact production classification is inconsistent".into());
     }
     Ok(())
 }

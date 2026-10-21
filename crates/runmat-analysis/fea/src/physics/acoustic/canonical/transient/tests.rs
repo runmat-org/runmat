@@ -55,7 +55,7 @@ use runmat_analysis_core::Pressure;
 fn duct(end: Option<f64>, end_time: f64, intervals: usize) -> AnalysisModel {
     let mut model = super::super::tests::model();
     model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
-    model.sequence.steps = vec![ProcedureStep::experimental(
+    model.sequence.steps = vec![ProcedureStep::new(
         "acoustic",
         PhysicsFamily::Acoustic,
         AnalysisProcedure::TransientResponse,

@@ -672,6 +672,9 @@ fn primary_result_field_id(procedure_step: &ProcedureStep) -> String {
         AnalysisSolverOptions::AcousticHelmholtz(_) => {
             FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE.to_string()
         }
+        AnalysisSolverOptions::AcousticResponse(_) => {
+            panic!("acoustic modal/transient fixtures execute through the study runner")
+        }
         AnalysisSolverOptions::ElectricalStatic(_)
         | AnalysisSolverOptions::Magnetostatic(_)
         | AnalysisSolverOptions::MaxwellHarmonic(_) => {
@@ -2704,7 +2707,6 @@ fn run_fixture_cpu(
             return boxed_fixture_run_result(analysis_run_transient_with_options_op(
                 model,
                 ComputeBackend::Cpu,
-                FormulationRequirement::Experimental,
                 transient_options_for_spec(spec, solver_mesh_artifact_path),
                 OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
             ));
@@ -2717,14 +2719,12 @@ fn run_fixture_cpu(
         AnalysisSolverOptions::StructuralLinear(_) => analysis_run_linear_static_with_options(
             model,
             ComputeBackend::Cpu,
-            FormulationRequirement::Experimental,
             default_options(solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
         AnalysisSolverOptions::StructuralModes(_) => analysis_run_modal_with_options_op(
             model,
             ComputeBackend::Cpu,
-            FormulationRequirement::Experimental,
             AnalysisModalRunOptions {
                 solver_mesh_artifact_path: solver_mesh_artifact_path.clone(),
                 truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(
@@ -2750,10 +2750,12 @@ fn run_fixture_cpu(
         AnalysisSolverOptions::StructuralBuckling(_) => panic!(
             "structural-buckling fixtures must execute through the study runner, not the legacy single-run CPU fixture harness"
         ),
+        AnalysisSolverOptions::AcousticResponse(_) => panic!(
+            "acoustic modal/transient fixtures must execute through the study runner, not the legacy single-run CPU fixture harness"
+        ),
         AnalysisSolverOptions::AcousticHelmholtz(_) => analysis_run_acoustic_with_options_op(
             model,
             ComputeBackend::Cpu,
-            FormulationRequirement::Experimental,
             AnalysisAcousticRunOptions {
                 mode_count: spec
                     .modal_mode_count
@@ -2765,28 +2767,24 @@ fn run_fixture_cpu(
         AnalysisSolverOptions::StructuralTransient(_) => analysis_run_transient_with_options_op(
             model,
             ComputeBackend::Cpu,
-            FormulationRequirement::Experimental,
             transient_options_for_spec(spec, solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
         AnalysisSolverOptions::ThermalDiffusion(_) => analysis_run_thermal_with_options_op(
             model,
             ComputeBackend::Cpu,
-            FormulationRequirement::Experimental,
             thermal_options_for_spec(spec, solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
         AnalysisSolverOptions::IncompressibleFlow(_) => analysis_run_cfd_with_options_op(
             model,
             ComputeBackend::Cpu,
-            FormulationRequirement::Experimental,
             AnalysisCfdRunOptions::default(),
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
         AnalysisSolverOptions::ConjugateHeatTransfer(_) => analysis_run_cht_with_options_op(
             model,
             ComputeBackend::Cpu,
-            FormulationRequirement::Experimental,
             AnalysisChtRunOptions {
                 deterministic_mode: true,
                 precision_mode: PrecisionMode::Fp64,
@@ -2804,7 +2802,6 @@ fn run_fixture_cpu(
         AnalysisSolverOptions::FluidStructureInteraction(_) => analysis_run_fsi_with_options_op(
             model,
             ComputeBackend::Cpu,
-            FormulationRequirement::Experimental,
             AnalysisFsiRunOptions {
                 deterministic_mode: true,
                 precision_mode: PrecisionMode::Fp64,
@@ -2822,7 +2819,6 @@ fn run_fixture_cpu(
         AnalysisSolverOptions::StructuralNonlinear(_) => analysis_run_nonlinear_with_options_op(
             model,
             ComputeBackend::Cpu,
-            FormulationRequirement::Experimental,
             nonlinear_options_for_spec(spec, solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
@@ -2846,14 +2842,12 @@ fn run_fixture_gpu(
         AnalysisSolverOptions::StructuralLinear(_) => analysis_run_linear_static_with_options(
             model,
             ComputeBackend::Gpu,
-            FormulationRequirement::Experimental,
             default_options(solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
         AnalysisSolverOptions::StructuralModes(_) => analysis_run_modal_with_options_op(
             model,
             ComputeBackend::Gpu,
-            FormulationRequirement::Experimental,
             AnalysisModalRunOptions {
                 solver_mesh_artifact_path: solver_mesh_artifact_path.clone(),
                 truncation: runmat_analysis_fea::ModalTruncationPolicy::requested(
@@ -2879,10 +2873,12 @@ fn run_fixture_gpu(
         AnalysisSolverOptions::StructuralBuckling(_) => panic!(
             "structural-buckling fixtures must execute through the study runner, not the legacy single-run GPU fixture harness"
         ),
+        AnalysisSolverOptions::AcousticResponse(_) => panic!(
+            "acoustic modal/transient fixtures must execute through the study runner, not the legacy single-run GPU fixture harness"
+        ),
         AnalysisSolverOptions::AcousticHelmholtz(_) => analysis_run_acoustic_with_options_op(
             model,
             ComputeBackend::Gpu,
-            FormulationRequirement::Experimental,
             AnalysisAcousticRunOptions {
                 mode_count: spec
                     .modal_mode_count
@@ -2894,28 +2890,24 @@ fn run_fixture_gpu(
         AnalysisSolverOptions::StructuralTransient(_) => analysis_run_transient_with_options_op(
             model,
             ComputeBackend::Gpu,
-            FormulationRequirement::Experimental,
             transient_options_for_spec(spec, solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
         AnalysisSolverOptions::ThermalDiffusion(_) => analysis_run_thermal_with_options_op(
             model,
             ComputeBackend::Gpu,
-            FormulationRequirement::Experimental,
             thermal_options_for_spec(spec, solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
         AnalysisSolverOptions::IncompressibleFlow(_) => analysis_run_cfd_with_options_op(
             model,
             ComputeBackend::Gpu,
-            FormulationRequirement::Experimental,
             AnalysisCfdRunOptions::default(),
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
         AnalysisSolverOptions::ConjugateHeatTransfer(_) => analysis_run_cht_with_options_op(
             model,
             ComputeBackend::Gpu,
-            FormulationRequirement::Experimental,
             AnalysisChtRunOptions {
                 deterministic_mode: true,
                 precision_mode: PrecisionMode::Fp64,
@@ -2933,7 +2925,6 @@ fn run_fixture_gpu(
         AnalysisSolverOptions::FluidStructureInteraction(_) => analysis_run_fsi_with_options_op(
             model,
             ComputeBackend::Gpu,
-            FormulationRequirement::Experimental,
             AnalysisFsiRunOptions {
                 deterministic_mode: true,
                 precision_mode: PrecisionMode::Fp64,
@@ -2951,7 +2942,6 @@ fn run_fixture_gpu(
         AnalysisSolverOptions::StructuralNonlinear(_) => analysis_run_nonlinear_with_options_op(
             model,
             ComputeBackend::Gpu,
-            FormulationRequirement::Experimental,
             nonlinear_options_for_spec(spec, solver_mesh_artifact_path.clone()),
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
@@ -4392,7 +4382,6 @@ pub(super) fn run_fixture(
     let mut electromagnetic_resonance_quality_factor = None;
     let mut electromagnetic_resonance_flux_gain = None;
     let mut numerically_acceptable = None;
-    let mut production_publishable = None;
     let mut parity = None;
     let mut threshold_assertions = Vec::new();
 
@@ -4495,7 +4484,6 @@ pub(super) fn run_fixture(
                     electromagnetic_resonance_quality_factor,
                     electromagnetic_resonance_flux_gain,
                     numerically_acceptable,
-                    production_publishable,
                     parity,
                     threshold_assertions,
                     failures,
@@ -4504,7 +4492,6 @@ pub(super) fn run_fixture(
         };
         run_ok = true;
         numerically_acceptable = Some(cpu_envelope.data.numerically_acceptable);
-        production_publishable = Some(cpu_envelope.data.production_publishable);
         if let Some(expected_numerically_acceptable) = spec.expected_numerically_acceptable {
             if cpu_envelope.data.numerically_acceptable != expected_numerically_acceptable {
                 failures.push(format!(
@@ -4512,12 +4499,6 @@ pub(super) fn run_fixture(
                     cpu_envelope.data.numerically_acceptable
                 ));
             }
-        }
-        if cpu_envelope.data.production_publishable {
-            failures.push(
-                "cpu result from an explicitly experimental formulation must not be production publishable"
-                    .to_string(),
-            );
         }
 
         if matches!(
@@ -6110,7 +6091,6 @@ pub(super) fn run_fixture(
                 Ok(gpu_envelope) => {
                     run_ok = true;
                     numerically_acceptable = Some(gpu_envelope.data.numerically_acceptable);
-                    production_publishable = Some(gpu_envelope.data.production_publishable);
                     gpu_fallback_events = gpu_envelope.data.provenance.fallback_events.clone();
                     gpu_solver_host_sync_count =
                         Some(gpu_envelope.data.provenance.solver_host_sync_count);
@@ -6231,12 +6211,6 @@ pub(super) fn run_fixture(
                                 gpu_envelope.data.numerically_acceptable
                             ));
                         }
-                    }
-                    if gpu_envelope.data.production_publishable {
-                        failures.push(
-                            "gpu result from an explicitly experimental formulation must not be production publishable"
-                                .to_string(),
-                        );
                     }
                     if spec.id.starts_with("transient_") {
                         push_fixed_step_transient_assertions(
@@ -8033,7 +8007,6 @@ pub(super) fn run_fixture(
                                 electromagnetic_resonance_quality_factor,
                                 electromagnetic_resonance_flux_gain,
                                 numerically_acceptable,
-                                production_publishable,
                                 parity,
                                 threshold_assertions,
                                 failures,
@@ -8450,7 +8423,6 @@ pub(super) fn run_fixture(
                                     electromagnetic_resonance_quality_factor,
                                     electromagnetic_resonance_flux_gain,
                                     numerically_acceptable,
-                                    production_publishable,
                                     parity,
                                     threshold_assertions,
                                     failures,
@@ -8588,7 +8560,6 @@ pub(super) fn run_fixture(
         electromagnetic_resonance_quality_factor,
         electromagnetic_resonance_flux_gain,
         numerically_acceptable,
-        production_publishable,
         parity,
         threshold_assertions,
         failures,

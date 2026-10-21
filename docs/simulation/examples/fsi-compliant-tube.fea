@@ -62,7 +62,6 @@ study compliant_tube {
     geometry = geometry.tube
     mesh = mesh.tube
     model = model.soft_tube
-    formulation = experimental
     analysis equilibrium { fluid_structure_interaction steady {} }
     output displacement = analysis.equilibrium.field.node.displacement
     output pressure = analysis.equilibrium.field.cell.fluid_pressure

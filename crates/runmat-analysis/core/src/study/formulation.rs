@@ -1,16 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-/// Qualification requested by the caller at the pre-solve boundary.
-///
-/// There is intentionally no `Default`: every caller must choose whether experimental numerical
-/// work is admissible.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FormulationRequirement {
-    Production,
-    Experimental,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StructuralOperatorImplementation {
@@ -266,7 +255,6 @@ pub enum FormulationAdmissionRejectionReason {
     UnsupportedSolutionSpace,
     UnregisteredRealization,
     IncompatibleAxis(FormulationAxis),
-    ProductionQualificationMissing,
     InvalidRealization,
 }
 
@@ -301,7 +289,7 @@ mod tests {
             "temporals": ["structural_static_linear_solve"],
             "coupling": "uncoupled",
             "boundary_transfers": ["canonical_boundary_projection"],
-            "forged_maturity": "production"
+            "forged_field": "value"
         });
         assert!(serde_json::from_value::<ExactFormulationRealization>(extra).is_err());
     }

@@ -3,7 +3,7 @@ use crate::execution::{AccuracySourceKind, SequenceIdentity, SolverResultIdentit
 use crate::planning::resource::{
     PreparedInputResourceFacts, PreparedOutputResourceFacts, PreparedOutputSetResourceFacts,
 };
-use runmat_analysis_core::{AccuracyPlan, FormulationRequirement};
+use runmat_analysis_core::AccuracyPlan;
 use runmat_execution::Digest;
 
 fn request(kind: AccuracySourceKind, maximum: u64) -> AccuracyEvaluationRequest {
@@ -11,18 +11,10 @@ fn request(kind: AccuracySourceKind, maximum: u64) -> AccuracyEvaluationRequest 
     let producer = StepIdentity::new(sequence, Digest::sha256("accuracy admission step")).unwrap();
     let result =
         SolverResultIdentity::from_step_result(producer, Digest::sha256("result")).unwrap();
-    let mut plan = AccuracyPlan::experimental_baseline("admission");
+    let mut plan = AccuracyPlan::baseline("admission");
     plan.resources.maximum_resident_bytes = maximum;
     plan.resources.maximum_wall_time_milliseconds = 60_000;
-    AccuracyEvaluationRequest::new(
-        producer,
-        kind,
-        result,
-        None,
-        FormulationRequirement::Experimental,
-        plan,
-    )
-    .unwrap()
+    AccuracyEvaluationRequest::new(producer, kind, result, None, plan).unwrap()
 }
 
 fn build(request: &AccuracyEvaluationRequest) -> Result<FeaResourcePlan, ResourcePlanningError> {

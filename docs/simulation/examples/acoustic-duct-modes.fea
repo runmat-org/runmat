@@ -36,6 +36,5 @@ study acoustic_duct_modes {
     geometry = geometry.duct
     mesh = mesh.duct
     model = model.closed_duct
-    formulation = experimental
     analysis cavity { acoustic modal { modes = 8 } }
 }

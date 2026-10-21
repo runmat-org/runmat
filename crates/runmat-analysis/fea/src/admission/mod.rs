@@ -12,7 +12,7 @@ use std::fmt;
 
 use runmat_analysis_core::{
     AnalysisProcedure, ExactFormulationRealization, FormulationAdmissionRejectionReason,
-    FormulationMaturity, FormulationRequirement, PhysicsFamily, SolutionSpace,
+    PhysicsFamily, SolutionSpace,
 };
 use serde::{Deserialize, Serialize};
 
@@ -42,7 +42,6 @@ pub struct FormulationAdmissionRequest {
     pub family: PhysicsFamily,
     pub procedure: AnalysisProcedure,
     pub solution_space: SolutionSpace,
-    pub requirement: FormulationRequirement,
     pub realization: ExactFormulationRealization,
 }
 
@@ -52,7 +51,6 @@ pub struct AdmittedFormulationReceipt {
     procedure: AnalysisProcedure,
     solution_space: SolutionSpace,
     realization: ExactFormulationRealization,
-    qualification: FormulationMaturity,
 }
 
 impl AdmittedFormulationReceipt {
@@ -72,10 +70,6 @@ impl AdmittedFormulationReceipt {
         &self.realization
     }
 
-    pub const fn qualification(&self) -> FormulationMaturity {
-        self.qualification
-    }
-
     pub fn into_identity(self) -> AnalysisRunIdentity {
         AnalysisRunIdentity::from_receipt(self)
     }
@@ -92,7 +86,6 @@ pub struct FormulationAvailabilityRejection {
     pub family: PhysicsFamily,
     pub procedure: AnalysisProcedure,
     pub solution_space: SolutionSpace,
-    pub requirement: FormulationRequirement,
     pub reason: FormulationAdmissionRejectionReason,
 }
 
@@ -100,26 +93,24 @@ impl fmt::Display for FormulationAvailabilityRejection {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             formatter,
-            "formulation availability rejected: family={:?} procedure={:?} solution_space={:?} requirement={:?} reason={:?}",
-            self.family, self.procedure, self.solution_space, self.requirement, self.reason
+            "formulation availability rejected: family={:?} procedure={:?} solution_space={:?} reason={:?}",
+            self.family, self.procedure, self.solution_space, self.reason
         )
     }
 }
 
 impl std::error::Error for FormulationAvailabilityRejection {}
 
-pub fn require_qualified_formulation(
+pub fn require_available_formulation(
     family: PhysicsFamily,
     procedure: AnalysisProcedure,
     solution_space: SolutionSpace,
-    requirement: FormulationRequirement,
 ) -> Result<(), FormulationAvailabilityRejection> {
-    registry::require_available(family, procedure, solution_space, requirement).map_err(|reason| {
+    registry::require_available(family, procedure, solution_space).map_err(|reason| {
         FormulationAvailabilityRejection {
             family,
             procedure,
             solution_space,
-            requirement,
             reason,
         }
     })
@@ -140,24 +131,14 @@ impl std::error::Error for FormulationAdmissionRejection {}
 pub fn admit_formulation(
     request: FormulationAdmissionRequest,
 ) -> Result<AdmittedFormulationReceipt, FormulationAdmissionRejection> {
-    let qualification = match registry::qualification(&request) {
-        Ok(qualification) => qualification,
-        Err(reason) => return Err(FormulationAdmissionRejection { request, reason }),
-    };
-    if request.requirement == FormulationRequirement::Production
-        && qualification != FormulationMaturity::Production
-    {
-        return Err(FormulationAdmissionRejection {
-            request,
-            reason: FormulationAdmissionRejectionReason::ProductionQualificationMissing,
-        });
+    if let Err(reason) = registry::admit(&request) {
+        return Err(FormulationAdmissionRejection { request, reason });
     }
     Ok(AdmittedFormulationReceipt {
         family: request.family,
         procedure: request.procedure,
         solution_space: request.solution_space,
         realization: request.realization,
-        qualification,
     })
 }
 

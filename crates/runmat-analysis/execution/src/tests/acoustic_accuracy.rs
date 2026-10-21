@@ -1,8 +1,7 @@
 use super::*;
 use runmat_analysis_core::{
-    AcousticConstraint, AcousticConstraintKind, AnalysisConstraint, FormulationRequirement,
-    Frequency, IndependentDomain, MaterialAcousticModel, PrescribedValue, Pressure,
-    PropertyRegionTarget, RegionTarget,
+    AcousticConstraint, AcousticConstraintKind, AnalysisConstraint, Frequency, IndependentDomain,
+    MaterialAcousticModel, PrescribedValue, Pressure, PropertyRegionTarget, RegionTarget,
 };
 use runmat_analysis_fea::execution::{
     AccuracySourceKind, AccuracySourceReceipt, AcousticHarmonicWorkload,
@@ -59,7 +58,6 @@ pub(super) fn workload() -> AcousticHarmonicWorkload {
         model,
         step_id: ProcedureStepId("acoustic".into()),
         frequency: Frequency::new(0.2),
-        formulation_requirement: FormulationRequirement::Experimental,
         solver: AcousticHarmonicPolicy::default(),
         power_balance_relative_tolerance: 1e-8,
     }
@@ -145,7 +143,6 @@ fn acoustic_accuracy_admission_binds_retained_result_and_original_intent() {
                 source_context_inputs: context.clone(),
                 sequence: SequenceIdentity::from_solver_contract(&workload.model.sequence).unwrap(),
                 step: workload.model.sequence.steps[0].clone(),
-                formulation_requirement: workload.formulation_requirement,
                 program_revision: revision(),
                 chunk_bytes: chunk,
                 inventory_limits: limits,
@@ -198,7 +195,6 @@ fn acoustic_accuracy_admission_binds_retained_result_and_original_intent() {
                 prepared.request.source_kind,
                 prepared.request.source_result,
                 None,
-                FormulationRequirement::Production,
                 prepared.request.plan.clone(),
             )
             .unwrap();

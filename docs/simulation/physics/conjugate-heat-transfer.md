@@ -57,7 +57,7 @@ $q_n=h_c(T_s-T_f)$.
 | Procedure | Contract | Execution |
 | --- | --- | --- |
 | `conjugate_heat_transfer steady` | Steady flow and steady temperature in fluid and solid | Runs from `fea run` |
-| `conjugate_heat_transfer transient` | Time samples and coupled initial state | Typed contract; not yet executed |
+| `conjugate_heat_transfer transient` | Steady flow advecting a backward-Euler temperature march from the authored initial temperature | Runs from `fea run` |
 | `conjugate_heat_transfer nonlinear` | Temperature-dependent properties | Typed contract; not yet executed |
 
 ## How do I declare a fluid–solid thermal interface?

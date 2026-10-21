@@ -60,7 +60,6 @@ study flexible_duct {
     geometry = geometry.duct
     mesh = mesh.duct
     model = model.flexible_wall
-    formulation = experimental
     analysis response {
         fluid_structure_interaction transient {
             start_time = 0 s

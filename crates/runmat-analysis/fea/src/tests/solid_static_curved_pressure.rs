@@ -119,7 +119,7 @@ fn curved_tet10_pressure_preserves_analytic_resultant_moment_and_nodal_loads() {
         ComputeBackend::Cpu,
         LinearStaticSolveOptions {
             solver_mesh: Some(mesh.clone()),
-            ..experimental_linear_static_options()
+            ..baseline_linear_static_options()
         },
     )
     .expect("curved Tet10 pressure must solve");

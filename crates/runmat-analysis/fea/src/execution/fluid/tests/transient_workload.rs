@@ -19,7 +19,6 @@ fn authored_transient() -> (FluidTransientWorkload, SolverMeshArtifact) {
         FluidTransientWorkload {
             model,
             step_id: ProcedureStepId("advance".into()),
-            formulation_requirement: FormulationRequirement::Experimental,
             policy: CanonicalFluidPolicy {
                 linear_relative_tolerance: steady.policy.linear_relative_tolerance,
                 ..CanonicalFluidPolicy::default()
@@ -160,9 +159,6 @@ fn transient_workload_retains_authored_initial_time_source_properties_and_cold_o
     let mut low = w.clone();
     low.policy.maximum_resident_bytes = 1;
     assert!(low.prepare(&m).is_err());
-    let mut production = w;
-    production.formulation_requirement = FormulationRequirement::Production;
-    assert!(production.prepare(&m).is_err());
 }
 
 fn velocity_field(mesh: &SolverMeshArtifact, values: Vec<f64>) -> InitialFieldBinding {
@@ -291,9 +287,7 @@ fn nonuniform_original_nodal_field_integrates_exact_cell_and_face_initial_data_w
 #[test]
 fn transient_formulation_cannot_be_claimed_by_generic_profile_admission() {
     let (w, m) = authored_transient();
-    let identity =
-        crate::admission::admit_canonical_fluid_transient(&m, FormulationRequirement::Experimental)
-            .unwrap();
+    let identity = crate::admission::admit_canonical_fluid_transient(&m).unwrap();
     assert_ne!(
         identity.realization(),
         &crate::admission::canonical_fluid_steady_realization()
@@ -303,8 +297,7 @@ fn transient_formulation_cannot_be_claimed_by_generic_profile_admission() {
         AnalysisProcedure::TransientResponse,
         Some(&m),
         SourceImplementation::CanonicalVolumeProjection,
-        BoundaryTransferImplementation::CanonicalBoundaryProjection,
-        FormulationRequirement::Experimental
+        BoundaryTransferImplementation::CanonicalBoundaryProjection
     )
     .is_err());
     assert_eq!(
@@ -326,7 +319,6 @@ fn authored_study_workload_retains_and_recovers_the_complete_transient_history()
     let study = FluidSteadyWorkload {
         model: kernel.model.clone(),
         step_id: kernel.step_id.clone(),
-        formulation_requirement: kernel.formulation_requirement,
         policy: kernel.policy,
         geometry_policy: kernel.geometry_policy,
     };

@@ -183,7 +183,6 @@ impl AcousticResponseStudyCoordinator {
             accuracy_kind: AccuracySourceKind::AcousticResponse,
             sequence: SequenceIdentity::from_solver_contract(&workload.model.sequence)?,
             step: self.preparation.selected_step().clone(),
-            formulation_requirement: workload.formulation_requirement,
             observations: None,
             program_revision: self.preparation.program_revision.clone(),
             output_policy: self.preparation.output_policy,

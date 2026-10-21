@@ -46,6 +46,5 @@ study acoustic_duct_pulse {
     geometry = geometry.duct
     mesh = mesh.duct
     model = model.driven_duct
-    formulation = experimental
     analysis pulse { acoustic transient { start_time = 0 s; end_time = 4 ms; time_step = 10 us } }
 }

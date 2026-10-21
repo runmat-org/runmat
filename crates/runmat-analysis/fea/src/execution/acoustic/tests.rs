@@ -9,9 +9,8 @@ use crate::{
 };
 use runmat_analysis_core::{
     AcousticConstraint, AcousticConstraintKind, AnalysisBoundary, AnalysisConstraint,
-    BoundaryOperator, FormulationMaturity, IndependentDomain, MaterialAcousticModel,
-    PrescribedValue, Pressure, PropertyRegionTarget, RegionTarget, SpecificAcousticImpedance,
-    TemporalImplementation,
+    BoundaryOperator, IndependentDomain, MaterialAcousticModel, PrescribedValue, Pressure,
+    PropertyRegionTarget, RegionTarget, SpecificAcousticImpedance, TemporalImplementation,
 };
 
 pub(in crate::execution) fn workload() -> AcousticHarmonicWorkload {
@@ -48,7 +47,6 @@ pub(in crate::execution) fn workload() -> AcousticHarmonicWorkload {
         model,
         step_id: ProcedureStepId("acoustic".into()),
         frequency: Frequency::new(0.2),
-        formulation_requirement: FormulationRequirement::Experimental,
         solver: AcousticHarmonicPolicy {
             relative_tolerance: 1e-10,
             ..Default::default()
@@ -72,10 +70,6 @@ fn cold_canonical_acoustic_objects_preserve_independent_fields_and_exact_lineage
         let mesh: SolverMeshArtifact =
             serde_json::from_slice(&serde_json::to_vec(&mesh).unwrap()).unwrap();
         let result = cold.execute(&mesh).unwrap();
-        assert_eq!(
-            result.formulation().qualification(),
-            FormulationMaturity::Experimental
-        );
         assert_eq!(
             result.formulation().realization().temporals,
             vec![TemporalImplementation::AcousticCanonicalHarmonicSolve]
@@ -128,9 +122,6 @@ fn cold_canonical_acoustic_objects_preserve_independent_fields_and_exact_lineage
 fn acoustic_portable_admission_and_result_import_fail_closed() {
     let mut workload = workload();
     let mesh = slab_mesh(2);
-    workload.formulation_requirement = FormulationRequirement::Production;
-    assert!(workload.execute(&mesh).is_err());
-    workload.formulation_requirement = FormulationRequirement::Experimental;
     let result = workload.execute(&mesh).unwrap();
     assert!(validate_solver_formulation_compatibility(
         result.formulation(),

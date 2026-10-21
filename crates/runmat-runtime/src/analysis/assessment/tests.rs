@@ -47,7 +47,6 @@ pub(in crate::analysis) fn fixture() -> (
     let compiled = CompiledAnalysisStudy {
         module_path: "study.fea".into(),
         study_id: "study".into(),
-        formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: Vec::new(),
         outputs: vec![output],
         assessments: vec![definition.clone()],
@@ -72,7 +71,6 @@ pub(in crate::analysis) fn fixture() -> (
         operation_sequence: Vec::new(),
         run_status: crate::analysis::RunStatus::Completed,
         numerically_acceptable: true,
-        production_publishable: false,
         solver_convergence: crate::analysis::QualityGate::Pass,
         result_quality: crate::analysis::QualityGate::Pass,
         evidence_artifact_path: String::new(),

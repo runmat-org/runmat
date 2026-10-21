@@ -81,7 +81,6 @@ study plate_channel {
     geometry = geometry.cell
     mesh = mesh.cell
     model = model.heated_channel
-    formulation = experimental
     analysis operating_point { conjugate_heat_transfer steady {} }
     output temperature = analysis.operating_point.field.node.temperature
     output velocity = analysis.operating_point.field.cell.fluid_velocity

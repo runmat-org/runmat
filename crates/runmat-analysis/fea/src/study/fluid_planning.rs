@@ -5,8 +5,7 @@ use crate::{
     topology::FiniteVolumeProjectionPolicy,
 };
 use runmat_analysis_core::{
-    AccuracyTarget, AccuracyTolerance, ErrorContributionKind, FormulationRequirement,
-    RequiredAccuracyEvidence,
+    AccuracyTarget, AccuracyTolerance, ErrorContributionKind, RequiredAccuracyEvidence,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -17,7 +16,6 @@ mod tests;
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FluidStudyPlanningPolicy {
-    pub formulation_requirement: FormulationRequirement,
     pub numerical: CanonicalFluidPolicy,
     pub geometry: FiniteVolumeProjectionPolicy,
 }
@@ -28,9 +26,6 @@ pub fn plan_fluid_study(
     study: &CompiledAnalysisStudy,
     policy: FluidStudyPlanningPolicy,
 ) -> Result<FluidSteadyWorkload, FluidStudyPlanningError> {
-    if policy.formulation_requirement != study.formulation_requirement {
-        return Err(FluidStudyPlanningError::FormulationRequirementMismatch);
-    }
     let [step] = study.model.sequence.steps.as_slice() else {
         return Err(FluidStudyPlanningError::UnsupportedSequence);
     };
@@ -53,7 +48,6 @@ pub fn plan_fluid_study(
     let workload = FluidSteadyWorkload {
         model: study.model.clone(),
         step_id: step.step_id.clone(),
-        formulation_requirement: policy.formulation_requirement,
         policy: numerical,
         geometry_policy: policy.geometry,
     };
@@ -93,8 +87,6 @@ pub fn plan_fluid_study(
 
 #[derive(Debug, Error)]
 pub enum FluidStudyPlanningError {
-    #[error("fluid planning requirement differs from compiled study")]
-    FormulationRequirementMismatch,
     #[error("steady fluid planning requires a standalone singleton step")]
     UnsupportedSequence,
     #[error("steady fluid requires an authored relative algebraic accuracy target")]

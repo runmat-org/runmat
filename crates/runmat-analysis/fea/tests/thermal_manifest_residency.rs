@@ -52,7 +52,6 @@ fn workload(samples: usize) -> ThermalWorkload {
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         procedure: ThermalProcedureControl::BackwardEuler {
             snapshot_count: samples,
         },
@@ -72,7 +71,6 @@ fn manifest_construction_and_header_peak_fit_composed_reservation() {
                 Some(&mesh),
                 SourceImplementation::CanonicalVolumeProjection,
                 BoundaryTransferImplementation::CanonicalBoundaryProjection,
-                workload.formulation_requirement,
             )
             .unwrap();
             let facts = ThermalPreassemblyResourceFacts::derive(

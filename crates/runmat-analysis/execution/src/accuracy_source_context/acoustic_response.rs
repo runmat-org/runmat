@@ -71,7 +71,6 @@ pub(super) fn validate(
     )?;
     if producer != request.producer
         || request.plan != step.accuracy
-        || request.formulation_requirement != workload.formulation_requirement
         || !step.observations.is_empty()
     {
         return Err(AnalysisBridgeError::Identity(

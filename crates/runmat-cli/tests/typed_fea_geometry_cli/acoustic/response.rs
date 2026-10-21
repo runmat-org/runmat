@@ -129,7 +129,6 @@ study response {
     geometry = geometry.part
     mesh = mesh.volume
     model = model.cavity
-    formulation = experimental
     analysis sound { acoustic transient { start_time = 0 s; end_time = 2 ms; time_step = 0.1 ms } }
 }
 "#;

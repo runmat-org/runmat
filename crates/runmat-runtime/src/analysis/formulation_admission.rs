@@ -1,8 +1,8 @@
 use std::fmt;
 
 use runmat_analysis_core::{
-    AnalysisProcedure, BoundaryTransferImplementation, FormulationRequirement, PhysicsFamily,
-    SolutionSpace, SourceImplementation, SpatialOperatorImplementation, TopologyImplementation,
+    AnalysisProcedure, BoundaryTransferImplementation, PhysicsFamily, SolutionSpace,
+    SourceImplementation, SpatialOperatorImplementation, TopologyImplementation,
 };
 use runmat_analysis_fea::admission::{
     admit_formulation, registered_formulations, FormulationAdmissionRejection,
@@ -46,7 +46,6 @@ impl std::error::Error for RuntimeProxyAdmissionError {}
 pub(super) fn admit_runtime_proxy(
     family: PhysicsFamily,
     procedure: AnalysisProcedure,
-    requirement: FormulationRequirement,
     branch: RuntimeProxyFormulation,
 ) -> Result<AnalysisRunIdentity, RuntimeProxyAdmissionError> {
     let realization = registered_formulations(family, procedure)
@@ -62,7 +61,6 @@ pub(super) fn admit_runtime_proxy(
         family,
         procedure,
         solution_space: SolutionSpace::Direct,
-        requirement,
         realization,
     })
     .map(|receipt| receipt.into_identity())
@@ -97,7 +95,6 @@ mod tests {
         let acoustic = admit_runtime_proxy(
             PhysicsFamily::Acoustic,
             AnalysisProcedure::HarmonicResponse,
-            FormulationRequirement::Experimental,
             RuntimeProxyFormulation::AcousticHashedTargetGraphProjection,
         )
         .expect("generated acoustic formulation must be registered");
@@ -116,7 +113,6 @@ mod tests {
         let error = admit_runtime_proxy(
             PhysicsFamily::Acoustic,
             AnalysisProcedure::HarmonicResponse,
-            FormulationRequirement::Production,
             RuntimeProxyFormulation::AcousticHashedTargetGraphProjection,
         )
         .expect_err("current acoustic proxy is not production-qualified");

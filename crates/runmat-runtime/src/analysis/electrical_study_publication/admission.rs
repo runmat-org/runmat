@@ -38,16 +38,13 @@ pub(super) fn validate(
         || step.independent_domain != IndependentDomain::Static
         || !step.observations.is_empty()
         || !completed.compiled.outputs.is_empty()
-        || completed.workload.formulation_requirement != completed.compiled.formulation_requirement
     {
         return Err("electrical publication requires exact singleton workload without unsupported observations".into());
     }
     validate_options(options, completed.workload.relative_residual_target)?;
     let plan = runmat_analysis_fea::study::plan_electrical_study(
         &completed.compiled,
-        runmat_analysis_fea::study::ElectricalStudyPlanningPolicy {
-            formulation_requirement: completed.workload.formulation_requirement,
-        },
+        runmat_analysis_fea::study::ElectricalStudyPlanningPolicy {},
     )
     .map_err(|e| e.to_string())?;
     if plan != completed.workload {
@@ -69,7 +66,6 @@ pub(super) fn validate(
             .source_result_identity()
             .map_err(|e| e.to_string())?,
         None,
-        completed.workload.formulation_requirement,
         step.accuracy.clone(),
     )
     .map_err(|e| e.to_string())?;

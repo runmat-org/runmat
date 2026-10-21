@@ -27,7 +27,6 @@ fn thermal_terminal_publication_reads_only_selected_validated_closure() {
             &model,
             ComputeBackend::Cpu,
             ThermalSolveOptions {
-                formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
                 procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 4 },
                 solver_mesh: Some(mesh.clone()),
                 ..ThermalSolveOptions::default()
@@ -125,7 +124,6 @@ fn thermal_terminal_publication_reads_only_selected_validated_closure() {
                 model: model.clone(),
                 step_id: model.sequence.steps[0].step_id.clone(),
                 backend: ComputeBackend::Cpu,
-                formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
                 procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 4 },
                 residual_target: result.residual_target,
             };

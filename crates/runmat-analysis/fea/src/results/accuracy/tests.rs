@@ -26,9 +26,9 @@ fn evidence(value: f64) -> AccuracyEvidence {
 
 #[test]
 fn production_accuracy_failure_produces_a_blocking_gate() {
-    let plan = AccuracyPlan::experimental_baseline("accuracy");
+    let plan = AccuracyPlan::baseline("accuracy");
     let evaluation = evaluate_accuracy(&plan, &[evidence(1.0e-6)]).unwrap();
-    let gate = publication_gate(&plan, FormulationRequirement::Production, &evaluation).unwrap();
+    let gate = publication_gate(&plan, &evaluation).unwrap();
     assert_eq!(gate.decision, PublicationDecision::Block);
     let producer = step_identity();
     let source_result =
@@ -38,7 +38,6 @@ fn production_accuracy_failure_produces_a_blocking_gate() {
         crate::execution::AccuracySourceKind::StructuralLinear,
         source_result,
         None,
-        FormulationRequirement::Production,
         plan,
     )
     .unwrap();
@@ -48,7 +47,6 @@ fn production_accuracy_failure_produces_a_blocking_gate() {
         source_kind: request.source_kind,
         source_result,
         source_observations: None,
-        formulation_requirement: FormulationRequirement::Production,
         evidence: vec![evidence(1.0e-6)],
         evaluation,
         gate,
@@ -59,48 +57,40 @@ fn production_accuracy_failure_produces_a_blocking_gate() {
 
 #[test]
 fn mandatory_evidence_governs_status_and_production_publication() {
-    let plan = AccuracyPlan::experimental_baseline("accuracy");
+    let plan = AccuracyPlan::baseline("accuracy");
     let satisfied = evaluate_accuracy(&plan, &[evidence(1.0e-9)]).unwrap();
     assert_eq!(satisfied.report.status, AccuracyStatus::Satisfied);
     assert_eq!(
-        publication_gate(&plan, FormulationRequirement::Production, &satisfied)
-            .unwrap()
-            .decision,
+        publication_gate(&plan, &satisfied).unwrap().decision,
         PublicationDecision::Allow
     );
 
     let failed = evaluate_accuracy(&plan, &[evidence(1.0e-6)]).unwrap();
     assert_eq!(failed.report.status, AccuracyStatus::NotSatisfied);
     assert_eq!(
-        publication_gate(&plan, FormulationRequirement::Production, &failed)
-            .unwrap()
-            .decision,
+        publication_gate(&plan, &failed).unwrap().decision,
         PublicationDecision::Block
     );
 }
 
 #[test]
 fn missing_mandatory_evidence_is_indeterminate_and_blocks_production() {
-    let plan = AccuracyPlan::experimental_baseline("accuracy");
+    let plan = AccuracyPlan::baseline("accuracy");
     let evaluation = evaluate_accuracy(&plan, &[]).unwrap();
     assert_eq!(evaluation.report.status, AccuracyStatus::Indeterminate);
     assert_eq!(
-        publication_gate(&plan, FormulationRequirement::Production, &evaluation)
-            .unwrap()
-            .decision,
+        publication_gate(&plan, &evaluation).unwrap().decision,
         PublicationDecision::Block
     );
     assert_eq!(
-        publication_gate(&plan, FormulationRequirement::Experimental, &evaluation)
-            .unwrap()
-            .decision,
+        publication_gate(&plan, &evaluation).unwrap().decision,
         PublicationDecision::Allow
     );
 }
 
 #[test]
 fn report_identity_is_independent_of_evidence_submission_order() {
-    let mut plan = AccuracyPlan::experimental_baseline("accuracy");
+    let mut plan = AccuracyPlan::baseline("accuracy");
     plan.criteria.push(runmat_analysis_core::AccuracyCriterion {
         criterion_id: "precision".into(),
         target: AccuracyTarget::ExecutionEquivalence,
@@ -127,26 +117,26 @@ fn report_identity_is_independent_of_evidence_submission_order() {
 
 #[test]
 fn publication_rejects_a_changed_plan_with_the_same_authored_id() {
-    let plan = AccuracyPlan::experimental_baseline("accuracy");
+    let plan = AccuracyPlan::baseline("accuracy");
     let evaluation = evaluate_accuracy(&plan, &[evidence(1.0e-9)]).unwrap();
     let mut changed = plan.clone();
     changed.criteria[0].tolerance = AccuracyTolerance::Relative(1.0e-4);
 
-    assert!(publication_gate(&changed, FormulationRequirement::Production, &evaluation).is_err());
+    assert!(publication_gate(&changed, &evaluation).is_err());
 }
 
 #[test]
 fn publication_rejects_mutated_report_content() {
-    let plan = AccuracyPlan::experimental_baseline("accuracy");
+    let plan = AccuracyPlan::baseline("accuracy");
     let mut evaluation = evaluate_accuracy(&plan, &[evidence(1.0e-9)]).unwrap();
     evaluation.report.status = AccuracyStatus::NotSatisfied;
 
-    assert!(publication_gate(&plan, FormulationRequirement::Production, &evaluation).is_err());
+    assert!(publication_gate(&plan, &evaluation).is_err());
 }
 
 #[test]
 fn deserialization_rejects_a_nonconvergent_report_identity() {
-    let plan = AccuracyPlan::experimental_baseline("accuracy");
+    let plan = AccuracyPlan::baseline("accuracy");
     let evaluation = evaluate_accuracy(&plan, &[evidence(1.0e-9)]).unwrap();
     let mut encoded = serde_json::to_value(evaluation).unwrap();
     encoded["report"]["status"] = serde_json::json!("not_satisfied");

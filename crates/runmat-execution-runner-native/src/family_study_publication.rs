@@ -310,7 +310,6 @@ pub fn import_family_study_result(
     } else {
         compiled.study_id == recompiled.study_id
             && compiled.properties == recompiled.properties
-            && compiled.formulation_requirement == recompiled.formulation_requirement
     };
     if !admitted {
         return Err(protocol(

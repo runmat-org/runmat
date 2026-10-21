@@ -321,7 +321,6 @@ fn box_prestressed_modal_workloads() -> runmat_analysis_execution::StructuralStu
         model: preload.model.clone(),
         step_id: ProcedureStepId("prestressed_modes".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         truncation: ModalTruncationPolicy::requested(1),

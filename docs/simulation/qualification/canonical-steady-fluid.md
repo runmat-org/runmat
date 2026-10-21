@@ -2,8 +2,8 @@
 
 ## Envelope and physical authority
 
-This is an experimental CPU FP64, serial, steady, homogeneous incompressible
-Newtonian envelope, not Stage 9 production qualification. Canonical affine
+This is a CPU FP64, serial, steady, homogeneous incompressible
+Newtonian envelope; Stage 9 qualification remains open. Canonical affine
 tetrahedral cell/face geometry carries original persistent boundary ownership.
 The portable workload currently admits Tet4 only. Fields are physical cell
 velocity (m/s), pressure (Pa), and owner-oriented face volume flux (m³/s).
@@ -135,7 +135,7 @@ cell ordering, partial targets, omitted/swapped plans, reversed owner orientatio
 self-consistent reordered cold layouts and tiny caps. Focused fluid tests pass
 23/23 and shared field/observation/accuracy results tests pass 140/140. These are
 local field/observation and authored-intent evidence, not completed native lifecycle
-integration, measured RSS, process-separated restart or production qualification.
+integration, measured RSS, process-separated restart or Stage 9 qualification.
 
 Governed native solve/copy-only recovery and complete original state publication
 now use shared host resource plans. Scheduled final observations import only
@@ -147,7 +147,7 @@ contract. The native cold-store chain verifies signed velocity, exact state,
 receipt-backed algebraic/conservation evidence and missing mandatory spatial
 evidence remaining `Indeterminate`. Requested bounds are not measured usage.
 Current shared verification covers 31 focused fluid tests, 102 observation tests,
-167 bridge tests and four native CFD tests. Production remains blocked.
+167 bridge tests and four native CFD tests. Stage 9 qualification remains open.
 
 ## Authored lifecycle cutover and historical diagnostics
 
@@ -160,8 +160,8 @@ Runtime publication imports the original recovered-field artifact under its
 authenticated codec/transport/construction budget and verifies bit-exact signed
 Cell U/p and every owner-oriented face q. It neither solves nor recovers them again.
 Typed numerical and geometry resource policies replace reduced-channel sampling
-controls. The exact canonical FV realization is experimental and cannot inherit
-the old reduced operator's identity or production maturity.
+controls. The exact canonical FV realization cannot inherit the old reduced operator's
+identity or evidence.
 
 The standalone reduced channel solver/dispatch and proxy field construction are
 removed. The direct model-only operation rejects with an authored-study-required
@@ -212,7 +212,7 @@ test depends on the reduced directional-excitation fallback now truthfully rejec
 The operation-contract suite similarly passes 47/48, with the FSI success contract
 failing on the same directional fallback rejection. These coupled cutover failures
 remain explicit; they are not standalone-fluid evidence or a green release lane.
-No production gate is promoted here.
+No qualification gate is closed here.
 
 
 ## Original pressure-state authority (2026-10-05)
@@ -242,6 +242,6 @@ portable result/profile/field/rejection15/15PASS.13s, shared resources170/170PAS
 and native5/5PASS3.23s cover worker output/receipt, cold original state, field recovery,
 observations and publication. Strict FEA/native lib/tests lint passes. Main architecture
 passes; isolated candidate retains two existing runtime rendering-size debts.
-These are scoped implementation checks, not production or measured-resource
+These are scoped implementation checks, not stage or measured-resource
 qualification. Mandatory spatial accuracy, transient/coupled/claimed execution
 and release gates remain open.

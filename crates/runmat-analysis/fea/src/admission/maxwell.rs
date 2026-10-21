@@ -3,10 +3,9 @@
 //! realization, worker admission, or production physics qualification.
 use runmat_analysis_core::{
     AnalysisProcedure, BoundaryTransferImplementation, ConstitutiveImplementation,
-    CouplingImplementation, ExactFormulationComponent, ExactFormulationRealization,
-    FormulationRequirement, PhysicsFamily, RecoveryImplementation, SolutionSpace,
-    SourceImplementation, SpatialOperatorImplementation, TemporalImplementation,
-    TopologyImplementation,
+    CouplingImplementation, ExactFormulationComponent, ExactFormulationRealization, PhysicsFamily,
+    RecoveryImplementation, SolutionSpace, SourceImplementation, SpatialOperatorImplementation,
+    TemporalImplementation, TopologyImplementation,
 };
 use runmat_meshing_core::{ElementOrder, SolverMeshArtifact};
 
@@ -17,13 +16,11 @@ use crate::contracts::FeaRunError;
 /// The physical input owner separately proves exact boundary intent and geometric eligibility.
 pub fn admit_canonical_maxwell(
     mesh: &SolverMeshArtifact,
-    requirement: FormulationRequirement,
 ) -> Result<AnalysisRunIdentity, FeaRunError> {
     admit_formulation(FormulationAdmissionRequest {
         family: PhysicsFamily::Electromagnetic,
         procedure: AnalysisProcedure::HarmonicResponse,
         solution_space: SolutionSpace::Direct,
-        requirement,
         realization: canonical_maxwell_realization(mesh.resolved_request.element_order),
     })
     .map(|receipt| receipt.into_identity())

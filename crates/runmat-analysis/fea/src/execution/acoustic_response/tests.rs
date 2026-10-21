@@ -26,7 +26,6 @@ fn modal_workload() -> AcousticResponseWorkload {
     AcousticResponseWorkload {
         model: model(ProcedureStep::acoustic_modal("cavity", 4)),
         step_id: ProcedureStepId("cavity".into()),
-        formulation_requirement: FormulationRequirement::Experimental,
         solver: AcousticResponseSolver::Modal {
             policy: AcousticModalPolicy::default(),
         },
@@ -78,7 +77,6 @@ fn transient_publishes_every_time_sample() {
     let workload = AcousticResponseWorkload {
         model: model(ProcedureStep::acoustic_transient("pulse", 0.1, 10)),
         step_id: ProcedureStepId("pulse".into()),
-        formulation_requirement: FormulationRequirement::Experimental,
         solver: AcousticResponseSolver::Transient {
             policy: AcousticTransientPolicy::default(),
         },

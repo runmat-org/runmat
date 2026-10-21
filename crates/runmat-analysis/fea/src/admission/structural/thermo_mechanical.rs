@@ -1,4 +1,4 @@
-//! Exact experimental identity for prescribed solid thermoelasticity and reduced profiles.
+//! Exact identity for prescribed solid thermoelasticity and reduced profiles.
 
 use runmat_analysis_core::{
     AnalysisProcedure, ConstitutiveImplementation, CouplingImplementation,

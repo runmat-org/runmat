@@ -1,6 +1,6 @@
 use runmat_analysis_core::{
     AnalysisProcedure, AnalysisSequence, AuthoredMeshRef, AuthoredModel, CoupledPhysicsFamily,
-    FormulationRequirement, ProcedureStep, RealizedGeometryInstance, RealizedStudy,
+    ProcedureStep, RealizedGeometryInstance, RealizedStudy,
 };
 use runmat_geometry_core::{
     GeometryAuthoringCapabilities, GeometryDefinitionRef, GeometryDefinitionSource, GeometryDigest,
@@ -37,7 +37,6 @@ fn structural_study_compilation_requires_capable_solid_material_before_planning(
     let substituted = CompiledAnalysisStudy {
         module_path: "tests/structural.fea".into(),
         study_id: "structural".into(),
-        formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: Vec::new(),
         assessments: Vec::new(),
         outputs: Vec::new(),
@@ -106,7 +105,6 @@ fn thermal_study_compilation_rejects_uncapable_and_substituted_properties() {
     let substituted = CompiledAnalysisStudy {
         module_path: "tests/thermal.fea".into(),
         study_id: "thermal".into(),
-        formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: Vec::new(),
         assessments: Vec::new(),
         outputs: Vec::new(),
@@ -166,7 +164,6 @@ fn thermomechanical_study_requires_the_union_of_solid_capabilities() {
     let substituted = CompiledAnalysisStudy {
         module_path: "tests/thermomechanical.fea".into(),
         study_id: "thermomechanical".into(),
-        formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: Vec::new(),
         assessments: Vec::new(),
         outputs: Vec::new(),
@@ -254,7 +251,6 @@ fn imported_study(document: &runmat_geometry_core::GeometryDocument) -> Realized
             random_excitations: Vec::new(),
             initial_conditions: Vec::new(),
         },
-        formulation_requirement: FormulationRequirement::Experimental,
         included_models: Vec::new(),
         study_inputs: Vec::new(),
         outputs: Vec::new(),

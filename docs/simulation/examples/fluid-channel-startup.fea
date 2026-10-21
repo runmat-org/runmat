@@ -57,7 +57,6 @@ study channel_startup {
     geometry = geometry.channel
     mesh = mesh.channel
     model = model.plane_channel
-    formulation = experimental
     analysis startup {
         fluid transient {
             start_time = 0 s

@@ -40,16 +40,13 @@ pub(super) fn validate(
         )
         || !step.observations.is_empty()
         || !completed.compiled.outputs.is_empty()
-        || completed.workload.formulation_requirement != completed.compiled.formulation_requirement
     {
         return Err("acoustic response publication requires exact singleton workload without unsupported observations".into());
     }
     validate_options(options, completed.workload.solver.relative_tolerance())?;
     let plan = runmat_analysis_fea::study::plan_acoustic_response_study(
         &completed.compiled,
-        runmat_analysis_fea::study::AcousticResponseStudyPlanningPolicy {
-            formulation_requirement: completed.workload.formulation_requirement,
-        },
+        runmat_analysis_fea::study::AcousticResponseStudyPlanningPolicy::default(),
     )
     .map_err(|e| e.to_string())?;
     if plan != completed.workload {
@@ -71,7 +68,6 @@ pub(super) fn validate(
             .source_result_identity()
             .map_err(|e| e.to_string())?,
         None,
-        completed.workload.formulation_requirement,
         step.accuracy.clone(),
     )
     .map_err(|e| e.to_string())?;

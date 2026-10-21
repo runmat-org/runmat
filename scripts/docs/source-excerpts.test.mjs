@@ -12,7 +12,8 @@ test("cantilever excerpts retain exact packaged study clauses", () => {
   assert.equal(excerpts.length, 4);
   for (const excerpt of excerpts) assert.ok(source.includes(excerpt.content));
   assert.ok(excerpts[2].content.includes("[0, 0, -100000] Pa"));
-  assert.ok(excerpts[3].content.includes("formulation = experimental"));
+  assert.ok(excerpts[3].content.startsWith("study cantilever_static {"));
+  assert.ok(excerpts[3].content.includes("analysis static { structural static {} }"));
 });
 
 test("missing or ambiguous excerpt anchors fail instead of publishing stale instructions", () => {
@@ -30,7 +31,9 @@ test("every snapshotted guide exposes complete canonical source sections", () =>
     const excerpts = sourceExcerpts(source, example.source_sections);
     assert.equal(excerpts.length, 4, example.id);
     for (const excerpt of excerpts) assert.ok(source.includes(excerpt.content), example.id);
-    assert.ok(excerpts[3].content.includes("formulation = experimental"), example.id);
+    assert.ok(excerpts[3].content.startsWith("study "), example.id);
+    assert.ok(/\banalysis\s+\w+\s*\{/.test(excerpts[3].content), example.id);
+    assert.ok(!/\bformulation\s*=/.test(excerpts[3].content), example.id);
     const geometryFiles = [...source.matchAll(/file\s*=\s*"\.\/([^"]+\.step)"/g)].map(match => match[1]);
     assert.ok(geometryFiles.length > 0, example.id);
     for (const path of geometryFiles) assert.ok(example.files.includes(path), `${example.id}: ${path}`);

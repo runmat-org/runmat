@@ -4,9 +4,7 @@ mod initial_fields;
 mod profile_rejection;
 mod publication_admission;
 use crate::analysis_kernel::NativeAnalysisKernel;
-use runmat_analysis_core::{
-    AnalysisSequence, FormulationRequirement, ProcedureStep, Temperature, ThermalDomain,
-};
+use runmat_analysis_core::{AnalysisSequence, ProcedureStep, Temperature, ThermalDomain};
 use runmat_analysis_execution::{
     decode_prepared_thermal_manifest, prepare_thermal_task, AnalysisKernel, AnalysisOutputPolicy,
     PreparedThermalTask, ThermalTaskPreparation,
@@ -48,7 +46,6 @@ fn task(order: ElementOrder, chunk: usize) -> (ThermalWorkload, PreparedThermalT
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 3 },
         residual_target: 1e-4,
     };

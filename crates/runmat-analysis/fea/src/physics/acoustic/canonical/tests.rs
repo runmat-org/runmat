@@ -191,7 +191,7 @@ pub(super) fn model() -> AnalysisModel {
         damping_ratio: 0.0,
     });
     model.materials[0].mass_density_kg_per_m3 = Some(3.0);
-    let step = ProcedureStep::experimental(
+    let step = ProcedureStep::new(
         "acoustic",
         PhysicsFamily::Acoustic,
         AnalysisProcedure::HarmonicResponse,

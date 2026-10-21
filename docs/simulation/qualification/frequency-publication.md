@@ -1,7 +1,7 @@
 # Shared frequency publication contract
 
 This documents the shared publication contract and the governed authored acoustic
-sweep cutover. Neither is a production qualification of the acoustic formulation.
+sweep cutover. Neither is a qualification of the acoustic formulation.
 
 ## Authority and invariants
 
@@ -150,5 +150,5 @@ debt and a stale assembly ratchet. No suppression or size-ceiling increase is us
 Broader resonance/uniqueness, original radiation acceptance, measured
 resources, all advertised placement shapes and blocking release evidence remain
 separate mandatory gates.
-No Stage 8, production, distributed/GPU, measured-memory, restart or release gate
+No Stage 8, qualification, distributed/GPU, measured-memory, restart or release gate
 is promoted by these tests.

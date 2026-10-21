@@ -113,7 +113,7 @@ use execution_dispatch::{execution_operation, run_operation_for_identity, Analys
 use execution_error::{admit_runtime_proxy_for_operation, map_fea_run_error};
 use formulation_admission::RuntimeProxyFormulation;
 use linear_static_execution::analysis_run_linear_static_with_executor;
-use result_policy::{classify_run_status, evaluate_production_publication};
+use result_policy::classify_run_status;
 pub use structural_study::{
     analysis_complete_structural_study_intent_op, analysis_prepare_structural_study_intent_op,
     structural_study_execution_failure, PreparedStructuralStudy, PreparedStructuralStudyIntent,
@@ -353,16 +353,16 @@ pub use contracts::{
     AnalysisTransientRunOptions, AnalysisTrendKindSummary, AnalysisTrendsData, AnalysisTrendsQuery,
     AnalysisValidateResult, BucklingResultsData, ContactEnforcementOptions, FallbackEvent,
     FallbackReason, FallbackStage, ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData,
-    NonlinearMethod, NonlinearResultsData, PrecisionMode, PreconditionerMode,
-    ProductionPublicationReason, ProductionPublicationReasonCode, QualityGate, QualityPolicy,
-    QualityReason, QualityReasonCode, RunProvenance, RunStatus, StructuralFrequencyResultsData,
-    StructuralRandomResponseResultsData, StructuralResponseSpectrumResultsData, ThermalResultsData,
-    TransientIntegrationMethod, TransientResultsData, ANALYSIS_ARTIFACT_MANIFEST_KIND,
-    ANALYSIS_DATASET_ARTIFACT_KIND, ANALYSIS_DIAGNOSTICS_ARTIFACT_KIND,
-    ANALYSIS_DIAGNOSTICS_SCHEMA_VERSION, ANALYSIS_FIELD_BINDINGS_ARTIFACT_KIND,
-    ANALYSIS_FIELD_BINDINGS_SCHEMA_VERSION, ANALYSIS_FIELD_DEFAULT_MATERIALIZE_LIMIT,
-    ANALYSIS_FIELD_DEFAULT_PAGE_SIZE, ANALYSIS_OBJECT_ARTIFACT_METADATA_SCHEMA_VERSION,
-    ANALYSIS_RUN_DATASET_KIND, ANALYSIS_RUN_DATASET_SCHEMA_VERSION,
+    NonlinearMethod, NonlinearResultsData, PrecisionMode, PreconditionerMode, QualityGate,
+    QualityPolicy, QualityReason, QualityReasonCode, RunProvenance, RunStatus,
+    StructuralFrequencyResultsData, StructuralRandomResponseResultsData,
+    StructuralResponseSpectrumResultsData, ThermalResultsData, TransientIntegrationMethod,
+    TransientResultsData, ANALYSIS_ARTIFACT_MANIFEST_KIND, ANALYSIS_DATASET_ARTIFACT_KIND,
+    ANALYSIS_DIAGNOSTICS_ARTIFACT_KIND, ANALYSIS_DIAGNOSTICS_SCHEMA_VERSION,
+    ANALYSIS_FIELD_BINDINGS_ARTIFACT_KIND, ANALYSIS_FIELD_BINDINGS_SCHEMA_VERSION,
+    ANALYSIS_FIELD_DEFAULT_MATERIALIZE_LIMIT, ANALYSIS_FIELD_DEFAULT_PAGE_SIZE,
+    ANALYSIS_OBJECT_ARTIFACT_METADATA_SCHEMA_VERSION, ANALYSIS_RUN_DATASET_KIND,
+    ANALYSIS_RUN_DATASET_SCHEMA_VERSION,
 };
 #[cfg(feature = "plot-core")]
 pub use figures::{
@@ -386,7 +386,6 @@ pub use operations::{
     analysis_trends_op,
 };
 pub(crate) use operations::{analysis_run_field_ids, collect_analysis_result_fields};
-pub use runmat_analysis_core::FormulationRequirement;
 pub use runmat_analysis_fea::{FeaProgressEvent, FeaProgressPhase, FeaProgressStatus};
 pub use runmat_analysis_language::{
     operation_pattern_from_value_fact, remote_execution_profile_facts, ExecutionProfileFacts,
@@ -899,7 +898,6 @@ pub fn analysis_prepare_structural_study_op(
                     &study.model,
                     &preload_step.procedure_step.step_id,
                     preload_step.authored_execution.backend,
-                    preload_step.authored_execution.requirement,
                     preload_options,
                     study.context.clone(),
                 )?;
@@ -986,7 +984,6 @@ pub fn analysis_prepare_structural_study_op(
                     &study.model,
                     &preload_step.procedure_step.step_id,
                     preload_step.authored_execution.backend,
-                    preload_step.authored_execution.requirement,
                     preload_options,
                     study.context.clone(),
                 )?;
@@ -1060,7 +1057,6 @@ pub fn analysis_prepare_structural_study_op(
                     &study.model,
                     &preload_step.procedure_step.step_id,
                     preload_step.authored_execution.backend,
-                    preload_step.authored_execution.requirement,
                     preload_options,
                     study.context.clone(),
                 )?;
@@ -1131,7 +1127,6 @@ pub fn analysis_prepare_structural_study_op(
                 &study.model,
                 &preload_step.procedure_step.step_id,
                 preload_step.authored_execution.backend,
-                preload_step.authored_execution.requirement,
                 preload_options,
                 study.context.clone(),
             )?;
@@ -1301,7 +1296,6 @@ pub fn analysis_prepare_structural_study_op(
             &study.model,
             &step.procedure_step.step_id,
             step.authored_execution.backend,
-            step.authored_execution.requirement,
             options,
             study.context.clone(),
         )?;
@@ -1919,13 +1913,7 @@ pub fn analysis_run_linear_static_op(
     backend: ComputeBackend,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
-    analysis_run_linear_static_with_options(
-        model,
-        backend,
-        FormulationRequirement::Production,
-        AnalysisRunOptions::default(),
-        context,
-    )
+    analysis_run_linear_static_with_options(model, backend, AnalysisRunOptions::default(), context)
 }
 
 pub fn analysis_run_modal_op(
@@ -1933,13 +1921,7 @@ pub fn analysis_run_modal_op(
     backend: ComputeBackend,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
-    analysis_run_modal_with_options_op(
-        model,
-        backend,
-        FormulationRequirement::Production,
-        AnalysisModalRunOptions::default(),
-        context,
-    )
+    analysis_run_modal_with_options_op(model, backend, AnalysisModalRunOptions::default(), context)
 }
 
 pub fn analysis_run_acoustic_op(
@@ -1950,7 +1932,6 @@ pub fn analysis_run_acoustic_op(
     analysis_run_acoustic_with_options_op(
         model,
         backend,
-        FormulationRequirement::Production,
         AnalysisAcousticRunOptions::default(),
         context,
     )
@@ -1959,7 +1940,6 @@ pub fn analysis_run_acoustic_op(
 fn execute_modal_with_options(
     model: &AnalysisModel,
     backend: ComputeBackend,
-    formulation_requirement: FormulationRequirement,
     options: AnalysisModalRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
@@ -2018,7 +1998,6 @@ fn execute_modal_with_options(
         model,
         backend,
         ModalSolveOptions {
-            formulation_requirement,
             truncation: options.truncation,
             convergence: options.convergence,
             residual_vector_directions: options.residual_vector_directions.clone(),
@@ -2076,8 +2055,6 @@ fn analysis_admit_buckling_run_with_id(
         });
     }
     let numerically_acceptable = result_quality == QualityGate::Pass;
-    let (production_publishable, production_publication_reasons) =
-        evaluate_production_publication(&run, numerically_acceptable);
     let run_status = classify_run_status(result_quality, numerically_acceptable);
     let provenance = RunProvenance {
         requested_backend: run.requested_backend,
@@ -2113,9 +2090,7 @@ fn analysis_admit_buckling_run_with_id(
         result_quality,
         run_status,
         numerically_acceptable,
-        production_publishable,
         quality_reasons,
-        production_publication_reasons,
         provenance,
     };
 
@@ -2130,7 +2105,6 @@ fn analysis_admit_buckling_run_with_id(
 fn execute_acoustic_with_options(
     model: &AnalysisModel,
     backend: ComputeBackend,
-    formulation_requirement: FormulationRequirement,
     options: AnalysisAcousticRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
@@ -2280,7 +2254,6 @@ fn execute_acoustic_with_options(
     let identity = admit_runtime_proxy_for_operation(
         PhysicsFamily::Acoustic,
         AnalysisProcedure::HarmonicResponse,
-        formulation_requirement,
         RuntimeProxyFormulation::AcousticHashedTargetGraphProjection,
         AnalysisOperation::Acoustic,
         model,
@@ -2384,8 +2357,6 @@ fn execute_acoustic_with_options(
             solver_convergence != QualityGate::Fail && result_quality != QualityGate::Fail
         }
     };
-    let (production_publishable, production_publication_reasons) =
-        evaluate_production_publication(&run, numerically_acceptable);
     let run_status = classify_run_status(result_quality, numerically_acceptable);
     let solver_backend = run.solver_backend;
     let execution_backend = run.execution_backend;
@@ -2409,9 +2380,7 @@ fn execute_acoustic_with_options(
         result_quality,
         run_status,
         numerically_acceptable,
-        production_publishable,
         quality_reasons,
-        production_publication_reasons,
         provenance: RunProvenance {
             requested_backend: backend,
             execution_backend,
@@ -2443,7 +2412,6 @@ pub fn analysis_run_transient_op(
     analysis_run_transient_with_options_op(
         model,
         backend,
-        FormulationRequirement::Production,
         AnalysisTransientRunOptions::default(),
         context,
     )
@@ -2454,19 +2422,12 @@ pub fn analysis_run_cfd_op(
     backend: ComputeBackend,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
-    analysis_run_cfd_with_options_op(
-        model,
-        backend,
-        FormulationRequirement::Production,
-        AnalysisCfdRunOptions::default(),
-        context,
-    )
+    analysis_run_cfd_with_options_op(model, backend, AnalysisCfdRunOptions::default(), context)
 }
 
 pub fn analysis_run_cfd_with_options_op(
     model: &AnalysisModel,
     _backend: ComputeBackend,
-    _formulation_requirement: FormulationRequirement,
     _options: AnalysisCfdRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
@@ -2493,7 +2454,6 @@ pub fn analysis_run_thermal_op(
     analysis_run_thermal_with_options_op(
         model,
         backend,
-        FormulationRequirement::Production,
         AnalysisThermalRunOptions::default(),
         context,
     )
@@ -2504,19 +2464,12 @@ pub fn analysis_run_cht_op(
     backend: ComputeBackend,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
-    analysis_run_cht_with_options_op(
-        model,
-        backend,
-        FormulationRequirement::Production,
-        AnalysisChtRunOptions::default(),
-        context,
-    )
+    analysis_run_cht_with_options_op(model, backend, AnalysisChtRunOptions::default(), context)
 }
 
 fn execute_cht_with_options(
     model: &AnalysisModel,
     _backend: ComputeBackend,
-    _formulation_requirement: FormulationRequirement,
     _options: AnalysisChtRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
@@ -2540,19 +2493,12 @@ pub fn analysis_run_fsi_op(
     backend: ComputeBackend,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
-    analysis_run_fsi_with_options_op(
-        model,
-        backend,
-        FormulationRequirement::Production,
-        AnalysisFsiRunOptions::default(),
-        context,
-    )
+    analysis_run_fsi_with_options_op(model, backend, AnalysisFsiRunOptions::default(), context)
 }
 
 fn execute_fsi_with_options(
     model: &AnalysisModel,
     _backend: ComputeBackend,
-    _formulation_requirement: FormulationRequirement,
     _options: AnalysisFsiRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
@@ -2676,7 +2622,6 @@ fn validate_thermal_run_model(
 fn execute_transient_with_options(
     model: &AnalysisModel,
     backend: ComputeBackend,
-    formulation_requirement: FormulationRequirement,
     options: AnalysisTransientRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
@@ -2716,7 +2661,6 @@ fn execute_transient_with_options(
         model,
         backend,
         runmat_analysis_fea::solve::transient::TransientSolveOptions {
-            formulation_requirement,
             time_step_policy: match options.time_step_policy {
                 contracts::AnalysisStructuralTimeStepPolicy::Fixed { interval_count } => {
                     runmat_analysis_fea::solve::transient::StructuralTimeStepPolicy::Fixed {
@@ -2942,8 +2886,6 @@ fn analysis_admit_transient_run_with_id(
             solver_convergence != QualityGate::Fail && result_quality != QualityGate::Fail
         }
     };
-    let (production_publishable, production_publication_reasons) =
-        evaluate_production_publication(&run, numerically_acceptable);
     let run_status = classify_run_status(result_quality, numerically_acceptable);
 
     let solver_backend = run.solver_backend;
@@ -3002,9 +2944,7 @@ fn analysis_admit_transient_run_with_id(
         result_quality,
         run_status,
         numerically_acceptable,
-        production_publishable,
         quality_reasons,
-        production_publication_reasons,
         provenance: RunProvenance {
             requested_backend: backend,
             execution_backend,
@@ -3036,7 +2976,6 @@ pub fn analysis_run_nonlinear_op(
     analysis_run_nonlinear_with_options_op(
         model,
         backend,
-        FormulationRequirement::Production,
         AnalysisNonlinearRunOptions::default(),
         context,
     )
@@ -3045,7 +2984,6 @@ pub fn analysis_run_nonlinear_op(
 fn execute_nonlinear_with_options(
     model: &AnalysisModel,
     backend: ComputeBackend,
-    formulation_requirement: FormulationRequirement,
     options: AnalysisNonlinearRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
@@ -3251,7 +3189,6 @@ fn execute_nonlinear_with_options(
         model,
         backend,
         runmat_analysis_fea::solve::nonlinear::NonlinearSolveOptions {
-            formulation_requirement,
             increment_count: options.increment_count,
             max_newton_iters: options.max_newton_iters,
             tolerance: options.tolerance,
@@ -3502,8 +3439,6 @@ fn execute_nonlinear_with_options(
             solver_convergence != QualityGate::Fail && result_quality != QualityGate::Fail
         }
     };
-    let (production_publishable, production_publication_reasons) =
-        evaluate_production_publication(&run, numerically_acceptable);
     let run_status = classify_run_status(result_quality, numerically_acceptable);
 
     let solver_backend = run.solver_backend;
@@ -3528,9 +3463,7 @@ fn execute_nonlinear_with_options(
         result_quality,
         run_status,
         numerically_acceptable,
-        production_publishable,
         quality_reasons,
-        production_publication_reasons,
         provenance: RunProvenance {
             requested_backend: backend,
             execution_backend,
@@ -3557,24 +3490,15 @@ fn execute_nonlinear_with_options(
 pub fn analysis_run_linear_static_with_options(
     model: &AnalysisModel,
     backend: ComputeBackend,
-    formulation_requirement: FormulationRequirement,
     options: AnalysisRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
-    analysis_run_linear_static_with_executor(
-        model,
-        backend,
-        formulation_requirement,
-        options,
-        context,
-        None,
-    )
+    analysis_run_linear_static_with_executor(model, backend, options, context, None)
 }
 
 pub fn analysis_prepare_linear_static_run_op(
     model: &AnalysisModel,
     backend: ComputeBackend,
-    formulation_requirement: FormulationRequirement,
     options: AnalysisRunOptions,
     context: OperationContext,
 ) -> Result<PreparedStructuralLinearRun, OperationErrorEnvelope> {
@@ -3599,32 +3523,18 @@ pub fn analysis_prepare_linear_static_run_op(
         })?
         .step_id
         .clone();
-    prepare_linear_static_step_run(
-        model,
-        &step_id,
-        backend,
-        formulation_requirement,
-        options,
-        context,
-    )
+    prepare_linear_static_step_run(model, &step_id, backend, options, context)
 }
 
 fn prepare_linear_static_step_run(
     model: &AnalysisModel,
     step_id: &ProcedureStepId,
     backend: ComputeBackend,
-    formulation_requirement: FormulationRequirement,
     options: AnalysisRunOptions,
     context: OperationContext,
 ) -> Result<PreparedStructuralLinearRun, OperationErrorEnvelope> {
     let _solver_context = install_fea_solver_context();
-    let workload = prepare_linear_static_workload_template(
-        model,
-        step_id,
-        backend,
-        formulation_requirement,
-        &options,
-    )?;
+    let workload = prepare_linear_static_workload_template(model, step_id, backend, &options)?;
     let solver_mesh = resolve_solver_mesh_artifact(
         model,
         options.solver_mesh_artifact_path.as_deref(),
@@ -3645,7 +3555,6 @@ fn prepare_linear_static_workload_template(
     model: &AnalysisModel,
     step_id: &ProcedureStepId,
     backend: ComputeBackend,
-    formulation_requirement: FormulationRequirement,
     options: &AnalysisRunOptions,
 ) -> Result<StructuralLinearWorkload, OperationErrorEnvelope> {
     let requested_preconditioner = match options.preconditioner_mode {
@@ -3669,7 +3578,6 @@ fn prepare_linear_static_workload_template(
         model: model.clone(),
         step_id: step_id.clone(),
         backend,
-        formulation_requirement,
         preconditioner: requested_preconditioner,
         algebra_backend: requested_solver_backend,
         observation_execution:
@@ -3707,7 +3615,6 @@ fn analysis_admit_linear_static_run_with_id(
             model: &prepared.workload.model,
             solver_mesh: prepared.solver_mesh.as_ref(),
             requested_backend: prepared.workload.backend,
-            formulation_requirement: prepared.workload.formulation_requirement,
             options: &prepared.options,
             assigned_run_id,
         },

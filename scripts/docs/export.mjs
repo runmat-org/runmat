@@ -3,12 +3,12 @@ import { mkdirSync, mkdtempSync, renameSync, rmSync, readFileSync, writeFileSync
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
-import { readJson, copyInput, collectDocuments } from "./documents.mjs";
+import { readJson, copyInput, collectDocuments, collectBuiltinReferences } from "./documents.mjs";
 import { collectExamples } from "./examples.mjs";
 import { collectFea } from "./fea.mjs";
 import { writeManifest } from "./manifest.mjs";
 import { collectGraphics } from "./graphics.mjs";
-export function buildSourceDocs({ source, output, requirementsPath, builtinDescriptorsPath, evidencePath, snapshotsRoot, graphicsRoot }) {
+export function buildSourceDocs({ source, output, requirementsPath, builtinDescriptorsPath, builtinDocumentationPath, evidencePath, snapshotsRoot, graphicsRoot }) {
     source = resolve(source);
     output = resolve(output);
     if (!output.startsWith(source + "/target/"))
@@ -29,6 +29,9 @@ export function buildSourceDocs({ source, output, requirementsPath, builtinDescr
         collectDocuments(source, staging, validate);
         collectFea(source, staging, register, examples, evidencePath ? readJson(evidencePath) : { schema_version: 1, records: [] }, validate);
         mkdirSync(join(staging, "builtins"), { recursive: true });
+        if (!builtinDocumentationPath)
+            throw new Error("Missing builtin documentation export");
+        collectBuiltinReferences(builtinDocumentationPath, staging);
         const descriptors = readJson(builtinDescriptorsPath);
         if (!Array.isArray(descriptors.builtins))
             throw new Error("Invalid built-in descriptors");
@@ -77,9 +80,9 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
             throw new Error("Invalid export arguments");
         options.set(args[index], args[index + 1]);
     }
-    for (const required of ["--requirements", "--builtin-descriptors", "--out"])
+    for (const required of ["--requirements", "--builtin-descriptors", "--builtin-documentation", "--out"])
         if (!options.has(required))
             throw new Error(`Missing ${required}`);
-    const manifest = buildSourceDocs({ source: resolve(dirname(fileURLToPath(import.meta.url)), "../.."), output: options.get("--out"), requirementsPath: options.get("--requirements"), builtinDescriptorsPath: options.get("--builtin-descriptors"), evidencePath: options.get("--evidence-manifest"), snapshotsRoot: options.get("--example-snapshots"), graphicsRoot: options.get("--graphics-runtime") });
+    const manifest = buildSourceDocs({ source: resolve(dirname(fileURLToPath(import.meta.url)), "../.."), output: options.get("--out"), requirementsPath: options.get("--requirements"), builtinDescriptorsPath: options.get("--builtin-descriptors"), builtinDocumentationPath: options.get("--builtin-documentation"), evidencePath: options.get("--evidence-manifest"), snapshotsRoot: options.get("--example-snapshots"), graphicsRoot: options.get("--graphics-runtime") });
     console.log(`Source docs: ${manifest.content_hash} (${manifest.files.length} files)`);
 }

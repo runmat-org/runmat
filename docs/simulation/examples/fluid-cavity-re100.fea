@@ -47,7 +47,6 @@ study cavity_re100 {
     geometry = geometry.cavity
     mesh = mesh.cavity
     model = model.driven_cavity
-    formulation = experimental
     analysis flow { fluid steady {} }
     output velocity = analysis.flow.field.cell.fluid_velocity
     output pressure = analysis.flow.field.cell.fluid_pressure

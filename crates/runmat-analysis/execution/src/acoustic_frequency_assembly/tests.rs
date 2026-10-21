@@ -41,7 +41,6 @@ fn fixture_with_memory(
             model,
             step_id: ProcedureStepId("acoustic".into()),
             frequency: Frequency::new(0.1),
-            formulation_requirement: FormulationRequirement::Experimental,
             solver: Default::default(),
             power_balance_relative_tolerance: 1e-8,
         })

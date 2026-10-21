@@ -1,8 +1,8 @@
 use super::NativeAnalysisKernel;
 use runmat_analysis_core::{
-    AnalysisConstraint, CoordinateFrame, Displacement, FormulationRequirement, IndependentDomain,
-    PrescribedStructuralDofs, PrescribedValue, ProcedureStep, ProcedureStepId, RegionTarget,
-    StructuralConstraint, StructuralConstraintKind, StructuralTranslationDof, TranslationDofValue,
+    AnalysisConstraint, CoordinateFrame, Displacement, IndependentDomain, PrescribedStructuralDofs,
+    PrescribedValue, ProcedureStep, ProcedureStepId, RegionTarget, StructuralConstraint,
+    StructuralConstraintKind, StructuralTranslationDof, TranslationDofValue,
 };
 use runmat_analysis_execution::{
     execute_reserved_serial_analysis, import_structural_modal_result, prepare_analysis_objects,
@@ -64,7 +64,6 @@ fn native_scalar_modal_preserves_cold_basis_receipts_fields_and_rejects_missing_
             model,
             step_id: ProcedureStepId("modes".into()),
             backend: ComputeBackend::Cpu,
-            formulation_requirement: FormulationRequirement::Experimental,
             observation_execution: ObservationExecutionPolicy::scalable(),
             truncation: ModalTruncationPolicy::requested(1),
             convergence: ModalConvergencePolicy::exploratory(),

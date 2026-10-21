@@ -6,9 +6,9 @@ use crate::{
 };
 use runmat_analysis_core::{
     validate_model, AnalysisConstraint, AnalysisModel, AnalysisProcedure, CoordinateFrame,
-    CoupledPhysicsFamily, ExcitationCaseActivation, ExcitationCaseSelection,
-    FormulationRequirement, IndependentDomain, PhysicsFamily, ProcedureSettings, ProcedureStepId,
-    RestartPolicy, SolutionSpace, StateCompleteness, StateKind, StatePersistence,
+    CoupledPhysicsFamily, ExcitationCaseActivation, ExcitationCaseSelection, IndependentDomain,
+    PhysicsFamily, ProcedureSettings, ProcedureStepId, RestartPolicy, SolutionSpace,
+    StateCompleteness, StateKind, StatePersistence,
 };
 use runmat_canonical_codec::{
     decode_contract, encode_contract, serialized_materialization_resident_bytes_estimate,
@@ -22,7 +22,6 @@ use serde::{Deserialize, Serialize};
 pub struct FluidSteadyWorkload {
     pub model: AnalysisModel,
     pub step_id: ProcedureStepId,
-    pub formulation_requirement: FormulationRequirement,
     pub policy: CanonicalFluidPolicy,
     pub geometry_policy: FiniteVolumeProjectionPolicy,
 }
@@ -46,29 +45,17 @@ impl FluidSteadyWorkload {
     ) -> AnalysisExecutionResult<crate::admission::AnalysisRunIdentity> {
         self.validate()?;
         if self.coupling() == FluidCoupling::ConjugateHeat && self.is_transient() {
-            crate::admission::admit_canonical_conjugate_heat_transient(
-                mesh,
-                self.formulation_requirement,
-            )
+            crate::admission::admit_canonical_conjugate_heat_transient(mesh)
         } else if self.coupling() == FluidCoupling::ConjugateHeat {
-            crate::admission::admit_canonical_conjugate_heat_steady(
-                mesh,
-                self.formulation_requirement,
-            )
+            crate::admission::admit_canonical_conjugate_heat_steady(mesh)
         } else if self.coupling() == FluidCoupling::FluidStructure && self.is_transient() {
-            crate::admission::admit_canonical_fluid_structure_transient(
-                mesh,
-                self.formulation_requirement,
-            )
+            crate::admission::admit_canonical_fluid_structure_transient(mesh)
         } else if self.coupling() == FluidCoupling::FluidStructure {
-            crate::admission::admit_canonical_fluid_structure_steady(
-                mesh,
-                self.formulation_requirement,
-            )
+            crate::admission::admit_canonical_fluid_structure_steady(mesh)
         } else if self.is_transient() {
-            crate::admission::admit_canonical_fluid_transient(mesh, self.formulation_requirement)
+            crate::admission::admit_canonical_fluid_transient(mesh)
         } else {
-            crate::admission::admit_canonical_fluid_steady(mesh, self.formulation_requirement)
+            crate::admission::admit_canonical_fluid_steady(mesh)
         }
         .map_err(invalid)
     }
@@ -145,7 +132,6 @@ impl FluidSteadyWorkload {
         super::FluidTransientWorkload {
             model: self.model.clone(),
             step_id: self.step_id.clone(),
-            formulation_requirement: self.formulation_requirement,
             policy: self.policy,
             geometry_policy: self.geometry_policy,
             initial_fields: Vec::new(),
@@ -204,7 +190,7 @@ impl FluidSteadyWorkload {
                 "steady fluid has no scheduled/alternate excitation-case authority",
             ));
         }
-        if self.formulation_requirement != FormulationRequirement::Experimental
+        if step.step_id != self.step_id
             || step.family != PhysicsFamily::Fluid
             || step.procedure != AnalysisProcedure::Static
             || step.solution_space != SolutionSpace::Direct
@@ -245,9 +231,7 @@ impl FluidSteadyWorkload {
                 .iter()
                 .any(|s| !crate::physics::cfd::canonical::supports_signal(s))
         {
-            return Err(invalid(
-                "unsupported standalone experimental CPU steady fluid authority",
-            ));
+            return Err(invalid("unsupported standalone CPU steady fluid authority"));
         }
         Ok(())
     }
@@ -305,8 +289,7 @@ impl FluidSteadyWorkload {
             }
             _ => None,
         };
-        if self.formulation_requirement != FormulationRequirement::Experimental
-            || transient.is_none()
+        if transient.is_none()
             || step.solution_space != SolutionSpace::Direct
             || step.settings != ProcedureSettings::None
             || step.restart != RestartPolicy::Fresh
@@ -388,8 +371,7 @@ impl FluidSteadyWorkload {
             }
             _ => false,
         };
-        if self.formulation_requirement != FormulationRequirement::Experimental
-            || !timing
+        if !timing
             || step.solution_space != SolutionSpace::Direct
             || step.settings != ProcedureSettings::None
             || step.restart != RestartPolicy::Fresh

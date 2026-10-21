@@ -18,4 +18,4 @@ rotation/scale covariance, exact affine gradients, first-order gradient truncati
 of an independently defined quadratic field, and rank-deficiency rejection.
 These stencil checks do not establish study-level spatial error bounds. Original
 Couette, convective and Fourier duct references, balances and cold validation remain
-mandatory. No CFD production or Stage 9 promotion follows from preparation reuse.
+mandatory. No CFD qualification or Stage 9 promotion follows from preparation reuse.

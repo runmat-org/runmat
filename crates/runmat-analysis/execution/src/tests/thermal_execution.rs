@@ -1,5 +1,5 @@
 use super::*;
-use runmat_analysis_core::{FormulationRequirement, Temperature, ThermalDomain};
+use runmat_analysis_core::{Temperature, ThermalDomain};
 use runmat_analysis_fea::execution::{ThermalSolverResultManifest, ThermalWorkload};
 use runmat_analysis_fea::{ComputeBackend, ThermalProcedureControl};
 use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
@@ -21,7 +21,6 @@ fn workload(procedure: ThermalProcedureControl) -> ThermalWorkload {
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         procedure,
         residual_target: 1e-4,
     }
@@ -90,7 +89,6 @@ fn thermal_accuracy_binds_numerical_workload_and_topology_not_host_identity() {
             .collect(),
         sequence: SequenceIdentity::from_solver_contract(&workload.model.sequence).unwrap(),
         step: workload.model.sequence.steps[0].clone(),
-        formulation_requirement: workload.formulation_requirement,
         program_revision: revision(),
         chunk_bytes: 1024,
         inventory_limits: limits,
@@ -139,9 +137,6 @@ fn thermal_accuracy_binds_numerical_workload_and_topology_not_host_identity() {
     // Both substituted objects are canonical and freshly hashed, but did not produce this receipt.
     assert!(check(&substituted_inputs).is_err());
     assert!(prepare_accuracy(request(substituted.host)).is_err());
-    let mut wrong_requirements = request(prepared.host);
-    wrong_requirements.formulation_requirement = FormulationRequirement::Production;
-    assert!(prepare_accuracy(wrong_requirements).is_err());
 }
 
 #[test]

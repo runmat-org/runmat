@@ -338,6 +338,7 @@ pub(in crate::semantic::model) fn scalar(value: &CheckedExpression) -> Option<f6
             value,
             scale_bits,
             offset_bits,
+            ..
         } => Some(scalar(value)? * f64::from_bits(*scale_bits) + f64::from_bits(*offset_bits)),
         CheckedExpressionKind::Unary { operator, operand } => {
             let value = scalar(operand)?;

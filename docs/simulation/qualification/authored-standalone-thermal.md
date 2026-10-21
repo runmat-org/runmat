@@ -2,8 +2,8 @@
 
 ## Envelope and current gate
 
-The bounded local authored chain is verified; the formulation is not qualified or
-production-promoted. The new
+The bounded local authored chain is verified; the formulation is not
+qualified. The new
 local entry admits one fresh, independent direct thermal steady or backward-Euler
 transient step. Mixed-family sequences, checkpoint entry, dependency/transition/branch
 graphs and accelerators remain closed at this entry. Existing thermal product and

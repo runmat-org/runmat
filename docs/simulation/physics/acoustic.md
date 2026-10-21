@@ -6,11 +6,11 @@ rigid wall, radiation condition, or impedance. RunMat does not infer those condi
 names or from an enclosed-looking volume.
 
 The `.fea` language checks static, modal, transient, harmonic, and nonlinear acoustic procedure
-contracts. The Rust numerical library now has an experimental canonical Tet4/Tet10 harmonic
+contracts. The Rust numerical library has a canonical Tet4/Tet10 harmonic
 entry, `physics::acoustic::solve_canonical_harmonic`, with exact pressure, normal-velocity,
 rigid-wall and positive real impedance boundaries. The public typed `.fea` executor does not
 connect that entry end to end. The older **reduced acoustic Helmholtz graph** remains separately
-identified as a proxy; it is not the canonical FE formulation. Neither route is production qualified.
+identified as a proxy; it is not the canonical FE formulation.
 
 The [canonical acoustic qualification record](../qualification/canonical-acoustic.md) states
 the independent references, supported library envelope and outstanding gates.
@@ -36,7 +36,7 @@ uses nearest-neighbor Laplacian weights $1/h_d^2$, adds $k^2$ and damping/bounda
 maps pressure sources onto graph nodes, and solves the complex Helmholtz system. Its admitted
 realization is named `ReducedAcousticHelmholtz`; source evidence distinguishes a hashed-target graph
 projection from a synthetic fallback. This component is useful for pipeline integration and
-diagnostics, not a production claim for arbitrary CAD acoustics.
+diagnostics; it is not a general solver for arbitrary CAD acoustics.
 
 ## Which acoustic procedures are defined?
 
@@ -45,7 +45,7 @@ diagnostics, not a production claim for arbitrary CAD acoustics.
 | `acoustic static` | Static pressure state | Typed contract; reduced component is harmonic, not static |
 | `acoustic modal` | Positive mode count; acoustic modes state | Canonical Tet4/Tet10 pressure eigen-solve; publishes `modal.frequency_hz` and one `acoustic.pressure` field per mode |
 | `acoustic transient` | Time samples; acoustic pressure state | Canonical Tet4/Tet10 Newmark pressure history; publishes one `acoustic.pressure` field per time sample with acoustic energy |
-| `acoustic harmonic` | Frequency samples and complex pressure | Experimental reduced Helmholtz graph component |
+| `acoustic harmonic` | Frequency samples and complex pressure | Canonical Tet4/Tet10 complex pressure; one certified sparse LU per frequency solves and proves the operator nonsingular; publishes `acoustic.pressure` per frequency |
 | `acoustic nonlinear` | Load-factor domain | Typed contract only |
 
 No unsupported procedure is approximated by silently selecting the reduced harmonic component.
@@ -67,12 +67,11 @@ study cavity_modes {
     geometry = geometry.cavity
     mesh = mesh.cavity
     model = model.cavity_model
-    formulation = experimental
     analysis modes { acoustic modal { modes = 20 } }
 }
 ```
 
-For a production acoustic eigenproblem, the expected discrete system is
+For an acoustic eigenproblem, the expected discrete system is
 $\mathsf K_p\boldsymbol\phi_i=\omega_i^2\mathsf M_p\boldsymbol\phi_i$. The typed contract carries
 mode count and acoustic state, but no native public modal realization is currently admitted.
 

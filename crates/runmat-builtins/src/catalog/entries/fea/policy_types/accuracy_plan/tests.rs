@@ -9,8 +9,8 @@ fn accuracy_plan_identities_conform() {
             &new_method::POLICY_CALL,
         ),
         (
-            &experimental_baseline::FEA_ACCURACY_PLAN_EXPERIMENTAL_BASELINE_CATALOG_ENTRY,
-            &experimental_baseline::POLICY_CALL,
+            &baseline::FEA_ACCURACY_PLAN_BASELINE_CATALOG_ENTRY,
+            &baseline::POLICY_CALL,
         ),
     ]);
 }

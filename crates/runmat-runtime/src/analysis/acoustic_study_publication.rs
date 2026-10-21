@@ -12,7 +12,8 @@ mod admission;
 #[path = "acoustic_study_publication/materialization.rs"]
 mod materialization;
 pub(in crate::analysis) use materialization::{
-    AcousticFrequencyCompletionResults, AcousticFrequencyPersistence, CompletedAcousticFrequencyStep,
+    AcousticFrequencyCompletionResults, AcousticFrequencyPersistence,
+    CompletedAcousticFrequencyStep,
 };
 
 pub fn publish_acoustic_study_result(
@@ -117,7 +118,6 @@ pub fn prepare_acoustic_study_publication(
     let execution = super::AnalysisExecutionStep {
         step_id: authored_step.step_id.clone(),
         backend: runmat_analysis_fea::ComputeBackend::Cpu,
-        requirement: completed.compiled.formulation_requirement,
         solver_options: super::AnalysisSolverOptions::AcousticHelmholtz(options.clone()),
     };
     let prepared = super::structural_study::standalone_completion(

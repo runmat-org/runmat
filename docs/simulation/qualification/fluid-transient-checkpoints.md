@@ -42,7 +42,7 @@ prepared resource facts avoid repeated history replay during transport planning;
 worker preparation reuses its validated physical state through execution.
 No second scheduler, property compiler, fluid integrator or private sparse solver
 is introduced. Native output is an original checkpoint artifact, not a complete
-study publication or production accuracy attestation.
+study publication or accuracy attestation.
 
 ## Evidence and remaining gates
 
@@ -108,5 +108,5 @@ space/time accuracy and atomic semantic publication. Selected activation, remain
 shared boundary/source histories, full typed cell/face state transitions, independent
 vortex/cavity/backstep, conservative CHT/FSI, measured resources and all claimed
 backend/release gates remain. Original scientific failures and the default-control
-continuity failure remain open. No stage, production, accelerator, distributed or
+continuity failure remain open. No stage, qualification, accelerator, distributed or
 whole-release promotion.

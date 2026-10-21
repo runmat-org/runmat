@@ -72,7 +72,6 @@ fn template(frequencies: Vec<f64>) -> AcousticHarmonicWorkload {
         model,
         step_id: ProcedureStepId("acoustic".into()),
         frequency: Frequency::new(0.2),
-        formulation_requirement: FormulationRequirement::Experimental,
         solver: runmat_analysis_fea::physics::acoustic::AcousticHarmonicPolicy::default(),
         power_balance_relative_tolerance: 1e-8,
     }

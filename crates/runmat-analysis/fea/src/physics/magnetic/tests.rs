@@ -193,14 +193,7 @@ fn authored_material_current_ground_and_gauge_compile_into_physical_solve() {
             ElementOrder::Tet10 => quadratic_slab_mesh(2),
         };
         let input = authored_model(-2.0);
-        let result = solve_canonical_static(
-            &input,
-            &mesh,
-            "potential",
-            FormulationRequirement::Experimental,
-            1e-10,
-        )
-        .unwrap();
+        let result = solve_canonical_static(&input, &mesh, "potential", 1e-10).unwrap();
         assert!(result.magnetic_energy_j > 0.0);
         assert!(result.relative_energy_work_error < 1.6e-9);
         let (projection, data) = problem(order, 2, VACUUM_PERMEABILITY_H_PER_M, -2.0);
@@ -214,47 +207,19 @@ fn authored_material_current_ground_and_gauge_compile_into_physical_solve() {
         {
             assert!((a - b).abs() < 1e-14);
         }
-        assert!(solve_canonical_static(
-            &input,
-            &mesh,
-            "potential",
-            FormulationRequirement::Production,
-            1e-10
-        )
-        .is_err());
+        assert!(solve_canonical_static(&input, &mesh, "potential", 1e-10).is_err());
         let mut missing = input.clone();
         missing.constraints.pop();
-        assert!(solve_canonical_static(
-            &missing,
-            &mesh,
-            "potential",
-            FormulationRequirement::Experimental,
-            1e-10
-        )
-        .is_err());
+        assert!(solve_canonical_static(&missing, &mesh, "potential", 1e-10).is_err());
         let mut surface = input.clone();
         let excitation = surface.excitations[0].excitation().clone();
         surface.excitations[0] = ExcitationAction::CurrentDensity(excitation);
-        assert!(solve_canonical_static(
-            &surface,
-            &mesh,
-            "potential",
-            FormulationRequirement::Experimental,
-            1e-10
-        )
-        .is_err());
+        assert!(solve_canonical_static(&surface, &mesh, "potential", 1e-10).is_err());
         let mut wrong_domain = input;
         wrong_domain.electromagnetic = Some(ElectromagneticDomain::Static {
             equation: StaticElectricalEquation::Electrostatics,
         });
-        assert!(solve_canonical_static(
-            &wrong_domain,
-            &mesh,
-            "potential",
-            FormulationRequirement::Experimental,
-            1e-10
-        )
-        .is_err());
+        assert!(solve_canonical_static(&wrong_domain, &mesh, "potential", 1e-10).is_err());
     }
 }
 
@@ -262,14 +227,7 @@ fn authored_material_current_ground_and_gauge_compile_into_physical_solve() {
 fn exact_volume_superposition_zero_conductivity_and_missing_boundary_fail_closed() {
     let mesh = slab_mesh(2);
     let base = authored_model(2.0);
-    let reference = solve_canonical_static(
-        &base,
-        &mesh,
-        "potential",
-        FormulationRequirement::Experimental,
-        1e-10,
-    )
-    .unwrap();
+    let reference = solve_canonical_static(&base, &mesh, "potential", 1e-10).unwrap();
     let mut summed = authored_model(3.0);
     summed.materials[0]
         .electrical
@@ -296,14 +254,7 @@ fn exact_volume_superposition_zero_conductivity_and_missing_boundary_fail_closed
     summed.excitation_cases[0]
         .action_ids
         .push(ExcitationId("minus".into()));
-    let result = solve_canonical_static(
-        &summed,
-        &mesh,
-        "potential",
-        FormulationRequirement::Experimental,
-        1e-10,
-    )
-    .unwrap();
+    let result = solve_canonical_static(&summed, &mesh, "potential", 1e-10).unwrap();
     assert!((result.magnetic_energy_j / reference.magnetic_energy_j - 1.0).abs() < 1e-8);
     for (a, b) in result
         .edge_circulations_wb
@@ -313,14 +264,7 @@ fn exact_volume_superposition_zero_conductivity_and_missing_boundary_fail_closed
         assert!((a - b).abs() < 1e-14);
     }
     summed.constraints.remove(0);
-    assert!(solve_canonical_static(
-        &summed,
-        &mesh,
-        "potential",
-        FormulationRequirement::Experimental,
-        1e-10
-    )
-    .is_err());
+    assert!(solve_canonical_static(&summed, &mesh, "potential", 1e-10).is_err());
     let (mut projection, data) = problem(ElementOrder::Tet10, 2, 1.0, 1.0);
     let midside = projection.elements[0].node_indices[4];
     projection.nodes[midside].coordinates_m[0] += 0.01;

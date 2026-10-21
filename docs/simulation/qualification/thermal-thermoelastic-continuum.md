@@ -2,7 +2,7 @@
 
 This qualification is an affine Tet4/Tet10 unit-cube, constant-property, steady heat conduction
 and small-strain one-way thermoelastic envelope. It is not CAD generation, arbitrary-mesh
-transfer, temperature-dependent material closure, GPU execution or production qualification.
+transfer, temperature-dependent material closure, GPU execution or family qualification.
 The initial six-case numerical run passed (root run 4925, 15.86 s); its results below motivated
 stricter order-specific gates. The ratcheted rerun passes (43260, 15.12 s), the full thermal-state
 qualification group passes 11/11 (77512, 14.21 s), and strict FEA all-target lint passes (90041).
@@ -17,7 +17,7 @@ The authored activation inventory, solved-temperature transfer and independent
 gates are unchanged. Thermal planning passes 16 tests including mixed selections
 and unsupported-input rejection. Retained backend reservation tests count both
 primary and bounded power-refinement solves and preserve one-byte-under rejection.
-These focused checks do not establish a green full regression or production gate.
+These focused checks do not establish a green full regression or qualification gate.
 
 ## Independent continuum reference
 
@@ -85,7 +85,7 @@ strictly enforced at both refinement transitions; neither mandatory meshes nor r
 are changed. The coarse Tet4 mesh has only prescribed-end thermal nodes and consequently
 cannot resolve interior heating: interior RMS error explicitly detects this limitation.
 
-These figures qualify this fixture's trend and precision, not every production accuracy target.
+These figures qualify this fixture's trend and precision, not every accuracy target.
 The same computed source is cold decoded before mechanics, and no additional thermal solve
 or analytic reconstruction occurs during transfer.
 

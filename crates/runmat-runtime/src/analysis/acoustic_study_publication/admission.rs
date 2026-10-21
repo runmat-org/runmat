@@ -72,7 +72,6 @@ pub(super) fn validate(
     let plan = runmat_analysis_fea::study::plan_acoustic_study(
         &completed.compiled,
         runmat_analysis_fea::study::AcousticStudyPlanningPolicy {
-            formulation_requirement: first.workload.formulation_requirement,
             power_balance_relative_tolerance: first.workload.power_balance_relative_tolerance,
             contraction_limit: first.workload.solver.contraction_limit,
         },
@@ -126,7 +125,6 @@ fn validate_entry(
             .source_result_identity()
             .map_err(|e| e.to_string())?,
         completed.observation_catalog.as_ref(),
-        completed.workload.formulation_requirement,
         step.accuracy.clone(),
     )
     .map_err(|e| e.to_string())?;

@@ -9,7 +9,7 @@ use runmat_analysis_core::{
 fn cavity_model(count: usize) -> AnalysisModel {
     let mut model = super::super::tests::model();
     model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
-    model.sequence.steps = vec![ProcedureStep::experimental(
+    model.sequence.steps = vec![ProcedureStep::new(
         "acoustic",
         PhysicsFamily::Acoustic,
         AnalysisProcedure::ModalExtraction,

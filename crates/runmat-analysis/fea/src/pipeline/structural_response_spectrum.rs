@@ -101,11 +101,11 @@ pub fn prepare_structural_modal_response_spectrum(
         workload.model(),
         &excitations,
         Some(solver_mesh.clone()),
-        StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+        StructuralFormulationRequirement::SyntheticOperator,
         constraints,
     )
     .map_err(|error| invalid(error.to_string()))?;
-    super::admission::admit_structural(&summary, producer, workload.formulation_requirement())
+    super::admission::admit_structural(&summary, producer)
         .map_err(|error| invalid(error.to_string()))?;
     super::validate_rotational_dof_targets(workload.model(), &summary)
         .map_err(|error| invalid(error.to_string()))?;

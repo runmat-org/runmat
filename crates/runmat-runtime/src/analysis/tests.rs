@@ -1026,7 +1026,6 @@ fn sample_linear_static_study_spec() -> AnalysisStudySpec {
             steps: vec![AnalysisExecutionStep {
                 step_id: procedure_step.step_id.clone(),
                 backend: ComputeBackend::Cpu,
-                requirement: FormulationRequirement::Experimental,
                 solver_options: AnalysisSolverOptions::defaults_for(&procedure_step).unwrap(),
             }],
         },
@@ -1059,7 +1058,6 @@ fn sample_electromagnetic_study_spec() -> AnalysisStudySpec {
             steps: vec![AnalysisExecutionStep {
                 step_id: procedure_step.step_id.clone(),
                 backend: ComputeBackend::Cpu,
-                requirement: FormulationRequirement::Experimental,
                 solver_options: AnalysisSolverOptions::defaults_for(&procedure_step).unwrap(),
             }],
         },
@@ -1662,7 +1660,6 @@ impl StructuralLinearExecutor for CanonicalStructuralExecutor {
             &workload.model,
             workload.backend,
             runmat_analysis_fea::LinearStaticSolveOptions {
-                formulation_requirement: workload.formulation_requirement,
                 preconditioner_kind: workload.preconditioner,
                 algebra_backend_kind: workload.algebra_backend,
                 solver_mesh_artifact_path: None,
@@ -1920,10 +1917,6 @@ fn portable_structural_study_reenters_shared_runtime_persistence() {
         .expect("portable run should be persisted");
     assert_eq!(persisted.run.identity, envelope.data.steps[0].identity);
     assert_eq!(persisted.run_status, envelope.data.run_status);
-    assert_eq!(
-        persisted.production_publishable,
-        envelope.data.production_publishable
-    );
     assert!(Path::new(&envelope.data.evidence_artifact_path).is_file());
     let _ = fs::remove_dir_all(&root);
     let _ = fs::remove_dir_all(&solver_mesh_root);
@@ -1948,13 +1941,12 @@ fn portable_structural_study_executes_every_independent_step_in_authored_order()
         vec![first.clone(), second.clone()],
     );
     spec.model = model;
-    spec.execution = AnalysisExecutionPlan::for_sequence_with_requirement(
+    spec.execution = AnalysisExecutionPlan::for_sequence(
         &AnalysisSequence::from_steps(
             "sequence_two_independent_static_steps",
             vec![first.clone(), second.clone()],
         ),
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
     )
     .expect("two-step execution plan should be valid");
     let executor = CanonicalStructuralExecutor {
@@ -2518,7 +2510,6 @@ fn analysis_run_linear_static_returns_typed_envelope() {
     let envelope = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisRunOptions {
             deterministic_mode: true,
             precision_mode: PrecisionMode::Fp64,
@@ -2584,7 +2575,6 @@ fn analysis_run_linear_static_with_thermo_mechanical_coupling_reports_fields() {
     let envelope = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisRunOptions {
             deterministic_mode: true,
             precision_mode: PrecisionMode::Fp64,
@@ -2688,7 +2678,6 @@ fn analysis_run_linear_static_rejects_thermo_coupling_on_structural_step() {
     let error = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisRunOptions {
             solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
             ..AnalysisRunOptions::default()
@@ -2727,7 +2716,6 @@ fn analysis_run_linear_static_persists_artifacts_through_runtime_filesystem_prov
     let envelope = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(Some("trace-provider-artifact".to_string()), None),
     )
@@ -2766,7 +2754,6 @@ fn analysis_run_linear_static_cancellation_maps_normalized_error() {
     let err = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(Some("trace-cancel".to_string()), None),
     )
@@ -2798,7 +2785,6 @@ fn analysis_run_linear_static_cancellation_after_preparation_stops_assembly() {
     let error = analysis_run_linear_static_with_options(
         &sample_model(),
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisRunOptions::default(),
         OperationContext::new(Some("trace-cancel-after-preparation".to_string()), None),
     )
@@ -2826,7 +2812,6 @@ fn analysis_run_linear_static_emits_solver_and_artifact_progress_events() {
     analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(Some("trace-progress".to_string()), None),
     )
@@ -2966,7 +2951,6 @@ fn native_sparse_provider_serves_modal_and_transient_routes() {
     let modal = analysis_run_modal_with_options_op(
         &modal_model,
         ComputeBackend::Gpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(Some("trace-modal-native-sparse".to_string()), None),
     )
@@ -2991,7 +2975,6 @@ fn native_sparse_provider_serves_modal_and_transient_routes() {
     let transient = analysis_run_transient_with_options_op(
         &transient_model,
         ComputeBackend::Gpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(Some("trace-transient-native-sparse".to_string()), None),
     )
@@ -3017,7 +3000,6 @@ fn analysis_results_returns_filtered_fields_and_metadata() {
     let run = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(Some("trace-results-1".to_string()), None),
     )
@@ -3348,7 +3330,6 @@ fn analysis_results_describes_structural_l2_fields() {
     let run = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisRunOptions {
             solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
             ..AnalysisRunOptions::default()
@@ -3439,7 +3420,6 @@ fn analysis_results_describes_beam_resultant_fields() {
     let run = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(Some("trace-results-beam-fields-1".to_string()), None),
     )
@@ -3547,7 +3527,6 @@ fn analysis_results_unavailable_beam_continuum_field_maps_typed_error() {
     let run = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(Some("trace-results-3".to_string()), None),
     )
@@ -3589,7 +3568,6 @@ fn analysis_results_by_run_id_roundtrip_works() {
     let run = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(Some("trace-results-by-id-run".to_string()), None),
     )
@@ -3672,7 +3650,6 @@ fn analysis_results_compare_reports_typed_deltas_rejects_unsupported_envelope() 
     let error = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisNonlinearRunOptions::balanced(),
         OperationContext::new(None, None),
     )
@@ -3692,7 +3669,6 @@ fn analysis_trends_summarizes_recent_nonlinear_runs_rejects_unsupported_envelope
     let error = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisNonlinearRunOptions::balanced(),
         OperationContext::new(None, None),
     )
@@ -3723,7 +3699,6 @@ fn analysis_trends_classifies_acoustic_runs_separately() {
         let _ = analysis_run_acoustic_with_options_op(
             &acoustic_model.data,
             ComputeBackend::Cpu,
-            FormulationRequirement::Experimental,
             Default::default(),
             OperationContext::new(None, None),
         )
@@ -3771,7 +3746,6 @@ fn analysis_trends_never_records_rejected_reduced_cfd_as_a_run() {
         let error = analysis_run_cfd_with_options_op(
             &model,
             ComputeBackend::Cpu,
-            FormulationRequirement::Experimental,
             Default::default(),
             OperationContext::new(None, None),
         )
@@ -3802,7 +3776,6 @@ fn analysis_trends_omit_rejected_coupled_flow_runs() {
         analysis_run_cht_with_options_op(
             &sample_cht_model(),
             ComputeBackend::Cpu,
-            FormulationRequirement::Experimental,
             Default::default(),
             OperationContext::new(None, None),
         )
@@ -3810,7 +3783,6 @@ fn analysis_trends_omit_rejected_coupled_flow_runs() {
         analysis_run_fsi_with_options_op(
             &sample_fsi_model(),
             ComputeBackend::Cpu,
-            FormulationRequirement::Experimental,
             Default::default(),
             OperationContext::new(None, None),
         )
@@ -3850,7 +3822,6 @@ fn analysis_run_transient_rejects_configured_thermomechanical_step() {
     let error = analysis_run_transient_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisTransientRunOptions::default(),
         OperationContext::new(None, None),
     )
@@ -3879,7 +3850,6 @@ fn analysis_run_transient_rejects_invalid_electro_thermal_voltage() {
     let err = analysis_run_transient_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(None, None),
     )
@@ -3909,7 +3879,6 @@ fn analysis_run_transient_rejects_electro_thermal_context_on_structural_step() {
     let error = analysis_run_transient_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(None, None),
     )
@@ -3940,7 +3909,6 @@ fn analysis_results_summary_surfaces_thermo_nonlinear_metrics_rejects_unsupporte
     let error = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisNonlinearRunOptions::balanced(),
         OperationContext::new(None, None),
     )
@@ -3974,7 +3942,6 @@ fn analysis_run_nonlinear_rejects_explicit_connectivity_that_drops_thermo_coupli
     let error = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisNonlinearRunOptions::solid_recommended(),
         OperationContext::new(None, None),
     )
@@ -4006,7 +3973,6 @@ fn analysis_trends_ignore_noncanonical_artifacts() {
     let run = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(None, None),
     )
@@ -4321,7 +4287,6 @@ fn static_completion_rejects_result_with_unowned_solid_elements() {
     let solved = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         options.clone(),
         OperationContext::new(Some("trace-completion-property-coverage".to_string()), None),
     )
@@ -4338,7 +4303,6 @@ fn static_completion_rejects_result_with_unowned_solid_elements() {
             model: &unowned,
             solver_mesh: Some(&mesh),
             requested_backend: ComputeBackend::Cpu,
-            formulation_requirement: FormulationRequirement::Experimental,
             options: &options,
             assigned_run_id: Some("rejected-property-coverage"),
         },
@@ -4359,7 +4323,6 @@ fn static_completion_rejects_result_with_unowned_solid_elements() {
             model: &thermal_only,
             solver_mesh: Some(&mesh),
             requested_backend: ComputeBackend::Cpu,
-            formulation_requirement: FormulationRequirement::Experimental,
             options: &options,
             assigned_run_id: Some("rejected-structural-capability"),
         },
@@ -4393,7 +4356,6 @@ fn analysis_results_by_run_id_rejects_unwrapped_artifacts() {
     let run = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(None, None),
     )
@@ -4451,7 +4413,6 @@ fn analysis_results_by_run_id_rejects_unknown_artifact_schema() {
     let run = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(None, None),
     )
@@ -4507,7 +4468,6 @@ fn analysis_artifacts_record_family_specific_op_versions() {
     let acoustic = analysis_run_acoustic_with_options_op(
         &acoustic_model.data,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(None, None),
     )
@@ -4531,7 +4491,6 @@ fn analysis_artifacts_record_family_specific_op_versions() {
     let thermal = analysis_run_thermal_with_options_op(
         &thermal_model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisThermalRunOptions {
             solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
             ..Default::default()
@@ -4585,7 +4544,6 @@ fn analysis_artifact_retention_prunes_old_runs_per_kind() {
         let run = analysis_run_nonlinear_with_options_op(
             &model,
             ComputeBackend::Cpu,
-            FormulationRequirement::Experimental,
             Default::default(),
             OperationContext::new(None, None),
         )
@@ -4632,7 +4590,6 @@ fn analysis_results_by_run_id_filesystem_replay_is_stable() {
     let run = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(None, None),
     )
@@ -4672,7 +4629,6 @@ fn requested_preconditioner_fallback_is_recorded() {
     let envelope = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisRunOptions {
             deterministic_mode: true,
             precision_mode: PrecisionMode::Fp64,
@@ -4721,7 +4677,6 @@ fn solver_mesh_geometry_revision_must_match_the_analysis_model() {
     let error = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisRunOptions {
             solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
             ..AnalysisRunOptions::default()
@@ -4753,7 +4708,6 @@ fn ilu_preconditioner_provenance_reports_the_executed_ilu_solver() {
     let envelope = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisRunOptions {
             deterministic_mode: true,
             precision_mode: PrecisionMode::Fp64,
@@ -4790,7 +4744,6 @@ fn quality_policy_exploratory_allows_numerically_acceptable_warn_path() {
     let envelope = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisRunOptions {
             deterministic_mode: true,
             precision_mode: PrecisionMode::Fp64,
@@ -4818,7 +4771,6 @@ fn direct_solid_run_without_solver_mesh_fails_closed() {
     let err = analysis_run_linear_static_with_options(
         &sample_solid_model(),
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisRunOptions {
             deterministic_mode: true,
             precision_mode: PrecisionMode::Fp64,
@@ -4847,7 +4799,6 @@ fn analysis_run_modal_rejects_models_without_modal_step() {
     let err = analysis_run_modal_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(None, None),
     )
@@ -4865,7 +4816,6 @@ fn analysis_run_acoustic_rejects_models_without_acoustic_harmonic_step() {
     let err = analysis_run_acoustic_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(None, None),
     )
@@ -4903,7 +4853,6 @@ fn analysis_run_acoustic_rejects_models_without_acoustic_source() {
     let err = analysis_run_acoustic_with_options_op(
         &acoustic_model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(None, None),
     )
@@ -4934,7 +4883,6 @@ fn analysis_run_acoustic_rejects_moment_excitations() {
     let err = analysis_run_acoustic_with_options_op(
         &acoustic_model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(None, None),
     )
@@ -4969,7 +4917,6 @@ fn analysis_run_acoustic_rejects_models_without_acoustic_boundary() {
     let err = analysis_run_acoustic_with_options_op(
         &acoustic_model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(None, None),
     )
@@ -4988,7 +4935,6 @@ fn analysis_run_transient_rejects_models_without_transient_step() {
     let err = analysis_run_transient_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(None, None),
     )
@@ -5006,7 +4952,6 @@ fn analysis_run_cfd_rejects_models_without_cfd_step() {
     let err = analysis_run_cfd_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(None, None),
     )
@@ -5025,7 +4970,6 @@ fn analysis_run_cfd_rejects_model_without_cfd_domain() {
     let err = analysis_run_cfd_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(None, None),
     )
@@ -5047,7 +4991,6 @@ fn analysis_run_cfd_rejects_moment_excitations() {
     let err = analysis_run_cfd_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(None, None),
     )
@@ -5065,7 +5008,6 @@ fn analysis_run_thermal_rejects_models_without_thermal_step() {
     let err = analysis_run_thermal_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(None, None),
     )
@@ -5092,7 +5034,6 @@ fn analysis_run_thermal_rejects_invalid_thermal_material_values() {
     let err = analysis_run_thermal_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(None, None),
     )
@@ -5124,7 +5065,6 @@ fn analysis_run_thermal_rejects_invalid_heat_source_values() {
     let err = analysis_run_thermal_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(None, None),
     )
@@ -5145,7 +5085,6 @@ fn analysis_run_thermal_rejects_moment_excitations() {
     let err = analysis_run_thermal_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(None, None),
     )
@@ -5176,7 +5115,6 @@ fn analysis_run_thermal_rejects_invalid_thermal_boundary_values() {
     let err = analysis_run_thermal_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(None, None),
     )
@@ -5199,7 +5137,6 @@ fn analysis_run_cht_requires_an_authored_study() {
         let err = analysis_run_cht_with_options_op(
             &model,
             ComputeBackend::Cpu,
-            FormulationRequirement::Experimental,
             Default::default(),
             OperationContext::new(None, None),
         )
@@ -5222,7 +5159,6 @@ fn analysis_run_fsi_requires_an_authored_study() {
         let err = analysis_run_fsi_with_options_op(
             &model,
             ComputeBackend::Cpu,
-            FormulationRequirement::Experimental,
             Default::default(),
             OperationContext::new(None, None),
         )
@@ -5245,7 +5181,6 @@ fn analysis_run_thermal_returns_temperature_payload() {
     let run = analysis_run_thermal_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisThermalRunOptions {
             snapshot_count: 6,
             solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
@@ -5351,14 +5286,13 @@ fn analysis_run_thermal_reports_host_execution_for_gpu_request() {
     let run = analysis_run_thermal_with_options_op(
         &model,
         ComputeBackend::Gpu,
-        FormulationRequirement::Experimental,
         AnalysisThermalRunOptions {
             solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
             ..AnalysisThermalRunOptions::default()
         },
         OperationContext::new(None, None),
     )
-    .expect("experimental thermal run should complete");
+    .expect("thermal run should complete");
 
     assert_eq!(run.data.provenance.requested_backend, ComputeBackend::Gpu);
     assert_eq!(run.data.provenance.execution_backend, ExecutionBackend::Cpu);
@@ -5428,7 +5362,6 @@ fn analysis_run_thermal_balanced_degrades_on_high_constitutive_spread() {
     let run = analysis_run_thermal_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisThermalRunOptions {
             quality_policy: QualityPolicy::Balanced,
             snapshot_count: 8,
@@ -5464,7 +5397,6 @@ fn analysis_run_nonlinear_rejects_models_without_nonlinear_step() {
     let err = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(None, None),
     )
@@ -5482,7 +5414,6 @@ fn analysis_run_nonlinear_returns_native_nonlinear_result_rejects_unsupported_en
     let error = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisNonlinearRunOptions::balanced(),
         OperationContext::new(None, None),
     )
@@ -5504,7 +5435,6 @@ fn analysis_run_nonlinear_exposes_beam_rotation_snapshots_rejects_unsupported_en
     let error = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisNonlinearRunOptions::balanced(),
         OperationContext::new(None, None),
     )
@@ -5524,7 +5454,6 @@ fn nonlinear_strict_iteration_controls_do_not_admit_an_unsupported_envelope() {
     let error = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisNonlinearRunOptions {
             quality_policy: QualityPolicy::Strict,
             max_newton_iters: 1,
@@ -5553,7 +5482,6 @@ fn nonlinear_quality_policy_cannot_override_formulation_admission() {
         let error = analysis_run_nonlinear_with_options_op(
             &model,
             ComputeBackend::Cpu,
-            FormulationRequirement::Experimental,
             AnalysisNonlinearRunOptions {
                 quality_policy,
                 ..AnalysisNonlinearRunOptions::balanced()
@@ -5584,7 +5512,6 @@ fn nonlinear_balanced_degrades_when_thermo_mechanical_severity_is_high_rejects_u
     let error = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisNonlinearRunOptions::balanced(),
         OperationContext::new(None, None),
     )
@@ -5609,7 +5536,6 @@ fn nonlinear_balanced_does_not_report_thermo_stress_below_severity_threshold_rej
     let error = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisNonlinearRunOptions::balanced(),
         OperationContext::new(None, None),
     )
@@ -5629,7 +5555,6 @@ fn analysis_results_query_can_exclude_nonlinear_payload_rejects_unsupported_enve
     let error = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisNonlinearRunOptions::balanced(),
         OperationContext::new(None, None),
     )
@@ -5680,7 +5605,6 @@ fn analysis_run_transient_returns_native_transient_result() {
     let envelope = analysis_run_transient_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(None, None),
     )
@@ -5847,7 +5771,6 @@ fn analysis_run_transient_exposes_beam_rotational_snapshots() {
     let envelope = analysis_run_transient_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(None, None),
     )
@@ -5924,7 +5847,6 @@ fn analysis_run_cfd_rejects_vector_boundaries_without_fabricated_payload() {
     let err = analysis_run_cfd_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisCfdRunOptions::default(),
         OperationContext::new(None, None),
     )
@@ -5982,7 +5904,6 @@ fn analysis_run_cfd_mesh_counts_do_not_qualify_a_reduced_vector_solve() {
     let err = analysis_run_cfd_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisCfdRunOptions::default(),
         OperationContext::new(None, None),
     )
@@ -6030,7 +5951,6 @@ fn analysis_run_cfd_rejects_partial_authored_boundary_conditions() {
     let err = analysis_run_cfd_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(None, None),
     )
@@ -6052,7 +5972,6 @@ fn analysis_run_transient_with_options_controls_timeline() {
     let envelope = analysis_run_transient_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisTransientRunOptions {
             deterministic_mode: true,
             quality_policy: QualityPolicy::Balanced,
@@ -6099,7 +6018,6 @@ fn analysis_run_nonlinear_rejects_unknown_temperature_field_region() {
     let err = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisNonlinearRunOptions::solid_recommended(),
         OperationContext::new(None, None),
     )
@@ -6130,7 +6048,6 @@ fn analysis_run_nonlinear_rejects_invalid_plastic_material() {
     let err = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisNonlinearRunOptions::default(),
         OperationContext::new(None, None),
     )
@@ -6192,7 +6109,6 @@ fn nonlinear_plasticity_rejects_noncanonical_synthetic_model() {
     let error = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisNonlinearRunOptions {
             quality_policy: QualityPolicy::Balanced,
             ..AnalysisNonlinearRunOptions::balanced()
@@ -6215,7 +6131,6 @@ fn nonlinear_contact_is_rejected_outside_the_j2_envelope() {
     let error = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisNonlinearRunOptions {
             quality_policy: QualityPolicy::Balanced,
             contact_enforcement: Some(ContactEnforcementOptions {
@@ -6247,7 +6162,6 @@ fn analysis_run_modal_returns_native_modal_result() {
     let envelope = analysis_run_modal_with_options_op(
         &modal_model.data,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(None, None),
     )
@@ -6351,7 +6265,6 @@ fn analysis_run_acoustic_returns_acoustic_fields_and_diagnostics() {
     let envelope = analysis_run_acoustic_with_options_op(
         &acoustic_model.data,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(None, None),
     )
@@ -6522,7 +6435,6 @@ fn analysis_run_acoustic_realizes_complex_frequency_pressure() {
         analysis_run_acoustic_with_options_op(
             model,
             ComputeBackend::Cpu,
-            FormulationRequirement::Experimental,
             Default::default(),
             OperationContext::new(None, None),
         )
@@ -6563,7 +6475,6 @@ fn analysis_run_modal_with_options_controls_requested_mode_count() {
     let envelope = analysis_run_modal_with_options_op(
         &modal_model.data,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisModalRunOptions {
             deterministic_mode: true,
             precision_mode: PrecisionMode::Fp64,
@@ -6604,7 +6515,6 @@ fn analysis_results_include_modal_payload_for_modal_runs() {
     let run = analysis_run_modal_with_options_op(
         &modal_model.data,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(None, None),
     )
@@ -6657,7 +6567,6 @@ fn analysis_results_query_can_exclude_modal_payload() {
     let run = analysis_run_modal_with_options_op(
         &modal_model.data,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(None, None),
     )
@@ -6701,7 +6610,6 @@ fn analysis_results_query_rejects_unknown_modal_mode_index() {
     let run = analysis_run_modal_with_options_op(
         &modal_model.data,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(None, None),
     )
@@ -6743,7 +6651,6 @@ fn analysis_results_include_transient_payload_for_transient_runs() {
     let run = analysis_run_transient_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisTransientRunOptions {
             solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
             ..Default::default()
@@ -6843,7 +6750,6 @@ fn analysis_results_query_can_exclude_transient_payload() {
     let run = analysis_run_transient_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(None, None),
     )
@@ -6886,7 +6792,6 @@ fn analysis_results_query_rejects_unknown_transient_snapshot_index() {
     let run = analysis_run_transient_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(None, None),
     )

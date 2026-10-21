@@ -40,7 +40,6 @@ fn workload() -> ThermalWorkload {
         step_id: ProcedureStepId("heat".into()),
         model,
         backend: crate::ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         procedure: crate::ThermalProcedureControl::BackwardEuler { snapshot_count: 3 },
         residual_target: 1e-4,
     }
@@ -220,7 +219,6 @@ fn thermal_volume_and_flux_evidence_match_inventory_and_resident_ceiling() {
                 Some(&mesh),
                 runmat_analysis_core::SourceImplementation::CanonicalVolumeProjection,
                 runmat_analysis_core::BoundaryTransferImplementation::CanonicalBoundaryProjection,
-                workload.formulation_requirement,
             )
             .unwrap(),
         )

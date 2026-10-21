@@ -1,7 +1,7 @@
 //! Isolated allocator evidence for the completed physical transient recovery preflight.
 
 use mesh::{physical_fixture_mesh, RecoveryMesh};
-use runmat_analysis_core::{AnalysisModel, FormulationRequirement};
+use runmat_analysis_core::AnalysisModel;
 use runmat_analysis_fea::{
     execution::{
         StructuralTransientBlockPlan, StructuralTransientBlockRequest,
@@ -152,7 +152,6 @@ fn modal_recovery_model_and_state() -> (
         ModalSolveOptions {
             truncation: ModalTruncationPolicy::requested(1),
             solver_mesh: Some(mesh.clone()),
-            formulation_requirement: FormulationRequirement::Experimental,
             ..ModalSolveOptions::default()
         },
     )
@@ -203,7 +202,6 @@ fn measure_physical_recovery(
         step_id: model.sequence.steps.last().unwrap().step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         solver,
         time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count },
         residual_target: 1.0e-10,

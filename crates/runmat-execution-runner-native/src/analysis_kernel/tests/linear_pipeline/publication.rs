@@ -25,7 +25,6 @@ pub(super) fn execute(solved: &SolvedPipeline, observed: &ObservedPipeline) {
                 .collect(),
             sequence: SequenceIdentity::from_solver_contract(&solved.solve.model.sequence).unwrap(),
             step: solved.solve.model.sequence.steps[0].clone(),
-            formulation_requirement: solved.solve.formulation_requirement,
             program_revision: revision(),
             chunk_bytes: 4096,
             inventory_limits: ObjectInventoryLimits::default(),
@@ -132,7 +131,6 @@ pub(super) fn execute(solved: &SolvedPipeline, observed: &ObservedPipeline) {
         original_request.source_kind,
         original_request.source_result,
         Some(observations),
-        original_request.formulation_requirement,
         weakened_plan,
     )
     .unwrap();

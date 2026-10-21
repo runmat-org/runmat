@@ -8,9 +8,7 @@ use crate::analysis::contracts::{
     FallbackEvent, QualityGate, QualityReason, QualityReasonCode, RunProvenance, RunStatus,
     StructuralFrequencyResultsData,
 };
-use crate::analysis::result_policy::{
-    classify_run_status, evaluate_identity_production_publication,
-};
+use crate::analysis::result_policy::classify_run_status;
 use crate::analysis::{AnalysisRunIdentity, StructuralFrequencyArtifactRootIndex};
 
 #[derive(Clone)]
@@ -25,11 +23,9 @@ pub(in crate::analysis) struct CompletedStructuralFrequencyStep {
     pub run_id: String,
     pub run_status: RunStatus,
     pub numerically_acceptable: bool,
-    pub production_publishable: bool,
     pub solver_convergence: QualityGate,
     pub result_quality: QualityGate,
     pub quality_reasons: Vec<QualityReason>,
-    pub production_publication_reasons: Vec<crate::analysis::ProductionPublicationReason>,
     pub provenance: RunProvenance,
     pub numerical_result: AnalysisStudyStepNumericalResultData,
     pub persistence: StructuralFrequencyPersistence,
@@ -199,8 +195,6 @@ fn admit_structural_frequency_result_with_state(
     }
     let numerically_acceptable =
         solver_convergence == QualityGate::Pass && result_quality == QualityGate::Pass;
-    let (production_publishable, production_publication_reasons) =
-        evaluate_identity_production_publication(&identity, numerically_acceptable);
     let run_status = classify_run_status(result_quality, numerically_acceptable);
 
     Ok(CompletedStructuralFrequencyStep {
@@ -208,11 +202,9 @@ fn admit_structural_frequency_result_with_state(
         run_id: assigned_run_id,
         run_status,
         numerically_acceptable,
-        production_publishable,
         solver_convergence,
         result_quality,
         quality_reasons,
-        production_publication_reasons,
         provenance: RunProvenance {
             requested_backend: numerical.workload.backend(),
             execution_backend: runmat_analysis_fea::ExecutionBackend::Cpu,

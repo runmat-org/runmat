@@ -6,7 +6,7 @@ use crate::solve::nonlinear::{
     NonlinearLoadContinuation, NonlinearSolveOptions,
 };
 use crate::ComputeBackend;
-use runmat_analysis_core::{FormulationRequirement, ProcedureStep};
+use runmat_analysis_core::ProcedureStep;
 mod constraints;
 
 #[test]
@@ -36,7 +36,6 @@ fn full_authored_contact_cold_blocks_preserve_schedule_original_points_and_work(
         .unwrap();
         let p = policy();
         let options = NonlinearSolveOptions {
-            formulation_requirement: FormulationRequirement::Experimental,
             solver_mesh: Some(f.surface.mesh.clone()),
             increment_count: 2,
             max_accepted_increments: 3,

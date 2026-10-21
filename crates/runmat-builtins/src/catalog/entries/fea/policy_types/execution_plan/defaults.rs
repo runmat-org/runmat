@@ -13,12 +13,12 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
         "Create an execution plan with default solver options for every step of a sequence.",
     ),
     description: concat!(
-        "`fea.ExecutionPlan.defaults(sequence, backend, requirement)` returns an ",
+        "`fea.ExecutionPlan.defaults(sequence, backend)` returns an ",
         "`fea.ExecutionPlan` with one execution step per procedure step, each using ",
-        "`backend`, `requirement`, and `fea.SolverOptions.defaults` for that step.",
+        "`backend` and `fea.SolverOptions.defaults` for that step.",
     ),
     keywords: &["fea", "execution", "plan", "defaults", "backend"],
-    related: &["fea.ExecutionPlan.new", "fea.SolverOptions.defaults", "fea.ComputeBackend.cpu", "fea.FormulationRequirement.experimental", "fea.study"],
+    related: &["fea.ExecutionPlan.new", "fea.SolverOptions.defaults", "fea.ComputeBackend.cpu", "fea.study"],
     sections: &[
         section(
             "Behavior",
@@ -41,18 +41,16 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
     ],
     examples: &[
         example(
-            "experimental-cpu",
-            "Run every step on the CPU as experimental work",
+            "cpu",
+            "Run every step on the CPU",
             concat!(
                 "static = fea.StructuralStep.static('preload');\n",
                 "sequence = fea.AnalysisSequence.new('bracket', {static}, {}, {}, {});\n",
-                "plan = fea.ExecutionPlan.defaults(sequence, fea.ComputeBackend.cpu(), ...\n",
-                "    fea.FormulationRequirement.experimental());",
+                "plan = fea.ExecutionPlan.defaults(sequence, fea.ComputeBackend.cpu());",
             ),
             concat!(
                 "assert(strcmp(class(plan), 'fea.ExecutionPlan'));\n",
                 "assert(numel(plan.steps) == 1);\n",
-                "assert(plan.steps{1}.requirement == \"experimental\");\n",
                 "assert(plan.steps{1}.backend == \"cpu\");",
             ),
         ),
@@ -61,8 +59,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
         faq(
             "Is this what fea.study does without an Execution option?",
             concat!(
-                "Almost. `fea.study` builds the same default plan with the CPU backend and the ",
-                "production requirement.",
+                "Yes. `fea.study` builds the same default plan with the CPU backend.",
             ),
         ),
     ],
@@ -90,7 +87,7 @@ policy_entry!(
     FEA_EXECUTION_PLAN_DEFAULTS_CATALOG_ENTRY,
     name: "fea.ExecutionPlan.defaults",
     result: classes::EXECUTION_PLAN,
-    signature: "plan = fea.ExecutionPlan.defaults(sequence, backend, requirement)",
+    signature: "plan = fea.ExecutionPlan.defaults(sequence, backend)",
     inputs: [
         (
             "sequence",
@@ -103,12 +100,6 @@ policy_entry!(
             Any,
             "Typed fea.ComputeBackend applied to every step.",
             PolicyArg::Typed(&[classes::COMPUTE_BACKEND]),
-        ),
-        (
-            "requirement",
-            Any,
-            "Typed fea.FormulationRequirement applied to every step.",
-            PolicyArg::Typed(&[classes::FORMULATION_REQUIREMENT]),
         ),
     ],
     output: ("plan", "Typed fea.ExecutionPlan."),

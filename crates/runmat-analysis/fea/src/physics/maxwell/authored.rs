@@ -16,11 +16,10 @@ pub fn compile_canonical_input(
     model: &AnalysisModel,
     mesh: &SolverMeshArtifact,
     step_id: &str,
-    requirement: FormulationRequirement,
     residual_target: f64,
 ) -> Result<MaxwellInput, MaxwellError> {
     super::resources::require_selected_ceiling(model, mesh, step_id)?;
-    let step = validate_canonical_input(model, step_id, requirement, residual_target)?;
+    let step = validate_canonical_input(model, step_id, residual_target)?;
     let IndependentDomain::FrequencyHertz(frequencies) = &step.independent_domain else {
         return Err(invalid("missing singleton harmonic frequency"));
     };
@@ -114,9 +113,8 @@ pub fn solve_canonical_harmonic(
     model: &AnalysisModel,
     mesh: &SolverMeshArtifact,
     step_id: &str,
-    requirement: FormulationRequirement,
     residual_target: f64,
 ) -> Result<MaxwellResponse, MaxwellError> {
-    let input = compile_canonical_input(model, mesh, step_id, requirement, residual_target)?;
+    let input = compile_canonical_input(model, mesh, step_id, residual_target)?;
     super::solve_full_pec_volume(mesh, &input, residual_target)
 }

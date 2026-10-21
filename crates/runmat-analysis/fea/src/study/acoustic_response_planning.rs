@@ -1,7 +1,6 @@
 //! Authored acoustic cavity-mode and pressure-transient intent; placement stays downstream.
 use runmat_analysis_core::{
-    AccuracyTolerance, AnalysisProcedure, ErrorContributionKind, FormulationRequirement,
-    PhysicsFamily,
+    AccuracyTolerance, AnalysisProcedure, ErrorContributionKind, PhysicsFamily,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -12,11 +11,10 @@ use crate::{
     physics::acoustic::{AcousticModalPolicy, AcousticTransientPolicy},
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+/// Cavity-mode and transient controls come from the authored step; the policy carries none.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct AcousticResponseStudyPlanningPolicy {
-    pub formulation_requirement: FormulationRequirement,
-}
+pub struct AcousticResponseStudyPlanningPolicy {}
 
 /// Is this a standalone acoustic step served by the cavity-mode/transient workload?
 pub fn is_acoustic_response_study(study: &CompiledAnalysisStudy) -> bool {
@@ -36,9 +34,8 @@ pub fn plan_acoustic_response_study(
     study: &CompiledAnalysisStudy,
     policy: AcousticResponseStudyPlanningPolicy,
 ) -> Result<AcousticResponseWorkload, AcousticResponseStudyPlanningError> {
-    if policy.formulation_requirement != study.formulation_requirement {
-        return Err(AcousticResponseStudyPlanningError::FormulationRequirementMismatch);
-    }
+    // The policy carries no controls today; destructuring keeps any future field explicit.
+    let AcousticResponseStudyPlanningPolicy {} = policy;
     let [step] = study.model.sequence.steps.as_slice() else {
         return Err(AcousticResponseStudyPlanningError::UnsupportedSequence);
     };
@@ -74,7 +71,6 @@ pub fn plan_acoustic_response_study(
     let workload = AcousticResponseWorkload {
         model: study.model.clone(),
         step_id: step.step_id.clone(),
-        formulation_requirement: policy.formulation_requirement,
         solver,
     };
     workload.validate().map_err(|error| {
@@ -85,8 +81,6 @@ pub fn plan_acoustic_response_study(
 
 #[derive(Debug, Error)]
 pub enum AcousticResponseStudyPlanningError {
-    #[error("acoustic response planning requirement differs from the compiled study")]
-    FormulationRequirementMismatch,
     #[error("acoustic response planning requires a standalone singleton step")]
     UnsupportedSequence,
     #[error("acoustic response planning admits acoustic modal and transient procedures")]

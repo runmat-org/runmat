@@ -17,7 +17,7 @@ use crate::{
 };
 use runmat_analysis_core::{
     validate_model, AnalysisModel, AnalysisProcedure, BoundaryTransferImplementation,
-    FormulationRequirement, PhysicsFamily, ProcedureStep, ProcedureStepId, RestartPolicy,
+    PhysicsFamily, ProcedureStep, ProcedureStepId, RestartPolicy,
     SolutionSpace, SourceImplementation, StateCompleteness, StateKind, StatePersistence,
 };
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
@@ -82,7 +82,6 @@ impl AcousticResponseSolver {
 pub struct AcousticResponseWorkload {
     pub model: AnalysisModel,
     pub step_id: ProcedureStepId,
-    pub formulation_requirement: FormulationRequirement,
     pub solver: AcousticResponseSolver,
 }
 
@@ -173,7 +172,6 @@ impl AcousticResponseWorkload {
             Some(mesh),
             SourceImplementation::CanonicalBoundaryProjection,
             BoundaryTransferImplementation::CanonicalBoundaryProjection,
-            self.formulation_requirement,
         )
         .map_err(invalid)?;
         validate_solver_formulation_compatibility(

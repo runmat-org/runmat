@@ -208,7 +208,6 @@ mod tests {
             &model,
             ComputeBackend::Cpu,
             ThermalSolveOptions {
-                formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
                 procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 4 },
                 solver_mesh: Some(mesh.clone()),
                 ..ThermalSolveOptions::default()
@@ -422,7 +421,6 @@ mod tests {
             &model,
             ComputeBackend::Cpu,
             ThermalSolveOptions {
-                formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
                 procedure: ThermalProcedureControl::Steady,
                 solver_mesh: Some(mesh.clone()),
                 ..ThermalSolveOptions::default()
@@ -480,7 +478,6 @@ mod tests {
             &model,
             ComputeBackend::Cpu,
             ThermalSolveOptions {
-                formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
                 procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 4 },
                 solver_mesh: Some(mesh.clone()),
                 ..ThermalSolveOptions::default()

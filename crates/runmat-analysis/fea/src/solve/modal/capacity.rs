@@ -49,7 +49,7 @@ mod tests {
             &model,
             &excitation,
             None,
-            crate::assembly::StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+            crate::assembly::StructuralFormulationRequirement::SyntheticOperator,
         )
         .unwrap();
         let diagonal = |role, values: [f64; 6]| {

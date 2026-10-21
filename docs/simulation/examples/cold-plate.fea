@@ -77,7 +77,6 @@ study cold_plate {
     geometry = geometry.plate
     mesh = mesh.plate
     model = model.cooled_plate
-    formulation = experimental
     analysis operating_point { conjugate_heat_transfer steady {} }
     output temperature = analysis.operating_point.field.node.temperature
     output velocity = analysis.operating_point.field.cell.fluid_velocity

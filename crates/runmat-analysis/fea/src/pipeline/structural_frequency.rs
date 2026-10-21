@@ -147,12 +147,8 @@ fn admit_structural_frequency_publication_with_state(
             ))
         }
     }
-    let identity = super::admission::admit_structural(
-        &assembly.real,
-        workload.procedure_step()?,
-        workload.formulation_requirement(),
-    )
-    .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+    let identity = super::admission::admit_structural(&assembly.real, workload.procedure_step()?)
+        .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
     if identity.solution_space() != workload.solver().solution_space() {
         return Err(AnalysisExecutionError::Identity(
             "admitted structural frequency formulation has another solution space",

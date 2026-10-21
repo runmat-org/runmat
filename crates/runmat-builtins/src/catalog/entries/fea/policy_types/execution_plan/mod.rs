@@ -18,7 +18,7 @@ pub(super) const EXECUTION_ROLE: &str = concat!(
 pub(super) const EXECUTION_STUDY: &str = concat!(
     "Pass an `fea.ExecutionPlan` to `fea.study(id, geometry, model, \"Execution\", plan)`. ",
     "Without that option, `fea.study` builds the default plan for the model's sequence ",
-    "with the CPU backend and the production formulation requirement.",
+    "with the CPU backend.",
 );
 
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[

@@ -124,7 +124,6 @@ fn recover_completed_structural_modal_run_with_state(
             .procedure_step()
             .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?
             .procedure,
-        workload.formulation_requirement(),
     )?;
     validate_model(workload.model())
         .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
@@ -143,7 +142,7 @@ fn recover_completed_structural_modal_run_with_state(
         workload.model(),
         &excitations,
         Some(solver_mesh.clone()),
-        StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+        StructuralFormulationRequirement::SyntheticOperator,
     )
     .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
     let summary = if let Some(linearization) = linearization {
@@ -152,11 +151,7 @@ fn recover_completed_structural_modal_run_with_state(
     } else {
         summary
     };
-    let expected_run = super::super::admission::admit_structural(
-        &summary,
-        execution_step,
-        workload.formulation_requirement(),
-    )?;
+    let expected_run = super::super::admission::admit_structural(&summary, execution_step)?;
     if result.run().identity != expected_run {
         return Err(FeaRunError::Assembly(
             "portable modal result run identity differs from the recovered operator".into(),

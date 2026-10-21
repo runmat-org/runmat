@@ -100,7 +100,6 @@ pub(crate) fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
     let workload = FluidSteadyWorkload {
         model,
         step_id: ProcedureStepId("steady".into()),
-        formulation_requirement: FormulationRequirement::Experimental,
         policy: CanonicalFluidPolicy {
             fixed_point_acceleration: None,
             maximum_outer_iterations: 20,
@@ -592,9 +591,6 @@ fn cold_preflight_and_closed_static_scope_reject_before_original_vectors_decode(
     assert!(result.validate_for(&wrong, &mesh).is_err());
     let mut wrong = workload.clone();
     wrong.model.sequence.steps[0].procedure = AnalysisProcedure::TransientResponse;
-    assert!(wrong.validate().is_err());
-    let mut wrong = workload.clone();
-    wrong.formulation_requirement = FormulationRequirement::Production;
     assert!(wrong.validate().is_err());
     let mut wrong = workload.clone();
     wrong.model.sequence.steps[0].state_outputs.clear();

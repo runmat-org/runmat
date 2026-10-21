@@ -583,19 +583,6 @@ fn validate_run_identity(run: &AnalysisRunResult) -> Result<(), String> {
     let identity = &run.run.identity;
     super::run_operation_for_identity(identity)
         .ok_or_else(|| "analysis run identity has no registered runtime operation".to_string())?;
-    let (expected_publishable, expected_publication_reasons) =
-        super::result_policy::evaluate_production_publication(&run.run, run.numerically_acceptable);
-    if run.production_publishable != expected_publishable {
-        return Err(
-            "production publication must require both numerical acceptance and a production-qualified formulation"
-                .to_string(),
-        );
-    }
-    if run.production_publication_reasons != expected_publication_reasons {
-        return Err(
-            "production publication reasons do not match the failed publication gates".to_string(),
-        );
-    }
     let expected_status =
         super::result_policy::classify_run_status(run.result_quality, run.numerically_acceptable);
     if run.run_status != expected_status {
@@ -603,12 +590,6 @@ fn validate_run_identity(run: &AnalysisRunResult) -> Result<(), String> {
             "analysis run status {:?} does not match numerical outcome {:?}",
             run.run_status, expected_status
         ));
-    }
-    if !run.provenance.fallback_events.is_empty() && !identity.permits_fallback() {
-        return Err(
-            "analysis run identity forbids the execution fallbacks recorded by provenance"
-                .to_string(),
-        );
     }
     Ok(())
 }

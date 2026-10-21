@@ -1,4 +1,4 @@
-//! Experimental CPU physical solve and durable result history, not worker/restart evidence.
+//! CPU physical solve and durable result history, not worker/restart evidence.
 use super::super::storage::{AnalysisArtifactStore, FilesystemAnalysisArtifactStore};
 use super::*;
 use runmat_analysis_core::{
@@ -166,7 +166,6 @@ fn physical_j2_tet4_tet10_history_survives_cold_filesystem_and_query() {
         let result = analysis_run_nonlinear_with_options_op(
             &model,
             ComputeBackend::Cpu,
-            FormulationRequirement::Experimental,
             AnalysisNonlinearRunOptions {
                 solver_mesh_artifact_path: Some(path.to_string_lossy().into_owned()),
                 increment_count: 4,
@@ -243,7 +242,6 @@ fn physical_j2_tet4_tet10_history_survives_cold_filesystem_and_query() {
         ] {
             assert!(result.run.fields.iter().any(|field| field.field_id == id));
         }
-        assert!(!result.production_publishable);
         // Fresh store has no manifest cache; both history and immutable field chunks must decode.
         let cold = FilesystemAnalysisArtifactStore::new(root.clone())
             .load_run(&result.run_id)

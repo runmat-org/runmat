@@ -1,6 +1,6 @@
 # Authored incident-pressure matched duct
 
-Status: bounded authored CPU qualification PASS; no production promotion.
+Status: bounded authored CPU qualification PASS; no broader family qualification.
 
 The first native test compiled successfully, then failed authored validation before
 meshing: the language checker required an empty effect set while shared callable

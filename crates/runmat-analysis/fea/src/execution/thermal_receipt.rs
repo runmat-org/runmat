@@ -233,7 +233,6 @@ fn evidence(
         family: identity.family(),
         procedure: identity.procedure(),
         solution_space: identity.solution_space(),
-        requirement: workload.formulation_requirement,
         realization: identity.realization().clone(),
     })
     .map_err(invalid)?;

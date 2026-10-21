@@ -154,7 +154,6 @@ fn execute(drive: Drive, quadratic: bool, size: f64, generated: bool) -> Evidenc
             "{:?}",
             retained.quality_reasons
         );
-        assert!(!retained.production_publishable);
         assert_eq!(
             retained.provenance.preconditioner,
             runmat_analysis_fea::contracts::SolverPreconditioner::Ilu0
