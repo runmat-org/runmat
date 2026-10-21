@@ -108,6 +108,21 @@ impl ObservationPublicationCatalog {
             {
                 Ok(())
             }
+            // The family-neutral native mesh catalog serves any family whose step fields were
+            // recovered from its own solver result (statistical structural steps among them).
+            (
+                _,
+                crate::results::observation::ObservationFieldCatalogSource::VolumeMeshRecovery {
+                    recovery_request,
+                    manifest,
+                    ..
+                },
+            ) if recovery_request.producer == producer
+                && recovery_request.source.solver_result() == Some(result)
+                && manifest.source == recovery_request.source =>
+            {
+                Ok(())
+            }
             _ => Err(AnalysisExecutionError::Identity(
                 "observation publication differs from solver result or supported source family",
             )),
