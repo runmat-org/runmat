@@ -12,6 +12,11 @@ pub fn resolve_observation_plan(
         projection,
         limits.maximum_peak_resident_bytes,
     )?;
+    let topology = if ObservationTopology::needs_faces(fields) {
+        topology.with_projection_faces()?
+    } else {
+        topology
+    };
     let limits = ObservationLimits {
         maximum_peak_resident_bytes: remaining,
         ..limits

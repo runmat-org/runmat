@@ -8,11 +8,19 @@ pub use crate::pipeline::thermal::{PreparedThermalPrimarySolve, PreparedThermalS
 mod accuracy;
 mod acoustic;
 pub use acoustic::{
-    assemble_acoustic_frequency_result, AcousticFrequencyAssemblyOutput, AcousticFrequencyResult,
+    acoustic_native_field_definitions, assemble_acoustic_frequency_result,
+    AcousticFrequencyAssemblyOutput, AcousticFrequencyAssemblyRequest, AcousticFrequencyResult,
     AcousticFrequencyWorkload, AcousticHarmonicResultSummary, AcousticHarmonicSolverResult, AcousticHarmonicWorkload,
     AcousticNumericalReceipt, AcousticNumericalReceiptArtifact, ACOUSTIC_RECEIPT_MAX_ENCODED_BYTES,
 };
 mod accuracy_source;
+mod acoustic_response;
+pub use acoustic_response::{
+    AcousticResponseDiagnostics, AcousticResponseNumericalReceipt,
+    AcousticResponseNumericalReceiptArtifact, AcousticResponseSolver,
+    AcousticResponseSolverResult, AcousticResponseWorkload, ACOUSTIC_PRESSURE_FIELD_ID,
+    ACOUSTIC_RESPONSE_RECEIPT_MAX_ENCODED_BYTES,
+};
 mod buckling_result;
 mod buckling_workload;
 mod electrical_static;
@@ -45,12 +53,14 @@ mod fluid;
 #[cfg(test)]
 pub(crate) use fluid::tests::authored as fluid_test_workload;
 pub use fluid::{
-    fluid_native_field_definition_inventory, fluid_receipt_encoding_profile, FluidNumericalReceipt,
-    FluidNumericalReceiptArtifact, FluidSolverProvenance, FluidSteadySolverResult,
-    FluidSteadyWorkload, FluidTransientBlock, FluidTransientBlockReservation,
-    FluidTransientBlockResult, FluidTransientBlockWorkload, FluidTransientCheckpoint,
-    FluidTransientSchedule, FluidTransientSolverResult, FluidTransientWorkload,
-    PreparedFluidTransient, PreparedFluidTransientContinuation, FLUID_RECEIPT_MAX_ENCODED_BYTES,
+    fluid_native_field_definition_inventory,
+    fluid_native_field_definitions, fluid_receipt_encoding_profile, FluidCoupling, FluidNumericalReceipt,
+    FluidNumericalReceiptArtifact, FluidRetainedOriginal, FluidSolverProvenance,
+    FluidSteadySolverResult, FluidSteadyWorkload, FluidTransientBlock,
+    FluidTransientBlockReservation, FluidTransientBlockResult, FluidTransientBlockWorkload,
+    FluidTransientCheckpoint, FluidTransientSchedule, FluidTransientSolverResult,
+    FluidTransientWorkload, PreparedFluidTransient, PreparedFluidTransientContinuation,
+    FLUID_RECEIPT_MAX_ENCODED_BYTES,
 };
 mod frequency_assembly;
 mod frequency_balance;

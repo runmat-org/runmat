@@ -1,4 +1,5 @@
 use super::*;
+mod acoustic;
 mod fluid;
 mod magnetic;
 mod maxwell;
@@ -29,6 +30,13 @@ pub(super) fn execute_field_recovery(
         .any(|input| input.manifest.kind == AnalysisNumericalObjectKind::MaxwellHarmonicWorkload)
     {
         return maxwell::execute(invocation);
+    }
+    if invocation
+        .inputs
+        .iter()
+        .any(|input| input.manifest.kind == AnalysisNumericalObjectKind::AcousticHarmonicWorkload)
+    {
+        return acoustic::execute(invocation);
     }
     if invocation
         .inputs

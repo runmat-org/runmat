@@ -11,33 +11,14 @@ pub(super) fn build_acoustic_plan(
         demand.operator_nonzeros_upper_bound.0,
         demand.block_dimension_upper_bound.0,
         demand.recovery_row_support_upper_bound.0,
-        demand.preconditioner,
-    )?;
-    let uniqueness_bytes = match demand.uniqueness {
-        Some(envelope) if envelope.resident_bytes > 0 && envelope.scalar_operations > 0 => {
-            envelope.resident_bytes
-        }
-        Some(_) => {
-            return Err(ResourcePlanningError::Invalid(
-                "empty acoustic uniqueness budget".into(),
-            ))
-        }
-        None => 0,
-    };
-    let coexistence_bound = add(
-        sparse_bound,
-        uniqueness_bytes,
-        "acoustic sparse and uniqueness coexistence",
     )?;
     if demand.node_count.0 == 0
         || demand.element_count.0 == 0
         || demand.block_dimension_upper_bound.0
             != mul(demand.node_count.0, 2, "acoustic real block")?
-        || demand.krylov_restart_upper_bound.0 == 0
-        || demand.krylov_restart_upper_bound.0 > demand.block_dimension_upper_bound.0
         || demand.numerical_reservation_bytes.0 == 0
         || demand.sparse_solve_reservation_bytes.0 != sparse_bound
-        || demand.numerical_reservation_bytes.0 < coexistence_bound
+        || demand.numerical_reservation_bytes.0 < sparse_bound
         || demand.state_profiles_resident_bytes.0 == 0
         || demand.receipt_output.encoded_payload_bytes_upper_bound.0 != crate::execution::ACOUSTIC_RECEIPT_MAX_ENCODED_BYTES
         || demand.receipt_output.construction_resident_bytes_admission_budget

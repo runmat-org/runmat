@@ -40,6 +40,9 @@ pub enum AuthoredBoundaryKind {
     MagneticInsulation,
     AcousticRigidWall,
     AcousticRadiation,
+    AcousticSphericalRadiation {
+        center_m: [f64; 3],
+    },
     AcousticImpedance {
         impedance: SpecificAcousticImpedance,
     },

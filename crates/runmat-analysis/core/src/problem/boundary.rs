@@ -39,6 +39,11 @@ pub enum BoundaryOperator {
     MagneticInsulation,
     AcousticRigidWall,
     AcousticRadiation,
+    /// Outgoing spherical-wave radiation centered at `center_m`: the first-order
+    /// Bayliss-Turkel condition dp/dn = -(ik + 1/r) p, exact for a monopole field.
+    AcousticSphericalRadiation {
+        center_m: [f64; 3],
+    },
     AcousticImpedance {
         impedance: SpecificAcousticImpedance,
     },

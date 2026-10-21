@@ -52,19 +52,17 @@ where
     I::IntoIter: Clone,
 {
     verify_authored_observations(step, plan)?;
+    let fields = fields.into_iter();
     let (topology, remaining) = ObservationTopology::from_projection_admitted(
         projection,
         step.accuracy.resources.maximum_resident_bytes,
     )?;
-    verify_for_topology(
-        step,
-        &topology,
-        None,
-        None,
-        fields.into_iter(),
-        plan,
-        remaining,
-    )
+    let topology = if ObservationTopology::needs_faces(fields.clone()) {
+        topology.with_projection_faces()?
+    } else {
+        topology
+    };
+    verify_for_topology(step, &topology, None, None, fields, plan, remaining)
 }
 
 pub(crate) fn verify_sampled_observation_plan(
@@ -150,24 +148,6 @@ fn verify_for_topology<'a>(
         // `actual` and its target buffers are released here, not retained in a second plan.
     }
     Ok(())
-}
-
-pub(crate) fn verify_finite_volume_observation_plan_for_topology(
-    step: &ProcedureStep,
-    topology: &ObservationTopology,
-    fields: &[RecoveredFieldDefinition],
-    plan: &ResolvedObservationPlan,
-) -> Result<(), ObservationError> {
-    verify_authored_observations(step, plan)?;
-    verify_for_topology(
-        step,
-        topology,
-        None,
-        None,
-        fields.iter(),
-        plan,
-        step.accuracy.resources.maximum_resident_bytes,
-    )
 }
 
 fn verification_limits(

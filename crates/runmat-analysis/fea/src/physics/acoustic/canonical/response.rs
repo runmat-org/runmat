@@ -1,7 +1,6 @@
 use super::{assembly::AcousticAssembly, AcousticHarmonicError, AcousticHarmonicPolicy};
 use crate::{
     excitation::{ProjectionScalar, ProjectionVector3, SpatialProjectionEvidence},
-    solve::krylov::{restarted_gmres, GmresPolicy},
     topology::AnalysisProjection,
 };
 mod power;
@@ -20,6 +19,7 @@ pub struct CanonicalAcousticResponse {
     pub element_mean_intensity_w_per_m2: Vec<[f64; 3]>,
     /// Volume average of (|p|²/(rho c²) + rho |v|²)/4, in element order.
     pub element_mean_energy_density_j_per_m3: Vec<f64>,
+    /// Iterative refinement steps of the certified direct solve.
     pub iterations: u32,
     pub relative_residual: f64,
     /// Positive into the fluid; includes prescribed-pressure reaction flux.
@@ -29,36 +29,92 @@ pub struct CanonicalAcousticResponse {
     pub mean_impedance_loss_w: f64,
     pub power_relative_error: f64,
     pub source_evidence: Vec<SpatialProjectionEvidence>,
-    pub uniqueness: Option<crate::solve::uniqueness::SparseUniquenessRecord>,
+    /// Nonsingularity of the reduced operator, from the factorization that solved it.
+    pub certificate: AcousticSolveCertificate,
 }
 
-#[cfg(test)]
+/// Retained nonsingularity evidence of one harmonic solve: the shared factorization
+/// certificate (`solve::certificate`) of the reduced real block operator.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AcousticSolveCertificate {
+    pub operator_identity: runmat_execution::Digest,
+    pub dimension: usize,
+    /// Estimated `‖I − A F⁻¹‖₁`.
+    pub defect_estimate: f64,
+    /// Estimated `‖F⁻¹‖₁`.
+    pub inverse_norm_estimate: f64,
+    /// `‖A‖₁`.
+    pub operator_norm: f64,
+    pub condition_estimate: f64,
+    /// Safety-scaled contraction bound; strictly below `limit`.
+    pub contraction_bound: f64,
+    pub limit: f64,
+}
+
+impl AcousticSolveCertificate {
+    /// Every unknown is prescribed: there is no operator left to certify.
+    pub(super) fn no_free_unknowns(operator_identity: runmat_execution::Digest, limit: f64) -> Self {
+        Self {
+            operator_identity,
+            dimension: 0,
+            defect_estimate: 0.0,
+            inverse_norm_estimate: 0.0,
+            operator_norm: 0.0,
+            condition_estimate: 0.0,
+            contraction_bound: 0.0,
+            limit,
+        }
+    }
+
+    pub fn validate(&self, limit: f64, maximum_dimension: usize) -> Result<(), &'static str> {
+        let values = [
+            self.defect_estimate,
+            self.inverse_norm_estimate,
+            self.operator_norm,
+            self.condition_estimate,
+            self.contraction_bound,
+        ];
+        if values.iter().any(|value| !value.is_finite() || *value < 0.0)
+            || self.limit != limit
+            || !(self.contraction_bound < self.limit)
+            || self.dimension > maximum_dimension
+        {
+            return Err("acoustic factorization certificate is invalid or exceeds its limit");
+        }
+        Ok(())
+    }
+}
+
+impl From<&crate::solve::certificate::NonsingularityCertificate> for AcousticSolveCertificate {
+    fn from(certificate: &crate::solve::certificate::NonsingularityCertificate) -> Self {
+        Self {
+            operator_identity: certificate.operator_identity,
+            dimension: certificate.dimension,
+            defect_estimate: certificate.defect_estimate,
+            inverse_norm_estimate: certificate.inverse_norm_estimate,
+            operator_norm: certificate.operator_norm,
+            condition_estimate: certificate.condition_estimate,
+            contraction_bound: certificate.contraction_bound,
+            limit: certificate.limit,
+        }
+    }
+}
+
 pub(super) fn solve(
     assembly: AcousticAssembly,
     frequency_hz: f64,
     policy: AcousticHarmonicPolicy,
     power_tolerance: f64,
 ) -> Result<CanonicalAcousticResponse, AcousticHarmonicError> {
-    // Assembly-level tests that request proof must supply its complete admission.
-    solve_admitted(assembly, frequency_hz, policy, power_tolerance, None)
-}
-
-pub(super) fn solve_admitted(
-    assembly: AcousticAssembly,
-    frequency_hz: f64,
-    policy: AcousticHarmonicPolicy,
-    power_tolerance: f64,
-    uniqueness: Option<crate::solve::uniqueness::SparseUniquenessEnvelope>,
-) -> Result<CanonicalAcousticResponse, AcousticHarmonicError> {
     let (solution, power) =
-        refinement::solve_admitted(&assembly, policy, power_tolerance, uniqueness)?;
+        refinement::solve(&assembly, policy, power_tolerance)?;
     let reduced::ReducedSolution {
         real,
         imaginary,
         iterations,
         relative_residual,
-        uniqueness,
-        ..
+        certificate,
     } = solution;
     let power::PowerClosure {
         mean_input_power_w,
@@ -107,6 +163,6 @@ pub(super) fn solve_admitted(
         mean_impedance_loss_w,
         power_relative_error,
         source_evidence: assembly.source_evidence,
-        uniqueness,
+        certificate,
     })
 }

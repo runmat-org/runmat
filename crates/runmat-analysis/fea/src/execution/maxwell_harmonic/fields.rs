@@ -200,6 +200,7 @@ fn native_maxwell_field_plan(
                 .ok_or_else(|| invalid("Maxwell component count"))?
                 as u64;
             Ok(FieldRecoveryRequirement {
+                support: Default::default(),
                 quantity: definition.quantity(),
                 source_location: definition.location(),
                 output_location: definition.location(),

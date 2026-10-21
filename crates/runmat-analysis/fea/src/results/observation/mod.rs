@@ -11,14 +11,6 @@ mod contract;
 mod distributed;
 mod distributed_numeric;
 mod entity;
-mod finite_volume;
-pub use finite_volume::{
-    evaluate_finite_volume_observation_partition, evaluate_finite_volume_observations,
-    finite_volume_observation_partition_source_indices,
-    finite_volume_observation_topology_resident_bytes,
-    prepare_finite_volume_observation_field_partition, resolve_finite_volume_observation_plan,
-    verify_finite_volume_observation_plan, FiniteVolumeObservationSource,
-};
 mod evaluate;
 mod extrema;
 mod history;
@@ -73,6 +65,7 @@ pub use evaluate::{
     evaluate_observation_event_sample, evaluate_observation_sample, evaluate_observations,
     evaluate_structural_observation_event_sample, evaluate_structural_observation_sample,
     evaluate_structural_observations, resolved_observation_accepts_sample,
+    authored_observations_sample,
 };
 pub(crate) use history::{
     exact_scheduled_coordinate_at, exact_scheduled_sample_count, sample_matches_policy,

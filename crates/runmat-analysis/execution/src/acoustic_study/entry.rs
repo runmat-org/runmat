@@ -25,13 +25,23 @@ use crate::{
 use super::completion::{AcousticStudyResultClosure, AcousticStudyResultPhase};
 use super::AcousticStudyPreparation;
 
+mod observations;
 mod task;
+pub(super) use crate::sampled_study_observations::SampledStudyObservations as AcousticObservations;
 
 /// One exact authored numerical entry; states remain scoped to this coordinate and declaration.
 pub struct CompletedAcousticStudyEntry {
     pub entry: runmat_analysis_fea::frequency::FrequencyResponsePlanEntry,
     pub workload: runmat_analysis_fea::execution::AcousticHarmonicWorkload,
     pub result: ImportedAcousticHarmonicResult,
+    /// Retained native pressure and particle velocity at this frequency.
+    pub fields: crate::ImportedRecoveredFields,
+    /// The complete transport closure of `fields`, for publication catalogs.
+    pub field_objects: crate::PreparedAnalysisObjects,
+    pub observations: Option<crate::ImportedObservations>,
+    pub observation_objects: Option<crate::PreparedAnalysisObjects>,
+    pub observation_catalog:
+        Option<runmat_analysis_fea::results::observation::ObservationPublicationCatalog>,
     pub accuracy: ImportedAccuracy,
     pub states: Vec<ImportedSemanticState>,
     pub baseline_usage: PreparedResourceUsage,
@@ -49,6 +59,15 @@ impl CompletedAcousticStudyEntry {
 pub enum AcousticStudyPhase {
     ReadyForSolve,
     AwaitingSolve,
+    ReadyForFieldRecovery,
+    AwaitingFieldRecovery,
+    ReadyForObservationFanout,
+    ReadyForObservationPartition { ordinal: usize },
+    AwaitingObservationPartition { ordinal: usize },
+    ReadyForObservationReduction { ordinal: usize },
+    AwaitingObservationReduction { ordinal: usize },
+    ReadyForObservationAssembly,
+    AwaitingObservationAssembly,
     ReadyForAccuracy,
     AwaitingAccuracy,
     ReadyForState { ordinal: usize },
@@ -68,6 +87,11 @@ pub struct AcousticStudyEntryCoordinator {
     definition_digest: Digest,
     phase: AcousticStudyPhase,
     solve_task: Option<PreparedAcousticHarmonicTask>,
+    recovery_task: Option<crate::PreparedAcousticFieldRecovery>,
+    fields: Option<crate::ImportedRecoveredFields>,
+    field_objects: Option<crate::PreparedAnalysisObjects>,
+    observation_objects: Option<crate::PreparedAnalysisObjects>,
+    observation_state: AcousticObservations,
     accuracy_task: Option<PreparedAccuracy>,
     state_task: Option<PreparedSemanticStatePublication>,
     publication_task: Option<PreparedResultPublication>,
@@ -113,6 +137,11 @@ impl AcousticStudyEntryCoordinator {
             definition_digest,
             phase: AcousticStudyPhase::ReadyForSolve,
             solve_task: None,
+            recovery_task: None,
+            fields: None,
+            field_objects: None,
+            observation_objects: None,
+            observation_state: AcousticObservations::default(),
             accuracy_task: None,
             state_task: None,
             publication_task: None,
@@ -181,7 +210,7 @@ impl AcousticStudyEntryCoordinator {
         self.usage = Some(usage);
         self.closures.push(closure);
         self.attempts.extend(task_attempts);
-        self.phase = AcousticStudyPhase::ReadyForAccuracy;
+        self.phase = AcousticStudyPhase::ReadyForFieldRecovery;
         Ok(())
     }
 
@@ -194,7 +223,7 @@ impl AcousticStudyEntryCoordinator {
                 solve_host: self.solve_task.as_ref().expect("completed solve").host.clone(),
                 source_kind: AccuracySourceKind::AcousticHarmonic,
                 source_numerical_receipt: result.numerical_receipt_objects.clone(),
-                source_observations: None,
+                source_observations: self.observation_state.catalog.clone(),
                 source_context_inputs: self
                     .solve_task
                     .as_ref()
@@ -345,7 +374,7 @@ impl AcousticStudyEntryCoordinator {
                 .expect("frozen baseline")
                 .objects
                 .clone(),
-            source_observations: None,
+            source_observations: self.observation_state.catalog.clone(),
             program_revision: self.preparation.program_revision.clone(),
             chunk_bytes: self.preparation.output_policy.chunk_bytes(),
             inventory_limits: self.preparation.output_policy.inventory_limits(),
@@ -405,6 +434,11 @@ impl AcousticStudyEntryCoordinator {
             closures: self.closures,
             workload,
             result: self.result.expect("completed solve"),
+            fields: self.fields.expect("completed retained fields"),
+            field_objects: self.field_objects.expect("completed retained field objects"),
+            observations: self.observation_state.completed,
+            observation_objects: self.observation_objects,
+            observation_catalog: self.observation_state.catalog,
             accuracy: self.accuracy.expect("completed accuracy"),
             states: self.states,
             baseline_usage: self.baseline.expect("frozen baseline"),
@@ -426,6 +460,12 @@ impl AcousticStudyEntryCoordinator {
     }
     pub fn result(&self) -> Option<&ImportedAcousticHarmonicResult> {
         self.result.as_ref()
+    }
+    pub fn fields(&self) -> Option<&crate::ImportedRecoveredFields> {
+        self.fields.as_ref()
+    }
+    pub fn observations(&self) -> Option<&crate::ImportedObservations> {
+        self.observation_state.completed.as_ref()
     }
     pub fn accuracy(&self) -> Option<&ImportedAccuracy> {
         self.accuracy.as_ref()

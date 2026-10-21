@@ -99,21 +99,18 @@ fn native_solve_receipt_and_copy_only_all_face_recovery_survive_cold_store() {
                 entry.definition.clone(),
                 entry.sample,
                 partitions,
-                cold.manifest
-                    .entity_counts
-                    .entity_count(entry.definition.entity_domain()),
+                entry.definition.stored_entities(cold.manifest.entity_counts),
             )
             .unwrap();
             assert_eq!(&field, original);
         }
-        let mut missing_layout = recovery.inputs.clone();
-        missing_layout
-            .retain(|input| input.manifest.kind != AnalysisNumericalObjectKind::FieldSourceBinding);
+        let mut missing_mesh = recovery.inputs.clone();
+        missing_mesh.retain(|input| input.manifest.kind != AnalysisNumericalObjectKind::Mesh);
         assert!(NativeAnalysisKernel
             .execute(AnalysisKernelInvocation {
                 kind: AnalysisWorkKind::RecoverField,
                 host: &recovery.host,
-                inputs: &missing_layout,
+                inputs: &missing_mesh,
                 output_policy: policy,
             })
             .is_err());

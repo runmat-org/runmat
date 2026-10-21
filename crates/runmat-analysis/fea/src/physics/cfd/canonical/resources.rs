@@ -1,6 +1,6 @@
 use super::{CanonicalFluidError as Error, CanonicalFluidPolicy};
 use crate::{
-    solve::krylov::{right_ilu::SparseRightIluEnvelope, GmresPolicy, GmresWorkEnvelope},
+    solve::krylov::{GmresPolicy, GmresWorkEnvelope},
     topology::{AnalysisProjection, FiniteVolumeReservation, FiniteVolumeTopology},
 };
 use runmat_analysis_core::{
@@ -25,7 +25,7 @@ pub(super) fn reserve(
     t: &FiniteVolumeTopology,
     p: CanonicalFluidPolicy,
 ) -> Result<CanonicalFluidReservation, Error> {
-    let geometry = FiniteVolumeTopology::reserve(source, t.policy)
+    let geometry = FiniteVolumeTopology::reserve(source, t.policy, &t.selection)
         .map_err(|_| Error::Resource("source geometry admission"))?;
     if geometry.cell_count != t.cells.len() {
         return Err(Error::Invalid("finite-volume source count"));
@@ -126,9 +126,17 @@ pub(super) fn admit_authority_profile(
         mul(profile.maximum_entity_units.max(1), 2)?,
         u64::from(usize::BITS),
     )?;
+    // Every face-bound action (mass flow, inlet velocity, wall motion) selects faces.
     let mass_flow_actions = actions
         .iter()
-        .filter(|a| matches!(a, ExcitationAction::MassFlow(_)))
+        .filter(|a| {
+            matches!(
+                a,
+                ExcitationAction::MassFlow(_)
+                    | ExcitationAction::InletVelocity(_)
+                    | ExcitationAction::WallMotion(_)
+            )
+        })
         .count() as u64;
     let boundary_work = mul(
         mul(
@@ -266,8 +274,8 @@ impl CanonicalFluidReservation {
         let f = u64::try_from(face_count).map_err(|_| Error::Resource("face count"))?;
         // A tetrahedral cell has at most four distinct face-neighbours plus its diagonal.
         let nnz = mul(n, 5)?;
-        let ilu = SparseRightIluEnvelope::for_counts(n, nnz, 5)
-            .ok_or(Error::Resource("shared ILU envelope"))?;
+        let ilu = super::linear::PreconditionerEnvelope::for_counts(n, nnz)
+            .ok_or(Error::Resource("shared preconditioner envelope"))?;
         // Three coexisting CSR operators/pattern clones plus assembly/output temporaries,
         // immutable boundary/bodyforce, all cell vectors/gradients/3x3 LS stencils, and
         // shared GMRES peak. Includes doubled Vec payload/header growth allowances.
@@ -296,6 +304,8 @@ impl CanonicalFluidReservation {
                 48,
             )?,
         )?;
+        // Cell vorticity: one retained and one evaluated vector per cell, doubled payload.
+        bytes = add(bytes, add(mul(n, 2 * 2 * 24)?, 48)?)?;
         // Gauge selection/component arrays, original and reduced scalar systems,
         // compatibility traversal and mean-trace normalization coexist with GMRES.
         bytes = add(bytes, add(mul(n, 512)?, mul(f, 64)?)?)?;

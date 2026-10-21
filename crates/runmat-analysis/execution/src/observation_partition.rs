@@ -216,19 +216,7 @@ pub fn prepare_observation_fanout(
                 }
                 _ => None,
             };
-            let required_indices = if let crate::ObservationPublishedSource::FiniteVolumeRecovery { layout, .. } = &preparation.source {
-                let super::observation_source::AdmittedObservationWorkload::FluidSteady(fluid) = &admitted.workload else {
-                    return Err(AnalysisBridgeError::Identity("finite-volume original workload absent"));
-                };
-                let mesh = admitted.mesh.as_ref().ok_or(AnalysisBridgeError::Identity("finite-volume observation mesh absent"))?;
-                let projection = runmat_analysis_fea::topology::AnalysisProjection::derive(mesh)
-                    .map_err(|e| AnalysisBridgeError::Invalid(e.to_string()))?;
-                let geometry = runmat_analysis_fea::topology::FiniteVolumeTopology::derive(&projection, fluid.geometry_policy)
-                    .map_err(|e| AnalysisBridgeError::Invalid(e.to_string()))?;
-                runmat_analysis_fea::results::observation::finite_volume_observation_partition_source_indices(
-                    &admitted.request.plan, &plan, partition,
-                    runmat_analysis_fea::results::observation::FiniteVolumeObservationSource { layout, projection: &projection, geometry: &geometry }, preparation.limits)
-            } else if let Some(sampling) = sampled {
+            let required_indices = if let Some(sampling) = sampled {
                 let mesh = admitted.mesh.as_ref().ok_or(AnalysisBridgeError::Identity(
                     "sampled observation mesh absent",
                 ))?;

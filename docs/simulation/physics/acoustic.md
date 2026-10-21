@@ -43,9 +43,9 @@ diagnostics; it is not a general solver for arbitrary CAD acoustics.
 | Procedure | Required domain/state | Current numerical status |
 | --- | --- | --- |
 | `acoustic static` | Static pressure state | Typed contract; reduced component is harmonic, not static |
-| `acoustic modal` | Positive mode count | Typed contract only |
-| `acoustic transient` | Time samples and compatible initial pressure | Typed contract only |
-| `acoustic harmonic` | Frequency samples and complex pressure | Reduced Helmholtz graph component |
+| `acoustic modal` | Positive mode count; acoustic modes state | Canonical Tet4/Tet10 pressure eigen-solve; publishes `modal.frequency_hz` and one `acoustic.pressure` field per mode |
+| `acoustic transient` | Time samples; acoustic pressure state | Canonical Tet4/Tet10 Newmark pressure history; publishes one `acoustic.pressure` field per time sample with acoustic energy |
+| `acoustic harmonic` | Frequency samples and complex pressure | Canonical Tet4/Tet10 complex pressure; one certified sparse LU per frequency solves and proves the operator nonsingular; publishes `acoustic.pressure` and `acoustic.particle_velocity` at every frequency, and authored outputs (pressure, `level` in dB re 20 µPa) at the sampled frequencies |
 | `acoustic nonlinear` | Load-factor domain | Typed contract only |
 
 No unsupported procedure is approximated by silently selecting the reduced harmonic component.
@@ -71,9 +71,9 @@ study cavity_modes {
 }
 ```
 
-For an acoustic eigenproblem, the expected discrete system is
-$\mathsf K_p\boldsymbol\phi_i=\omega_i^2\mathsf M_p\boldsymbol\phi_i$. The typed contract carries
-mode count and acoustic state, but no native public modal realization is currently admitted.
+The discrete eigenproblem is
+$\mathsf K_p\boldsymbol\phi_i=\omega_i^2\mathsf M_p\boldsymbol\phi_i$. `fea run` solves it on the
+canonical mesh and publishes each natural frequency with its pressure mode shape and residual.
 
 ## How do I apply an acoustic pressure or speaker velocity?
 

@@ -24,6 +24,7 @@ pub enum AccuracySourceKind {
     Magnetostatic,
     ElectricalStatic,
     AcousticHarmonic,
+    AcousticResponse,
     Thermal,
     StructuralLinear,
     StructuralModalResponseSpectrum,
@@ -69,19 +70,6 @@ impl ObservationPublicationCatalog {
         }
         match (kind, self.source().source()) {
             (
-                AccuracySourceKind::FluidSteady,
-                crate::results::observation::ObservationFieldCatalogSource::FiniteVolumeRecovery {
-                    recovery_request,
-                    manifest,
-                    ..
-                },
-            ) if recovery_request.producer == producer
-                && recovery_request.source.solver_result() == Some(result)
-                && manifest.source == recovery_request.source =>
-            {
-                Ok(())
-            }
-            (
                 AccuracySourceKind::Magnetostatic | AccuracySourceKind::MaxwellHarmonic,
                 crate::results::observation::ObservationFieldCatalogSource::SampledRecovery {
                     recovery_request,
@@ -89,6 +77,19 @@ impl ObservationPublicationCatalog {
                 },
             ) if recovery_request.producer == producer
                 && recovery_request.source.solver_result() == Some(result) =>
+            {
+                Ok(())
+            }
+            (
+                AccuracySourceKind::AcousticHarmonic,
+                crate::results::observation::ObservationFieldCatalogSource::VolumeMeshRecovery {
+                    recovery_request,
+                    manifest,
+                    ..
+                },
+            ) if recovery_request.producer == producer
+                && recovery_request.source.solver_result() == Some(result)
+                && manifest.source == recovery_request.source =>
             {
                 Ok(())
             }

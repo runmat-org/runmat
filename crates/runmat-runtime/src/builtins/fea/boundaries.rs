@@ -41,6 +41,7 @@ impl GeometryBoundBoundary {
             BoundaryOperator::MagneticInsulation => FEA_MAGNETIC_BOUNDARY_CLASS,
             BoundaryOperator::AcousticRigidWall
             | BoundaryOperator::AcousticRadiation
+            | BoundaryOperator::AcousticSphericalRadiation { .. }
             | BoundaryOperator::AcousticImpedance { .. } => FEA_ACOUSTIC_BOUNDARY_CLASS,
             BoundaryOperator::FluidOutletPressure { .. } => FEA_FLUID_BOUNDARY_CLASS,
         };

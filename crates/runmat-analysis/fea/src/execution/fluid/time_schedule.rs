@@ -4,8 +4,8 @@ use crate::excitation::{
     time_breakpoints, ProcedureTimeGrid, ProcedureTimeSchedule, TimeScheduleError,
 };
 use runmat_analysis_core::{
-    AnalysisModel, AnalysisProcedure, IndependentDomain, ObservationRequest, PhysicsFamily,
-    ProcedureStep, SignalSampleApproach, SolutionSpace,
+    AnalysisModel, AnalysisProcedure, IndependentDomain, ObservationRequest, ProcedureStep,
+    SignalSampleApproach, SolutionSpace,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -31,7 +31,7 @@ impl FluidTransientSchedule {
                 "fluid schedule step differs from original authored sequence",
             ));
         }
-        if step.family != PhysicsFamily::Fluid
+        if !crate::study::is_flow_step(step)
             || step.procedure != AnalysisProcedure::TransientResponse
             || step.solution_space != SolutionSpace::Direct
         {

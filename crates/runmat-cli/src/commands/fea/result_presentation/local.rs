@@ -49,6 +49,39 @@ pub(in super::super) fn completed_summary(
                     )
                 })?,
         }),
+        CompletedFeaStudyResult::AcousticResponse(result) => Ok(LocalRunSummary {
+            assessment_summary: publication.into(),
+            root_id: root_id.into(),
+            procedure: match result.completion.workload.solver {
+                runmat_analysis_fea::execution::AcousticResponseSolver::Modal { .. } => {
+                    "acoustic_modal"
+                }
+                runmat_analysis_fea::execution::AcousticResponseSolver::Transient { .. } => {
+                    "acoustic_transient"
+                }
+            },
+            study_definition_digest: result
+                .completion
+                .compiled
+                .definition_digest()
+                .map_err(anyhow::Error::msg)?
+                .to_string(),
+            mesh_digest: super::stable_digest_hex(&result.mesh.canonical_digest),
+            nodes: result.mesh.topology.nodes.len(),
+            elements: result.mesh.topology.volume_elements.len(),
+            boundary_faces: result.mesh.topology.boundary_faces.len(),
+            step_run_ids: publication
+                .steps
+                .iter()
+                .map(|step| step.run_id.clone())
+                .collect(),
+            result_manifest_artifact_path: publication
+                .result_manifest_artifact_path
+                .clone()
+                .ok_or_else(|| {
+                    anyhow::anyhow!("typed acoustic study publication omitted its result manifest")
+                })?,
+        }),
         CompletedFeaStudyResult::Magnetic(result) => Ok(LocalRunSummary {
             assessment_summary: publication.into(),
             root_id: root_id.into(),

@@ -1,8 +1,10 @@
 mod connected;
 mod cube;
+mod layered;
 mod solver_mesh;
 
 pub use cube::{quadratic_slab_mesh, slab_mesh};
+pub use layered::layered_box_mesh;
 
 pub use connected::{
     connected_quadratic_tetrahedron_solver_mesh, connected_tetrahedron_solver_mesh,

@@ -72,12 +72,7 @@ fn template(frequencies: Vec<f64>) -> AcousticHarmonicWorkload {
         model,
         step_id: ProcedureStepId("acoustic".into()),
         frequency: Frequency::new(0.2),
-        solver: runmat_analysis_fea::physics::acoustic::AcousticHarmonicPolicy {
-            uniqueness: Some(
-                runmat_analysis_fea::solve::uniqueness::SparseUniquenessPolicy::bounded(),
-            ),
-            ..Default::default()
-        },
+        solver: runmat_analysis_fea::physics::acoustic::AcousticHarmonicPolicy::default(),
         power_balance_relative_tolerance: 1e-8,
     }
 }
@@ -138,10 +133,17 @@ fn native_admitted_frequency_assembly_reopens_original_complete_fields_and_metad
                 originals.push(imported.result);
                 objects.push(imported.objects);
             }
+            let request =
+                runmat_analysis_fea::execution::AcousticFrequencyAssemblyRequest::new(vec![
+                    None;
+                    count
+                ])
+                .unwrap();
             let preparation = |entries| AcousticFrequencyAssemblyPreparation {
                 workload: workload.clone(),
                 mesh: mesh.clone(),
                 entries,
+                request: request.clone(),
                 artifact_access: access.clone(),
                 program_revision: revision.clone(),
                 output_policy: policy,
@@ -189,7 +191,7 @@ fn native_admitted_frequency_assembly_reopens_original_complete_fields_and_metad
             for missing in [true, false] {
                 let damaged = DamagedObject {
                     source: &store,
-                    target: imported.fields[0].objects[1].descriptor.digest,
+                    target: imported.result_objects.objects[0].descriptor.digest,
                     missing,
                 };
                 assert!(import_acoustic_frequency_assembly(
@@ -209,32 +211,23 @@ fn native_admitted_frequency_assembly_reopens_original_complete_fields_and_metad
                     .collect::<Vec<_>>(),
                 frequencies
             );
-            assert_eq!(imported.fields.len(), count);
             imported
                 .publication
                 .validate_for(&imported.result.publication_authority().unwrap())
                 .unwrap();
-            for ((result, sample), field) in imported
+            // Fields are recovered and published by each frequency entry's own task; the fan-in
+            // retains only the assembled result and its publication manifest.
+            for (result, sample) in imported
                 .result
                 .results()
                 .iter()
                 .zip(imported.publication.samples())
-                .zip(&imported.fields)
             {
                 assert!(originals.contains(result));
                 assert_eq!(
                     sample.recovery_request.source.solver_result(),
                     Some(result.source_result_identity().unwrap())
                 );
-                assert_eq!(
-                    field.manifest.logical_identity,
-                    sample.fields.identity.digest()
-                );
-                assert_eq!(
-                    field.manifest.partitions[0].logical_identity,
-                    sample.fields.identity.digest()
-                );
-                assert!(field.manifest.partitions.len() >= 3);
             }
             let mut ordered = objects;
             ordered.reverse();

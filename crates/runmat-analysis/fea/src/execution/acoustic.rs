@@ -17,6 +17,7 @@ use runmat_execution::Digest;
 use runmat_meshing_core::SolverMeshArtifact;
 use serde::{Deserialize, Serialize};
 mod fields;
+pub use fields::acoustic_native_field_definitions;
 pub(in crate::execution) use fields::{
     native_acoustic_entity_counts, native_acoustic_field_definition, native_acoustic_field_plan,
 };
@@ -30,7 +31,10 @@ pub use receipt::{
 mod sweep;
 pub use sweep::{AcousticFrequencyResult, AcousticFrequencyWorkload};
 mod frequency_assembly;
-pub use frequency_assembly::{assemble_acoustic_frequency_result, AcousticFrequencyAssemblyOutput};
+pub use frequency_assembly::{
+    assemble_acoustic_frequency_result, AcousticFrequencyAssemblyOutput,
+    AcousticFrequencyAssemblyRequest,
+};
 #[cfg(test)]
 pub(in crate::execution) mod tests;
 const PREFIX: &[u8] = b"runmat-acoustic-harmonic-workload/v1\0";
@@ -72,9 +76,8 @@ impl AcousticHarmonicWorkload {
                 output.kind != StateKind::AcousticComplex
                     || output.completeness != StateCompleteness::Complete
             })
-            || !step.observations.is_empty()
         {
-            return Err(invalid("canonical acoustic workload requires a unique standalone step with complete acoustic-complex outputs and without lifecycle activations or observations"));
+            return Err(invalid("canonical acoustic workload requires a unique standalone step with complete acoustic-complex outputs and without lifecycle activations"));
         }
         if !self.power_balance_relative_tolerance.is_finite()
             || self.power_balance_relative_tolerance <= 0.0
@@ -121,8 +124,8 @@ impl AcousticHarmonicWorkload {
         .map_err(invalid)?;
         validate_solver_formulation_compatibility(
             &identity,
-            SolverMethod::AcousticCanonicalHelmholtzGmres,
-            self.solver.preconditioner,
+            SolverMethod::AcousticCanonicalHelmholtzCertifiedLu,
+            crate::contracts::SolverPreconditioner::None,
         )
         .map_err(invalid)?;
         Ok(identity)

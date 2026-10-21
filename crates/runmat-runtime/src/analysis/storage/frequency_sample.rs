@@ -109,7 +109,7 @@ pub(super) fn validate_artifact(
             summary.producer,
             runmat_analysis_fea::execution::AccuracySourceKind::AcousticHarmonic,
             summary.source_result,
-            None,
+            completed.observation_catalog.as_ref(),
             expected
                 .model
                 .sequence

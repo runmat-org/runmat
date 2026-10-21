@@ -42,6 +42,8 @@ pub(crate) struct ObservationTopology<'a> {
     pub oriented_faces: Vec<ObservationElement>,
     pub finite_volume: Option<crate::results::field::FiniteVolumeFieldTopology>,
     pub face_boundary_sources: Vec<Option<usize>>,
+    /// Owner and neighbor projection element of every oriented face.
+    pub face_elements: Vec<(usize, Option<usize>)>,
     pub beam_elements: Vec<ObservationElement>,
     pub shell_elements: Vec<ObservationElement>,
     pub solid_projection: Option<Cow<'a, AnalysisProjection>>,
@@ -56,11 +58,86 @@ mod sampled;
 mod tests;
 
 impl<'a> ObservationTopology<'a> {
-    pub(super) fn set_finite_volume_digest(&mut self, digest: Digest) {
-        self.topology_digest = digest;
-    }
     pub fn from_projection(projection: &'a AnalysisProjection) -> Result<Self, ObservationError> {
         Self::from_solid_projection(Cow::Borrowed(projection))
+    }
+
+    /// Fields with a cell or face location live on the mesh's owner-oriented faces too.
+    pub(crate) fn needs_faces<'f>(
+        definitions: impl IntoIterator<Item = &'f crate::results::field::RecoveredFieldDefinition>,
+    ) -> bool {
+        definitions.into_iter().any(|definition| {
+            definition.entity_domain() == crate::results::field::RecoveredFieldEntityDomain::OrientedFaces
+                || definition.location() == runmat_analysis_core::FieldLocation::Cell
+        })
+    }
+
+    /// The canonical solver mesh topology, with its owner-oriented faces when `faces`.
+    pub fn from_projection_for(
+        projection: &'a AnalysisProjection,
+        faces: bool,
+    ) -> Result<Self, ObservationError> {
+        let topology = Self::from_projection(projection)?;
+        if faces {
+            topology.with_projection_faces()
+        } else {
+            Ok(topology)
+        }
+    }
+
+    /// Add the owner-oriented faces of the projection: every interior face once and every
+    /// boundary face. Faces are derived from the projection alone, so the topology digest stays
+    /// the projection digest.
+    pub(crate) fn with_projection_faces(mut self) -> Result<Self, ObservationError> {
+        let projection = self.solid_projection.as_deref().ok_or(ObservationError::Identity(
+            "mesh faces need the topology's projection",
+        ))?;
+        let geometry = crate::topology::FiniteVolumeTopology::derive_selected(
+            projection,
+            crate::topology::FiniteVolumeProjectionPolicy::covering(projection),
+            crate::topology::FiniteVolumeCellSelection::AllElements,
+        )
+        .map_err(|error| ObservationError::Invalid(error.to_string()))?;
+        let layout = crate::results::field::FiniteVolumeFieldTopology::derive(projection, &geometry)
+            .map_err(|error| ObservationError::Invalid(error.to_string()))?;
+        self.oriented_faces = layout
+            .oriented_faces()
+            .iter()
+            .zip(&geometry.faces)
+            .map(|(face, geo)| ObservationElement {
+                identity: face.identity,
+                region_id: String::new(),
+                centroid_m: geo.centroid_m,
+            })
+            .collect();
+        self.face_boundary_sources = geometry
+            .faces
+            .iter()
+            .map(|f| f.boundary_source.map(|b| b.projection_boundary_index))
+            .collect();
+        self.face_elements = geometry
+            .faces
+            .iter()
+            .map(|f| {
+                (
+                    geometry.cells[f.owner].source_element_index,
+                    f.neighbor.map(|n| geometry.cells[n].source_element_index),
+                )
+            })
+            .collect();
+        self.finite_volume = Some(layout);
+        Ok(self)
+    }
+
+    /// The topology a field support resolves against, when it has a mesh projection.
+    pub(crate) fn support_topology(&self) -> Option<crate::results::field::SupportTopology<'_>> {
+        self.solid_projection
+            .as_deref()
+            .map(|projection| crate::results::field::SupportTopology {
+                projection,
+                face_elements: (!self.oriented_faces.is_empty())
+                    .then_some(self.face_elements.as_slice()),
+            })
     }
 
     fn from_solid_projection(
@@ -104,6 +181,7 @@ impl<'a> ObservationTopology<'a> {
             oriented_faces: Vec::new(),
             finite_volume: None,
             face_boundary_sources: Vec::new(),
+            face_elements: Vec::new(),
             beam_elements: Vec::new(),
             shell_elements: Vec::new(),
             solid_projection: Some(projection),
@@ -233,6 +311,7 @@ impl<'a> ObservationTopology<'a> {
             oriented_faces: Vec::new(),
             finite_volume: None,
             face_boundary_sources: Vec::new(),
+            face_elements: Vec::new(),
             sampling: None,
             integration_points_by_parent: projection
                 .as_ref()

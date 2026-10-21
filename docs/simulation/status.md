@@ -40,10 +40,13 @@ execution after pre-execution driver/worker replacement and cold import from dec
 including foreign-source and missing-object rejection. Full outer-root consumer/order coverage
 and genuine mid-phase restart remain open.
 
-Acoustic, electromagnetic, fluid, electro-thermal, conjugate heat-transfer and fluid-structure
-procedure contracts are represented and checked by the language but are not yet admitted by the
-typed native whole-study executor. Runtime object-level operations and solver components are not
-a substitute for that complete path.
+Fluid flow (steady and transient), conjugate heat transfer (steady and transient with steady
+flow) and fluid–structure interaction (steady and transient) run through the typed native
+whole-study executor on conformal Tet4 meshes; see [fluid flow](./physics/fluid),
+[conjugate heat transfer](./physics/conjugate-heat-transfer) and
+[fluid–structure interaction](./physics/fluid-structure-interaction) for their envelopes and
+[fluid validation](./validation/fluid) for the reference comparisons. Electro-thermal procedure
+contracts are checked by the language but not admitted by the executor.
 
 `docs/simulation/examples/acoustic-cavity-harmonic.fea` is an acoustic harmonic study of a 1 m air cavity with incident pressure on its walls at 100, 200 and 400 Hz. It checks and plans as an authored acoustic contract. The native whole-study executor does not yet run this multi-frequency acoustic study, and rejects it rather than running a substitute.
 

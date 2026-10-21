@@ -90,6 +90,21 @@ pub(super) fn receipt_matches_solve(
                 && meshes.next().is_none()
                 && magnetic.receipt().producer == host.workload.step
         }
+        AccuracySourceReceipt::AcousticResponse(response) => {
+            let mut workloads = host.workload.inputs.iter().filter(|input| {
+                input.kind == AnalysisNumericalObjectKind::AcousticResponseWorkload
+            });
+            let mut meshes = host
+                .workload
+                .inputs
+                .iter()
+                .filter(|input| input.kind == AnalysisNumericalObjectKind::Mesh);
+            matches!(workloads.next(), Some(input) if input.logical_identity == response.source_workload().digest())
+                && workloads.next().is_none()
+                && matches!(meshes.next(), Some(input) if input.logical_identity == response.receipt().topology_digest)
+                && meshes.next().is_none()
+                && response.receipt().producer == host.workload.step
+        }
         AccuracySourceReceipt::ElectricalStatic(electrical) => {
             let mut workloads = host.workload.inputs.iter().filter(|input| {
                 input.kind == AnalysisNumericalObjectKind::ElectricalStaticWorkload
