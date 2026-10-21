@@ -1672,7 +1672,7 @@ fn apply_thermo_spatial_field(
             / 240.0)
             .clamp(-0.45, 0.45);
         let start =
-            ((region_hash(&region_delta.region_id) as usize).wrapping_add(idx * 5)) % dof_count;
+            ((region_hash(region_delta.region_id()) as usize).wrapping_add(idx * 5)) % dof_count;
         let stride = context
             .region_temperature_deltas
             .len()

@@ -111,7 +111,10 @@ fn realize_thermo_mechanical_context(
                         "temperature field targets unknown model region {region_id}"
                     ));
                 }
-                if region_deltas.insert(region_id.clone(), delta).is_some() {
+                if region_deltas
+                    .insert(region_id.clone(), (target.clone(), delta))
+                    .is_some()
+                {
                     return Err(format!(
                         "multiple active temperature fields target region {region_id} at one sample"
                     ));
@@ -133,8 +136,8 @@ fn realize_thermo_mechanical_context(
         region_temperature_deltas: region_deltas
             .into_iter()
             .map(
-                |(region_id, temperature_delta_k)| FeaThermoRegionTemperatureDelta {
-                    region_id,
+                |(_, (target, temperature_delta_k))| FeaThermoRegionTemperatureDelta {
+                    target,
                     temperature_delta_k,
                 },
             )

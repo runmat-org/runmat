@@ -51,7 +51,8 @@ pub(crate) fn build(
             let prescribed_temperature_k = thermal_context
                 .map(|context| {
                     thermoelastic_load::element_temperature_k(
-                        &element.region_id.source_topology_id,
+                        &element.region_id,
+                        &element.provenance,
                         context,
                     )
                     .map_err(|error| {
@@ -71,7 +72,8 @@ pub(crate) fn build(
                         })?;
                     thermoelastic_load::element_thermal_eigenstrain(
                         owner,
-                        &element.region_id.source_topology_id,
+                        &element.region_id,
+                        &element.provenance,
                         context,
                     )
                     .map_err(|error| {
