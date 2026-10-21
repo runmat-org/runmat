@@ -178,6 +178,36 @@ pub(crate) fn dimension_requirement(dimension: PhysicalDimension) -> Option<(&'s
         .map(|(_, description, unit)| (description, unit))
 }
 
+/// When `value` is a quantity whose authored unit measures something other than `expected`,
+/// returns the message (`<subject> must be <what>, found <unit>`) and the caret label
+/// (`expected <SI unit>`) for a diagnostic located at the value.
+pub(crate) fn unit_mismatch(
+    subject: &str,
+    value: &crate::CheckedExpression,
+    expected: PhysicalDimension,
+) -> Option<(String, String)> {
+    let crate::CheckedExpressionKind::Quantity { unit, .. } = &value.kind else {
+        return None;
+    };
+    let found = match &value.value_type {
+        crate::FeaType::Quantity(found) => *found,
+        crate::FeaType::Vector { element, .. } => match element.as_ref() {
+            crate::FeaType::Quantity(found) => *found,
+            _ => return None,
+        },
+        _ => return None,
+    };
+    if found == expected {
+        return None;
+    }
+    let (description, expected_unit) =
+        dimension_requirement(expected).unwrap_or(("a different physical quantity", "SI units"));
+    Some((
+        format!("{} must be {description}, found {unit}", subject.replace('_', " ")),
+        format!("expected {expected_unit}"),
+    ))
+}
+
 fn is_unit_character(value: u8) -> bool {
     value.is_ascii_alphabetic() || value == b'_'
 }

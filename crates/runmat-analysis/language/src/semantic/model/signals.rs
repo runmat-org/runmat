@@ -458,36 +458,21 @@ fn authored_unit_matches(
     dimension: PhysicalDimension,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<()> {
-    let CheckedExpressionKind::Quantity { unit, .. } = &value.kind else {
+    let Some((message, label)) = crate::semantic::units::unit_mismatch(quantity, value, dimension)
+    else {
         return Some(());
     };
-    let found = match &value.value_type {
-        FeaType::Quantity(found) => *found,
-        FeaType::Vector { element, .. } => match element.as_ref() {
-            FeaType::Quantity(found) => *found,
-            _ => return Some(()),
-        },
-        _ => return Some(()),
-    };
-    if found == dimension {
-        return Some(());
-    }
-    let (description, expected_unit) = crate::semantic::units::dimension_requirement(dimension)
-        .unwrap_or(("a different physical quantity", "SI units"));
     diagnostics.push(
         crate::FeaDiagnostic::error(
             "fea.semantic.model",
-            format!(
-                "{} must be {description}, found {unit}",
-                quantity.replace('_', " ")
-            ),
+            message,
             crate::FeaDiagnosticPhase::Lowering,
             Some(crate::FeaDiagnosticLocation {
                 path: declaration.module.clone(),
                 span: value.span,
             }),
         )
-        .with_label(format!("expected {expected_unit}")),
+        .with_label(label),
     );
     None
 }

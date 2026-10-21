@@ -289,7 +289,7 @@ fn geometry_binding<'a>(
         _ => return missing_binding(declaration, "geometry", diagnostics),
     };
     let key = symbol_key(bound, declaration, path, FeaSymbolKind::Geometry)
-        .or_else(|| missing_binding(declaration, "geometry", diagnostics))?;
+        .or_else(|| unresolved_binding(declaration, expression, "geometry", diagnostics))?;
     Some((key, expression))
 }
 
@@ -399,7 +399,7 @@ fn declaration_binding(
         return missing_binding(declaration, member, diagnostics);
     };
     symbol_key(bound, declaration, path, kind)
-        .or_else(|| missing_binding(declaration, member, diagnostics))
+        .or_else(|| unresolved_binding(declaration, expression, member, diagnostics))
 }
 
 fn model_binding<'a>(
@@ -416,7 +416,7 @@ fn model_binding<'a>(
         _ => return missing_binding(declaration, "model", diagnostics),
     };
     let key = symbol_key(bound, declaration, path, FeaSymbolKind::Model)
-        .or_else(|| missing_binding(declaration, "model", diagnostics))?;
+        .or_else(|| unresolved_binding(declaration, expression, "model", diagnostics))?;
     Some((key, expression))
 }
 
@@ -531,6 +531,19 @@ fn model_arguments(
             })
         })
         .collect()
+}
+
+/// A binding whose reference already failed to resolve was reported where it is written.
+fn unresolved_binding<T>(
+    declaration: &CheckedFeaDeclaration,
+    expression: &CheckedExpression,
+    member: &str,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<T> {
+    if expression.value_type == crate::FeaType::Error {
+        return None;
+    }
+    missing_binding(declaration, member, diagnostics)
 }
 
 fn missing_binding<T>(

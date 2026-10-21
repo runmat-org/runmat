@@ -317,6 +317,23 @@ fn required_length(
         return None;
     };
     if value.value_type != FeaType::Quantity(PhysicalDimension::LENGTH) {
+        if let Some((message, label)) =
+            super::units::unit_mismatch(name, value, PhysicalDimension::LENGTH)
+        {
+            diagnostics.push(
+                FeaDiagnostic::error(
+                    "fea.semantic.mesh",
+                    message,
+                    crate::FeaDiagnosticPhase::Lowering,
+                    Some(crate::FeaDiagnosticLocation {
+                        path: declaration.module.clone(),
+                        span: value.span,
+                    }),
+                )
+                .with_label(label),
+            );
+            return None;
+        }
         invalid(declaration, value, name, "length quantity", diagnostics);
         return None;
     }
