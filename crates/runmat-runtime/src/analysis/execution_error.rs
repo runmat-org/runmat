@@ -165,7 +165,7 @@ pub(super) fn admit_runtime_proxy_for_operation(
     model: &AnalysisModel,
     context: &OperationContext,
 ) -> Result<AnalysisRunIdentity, OperationErrorEnvelope> {
-    admit_runtime_proxy(family, procedure, requirement, branch).map_err(|error| {
+    admit_runtime_proxy(family, procedure, branch).map_err(|error| {
         operation_error(
             operation.name(),
             operation.version(),

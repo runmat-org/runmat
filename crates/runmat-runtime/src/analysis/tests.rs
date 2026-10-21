@@ -1947,7 +1947,7 @@ fn portable_structural_study_executes_every_independent_step_in_authored_order()
         vec![first.clone(), second.clone()],
     );
     spec.model = model;
-    spec.execution = AnalysisExecutionPlan::for_sequence_with_requirement(
+    spec.execution = AnalysisExecutionPlan::for_sequence(
         &AnalysisSequence::from_steps(
             "sequence_two_independent_static_steps",
             vec![first.clone(), second.clone()],

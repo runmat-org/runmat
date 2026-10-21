@@ -3993,7 +3993,6 @@ mod tests {
         let execution = block_on(execution::execution_plan_defaults(
             sequence,
             block_on(execution::backend_cpu()).unwrap(),
-            block_on(execution::requirement_production()).unwrap(),
         ))
         .expect("execution should build");
 
@@ -4346,7 +4345,7 @@ mod tests {
             vec![ProcedureStep::structural_static("static")],
         );
         let execution =
-            AnalysisExecutionPlan::for_sequence_with_requirement(&sequence, ComputeBackend::Cpu)
+            AnalysisExecutionPlan::for_sequence(&sequence, ComputeBackend::Cpu)
                 .expect("execution plan should match the sequence");
         let model = runmat_analysis_core::AnalysisModel {
             model_id: runmat_analysis_core::AnalysisModelId("synthetic_plot.model".to_string()),

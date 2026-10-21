@@ -122,7 +122,7 @@ fn cold_canonical_acoustic_objects_preserve_independent_fields_and_exact_lineage
 
 #[test]
 fn acoustic_portable_admission_and_result_import_fail_closed() {
-    let workload = workload();
+    let mut workload = workload();
     let mesh = slab_mesh(2);
     let result = workload.execute(&mesh).unwrap();
     assert!(validate_solver_formulation_compatibility(
