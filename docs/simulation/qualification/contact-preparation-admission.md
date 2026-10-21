@@ -1,6 +1,6 @@
 # Contact preparation admission
 
-This experimental component admits construction of an original prepared contact
+This component admits construction of an original prepared contact
 operator. Public contact remains disabled pending whole-task admission, supported
 transitions, independent mandatory accuracy, continuation and publication.
 
@@ -55,7 +55,7 @@ counting and construction envelopes. Exact storage/work boundaries pass and one-
 one-operation shortfalls reject. All original interface inventories are counted;
 conflicting laws still reject physically. Invalid primary node layout, missing controls,
 zero budgets and pre-cancellation reject. Allocation observations are test-allocator
-payload measurements, not process RSS or supported production execution evidence.
+payload measurements, not process RSS or supported execution evidence.
 
 The distinct GENERAL policy must still be governed by the shared task resource planner
 and rederived alongside original control, reduced support, history, output and transport
@@ -65,4 +65,4 @@ Independent contact physics and every original continuum/release failure remain 
 Exact candidate351 passes668unique focused shared execution/FEA/bridge tests, strict
 shared execution/FEA/bridge lint and native/runtime compilation plus strict native lint.
 The candidate retains two excluded HEAD renderer-size debts; main architecture passes.
-No native contact continuation, production promotion or full-corpus pass is claimed.
+No native contact continuation, qualification or full-corpus pass is claimed.

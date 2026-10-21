@@ -12,13 +12,11 @@ pub(super) fn verify_original_sources(
 ) {
     let policy = StructuralStudyPlanningPolicy {
         backend: expected.backend,
-        formulation_requirement: expected.formulation_requirement,
         numerics: StructuralNumericalPlanningPolicy::production(),
     };
     let mut compiled = CompiledAnalysisStudy {
         module_path: "tests/original-rod.fea".into(),
         study_id: "original-rod".into(),
-        formulation_requirement: expected.formulation_requirement,
         study_inputs: Vec::new(),
         assessments: Vec::new(),
         outputs: Vec::new(),

@@ -53,7 +53,6 @@ fn workload() -> MaxwellHarmonicWorkload {
     MaxwellHarmonicWorkload {
         model,
         step_id: ProcedureStepId("field".into()),
-        formulation_requirement: FormulationRequirement::Experimental,
         relative_residual_target: 1e-10,
     }
 }
@@ -65,7 +64,6 @@ fn preparation(order: ElementOrder) -> MaxwellStudyPreparation {
     let compiled = CompiledAnalysisStudy {
         module_path: "tests/maxwell.fea".into(),
         study_id: "maxwell".into(),
-        formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: Vec::new(),
         assessments: Vec::new(),
         outputs: Vec::new(),
@@ -73,9 +71,7 @@ fn preparation(order: ElementOrder) -> MaxwellStudyPreparation {
         model,
         solver_mesh_digest: mesh.canonical_digest,
     };
-    let policy = MaxwellStudyPlanningPolicy {
-        formulation_requirement: FormulationRequirement::Experimental,
-    };
+    let policy = MaxwellStudyPlanningPolicy {};
     let workload = plan_maxwell_study(&compiled, policy).unwrap();
     MaxwellStudyPreparation {
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),

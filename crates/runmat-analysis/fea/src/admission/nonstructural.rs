@@ -1,6 +1,6 @@
 use runmat_analysis_core::{
-    AnalysisProcedure, BoundaryTransferImplementation, FormulationRequirement, PhysicsFamily,
-    SolutionSpace, SourceImplementation, TemporalImplementation, TopologyImplementation,
+    AnalysisProcedure, BoundaryTransferImplementation, PhysicsFamily, SolutionSpace,
+    SourceImplementation, TemporalImplementation, TopologyImplementation,
 };
 use runmat_meshing_core::{ElementOrder, SolverMeshArtifact};
 
@@ -16,7 +16,6 @@ pub fn admit_nonstructural(
     solver_mesh: Option<&SolverMeshArtifact>,
     source: SourceImplementation,
     boundary_transfer: BoundaryTransferImplementation,
-    requirement: FormulationRequirement,
 ) -> Result<AnalysisRunIdentity, FeaRunError> {
     admit_nonstructural_with_temporal(
         family,
@@ -24,7 +23,6 @@ pub fn admit_nonstructural(
         solver_mesh,
         source,
         boundary_transfer,
-        requirement,
         None,
     )
 }
@@ -35,7 +33,6 @@ pub(crate) fn admit_nonstructural_with_temporal(
     solver_mesh: Option<&SolverMeshArtifact>,
     source: SourceImplementation,
     boundary_transfer: BoundaryTransferImplementation,
-    requirement: FormulationRequirement,
     temporal: Option<TemporalImplementation>,
 ) -> Result<AnalysisRunIdentity, FeaRunError> {
     if family == PhysicsFamily::Fluid {
@@ -91,7 +88,6 @@ pub(crate) fn admit_nonstructural_with_temporal(
         family,
         procedure,
         solution_space: SolutionSpace::Direct,
-        requirement,
         realization,
     })
     .map(|receipt| receipt.into_identity())

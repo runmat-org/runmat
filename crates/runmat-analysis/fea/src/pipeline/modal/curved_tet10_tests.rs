@@ -1,10 +1,9 @@
 use std::f64::consts::TAU;
 
 use runmat_analysis_core::{
-    AnalysisConstraint, CoordinateFrame, Displacement, FormulationRequirement,
-    MaterialElasticityModel, PrescribedStructuralDofs, PrescribedValue, ProcedureStep,
-    RegionTarget, StructuralConstraint, StructuralConstraintKind, StructuralTranslationDof,
-    TranslationDofValue,
+    AnalysisConstraint, CoordinateFrame, Displacement, MaterialElasticityModel,
+    PrescribedStructuralDofs, PrescribedValue, ProcedureStep, RegionTarget, StructuralConstraint,
+    StructuralConstraintKind, StructuralTranslationDof, TranslationDofValue,
 };
 use runmat_meshing_core::{
     fixtures::canonical_tetrahedron_solver_mesh, ElementOrder, SolverMeshArtifact, StableDigest,
@@ -130,7 +129,6 @@ fn curved_tet10_modal_frequency_matches_independent_one_dof_reference() {
             &model,
             ComputeBackend::Cpu,
             ModalSolveOptions {
-                formulation_requirement: FormulationRequirement::Experimental,
                 truncation: ModalTruncationPolicy::requested(1),
                 solver_mesh: Some(mesh),
                 ..ModalSolveOptions::default()

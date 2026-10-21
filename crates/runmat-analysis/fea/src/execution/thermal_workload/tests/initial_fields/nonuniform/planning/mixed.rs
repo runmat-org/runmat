@@ -59,7 +59,6 @@ pub(super) fn verify_source_selection(
     ];
     let policy = StructuralStudyPlanningPolicy {
         backend: thermal_policy.backend,
-        formulation_requirement: thermal_policy.formulation_requirement,
         numerics: StructuralNumericalPlanningPolicy::production(),
     };
     assert!(plan_structural_study(&compiled, policy).is_err());

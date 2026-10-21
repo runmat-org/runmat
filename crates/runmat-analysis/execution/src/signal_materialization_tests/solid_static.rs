@@ -2,7 +2,6 @@ use super::*;
 
 #[test]
 fn generated_face_force_matches_explicit_tet4_static_balance_and_analytic_shear() {
-    use runmat_analysis_core::FormulationRequirement;
     use runmat_analysis_fea::{
         excitation::SpatialProjectionBalance,
         fixtures::{fixture_model, FixtureId},
@@ -47,7 +46,6 @@ fn generated_face_force_matches_explicit_tet4_static_balance_and_analytic_shear(
     let mut generated_model = baseline_model.clone();
     generated_model.signals = vec![generated_signal];
     let options = LinearStaticSolveOptions {
-        formulation_requirement: FormulationRequirement::Experimental,
         solver_mesh: Some(mesh.clone()),
         ..LinearStaticSolveOptions::default()
     };

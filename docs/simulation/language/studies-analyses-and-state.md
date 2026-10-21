@@ -25,19 +25,6 @@ model = model.loaded_bracket(service_load = input.load)
 
 Unknown, duplicate, missing, or incorrectly typed arguments are errors.
 
-## Formulation maturity
-
-Omitting `formulation` requires production-qualified numerical work. A study that intentionally
-uses a formulation still under qualification states that fact directly:
-
-```fea
-formulation = experimental
-```
-
-The only values are `production` and `experimental`. Placement, a CLI flag, or successful
-convergence cannot weaken this requirement. The selected maturity is retained in workload and
-result evidence.
-
 ## Analysis declarations
 
 An analysis has a study-local name and exactly one typed procedure block:
@@ -99,6 +86,6 @@ study. The study selects them; the model remains their owner.
 
 The language and canonical contracts cover the planned physics families. The native `.fea`
 execution entrypoint currently executes structural procedure graphs. Other families may have
-lower-level typed operations or experimental kernels without yet being runnable through the public
+lower-level typed operations or numerical kernels without yet being runnable through the public
 `.fea` command. Check [current status](../status) before treating language acceptance as execution
-support or production qualification.
+support or validation.

@@ -359,7 +359,6 @@ fn verify_original_publication(
         ],
         sequence: SequenceIdentity::from_solver_contract(&workload.model.sequence).unwrap(),
         step: workload.model.sequence.steps[0].clone(),
-        formulation_requirement: workload.formulation_requirement,
         program_revision: task.program.request.recipe.program_revision.clone(),
         chunk_bytes: policy.chunk_bytes(),
         inventory_limits: limits,

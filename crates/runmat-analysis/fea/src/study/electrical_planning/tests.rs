@@ -21,7 +21,6 @@ fn compiled(equation: StaticElectricalEquation) -> CompiledAnalysisStudy {
     CompiledAnalysisStudy {
         module_path: "tests/electrical.fea".into(),
         study_id: "electrical".into(),
-        formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: vec![],
         assessments: Vec::new(),
         outputs: vec![],
@@ -32,9 +31,7 @@ fn compiled(equation: StaticElectricalEquation) -> CompiledAnalysisStudy {
 }
 
 fn policy() -> ElectricalStudyPlanningPolicy {
-    ElectricalStudyPlanningPolicy {
-        formulation_requirement: FormulationRequirement::Experimental,
-    }
+    ElectricalStudyPlanningPolicy {}
 }
 
 #[test]
@@ -88,16 +85,6 @@ fn unsupported_lifecycle_and_missing_accuracy_are_not_silently_lowered() {
         required_state_digest: "not-admitted".into(),
     };
     assert!(plan_electrical_study(&changed, policy()).is_err());
-    let mismatched = ElectricalStudyPlanningPolicy {
-        formulation_requirement: FormulationRequirement::Production,
-    };
-    assert!(matches!(
-        plan_electrical_study(&study, mismatched),
-        Err(ElectricalStudyPlanningError::FormulationRequirementMismatch)
-    ));
-    changed = study;
-    changed.formulation_requirement = FormulationRequirement::Production;
-    assert!(plan_electrical_study(&changed, mismatched).is_err());
 }
 
 #[test]

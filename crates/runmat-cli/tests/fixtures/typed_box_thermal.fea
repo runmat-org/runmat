@@ -49,7 +49,6 @@ study response {
     geometry = geometry.part
     mesh = mesh.volume
     model = model.temperature
-    formulation = experimental
     analysis heat { thermal steady {} }
     output temperature = analysis.heat.field.node.temperature
 }

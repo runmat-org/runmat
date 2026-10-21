@@ -1,11 +1,11 @@
 use runmat_analysis_core::{
-    AnalysisModel, AnalysisProcedure, CoupledPhysicsFamily, FormulationRequirement, PhysicsFamily,
-    ProcedureStep, SolutionSpace, StructuralConstraintKind,
+    AnalysisModel, AnalysisProcedure, CoupledPhysicsFamily, PhysicsFamily, ProcedureStep,
+    SolutionSpace, StructuralConstraintKind,
 };
 
 use crate::{
     admission::{
-        admit_formulation, require_qualified_formulation, structural_exact_realization,
+        admit_formulation, require_available_formulation, structural_exact_realization,
         thermomechanical_exact_realization, AnalysisRunIdentity, FormulationAdmissionRequest,
         StructuralRealizationInput, ThermomechanicalRealizationInput,
     },
@@ -16,7 +16,6 @@ use crate::{
 pub(super) fn require_structural(
     model: &AnalysisModel,
     procedure: AnalysisProcedure,
-    requirement: FormulationRequirement,
 ) -> Result<&ProcedureStep, FeaRunError> {
     let mut matching_steps = model.sequence.steps.iter().filter(|step| {
         step.procedure == procedure
@@ -36,7 +35,7 @@ pub(super) fn require_structural(
             "structural {procedure:?} execution requires exactly one canonical Structural or Thermomechanical procedure step, but multiple steps were found"
         )));
     }
-    require_structural_step(model, step, requirement)?;
+    require_structural_step(model, step)?;
     Ok(step)
 }
 
@@ -44,16 +43,10 @@ pub(super) fn require_structural(
 pub(super) fn require_structural_step(
     model: &AnalysisModel,
     step: &ProcedureStep,
-    requirement: FormulationRequirement,
 ) -> Result<(), FeaRunError> {
     let procedure = step.procedure;
-    require_qualified_formulation(
-        step.family,
-        step.procedure,
-        step.solution_space,
-        requirement,
-    )
-    .map_err(FeaRunError::from)?;
+    require_available_formulation(step.family, step.procedure, step.solution_space)
+        .map_err(FeaRunError::from)?;
     if !matches!(
         procedure,
         AnalysisProcedure::ModalExtraction | AnalysisProcedure::TransientResponse
@@ -94,16 +87,13 @@ pub(super) fn require_structural_step(
 pub(super) fn require_nonstructural(
     family: PhysicsFamily,
     procedure: AnalysisProcedure,
-    requirement: FormulationRequirement,
 ) -> Result<(), FeaRunError> {
-    require_qualified_formulation(family, procedure, SolutionSpace::Direct, requirement)
-        .map_err(Into::into)
+    require_available_formulation(family, procedure, SolutionSpace::Direct).map_err(Into::into)
 }
 
 pub(super) fn admit_structural(
     summary: &AssemblySummary,
     step: &ProcedureStep,
-    requirement: FormulationRequirement,
 ) -> Result<AnalysisRunIdentity, FeaRunError> {
     if summary.structural_formulations.is_empty() {
         return Err(FeaRunError::Assembly(
@@ -181,7 +171,6 @@ pub(super) fn admit_structural(
         family: step.family,
         procedure: step.procedure,
         solution_space: step.solution_space,
-        requirement,
         realization,
     })
     .map(|receipt| receipt.into_identity())

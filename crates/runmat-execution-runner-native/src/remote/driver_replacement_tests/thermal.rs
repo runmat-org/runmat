@@ -89,7 +89,6 @@ pub(super) fn prepare_authored_root(
     .unwrap();
     let planning = runmat_analysis_fea::study::StructuralStudyPlanningPolicy {
         backend: ComputeBackend::Cpu,
-        formulation_requirement: realized.formulation_requirement,
         numerics: runmat_analysis_fea::study::StructuralNumericalPlanningPolicy::production(),
     };
     crate::prepare_structural_study_root(crate::StructuralStudyRootPreparation {

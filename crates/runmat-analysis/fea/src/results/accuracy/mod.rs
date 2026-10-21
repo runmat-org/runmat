@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 
 use runmat_analysis_core::{
     AccuracyLimitAction, AccuracyPlan, AccuracyPlanId, AccuracyTarget, AccuracyTolerance,
-    ErrorContributionKind, FormulationRequirement, ObservationQuantity, RequiredAccuracyEvidence,
+    ErrorContributionKind, ObservationQuantity, RequiredAccuracyEvidence,
     UnavailableEvidencePolicy,
 };
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
@@ -304,7 +304,6 @@ pub struct AccuracyArtifact {
     pub source_kind: crate::execution::AccuracySourceKind,
     pub source_result: SolverResultIdentity,
     pub source_observations: Option<ObservationPublicationCatalogIdentity>,
-    pub formulation_requirement: FormulationRequirement,
     evidence: Vec<AccuracyEvidence>,
     evaluation: AccuracyEvaluation,
     gate: AccuracyPublicationGate,
@@ -320,7 +319,6 @@ struct AccuracyArtifactWire {
     source_kind: crate::execution::AccuracySourceKind,
     source_result: SolverResultIdentity,
     source_observations: Option<ObservationPublicationCatalogIdentity>,
-    formulation_requirement: FormulationRequirement,
     evidence: Vec<AccuracyEvidence>,
     evaluation: AccuracyEvaluation,
     gate: AccuracyPublicationGate,
@@ -338,7 +336,6 @@ impl TryFrom<AccuracyArtifactWire> for AccuracyArtifact {
             source_kind: wire.source_kind,
             source_result: wire.source_result,
             source_observations: wire.source_observations,
-            formulation_requirement: wire.formulation_requirement,
             evidence: wire.evidence,
             evaluation: wire.evaluation,
             gate: wire.gate,
@@ -354,7 +351,6 @@ pub struct AccuracyArtifactInput {
     pub source_kind: crate::execution::AccuracySourceKind,
     pub source_result: SolverResultIdentity,
     pub source_observations: Option<ObservationPublicationCatalogIdentity>,
-    pub formulation_requirement: FormulationRequirement,
     pub evidence: Vec<AccuracyEvidence>,
     pub evaluation: AccuracyEvaluation,
     pub gate: AccuracyPublicationGate,
@@ -370,7 +366,6 @@ impl AccuracyArtifact {
             source_kind: input.source_kind,
             source_result: input.source_result,
             source_observations: input.source_observations,
-            formulation_requirement: input.formulation_requirement,
             evidence: input.evidence,
             evaluation: input.evaluation,
             gate: input.gate,
@@ -451,7 +446,6 @@ impl AccuracyArtifact {
                 self.source_kind,
                 self.source_result,
                 self.source_observations,
-                self.formulation_requirement,
                 &self.evidence,
                 &self.evaluation,
                 &self.gate,
@@ -473,14 +467,13 @@ pub fn evaluate_accuracy_artifact(
     evidence: Vec<AccuracyEvidence>,
 ) -> Result<AccuracyArtifact, AccuracyEvaluationError> {
     let evaluation = evaluate_accuracy(&request.plan, &evidence)?;
-    let gate = publication_gate(&request.plan, request.formulation_requirement, &evaluation)?;
+    let gate = publication_gate(&request.plan, &evaluation)?;
     AccuracyArtifact::new(AccuracyArtifactInput {
         evaluation_request: request.identity(),
         producer: request.producer,
         source_kind: request.source_kind,
         source_result: request.source_result,
         source_observations: request.source_observations,
-        formulation_requirement: request.formulation_requirement,
         evidence,
         evaluation,
         gate,
@@ -502,7 +495,6 @@ pub use evaluation::evaluate_accuracy;
 
 pub fn publication_gate(
     plan: &AccuracyPlan,
-    requirement: FormulationRequirement,
     evaluation: &AccuracyEvaluation,
 ) -> Result<AccuracyPublicationGate, AccuracyEvaluationError> {
     evaluation.validate_identity()?;
@@ -513,17 +505,10 @@ pub fn publication_gate(
             "accuracy report identity does not match the authored plan and report content".into(),
         ));
     }
-    let decision = match (requirement, evaluation.report.status) {
-        (_, AccuracyStatus::Satisfied) => PublicationDecision::Allow,
-        (FormulationRequirement::Production, _) => PublicationDecision::Block,
-        (FormulationRequirement::Experimental, AccuracyStatus::Indeterminate)
-            if plan.unavailable_evidence
-                == UnavailableEvidencePolicy::MarkIndeterminateExperimental =>
-        {
-            PublicationDecision::Allow
-        }
-        (FormulationRequirement::Experimental, AccuracyStatus::NotSatisfied)
-            if plan.exceeded_limit == AccuracyLimitAction::WarnExperimental =>
+    let decision = match evaluation.report.status {
+        AccuracyStatus::Satisfied => PublicationDecision::Allow,
+        AccuracyStatus::Indeterminate
+            if plan.unavailable_evidence == UnavailableEvidencePolicy::MarkIndeterminate =>
         {
             PublicationDecision::Allow
         }
@@ -636,7 +621,7 @@ fn validate_plan_boundary(plan: &AccuracyPlan) -> Result<(), AccuracyEvaluationE
             AccuracyLimitAction::Refine => plan.resources.maximum_refinement_cycles > 0,
             AccuracyLimitAction::TightenSolver => plan.resources.maximum_solver_tightenings > 0,
             AccuracyLimitAction::ExtendSampling => plan.resources.maximum_samples > 1,
-            AccuracyLimitAction::Fail | AccuracyLimitAction::WarnExperimental => true,
+            AccuracyLimitAction::Fail => true,
         };
     if !equivalence_is_valid || !resources_are_valid {
         return Err(AccuracyEvaluationError::InvalidPlan(

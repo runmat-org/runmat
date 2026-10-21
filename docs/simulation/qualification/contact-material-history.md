@@ -2,7 +2,7 @@
 
 This component retains and differentiates original point history on a smooth, held-primary-
 face branch. It is not enabled in nonlinear assembly and is not a converged body state,
-global checkpoint, native continuation witness, contact benchmark or production qualification.
+global checkpoint, native continuation witness, contact benchmark or qualification.
 
 ## Original reference inventory and scope
 

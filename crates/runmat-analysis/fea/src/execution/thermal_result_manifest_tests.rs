@@ -21,7 +21,6 @@ fn manifest_retains_identity_without_histories_and_rejects_malformed_catalogs() 
             &model,
             ComputeBackend::Cpu,
             ThermalSolveOptions {
-                formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
                 procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 3 },
                 solver_mesh: Some(canonical_tetrahedron_solver_mesh(order)),
                 ..ThermalSolveOptions::default()

@@ -1,13 +1,11 @@
 use super::*;
 use crate::solve::nonlinear::solid::continuum_qualification::fixture;
-use runmat_analysis_core::FormulationRequirement;
 
 #[test]
 fn admitted_nonuniform_blocks_preserve_every_original_point_and_output() {
     for quadratic in [false, true] {
         let (model, mesh, _) = fixture::prepare(1, quadratic);
         let options = NonlinearSolveOptions {
-            formulation_requirement: FormulationRequirement::Experimental,
             solver_mesh: Some(mesh),
             increment_count: 2,
             max_accepted_increments: 8,
@@ -92,7 +90,6 @@ fn admitted_nonuniform_blocks_preserve_every_original_point_and_output() {
 fn blocked_execution_rejects_resource_and_control_substitution() {
     let (mut model, mesh, _) = fixture::prepare(1, false);
     let options = NonlinearSolveOptions {
-        formulation_requirement: FormulationRequirement::Experimental,
         solver_mesh: Some(mesh),
         max_accepted_increments: 8,
         ..NonlinearSolveOptions::default()

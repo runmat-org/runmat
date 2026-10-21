@@ -39,7 +39,7 @@ fn explicit_axial_connector_matches_the_parallel_spring_reference() {
     let result = crate::run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        experimental_linear_static_options(),
+        baseline_linear_static_options(),
     )
     .expect("parallel beam and connector reference must solve");
     let expected_displacement = APPLIED_FORCE_N
@@ -94,7 +94,7 @@ fn mixed_solid_beam_ground_spring_recovers_from_the_shared_tip_dof() {
         LinearStaticSolveOptions {
             solver_mesh: Some(mesh),
             solver_mesh_artifact_path: Some("mixed-connector-reference.rmmesh".into()),
-            ..experimental_linear_static_options()
+            ..baseline_linear_static_options()
         },
     )
     .expect("mixed solid-beam connector reference must solve");
@@ -147,7 +147,7 @@ fn solid_face_foundation_matches_an_independent_quadrature_sum() {
         LinearStaticSolveOptions {
             solver_mesh: Some(mesh),
             solver_mesh_artifact_path: Some("solid-foundation-reference.rmmesh".into()),
-            ..experimental_linear_static_options()
+            ..baseline_linear_static_options()
         },
     )
     .expect("solid face foundation reference must solve");

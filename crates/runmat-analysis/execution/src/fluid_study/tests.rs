@@ -100,7 +100,6 @@ fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
     let workload = FluidSteadyWorkload {
         model,
         step_id: ProcedureStepId("steady".into()),
-        formulation_requirement: FormulationRequirement::Experimental,
         policy: CanonicalFluidPolicy {
             fixed_point_acceleration: None,
             maximum_outer_iterations: 20,
@@ -132,7 +131,6 @@ pub(crate) fn preparation() -> FluidStudyPreparation {
     let compiled = CompiledAnalysisStudy {
         module_path: "tests/fluid.fea".into(),
         study_id: "fluid".into(),
-        formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: Vec::new(),
         outputs: Vec::new(),
         assessments: Vec::new(),
@@ -141,7 +139,6 @@ pub(crate) fn preparation() -> FluidStudyPreparation {
         solver_mesh_digest: mesh.canonical_digest,
     };
     let policy = FluidStudyPlanningPolicy {
-        formulation_requirement: FormulationRequirement::Experimental,
         numerical: workload.policy,
         geometry: workload.geometry_policy,
     };

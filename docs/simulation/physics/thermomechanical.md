@@ -5,15 +5,14 @@ combination with mechanical loading. RunMat treats temperature as typed state an
 a constitutive contribution; it does not convert temperature into an arbitrary equivalent force.
 
 The `.fea` language checks steady, transient, and nonlinear thermomechanical procedure contracts.
-The numerical library admits experimental prescribed-temperature structural realizations and an
-experimental **retained thermal state to static solid solve** path. Neither is bidirectionally
+The numerical library admits prescribed-temperature structural realizations and a
+**retained thermal state to static solid solve** path. Neither is bidirectionally
 coupled. Compiled-study execution connects a thermal prefix to this same-mesh preload and a supported
 buckling, prestressed modal, direct harmonic or modal-reduced harmonic consumer. This narrow graph
 has local/remote numerical execution and typed publication. Explicit authored model domains and
 `thermomechanical preload` preserve the thermal-to-prestress binding. The authored modal fixture
 passes actual-CAD execution after pre-execution driver/worker replacement and cold declared-object
-import. This does not qualify other outer-root consumer/order combinations, mid-phase restart,
-or production use.
+import. This does not qualify other outer-root consumer/order combinations or mid-phase restart.
 
 ## What thermomechanical equation is implemented?
 
@@ -39,7 +38,7 @@ The physical static Tet4/Tet10 branch integrates the thermal load and subtracts 
 thermal eigenstrain during stress/energy recovery. A prescribed field records
 `OnePassPrescribedThermomechanicalProfile`; a retained solved nodal field records
 `OneWaySolvedThermoelasticState`. The latter interpolates the retained temperatures at integration
-points and bypasses reduced-profile stiffness/load adjustments. Other experimental prescribed
+points and bypasses reduced-profile stiffness/load adjustments. Other prescribed
 branches include reduced beam, shell, and explicitly synthetic profiles; those do not establish
 the physical solid formulation's equations or qualification. Neither path solves heat in the
 structural step or feeds deformation back into temperature.
@@ -49,9 +48,9 @@ structural step or feeds deformation back into temperature.
 | Procedure | Contract | Registered realization |
 | --- | --- | --- |
 | `thermomechanical steady` | Coupled static thermal/structural state | Prescribed profile, or retained solved temperature on Tet4/Tet10 through the Rust library |
-| `thermomechanical preload` | Named retained thermal state to structural and geometric-stiffness states | Experimental same-mesh Tet4/Tet10 static solid path; authored modal CAD replay verified, broader qualification open |
+| `thermomechanical preload` | Named retained thermal state to structural and geometric-stiffness states | Same-mesh Tet4/Tet10 static solid path; authored modal CAD replay verified, broader qualification open |
 | `thermomechanical transient` | Time samples and coupled evolving state | Not currently admitted as a coupled transient solve |
-| `thermomechanical nonlinear` | Load-factor domain and coupled nonlinear state | Same profile family with experimental nonlinear structural policy |
+| `thermomechanical nonlinear` | Load-factor domain and coupled nonlinear state | Same profile family with the nonlinear structural policy |
 
 These are not bidirectional thermal solves. The transient/nonlinear coupling helpers adjust bounded
 convergence policies from a thermal-strain severity measure; they do not create a thermal operator.
@@ -74,7 +73,6 @@ study heated_bracket {
     geometry = geometry.bracket
     mesh = mesh.bracket
     model = model.heated_bracket_model
-    formulation = experimental
     analysis coupled { thermomechanical steady {} }
     output displacement = analysis.coupled.field.node.displacement
     output stress = analysis.coupled.field.element.von_mises_stress
@@ -115,7 +113,7 @@ analysis deformation after analysis.temperature {
 The typed state must retain mesh/topology, units, reference temperature, and producer identity.
 This is a one-way preload, not a bidirectional coupled solve or an interrupted-solve restart.
 The preload publishes structural-primary and geometric-stiffness states for a supported downstream
-consumer. The [complete authored fixture](../examples/thermal-prestress-experimental.fea) includes
+consumer. The [complete authored fixture](../examples/thermal-prestress.fea) includes
 geometry, materials, constraints and a prestressed-modal consumer. Its regression replaces the
 driver and worker before execution, then cold-imports only declared result objects and checks
 the exact retained thermal state. It does not resume an interrupted thermal phase. The isolated
@@ -370,7 +368,7 @@ without per-element temporary arrays. Integrity checking uses in-place unstable 
 and releases those validation vectors before canonical rehashing. Canonical value trees and encoded
 bytes still allocate and are included in the compiler's estimated materialization envelope.
 
-This path remains experimental. Evidence includes a solved-temperature-to-restrained Tet4
+Evidence for this path includes a solved-temperature-to-restrained Tet4
 expansion reference with displacement, stress, reaction balance, and energy checks, plus separate
 Tet4/Tet10 load and linear-temperature recovery references. Affine Tet10 quadratic-temperature
 energy and an analytic curved-Tet10 map with thermal and mechanical strain are checked against
@@ -379,7 +377,7 @@ reported recovery samples. Curved thermal recovery compares 8-, 12-, and, when n
 Gauss rules per Duffy coordinate and rejects unresolved integrals; this comparison is not a
 certified error bound or general curved-element qualification. Spatial convergence, temperature-dependent constitutive iteration,
 cross-mesh projection, portable execution/persistence, and downstream thermal-prestress procedures
-are not qualified by these tests. Production admission remains closed.
+are not qualified by these tests.
 
 ## Shared numerical transport memory evidence
 
@@ -439,7 +437,7 @@ GPU execution envelope is inferred. Linear and global energy normalizations diff
 linear solves must still pass the separate energy gate. Producer validation now runs before final
 completion; its uniqueness-validation scratch remains outside complete producer-memory admission.
 
-The accepted-intent-bound identity domain includes target and balances and intentionally changes experimental thermal source-result identities; there is no legacy
+The accepted-intent-bound identity domain includes target and balances and intentionally changes thermal source-result identities; there is no legacy
 identity fallback. Shared recovered-field canonical limits apply to each field, and negative-zero
 sample times are rejected consistently. A thermal result may fit its monolithic serialization
 limit yet exceed a shared per-field identity limit; publication fails closed in that case. This
@@ -663,7 +661,7 @@ prepared results, and pre-solve bounds covering post-solve profiles at two chunk
 tests reject inventory ceilings and one byte below combined residency, admitting the exact bound.
 This guarantee applies to the transport-aware bridge, not numerical-only `execute`/`run_thermal`
 or conversion of an already computed result. Portable native worker routing, scheduler/receipt
-integration and whole-process qualification remain required; no production promotion is implied.
+integration and whole-process qualification remain required.
 
 The isolated `thermal_execution_residency` integration test measures the complete public bridge
 above caller-owned model/mesh storage. Tet4 at 8/128 samples measured 203,014/2,973,342 B against
@@ -712,8 +710,8 @@ policy, and checks the execution identity before solving. It returns a moved pre
 a source-bound numerical receipt. Result import validates the exact returned reference inventory,
 workload, topology and receipt without gathering field arrays. Terminal-temperature publication
 uses the thermal manifest's semantic result identity rather than a host/transport-derived identity.
-Resource-planned task submission uses the shared analysis allocation check. This path remains an
-explicit-CPU, experimental formulation envelope. The native process-conformance harness submits
+Resource-planned task submission uses the shared analysis allocation check. This path is an
+explicit-CPU formulation envelope. The native process-conformance harness submits
 Tet4/Tet10 insulated constant-temperature transient tasks through the shared resource admission
 and isolated, durable, and loopback TLS/QUIC workers, then checks exact inline/worker result and
 receipt parity and analytic equilibrium across nonempty field partitions. Each placement also
@@ -730,8 +728,8 @@ transport-dependent host identity. The only receipt-backed criteria currently su
 global-equilibrium algebraic residual bounds and conservation balances, using the maximum accepted
 linear and energy residuals respectively. Their normalization assumptions are retained in the
 evidence. These criteria do not establish spatial, temporal, recovery or reference accuracy.
-Unsupported mandatory criteria remain indeterminate, and the shared production publication gate
-blocks them. Satisfying a residual-only plan does not promote the thermal formulation to production.
+Unsupported mandatory criteria remain indeterminate and follow the shared accuracy publication
+rule. Satisfying a residual-only plan does not establish spatial or temporal accuracy.
 
 `import_thermal_completion` imports the validated result closure once and reconciles it with
 scheduler-owned solve-attempt accounting. It checks exact encoded artifact bytes, the admitted
@@ -777,7 +775,7 @@ the catalog entry with the actual source profile before constructing a state. Na
 admit those plans and retain actual publication attempts; durable closure reconstruction explicitly
 records an unmetered import rather than inventing scheduler usage. Existing numerical receipts
 and numerical result identities are unchanged. This does not qualify interrupted solves, complete
-workflow accounting, or a broader production formulation envelope.
+workflow accounting, or a broader formulation envelope.
 
 The release `thermal_history_memory` diagnostic separately measured identity-construction growth
 above the retained-result baseline: 331,318 B for connected Tet4/257 samples and 5,231,479 B for

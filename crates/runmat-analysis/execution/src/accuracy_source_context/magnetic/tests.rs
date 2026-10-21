@@ -70,7 +70,6 @@ fn workload() -> MagnetostaticWorkload {
     MagnetostaticWorkload {
         model,
         step_id: ProcedureStepId("potential".into()),
-        formulation_requirement: FormulationRequirement::Experimental,
         relative_residual_target: 1e-10,
     }
 }
@@ -233,7 +232,6 @@ fn request(
         AccuracySourceKind::Magnetostatic,
         source_result,
         observations,
-        workload.formulation_requirement,
         workload.model.sequence.steps[0].accuracy.clone(),
     )
     .unwrap()
@@ -286,7 +284,6 @@ fn magnetic_accuracy_original_catalog_and_rehashed_missing_extra_catalogs_both_o
             original.source_kind,
             original.source_result,
             Some(&catalog),
-            original.formulation_requirement,
             changed,
         )
         .unwrap();

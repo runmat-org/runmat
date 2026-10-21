@@ -61,7 +61,6 @@ pub(in crate::study) fn compiled(
     CompiledAnalysisStudy {
         module_path: "tests/maxwell.fea".into(),
         study_id: "maxwell".into(),
-        formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: vec![],
         assessments: Vec::new(),
         outputs: vec![],
@@ -71,9 +70,7 @@ pub(in crate::study) fn compiled(
     }
 }
 pub(in crate::study) fn policy() -> MaxwellStudyPlanningPolicy {
-    MaxwellStudyPlanningPolicy {
-        formulation_requirement: FormulationRequirement::Experimental,
-    }
+    MaxwellStudyPlanningPolicy {}
 }
 
 #[test]
@@ -147,13 +144,4 @@ fn accuracy_static_sequence_frequency_and_restart_fail_closed() {
     for changed in [static_intent, sweep, foreign_frequency, restart, sequence] {
         assert!(plan_maxwell_study(&changed, policy()).is_err());
     }
-    assert!(matches!(
-        plan_maxwell_study(
-            &study,
-            MaxwellStudyPlanningPolicy {
-                formulation_requirement: FormulationRequirement::Production,
-            }
-        ),
-        Err(MaxwellStudyPlanningError::FormulationRequirementMismatch)
-    ));
 }

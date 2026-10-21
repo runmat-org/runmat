@@ -82,30 +82,26 @@ mod solid_static_pressure_patch;
 mod structural_static_surface;
 mod transient_physical;
 
-fn experimental_linear_static_options() -> LinearStaticSolveOptions {
+fn baseline_linear_static_options() -> LinearStaticSolveOptions {
     LinearStaticSolveOptions {
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         ..LinearStaticSolveOptions::default()
     }
 }
 
-fn experimental_modal_options() -> ModalSolveOptions {
+fn baseline_modal_options() -> ModalSolveOptions {
     ModalSolveOptions {
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         ..ModalSolveOptions::default()
     }
 }
 
-fn experimental_thermal_options() -> ThermalSolveOptions {
+fn baseline_thermal_options() -> ThermalSolveOptions {
     ThermalSolveOptions {
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         ..ThermalSolveOptions::default()
     }
 }
 
-fn experimental_transient_options() -> TransientSolveOptions {
+fn baseline_transient_options() -> TransientSolveOptions {
     TransientSolveOptions {
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         ..TransientSolveOptions::default()
     }
 }
@@ -160,9 +156,8 @@ fn configure_electro_thermal_excitation(model: &mut runmat_analysis_core::Analys
     );
 }
 
-fn experimental_nonlinear_options() -> NonlinearSolveOptions {
+fn baseline_nonlinear_options() -> NonlinearSolveOptions {
     NonlinearSolveOptions {
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         ..NonlinearSolveOptions::default()
     }
 }
@@ -219,39 +214,6 @@ fn history_observation(
     })
 }
 
-#[test]
-fn production_requirement_rejects_before_structural_solver_progress() {
-    use std::sync::{Arc, Mutex};
-
-    let model = fixture_model(FixtureId::CantileverLinearStatic);
-    let events = Arc::new(Mutex::new(Vec::new()));
-    let captured = Arc::clone(&events);
-    let _guard = crate::replace_fea_progress_context(crate::FeaProgressContext {
-        handler: Some(Arc::new(move |event| {
-            captured.lock().expect("progress lock").push(event);
-        })),
-        ..crate::FeaProgressContext::default()
-    });
-    let error = crate::run_linear_static_with_options(
-        &model,
-        ComputeBackend::Cpu,
-        LinearStaticSolveOptions {
-            solver_mesh: Some(single_tetrahedron_solver_mesh_for_model(&model)),
-            solver_mesh_artifact_path: Some("solver_mesh.cbor".to_string()),
-            ..LinearStaticSolveOptions::default()
-        },
-    )
-    .expect_err("no current structural realization is production-qualified");
-
-    assert!(matches!(
-        error,
-        crate::FeaRunError::FormulationAvailability(ref rejection)
-            if rejection.reason
-                == runmat_analysis_core::FormulationAdmissionRejectionReason::ProductionQualificationMissing
-    ));
-    assert!(events.lock().expect("progress lock").is_empty());
-}
-
 fn field<'a>(result: &'a FeaRunResult, field_id: &str) -> &'a runmat_analysis_core::AnalysisField {
     result.field(field_id).expect("field should be present")
 }
@@ -272,7 +234,7 @@ fn run_linear_static_with_single_tetrahedron_mesh(
         LinearStaticSolveOptions {
             solver_mesh: Some(single_tetrahedron_solver_mesh_for_model(model)),
             solver_mesh_artifact_path: Some("solver_mesh.cbor".to_string()),
-            ..experimental_linear_static_options()
+            ..baseline_linear_static_options()
         },
     )
 }
@@ -322,7 +284,7 @@ fn direct_connector_static_without_connector_observation_preflights_memory() {
     let error = crate::run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        experimental_linear_static_options(),
+        baseline_linear_static_options(),
     )
     .expect_err("connector-bearing direct solve must preflight before assembly");
     assert!(matches!(
@@ -342,7 +304,7 @@ fn direct_connector_static_without_connector_observation_preflights_memory() {
     let result = crate::run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        experimental_linear_static_options(),
+        baseline_linear_static_options(),
     )
     .expect("the admitted connector-bearing direct solve must complete");
     assert_eq!(
@@ -431,10 +393,6 @@ fn canonical_cantilever_benchmark_runs() {
         .expect("solve should succeed");
 
     assert_eq!(
-        result.identity.qualification(),
-        runmat_analysis_core::FormulationMaturity::Experimental
-    );
-    assert_eq!(
         result.identity.family(),
         runmat_analysis_core::PhysicsFamily::Structural
     );
@@ -513,7 +471,7 @@ fn solid_physics_pipelines_assemble_from_the_canonical_solver_mesh() {
         ModalSolveOptions {
             truncation: ModalTruncationPolicy::requested(2),
             solver_mesh: Some(mesh.clone()),
-            ..experimental_modal_options()
+            ..baseline_modal_options()
         },
     )
     .expect("modal solve should consume the canonical mesh");
@@ -530,7 +488,7 @@ fn solid_physics_pipelines_assemble_from_the_canonical_solver_mesh() {
         ThermalSolveOptions {
             procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 2 },
             solver_mesh: Some(mesh.clone()),
-            ..experimental_thermal_options()
+            ..baseline_thermal_options()
         },
     )
     .expect("thermal solve should consume the canonical mesh");
@@ -544,7 +502,7 @@ fn solid_physics_pipelines_assemble_from_the_canonical_solver_mesh() {
         TransientSolveOptions {
             time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 2 },
             solver_mesh: Some(mesh.clone()),
-            ..experimental_transient_options()
+            ..baseline_transient_options()
         },
     )
     .expect("transient solve should consume the canonical mesh");
@@ -577,7 +535,7 @@ fn solid_physics_pipelines_assemble_from_the_canonical_solver_mesh() {
         NonlinearSolveOptions {
             increment_count: 2,
             solver_mesh: Some(mesh.clone()),
-            ..experimental_nonlinear_options()
+            ..baseline_nonlinear_options()
         },
     )
     .expect("nonlinear solve should consume the canonical mesh");
@@ -599,7 +557,7 @@ fn moment_loads_require_rotational_dofs() {
     let err = crate::run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        experimental_linear_static_options(),
+        baseline_linear_static_options(),
     )
     .expect_err("moment loads should require rotational DOFs");
     let message = err.to_string();
@@ -633,7 +591,7 @@ fn prescribed_rotations_require_rotational_dofs() {
     let err = crate::run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        experimental_linear_static_options(),
+        baseline_linear_static_options(),
     )
     .expect_err("prescribed rotations should require rotational DOFs");
     let message = err.to_string();
@@ -648,7 +606,7 @@ fn canonical_constant_signal_drives_prescribed_translation_assembly() {
         &inline_model,
         &static_excitations(&inline_model),
         None,
-        crate::assembly::StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+        crate::assembly::StructuralFormulationRequirement::SyntheticOperator,
     )
     .expect("inline prescribed value should assemble");
 
@@ -695,7 +653,7 @@ fn canonical_constant_signal_drives_prescribed_translation_assembly() {
         &signal_model,
         &static_excitations(&signal_model),
         None,
-        crate::assembly::StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+        crate::assembly::StructuralFormulationRequirement::SyntheticOperator,
     )
     .expect("signal-backed prescribed value should assemble");
     assert_eq!(
@@ -791,7 +749,7 @@ fn shell_moment_solves_rotation_and_reaction_moment() {
     let result = crate::run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        experimental_linear_static_options(),
+        baseline_linear_static_options(),
     )
     .expect("shell moment solve should run");
     assert_eq!(
@@ -856,7 +814,7 @@ fn mixed_beam_shell_model_solves_and_recovers_each_formulation() {
     let result = crate::run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        experimental_linear_static_options(),
+        baseline_linear_static_options(),
     )
     .expect("the shared-node beam-shell model must complete one admitted solve");
 
@@ -889,7 +847,7 @@ fn mixed_solid_beam_pipeline_is_deterministic_and_recovers_both_formulations() {
     let options = LinearStaticSolveOptions {
         solver_mesh: Some(mesh),
         solver_mesh_artifact_path: Some("mixed-solid-beam.rmmesh".into()),
-        ..experimental_linear_static_options()
+        ..baseline_linear_static_options()
     };
 
     let first = crate::run_linear_static_with_options(&model, ComputeBackend::Cpu, options.clone())
@@ -936,7 +894,7 @@ fn conformal_solid_beam_shell_pipeline_recovers_every_formulation() {
     let options = LinearStaticSolveOptions {
         solver_mesh: Some(mesh),
         solver_mesh_artifact_path: Some("mixed-solid-beam-shell.rmmesh".into()),
-        ..experimental_linear_static_options()
+        ..baseline_linear_static_options()
     };
 
     let result = crate::run_linear_static_with_options(&model, ComputeBackend::Cpu, options)
@@ -1040,7 +998,7 @@ fn beam_end_moment_solves_rotation_and_reaction_moment() {
     let result = crate::run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        experimental_linear_static_options(),
+        baseline_linear_static_options(),
     )
     .expect("beam moment solve should run");
     assert_eq!(
@@ -1177,7 +1135,7 @@ fn grounded_explicit_spring_changes_the_completed_physical_solution() {
     let baseline = crate::run_linear_static_with_options(
         &baseline_model,
         ComputeBackend::Cpu,
-        experimental_linear_static_options(),
+        baseline_linear_static_options(),
     )
     .expect("baseline beam solve");
 
@@ -1225,7 +1183,7 @@ fn grounded_explicit_spring_changes_the_completed_physical_solution() {
     let error = crate::run_linear_static_with_options(
         &rejected_model,
         ComputeBackend::Cpu,
-        experimental_linear_static_options(),
+        baseline_linear_static_options(),
     )
     .expect_err("connector observation must be costed before assembly");
     assert!(matches!(
@@ -1241,7 +1199,7 @@ fn grounded_explicit_spring_changes_the_completed_physical_solution() {
     let supported = crate::run_linear_static_with_options(
         &supported_model,
         ComputeBackend::Cpu,
-        experimental_linear_static_options(),
+        baseline_linear_static_options(),
     )
     .expect("spring-supported beam solve");
 
@@ -1292,7 +1250,7 @@ fn thermo_mechanical_linear_static_emits_coupled_fields() {
         LinearStaticSolveOptions {
             solver_mesh: Some(single_tetrahedron_solver_mesh_for_model(&model)),
             solver_mesh_artifact_path: Some("solver_mesh.cbor".to_string()),
-            ..experimental_linear_static_options()
+            ..baseline_linear_static_options()
         },
     )
     .expect("thermo-mechanical linear static solve should succeed");
@@ -1436,7 +1394,7 @@ fn thermo_mechanical_static_region_temperature_overrides_global_field_on_exact_s
         ComputeBackend::Cpu,
         LinearStaticSolveOptions {
             solver_mesh: Some(single_tetrahedron_solver_mesh_for_model(&model)),
-            ..experimental_linear_static_options()
+            ..baseline_linear_static_options()
         },
     )
     .expect("exact-region prescribed temperature should solve physically");
@@ -1471,7 +1429,7 @@ fn linear_static_rejects_structural_step_with_thermomechanical_assembly() {
         ComputeBackend::Cpu,
         LinearStaticSolveOptions {
             solver_mesh: Some(mesh),
-            ..experimental_linear_static_options()
+            ..baseline_linear_static_options()
         },
     )
     .expect_err("a structural step must not silently execute coupled assembly math");
@@ -1492,7 +1450,7 @@ fn transient_rejects_thermomechanical_identity_before_assembly() {
     let error = crate::run_transient_with_options(
         &model,
         ComputeBackend::Cpu,
-        experimental_transient_options(),
+        baseline_transient_options(),
     )
     .expect_err("thermomechanical transient requires a solver-owned coupled thermal state");
 
@@ -1516,7 +1474,7 @@ fn nonlinear_rejects_explicit_connectivity_that_drops_thermomechanical_coupling(
     let error = crate::run_nonlinear_with_options(
         &model,
         ComputeBackend::Cpu,
-        experimental_nonlinear_options(),
+        baseline_nonlinear_options(),
     )
     .expect_err("explicit connectivity must not silently drop thermomechanical coupling");
 
@@ -1541,7 +1499,7 @@ fn structural_pipeline_rejects_ambiguous_procedure_steps() {
     let error = crate::run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        experimental_linear_static_options(),
+        baseline_linear_static_options(),
     )
     .expect_err("a structural pipeline must resolve one canonical procedure step");
 
@@ -1587,7 +1545,7 @@ fn solid_continuum_requires_solver_mesh_when_requested() {
         ComputeBackend::Cpu,
         LinearStaticSolveOptions {
             require_solver_mesh_for_solid: true,
-            ..experimental_linear_static_options()
+            ..baseline_linear_static_options()
         },
     )
     .expect_err("solid continuum solve should require a solver mesh");
@@ -1604,7 +1562,7 @@ fn explicit_beam_topology_does_not_require_solver_mesh() {
         ComputeBackend::Cpu,
         LinearStaticSolveOptions {
             require_solver_mesh_for_solid: true,
-            ..experimental_linear_static_options()
+            ..baseline_linear_static_options()
         },
     )
     .expect("explicit beam topology should not require a solid solver mesh");
@@ -1625,7 +1583,7 @@ fn explicit_results_do_not_impersonate_continuum_stress_fields() {
         let result = crate::run_linear_static_with_options(
             &model,
             ComputeBackend::Cpu,
-            experimental_linear_static_options(),
+            baseline_linear_static_options(),
         )
         .expect("explicit structural solve");
         for field_id in [
@@ -1645,7 +1603,7 @@ fn explicit_results_do_not_impersonate_continuum_stress_fields() {
     let result = crate::run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        experimental_linear_static_options(),
+        baseline_linear_static_options(),
     )
     .expect("explicit beam solve");
     assert!(
@@ -1669,7 +1627,7 @@ fn solver_mesh_linear_static_reports_solid_assembly_basis() {
         LinearStaticSolveOptions {
             solver_mesh: Some(mesh),
             solver_mesh_artifact_path: Some("solver_mesh.cbor".to_string()),
-            ..experimental_linear_static_options()
+            ..baseline_linear_static_options()
         },
     )
     .expect("analysis-mesh-backed linear static solve should succeed");
@@ -1748,7 +1706,7 @@ fn linear_static_executes_authored_displacement_observation() {
         ComputeBackend::Cpu,
         LinearStaticSolveOptions {
             solver_mesh: Some(mesh),
-            ..experimental_linear_static_options()
+            ..baseline_linear_static_options()
         },
     )
     .expect("authored observation should execute after physical field recovery");
@@ -1780,7 +1738,7 @@ fn linear_static_reuses_structural_primary_state_as_an_initial_guess() {
         LinearStaticSolveOptions {
             solver_mesh: Some(mesh.clone()),
             solver_mesh_artifact_path: Some("solver_mesh.cbor".into()),
-            ..experimental_linear_static_options()
+            ..baseline_linear_static_options()
         },
     )
     .expect("baseline structural solve should succeed");
@@ -1797,7 +1755,7 @@ fn linear_static_reuses_structural_primary_state_as_an_initial_guess() {
             solver_mesh: Some(mesh),
             solver_mesh_artifact_path: Some("solver_mesh.cbor".into()),
             initial_displacement: Some(initial_displacement),
-            ..experimental_linear_static_options()
+            ..baseline_linear_static_options()
         },
     )
     .expect("state-initialized structural solve should succeed");
@@ -1915,7 +1873,7 @@ fn tet10_linear_static_admits_its_assembled_recovery_contract() {
         LinearStaticSolveOptions {
             solver_mesh: Some(mesh.clone()),
             require_solver_mesh_for_solid: true,
-            ..experimental_linear_static_options()
+            ..baseline_linear_static_options()
         },
     )
     .expect("a physical Tet10 solve must admit the recovery implementation it assembled");
@@ -1963,7 +1921,6 @@ fn physical_preload_publishes_signed_load_linear_geometric_stiffness() {
     .unwrap();
     let topology_digest = plan.topology.discretization_digest();
     let options = LinearStaticSolveOptions {
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         solver_mesh: Some(mesh.clone()),
         require_solver_mesh_for_solid: true,
         ..LinearStaticSolveOptions::default()
@@ -2049,7 +2006,6 @@ fn physical_compressive_preload_buckling_has_exact_residual_and_inverse_load_sca
     .unwrap();
     let topology_digest = plan.topology.discretization_digest();
     let options = || LinearStaticSolveOptions {
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         solver_mesh: Some(mesh.clone()),
         require_solver_mesh_for_solid: true,
         ..LinearStaticSolveOptions::default()
@@ -2069,7 +2025,7 @@ fn physical_compressive_preload_buckling_has_exact_residual_and_inverse_load_sca
             model,
             &excitations,
             Some(mesh.clone()),
-            crate::assembly::StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+            crate::assembly::StructuralFormulationRequirement::SyntheticOperator,
             &plan,
         )
         .unwrap();
@@ -2116,8 +2072,8 @@ fn physical_compressive_preload_buckling_has_exact_residual_and_inverse_load_sca
 #[test]
 fn portable_buckling_pipeline_consumes_the_exact_published_preload_state() {
     use runmat_analysis_core::{
-        FormulationRequirement, ReferenceStatePolicy, SequenceDependency, SequenceDependencyReason,
-        StateTransition, StateTransitionMethod, TopologyTransitionPolicy, TransitionId,
+        ReferenceStatePolicy, SequenceDependency, SequenceDependencyReason, StateTransition,
+        StateTransitionMethod, TopologyTransitionPolicy, TransitionId,
     };
     use runmat_execution::Digest;
 
@@ -2169,7 +2125,6 @@ fn portable_buckling_pipeline_consumes_the_exact_published_preload_state() {
         &model,
         ComputeBackend::Cpu,
         LinearStaticSolveOptions {
-            formulation_requirement: FormulationRequirement::Experimental,
             solver_mesh: Some(mesh.clone()),
             require_solver_mesh_for_solid: true,
             ..LinearStaticSolveOptions::default()
@@ -2209,7 +2164,6 @@ fn portable_buckling_pipeline_consumes_the_exact_published_preload_state() {
         model,
         step_id: runmat_analysis_core::ProcedureStepId("buckling".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         observation_execution: crate::results::observation::ObservationExecutionPolicy::scalable(),
         solver: StructuralBucklingSolverPolicy::new(1, 1.0e-10, 8).unwrap(),
     }
@@ -2238,8 +2192,8 @@ pub(crate) fn prepared_prestressed_modal_case(
     crate::execution::CanonicalSemanticState,
 ) {
     use runmat_analysis_core::{
-        AnalysisSequence, FormulationRequirement, ReferenceStatePolicy, StateTransition,
-        StateTransitionMethod, TopologyTransitionPolicy, TransitionId,
+        AnalysisSequence, ReferenceStatePolicy, StateTransition, StateTransitionMethod,
+        TopologyTransitionPolicy, TransitionId,
     };
     use runmat_execution::Digest;
 
@@ -2291,7 +2245,6 @@ pub(crate) fn prepared_prestressed_modal_case(
         &model,
         ComputeBackend::Cpu,
         LinearStaticSolveOptions {
-            formulation_requirement: FormulationRequirement::Experimental,
             solver_mesh: Some(mesh.clone()),
             require_solver_mesh_for_solid: true,
             ..LinearStaticSolveOptions::default()
@@ -2329,7 +2282,6 @@ pub(crate) fn prepared_prestressed_modal_case(
         model,
         step_id: modal.step_id,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         observation_execution: crate::results::observation::ObservationExecutionPolicy::scalable(),
         truncation: crate::ModalTruncationPolicy::requested(1),
         convergence: crate::ModalConvergencePolicy::exploratory(),
@@ -2348,7 +2300,7 @@ fn prestressed_modal_pipeline_proves_tension_stiffening_and_compression_softenin
         unit_compression.model(),
         &static_excitations(unit_compression.model()),
         Some(unit_mesh),
-        crate::assembly::StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+        crate::assembly::StructuralFormulationRequirement::SyntheticOperator,
     )
     .unwrap();
     let critical = crate::solve::buckling::solve_eigenvalue_buckling(
@@ -2412,7 +2364,7 @@ fn prestressed_modal_pipeline_proves_tension_stiffening_and_compression_softenin
 
 #[test]
 fn structural_frequency_entries_execute_independently_and_assemble_in_plan_order() {
-    use runmat_analysis_core::{FormulationRequirement, IndependentDomain};
+    use runmat_analysis_core::IndependentDomain;
 
     use crate::{
         execution::{
@@ -2463,7 +2415,6 @@ fn structural_frequency_entries_execute_independently_and_assemble_in_plan_order
         model,
         step_id: runmat_analysis_core::ProcedureStepId("frequency_response".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         observation_execution: crate::results::observation::ObservationExecutionPolicy::scalable(),
         plan,
         solver: StructuralFrequencySolverPlan::Direct {
@@ -2736,7 +2687,7 @@ fn static_gpu_request_fails_before_assembly_without_native_admission() {
             LinearStaticSolveOptions {
                 solver_mesh: Some(mesh),
                 algebra_backend_kind,
-                ..experimental_linear_static_options()
+                ..baseline_linear_static_options()
             },
         )
         .expect_err("GPU request must not silently execute a CPU static solve");
@@ -2755,7 +2706,7 @@ fn fixture_missing_materials_is_rejected() {
     let err = crate::run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        experimental_linear_static_options(),
+        baseline_linear_static_options(),
     )
     .expect_err("fixture should fail validation");
     assert!(err
@@ -2766,12 +2717,9 @@ fn fixture_missing_materials_is_rejected() {
 #[test]
 fn thermal_pipeline_rejects_moment_loads_before_assembly() {
     let model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
-    let err = crate::run_thermal_with_options(
-        &model,
-        ComputeBackend::Cpu,
-        experimental_thermal_options(),
-    )
-    .expect_err("thermal solve should reject structural moment loads");
+    let err =
+        crate::run_thermal_with_options(&model, ComputeBackend::Cpu, baseline_thermal_options())
+            .expect_err("thermal solve should reject structural moment loads");
     let message = err.to_string();
 
     assert!(message.contains("moment loads are structural loads"));
@@ -2792,12 +2740,9 @@ fn thermal_pipeline_requires_a_canonical_solver_mesh() {
         )],
     );
 
-    let error = crate::run_thermal_with_options(
-        &model,
-        ComputeBackend::Cpu,
-        experimental_thermal_options(),
-    )
-    .expect_err("thermal execution must not synthesize topology");
+    let error =
+        crate::run_thermal_with_options(&model, ComputeBackend::Cpu, baseline_thermal_options())
+            .expect_err("thermal execution must not synthesize topology");
 
     assert!(error
         .to_string()
@@ -2809,7 +2754,7 @@ fn modal_solver_emits_modes_for_modal_step_fixture() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     model.sequence.steps = vec![ProcedureStep::structural_modal("modal_1".to_string())];
     let result =
-        crate::run_modal_with_options(&model, ComputeBackend::Cpu, experimental_modal_options())
+        crate::run_modal_with_options(&model, ComputeBackend::Cpu, baseline_modal_options())
             .expect("modal solve should succeed");
 
     assert!(!result.frequencies_hz().is_empty());
@@ -2916,7 +2861,7 @@ fn modal_truncation_expands_to_a_complete_governed_eigenspace() {
         ModalSolveOptions {
             truncation: ModalTruncationPolicy::requested(1)
                 .with_eigenspace_relative_tolerance(0.999_999),
-            ..experimental_modal_options()
+            ..baseline_modal_options()
         },
     )
     .expect("modal truncation should retain the complete boundary eigenspace");
@@ -2944,7 +2889,7 @@ fn transient_solver_emits_time_snapshots_for_transient_step_fixture() {
     let result = crate::run_transient_with_options(
         &model,
         ComputeBackend::Cpu,
-        experimental_transient_options(),
+        baseline_transient_options(),
     )
     .expect("transient solve should succeed");
 
@@ -3135,7 +3080,7 @@ fn physical_tet4_transient_converges_to_damped_step_response_and_closes_balance(
                 time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count },
                 residual_target: 1.0e-10,
                 solver_mesh: Some(mesh.clone()),
-                ..experimental_transient_options()
+                ..baseline_transient_options()
             },
         )
         .expect("the physical Tet4 transient should solve");
@@ -3259,7 +3204,7 @@ fn transient_history_schedule_splits_the_solve_and_publishes_exact_samples() {
         TransientSolveOptions {
             time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 2 },
             solver_mesh: Some(mesh),
-            ..experimental_transient_options()
+            ..baseline_transient_options()
         },
     )
     .expect("an explicit history schedule should become exact solve boundaries");
@@ -3376,7 +3321,7 @@ fn transient_every_accepted_increment_history_tracks_the_solver_grid() {
         TransientSolveOptions {
             time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 2 },
             solver_mesh: Some(mesh),
-            ..experimental_transient_options()
+            ..baseline_transient_options()
         },
     )
     .expect("every-accepted-increment history should follow accepted solve points");
@@ -3419,7 +3364,7 @@ fn solver_pipeline_without_an_event_detector_rejects_event_histories() {
         TransientSolveOptions {
             time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 2 },
             solver_mesh: Some(mesh),
-            ..experimental_transient_options()
+            ..baseline_transient_options()
         },
     )
     .expect_err("a pipeline cannot publish an empty history for a detector it did not run");
@@ -3445,7 +3390,7 @@ fn nonlinear_history_schedule_splits_load_increments_and_retains_the_initial_sta
         NonlinearSolveOptions {
             increment_count: 2,
             solver_mesh: Some(mesh),
-            ..experimental_nonlinear_options()
+            ..baseline_nonlinear_options()
         },
     )
     .expect("an explicit load-factor history should become exact increment boundaries");
@@ -3507,7 +3452,7 @@ fn nonlinear_events_require_a_physical_basis() {
     let error = crate::run_nonlinear_with_options(
         &model,
         ComputeBackend::Cpu,
-        experimental_nonlinear_options(),
+        baseline_nonlinear_options(),
     )
     .expect_err("unsupported envelopes must not claim J2 continuum equilibrium");
     assert!(matches!(
@@ -3544,7 +3489,7 @@ fn modal_history_publishes_requested_mode_shapes_with_mode_coordinates() {
         ModalSolveOptions {
             truncation: ModalTruncationPolicy::requested(2),
             solver_mesh: Some(mesh),
-            ..experimental_modal_options()
+            ..baseline_modal_options()
         },
     )
     .expect("requested modal histories should publish solved mode shapes");
@@ -3611,7 +3556,7 @@ fn modal_beam_history_separates_rotation_from_translation() {
         ComputeBackend::Cpu,
         ModalSolveOptions {
             truncation: ModalTruncationPolicy::requested(2),
-            ..experimental_modal_options()
+            ..baseline_modal_options()
         },
     )
     .expect("explicit beam modes should publish typed translation and rotation histories");
@@ -3660,7 +3605,7 @@ fn modal_beam_recovers_the_closed_form_lumped_mass_axial_frequency() {
         ModalSolveOptions {
             truncation: ModalTruncationPolicy::requested(6),
             convergence: policy,
-            ..experimental_modal_options()
+            ..baseline_modal_options()
         },
     )
     .expect("one-element beam modal reference should solve");
@@ -3724,7 +3669,7 @@ fn thermal_history_schedule_adds_exact_solve_points_and_publishes_temperature() 
         ThermalSolveOptions {
             procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 3 },
             solver_mesh: Some(mesh),
-            ..experimental_thermal_options()
+            ..baseline_thermal_options()
         },
     )
     .expect("thermal history samples should become exact solve points");
@@ -3813,7 +3758,7 @@ fn structural_transient_inserts_active_jump_without_extending_the_horizon() {
     signal.evidence.sample_count = 3;
     let options = TransientSolveOptions {
         time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 2 },
-        ..experimental_transient_options()
+        ..baseline_transient_options()
     };
 
     let result = crate::run_transient_with_options(&model, ComputeBackend::Cpu, options)
@@ -3841,7 +3786,7 @@ fn transient_beam_moment_emits_rotational_snapshots() {
     let result = crate::run_transient_with_options(
         &model,
         ComputeBackend::Cpu,
-        experimental_transient_options(),
+        baseline_transient_options(),
     )
     .expect("transient beam solve should run");
 
@@ -3918,7 +3863,7 @@ fn thermal_solver_emits_heat_transfer_fields() {
         ThermalSolveOptions {
             procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 4 },
             solver_mesh: Some(mesh),
-            ..experimental_thermal_options()
+            ..baseline_thermal_options()
         },
     )
     .expect("thermal solve should succeed");
@@ -4007,7 +3952,7 @@ fn steady_thermal_solver_is_a_distinct_static_procedure() {
         ThermalSolveOptions {
             procedure: ThermalProcedureControl::Steady,
             solver_mesh: Some(mesh),
-            ..experimental_thermal_options()
+            ..baseline_thermal_options()
         },
     )
     .expect("steady thermal solve should succeed");
@@ -4146,7 +4091,7 @@ fn transient_thermal_pipeline_samples_prescribed_temperature_at_each_time_point(
         ThermalSolveOptions {
             procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 2 },
             solver_mesh: Some(mesh),
-            ..experimental_thermal_options()
+            ..baseline_thermal_options()
         },
     )
     .expect("time-dependent prescribed temperature should solve");
@@ -4213,7 +4158,7 @@ fn canonical_mesh_thermal_pipeline_enforces_exact_boundaries_and_reports_energy_
         ThermalSolveOptions {
             procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 3 },
             solver_mesh: Some(mesh),
-            ..experimental_thermal_options()
+            ..baseline_thermal_options()
         },
     )
     .unwrap();
@@ -4298,7 +4243,7 @@ fn canonical_mesh_thermal_pipeline_starts_from_the_authored_temperature_state() 
         ThermalSolveOptions {
             procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 3 },
             solver_mesh: Some(mesh),
-            ..experimental_thermal_options()
+            ..baseline_thermal_options()
         },
     )
     .unwrap();
@@ -4323,7 +4268,6 @@ fn modal_large_fixture_emits_orthogonality_and_separation_diagnostics() {
         &model,
         ComputeBackend::Cpu,
         ModalSolveOptions {
-            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
             truncation: ModalTruncationPolicy::requested(8),
             convergence: crate::ModalConvergencePolicy::default(),
             residual_vector_directions: Vec::new(),
@@ -4359,7 +4303,7 @@ fn transient_long_fixture_emits_stability_diagnostics() {
         ComputeBackend::Cpu,
         TransientSolveOptions {
             time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 24 },
-            ..experimental_transient_options()
+            ..baseline_transient_options()
         },
     )
     .expect("transient long fixture should solve");
@@ -4393,7 +4337,7 @@ fn transient_shock_fixture_emits_method_and_stability_diagnostics() {
         ComputeBackend::Cpu,
         TransientSolveOptions {
             time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 48 },
-            ..experimental_transient_options()
+            ..baseline_transient_options()
         },
     )
     .expect("transient shock fixture should solve");
@@ -4430,7 +4374,7 @@ fn thermo_mechanical_transient_fails_closed_without_a_coupled_thermal_state() {
         ComputeBackend::Cpu,
         TransientSolveOptions {
             time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 24 },
-            ..experimental_transient_options()
+            ..baseline_transient_options()
         },
     )
     .expect_err("thermo-mechanical transient requires a solver-owned coupled thermal state");
@@ -4452,7 +4396,7 @@ fn structural_transient_rejects_unimplemented_electrothermal_formulation() {
         ComputeBackend::Cpu,
         TransientSolveOptions {
             time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 12 },
-            ..experimental_transient_options()
+            ..baseline_transient_options()
         },
     )
     .expect_err("structural transient must not relabel its profile math as electrothermal");
@@ -4468,7 +4412,7 @@ fn nonlinear_synthetic_fixture_requires_a_physical_canonical_basis() {
     let error = crate::run_nonlinear_with_options(
         &model,
         ComputeBackend::Cpu,
-        experimental_nonlinear_options(),
+        baseline_nonlinear_options(),
     )
     .expect_err("unsupported envelopes must not claim J2 continuum equilibrium");
     assert!(matches!(
@@ -4486,7 +4430,7 @@ fn nonlinear_beam_moment_is_outside_the_canonical_solid_envelope() {
     let error = crate::run_nonlinear_with_options(
         &model,
         ComputeBackend::Cpu,
-        experimental_nonlinear_options(),
+        baseline_nonlinear_options(),
     )
     .expect_err("unsupported envelopes must not claim J2 continuum equilibrium");
     assert!(matches!(
@@ -4511,7 +4455,7 @@ fn nonlinear_contact_reference_is_explicitly_unsupported() {
                 max_penetration_ratio: 0.01,
                 friction_coefficient: 0.0,
             }),
-            ..experimental_nonlinear_options()
+            ..baseline_nonlinear_options()
         },
     )
     .expect_err("unsupported envelopes must not claim J2 continuum equilibrium");
@@ -4535,7 +4479,7 @@ fn thermo_mechanical_nonlinear_cannot_borrow_the_uncoupled_j2_gate() {
     let error = crate::run_nonlinear_with_options(
         &model,
         ComputeBackend::Cpu,
-        experimental_nonlinear_options(),
+        baseline_nonlinear_options(),
     )
     .expect_err("coupled nonlinear equilibrium is unimplemented");
     assert!(matches!(
@@ -4555,7 +4499,7 @@ fn nonlinear_proxy_benchmarks_do_not_claim_physical_qualification() {
         let error = crate::run_nonlinear_with_options(
             &model,
             ComputeBackend::Cpu,
-            experimental_nonlinear_options(),
+            baseline_nonlinear_options(),
         )
         .expect_err("unsupported envelopes must not claim J2 continuum equilibrium");
         assert!(matches!(
@@ -4715,7 +4659,7 @@ fn structural_beam_moment_reference_fixtures_emit_closed_form_checks() {
         let result = crate::run_linear_static_with_options(
             &fixture_model(fixture),
             ComputeBackend::Cpu,
-            experimental_linear_static_options(),
+            baseline_linear_static_options(),
         )
         .expect("beam moment reference should solve");
         assert_eq!(
@@ -4762,7 +4706,7 @@ fn structural_invalid_moment_without_rotational_dofs_fixture_is_typed() {
     let err = crate::run_linear_static_with_options(
         &fixture_model(FixtureId::StructuralInvalidMomentWithoutRotationalDofs),
         ComputeBackend::Cpu,
-        experimental_linear_static_options(),
+        baseline_linear_static_options(),
     )
     .expect_err("moment on displacement-only fixture should fail");
     assert!(err
@@ -4782,7 +4726,7 @@ fn moment_load_region_must_resolve_to_rotational_dofs() {
     let err = crate::run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        experimental_linear_static_options(),
+        baseline_linear_static_options(),
     )
     .expect_err("unresolved beam moment target should fail");
     assert!(err
@@ -4808,7 +4752,7 @@ fn multi_material_fixture_has_distinct_response_profile() {
         LinearStaticSolveOptions {
             solver_mesh: Some(mesh.clone()),
             solver_mesh_artifact_path: Some("all-steel-solver-mesh.cbor".to_string()),
-            ..experimental_linear_static_options()
+            ..baseline_linear_static_options()
         },
     )
     .expect("all-steel reference solve should succeed");
@@ -4818,7 +4762,7 @@ fn multi_material_fixture_has_distinct_response_profile() {
         LinearStaticSolveOptions {
             solver_mesh: Some(mesh),
             solver_mesh_artifact_path: Some("multi-region-solver-mesh.cbor".to_string()),
-            ..experimental_linear_static_options()
+            ..baseline_linear_static_options()
         },
     )
     .expect("multi-material solve should succeed");
@@ -4860,7 +4804,7 @@ fn admitted_parallel_solid_recovery_matches_serial_static_fields_exactly() {
     let options = LinearStaticSolveOptions {
         solver_mesh: Some(mesh),
         solver_mesh_artifact_path: Some("parallel-recovery-solver-mesh.cbor".to_string()),
-        ..experimental_linear_static_options()
+        ..baseline_linear_static_options()
     };
     let serial =
         crate::run_linear_static_with_options(&model, ComputeBackend::Cpu, options.clone())

@@ -1,7 +1,7 @@
 use runmat_analysis_core::{
     validate_model_sequence, AnalysisFieldValues, AnalysisModel, AnalysisProcedure,
-    AnalysisSequence, CoupledPhysicsFamily, FormulationRequirement, PhysicsFamily, ProcedureStep,
-    ProcedureStepId, RestartPolicy, SolutionSpace,
+    AnalysisSequence, CoupledPhysicsFamily, PhysicsFamily, ProcedureStep, ProcedureStepId,
+    RestartPolicy, SolutionSpace,
 };
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use serde::{Deserialize, Serialize};
@@ -33,7 +33,6 @@ pub struct StructuralLinearWorkload {
     pub model: AnalysisModel,
     pub step_id: ProcedureStepId,
     pub backend: ComputeBackend,
-    pub formulation_requirement: FormulationRequirement,
     pub preconditioner: SpdPreconditionerKind,
     pub algebra_backend: LinearAlgebraBackendKind,
     pub observation_execution: ObservationExecutionPolicy,

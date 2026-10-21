@@ -195,7 +195,6 @@ fn portable_static_preparation_admits_connector_target_observation() {
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         preconditioner: SpdPreconditionerKind::Jacobi,
         algebra_backend: LinearAlgebraBackendKind::CpuReference,
         observation_execution:
@@ -1580,7 +1579,6 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         model,
         step_id,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         preconditioner: SpdPreconditionerKind::Jacobi,
         algebra_backend: LinearAlgebraBackendKind::CpuReference,
         observation_execution:
@@ -1742,7 +1740,6 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         &solve.solver_model().unwrap(),
         solve.backend,
         LinearStaticSolveOptions {
-            formulation_requirement: solve.formulation_requirement,
             preconditioner_kind: solve.preconditioner,
             algebra_backend_kind: solve.algebra_backend,
             solver_mesh_artifact_path: None,
@@ -2432,7 +2429,6 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             .collect(),
         sequence,
         step: producer_step.clone(),
-        formulation_requirement: solve.formulation_requirement,
         program_revision: revision(),
         chunk_bytes: 4096,
         inventory_limits: ObjectInventoryLimits::default(),
@@ -2491,7 +2487,6 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             .collect(),
         sequence,
         step: producer_step.clone(),
-        formulation_requirement: solve.formulation_requirement,
         program_revision: revision(),
         chunk_bytes: 4096,
         inventory_limits: ObjectInventoryLimits::default(),
@@ -2527,7 +2522,6 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     .unwrap();
     let accuracy_gate = runmat_analysis_fea::results::accuracy::publication_gate(
         &accuracy_prepared.request.plan,
-        accuracy_prepared.request.formulation_requirement,
         &accuracy_evaluation,
     )
     .unwrap();
@@ -2538,7 +2532,6 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             source_kind: accuracy_prepared.request.source_kind,
             source_result: accuracy_prepared.request.source_result,
             source_observations: accuracy_prepared.request.source_observations,
-            formulation_requirement: accuracy_prepared.request.formulation_requirement,
             evidence: accuracy_evidence,
             evaluation: accuracy_evaluation,
             gate: accuracy_gate,
@@ -3226,7 +3219,6 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
         step_id: root.step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         preconditioner: SpdPreconditionerKind::Jacobi,
         algebra_backend: LinearAlgebraBackendKind::CpuReference,
         observation_execution:
@@ -3262,7 +3254,6 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
         &workload.solver_model().unwrap(),
         workload.backend,
         LinearStaticSolveOptions {
-            formulation_requirement: workload.formulation_requirement,
             preconditioner_kind: workload.preconditioner,
             algebra_backend_kind: workload.algebra_backend,
             solver_mesh_artifact_path: None,

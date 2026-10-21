@@ -39,6 +39,11 @@ pub fn lower_models(
         if diagnostics.len() != initial_errors {
             continue;
         }
+        // Whole-model validation of a declaration whose source already failed to check (an
+        // unresolved reference or an invalid unit) would only restate that failure.
+        if has_reported_error(declaration, diagnostics) {
+            continue;
+        }
         match model.validate() {
             Ok(()) => {
                 result.insert(identity.clone(), model);
@@ -53,6 +58,17 @@ pub fn lower_models(
     }
     composition::validate(&mut result, declarations, diagnostics);
     result
+}
+
+fn has_reported_error(declaration: &CheckedFeaDeclaration, diagnostics: &[FeaDiagnostic]) -> bool {
+    diagnostics.iter().any(|diagnostic| {
+        diagnostic.severity == crate::FeaDiagnosticSeverity::Error
+            && diagnostic.location.as_ref().is_some_and(|location| {
+                location.path == declaration.module
+                    && location.span.start >= declaration.span.start
+                    && location.span.end <= declaration.span.end
+            })
+    })
 }
 
 fn model(
@@ -179,6 +195,9 @@ pub(super) fn material_source(
     };
     match path.as_slice() {
         [namespace, _name] if namespace == "material" => {
+            if expression.value_type == FeaType::Error {
+                return None;
+            }
             let reference = resolve_declaration_ref(
                 bound,
                 declaration,
@@ -247,7 +266,9 @@ pub(super) fn region_source(
             if namespace == "geometry" && region_namespace == "region" =>
         {
             let FeaType::Region(role) = &expression.value_type else {
-                invalid_assignment(declaration, expression, "geometry region", diagnostics);
+                if expression.value_type != FeaType::Error {
+                    invalid_assignment(declaration, expression, "geometry region", diagnostics);
+                }
                 return None;
             };
             let reference = resolve_declaration_ref(

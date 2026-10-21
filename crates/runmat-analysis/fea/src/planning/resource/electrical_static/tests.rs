@@ -1,8 +1,6 @@
 use super::*;
 use crate::physics::electrical::tests::{mesh, model, prescribe};
-use runmat_analysis_core::{
-    FormulationRequirement, ProcedureStepId, RegionTarget, StaticElectricalEquation,
-};
+use runmat_analysis_core::{ProcedureStepId, RegionTarget, StaticElectricalEquation};
 use runmat_meshing_core::ElementOrder;
 
 fn workload(equation: StaticElectricalEquation) -> ElectricalStaticWorkload {
@@ -22,7 +20,6 @@ fn workload(equation: StaticElectricalEquation) -> ElectricalStaticWorkload {
     ElectricalStaticWorkload {
         model,
         step_id: ProcedureStepId("potential".into()),
-        formulation_requirement: FormulationRequirement::Experimental,
         relative_residual_target: 1e-11,
     }
 }
@@ -253,8 +250,8 @@ fn planning_support_budget_is_checked_before_geometry_or_graph_materialization()
 }
 
 #[test]
-fn inconsistent_inputs_outputs_overflow_and_production_fail_closed() {
-    let mut workload = workload(StaticElectricalEquation::SteadyConduction);
+fn inconsistent_inputs_outputs_and_overflow_fail_closed() {
+    let workload = workload(StaticElectricalEquation::SteadyConduction);
     let mesh = mesh(ElementOrder::Tet4, 1);
     for field in 0..7 {
         let mut prepared = facts(&workload, &mesh);
@@ -275,7 +272,4 @@ fn inconsistent_inputs_outputs_overflow_and_production_fail_closed() {
     }
     assert!(add(u64::MAX, 1).is_err());
     assert!(mul(u64::MAX, 2).is_err());
-    workload.formulation_requirement = FormulationRequirement::Production;
-    assert!(electrical_static_result_payload_bytes_upper_bound(&workload, &mesh).is_err());
-    assert!(electrical_static_solver_admission(&workload, &mesh).is_err());
 }

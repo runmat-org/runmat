@@ -1,7 +1,6 @@
 //! Cold typed-object execution/recovery, not a driver-crash or distributed-solve claim.
 use super::{
-    field_error, policy, rod_mesh, rod_model, ComputeBackend, FormulationRequirement,
-    SolverMeshArtifact, WAVE_SPEED,
+    field_error, policy, rod_mesh, rod_model, ComputeBackend, SolverMeshArtifact, WAVE_SPEED,
 };
 use crate::{
     execution::{
@@ -70,7 +69,6 @@ pub(super) fn cold_execution_on_mesh(
         model,
         step_id: runmat_analysis_core::ProcedureStepId("rod_response".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         observation_execution: ObservationExecutionPolicy::scalable(),
         plan: FrequencyResponsePlan::new(f, &[], &[]).unwrap(),
         solver: StructuralFrequencySolverPlan::Direct { policy: policy() },
@@ -192,7 +190,6 @@ pub(super) fn cold_execution_on_mesh(
         model: substituted,
         step_id: runmat_analysis_core::ProcedureStepId("rod_response".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         observation_execution: ObservationExecutionPolicy::scalable(),
         plan: FrequencyResponsePlan::new(f, &[], &[]).unwrap(),
         solver: StructuralFrequencySolverPlan::Direct { policy: policy() },

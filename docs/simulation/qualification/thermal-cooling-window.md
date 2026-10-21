@@ -1,6 +1,6 @@
 # Nonuniform thermal cooling: spatial qualification window
 
-This is constant-property continuum evidence, not restart or production qualification.
+This is constant-property continuum evidence, not restart or family qualification.
 The actual solved heated cube supplies the cold-bound initial field; no analytic field
 is substituted into the consumer. Independent Fourier diffusion supplies the physical
 reference. Backward-Euler time-error isolation is a measurement, not a new integrator.
@@ -30,7 +30,7 @@ keeps its original 1/2/4 sequence and limits.
 and temperature-offset invariance pass; strict FEA library/tests lint passes. The
 original Tet4 rate failure reproduces. Tet10 fails consumer solve acceptance with
 reported residual norm `3.848518805768323e-12` before completing its spatial sequence.
-The resolved Tet4 witness is still running. No thermal gate, normal-CI or production
+The resolved Tet4 witness is still running. No thermal gate, normal-CI or qualification
 pass follows, and the failed qualification draft is not retained as a verified slice.
 
 The source-free cooling chain covers temperature, recovered element-mean heat flux,

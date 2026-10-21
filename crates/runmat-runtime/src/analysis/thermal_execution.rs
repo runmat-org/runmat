@@ -1,9 +1,7 @@
 //! Thermal numerical execution and runtime result admission.
 use std::collections::BTreeMap;
 
-use runmat_analysis_core::{
-    AnalysisModel, AnalysisProcedure, FormulationRequirement, PhysicsFamily,
-};
+use runmat_analysis_core::{AnalysisModel, AnalysisProcedure, PhysicsFamily};
 use runmat_analysis_fea::{
     run_thermal_with_options, ComputeBackend, ExecutionBackend, ThermalProcedureControl,
     ThermalSolveOptions,
@@ -15,23 +13,21 @@ use crate::operations::{
 };
 
 use super::{
-    classify_run_status, contracts, diagnostic_metric, evaluate_production_publication,
-    install_fea_solver_context, map_fea_run_error, publish_standalone_run,
-    render_topology_from_solver_mesh, resolve_solver_mesh_artifact, storage,
-    validate_thermal_run_model, AnalysisOperation, AnalysisRunResult, AnalysisThermalRunOptions,
-    FallbackEvent, QualityGate, QualityPolicy, QualityReason, QualityReasonCode, RunProvenance,
-    ThermalResultsData,
+    classify_run_status, contracts, diagnostic_metric, install_fea_solver_context,
+    map_fea_run_error, publish_standalone_run, render_topology_from_solver_mesh,
+    resolve_solver_mesh_artifact, storage, validate_thermal_run_model, AnalysisOperation,
+    AnalysisRunResult, AnalysisThermalRunOptions, FallbackEvent, QualityGate, QualityPolicy,
+    QualityReason, QualityReasonCode, RunProvenance, ThermalResultsData,
 };
 
 pub fn analysis_run_thermal_with_options_op(
     model: &AnalysisModel,
     backend: ComputeBackend,
-    formulation_requirement: FormulationRequirement,
     options: AnalysisThermalRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     publish_standalone_run(
-        execute_thermal_with_options(model, backend, formulation_requirement, options, context)?,
+        execute_thermal_with_options(model, backend, options, context)?,
         "RM.FEA.RUN_THERMAL.ARTIFACT_STORE_FAILED",
     )
 }
@@ -39,7 +35,6 @@ pub fn analysis_run_thermal_with_options_op(
 pub(super) fn execute_thermal_with_options(
     model: &AnalysisModel,
     backend: ComputeBackend,
-    formulation_requirement: FormulationRequirement,
     options: AnalysisThermalRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
@@ -156,7 +151,6 @@ pub(super) fn execute_thermal_with_options(
         model,
         backend,
         ThermalSolveOptions {
-            formulation_requirement,
             procedure: match thermal_procedure {
                 AnalysisProcedure::Static => ThermalProcedureControl::Steady,
                 AnalysisProcedure::TransientResponse => ThermalProcedureControl::BackwardEuler {
@@ -240,8 +234,6 @@ pub(super) fn execute_thermal_with_options(
         }
         QualityPolicy::Exploratory => true,
     };
-    let (production_publishable, production_publication_reasons) =
-        evaluate_production_publication(&run, numerically_acceptable);
     let run_status = classify_run_status(result_quality, numerically_acceptable);
 
     let solver_backend = run.solver_backend;
@@ -276,9 +268,7 @@ pub(super) fn execute_thermal_with_options(
         result_quality,
         run_status,
         numerically_acceptable,
-        production_publishable,
         quality_reasons,
-        production_publication_reasons,
         provenance: RunProvenance {
             requested_backend: backend,
             execution_backend,

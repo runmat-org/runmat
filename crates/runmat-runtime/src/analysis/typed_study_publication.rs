@@ -371,7 +371,11 @@ impl StructuralStudyNumericalEvidence {
                     transient_step_id: result.transient_step_id.clone(),
                     modal_numerical_receipt: result.modal_numerical_receipt.clone(),
                     transient_numerical_receipt: result.transient_numerical_receipt.clone(),
-                    basis_state: PersistedStateEvidence::persist(&result.basis_state, study_digest, staging)?,
+                    basis_state: PersistedStateEvidence::persist(
+                        &result.basis_state,
+                        study_digest,
+                        staging,
+                    )?,
                 }
             }
             super::StructuralStudyNumericalResult::StructuralModalResponseSpectrum(result) => {
@@ -387,8 +391,16 @@ impl StructuralStudyNumericalEvidence {
                         .response_publication_baseline_usage
                         .clone(),
                     response_publication: result.response_publication.clone(),
-                    basis_state: PersistedStateEvidence::persist(&result.basis_state, study_digest, staging)?,
-                    envelope_state: PersistedStateEvidence::persist(&result.envelope_state, study_digest, staging)?,
+                    basis_state: PersistedStateEvidence::persist(
+                        &result.basis_state,
+                        study_digest,
+                        staging,
+                    )?,
+                    envelope_state: PersistedStateEvidence::persist(
+                        &result.envelope_state,
+                        study_digest,
+                        staging,
+                    )?,
                 }
             }
             super::StructuralStudyNumericalResult::StructuralRandomResponse(result) => {
@@ -404,8 +416,16 @@ impl StructuralStudyNumericalEvidence {
                         .response_publication_baseline_usage
                         .clone(),
                     response_publication: result.response_publication.clone(),
-                    basis_state: PersistedStateEvidence::persist(&result.basis_state, study_digest, staging)?,
-                    statistics_state: PersistedStateEvidence::persist(&result.statistics_state, study_digest, staging)?,
+                    basis_state: PersistedStateEvidence::persist(
+                        &result.basis_state,
+                        study_digest,
+                        staging,
+                    )?,
+                    statistics_state: PersistedStateEvidence::persist(
+                        &result.statistics_state,
+                        study_digest,
+                        staging,
+                    )?,
                 }
             }
             super::StructuralStudyNumericalResult::StructuralBuckling(result) => {
@@ -416,7 +436,11 @@ impl StructuralStudyNumericalEvidence {
                     preload_solver_result_identity: result.preload_solver_result_identity,
                     preload_numerical_receipt: result.preload_numerical_receipt.clone(),
                     buckling_numerical_receipt: result.buckling_numerical_receipt.clone(),
-                    prestress_state: PersistedStateEvidence::persist(&result.prestress_state, study_digest, staging)?,
+                    prestress_state: PersistedStateEvidence::persist(
+                        &result.prestress_state,
+                        study_digest,
+                        staging,
+                    )?,
                 }
             }
             super::StructuralStudyNumericalResult::StructuralPrestressedModal(result) => {
@@ -427,7 +451,11 @@ impl StructuralStudyNumericalEvidence {
                     preload_solver_result_identity: result.preload_solver_result_identity,
                     preload_numerical_receipt: result.preload_numerical_receipt.clone(),
                     modal_numerical_receipt: result.modal_numerical_receipt.clone(),
-                    prestress_state: PersistedStateEvidence::persist(&result.prestress_state, study_digest, staging)?,
+                    prestress_state: PersistedStateEvidence::persist(
+                        &result.prestress_state,
+                        study_digest,
+                        staging,
+                    )?,
                 }
             }
             super::StructuralStudyNumericalResult::StructuralPrestressedFrequency(result) => {
@@ -438,7 +466,11 @@ impl StructuralStudyNumericalEvidence {
                     ) => Some(StructuralModalReductionEvidence {
                         modal_step_id: reduction.modal_step_id.clone(),
                         modal_numerical_receipt: reduction.modal_numerical_receipt.clone(),
-                        basis_state: PersistedStateEvidence::persist(&reduction.basis_state, study_digest, staging)?,
+                        basis_state: PersistedStateEvidence::persist(
+                            &reduction.basis_state,
+                            study_digest,
+                            staging,
+                        )?,
                     }),
                 };
                 Self::StructuralPrestressedFrequency {
@@ -447,7 +479,11 @@ impl StructuralStudyNumericalEvidence {
                     frequency_step_id: result.frequency_step_id.clone(),
                     preload_solver_result_identity: result.preload_solver_result_identity,
                     preload_numerical_receipt: result.preload_numerical_receipt.clone(),
-                    prestress_state: PersistedStateEvidence::persist(&result.prestress_state, study_digest, staging)?,
+                    prestress_state: PersistedStateEvidence::persist(
+                        &result.prestress_state,
+                        study_digest,
+                        staging,
+                    )?,
                     modal_reduction,
                     frequency_publication_digest: frequency_publication_digest(
                         &result.frequency.publication,

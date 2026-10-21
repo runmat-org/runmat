@@ -71,7 +71,7 @@ pub(super) async fn run() {
     );
     let options = LocalFeaExecutionOptions {
         root: Some(FeaRootSelector::Study {
-            id: "structural_transient_experimental".into(),
+            id: "structural_transient".into(),
         }),
         workers: Some(1),
         ..Default::default()

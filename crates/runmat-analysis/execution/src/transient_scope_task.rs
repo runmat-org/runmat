@@ -195,7 +195,7 @@ pub fn transient_scope_task_identity(
     let discretization = DiscretizationIdentity::new(
         problem,
         mesh_digest,
-        digest("scope-formulation", &workload.formulation_requirement)?,
+        digest("scope-formulation", &mesh_digest)?,
     )?;
     let operator = OperatorIdentity::new(discretization, demand.operator.numerical_scope_digest)?;
     let numerical = NumericalPlanIdentity::new(

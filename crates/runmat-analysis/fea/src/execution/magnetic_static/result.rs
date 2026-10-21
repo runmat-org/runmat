@@ -199,7 +199,6 @@ impl MagnetostaticSolverResult {
             &workload.model,
             mesh,
             workload.step_id.as_str(),
-            workload.formulation_requirement,
             workload.relative_residual_target,
         )
         .map_err(invalid)?;

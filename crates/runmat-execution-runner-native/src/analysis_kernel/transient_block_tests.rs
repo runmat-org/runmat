@@ -1,7 +1,7 @@
 use runmat_analysis_core::{
-    AnalysisConstraint, ExcitationTarget, FormulationRequirement, IndependentDomain,
-    PrescribedStructuralDofs, ProcedureStep, ProcedureStepId, ReferenceStatePolicy, RegionTarget,
-    SequenceDependency, SequenceDependencyReason, StateId, StateTransition, StateTransitionMethod,
+    AnalysisConstraint, ExcitationTarget, IndependentDomain, PrescribedStructuralDofs,
+    ProcedureStep, ProcedureStepId, ReferenceStatePolicy, RegionTarget, SequenceDependency,
+    SequenceDependencyReason, StateId, StateTransition, StateTransitionMethod,
     StructuralConstraint, StructuralConstraintKind, TopologyTransitionPolicy, TransitionId,
 };
 use runmat_analysis_execution::{
@@ -131,7 +131,6 @@ fn prepared_modal_transient_fixture(
         &model,
         ComputeBackend::Cpu,
         ModalSolveOptions {
-            formulation_requirement: FormulationRequirement::Experimental,
             truncation: ModalTruncationPolicy::requested(3),
             solver_mesh: Some(mesh.clone()),
             ..ModalSolveOptions::default()
@@ -166,7 +165,6 @@ fn prepared_modal_transient_fixture(
         model,
         step_id: ProcedureStepId("response".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         solver: StructuralTransientSolverPlan::ModalReduced {
             basis_transition: Box::new(basis_transition),
         },
@@ -342,7 +340,6 @@ fn native_scope_task_rederives_its_plan_and_returns_the_exact_restart_scope() {
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         solver: StructuralTransientSolverPlan::Direct,
         time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 4 },
         residual_target: 1.0e-10,
@@ -417,7 +414,6 @@ fn native_kernel_executes_a_two_block_physical_transient_chain() {
         model: model.clone(),
         step_id: step.step_id.clone(),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         solver: runmat_analysis_fea::execution::StructuralTransientSolverPlan::Direct,
         time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 4 },
         residual_target: 1.0e-10,
@@ -435,7 +431,6 @@ fn transient_sequence_coordinator_admits_each_exact_transition_before_assembly()
         model,
         step_id,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         solver: runmat_analysis_fea::execution::StructuralTransientSolverPlan::Direct,
         time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 4 },
         residual_target: 1.0e-10,
@@ -609,7 +604,6 @@ fn transient_sequence_preserves_typed_scope_resource_rejection() {
         model,
         step_id,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         solver: StructuralTransientSolverPlan::Direct,
         time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 4 },
         residual_target: 1.0e-10,
@@ -811,7 +805,6 @@ fn authored_modal_transient_study_publishes_and_binds_the_produced_basis() {
         model: model.clone(),
         step_id: ProcedureStepId("modes".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         truncation: ModalTruncationPolicy::requested(3),
@@ -826,7 +819,6 @@ fn authored_modal_transient_study_publishes_and_binds_the_produced_basis() {
         model,
         step_id: ProcedureStepId("response".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 4 },
         residual_target: 1.0e-8,
     };

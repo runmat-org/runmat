@@ -1505,7 +1505,6 @@ fn nonlinear_accepted_states_preserve_complete_constraint_kinematics() {
             &model,
             &summary,
             &NonlinearSolveOptions {
-                formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
                 increment_count: 2,
                 max_newton_iters: 8,
                 solver_mesh: Some(mesh),

@@ -499,7 +499,6 @@ mod tests {
             model,
             step_id,
             backend: ComputeBackend::Cpu,
-            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
             preconditioner: SpdPreconditionerKind::Auto,
             algebra_backend: LinearAlgebraBackendKind::CpuReference,
             observation_execution:

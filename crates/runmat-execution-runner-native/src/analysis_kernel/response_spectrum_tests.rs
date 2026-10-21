@@ -1,7 +1,7 @@
 use runmat_analysis_core::{
-    AnalysisSequence, DirectionalCombination, FormulationRequirement, IndependentDomain,
-    ModalCombination, ModalTruncationCorrection, ModalTruncationPolicy as SpectrumTruncationPolicy,
-    ProcedureStep, ReferenceStatePolicy, ResponseSpectrum, ResponseSpectrumId, RigidResponsePolicy,
+    AnalysisSequence, DirectionalCombination, IndependentDomain, ModalCombination,
+    ModalTruncationCorrection, ModalTruncationPolicy as SpectrumTruncationPolicy, ProcedureStep,
+    ReferenceStatePolicy, ResponseSpectrum, ResponseSpectrumId, RigidResponsePolicy,
     SequenceDependencyReason, SpectrumAbscissa, SpectrumConstruction, SpectrumDamping,
     SpectrumDirection, SpectrumEnvelope, SpectrumEvidence, SpectrumExtrapolation,
     SpectrumInterpolation, SpectrumResponse, StateTransition, StateTransitionMethod, StateUse,
@@ -147,7 +147,6 @@ fn authored_response_spectrum_study_publishes_basis_and_terminal_envelope() {
         model: model.clone(),
         step_id: modal_step.step_id.clone(),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         observation_execution: ObservationExecutionPolicy::scalable(),
         truncation: ModalTruncationPolicy::requested(3),
         convergence: ModalConvergencePolicy::exploratory(),
@@ -160,7 +159,6 @@ fn authored_response_spectrum_study_publishes_basis_and_terminal_envelope() {
         model,
         step_id: response_step.step_id.clone(),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         observation_execution: ObservationExecutionPolicy::scalable(),
     };
     let workloads = StructuralStudyWorkloads::HeterogeneousSequence {
@@ -496,7 +494,6 @@ fn fixture() -> (
         model: model.clone(),
         step_id: modal.step_id.clone(),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         observation_execution: ObservationExecutionPolicy::scalable(),
         truncation: ModalTruncationPolicy::requested(3),
         convergence: ModalConvergencePolicy::exploratory(),
@@ -535,7 +532,6 @@ fn fixture() -> (
             model,
             step_id: response.step_id,
             backend: ComputeBackend::Cpu,
-            formulation_requirement: FormulationRequirement::Experimental,
             observation_execution: ObservationExecutionPolicy::scalable(),
             modal_basis_transition: transition,
         },

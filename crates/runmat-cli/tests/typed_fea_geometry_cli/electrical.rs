@@ -139,7 +139,6 @@ fn execute_with_charge(
             "{:?}",
             retained.quality_reasons
         );
-        assert!(!retained.production_publishable);
         let (flux, density) = if equation == "electrostatics" {
             (
                 "electrical.electric_displacement",

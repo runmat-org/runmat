@@ -56,7 +56,6 @@ fn original_source(
         || Digest::from_bytes(mesh.canonical_digest.0) != m.manifest.logical_identity
         || workload.producer_identity()? != request.producer
         || request.plan != step.accuracy
-        || request.formulation_requirement != workload.formulation_requirement
     {
         return Err(invalid(
             "fluid accuracy differs from original authored source",

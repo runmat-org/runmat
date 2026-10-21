@@ -160,11 +160,6 @@ pub(super) async fn run() {
         )
         .unwrap();
         assert!(published.data.result_manifest_artifact_path.is_some());
-        assert!(published
-            .data
-            .steps
-            .iter()
-            .all(|s| !s.production_publishable));
         let stored =
             runmat_runtime::analysis::storage::load_run_result(&published.data.steps[0].run_id)
                 .unwrap()

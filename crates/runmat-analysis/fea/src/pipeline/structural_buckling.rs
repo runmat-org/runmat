@@ -64,7 +64,6 @@ pub fn execute_structural_buckling_workload(
     let step = super::admission::require_structural(
         workload.model(),
         AnalysisProcedure::EigenvalueBuckling,
-        workload.formulation_requirement(),
     )?;
     let excitations =
         realize_step_excitations(workload.model(), step, ExcitationSamplePoint::Static)
@@ -73,11 +72,10 @@ pub fn execute_structural_buckling_workload(
         workload.model(),
         &excitations,
         Some(solver_mesh.clone()),
-        StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+        StructuralFormulationRequirement::SyntheticOperator,
     )
     .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
-    let run =
-        super::admission::admit_structural(&summary, step, workload.formulation_requirement())?;
+    let run = super::admission::admit_structural(&summary, step)?;
     super::validate_rotational_dof_targets(workload.model(), &summary)?;
     let solved = solve_eigenvalue_buckling(
         &summary,
@@ -171,7 +169,6 @@ pub fn recover_completed_structural_buckling_run(
     let step = super::admission::require_structural(
         workload.model(),
         AnalysisProcedure::EigenvalueBuckling,
-        workload.formulation_requirement(),
     )?;
     let excitations =
         realize_step_excitations(workload.model(), step, ExcitationSamplePoint::Static)
@@ -180,11 +177,10 @@ pub fn recover_completed_structural_buckling_run(
         workload.model(),
         &excitations,
         Some(solver_mesh.clone()),
-        StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+        StructuralFormulationRequirement::SyntheticOperator,
     )
     .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
-    let expected_run =
-        super::admission::admit_structural(&summary, step, workload.formulation_requirement())?;
+    let expected_run = super::admission::admit_structural(&summary, step)?;
     if result.run() != &expected_run {
         return Err(FeaRunError::Assembly(
             "portable buckling run identity differs from the recovered operator".into(),

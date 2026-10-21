@@ -69,7 +69,6 @@ fn plan_direct_transient(
         model: study.model.clone(),
         step_id: step.step_id.clone(),
         backend: policy.backend,
-        formulation_requirement: policy.formulation_requirement,
         solver: StructuralTransientSolverPlan::Direct,
         time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count },
         residual_target: relative_accuracy_target(step, ErrorContributionKind::Algebraic)?,
@@ -94,7 +93,6 @@ fn plan_direct_frequency(
         model: study.model.clone(),
         step_id: step.step_id.clone(),
         backend: policy.backend,
-        formulation_requirement: policy.formulation_requirement,
         observation_execution: ObservationExecutionPolicy::scalable(),
         plan: frequency_plan(step)?,
         solver,
@@ -121,7 +119,6 @@ fn plan_heterogeneous(
                 &step.step_id.0,
                 super::super::ThermalStudyPlanningPolicy {
                     backend: policy.backend,
-                    formulation_requirement: policy.formulation_requirement,
                 },
                 super::initial_fields::select(&study.model, step, fields)?,
             )
@@ -169,7 +166,6 @@ fn plan_heterogeneous(
                         model: study.model.clone(),
                         step_id: step.step_id.clone(),
                         backend: policy.backend,
-                        formulation_requirement: policy.formulation_requirement,
                         time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count },
                         residual_target: relative_accuracy_target(
                             step,
@@ -186,7 +182,6 @@ fn plan_heterogeneous(
                         model: study.model.clone(),
                         step_id: step.step_id.clone(),
                         backend: policy.backend,
-                        formulation_requirement: policy.formulation_requirement,
                         observation_execution: ObservationExecutionPolicy::scalable(),
                         plan: frequency_plan(step)?,
                     }),
@@ -199,7 +194,6 @@ fn plan_heterogeneous(
                         model: study.model.clone(),
                         step_id: step.step_id.clone(),
                         backend: policy.backend,
-                        formulation_requirement: policy.formulation_requirement,
                         observation_execution: ObservationExecutionPolicy::scalable(),
                     }),
                 }
@@ -244,7 +238,6 @@ fn modal_workload(
         model: study.model.clone(),
         step_id: step.step_id.clone(),
         backend: policy.backend,
-        formulation_requirement: policy.formulation_requirement,
         observation_execution: ObservationExecutionPolicy::scalable(),
         truncation: modal_truncation(step, policy)?,
         convergence: modal_convergence(step, policy)?,
@@ -265,7 +258,6 @@ fn prestressed_modal_template(
         model: study.model.clone(),
         step_id: step.step_id.clone(),
         backend: policy.backend,
-        formulation_requirement: policy.formulation_requirement,
         observation_execution: ObservationExecutionPolicy::scalable(),
         truncation: modal_truncation(step, policy)?,
         convergence: modal_convergence(step, policy)?,
@@ -357,7 +349,6 @@ fn prestressed_frequency_template(
         model: study.model.clone(),
         step_id: step.step_id.clone(),
         backend: policy.backend,
-        formulation_requirement: policy.formulation_requirement,
         observation_execution: ObservationExecutionPolicy::scalable(),
         plan: frequency_plan(step)?,
         solver,
@@ -379,7 +370,6 @@ fn buckling_template(
         model: study.model.clone(),
         step_id: step.step_id.clone(),
         backend: policy.backend,
-        formulation_requirement: policy.formulation_requirement,
         observation_execution: ObservationExecutionPolicy::scalable(),
         solver: StructuralBucklingSolverPolicy::new(
             requested_count,
@@ -410,7 +400,6 @@ fn random_response_template(
         model: study.model.clone(),
         step_id: step.step_id.clone(),
         backend: policy.backend,
-        formulation_requirement: policy.formulation_requirement,
         observation_execution: ObservationExecutionPolicy::scalable(),
         integration_policy: RandomResponseIntegrationPolicy {
             modal_damping_ratio: settings.modal_damping_ratio,

@@ -73,7 +73,6 @@ fn check(order: ElementOrder, publication_root: Option<&std::path::Path>) {
         model,
         step_id: step.step_id,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         observation_execution: ObservationExecutionPolicy::scalable(),
         plan: FrequencyResponsePlan::new(20.0, &[40.0], &[]).unwrap(),
         solver: StructuralFrequencySolverPlan::Direct {

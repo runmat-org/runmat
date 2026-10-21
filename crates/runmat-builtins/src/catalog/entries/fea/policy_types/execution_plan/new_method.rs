@@ -49,7 +49,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
                 "static = fea.StructuralStep.static('preload');\n",
                 "sequence = fea.AnalysisSequence.new('bracket', {static}, {}, {}, {});\n",
                 "execution = fea.ExecutionStep.new(static, fea.ComputeBackend.cpu(), ...\n",
-                "    fea.FormulationRequirement.production(), fea.SolverOptions.defaults(static));\n",
+                "    fea.SolverOptions.defaults(static));\n",
                 "plan = fea.ExecutionPlan.new(sequence, {execution});",
             ),
             concat!(

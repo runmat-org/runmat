@@ -1,8 +1,8 @@
 mod compiler;
 use runmat_analysis_core::{
-    FormulationRequirement, IndependentDomain, ProcedureStep, ProcedureStepId,
-    ReferenceStatePolicy, SequenceDependency, SequenceDependencyReason, StateId, StateTransition,
-    StateTransitionMethod, TopologyTransitionPolicy, TransitionId,
+    IndependentDomain, ProcedureStep, ProcedureStepId, ReferenceStatePolicy, SequenceDependency,
+    SequenceDependencyReason, StateId, StateTransition, StateTransitionMethod,
+    TopologyTransitionPolicy, TransitionId,
 };
 use runmat_execution::resource::AcceleratorRequest;
 use runmat_execution::Digest;
@@ -113,7 +113,6 @@ fn direct_case(
         model,
         step_id: runmat_analysis_core::ProcedureStepId("frequency".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         observation_execution: ObservationExecutionPolicy::scalable(),
         plan: FrequencyResponsePlan::new(20.0, &[], &[]).unwrap(),
         solver: StructuralFrequencySolverPlan::Direct {
@@ -175,7 +174,6 @@ fn modal_case() -> (
         ModalSolveOptions {
             truncation: ModalTruncationPolicy::requested(3),
             solver_mesh: Some(mesh.clone()),
-            formulation_requirement: FormulationRequirement::Experimental,
             ..ModalSolveOptions::default()
         },
     )
@@ -198,7 +196,6 @@ fn modal_case() -> (
         model,
         step_id: ProcedureStepId("frequency".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         observation_execution: ObservationExecutionPolicy::scalable(),
         plan: FrequencyResponsePlan::new(20.0, &[], &[]).unwrap(),
         solver: StructuralFrequencySolverPlan::ModalReduced {

@@ -22,7 +22,6 @@ study response {{
     geometry = geometry.part
     mesh = mesh.part
     model = model.physics
-    formulation = experimental
     analysis solve {{
         {procedure}
         {accuracy}

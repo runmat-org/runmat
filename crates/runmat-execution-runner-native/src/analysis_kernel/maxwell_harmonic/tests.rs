@@ -122,7 +122,6 @@ pub(crate) fn task(
     let w = MaxwellHarmonicWorkload {
         model,
         step_id: ProcedureStepId("field".into()),
-        formulation_requirement: FormulationRequirement::Experimental,
         relative_residual_target: 1e-10,
     };
     let mesh = if quadratic {

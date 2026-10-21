@@ -121,40 +121,33 @@ pub async fn prepare_study(
         admission::PreparedFamily::Structural => {
             crate::StudyRootPlanning::Structural(runmat_analysis_fea::study::StructuralStudyPlanningPolicy {
                 backend: options.backend,
-                formulation_requirement: resolved.study.formulation_requirement,
                 numerics: runmat_analysis_fea::study::StructuralNumericalPlanningPolicy::production(),
             })
         }
         admission::PreparedFamily::Thermal => {
             crate::StudyRootPlanning::Thermal(runmat_analysis_fea::study::ThermalStudyPlanningPolicy {
                 backend: options.backend,
-                formulation_requirement: resolved.study.formulation_requirement,
             })
         }
         admission::PreparedFamily::Acoustic => {
-            crate::StudyRootPlanning::Acoustic(runmat_analysis_fea::study::AcousticStudyPlanningPolicy {
-                formulation_requirement: resolved.study.formulation_requirement,
-                ..runmat_analysis_fea::study::AcousticStudyPlanningPolicy::experimental()
-            })
+            crate::StudyRootPlanning::Acoustic(
+                runmat_analysis_fea::study::AcousticStudyPlanningPolicy::standard(),
+            )
         }
         admission::PreparedFamily::Electrical => {
             crate::StudyRootPlanning::Electrical(runmat_analysis_fea::study::ElectricalStudyPlanningPolicy {
-                formulation_requirement: resolved.study.formulation_requirement,
             })
         }
         admission::PreparedFamily::Magnetic => {
             crate::StudyRootPlanning::Magnetic(runmat_analysis_fea::study::MagneticStudyPlanningPolicy {
-                formulation_requirement: resolved.study.formulation_requirement,
             })
         }
         admission::PreparedFamily::Maxwell => {
             crate::StudyRootPlanning::Maxwell(runmat_analysis_fea::study::MaxwellStudyPlanningPolicy {
-                formulation_requirement: resolved.study.formulation_requirement,
             })
         }
         admission::PreparedFamily::Fluid => {
             crate::StudyRootPlanning::Fluid(runmat_analysis_fea::study::FluidStudyPlanningPolicy {
-                formulation_requirement: resolved.study.formulation_requirement,
                 numerical: Default::default(),
                 geometry: Default::default(),
             })
@@ -162,7 +155,6 @@ pub async fn prepare_study(
         admission::PreparedFamily::Nonlinear => {
             crate::StudyRootPlanning::NonlinearSolid(crate::NonlinearSolidStudyPlanning {
                 controls: runmat_analysis_fea::solve::nonlinear::NonlinearSolveOptions {
-                    formulation_requirement: resolved.study.formulation_requirement,
                     ..Default::default()
                 },
                 accepted_block_limit:

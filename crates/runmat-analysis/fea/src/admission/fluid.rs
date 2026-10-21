@@ -3,20 +3,17 @@ use super::{admit_formulation, AnalysisRunIdentity, FormulationAdmissionRequest}
 use crate::contracts::FeaRunError;
 use runmat_analysis_core::{
     AnalysisProcedure, BoundaryTransferImplementation, ConstitutiveImplementation,
-    CouplingImplementation, ExactFormulationComponent, ExactFormulationRealization,
-    FormulationRequirement, PhysicsFamily, RecoveryImplementation, SolutionSpace,
-    SourceImplementation, SpatialOperatorImplementation, TemporalImplementation,
-    TopologyImplementation,
+    CouplingImplementation, ExactFormulationComponent, ExactFormulationRealization, PhysicsFamily,
+    RecoveryImplementation, SolutionSpace, SourceImplementation, SpatialOperatorImplementation,
+    TemporalImplementation, TopologyImplementation,
 };
 use runmat_meshing_core::{ElementOrder, SolverMeshArtifact};
 
 pub fn admit_canonical_fluid_steady(
     mesh: &SolverMeshArtifact,
-    requirement: FormulationRequirement,
 ) -> Result<AnalysisRunIdentity, FeaRunError> {
     admit_canonical_fluid(
         mesh,
-        requirement,
         AnalysisProcedure::Static,
         canonical_fluid_steady_realization(),
     )
@@ -24,18 +21,15 @@ pub fn admit_canonical_fluid_steady(
 
 pub fn admit_canonical_fluid_transient(
     mesh: &SolverMeshArtifact,
-    requirement: FormulationRequirement,
 ) -> Result<AnalysisRunIdentity, FeaRunError> {
     admit_canonical_fluid(
         mesh,
-        requirement,
         AnalysisProcedure::TransientResponse,
         canonical_fluid_transient_realization(),
     )
 }
 fn admit_canonical_fluid(
     mesh: &SolverMeshArtifact,
-    requirement: FormulationRequirement,
     procedure: AnalysisProcedure,
     realization: ExactFormulationRealization,
 ) -> Result<AnalysisRunIdentity, FeaRunError> {
@@ -54,7 +48,6 @@ fn admit_canonical_fluid(
         family: PhysicsFamily::Fluid,
         procedure,
         solution_space: SolutionSpace::Direct,
-        requirement,
         realization,
     })
     .map(|receipt| receipt.into_identity())
@@ -93,15 +86,12 @@ pub fn canonical_fluid_transient_realization() -> ExactFormulationRealization {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_analysis_core::FormulationMaturity;
     use runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh;
 
     #[test]
-    fn canonical_fluid_has_one_exact_experimental_identity_not_channel_or_tet10() {
+    fn canonical_fluid_has_one_exact_identity_not_channel_or_tet10() {
         let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
-        let identity =
-            admit_canonical_fluid_steady(&mesh, FormulationRequirement::Experimental).unwrap();
-        assert_eq!(identity.qualification(), FormulationMaturity::Experimental);
+        let identity = admit_canonical_fluid_steady(&mesh).unwrap();
         assert_eq!(
             identity.realization(),
             &canonical_fluid_steady_realization()
@@ -115,12 +105,11 @@ mod tests {
                 .count(),
             1
         );
-        assert!(admit_canonical_fluid_steady(&mesh, FormulationRequirement::Production).is_err());
-        assert!(admit_canonical_fluid_steady(
-            &canonical_tetrahedron_solver_mesh(ElementOrder::Tet10),
-            FormulationRequirement::Experimental
-        )
-        .is_err());
+        assert!(admit_canonical_fluid_steady(&mesh).is_err());
+        assert!(
+            admit_canonical_fluid_steady(&canonical_tetrahedron_solver_mesh(ElementOrder::Tet10))
+                .is_err()
+        );
         for axis in 0..4 {
             let mut realization = canonical_fluid_steady_realization();
             match axis {
@@ -142,7 +131,6 @@ mod tests {
                 family: PhysicsFamily::Fluid,
                 procedure: AnalysisProcedure::Static,
                 solution_space: SolutionSpace::Direct,
-                requirement: FormulationRequirement::Experimental,
                 realization,
             })
             .is_err());

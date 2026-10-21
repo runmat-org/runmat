@@ -525,7 +525,7 @@ impl std::error::Error for StructuralAssemblyError {}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StructuralFormulationRequirement {
     PhysicalDiscretization,
-    ExperimentalSyntheticOperator,
+    SyntheticOperator,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -804,8 +804,7 @@ pub(super) fn assemble_linear_system_impl(
 
     let mut rhs = vec![0.0; dof_count];
     if solid_topology.is_none()
-        && structural_requirement
-            == Some(StructuralFormulationRequirement::ExperimentalSyntheticOperator)
+        && structural_requirement == Some(StructuralFormulationRequirement::SyntheticOperator)
     {
         apply_synthetic_structural_rhs(excitations, &mut rhs);
     } else if structural_requirement.is_none() {
@@ -1294,13 +1293,14 @@ pub(super) fn assemble_linear_system_impl(
                     StructuralFormulationRealization::new(operator, recovery)
                 })
                 .or_else(|| {
-                    (requirement == StructuralFormulationRequirement::ExperimentalSyntheticOperator)
-                        .then(|| {
+                    (requirement == StructuralFormulationRequirement::SyntheticOperator).then(
+                        || {
                             StructuralFormulationRealization::new(
                                 StructuralOperatorImplementation::SyntheticDiagonalChain,
                                 None,
                             )
-                        })
+                        },
+                    )
                 })
                 .into_iter()
                 .collect()
@@ -3217,7 +3217,7 @@ mod tests {
     }
 
     #[test]
-    fn experimental_solid_uses_physical_traction_projection() {
+    fn physical_solid_uses_physical_traction_projection() {
         let mut model = fixture_model(FixtureId::CantileverLinearStatic);
         model.constraints = Vec::new();
         replace_fixture_excitations(
@@ -3236,9 +3236,9 @@ mod tests {
             &model,
             &static_excitations(&model),
             Some(mesh),
-            StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+            StructuralFormulationRequirement::SyntheticOperator,
         )
-        .expect("experimental admission with a solver mesh must use physical traction quadrature");
+        .expect("admission with a solver mesh must use physical traction quadrature");
 
         let evidence = summary
             .spatial_projection_evidence
@@ -3513,7 +3513,7 @@ mod tests {
                 &model,
                 &static_excitations(&model),
                 None,
-                StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+                StructuralFormulationRequirement::SyntheticOperator,
             )
             .expect_err(name);
             assert_eq!(error, LinearAssemblyError::Structural(expected), "{name}");
@@ -3927,14 +3927,14 @@ mod tests {
             &model,
             &first_sample,
             None,
-            StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+            StructuralFormulationRequirement::SyntheticOperator,
         )
         .expect("first sampled load should assemble");
         let second = assemble_structural_system(
             &model,
             &second_sample,
             None,
-            StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+            StructuralFormulationRequirement::SyntheticOperator,
         )
         .expect("second sampled load should assemble");
 
@@ -4147,9 +4147,9 @@ mod tests {
             &synthetic_model,
             &static_excitations(&synthetic_model),
             None,
-            StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+            StructuralFormulationRequirement::SyntheticOperator,
         )
-        .expect("typed experimental admission should permit synthetic assembly");
+        .expect("typed admission should permit synthetic assembly");
 
         let cases = [
             (

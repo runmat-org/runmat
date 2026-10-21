@@ -1,4 +1,4 @@
-use runmat_analysis_core::{FormulationRequirement, SignalSampleApproach};
+use runmat_analysis_core::SignalSampleApproach;
 use runmat_meshing_core::SolverMeshArtifact;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -15,7 +15,6 @@ use super::{state::SecondOrderState, TransientStepBoundary};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TransientSolveOptions {
-    pub formulation_requirement: FormulationRequirement,
     pub time_step_policy: StructuralTimeStepPolicy,
     pub residual_target: f64,
     #[serde(default = "default_progress_operation")]
@@ -44,7 +43,6 @@ fn default_progress_operation() -> String {
 impl Default for TransientSolveOptions {
     fn default() -> Self {
         Self {
-            formulation_requirement: FormulationRequirement::Production,
             time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 10 },
             residual_target: 1.0e-6,
             progress_operation: default_progress_operation(),

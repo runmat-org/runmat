@@ -6,7 +6,7 @@ use super::{
 
 impl ProcedureStep {
     pub fn electromagnetic_static(step_id: impl Into<String>) -> Self {
-        Self::experimental(
+        Self::new(
             step_id,
             PhysicsFamily::Electromagnetic,
             AnalysisProcedure::Static,
@@ -20,7 +20,7 @@ impl ProcedureStep {
     }
 
     pub fn electromagnetic_harmonic(step_id: impl Into<String>) -> Self {
-        Self::experimental(
+        Self::new(
             step_id,
             PhysicsFamily::Electromagnetic,
             AnalysisProcedure::HarmonicResponse,

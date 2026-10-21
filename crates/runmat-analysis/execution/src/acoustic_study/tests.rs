@@ -1,8 +1,8 @@
 use super::*;
 use runmat_analysis_core::{
     AcousticConstraint, AcousticConstraintKind, AnalysisConstraint, AnalysisSequence,
-    FormulationRequirement, IndependentDomain, MaterialAcousticModel, PrescribedValue, Pressure,
-    ProcedureStep, RegionTarget,
+    IndependentDomain, MaterialAcousticModel, PrescribedValue, Pressure, ProcedureStep,
+    RegionTarget,
 };
 use runmat_analysis_fea::{
     fixtures::{fixture_model, FixtureId},
@@ -46,7 +46,6 @@ pub(super) fn preparation() -> AcousticStudyPreparation {
     let compiled = CompiledAnalysisStudy {
         module_path: "tests/acoustic.fea".into(),
         study_id: "acoustic".into(),
-        formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: Vec::new(),
         assessments: Vec::new(),
         outputs: Vec::new(),
@@ -54,7 +53,7 @@ pub(super) fn preparation() -> AcousticStudyPreparation {
         model,
         solver_mesh_digest: mesh.canonical_digest,
     };
-    let policy = AcousticStudyPlanningPolicy::experimental();
+    let policy = AcousticStudyPlanningPolicy::standard();
     let plan = plan_acoustic_study(&compiled, policy).unwrap();
     AcousticStudyPreparation {
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),

@@ -146,10 +146,6 @@ mod tests {
         ),
         ("fea.StepObjectActivation", "fea.StepObjectActivation.new"),
         ("fea.ComputeBackend", "fea.ComputeBackend.cpu"),
-        (
-            "fea.FormulationRequirement",
-            "fea.FormulationRequirement.experimental",
-        ),
         ("fea.SolverOptions", "fea.SolverOptions.defaults"),
         ("fea.ExecutionStep", "fea.ExecutionStep.new"),
         ("fea.ExecutionPlan", "fea.ExecutionPlan.defaults"),
@@ -164,7 +160,7 @@ mod tests {
             "fea.AccuracyResourceCeiling.new",
         ),
         ("fea.AccuracyCriterion", "fea.AccuracyCriterion.new"),
-        ("fea.AccuracyPlan", "fea.AccuracyPlan.experimentalBaseline"),
+        ("fea.AccuracyPlan", "fea.AccuracyPlan.baseline"),
         ("fea.ErrorContribution", "fea.ErrorContribution.algebraic"),
         (
             "fea.RequiredAccuracyEvidence",

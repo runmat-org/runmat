@@ -177,7 +177,7 @@ fn assemble_transient_block_basis(
         &active_model,
         &excitations,
         options.solver_mesh.as_ref(),
-        StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+        StructuralFormulationRequirement::SyntheticOperator,
     )
     .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
     Ok(PreparedTransientBlockBasis {
@@ -469,14 +469,10 @@ pub fn run_transient_with_fields(
         &active_model,
         &excitations,
         options.solver_mesh.as_ref(),
-        StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+        StructuralFormulationRequirement::SyntheticOperator,
     )
     .map_err(|err| FeaRunError::Assembly(err.to_string()))?;
-    let identity = super::admission::admit_structural(
-        &summary,
-        execution_step,
-        options.formulation_requirement,
-    )?;
+    let identity = super::admission::admit_structural(&summary, execution_step)?;
     super::validate_rotational_dof_targets(model, &summary)?;
     let initial_state = realize_transient_initial_state(
         &active_model,

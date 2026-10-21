@@ -1,4 +1,4 @@
-//! Experimental canonical and reduced acoustic formulations.
+//! Canonical and reduced acoustic formulations.
 //!
 //! The canonical library entry uses physical Tet4/Tet10 operators and exact boundaries.
 //! The graph-domain proxy remains separately named for its existing callers. Neither has

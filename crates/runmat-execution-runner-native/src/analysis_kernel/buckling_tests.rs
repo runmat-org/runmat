@@ -1,9 +1,9 @@
 use std::collections::BTreeSet;
 
 use runmat_analysis_core::{
-    ExcitationTarget, FormulationRequirement, IndependentDomain, ProcedureStep, ProcedureStepId,
-    ReferenceStatePolicy, RegionTarget, SequenceDependency, SequenceDependencyReason,
-    StateTransition, StateTransitionMethod, TopologyTransitionPolicy, TransitionId,
+    ExcitationTarget, IndependentDomain, ProcedureStep, ProcedureStepId, ReferenceStatePolicy,
+    RegionTarget, SequenceDependency, SequenceDependencyReason, StateTransition,
+    StateTransitionMethod, TopologyTransitionPolicy, TransitionId,
 };
 use runmat_analysis_execution::{
     execute_serial_analysis, import_structural_buckling_result, prepare_analysis_objects,
@@ -114,7 +114,6 @@ fn native_buckling_task_round_trips_the_preload_bound_result() {
             &model,
             ComputeBackend::Cpu,
             LinearStaticSolveOptions {
-                formulation_requirement: FormulationRequirement::Experimental,
                 solver_mesh: Some(mesh.clone()),
                 require_solver_mesh_for_solid: true,
                 ..LinearStaticSolveOptions::default()
@@ -156,7 +155,6 @@ fn native_buckling_task_round_trips_the_preload_bound_result() {
         model,
         step_id: ProcedureStepId("buckling".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         observation_execution: ObservationExecutionPolicy::scalable(),
         solver: StructuralBucklingSolverPolicy::new(1, 1.0e-10, 8).unwrap(),
     }

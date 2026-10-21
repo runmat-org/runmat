@@ -1,8 +1,8 @@
 use runmat_analysis_core::{
-    CoordinateFrame, DirectionalCombination, FormulationRequirement, IndependentDomain,
-    ModalCombination, ProcedureStep, ResponseSpectrum, ResponseSpectrumId, SpectrumAbscissa,
-    SpectrumConstruction, SpectrumDamping, SpectrumDirection, SpectrumEnvelope, SpectrumEvidence,
-    SpectrumExtrapolation, SpectrumInterpolation, SpectrumResponse,
+    CoordinateFrame, DirectionalCombination, IndependentDomain, ModalCombination, ProcedureStep,
+    ResponseSpectrum, ResponseSpectrumId, SpectrumAbscissa, SpectrumConstruction, SpectrumDamping,
+    SpectrumDirection, SpectrumEnvelope, SpectrumEvidence, SpectrumExtrapolation,
+    SpectrumInterpolation, SpectrumResponse,
 };
 
 use crate::{
@@ -112,7 +112,6 @@ fn physical_modal_basis_drives_canonical_response_result() {
         &model,
         ComputeBackend::Cpu,
         ModalSolveOptions {
-            formulation_requirement: FormulationRequirement::Experimental,
             truncation,
             convergence: ModalConvergencePolicy::exploratory(),
             residual_vector_directions: Vec::new(),
@@ -175,7 +174,6 @@ fn basis_only_solver_rejects_operator_dependent_corrections() {
         &model,
         ComputeBackend::Cpu,
         ModalSolveOptions {
-            formulation_requirement: FormulationRequirement::Experimental,
             truncation,
             convergence: ModalConvergencePolicy::exploratory(),
             residual_vector_directions: Vec::new(),
@@ -207,7 +205,6 @@ fn operator_aware_missing_mass_closes_the_truncated_acceleration_influence() {
         &model,
         ComputeBackend::Cpu,
         ModalSolveOptions {
-            formulation_requirement: FormulationRequirement::Experimental,
             truncation,
             convergence: ModalConvergencePolicy::exploratory(),
             residual_vector_directions: Vec::new(),
@@ -225,7 +222,7 @@ fn operator_aware_missing_mass_closes_the_truncated_acceleration_influence() {
         &model,
         &excitations,
         Some(mesh),
-        StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+        StructuralFormulationRequirement::SyntheticOperator,
     )
     .unwrap();
     let first_mode = &run.basis.modes()[0];
@@ -329,7 +326,6 @@ fn pseudo_acceleration_missing_mass_recovers_the_independent_static_field() {
         &model,
         ComputeBackend::Cpu,
         ModalSolveOptions {
-            formulation_requirement: FormulationRequirement::Experimental,
             truncation,
             convergence: ModalConvergencePolicy::exploratory(),
             residual_vector_directions: Vec::new(),
@@ -347,7 +343,7 @@ fn pseudo_acceleration_missing_mass_recovers_the_independent_static_field() {
         &model,
         &excitations,
         Some(mesh),
-        StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+        StructuralFormulationRequirement::SyntheticOperator,
     )
     .unwrap();
     let first_mode = &run.basis.modes()[0];
@@ -484,7 +480,6 @@ fn directional_residual_vector_is_generated_in_the_basis_and_combined_as_a_mode(
         &model,
         ComputeBackend::Cpu,
         ModalSolveOptions {
-            formulation_requirement: FormulationRequirement::Experimental,
             truncation,
             convergence: ModalConvergencePolicy::exploratory(),
             residual_vector_directions: vec![SpectrumDirection {
@@ -505,7 +500,7 @@ fn directional_residual_vector_is_generated_in_the_basis_and_combined_as_a_mode(
         &model,
         &excitations,
         None,
-        StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+        StructuralFormulationRequirement::SyntheticOperator,
     )
     .unwrap();
     let direction = [1.0, 0.5, 0.25];
@@ -585,7 +580,6 @@ fn linear_field_envelope_recovers_signed_mode_before_statistical_combination() {
         &model,
         ComputeBackend::Cpu,
         ModalSolveOptions {
-            formulation_requirement: FormulationRequirement::Experimental,
             truncation,
             convergence: ModalConvergencePolicy::exploratory(),
             residual_vector_directions: Vec::new(),
@@ -603,7 +597,7 @@ fn linear_field_envelope_recovers_signed_mode_before_statistical_combination() {
         &model,
         &excitations,
         Some(mesh),
-        StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+        StructuralFormulationRequirement::SyntheticOperator,
     )
     .unwrap();
     let first_mode = &run.basis.modes()[0];
@@ -727,7 +721,6 @@ fn direct_acceleration_field_is_retained_when_deformation_is_unavailable() {
         &model,
         ComputeBackend::Cpu,
         ModalSolveOptions {
-            formulation_requirement: FormulationRequirement::Experimental,
             truncation,
             convergence: ModalConvergencePolicy::exploratory(),
             residual_vector_directions: Vec::new(),
@@ -745,7 +738,7 @@ fn direct_acceleration_field_is_retained_when_deformation_is_unavailable() {
         &model,
         &excitations,
         Some(mesh),
-        StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+        StructuralFormulationRequirement::SyntheticOperator,
     )
     .unwrap();
     let first_mode = &run.basis.modes()[0];
@@ -845,7 +838,6 @@ fn rotational_layout_publishes_typed_angular_envelopes() {
         &model,
         ComputeBackend::Cpu,
         ModalSolveOptions {
-            formulation_requirement: FormulationRequirement::Experimental,
             truncation,
             convergence: ModalConvergencePolicy::exploratory(),
             residual_vector_directions: Vec::new(),
@@ -863,7 +855,7 @@ fn rotational_layout_publishes_typed_angular_envelopes() {
         &model,
         &excitations,
         None,
-        StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+        StructuralFormulationRequirement::SyntheticOperator,
     )
     .unwrap();
     let first_mode = &run.basis.modes()[0];

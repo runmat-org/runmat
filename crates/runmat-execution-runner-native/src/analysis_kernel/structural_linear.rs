@@ -221,7 +221,6 @@ pub(super) fn execute(
     drop(phase);
     let phase = runmat_analysis_fea::progress::phase_timer("structural_kernel.run");
     let solve_options = LinearStaticSolveOptions {
-        formulation_requirement: solve.formulation_requirement,
         preconditioner_kind: solve.preconditioner,
         algebra_backend_kind: solve.algebra_backend,
         solver_mesh_artifact_path: None,

@@ -417,7 +417,6 @@ impl StructuralRandomResponseStudyCoordinator {
             source_observations: None,
             sequence: SequenceIdentity::from_solver_contract(&workload.model().sequence)?,
             step: workload.procedure_step()?.clone(),
-            formulation_requirement: workload.formulation_requirement(),
             program_revision: self.preparation.program_revision.clone(),
             chunk_bytes: self.preparation.chunk_bytes,
             inventory_limits: self.preparation.inventory_limits,

@@ -45,7 +45,6 @@ fn fixture() -> (FluidTransientWorkload, SolverMeshArtifact) {
         FluidTransientWorkload {
             model,
             step_id: ProcedureStepId("advance".into()),
-            formulation_requirement: FormulationRequirement::Experimental,
             policy: steady.policy,
             geometry_policy: steady.geometry_policy,
             initial_fields: Vec::new(),

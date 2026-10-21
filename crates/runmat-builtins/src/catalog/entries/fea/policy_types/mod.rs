@@ -15,7 +15,6 @@ mod execution_plan;
 mod execution_step;
 mod extrema_tie_policy;
 mod field_location;
-mod formulation_requirement;
 mod modal_truncation;
 mod modal_truncation_correction;
 mod numerical_equivalence_policy;
@@ -55,7 +54,6 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(execution_step::ENTRIES.iter().copied());
     values.extend(extrema_tie_policy::ENTRIES.iter().copied());
     values.extend(field_location::ENTRIES.iter().copied());
-    values.extend(formulation_requirement::ENTRIES.iter().copied());
     values.extend(modal_truncation::ENTRIES.iter().copied());
     values.extend(modal_truncation_correction::ENTRIES.iter().copied());
     values.extend(numerical_equivalence_policy::ENTRIES.iter().copied());

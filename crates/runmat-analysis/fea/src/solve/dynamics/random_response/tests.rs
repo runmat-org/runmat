@@ -34,7 +34,6 @@ fn physical_basis() -> (AssemblySummary, ModalBasisArtifact) {
         &model,
         ComputeBackend::Cpu,
         ModalSolveOptions {
-            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
             truncation: ModalTruncationPolicy::requested(2),
             convergence: ModalConvergencePolicy::exploratory(),
             residual_vector_directions: Vec::new(),

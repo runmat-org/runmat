@@ -26,8 +26,8 @@ relations; rotated and nonmatching pairing remains unsupported.
 
 Unsupported higher-order/exterior-domain radiation, incident sources, material attenuation,
 nonuniform distributions, interior boundary selection and structural/coupled models fail
-closed. Production admission, process restart and GPU/distributed execution remain
-unqualified. Authored canonical study execution and shared complex field publication
+closed. Stage 8 qualification, process restart and GPU/distributed execution remain
+open. Authored canonical study execution and shared complex field publication
 are connected; the bounded eight-case native matched-duct matrix, generated/explicit
 equivalence and authenticated cold fields are retained in
 [the right-LU qualification](acoustic-right-lu.md). This does not qualify every
@@ -85,7 +85,7 @@ so a lossless case does not divide by zero real power or use a dimensional floor
 The straight Tet10 unit-cube fixture shares midsides by canonical global-edge identity,
 uses Tri6 faces with actual planar source-face parameters, and is sealed/validated through
 the ordinary meshing contract. It is a qualification fixture, not a generated replacement
-for imported production topology. At `f=0.2` and `0.5 Hz`, the velocity-driven matched
+for imported CAD topology. At `f=0.2` and `0.5 Hz`, the velocity-driven matched
 wave uses 1/2/4 cells per axis. Nodal relative RMS pressure error must decrease by more
 than six on each refinement and finish below 0.4 percent. Finest particle-velocity RMS
 error must be below `0.01 m/s`, intensity RMS error below `0.005 W/m²`, and energy-density
@@ -141,13 +141,12 @@ curved non-affine energy-form integration or all geometric/quadrature accuracy e
 
 ## Verification and remaining gates
 
-### Portable experimental numerical execution
+### Portable numerical execution
 
 `execution::AcousticHarmonicWorkload` binds the authored model, explicit scheduled
-frequency, canonical formulation requirement, Krylov policy and power-balance target.
+frequency, canonical formulation identity, Krylov policy and power-balance target.
 The canonical Tet4/Tet10 realization has its own Galerkin operator, temporal, recovery
 and solver identities; it cannot be confused with the legacy domain-graph method.
-Production admission remains closed.
 
 Its portable result retains nodal complex pressure, element velocity, intensity and
 energy, ordered topology IDs, residual/power metrics and source-transfer evidence.
@@ -209,12 +208,12 @@ authored/cold-state/detached-profile checks above. Shared field/observation regr
 previously passed 123/123; current resource regressions pass 124/124, the execution
 bridge passes 91/91, and native acoustic execution/publication passes 9/9. Architecture checking still
 reports five unrelated runtime module-size violations. This is not unrestricted suite
-or production evidence. Numerical receipts,
+or qualification evidence. Numerical receipts,
 output-policy-neutral entry intent, whole-study worker coordination, shared observation
 catalog admission, independent frequency fan-out/fan-in and durable accepted-entry
 sweep restart remain required. Storage topology is distinct from interpolation
 projection; acoustic fields are not forced through the legacy projection-specific
-catalog constructor or assigned fictitious integration-point counts. No production,
+catalog constructor or assigned fictitious integration-point counts. No stage,
 process-restart, measured-memory or distributed-algebra gate is promoted.
 
 ### Canonical native task and resource admission
@@ -233,7 +232,7 @@ request and rederived resource plan. It has no mesh or acoustic-workload inputs 
 not solve again. Borrowed profiles interleave the already completed pressure/velocity arrays
 without constructing recovered buffers or a semantic state. The result's exact persisted
 single-frequency declaration is the authority; an ambiguous low-level sweep has an empty
-publication inventory rather than an invented single-frequency state. Production-authored
+publication inventory rather than an invented single-frequency state. Multi-frequency authored
 dispatch and durable sweep continuation remain separate gates.
 
 The assembly-free planner counts canonical local operator supports, full real-block Krylov

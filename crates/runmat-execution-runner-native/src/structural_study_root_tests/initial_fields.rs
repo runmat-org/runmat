@@ -92,7 +92,6 @@ pub(crate) fn verify_original_field_transport(fields: &[InitialFieldBinding]) {
         materials: resolved.material_catalog.clone(),
         planning: crate::StudyRootPlanning::Structural(StructuralStudyPlanningPolicy {
             backend: runmat_analysis_fea::ComputeBackend::Cpu,
-            formulation_requirement: study.formulation_requirement,
             numerics: StructuralNumericalPlanningPolicy::production(),
         }),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),

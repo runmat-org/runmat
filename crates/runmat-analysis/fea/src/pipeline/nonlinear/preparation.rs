@@ -75,11 +75,8 @@ fn prepare_for<'a>(
     additional_retained_bytes: u64,
     recovery: bool,
 ) -> Result<PreparedNonlinear<'a>, FeaRunError> {
-    let execution_step = super::super::admission::require_structural(
-        model,
-        AnalysisProcedure::Nonlinear,
-        options.formulation_requirement,
-    )?;
+    let execution_step =
+        super::super::admission::require_structural(model, AnalysisProcedure::Nonlinear)?;
     validate_nonlinear_event_requests(execution_step)?;
     emit_phase(
         "fea.run_nonlinear",
@@ -178,11 +175,7 @@ fn prepare_for<'a>(
         LinearAssemblyError::CouplingRealization(_) => FeaRunError::InvalidModel(err.to_string()),
         _ => FeaRunError::Assembly(err.to_string()),
     })?;
-    let identity = super::super::admission::admit_structural(
-        &summary,
-        execution_step,
-        options.formulation_requirement,
-    )?;
+    let identity = super::super::admission::admit_structural(&summary, execution_step)?;
     super::super::validate_rotational_dof_targets(model, &summary)?;
     emit_phase(
         "fea.run_nonlinear",

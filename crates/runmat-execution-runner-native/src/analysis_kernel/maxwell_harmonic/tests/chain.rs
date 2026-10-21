@@ -290,7 +290,6 @@ fn both_orders_native_solve_recovery_complex_observation_state_and_accuracy_cold
             ],
             sequence: SequenceIdentity::from_solver_contract(&w.model.sequence).unwrap(),
             step: w.model.sequence.steps[0].clone(),
-            formulation_requirement: w.formulation_requirement,
             program_revision: task.program.request.recipe.program_revision.clone(),
             chunk_bytes: policy.chunk_bytes(),
             inventory_limits: limits,

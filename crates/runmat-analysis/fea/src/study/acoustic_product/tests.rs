@@ -4,9 +4,9 @@ use runmat_analysis_core::{
     AuthoredBoundary, AuthoredBoundaryKind, AuthoredConstraint, AuthoredConstraintKind,
     AuthoredConstraintTarget, AuthoredMaterialAssignment, AuthoredMaterialRef,
     AuthoredMaterialSource, AuthoredMeshRef, AuthoredModel, AuthoredPropertyTarget,
-    AuthoredRegionSource, AuthoredTargetCardinality, FormulationRequirement, IndependentDomain,
-    MaterialAcousticModel, MaterialModel, MaterialProvenance, PrescribedValue, Pressure,
-    ProcedureStep, RealizedGeometryInstance, RealizedStudy, SpecificAcousticImpedance,
+    AuthoredRegionSource, AuthoredTargetCardinality, IndependentDomain, MaterialAcousticModel,
+    MaterialModel, MaterialProvenance, PrescribedValue, Pressure, ProcedureStep,
+    RealizedGeometryInstance, RealizedStudy, SpecificAcousticImpedance,
 };
 use runmat_geometry_core::{
     GeometryAuthoringCapabilities, GeometryDefinitionRef, GeometryDefinitionSource, GeometryDigest,
@@ -37,7 +37,7 @@ fn authored_tetrahedron_compiles_plans_and_executes_for_supported_orders() {
             regions: &fixture.regions,
             materials: &fixture.materials,
             mesh: &fixture.mesh,
-            planning: AcousticStudyPlanningPolicy::experimental(),
+            planning: AcousticStudyPlanningPolicy::standard(),
         })
         .unwrap();
 
@@ -45,7 +45,7 @@ fn authored_tetrahedron_compiles_plans_and_executes_for_supported_orders() {
             plan_acoustic_study_product(
                 product.compiled.clone(),
                 &fixture.mesh,
-                AcousticStudyPlanningPolicy::experimental(),
+                AcousticStudyPlanningPolicy::standard(),
             )
             .unwrap(),
             product,
@@ -142,7 +142,7 @@ fn post_sealing_product_retains_material_and_mesh_admission() {
             plan_acoustic_study_product(
                 compiled.clone(),
                 &fixture.mesh,
-                AcousticStudyPlanningPolicy::experimental()
+                AcousticStudyPlanningPolicy::standard()
             ),
             Err(AcousticStudyProductError::UnsupportedMaterial),
         ));
@@ -155,7 +155,7 @@ fn post_sealing_product_retains_material_and_mesh_admission() {
             plan_acoustic_study_product(
                 compiled,
                 &foreign.mesh,
-                AcousticStudyPlanningPolicy::experimental()
+                AcousticStudyPlanningPolicy::standard()
             ),
             Err(AcousticStudyProductError::Compilation(_)),
         ));
@@ -293,7 +293,6 @@ fn authored_tetrahedron(order: ElementOrder) -> AuthoredAcousticFixture {
             mesh_id: GEOMETRY.into(),
         },
         model,
-        formulation_requirement: FormulationRequirement::Experimental,
         included_models: Vec::new(),
         study_inputs: Vec::new(),
         assessments: Vec::new(),

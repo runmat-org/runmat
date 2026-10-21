@@ -1,6 +1,6 @@
 //! Thermal solve controls, solved output and initial/reference-state evidence.
 
-use runmat_analysis_core::{AnalysisField, AnalysisProcedure, FormulationRequirement};
+use runmat_analysis_core::{AnalysisField, AnalysisProcedure};
 use runmat_execution::Digest;
 use runmat_meshing_core::SolverMeshArtifact;
 use serde::{Deserialize, Serialize};
@@ -35,7 +35,6 @@ impl ThermalProcedureControl {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ThermalSolveOptions {
     pub initial_fields: Vec<crate::execution::InitialFieldBinding>,
-    pub formulation_requirement: FormulationRequirement,
     pub procedure: ThermalProcedureControl,
     pub residual_target: f64,
     pub solver_mesh: Option<SolverMeshArtifact>,
@@ -44,7 +43,6 @@ pub struct ThermalSolveOptions {
 impl Default for ThermalSolveOptions {
     fn default() -> Self {
         Self {
-            formulation_requirement: FormulationRequirement::Production,
             procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 10 },
             residual_target: 1.0e-4,
             solver_mesh: None,

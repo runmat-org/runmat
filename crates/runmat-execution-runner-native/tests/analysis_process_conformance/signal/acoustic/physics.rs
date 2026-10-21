@@ -217,7 +217,6 @@ fn workload(drive: Drive, signal: PhysicalSignal) -> AcousticHarmonicWorkload {
         model,
         step_id: ProcedureStepId("acoustic-spectrum".into()),
         frequency: Frequency::new(FREQUENCIES[0]),
-        formulation_requirement: FormulationRequirement::Experimental,
         solver: AcousticHarmonicPolicy::default(),
         power_balance_relative_tolerance: 1e-8,
     }
