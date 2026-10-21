@@ -456,7 +456,7 @@ pub fn assemble_elements<T, E, K, V>(
     mut visit: V,
 ) -> Result<AssembledElements<T>, ElementAssemblyError<E>>
 where
-    T: Copy + Default + AddAssign + Send + Sync,
+    T: Copy + Default + AddAssign + PartialEq + Send + Sync,
     E: Send,
     K: Fn(usize, &[u32], &mut ElementOutputs<'_, T>) -> Result<(), E> + Sync + Send,
     V: FnMut(&ElementView<'_, T>) -> Result<(), E> + Send,
@@ -705,13 +705,20 @@ where
                             {
                                 cursor += 1;
                             }
+                            let local = local_row * n + local_column as usize;
                             if cursor == row_columns.len()
                                 || row_columns[cursor] != u64::from(column)
                             {
+                                // Exact-zero contributions carry no support (as in
+                                // `RealSparseAssembler::add`); anything else fails closed.
+                                if (0..task.matrices.len())
+                                    .all(|matrix| values[matrix * n * n + local] == T::default())
+                                {
+                                    continue;
+                                }
                                 task.failure = Some((row, column as usize));
                                 return;
                             }
-                            let local = local_row * n + local_column as usize;
                             for (matrix, target) in task.matrices.iter_mut().enumerate() {
                                 target[local_entry + cursor] += values[matrix * n * n + local];
                             }

@@ -97,7 +97,7 @@ fn connected_tet4_affine_patch_balances_independent_boundary_tractions() {
 }
 
 #[test]
-fn scoped_solid_assembly_preserves_shared_row_sum_across_waves() {
+fn scoped_solid_assembly_preserves_shared_row_sum_across_batches() {
     let artifact = artifact(ElementOrder::Tet10);
     let properties = inventory(&artifact, material(70.0e9, 2_700.0));
     let nodes = artifact
@@ -110,7 +110,7 @@ fn scoped_solid_assembly_preserves_shared_row_sum_across_waves() {
     // Repeated contributions deliberately target identical rows. This exercises summation
     // order and a second bounded wave without admitting a duplicate canonical mesh element.
     let elements = vec![artifact.topology.volume_elements[0].clone(); 19];
-    let serial = assemble_solid_rows(
+    let serial = assemble_solid_operators(
         &elements,
         &properties,
         &nodes,
@@ -124,9 +124,10 @@ fn scoped_solid_assembly_preserves_shared_row_sum_across_waves() {
     )
     .unwrap();
     let parallel =
-        assemble_solid_rows(&elements, &properties, &nodes, nodes.len() * 3, plan, None).unwrap();
+        assemble_solid_operators(&elements, &properties, &nodes, nodes.len() * 3, plan, None)
+            .unwrap();
     assert_eq!(parallel.stiffness, serial.stiffness);
-    assert_eq!(parallel.mass, serial.mass);
+    assert_eq!(parallel.consistent_mass, serial.consistent_mass);
     assert_eq!(parallel.damping, serial.damping);
     assert_eq!(parallel.lumped_mass_diag, serial.lumped_mass_diag);
     assert_eq!(parallel.total_mass_kg, serial.total_mass_kg);

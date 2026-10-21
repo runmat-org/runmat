@@ -237,9 +237,31 @@ fn entries_outside_a_foreign_pattern_fail_closed() {
             ..Default::default()
         },
         plan(2),
-        |_, _, _: &mut ElementOutputs<'_, f64>| Ok::<_, ()>(()),
+        |_, _, out: &mut ElementOutputs<'_, f64>| {
+            out.matrix(0).fill(1.0);
+            Ok::<_, ()>(())
+        },
         no_visit,
     )
     .unwrap_err();
     assert!(matches!(error, ElementAssemblyError::OutsidePattern { .. }));
+    // Exact-zero contributions carry no support and never fail.
+    assemble_elements(
+        &map,
+        &diagonal,
+        ElementOutputShape {
+            matrices: 1,
+            ..Default::default()
+        },
+        plan(2),
+        |_, dofs, out: &mut ElementOutputs<'_, f64>| {
+            let n = dofs.len();
+            for local in 0..n {
+                out.matrix(0)[local * n + local] = 1.0;
+            }
+            Ok::<_, ()>(())
+        },
+        no_visit,
+    )
+    .unwrap();
 }
