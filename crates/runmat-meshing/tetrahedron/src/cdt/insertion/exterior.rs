@@ -93,39 +93,69 @@ impl UnconstrainedHull {
             self.hint = self.topology.vertex_stars[inserted].first().copied();
             return Ok(());
         }
-        let removed = search::finite_conflict(&self.topology, node, &visible, &mut work)?;
-        let mut boundary = BTreeSet::new();
-        let mut attachments = BTreeSet::new();
-        let mut affected_nodes = BTreeSet::new();
-        for index in &removed {
-            let tet = self
-                .topology
-                .tetrahedron(*index)
-                .expect("conflict tetrahedron is active");
-            affected_nodes.extend(tet.vertex_indices);
-            for opposite in 0..4 {
-                let neighbor = tet.neighbors[opposite];
-                if neighbor.is_some_and(|neighbor| removed.contains(&neighbor)) {
-                    continue;
-                }
-                let side = face_side(
-                    &self.topology,
-                    tet.vertex_indices,
-                    opposite,
-                    node,
-                    &mut work,
-                )?;
-                if neighbor.is_some() && side != FaceSide::Interior {
-                    return Err(error(
-                        DelaunayInsertionErrorKind::InvalidTopology,
-                        "finite hull conflict boundary is not visible from the cavity side",
-                    ));
-                }
-                if side == FaceSide::Interior {
-                    boundary.insert(face(tet.vertex_indices, opposite));
+        let mut removed = search::finite_conflict(&self.topology, node, &visible, &mut work)?;
+        // A cavity face can be coplanar with the new point only when the point lies exactly on
+        // that face's circumcircle, so both cells across it are in an in-sphere tie (cocircular
+        // cap points of a cylinder, a regular grid). The symbolic tie-break may split such a pair;
+        // the tied neighbor then joins the cavity, so no flat cell is created. A face the point
+        // does not see across a non-tied cell remains an error.
+        let (boundary, affected_nodes) = loop {
+            let mut boundary = BTreeSet::new();
+            let mut affected_nodes = BTreeSet::new();
+            let mut grow = None;
+            'cells: for index in &removed {
+                let tet = self
+                    .topology
+                    .tetrahedron(*index)
+                    .expect("conflict tetrahedron is active");
+                affected_nodes.extend(tet.vertex_indices);
+                for opposite in 0..4 {
+                    let neighbor = tet.neighbors[opposite];
+                    if neighbor.is_some_and(|neighbor| removed.contains(&neighbor)) {
+                        continue;
+                    }
+                    let side = face_side(
+                        &self.topology,
+                        tet.vertex_indices,
+                        opposite,
+                        node,
+                        &mut work,
+                    )?;
+                    if let Some(neighbor) = neighbor {
+                        if side != FaceSide::Interior {
+                            let tied = cospherical(&self.topology, neighbor, node)?;
+                            if side == FaceSide::Coplanar && tied {
+                                grow = Some(neighbor);
+                                break 'cells;
+                            }
+                            return Err(error(
+                                DelaunayInsertionErrorKind::InvalidTopology,
+                                format!(
+                                    "finite hull conflict boundary is not visible from the cavity side ({side:?} face, neighbor in-sphere tie {tied}, cavity of {} cells)",
+                                    removed.len()
+                                ),
+                            ));
+                        }
+                    }
+                    if side == FaceSide::Interior {
+                        boundary.insert(face(tet.vertex_indices, opposite));
+                    }
                 }
             }
-        }
+            match grow {
+                Some(neighbor) => {
+                    removed.insert(neighbor);
+                    if removed.len() as u64 > work.options.maximum_cavity_tetrahedra {
+                        return Err(resource(
+                            "hull insertion conflict tetrahedron limit exceeded",
+                        ));
+                    }
+                }
+                None => break (boundary, affected_nodes),
+            }
+        };
+        let mut boundary = boundary;
+        let mut attachments = BTreeSet::new();
         for (index, opposite) in visible {
             if removed.contains(&index) {
                 continue;
@@ -184,7 +214,7 @@ impl UnconstrainedHull {
     }
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 enum FaceSide {
     Interior,
     Coplanar,
@@ -232,4 +262,22 @@ fn face(vertices: [u32; 4], opposite: usize) -> [u32; 3] {
     }
     result.sort_unstable();
     result
+}
+
+/// True when `node` lies exactly on the circumsphere of `cell` (unperturbed in-sphere tie).
+fn cospherical(
+    topology: &TopologyMutation,
+    cell: u32,
+    node: DelaunayVolumeNode,
+) -> Result<bool, DelaunayInsertionError> {
+    let corners = topology
+        .tetrahedron(cell)
+        .expect("live conflict adjacency")
+        .vertex_indices
+        .map(|vertex| topology.nodes()[vertex as usize]);
+    let relation = crate::cdt::topology::insphere_materialized_volume_nodes([
+        corners[0], corners[1], corners[2], corners[3], node,
+    ])
+    .map_err(predicate_error)?;
+    Ok(relation == PredicateSign::Zero)
 }
