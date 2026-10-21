@@ -227,6 +227,10 @@ impl<'a> PreparedLocalQuality<'a> {
                     .filter(|id| self.boundary_nodes.contains(id))
                     .count() as u8,
                 protected_facet_count: protected_facet_count(identities, &self.protected_facets),
+                protected_edges: super::super::protected_edge_mask(
+                    identities,
+                    &self.protected_facets,
+                ),
             },
             self.options,
         )
