@@ -2,6 +2,7 @@ pub mod accelerator;
 mod affine;
 pub mod backend;
 pub mod buckling;
+pub mod certificate;
 pub(crate) mod convergence;
 pub mod dynamics;
 pub mod fixed_point;
@@ -15,6 +16,8 @@ pub mod preconditioner;
 mod reaction;
 #[cfg(test)]
 pub(crate) use reaction::{recover_structural_reaction, recover_structural_reaction_scoped};
+pub(crate) mod shared_sparse;
+pub use shared_sparse::with_solver_plan;
 pub(crate) mod spd_linear;
 mod static_balance;
 pub use static_balance::StructuralStaticBalanceEvidence;

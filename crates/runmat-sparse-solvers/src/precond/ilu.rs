@@ -173,6 +173,24 @@ impl<T: Scalar> Ilu0<T> {
         Ok(values)
     }
 
+    /// Factor row offsets (the input pattern).
+    pub fn row_ptr(&self) -> &[usize] {
+        &self.row_ptr
+    }
+    /// Factor column indices (the input pattern).
+    pub fn col_idx(&self) -> &[usize] {
+        &self.col_idx
+    }
+    /// `L` (strictly lower, unit diagonal implied) and `U` values on the input pattern.
+    pub fn values(&self) -> &[T] {
+        &self.values
+    }
+    /// Bytes retained by the factor.
+    pub fn retained_bytes(&self) -> u64 {
+        ((self.row_ptr.len() + self.col_idx.len() + self.diagonal.len()) * std::mem::size_of::<usize>()
+            + self.values.len() * std::mem::size_of::<T>()) as u64
+    }
+
     /// Diagonal shift that was required (0 when none).
     pub fn shift(&self) -> f64 {
         self.shift
