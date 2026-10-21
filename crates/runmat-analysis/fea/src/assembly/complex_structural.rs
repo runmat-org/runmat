@@ -158,7 +158,7 @@ mod tests {
             &model,
             &excitations,
             None,
-            StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+            StructuralFormulationRequirement::SyntheticOperator,
         )
         .unwrap();
 

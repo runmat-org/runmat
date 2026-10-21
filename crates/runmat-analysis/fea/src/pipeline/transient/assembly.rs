@@ -58,7 +58,7 @@ impl<'a> TransientAssemblySampler<'a> {
                 self.model,
                 &excitations,
                 self.mesh,
-                StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+                StructuralFormulationRequirement::SyntheticOperator,
             )
             .map_err(|error| FeaRunError::Assembly(error.to_string()))?
         };

@@ -67,7 +67,7 @@ pub enum MagnetostaticError {
     NotConverged(String),
 }
 
-/// Experimental numerical kernel with explicitly full-exterior tangential A=0.
+/// Numerical kernel with explicitly full-exterior tangential A=0.
 /// This does not silently infer authored boundary policy: authored execution must
 /// separately compile and prove this boundary/gauge contract before calling it.
 /// Lowest-order edges are used on affine Tet4/Tet10 geometry. General curved
@@ -89,7 +89,7 @@ pub fn solve_full_grounded_volume(
     )
 }
 
-/// Execute the same experimental kernel using exact precomputed sparse support.
+/// Execute the same kernel using exact precomputed sparse support.
 /// The plan is revalidated against canonical topology before physical assembly;
 /// it does not authorize scheduler placement, publication or production execution.
 pub fn solve_full_grounded_volume_with_plan(

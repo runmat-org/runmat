@@ -464,7 +464,6 @@ mod tests {
             &model,
             crate::ComputeBackend::Cpu,
             crate::LinearStaticSolveOptions {
-                formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
                 ..crate::LinearStaticSolveOptions::default()
             },
         )
@@ -483,7 +482,6 @@ mod tests {
             &model,
             crate::ComputeBackend::Cpu,
             crate::LinearStaticSolveOptions {
-                formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
                 local_execution: LocalExecutionPlan::fixed(LocalThreadCount::new(3).unwrap())
                     .unwrap(),
                 ..crate::LinearStaticSolveOptions::default()

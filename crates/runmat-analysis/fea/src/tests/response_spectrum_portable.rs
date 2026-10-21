@@ -1,11 +1,10 @@
 use runmat_analysis_core::{
-    AnalysisSequence, DirectionalCombination, FormulationRequirement, ModalCombination,
-    ModalTruncationCorrection, ModalTruncationPolicy as SpectrumTruncationPolicy, ProcedureStep,
-    ReferenceStatePolicy, ResponseSpectrum, ResponseSpectrumId, RigidResponsePolicy,
-    SequenceDependencyReason, SpectrumAbscissa, SpectrumConstruction, SpectrumDamping,
-    SpectrumDirection, SpectrumEnvelope, SpectrumEvidence, SpectrumExtrapolation,
-    SpectrumInterpolation, SpectrumResponse, StateTransition, StateTransitionMethod, StateUse,
-    TopologyTransitionPolicy, TransitionId,
+    AnalysisSequence, DirectionalCombination, ModalCombination, ModalTruncationCorrection,
+    ModalTruncationPolicy as SpectrumTruncationPolicy, ProcedureStep, ReferenceStatePolicy,
+    ResponseSpectrum, ResponseSpectrumId, RigidResponsePolicy, SequenceDependencyReason,
+    SpectrumAbscissa, SpectrumConstruction, SpectrumDamping, SpectrumDirection, SpectrumEnvelope,
+    SpectrumEvidence, SpectrumExtrapolation, SpectrumInterpolation, SpectrumResponse,
+    StateTransition, StateTransitionMethod, StateUse, TopologyTransitionPolicy, TransitionId,
 };
 use runmat_execution::Digest;
 
@@ -392,7 +391,6 @@ fn prepared_response(
         model: model.clone(),
         step_id: modal.step_id.clone(),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         observation_execution: ObservationExecutionPolicy::scalable(),
         truncation: ModalTruncationPolicy::requested(3),
         convergence: ModalConvergencePolicy::exploratory(),
@@ -429,7 +427,6 @@ fn prepared_response(
             model,
             step_id: response.step_id,
             backend: ComputeBackend::Cpu,
-            formulation_requirement: FormulationRequirement::Experimental,
             observation_execution: ObservationExecutionPolicy::scalable(),
             modal_basis_transition: transition,
         },

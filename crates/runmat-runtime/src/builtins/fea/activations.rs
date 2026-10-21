@@ -23,10 +23,10 @@ const ACTIVATION_FIELDS: &[&str] = &["object", "lifecycle"];
 macro_rules! object_ref_builtin {
     ($function:ident, $builtin:literal, $variant:ident, $descriptor:ident) => {
         #[runtime_builtin(
-                            name = $builtin,
-                            binding_variant = "default",
-                            builtin_path = "crate::builtins::fea::activations"
-                        )]
+                                    name = $builtin,
+                                    binding_variant = "default",
+                                    builtin_path = "crate::builtins::fea::activations"
+                                )]
         pub async fn $function(id: String) -> BuiltinResult<Value> {
             crate::builtins::fea::constraints::fixed_outputs(
                 &runmat_builtins::$descriptor,

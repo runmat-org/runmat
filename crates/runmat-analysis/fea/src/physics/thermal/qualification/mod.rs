@@ -66,7 +66,6 @@ pub fn workload() -> ThermalWorkload {
         initial_fields: Vec::new(),
         step_id: ProcedureStepId("heat".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         procedure: ThermalProcedureControl::Steady,
         residual_target: TARGET,
     }

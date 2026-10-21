@@ -13,7 +13,7 @@ fn surface_case(
         ComputeBackend::Cpu,
         LinearStaticSolveOptions {
             solver_mesh: Some(mesh.clone()),
-            ..experimental_linear_static_options()
+            ..baseline_linear_static_options()
         },
     )
     .expect("a supported single-tetrahedron surface-load solve must complete");
@@ -285,7 +285,7 @@ fn tet4_and_tet10_surface_loads_obey_reciprocity_and_energy_polarization() {
             ComputeBackend::Cpu,
             LinearStaticSolveOptions {
                 solver_mesh: Some(mesh),
-                ..experimental_linear_static_options()
+                ..baseline_linear_static_options()
             },
         )
         .unwrap();

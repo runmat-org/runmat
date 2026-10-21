@@ -104,7 +104,6 @@ pub fn validate_accuracy_source_context(
     )?;
     if producer != request.producer
         || request.plan != step.accuracy
-        || request.formulation_requirement != workload.formulation_requirement
         || observations.is_some() == step.observations.is_empty()
     {
         return Err(AnalysisBridgeError::Identity(

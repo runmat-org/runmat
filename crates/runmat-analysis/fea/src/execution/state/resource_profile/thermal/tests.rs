@@ -7,9 +7,7 @@ use crate::{
     fixtures::{fixture_model, FixtureId},
     ComputeBackend, ThermalProcedureControl, ThermalSolveOptions,
 };
-use runmat_analysis_core::{
-    AnalysisSequence, FormulationRequirement, ProcedureStep, StateId, Temperature, ThermalDomain,
-};
+use runmat_analysis_core::{AnalysisSequence, ProcedureStep, StateId, Temperature, ThermalDomain};
 use runmat_execution::Digest;
 use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
 
@@ -29,7 +27,6 @@ fn thermal_profiles_bound_actual_state_for_orders_histories_and_declaration_leng
                 &model,
                 ComputeBackend::Cpu,
                 ThermalSolveOptions {
-                    formulation_requirement: FormulationRequirement::Experimental,
                     procedure: ThermalProcedureControl::BackwardEuler { snapshot_count },
                     solver_mesh: Some(canonical_tetrahedron_solver_mesh(order)),
                     ..ThermalSolveOptions::default()

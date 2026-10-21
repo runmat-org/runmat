@@ -388,7 +388,6 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
             .collect(),
         sequence,
         step,
-        formulation_requirement: workload.formulation_requirement,
         program_revision: program_revision.clone(),
         chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
         inventory_limits: limits,

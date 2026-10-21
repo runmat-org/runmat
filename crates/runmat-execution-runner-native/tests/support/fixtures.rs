@@ -7,8 +7,8 @@ use runmat_execution::{
     host::{ExecutionHostInventory, ExecutionHostRequirement},
     resource::{
         AcceleratorAllocationDomainId, AcceleratorClass, AcceleratorDevice, AcceleratorDeviceId,
-        AcceleratorFeature, AcceleratorProvider, AcceleratorProviderId,
-        AcceleratorProviderVersion, AcceleratorRequest,
+        AcceleratorFeature, AcceleratorProvider, AcceleratorProviderId, AcceleratorProviderVersion,
+        AcceleratorRequest,
     },
     security::ExecutionTrustTier,
     Digest,
@@ -44,7 +44,10 @@ pub(crate) fn accelerator_class(name: &str) -> AcceleratorClass {
     AcceleratorClass::new(name).unwrap()
 }
 
-pub(crate) fn accelerator_request(class: &str, minimum_allocation_bytes: u64) -> AcceleratorRequest {
+pub(crate) fn accelerator_request(
+    class: &str,
+    minimum_allocation_bytes: u64,
+) -> AcceleratorRequest {
     AcceleratorRequest {
         class: accelerator_class(class),
         count: 1,
@@ -124,7 +127,9 @@ pub(crate) fn accelerator_devices(requests: &[AcceleratorRequest]) -> Vec<Accele
             if let Some(provider) = &request.provider {
                 device.provider = provider.clone();
             }
-            device.features.extend(request.required_features.iter().cloned());
+            device
+                .features
+                .extend(request.required_features.iter().cloned());
             device
         })
         .collect()

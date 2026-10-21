@@ -3,9 +3,7 @@
 //! The checkpoint-scope and direct-host paths must use one active-constraint and schedule
 //! authority. Resource projection can inspect this result before either path builds an operator.
 
-use runmat_analysis_core::{
-    validate_model, AnalysisModel, AnalysisProcedure, FormulationRequirement, ProcedureStep,
-};
+use runmat_analysis_core::{validate_model, AnalysisModel, AnalysisProcedure, ProcedureStep};
 
 use crate::{
     contracts::FeaRunError,
@@ -32,14 +30,12 @@ pub(crate) struct PreparedTransientPreassembly {
 /// or structural operators are constructed.
 #[derive(Clone, Copy)]
 pub(crate) struct TransientPreassemblyOptions {
-    pub(crate) formulation_requirement: FormulationRequirement,
     pub(crate) time_step_policy: StructuralTimeStepPolicy,
 }
 
 impl From<&TransientSolveOptions> for TransientPreassemblyOptions {
     fn from(options: &TransientSolveOptions) -> Self {
         Self {
-            formulation_requirement: options.formulation_requirement,
             time_step_policy: options.time_step_policy,
         }
     }
@@ -48,7 +44,6 @@ impl From<&TransientSolveOptions> for TransientPreassemblyOptions {
 impl From<&StructuralTransientWorkload> for TransientPreassemblyOptions {
     fn from(workload: &StructuralTransientWorkload) -> Self {
         Self {
-            formulation_requirement: workload.formulation_requirement,
             time_step_policy: workload.time_step_policy,
         }
     }
@@ -58,12 +53,9 @@ pub(crate) fn prepare_transient_preassembly(
     model: &AnalysisModel,
     options: TransientPreassemblyOptions,
 ) -> Result<PreparedTransientPreassembly, FeaRunError> {
-    let execution_step = super::super::admission::require_structural(
-        model,
-        AnalysisProcedure::TransientResponse,
-        options.formulation_requirement,
-    )?
-    .clone();
+    let execution_step =
+        super::super::admission::require_structural(model, AnalysisProcedure::TransientResponse)?
+            .clone();
     validate_model(model).map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
     admit_transient_minimum_samples(
         options.time_step_policy.interval_count(),

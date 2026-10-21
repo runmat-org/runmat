@@ -12,10 +12,10 @@ The purpose of validation is to determine whether the implementation, numerical 
 | Input validation | Is the model or typed `.fea` source well formed? | `runmat check`, `fea.validate_study/v1`, model validation, issue codes. |
 | Solver implementation verification | Does the implementation solve the intended discrete problem? | Residual checks, deterministic replay, convergence diagnostics, backend provenance. |
 | Numerical verification | Does the discretization converge toward known answers? | Analytic cases, manufactured solutions, patch tests, mesh convergence, time-step convergence. |
-| Physics validation | Does the model match trusted external behavior? | Literature cases, independent solver comparisons, standard benchmarks, experimental references. |
-| Production readiness | Are the checks repeatable and governed for a defined use class? | CI gates, readiness reports, threshold ratchets, owners, documented boundaries. |
+| Physics validation | Does the model match trusted external behavior? | Literature cases, independent solver comparisons, standard benchmarks, measured physical references. |
+| Release governance | Are the checks repeatable and governed for a defined use class? | CI gates, readiness reports, threshold ratchets, owners, documented boundaries. |
 
-No single test makes a FEA family production-grade. Readiness is earned per family and per intended use.
+No single test validates a FEA family. Validation is earned per family and per intended use.
 
 Model validation runs before formulation admission or solver progress. It rejects non-finite or
 inadmissible constitutive properties, duplicate materials, and material-domain gaps, overlaps,
@@ -26,7 +26,7 @@ valid when both materials exist; its confidence is retained as quality evidence.
 data and invalid assignments use distinct typed diagnostics, so a solver failure is not used as an
 input-validation mechanism.
 
-## Maturity Levels
+## Validation Levels
 
 Use these labels in [Current Status](/docs/simulation/status):
 
@@ -36,8 +36,8 @@ Use these labels in [Current Status](/docs/simulation/status):
 | L1 | Regression tested | Deterministic fixtures, valid/invalid cases, replay stability. |
 | L2 | Solver behavior checked | Residuals, convergence, quality reasons, backend provenance, CPU/GPU parity or documented fallback. |
 | L3 | Numerically verified | Known-answer, manufactured-solution, patch, mesh-convergence, or time-step-convergence evidence. |
-| L4 | Externally validated | Independent solver, literature, standard benchmark, or experimental comparison with accepted tolerances. |
-| L5 | Production ready | L4 evidence plus governed thresholds, CI enforcement, owner-approved limits, and documented use boundaries. |
+| L4 | Externally validated | Independent solver, literature, standard benchmark, or measured-data comparison with accepted tolerances. |
+| L5 | Governed for use | L4 evidence plus governed thresholds, CI enforcement, owner-approved limits, and documented use boundaries. |
 
 ## Current Test Sources
 
@@ -58,30 +58,30 @@ external-reference, and governance evidence.
 
 ## Current Gaps
 
-The main gaps for production-grade claims are:
+The main gaps for validated-use claims are:
 
 - broader analytic and manufactured-solution tests,
 - structural patch tests,
 - mesh-convergence studies,
 - time-step-convergence studies for transient families,
 - independent solver or literature comparisons for each promoted family,
-- calibrated experimental or industry benchmark references where appropriate,
+- calibrated measured or industry benchmark references where appropriate,
 - clearer accepted tolerances by model class, unit system, and family,
 - status labels that separate operation support from physical validation.
 
-## Family Maturity Summary
+## Family Validation Summary
 
 | Family | Public whole-study state | Main open gate |
 | --- | --- | --- |
-| Structural | Executable with formulation-specific experimental or production admission | Close the recorded result/recovery defects, then qualify each formulation and execution envelope independently. |
+| Structural | Executable | Close the recorded result/recovery defects, then qualify each formulation and execution envelope independently. |
 | Thermal and thermo-mechanical | Checkable; native typed execution unavailable | Connect geometry, properties, procedures, recovery, publication, local/remote execution, and governed validation evidence end to end. |
 | Electro-thermal and electromagnetic | Checkable; native typed execution unavailable | Complete the same whole-study path plus conservation, source/boundary realization, convergence, and independent references. |
 | Acoustic | Checkable; native typed execution unavailable | Complete the whole-study path plus impedance/radiation, convergence, and independent acoustic references. |
 | Fluid, conjugate heat transfer, and fluid-structure interaction | Checkable; native typed execution unavailable | Complete the whole-study path plus conservation, coupling/interface, canonical benchmark, scale, and independent-reference evidence. |
 
 Within the structural family, static, modal, transient, harmonic, spectrum, random-response,
-prestress-dependent, nonlinear, and buckling paths do not share one maturity label. Consult the
-formulation requirement and emitted evidence for the exact run, and see [Current Status](./status)
+prestress-dependent, nonlinear, and buckling paths do not share one validation level. Consult the
+formulation identity and emitted evidence for the exact run, and see [Current Status](./status)
 for the current execution boundary.
 
 ## Adding A V&V Case
@@ -108,4 +108,4 @@ Use these terms precisely:
 | Evidence | Artifacts, diagnostics, quality reasons, provenance, benchmark reports, readiness records. |
 | Verification | Showing the implementation solves the intended discrete equations correctly. |
 | Validation | Showing the implemented model matches known physical or trusted external behavior for a defined use. |
-| Production ready | A documented use class with validation records, release gates, accepted tolerances, and known boundaries. |
+| Governed for use | A documented use class with validation records, release gates, accepted tolerances, and known boundaries. |

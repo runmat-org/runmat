@@ -78,7 +78,7 @@ not by itself an executable end-to-end study. The native whole-study executor cu
 structural procedure graphs. Thermal, electromagnetic, acoustic, and fluid load contracts can be
 authored and checked, but their complete geometry-to-publication `.fea` execution paths are not yet
 admitted. `runmat fea check` therefore answers “is this a valid typed study definition?”; it does
-not promote a physics family to production execution.
+not admit a physics family for execution.
 
 The family pages mark that boundary where it matters. See [FEA capability status](../status) for the
 current execution envelope and [verification and validation](../validation) for the evidence needed

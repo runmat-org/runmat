@@ -166,7 +166,7 @@ load insulated_boundary {
 }
 ```
 
-The boundary contributes no scalar value. In the experimental edge-graph realization, result
+The boundary contributes no scalar value. In the edge-graph realization, result
 evidence distinguishes canonical boundary projection from ordinal/global-count/unmapped fallback.
 Require canonical localization for geometry-sensitive conclusions.
 

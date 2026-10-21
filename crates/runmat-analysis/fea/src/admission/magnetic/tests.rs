@@ -1,16 +1,13 @@
 use super::*;
 use crate::admission::{admit_nonstructural, registered_formulations};
-use runmat_analysis_core::{FormulationAdmissionRejectionReason, FormulationMaturity};
 use runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh;
 
 #[test]
-fn magnetic_identity_is_distinct_experimental_and_topology_specific() {
+fn magnetic_identity_is_distinct_and_topology_specific() {
     let mut identities = Vec::new();
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
         let mesh = canonical_tetrahedron_solver_mesh(order);
-        let identity =
-            admit_canonical_magnetostatic(&mesh, FormulationRequirement::Experimental).unwrap();
-        assert_eq!(identity.qualification(), FormulationMaturity::Experimental);
+        let identity = admit_canonical_magnetostatic(&mesh).unwrap();
         assert_eq!(identity.realization(), &realization(order));
         assert!(
             registered_formulations(PhysicsFamily::Electromagnetic, AnalysisProcedure::Static)
@@ -24,12 +21,11 @@ fn magnetic_identity_is_distinct_experimental_and_topology_specific() {
         );
         assert!(!identities.contains(&identity));
         identities.push(identity);
-        assert!(admit_canonical_magnetostatic(&mesh, FormulationRequirement::Production).is_err());
+        assert!(admit_canonical_magnetostatic(&mesh).is_err());
         assert!(admit_nonstructural(
             PhysicsFamily::Electromagnetic, AnalysisProcedure::Static, Some(&mesh),
             SourceImplementation::CanonicalVolumeProjection,
             BoundaryTransferImplementation::FullExteriorTangentialPotentialGroundWithWeakCoulombGauge,
-            FormulationRequirement::Experimental,
         ).is_err());
     }
 }
@@ -71,26 +67,19 @@ fn magnetic_identity_axis_splicing_and_production_forgery_fail_closed() {
             family: PhysicsFamily::Electromagnetic,
             procedure: AnalysisProcedure::Static,
             solution_space: SolutionSpace::Direct,
-            requirement: FormulationRequirement::Experimental,
             realization: forged,
         })
         .is_err());
     }
-    let error = admit_formulation(FormulationAdmissionRequest {
+    admit_formulation(FormulationAdmissionRequest {
         family: PhysicsFamily::Electromagnetic,
         procedure: AnalysisProcedure::Static,
         solution_space: SolutionSpace::Direct,
-        requirement: FormulationRequirement::Production,
         realization: exact,
     })
-    .unwrap_err();
-    assert_eq!(
-        error.reason,
-        FormulationAdmissionRejectionReason::ProductionQualificationMissing
-    );
+    .expect("exact magnetostatic realization is admitted");
     let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
-    let identity =
-        admit_canonical_magnetostatic(&mesh, FormulationRequirement::Experimental).unwrap();
+    let identity = admit_canonical_magnetostatic(&mesh).unwrap();
     let mut wire = serde_json::to_value(identity).unwrap();
     wire["qualification"] = serde_json::json!("production");
     assert!(serde_json::from_value::<AnalysisRunIdentity>(wire).is_err());

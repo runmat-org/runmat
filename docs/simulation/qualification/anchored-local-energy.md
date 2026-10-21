@@ -3,7 +3,7 @@
 Status: **verified admitted scalar electrical execution; reviewed for retention**.
 The original electrical suite passes 36/36, including the finest Tet10 manufactured
 field/refinement gate. Both equations retain the original quadrature, assembly arithmetic,
-meshes, tolerance and proof limits. This does not promote the production formulation,
+meshes, tolerance and proof limits. This does not qualify the whole formulation,
 resolve the modal gate, or measure resource usage.
 
 ## What is checked

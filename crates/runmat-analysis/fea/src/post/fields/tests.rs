@@ -217,7 +217,7 @@ fn synthetic_operator_recovery_does_not_publish_continuum_fields() {
         &model,
         &static_excitations(&model),
         None,
-        StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+        StructuralFormulationRequirement::SyntheticOperator,
     )
     .expect("the synthetic fixture operator should assemble");
 

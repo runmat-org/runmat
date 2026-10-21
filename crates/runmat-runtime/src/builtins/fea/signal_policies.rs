@@ -50,10 +50,10 @@ struct PointContinuityObject {
 macro_rules! policy_builtin {
     ($function:ident, $builtin:literal, $class:expr, $payload:expr $(,)?) => {
         #[runtime_builtin(
-                                    name = $builtin,
-                                    binding_variant = "default",
-                                    builtin_path = "crate::builtins::fea::signal_policies"
-                                )]
+                                            name = $builtin,
+                                            binding_variant = "default",
+                                            builtin_path = "crate::builtins::fea::signal_policies"
+                                        )]
         pub async fn $function() -> BuiltinResult<Value> {
             serializable_to_object($builtin, &ERROR_INTERNAL, $class, &$payload)
         }

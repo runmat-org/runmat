@@ -61,14 +61,12 @@ pub(super) async fn cold_fixture(
         .resources
         .maximum_resident_bytes;
     let policy = FluidStudyPlanningPolicy {
-        formulation_requirement: FormulationRequirement::Experimental,
         numerical: fixture.policy,
         geometry: geometry_policy(),
     };
     let compiled = CompiledAnalysisStudy {
         module_path: format!("qualification/{identity}.fea"),
         study_id: identity.into(),
-        formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: Vec::new(),
         outputs: Vec::new(),
         assessments: Vec::new(),
@@ -235,7 +233,6 @@ pub(super) async fn cold_fixture(
     );
     let gate = runmat_analysis_fea::results::accuracy::publication_gate(
         &cold.workload.model.sequence.steps[0].accuracy,
-        FormulationRequirement::Production,
         cold.accuracy.artifact.evaluation(),
     )
     .unwrap();

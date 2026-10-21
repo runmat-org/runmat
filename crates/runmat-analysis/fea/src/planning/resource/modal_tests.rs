@@ -3,9 +3,7 @@ mod capacity;
 mod compiler;
 mod local_energy;
 mod proof_workspace;
-use runmat_analysis_core::{
-    FormulationRequirement, IndependentDomain, ProcedureStep, ProcedureStepId,
-};
+use runmat_analysis_core::{IndependentDomain, ProcedureStep, ProcedureStepId};
 use runmat_execution::resource::AcceleratorRequest;
 
 use crate::{
@@ -96,7 +94,6 @@ fn modal_case(
         model,
         step_id: ProcedureStepId("modes".into()),
         backend,
-        formulation_requirement: FormulationRequirement::Experimental,
         observation_execution: ObservationExecutionPolicy::scalable(),
         truncation,
         convergence: ModalConvergencePolicy::exploratory(),
@@ -251,7 +248,6 @@ fn modal_plan_accounts_for_requested_residual_vectors() {
         model: base.model().clone(),
         step_id: base.step_id().clone(),
         backend: base.backend(),
-        formulation_requirement: base.formulation_requirement(),
         observation_execution: base.observation_execution(),
         truncation: base.truncation(),
         convergence: base.convergence(),
@@ -387,8 +383,8 @@ fn modal_accelerator_admission_rejects_missing_short_and_cpu_claims() {
         class: runmat_execution::resource::AcceleratorClass::new("test-gpu").unwrap(),
         count: 1,
         minimum_allocation_bytes: u64::MAX,
-            provider: None,
-            required_features: Default::default(),
+        provider: None,
+        required_features: Default::default(),
     };
     assert!(build_structural_modal_resource_plan(
         Some(&mesh),
@@ -452,8 +448,8 @@ fn modal_accelerator_admission_rejects_missing_short_and_cpu_claims() {
         class: runmat_execution::resource::AcceleratorClass::new("test-gpu").unwrap(),
         count: 1,
         minimum_allocation_bytes: required - 1,
-            provider: None,
-            required_features: Default::default(),
+        provider: None,
+        required_features: Default::default(),
     };
     assert!(build_structural_modal_resource_plan(
         Some(&mesh),
@@ -467,8 +463,8 @@ fn modal_accelerator_admission_rejects_missing_short_and_cpu_claims() {
     .is_err());
     let exact = AcceleratorRequest {
         minimum_allocation_bytes: required,
-            provider: None,
-            required_features: Default::default(),
+        provider: None,
+        required_features: Default::default(),
         ..short
     };
     let accelerated = build_structural_modal_resource_plan(

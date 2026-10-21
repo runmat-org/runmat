@@ -21,7 +21,6 @@ fn both_affine_orders_preserve_exact_compiled_model_properties_and_complex_sourc
             &product.workload.model,
             &mesh,
             product.workload.step_id.as_str(),
-            product.workload.formulation_requirement,
             product.workload.relative_residual_target,
         )
         .unwrap();

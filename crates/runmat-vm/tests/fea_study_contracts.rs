@@ -19,16 +19,15 @@ fn typed_study_sequence_compiles_and_executes_through_the_vm() {
 
         step = fea.StructuralStep.static("static");
         domain = fea.IndependentDomain.staticDomain();
-        accuracy = fea.AccuracyPlan.experimentalBaseline("acceptance");
+        accuracy = fea.AccuracyPlan.baseline("acceptance");
         restart = fea.RestartPolicy.fresh();
         step = fea.ProcedureStep.configure( ...
             step, domain, {activation}, cell(0, 0), {state}, cell(0, 0), accuracy, restart);
         sequence = fea.AnalysisSequence.new( ...
             "production", {step}, cell(0, 0), cell(0, 0), cell(0, 0));
         backend = fea.ComputeBackend.cpu();
-        requirement = fea.FormulationRequirement.production();
         solverOptions = fea.SolverOptions.defaults(step);
-        executionStep = fea.ExecutionStep.new(step, backend, requirement, solverOptions);
+        executionStep = fea.ExecutionStep.new(step, backend, solverOptions);
         execution = fea.ExecutionPlan.new(sequence, {executionStep});
         "#,
     )
@@ -40,7 +39,6 @@ fn typed_study_sequence_compiles_and_executes_through_the_vm() {
         "fea.StructuralStep",
         "fea.AnalysisSequence",
         "fea.ComputeBackend",
-        "fea.FormulationRequirement",
         "fea.SolverOptions",
         "fea.ExecutionStep",
         "fea.ExecutionPlan",

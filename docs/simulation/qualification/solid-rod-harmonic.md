@@ -3,7 +3,7 @@
 This Stage 4 case connects physical solid assembly, complex face-load realization,
 direct harmonic response, modal extraction/truncation, and cold typed execution to
 an independent continuum reference. It supplements the [isolated operator
-matrix](solid-harmonic.md); it does not promote the formulation to production.
+matrix](solid-harmonic.md); it does not by itself qualify the formulation.
 
 ## Damped modal extension — qualification in progress
 
@@ -56,7 +56,7 @@ or Poisson restraint correction. A uniform complex global-X traction
 cells per axis; straight Tet10 refinements have 1, 2, and 4. The shared quadratic
 fixture uses canonical global-edge midsides, Tri6 faces and exact source-face
 parameters, validated and sealed through the ordinary meshing contract. It is a
-test fixture, not production-generated topology. This qualification does not
+test fixture, not mesher-generated topology. This qualification does not
 extend to general unrestrained rods with nonzero Poisson ratio. The separate
 [analytic curved Tet10 envelope](curved-solid-harmonic.md) qualifies a fixed
 quadratic extrusion with its own geometry, force/moment and recovery checks;
@@ -223,9 +223,9 @@ finest field and reaction bounds are 3%/0.3%. FE input/loss power agreement is
 required within `1e-8`; continuum boundary/volume power agrees within `1e-9`.
 Finest FE versus continuum input-power bounds are 5%/0.5%. Cold recovery retains
 the original 0.5%/0.05% field bounds at `k=1`.
-Production defaults are unchanged; the larger Krylov workspace is not measured
+Solver defaults are unchanged; the larger Krylov workspace is not measured
 or formally admitted. This is numerical and cold-object evidence, not a
-process-restart or production qualification claim.
+process-restart or whole-study qualification claim.
 
 ## Authored CAD/source/process witness
 
@@ -261,9 +261,8 @@ and explicit/generated nodal responses must agree within `1e-12 m`.
 After each producer exits, the persisted study manifest must reopen and a fresh
 filesystem store must reopen the frequency
 publication and retained fields, require an explicit sample selection, and return
-an exact partial complex page. Numerical acceptance must be true; production
-publication must remain false. This is process execution and cold retention,
-not an interrupted-process restart, remote placement, or general source/physics
+an exact partial complex page. Numerical acceptance must be true. This is process
+execution and cold retention, not an interrupted-process restart, remote placement, or general source/physics
 qualification claim.
 
 This witness does not qualify generated primitive or derived source-alias selection.
@@ -281,10 +280,10 @@ cargo test --locked --offline -p runmat --no-default-features --features occt-na
 
 ## Gate decision
 
-The envelope remains experimental. Curved Tet10 continuum/recovery (including damping),
+Curved Tet10 continuum/recovery (including damping),
 authored source-language and generated-input
 equivalence, formal resource/accuracy admission, matching solver-specific
 restart/replacement evidence, supported accelerator/distributed execution, and
 the blocking release lane remain separate obligations. Existing checkpoint
 mechanisms are dependencies, not numerical qualification substitutes. No API,
-production admission, UI, runtime proxy, or release claim is changed by this case.
+admission, UI, runtime proxy, or release claim is changed by this case.

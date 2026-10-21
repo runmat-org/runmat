@@ -11,7 +11,6 @@ fn scalar_evidence_is_derived_and_authenticated_before_metadata_reads() {
     let mut run = crate::analysis::analysis_run_linear_static_with_options(
         &crate::analysis::tests::sample_model(),
         crate::analysis::ComputeBackend::Cpu,
-        runmat_analysis_core::FormulationRequirement::Experimental,
         crate::analysis::AnalysisRunOptions {
             deterministic_mode: true,
             precision_mode: crate::analysis::PrecisionMode::Fp64,

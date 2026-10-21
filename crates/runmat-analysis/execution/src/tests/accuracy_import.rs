@@ -2,7 +2,7 @@
 use super::*;
 use runmat_analysis_core::{
     AccuracyCriterion, AccuracyTarget, AccuracyTolerance, ErrorContributionKind,
-    FormulationRequirement, RequiredAccuracyEvidence,
+    RequiredAccuracyEvidence,
 };
 use runmat_analysis_fea::{
     execution::{
@@ -18,15 +18,13 @@ use runmat_analysis_fea::{
 fn artifact(prepared: &PreparedAccuracy, evidence: Vec<AccuracyEvidence>) -> AccuracyArtifact {
     let request = &prepared.request;
     let evaluation = evaluate_accuracy(&request.plan, &evidence).unwrap();
-    let gate =
-        publication_gate(&request.plan, request.formulation_requirement, &evaluation).unwrap();
+    let gate = publication_gate(&request.plan, &evaluation).unwrap();
     AccuracyArtifact::new(AccuracyArtifactInput {
         evaluation_request: request.identity(),
         producer: request.producer,
         source_kind: request.source_kind,
         source_result: request.source_result,
         source_observations: request.source_observations,
-        formulation_requirement: request.formulation_requirement,
         evidence,
         evaluation,
         gate,
@@ -140,23 +138,15 @@ pub(super) fn assert_original_evidence(prepared: &PreparedAccuracy) {
                 runmat_analysis_fea::results::accuracy::AccuracyStatus::Satisfied
             );
             assert_eq!(
-                publication_gate(
-                    &prepared.request.plan,
-                    FormulationRequirement::Production,
-                    honest.evaluation()
-                )
-                .unwrap()
-                .decision,
+                publication_gate(&prepared.request.plan, honest.evaluation())
+                    .unwrap()
+                    .decision,
                 runmat_analysis_fea::results::accuracy::PublicationDecision::Block
             );
             assert_eq!(
-                publication_gate(
-                    &prepared.request.plan,
-                    FormulationRequirement::Production,
-                    counterfeit.evaluation()
-                )
-                .unwrap()
-                .decision,
+                publication_gate(&prepared.request.plan, counterfeit.evaluation())
+                    .unwrap()
+                    .decision,
                 runmat_analysis_fea::results::accuracy::PublicationDecision::Allow
             );
         }
@@ -229,7 +219,6 @@ fn thermal_cold_import_rejects_rehashed_missing_spatial_certificate() {
             step_id: step.step_id.clone(),
             initial_fields: Vec::new(),
             backend: ComputeBackend::Cpu,
-            formulation_requirement: FormulationRequirement::Experimental,
             procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 3 },
             residual_target: 1e-8,
         };
@@ -274,7 +263,6 @@ fn thermal_cold_import_rejects_rehashed_missing_spatial_certificate() {
                 .collect(),
             sequence: SequenceIdentity::from_solver_contract(&workload.model.sequence).unwrap(),
             step,
-            formulation_requirement: workload.formulation_requirement,
             program_revision: revision(),
             chunk_bytes: 1024,
             inventory_limits: ObjectInventoryLimits::default(),

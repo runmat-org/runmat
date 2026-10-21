@@ -1,7 +1,7 @@
 # Authored static electrical vertical-chain evidence
 
-Status: eight-case authored/native/cold fixture passes. This does not promote
-production, complete Stage 7, establish restart consumption, or replace the open
+Status: eight-case authored/native/cold fixture passes. This does not
+complete Stage 7, establish restart consumption, or replace the open
 largest Tet10 refinement/resource gate recorded in [electrical-static.md](electrical-static.md).
 
 Current verification: the execution bridge passes all 13 electrical tests,
@@ -22,8 +22,8 @@ and requested explicitly by this fixture. Cross-physics authoring passes two
 tests spanning eight procedure shapes and thirteen invalid cases. The fresh
 eight-case run passes in 397.46 s, including the independent field/closure and
 authenticated cold checks below. A fresh final resource-model revision 47 run
-also passes all eight cases in 435.14 s. This remains the bounded experimental
-CPU static matrix, not whole-workspace or production qualification.
+also passes all eight cases in 435.14 s. This remains the bounded
+CPU static matrix, not whole-workspace or Stage 7 qualification.
 An isolated dependency-closed retention snapshot, excluding unrelated worktree
 drafts and using the tracked lockfile, passes the same eight actual CAD/native/
 cold cases in 410.40 s. Its bridge suite passes 13/13 and authored-domain tests
@@ -90,13 +90,13 @@ cold cache. Exact root import replays solve, accuracy, declared state,
 accounting and publication closure; a foreign trusted-root digest is rejected.
 The native electrical completion/source converter then authenticates that
 imported chain and each returned catalog object without solving or regenerating
-missing field bytes. Production publication must remain false.
+missing field bytes.
 
 ## Open scope
 
-This bounded experimental CPU fresh-singleton static/direct envelope admits
+This bounded CPU fresh-singleton static/direct envelope admits
 prescribed potentials/reference and natural insulation. Charged Poisson, explicit
 natural/Robin inputs, integral current, floating/equipotential/periodic terminals,
 temperature-dependent laws, imported states, restart, coupling, accelerator/remote
-equivalence and production release evidence remain outside this claim.
+equivalence and release evidence remain outside this claim.
 Magnetostatics, Maxwell and electrothermal Stage 7 exit gates remain open.

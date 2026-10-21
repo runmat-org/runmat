@@ -78,7 +78,6 @@ fn cold_original_material_history_and_accuracy_do_not_promote_missing_mesh_evide
             ],
             sequence: SequenceIdentity::from_solver_contract(&workload.model.sequence).unwrap(),
             step: workload.model.sequence.steps[0].clone(),
-            formulation_requirement: workload.controls.formulation_requirement,
             program_revision: solve.program.request.recipe.program_revision.clone(),
             chunk_bytes: policy.chunk_bytes(),
             inventory_limits: limits,
@@ -116,13 +115,9 @@ fn cold_original_material_history_and_accuracy_do_not_promote_missing_mesh_evide
             AccuracyStatus::Indeterminate
         );
         assert_eq!(
-            publication_gate(
-                &accuracy.request.plan,
-                FormulationRequirement::Production,
-                cold_accuracy.artifact.evaluation()
-            )
-            .unwrap()
-            .decision,
+            publication_gate(&accuracy.request.plan, cold_accuracy.artifact.evaluation())
+                .unwrap()
+                .decision,
             PublicationDecision::Block
         );
         drop(store);

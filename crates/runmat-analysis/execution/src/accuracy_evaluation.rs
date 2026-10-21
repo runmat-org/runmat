@@ -39,7 +39,6 @@ pub struct AccuracyPreparation {
     pub source_context_inputs: Vec<PreparedAnalysisObjects>,
     pub sequence: SequenceIdentity,
     pub step: ProcedureStep,
-    pub formulation_requirement: runmat_analysis_core::FormulationRequirement,
     pub program_revision: ProgramRevision,
     pub chunk_bytes: usize,
     pub inventory_limits: ObjectInventoryLimits,
@@ -129,7 +128,6 @@ pub fn prepare_accuracy(
         preparation.source_kind,
         source_result,
         preparation.source_observations.as_ref(),
-        preparation.formulation_requirement,
         preparation.step.accuracy.clone(),
     )?;
     if !matches!(
@@ -299,19 +297,14 @@ pub fn import_accuracy(
     import_source::validate_original_evidence(prepared, &artifact)?;
     let expected_evaluation = evaluate_accuracy(&prepared.request.plan, artifact.evidence())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let expected_gate = publication_gate(
-        &prepared.request.plan,
-        prepared.request.formulation_requirement,
-        &expected_evaluation,
-    )
-    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let expected_gate = publication_gate(&prepared.request.plan, &expected_evaluation)
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if artifact.identity().digest() != output.logical_identity
         || artifact.evaluation_request != prepared.request.identity()
         || artifact.producer != prepared.request.producer
         || artifact.source_kind != prepared.request.source_kind
         || artifact.source_result != prepared.request.source_result
         || artifact.source_observations != prepared.request.source_observations
-        || artifact.formulation_requirement != prepared.request.formulation_requirement
         || artifact.evaluation() != &expected_evaluation
         || artifact.gate() != &expected_gate
     {

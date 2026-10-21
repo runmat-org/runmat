@@ -27,7 +27,7 @@ const FAULTS: &[Fault] = &[
     Fault { name: "missing region", from: "region.loaded_end = [", to: "region.free_end = [", expected: "unresolved reference `geometry.beam.region.free_end`" },
     Fault { name: "selector matches nothing", from: "select id \"face_000002\"", to: "select id \"face_999999\"", expected: "region `loaded_end` resolved 0 entities" },
     // Hand-offs
-    Fault { name: "output the step does not produce", from: "analysis.static.field.node.displacement", to: "analysis.static.field.node.temperature", expected: "does not produce `Temperature`" },
+    Fault { name: "output the step does not produce", from: "output displacement = analysis.static.field.node.displacement", to: "output displacement = analysis.static.field.node.temperature", expected: "does not produce `Temperature`" },
     Fault { name: "output from an unknown step", from: "analysis.static.field.element.von_mises_stress", to: "analysis.modes.field.element.von_mises_stress", expected: "unknown analysis step `modes`" },
     Fault { name: "case includes a missing load", from: "include load.end_traction", to: "include load.end_pressure", expected: "unresolved reference `load.end_pressure`" },
     Fault { name: "study binds a missing model", from: "model = model.loaded_beam", to: "model = model.unloaded_beam", expected: "unresolved reference `model.unloaded_beam`" },

@@ -71,4 +71,4 @@ For a new part, concentrate refinement where the physics changes quickly: a bend
 
 Each new mesh is a new solve. Displaying a denser surface or smoothing a contour does not refine the equilibrium problem. Changing a support, a traction area or a material assignment at the same time also changes the physics, so keep those comparisons separate from a mesh study.
 
-Use [structural validation](/docs/simulation/validation/structural) to inspect the reference and convergence requirements behind the formulation. This guide demonstrates a controlled comparison with experimental studies; it is not an automatic adaptation loop or a declaration that every plotted quantity has converged.
+Use [structural validation](/docs/simulation/validation/structural) to inspect the reference and convergence requirements behind the formulation. This guide demonstrates a controlled comparison across meshes; it is not an automatic adaptation loop or a declaration that every plotted quantity has converged.

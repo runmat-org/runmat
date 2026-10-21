@@ -1,6 +1,6 @@
 # Original authored-boundary fluid balances
 
-The experimental canonical steady incompressible operator reports original exterior
+The canonical steady incompressible operator reports original exterior
 face terms under exact authored constraint/boundary IDs. Reports are sorted by ID;
 each exterior face belongs to exactly one report. Interior face fluxes and forces
 are excluded. No boundary is inferred from a label, coordinate extremum or profile.
@@ -31,4 +31,4 @@ zero and atmospheric pressure references: signed inlet/outlet flow, rho-weighted
 mass/advection, pressure traction, surface area and exact exterior-face count.
 Couette shear checks original viscous boundary terms and cold attribution. Changed
 or reordered IDs/terms reject. These conservation reports do not manufacture
-mandatory spatial accuracy; missing spatial evidence still blocks production.
+mandatory spatial accuracy; missing spatial evidence remains indeterminate.

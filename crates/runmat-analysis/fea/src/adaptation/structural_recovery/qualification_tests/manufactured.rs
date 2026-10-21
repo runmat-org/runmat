@@ -107,7 +107,6 @@ pub(super) fn manufactured_quadratic_solid_solution_converges_for_tet4_and_is_ex
             &model,
             ComputeBackend::Cpu,
             LinearStaticSolveOptions {
-                formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
                 solver_mesh: Some(mesh.clone()),
                 require_solver_mesh_for_solid: true,
                 ..LinearStaticSolveOptions::default()

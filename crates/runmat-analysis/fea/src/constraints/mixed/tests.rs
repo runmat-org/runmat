@@ -89,7 +89,6 @@ fn general_equation_spans_solid_and_explicit_nodes() {
         &model,
         crate::ComputeBackend::Cpu,
         crate::LinearStaticSolveOptions {
-            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
             solver_mesh: Some(mesh.clone()),
             ..crate::LinearStaticSolveOptions::default()
         },
@@ -159,7 +158,6 @@ fn geometric_tie_couples_a_nonconformal_beam_node_to_a_solid_face() {
         &model,
         crate::ComputeBackend::Cpu,
         crate::LinearStaticSolveOptions {
-            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
             solver_mesh: Some(mesh.clone()),
             ..crate::LinearStaticSolveOptions::default()
         },
@@ -240,7 +238,6 @@ fn explicit_shell_distributing_coupling_retains_reference_point_evidence() {
         &model,
         crate::ComputeBackend::Cpu,
         crate::LinearStaticSolveOptions {
-            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
             solver_mesh: Some(mesh.clone()),
             ..crate::LinearStaticSolveOptions::default()
         },
@@ -320,7 +317,6 @@ fn mesh_free_shell_reference_coupling_uses_the_same_generalized_dof_path() {
         &model,
         crate::ComputeBackend::Cpu,
         crate::LinearStaticSolveOptions {
-            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
             ..crate::LinearStaticSolveOptions::default()
         },
     )

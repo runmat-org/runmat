@@ -113,7 +113,6 @@ pub(super) async fn execute_downstream<D: PublicationChainDriver>(
         model: recovered.compiled.model.clone(),
         step_id: ProcedureStepId("thermal_expansion".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         preconditioner: SpdPreconditionerKind::Jacobi,
         algebra_backend: LinearAlgebraBackendKind::CpuReference,
         observation_execution: ObservationExecutionPolicy::serial(),

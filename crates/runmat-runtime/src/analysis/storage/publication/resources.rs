@@ -357,8 +357,10 @@ impl AnalysisPublicationBuilder {
             .admission
             .lock()
             .map_err(|_| "staging admission lock poisoned")?;
-        self.admit(runmat_canonical_codec::typed_resident_bytes_estimate(value)?)
-            .map_err(|error| error.context("family manifest typed public-run copy"))?;
+        self.admit(runmat_canonical_codec::typed_resident_bytes_estimate(
+            value,
+        )?)
+        .map_err(|error| error.context("family manifest typed public-run copy"))?;
         *guard = true;
         Ok(())
     }

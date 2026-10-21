@@ -90,6 +90,6 @@ The source declares density **7,850 kg/m³**. This traction-only static case use
 
 ## Supported scope and next steps
 
-This example uses RunMat's **experimental linear-static formulation** for small-strain elastic solids. Its saved result demonstrates the complete workflow. For your own model, check material and boundary assignments, load balance, and convergence of the quantities that matter.
+This example uses RunMat's **linear-static formulation** for small-strain elastic solids. Its saved result demonstrates the complete workflow. For your own model, check material and boundary assignments, load balance, and convergence of the quantities that matter.
 
 Read [Structural validation](/docs/simulation/validation/structural) for the formulation checks, physical references, acceptance criteria, and available assessment records behind this capability.

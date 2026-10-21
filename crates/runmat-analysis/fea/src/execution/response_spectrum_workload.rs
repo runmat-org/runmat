@@ -1,9 +1,9 @@
 use std::collections::BTreeSet;
 
 use runmat_analysis_core::{
-    validate_model_sequence, AnalysisModel, AnalysisProcedure, CoordinateFrame,
-    FormulationRequirement, IndependentDomain, PhysicsFamily, ProcedureStep, ProcedureStepId,
-    ResponseSpectrum, SolutionSpace, StateKind, StateSource, StateUse,
+    validate_model_sequence, AnalysisModel, AnalysisProcedure, CoordinateFrame, IndependentDomain,
+    PhysicsFamily, ProcedureStep, ProcedureStepId, ResponseSpectrum, SolutionSpace, StateKind,
+    StateSource, StateUse,
 };
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use serde::{Deserialize, Serialize};
@@ -31,7 +31,6 @@ pub struct StructuralModalResponseSpectrumWorkload {
     model: AnalysisModel,
     step_id: ProcedureStepId,
     backend: ComputeBackend,
-    formulation_requirement: FormulationRequirement,
     observation_execution: ObservationExecutionPolicy,
     modal_basis_transition: CanonicalStateTransition,
 }
@@ -44,7 +43,6 @@ struct StructuralModalResponseSpectrumWorkloadWire {
     model: AnalysisModel,
     step_id: ProcedureStepId,
     backend: ComputeBackend,
-    formulation_requirement: FormulationRequirement,
     observation_execution: ObservationExecutionPolicy,
     modal_basis_transition: CanonicalStateTransition,
 }
@@ -53,7 +51,6 @@ pub struct StructuralModalResponseSpectrumWorkloadInput {
     pub model: AnalysisModel,
     pub step_id: ProcedureStepId,
     pub backend: ComputeBackend,
-    pub formulation_requirement: FormulationRequirement,
     pub observation_execution: ObservationExecutionPolicy,
     pub modal_basis_transition: CanonicalStateTransition,
 }
@@ -66,7 +63,6 @@ pub struct StructuralModalResponseSpectrumTemplate {
     pub model: AnalysisModel,
     pub step_id: ProcedureStepId,
     pub backend: ComputeBackend,
-    pub formulation_requirement: FormulationRequirement,
     pub observation_execution: ObservationExecutionPolicy,
 }
 
@@ -95,7 +91,6 @@ impl StructuralModalResponseSpectrumTemplate {
             model: self.model,
             step_id: self.step_id,
             backend: self.backend,
-            formulation_requirement: self.formulation_requirement,
             observation_execution: self.observation_execution,
             modal_basis_transition,
         })
@@ -114,7 +109,6 @@ impl TryFrom<StructuralModalResponseSpectrumWorkloadWire>
             model: wire.model,
             step_id: wire.step_id,
             backend: wire.backend,
-            formulation_requirement: wire.formulation_requirement,
             observation_execution: wire.observation_execution,
             modal_basis_transition: wire.modal_basis_transition,
         };
@@ -136,7 +130,6 @@ impl StructuralModalResponseSpectrumWorkload {
             model: input.model,
             step_id: input.step_id,
             backend: input.backend,
-            formulation_requirement: input.formulation_requirement,
             observation_execution: input.observation_execution,
             modal_basis_transition: input.modal_basis_transition,
         };
@@ -159,10 +152,6 @@ impl StructuralModalResponseSpectrumWorkload {
 
     pub const fn backend(&self) -> ComputeBackend {
         self.backend
-    }
-
-    pub const fn formulation_requirement(&self) -> FormulationRequirement {
-        self.formulation_requirement
     }
 
     pub const fn observation_execution(&self) -> ObservationExecutionPolicy {
@@ -307,7 +296,6 @@ impl StructuralModalResponseSpectrumWorkload {
                 &self.model,
                 &self.step_id,
                 self.backend,
-                self.formulation_requirement,
                 self.observation_execution,
                 &self.modal_basis_transition,
             ),

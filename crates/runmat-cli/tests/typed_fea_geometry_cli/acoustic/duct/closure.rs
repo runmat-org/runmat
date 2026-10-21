@@ -52,7 +52,10 @@ pub(super) fn reopen(
     assert_eq!(numerical.entries.len(), 1);
     // The run record keeps a reference; the state is persisted once as canonical binary.
     let reference = numerical.entries[0].states[0].clone();
-    assert_eq!(reference.kind, runmat_analysis_core::StateKind::AcousticComplex);
+    assert_eq!(
+        reference.kind,
+        runmat_analysis_core::StateKind::AcousticComplex
+    );
     reference.verify_identity().unwrap();
     let state = runmat_analysis_fea::execution::CanonicalSemanticState::from_canonical_bytes(
         &fs::read(&reference.artifact_path).unwrap(),

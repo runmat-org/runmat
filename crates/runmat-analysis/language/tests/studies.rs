@@ -36,8 +36,8 @@ fn check(source: &str) -> CheckedFeaProgram {
 }
 
 #[test]
-fn study_formulation_maturity_is_explicit_and_defaults_to_production() {
-    let study = |requirement: &str| {
+fn study_has_no_formulation_setting() {
+    let study = |setting: &str| {
         format!(
             r#"
 {PART_AND_MESH}
@@ -46,53 +46,39 @@ study response {{
     geometry = geometry.part
     mesh = mesh.part
     model = model.structure
-    {requirement}
+    {setting}
     analysis solve {{ structural static {{}} }}
 }}
 "#
         )
     };
-    let production = check(&study(""));
-    assert!(production.is_valid(), "{:#?}", production.diagnostics);
-    assert_eq!(
-        production
-            .studies
-            .values()
-            .next()
-            .unwrap()
-            .formulation_requirement,
-        runmat_analysis_core::FormulationRequirement::Production
-    );
-
-    let experimental = check(&study("formulation = experimental"));
-    assert!(experimental.is_valid(), "{:#?}", experimental.diagnostics);
-    let authored = experimental.studies.values().next().unwrap();
-    assert_eq!(
-        authored.formulation_requirement,
-        runmat_analysis_core::FormulationRequirement::Experimental
-    );
-    let geometry = experimental.geometries.values().next().unwrap();
-    let models = experimental
+    let plain = check(&study(""));
+    assert!(plain.is_valid(), "{:#?}", plain.diagnostics);
+    let authored = plain.studies.values().next().unwrap();
+    let geometry = plain.geometries.values().next().unwrap();
+    let models = plain
         .models
         .values()
         .map(|model| (model.reference(), model.clone()))
         .collect();
-    assert_eq!(
-        authored
-            .realize_with_models(&models, geometry, &[])
-            .unwrap()
-            .formulation_requirement,
-        runmat_analysis_core::FormulationRequirement::Experimental
-    );
+    authored
+        .realize_with_models(&models, geometry, &[])
+        .unwrap();
 
-    let invalid = check(&study("formulation = preview"));
-    assert!(!invalid.is_valid());
-    assert!(invalid.diagnostics.iter().any(|diagnostic| diagnostic
-        .message
-        .contains("must be `production` or `experimental`")));
-
-    let retired_spelling = check(&study("require formulation = experimental"));
-    assert!(!retired_spelling.is_valid());
+    for stale in [
+        "formulation = production",
+        "require formulation = production",
+    ] {
+        let rejected = check(&study(stale));
+        assert!(!rejected.is_valid(), "{stale}");
+        assert!(
+            rejected.diagnostics.iter().any(|diagnostic| diagnostic
+                .message
+                .contains("`formulation` is not a study setting")),
+            "{stale}: {:#?}",
+            rejected.diagnostics
+        );
+    }
 }
 
 #[test]

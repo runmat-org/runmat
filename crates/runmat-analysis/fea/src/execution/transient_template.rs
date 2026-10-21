@@ -1,6 +1,6 @@
 use runmat_analysis_core::{
-    validate_model_sequence, AnalysisModel, AnalysisProcedure, FormulationRequirement,
-    PhysicsFamily, ProcedureStep, ProcedureStepId, SolutionSpace, StateKind, StateSource, StateUse,
+    validate_model_sequence, AnalysisModel, AnalysisProcedure, PhysicsFamily, ProcedureStep,
+    ProcedureStepId, SolutionSpace, StateKind, StateSource, StateUse,
 };
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use serde::{Deserialize, Serialize};
@@ -29,7 +29,6 @@ pub struct StructuralModalTransientTemplate {
     pub model: AnalysisModel,
     pub step_id: ProcedureStepId,
     pub backend: ComputeBackend,
-    pub formulation_requirement: FormulationRequirement,
     pub time_step_policy: StructuralTimeStepPolicy,
     pub residual_target: f64,
 }
@@ -108,7 +107,6 @@ impl StructuralModalTransientTemplate {
             model: self.model,
             step_id: self.step_id,
             backend: self.backend,
-            formulation_requirement: self.formulation_requirement,
             solver: StructuralTransientSolverPlan::ModalReduced {
                 basis_transition: Box::new(basis_transition),
             },

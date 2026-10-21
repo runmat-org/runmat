@@ -60,11 +60,6 @@ pub fn analysis_trends_op(
             .filter(|run| run.numerically_acceptable)
             .count() as f64
             / sample_count as f64;
-        let production_publishable_rate = entries
-            .iter()
-            .filter(|run| run.production_publishable)
-            .count() as f64
-            / sample_count as f64;
 
         let failed_increment_rate = if identity.procedure() == AnalysisProcedure::Nonlinear {
             let failed = entries
@@ -544,7 +539,6 @@ pub fn analysis_trends_op(
             median_solve_ms,
             p95_solve_ms,
             numerically_acceptable_rate,
-            production_publishable_rate,
             failed_increment_rate,
             mean_spike_count,
             mean_stall_count,

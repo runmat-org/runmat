@@ -1,9 +1,9 @@
 use super::*;
 use crate::analysis_kernel::NativeAnalysisKernel;
 use runmat_analysis_core::{
-    AcousticConstraint, AcousticConstraintKind, AnalysisConstraint, FormulationRequirement,
-    Frequency, IndependentDomain, MaterialAcousticModel, PrescribedValue, Pressure, ProcedureStep,
-    ProcedureStepId, PropertyRegionTarget, RegionTarget,
+    AcousticConstraint, AcousticConstraintKind, AnalysisConstraint, Frequency, IndependentDomain,
+    MaterialAcousticModel, PrescribedValue, Pressure, ProcedureStep, ProcedureStepId,
+    PropertyRegionTarget, RegionTarget,
 };
 use runmat_analysis_execution::{
     prepare_acoustic_harmonic_task, AcousticHarmonicTaskPreparation, AnalysisKernel,
@@ -100,7 +100,6 @@ fn task_with_boundary(
         model,
         step_id: ProcedureStepId("acoustic".into()),
         frequency: Frequency::new(0.2),
-        formulation_requirement: FormulationRequirement::Experimental,
         solver: AcousticHarmonicPolicy {
             uniqueness: Some(
                 runmat_analysis_fea::solve::uniqueness::SparseUniquenessPolicy::bounded(),

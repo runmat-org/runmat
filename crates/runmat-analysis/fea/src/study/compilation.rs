@@ -3,8 +3,8 @@ use std::collections::BTreeMap;
 use runmat_analysis_core::{
     realize_analysis_model, validate_authored_outputs, AnalysisModel,
     AnalysisModelRealizationError, AnalysisModelRealizationInput, AuthoredMaterialRef,
-    AuthoredOutput, AuthoredStudyInputBinding, CoupledPhysicsFamily, FormulationRequirement,
-    MaterialModel, PhysicsFamily, RealizedStudy,
+    AuthoredOutput, AuthoredStudyInputBinding, CoupledPhysicsFamily, MaterialModel, PhysicsFamily,
+    RealizedStudy,
 };
 use runmat_canonical_codec::{encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
@@ -33,7 +33,6 @@ const STUDY_IDENTITY_LIMITS: CanonicalLimits =
 pub struct CompiledAnalysisStudy {
     pub module_path: String,
     pub study_id: String,
-    pub formulation_requirement: FormulationRequirement,
     pub study_inputs: Vec<AuthoredStudyInputBinding>,
     pub outputs: Vec<AuthoredOutput>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -99,7 +98,6 @@ impl CompiledAnalysisStudy {
             &(
                 &self.module_path,
                 &self.study_id,
-                self.formulation_requirement,
                 &self.study_inputs,
                 &self.outputs,
                 &self.model,
@@ -172,7 +170,6 @@ pub fn compile_analysis_study(
     let compiled = CompiledAnalysisStudy {
         module_path: study.module_path.clone(),
         study_id: study.study_id.clone(),
-        formulation_requirement: study.formulation_requirement,
         study_inputs: study.study_inputs.clone(),
         assessments: study.assessments.clone(),
         outputs: study.outputs.clone(),

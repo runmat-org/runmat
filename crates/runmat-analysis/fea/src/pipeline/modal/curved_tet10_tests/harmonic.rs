@@ -15,8 +15,8 @@ use runmat_analysis_core::{
 use super::{
     canonical_tetrahedron_solver_mesh, constrain_everything_except_corner_x,
     curved_corner_x_stiffness_reference, fixture_model, replace_fixture_excitations,
-    ComputeBackend, ElementOrder, FixtureId, FormulationRequirement, ModalSolveOptions,
-    ModalTruncationPolicy, ProcedureStep, SolverMeshArtifact, StableDigest,
+    ComputeBackend, ElementOrder, FixtureId, ModalSolveOptions, ModalTruncationPolicy,
+    ProcedureStep, SolverMeshArtifact, StableDigest,
 };
 use crate::{
     assembly::{assemble_structural_system, StructuralFormulationRequirement},
@@ -106,7 +106,6 @@ fn qualify(case: SolidCase, damped: bool) {
         &model,
         ComputeBackend::Cpu,
         ModalSolveOptions {
-            formulation_requirement: FormulationRequirement::Experimental,
             truncation: ModalTruncationPolicy::requested(1),
             solver_mesh: Some(mesh.clone()),
             ..ModalSolveOptions::default()

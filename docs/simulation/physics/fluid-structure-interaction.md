@@ -5,9 +5,9 @@ back to the fluid. The paired interface is explicit; matching-looking CAD faces 
 coupling.
 
 The `.fea` language checks steady, transient, and nonlinear FSI contracts. The numerical library
-currently admits an experimental **partitioned reduced-flow/reduced-structure relaxation** with a
+currently admits a **partitioned reduced-flow/reduced-structure relaxation** with a
 heuristic interface transfer. The public typed `.fea` executor does not connect it end to end. It is
-not a production arbitrary-geometry FSI formulation.
+not an arbitrary-geometry FSI formulation.
 
 ## What interface equations does FSI enforce?
 
@@ -33,9 +33,9 @@ structural strain energy, pressure–displacement law residual, and the combined
 
 | Procedure | Contract | Registered realization |
 | --- | --- | --- |
-| `fluid_structure_interaction steady` | Static fluid and structural interface state | Experimental single-pass partitioned transfer |
-| `fluid_structure_interaction transient` | Time samples and coupled initial state | Experimental fixed-point relaxation |
-| `fluid_structure_interaction nonlinear` | Load-factor domain and coupled residual | Experimental scalar residual iteration |
+| `fluid_structure_interaction steady` | Static fluid and structural interface state | Single-pass partitioned transfer |
+| `fluid_structure_interaction transient` | Time samples and coupled initial state | Fixed-point relaxation |
+| `fluid_structure_interaction nonlinear` | Load-factor domain and coupled residual | Scalar residual iteration |
 
 The structural side of these registered branches is a reduced scalar graph response, not the full
 tetrahedral structural operator used by the structural executor.
@@ -59,7 +59,6 @@ study flexible_duct {
     geometry = geometry.duct
     mesh = mesh.duct
     model = model.flexible_wall
-    formulation = experimental
     analysis response {
         fluid_structure_interaction transient {
             start_time = 0 s

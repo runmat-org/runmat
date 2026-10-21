@@ -1,10 +1,10 @@
 # Thermal surface-to-ambient radiation — bounded nonlinear procedure
 
-Status: experimental CPU FP64 canonical Tet4/Tet10 steady and backward-Euler execution.
+Status: CPU FP64 canonical Tet4/Tet10 steady and backward-Euler execution.
 Plan ownership: Stage 5 radiation boundaries, nonlinear closure and heat accounting.
 Linear thermal operator entry points still reject radiation explicitly; the nonlinear route
 retains the actual boundary law and Jacobian. This bounded envelope does not complete Stage5
-or qualify GPU, distributed execution, numerical process restart or production release.
+or qualify GPU, distributed execution, numerical process restart or release.
 
 ## Law and independent references
 
@@ -93,7 +93,7 @@ failed-process restart or remote worker witness.
 
 ## Required continuation / gate decision
 
-Production remains closed. Required continuation includes broader independent spatial and
+Qualification remains open. Required continuation includes broader independent spatial and
 curved whole-procedure references, authored/generated signal equivalence, actual worker/cold
 process execution, solver-specific restart, satisfied full accuracy policies, measured usage
 and blocking release evidence. Existing face-form curved/quadrature tests do not prove those.

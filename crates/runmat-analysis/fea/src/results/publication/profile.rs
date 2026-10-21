@@ -14,7 +14,6 @@ struct Receipt<'a> {
     source_accuracy: AccuracyArtifactIdentity,
     source_resource_plan: FeaResourcePlanIdentity,
     source_resource_usage: ResourceUsageEvidenceIdentity,
-    formulation_requirement: FormulationRequirement,
     accuracy_status: AccuracyStatus,
     gate: &'a AccuracyPublicationGate,
 }
@@ -32,7 +31,6 @@ impl Serialize for PublishedAnalysisResult {
             source_accuracy: self.source_accuracy,
             source_resource_plan: self.source_resource_plan,
             source_resource_usage: self.source_resource_usage,
-            formulation_requirement: self.formulation_requirement,
             accuracy_status: self.accuracy_status,
             gate: &self.gate,
         }
@@ -63,8 +61,6 @@ pub(super) fn validate_sources(
         || usage.result_digest != request.source_result.digest()
         || !usage.overruns.is_empty()
         || accuracy.gate().decision != PublicationDecision::Allow
-        || (accuracy.formulation_requirement == FormulationRequirement::Production
-            && accuracy.evaluation().report().status != AccuracyStatus::Satisfied)
     {
         return Err(AnalysisExecutionError::Identity(
             "published result sources differ from the admitted request or publication gate",
@@ -100,7 +96,6 @@ pub fn published_result_encoding_profile(
             source_accuracy: request.source_accuracy,
             source_resource_plan: request.source_resource_plan,
             source_resource_usage: request.source_resource_usage,
-            formulation_requirement: accuracy.formulation_requirement,
             accuracy_status: accuracy.evaluation().report().status,
             gate: accuracy.gate(),
         },

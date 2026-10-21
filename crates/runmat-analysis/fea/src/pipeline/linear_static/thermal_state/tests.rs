@@ -86,7 +86,6 @@ fn retained_thermal_state_drives_restrained_expansion_and_source_linked_results(
         &model,
         ComputeBackend::Cpu,
         ThermalSolveOptions {
-            formulation_requirement: FormulationRequirement::Experimental,
             procedure: ThermalProcedureControl::Steady,
             solver_mesh: Some(mesh.clone()),
             ..ThermalSolveOptions::default()
@@ -96,7 +95,6 @@ fn retained_thermal_state_drives_restrained_expansion_and_source_linked_results(
     let source = CanonicalSemanticState::from_thermal_result(&model, &mesh, &thermal).unwrap();
     let retained = source.clone();
     let options = LinearStaticSolveOptions {
-        formulation_requirement: FormulationRequirement::Experimental,
         solver_mesh: Some(mesh.clone()),
         ..LinearStaticSolveOptions::default()
     };
@@ -169,7 +167,6 @@ fn retained_thermal_state_drives_restrained_expansion_and_source_linked_results(
     )
     .is_err());
     let options = LinearStaticSolveOptions {
-        formulation_requirement: FormulationRequirement::Experimental,
         solver_mesh: Some(mesh.clone()),
         ..LinearStaticSolveOptions::default()
     };
@@ -177,10 +174,7 @@ fn retained_thermal_state_drives_restrained_expansion_and_source_linked_results(
         crate::run_linear_static_with_options(&model, ComputeBackend::Cpu, options.clone())
             .is_err()
     );
-    let production = LinearStaticSolveOptions {
-        formulation_requirement: FormulationRequirement::Production,
-        ..options.clone()
-    };
+    let production = LinearStaticSolveOptions { ..options.clone() };
     assert!(
         run_linear_static_from_thermal_state(&model, ComputeBackend::Cpu, production, &source)
             .is_err()
@@ -247,7 +241,6 @@ fn retained_thermal_state_drives_restrained_expansion_and_source_linked_results(
         &model,
         ComputeBackend::Cpu,
         ThermalSolveOptions {
-            formulation_requirement: FormulationRequirement::Experimental,
             procedure: ThermalProcedureControl::Steady,
             solver_mesh: Some(mesh.clone()),
             ..ThermalSolveOptions::default()

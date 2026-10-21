@@ -3,10 +3,7 @@ use std::collections::HashSet;
 use runmat_analysis_core::{AnalysisField, AnalysisFieldValues};
 
 use super::accuracy_completion::CompletedAccuracy;
-use crate::analysis::{
-    AnalysisRunResult, AnalysisSolverOptions, ProductionPublicationReason, QualityGate,
-    RunProvenance,
-};
+use crate::analysis::{AnalysisRunResult, AnalysisSolverOptions, QualityGate, RunProvenance};
 
 pub(super) struct StatisticalPersistenceRequest<'a> {
     pub identity: &'a runmat_analysis_fea::AnalysisRunIdentity,
@@ -16,8 +13,6 @@ pub(super) struct StatisticalPersistenceRequest<'a> {
     pub solver_options: &'a AnalysisSolverOptions,
     pub solver_mesh: &'a runmat_meshing_core::SolverMeshArtifact,
     pub accuracy: &'a CompletedAccuracy,
-    pub production_publishable: bool,
-    pub production_publication_reasons: &'a [ProductionPublicationReason],
     pub fields: Vec<AnalysisField>,
 }
 
@@ -96,9 +91,7 @@ pub(super) fn admit_statistical_persistence(
         result_quality: request.accuracy.result_quality,
         run_status: request.accuracy.run_status,
         numerically_acceptable: request.accuracy.numerically_acceptable,
-        production_publishable: request.production_publishable,
         quality_reasons: request.accuracy.quality_reasons.clone(),
-        production_publication_reasons: request.production_publication_reasons.to_vec(),
         provenance: provenance.clone(),
     };
     Ok(StatisticalPersistence { provenance, run })

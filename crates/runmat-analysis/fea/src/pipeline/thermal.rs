@@ -79,11 +79,7 @@ pub(crate) fn prepare_selected_primary<'a>(
 
 fn validate_run(model: &AnalysisModel, options: &ThermalSolveOptions) -> Result<(), FeaRunError> {
     validate_controls(options.procedure, options.residual_target)?;
-    super::admission::require_nonstructural(
-        PhysicsFamily::Thermal,
-        options.procedure.procedure(),
-        options.formulation_requirement,
-    )?;
+    super::admission::require_nonstructural(PhysicsFamily::Thermal, options.procedure.procedure())?;
     emit_phase(
         "fea.run_thermal",
         FeaProgressPhase::RegionResolution,
@@ -176,7 +172,6 @@ fn prepare_validated_model<'a>(
         Some(mesh),
         runmat_analysis_core::SourceImplementation::CanonicalVolumeProjection,
         runmat_analysis_core::BoundaryTransferImplementation::CanonicalBoundaryProjection,
-        options.formulation_requirement,
         Some(temporal),
     )?;
     let schedule = crate::execution::ThermalSolveSchedule::derive(model, step, options.procedure)?;

@@ -1,7 +1,7 @@
 use runmat_analysis_core::{
-    AnalysisSequence, CoordinateFrame, CrossPowerSpectralDensity, FormulationRequirement,
-    IndependentDomain, ProcedureStep, RandomExcitationChannel, RandomExcitationChannelId,
-    RandomExcitationId, RandomExcitationQuantity, RandomExcitationSpectrum, RandomSpectrumEvidence,
+    AnalysisSequence, CoordinateFrame, CrossPowerSpectralDensity, IndependentDomain, ProcedureStep,
+    RandomExcitationChannel, RandomExcitationChannelId, RandomExcitationId,
+    RandomExcitationQuantity, RandomExcitationSpectrum, RandomSpectrumEvidence,
     RandomSpectrumExtrapolation, RandomSpectrumInterpolation, ReferenceStatePolicy,
     SequenceDependencyReason, SpectralDensityConvention, SpectrumDirection, StateId,
     StateTransition, StateTransitionMethod, StructuralRandomResponseSettings,
@@ -88,30 +88,6 @@ fn planner_creates_an_unresolved_modal_frequency_consumer() {
 }
 
 #[test]
-fn planner_rejects_a_formulation_requirement_different_from_the_compiled_study() {
-    let study = compiled(fixture_model(FixtureId::CantileverLinearStatic));
-    let mut planning = policy();
-    planning.formulation_requirement = FormulationRequirement::Production;
-
-    assert!(matches!(
-        plan_structural_study(&study, planning),
-        Err(super::StructuralStudyPlanningError::FormulationRequirementMismatch)
-    ));
-}
-
-#[test]
-fn compiled_identity_includes_the_formulation_requirement() {
-    let experimental = compiled(fixture_model(FixtureId::CantileverLinearStatic));
-    let mut production = experimental.clone();
-    production.formulation_requirement = FormulationRequirement::Production;
-
-    assert_ne!(
-        experimental.definition_digest().unwrap(),
-        production.definition_digest().unwrap()
-    );
-}
-
-#[test]
 fn compiled_identity_includes_and_validates_the_public_output_contract() {
     let without_output = compiled(fixture_model(FixtureId::CantileverLinearStatic));
     let mut with_output = without_output.clone();
@@ -149,7 +125,6 @@ fn compiled(model: runmat_analysis_core::AnalysisModel) -> CompiledAnalysisStudy
     CompiledAnalysisStudy {
         module_path: "tests/planning.fea".into(),
         study_id: "planning".into(),
-        formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: Vec::new(),
         assessments: Vec::new(),
         outputs: Vec::new(),
@@ -162,7 +137,6 @@ fn compiled(model: runmat_analysis_core::AnalysisModel) -> CompiledAnalysisStudy
 fn policy() -> StructuralStudyPlanningPolicy {
     StructuralStudyPlanningPolicy {
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         numerics: StructuralNumericalPlanningPolicy::production(),
     }
 }

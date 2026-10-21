@@ -43,7 +43,6 @@ study heatsink_temperature {
     geometry = geometry.heatsink
     mesh = mesh.heatsink
     model = model.cooled_heatsink
-    formulation = experimental
     analysis heat { thermal steady {} }
     output temperature = analysis.heat.field.node.temperature
     output heat_flux = analysis.heat.field.element.heat_flux

@@ -1,7 +1,7 @@
 # Generated tensor and spatial-field value layout
 
 Status: bounded shared input-layout and deferred-input graph integration. No
-formulation, stage or production promotion. Arbitrary-mesh generator arguments,
+formulation, stage or qualification promotion. Arbitrary-mesh generator arguments,
 exact preprocessing resources, positive whole-study spatial solves and restart
 qualification remain open.
 
@@ -102,7 +102,7 @@ The native process fixture composes this transition with actual compiled generat
 and checks Tet4/Tet10 Node1/Node3 values across the four task placements. It does not
 yet prove native whole-study deferred-input scheduling, resource admission, restart,
 or cold publication of the authored-to-resolved closure. Those remain required before
-advertising executable authored spatial generators. No solver or production gate is
+advertising executable authored spatial generators. No solver or qualification gate is
 promoted by semantic checking or this fixture.
 
 ## Frozen deferred callable preparation

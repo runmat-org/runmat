@@ -22,7 +22,7 @@ or unknown settings, nested settings and dimensional values are rejected.
 Omission preserves the procedure's baseline accuracy plan. Explicit authoring
 changes only its relative algebraic criteria, preserving evidence requirements,
 mandatory status, other criteria and resource budgets. It does not certify
-field error, spatial convergence or production maturity. Execution must honor
+field error or spatial convergence. Execution must honor
 the resulting typed accuracy contract; a small residual alone is not a continuum
 error bound. Authoring tests verify preservation across structural, thermal,
 acoustic and electrical procedures, and reject malformed or ambiguous settings.
@@ -58,7 +58,7 @@ procedure forms are `static` or family-appropriate `steady`, `transient`, `harmo
 `modal`, and `nonlinear` where the family admits it. Each form lowers to a typed physics family,
 procedure, independent domain, solution space, and state kind.
 
-Language recognition is not an execution or maturity claim. The typed structural-study runner
+Language recognition is not an execution or validation claim. The typed structural-study runner
 also supports an explicit thermal-state prefix feeding thermomechanical preload and supported
 structural consumers. This does not promote every recognized coupled family: promotion requires
 complete formulation, runner, publication, local/cluster, validation, and release evidence.

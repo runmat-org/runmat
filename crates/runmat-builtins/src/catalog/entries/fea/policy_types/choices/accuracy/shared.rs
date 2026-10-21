@@ -14,7 +14,7 @@ pub(super) const USE_PLAN: BuiltinDocumentationSection = section(
     "Use in a study",
     &[
         "Pass the policy to `fea.AccuracyPlan.new(id, criteria, unavailableEvidence, exceededLimit, equivalence, resources)` and attach the plan to a step with `fea.ProcedureStep.configure(..., accuracy, restart)`.",
-        "A satisfied plan always allows publication. For a production formulation any other status blocks publication. For an experimental formulation, an indeterminate result is published as degraded only with `markIndeterminateExperimental`, and an unsatisfied result only with `warnExperimental`.",
+        "A satisfied plan always allows publication. An indeterminate result is published as degraded only with `markIndeterminate`; an unsatisfied result is always blocked.",
     ],
 );
 pub(super) const EVIDENCE_PRODUCERS: BuiltinDocumentationSection = section(

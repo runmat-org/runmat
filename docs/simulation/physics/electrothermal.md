@@ -44,7 +44,7 @@ $$
 -\nabla\cdot(k(T)\nabla T)=Q_J+Q_{other}.
 $$
 
-A production implementation must state whether the coupling is one-way, staggered fixed-point, or
+A complete implementation must state whether the coupling is one-way, staggered fixed-point, or
 monolithic; preserve power during electrical-to-thermal projection; converge both electrical and
 thermal residuals; and publish charge and energy balance. RunMat will not treat a convergence
 severity heuristic as this formulation.
@@ -76,7 +76,6 @@ study heated_busbar {
     geometry = geometry.busbar
     mesh = mesh.busbar
     model = model.heated_conductor
-    formulation = experimental
     analysis operating_point { electrothermal steady {} }
 }
 ```

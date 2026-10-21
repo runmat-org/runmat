@@ -52,7 +52,6 @@ pub(super) fn execute() -> SolvedPipeline {
         model,
         step_id,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_runtime::analysis::FormulationRequirement::Experimental,
         preconditioner: SpdPreconditionerKind::Jacobi,
         algebra_backend: LinearAlgebraBackendKind::CpuReference,
         observation_execution:

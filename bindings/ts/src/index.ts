@@ -181,7 +181,6 @@ export type {
   FeaElementOrder,
   FeaExecutionInput,
   FeaMaxwellHarmonicOptions,
-  FeaFormulationRequirement,
   FeaExcitationCaseInput,
   FeaExcitationInput,
   FeaGeometryUnits,

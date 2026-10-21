@@ -54,7 +54,6 @@ fn solved_nonuniform_temperature_to_thermoelasticity_converges_to_independent_co
                 &model,
                 ComputeBackend::Cpu,
                 ThermalSolveOptions {
-                    formulation_requirement: FormulationRequirement::Experimental,
                     procedure: ThermalProcedureControl::Steady,
                     residual_target: 1.0e-12,
                     solver_mesh: Some(mesh.clone()),

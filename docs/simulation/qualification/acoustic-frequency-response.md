@@ -34,7 +34,7 @@ fixture is an execution witness, not an independent continuum reference.
 Whole-study authored dispatch and observation catalogs, assembled artifact
 publication/resource admission, actual failed-process restart/replacement,
 remote task scheduling, GPU/cooperative distribution, measured resource/accuracy
-release gates and full Stage 8 production qualification remain open. Existing
+release gates and full Stage 8 qualification remain open. Existing
 failed local-radiation convergence gates are unchanged and remain failed.
 
 ## Accepted numerical receipt and shared accuracy
@@ -54,7 +54,7 @@ these metrics are not an independent accuracy certificate. Missing, duplicate or
 substituted source objects and rehashed foreign requirements are rejected.
 
 This closes an accuracy/publication prerequisite, not whole-study authored
-dispatch, observations, process restart or Stage 8 production qualification.
+dispatch, observations, process restart or Stage 8 qualification.
 
 Receipt verification on 2026-09-30: canonical receipt tests pass 2/2, acoustic
 resource tests 4/4 and the full bridge library 92/92. Native acoustic tests pass

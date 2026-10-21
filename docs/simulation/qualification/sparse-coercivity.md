@@ -46,7 +46,7 @@ The original largest electrical Tet10 case now passes through single-pass origin
 local-energy capture, exact source reservation (resource revision79), and shared
 prepared-system reuse in signed `355b3992a`. All36 electrical tests pass, including
 its unchanged field/refinement gate. The modal candidate now passes the original
-damped first-mode Tet4 field/phase/power gate under its existing proof limit. No family maturity,
+damped first-mode Tet4 field/phase/power gate under its existing proof limit. No family qualification,
 accelerator, distributed or release gate is promoted.
 
 ## Reproduction
@@ -122,6 +122,6 @@ in660.46s. Final164 bridge regression passes199/199; strict bridge library/test 
 passes21.10s. These scoped results are recorded in the external completion ledger.
 
 General solid rigid-mode proofs, prestress and other constraint spaces remain
-required broader work. Historical whole-suite failures and stage maturity are not
+required broader work. Historical whole-suite failures and stage status are not
 replaced by this scoped pass. Architecture still reports two existing runtime renderer
 module-size findings in the isolated candidate; no new waiver or debt is introduced.
