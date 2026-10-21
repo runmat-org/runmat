@@ -1,6 +1,6 @@
 # Prepared contact in the original nonlinear load controller
 
-This is an experimental numerical/controller envelope. Public and portable contact
+This is a numerical/controller envelope. Public and portable contact
 execution remain disabled until whole-task admission, supported transitions,
 mandatory accuracy and publication evidence are complete.
 

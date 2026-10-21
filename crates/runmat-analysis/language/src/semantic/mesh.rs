@@ -338,6 +338,23 @@ fn required_length(
         return None;
     };
     if value.value_type != FeaType::Quantity(PhysicalDimension::LENGTH) {
+        if let Some((message, label)) =
+            super::units::unit_mismatch(name, value, PhysicalDimension::LENGTH)
+        {
+            diagnostics.push(
+                FeaDiagnostic::error(
+                    "fea.semantic.mesh",
+                    message,
+                    crate::FeaDiagnosticPhase::Lowering,
+                    Some(crate::FeaDiagnosticLocation {
+                        path: declaration.module.clone(),
+                        span: value.span,
+                    }),
+                )
+                .with_label(label),
+            );
+            return None;
+        }
         invalid(declaration, value, name, "length quantity", diagnostics);
         return None;
     }
@@ -423,6 +440,7 @@ fn scalar(value: &CheckedExpression) -> Option<f64> {
             value,
             scale_bits,
             offset_bits,
+            ..
         } => Some(scalar(value)? * f64::from_bits(*scale_bits) + f64::from_bits(*offset_bits)),
         CheckedExpressionKind::Unary { operator, operand } => {
             let scalar = scalar(operand)?;

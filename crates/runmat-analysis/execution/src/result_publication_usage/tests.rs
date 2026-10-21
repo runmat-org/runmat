@@ -1,5 +1,5 @@
 use super::*;
-use runmat_analysis_core::{AccuracyPlan, FormulationRequirement, ProcedureStep};
+use runmat_analysis_core::{AccuracyPlan, ProcedureStep};
 use runmat_analysis_fea::execution::{
     AccuracyEvaluationRequest, AccuracySourceKind, ResultPublicationRequest, SequenceIdentity,
     SolverResultIdentity, StepIdentity,
@@ -47,8 +47,7 @@ fn fixture() -> (
         AccuracySourceKind::StructuralLinear,
         result,
         None,
-        FormulationRequirement::Experimental,
-        AccuracyPlan::experimental_baseline("accuracy"),
+        AccuracyPlan::baseline("accuracy"),
     )
     .unwrap();
     let profile = accuracy_evaluation_resource_profile(&request, &[]).unwrap();

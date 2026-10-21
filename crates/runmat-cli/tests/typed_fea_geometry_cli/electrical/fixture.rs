@@ -120,7 +120,6 @@ study response {
     geometry = geometry.part
     mesh = mesh.volume
     model = model.electric
-    formulation = experimental
     analysis potential {
         electromagnetic static {}
         accuracy { algebraic_relative_tolerance = 1e-11 }

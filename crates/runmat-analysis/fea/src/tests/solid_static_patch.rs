@@ -14,7 +14,7 @@ use runmat_meshing_core::{
 };
 
 use super::{
-    assert_vectors_within_tolerance, experimental_linear_static_options, fixture_model, host_field,
+    assert_vectors_within_tolerance, baseline_linear_static_options, fixture_model, host_field,
     replace_fixture_excitations, ComputeBackend, FixtureExcitation, FixtureExcitationKind,
     FixtureId, LinearStaticSolveOptions, ParityTolerance, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
     FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_STRAIN,
@@ -83,7 +83,7 @@ fn connected_tet4_static_dirichlet_patch_recovers_affine_interior_and_boundary_t
         LinearStaticSolveOptions {
             solver_mesh: Some(connected_tetrahedron_solver_mesh()),
             solver_mesh_artifact_path: Some("connected-static-patch.rmmesh".into()),
-            ..experimental_linear_static_options()
+            ..baseline_linear_static_options()
         },
     )
     .expect("connected affine Dirichlet patch should solve");
@@ -258,7 +258,7 @@ fn connected_tet4_traction_patch_recovers_affine_solution_and_nodal_resultants()
     let options = LinearStaticSolveOptions {
         solver_mesh: Some(mesh),
         solver_mesh_artifact_path: Some("connected-traction-patch.rmmesh".into()),
-        ..experimental_linear_static_options()
+        ..baseline_linear_static_options()
     };
     let result =
         crate::run_linear_static_with_options(&model, ComputeBackend::Cpu, options.clone())
@@ -426,7 +426,7 @@ fn tet10_traction_patch_recovers_quadratic_face_loads_and_affine_stress() {
         LinearStaticSolveOptions {
             solver_mesh: Some(mesh.clone()),
             solver_mesh_artifact_path: Some("tet10-traction-patch.rmmesh".into()),
-            ..experimental_linear_static_options()
+            ..baseline_linear_static_options()
         },
     )
     .expect("Tet10 traction patch should solve");
@@ -509,7 +509,7 @@ fn connected_tet10_traction_patch_recovers_affine_solution_and_matches_parallel(
     let options = LinearStaticSolveOptions {
         solver_mesh: Some(mesh.clone()),
         solver_mesh_artifact_path: Some("connected-tet10-traction-patch.rmmesh".into()),
-        ..experimental_linear_static_options()
+        ..baseline_linear_static_options()
     };
     let serial =
         crate::run_linear_static_with_options(&model, ComputeBackend::Cpu, options.clone())

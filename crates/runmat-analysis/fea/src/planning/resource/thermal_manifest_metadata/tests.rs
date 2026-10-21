@@ -30,7 +30,6 @@ fn workload(procedure: ThermalProcedureControl) -> ThermalWorkload {
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         procedure,
         residual_target: 1e-4,
     }
@@ -66,7 +65,6 @@ fn complete_manifest_profile_bounds_real_steady_and_transient_headers() {
                 Some(&mesh),
                 SourceImplementation::CanonicalVolumeProjection,
                 BoundaryTransferImplementation::CanonicalBoundaryProjection,
-                workload.formulation_requirement,
             )
             .unwrap();
             let schedule = workload.solve_schedule().unwrap();
@@ -161,7 +159,6 @@ fn planning_rejects_an_identity_for_a_different_procedure() {
         Some(&mesh),
         SourceImplementation::CanonicalVolumeProjection,
         BoundaryTransferImplementation::CanonicalBoundaryProjection,
-        FormulationRequirement::Experimental,
     )
     .unwrap();
     assert!(

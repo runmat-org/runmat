@@ -37,7 +37,6 @@ pub(super) fn qualify() {
             &model,
             ComputeBackend::Cpu,
             LinearStaticSolveOptions {
-                formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
                 solver_mesh: Some(mesh.clone()),
                 require_solver_mesh_for_solid: true,
                 ..LinearStaticSolveOptions::default()

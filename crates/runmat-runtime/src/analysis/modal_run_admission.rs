@@ -107,8 +107,6 @@ pub(super) fn analysis_admit_modal_run_with_id(
             solver_convergence != QualityGate::Fail && result_quality != QualityGate::Fail
         }
     };
-    let (production_publishable, production_publication_reasons) =
-        evaluate_production_publication(&run, numerically_acceptable);
     let run_status = classify_run_status(result_quality, numerically_acceptable);
     let solver_backend = run.solver_backend;
     let execution_backend = run.execution_backend;
@@ -140,9 +138,7 @@ pub(super) fn analysis_admit_modal_run_with_id(
         result_quality,
         run_status,
         numerically_acceptable,
-        production_publishable,
         quality_reasons,
-        production_publication_reasons,
         provenance: RunProvenance {
             requested_backend: backend,
             execution_backend,

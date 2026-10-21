@@ -2452,7 +2452,6 @@ mod tests {
                 family: runmat_analysis_core::PhysicsFamily::Structural,
                 procedure,
                 solution_space: runmat_analysis_core::SolutionSpace::Direct,
-                requirement: runmat_analysis_core::FormulationRequirement::Experimental,
                 realization,
             },
         )
@@ -4021,7 +4020,6 @@ mod tests {
         let execution = block_on(execution::execution_plan_defaults(
             sequence,
             block_on(execution::backend_cpu()).unwrap(),
-            block_on(execution::requirement_production()).unwrap(),
         ))
         .expect("execution should build");
 
@@ -4373,12 +4371,9 @@ mod tests {
             "synthetic_plot.sequence",
             vec![ProcedureStep::structural_static("static")],
         );
-        let execution = AnalysisExecutionPlan::for_sequence_with_requirement(
-            &sequence,
-            ComputeBackend::Cpu,
-            runmat_analysis_core::FormulationRequirement::Experimental,
-        )
-        .expect("execution plan should match the sequence");
+        let execution =
+            AnalysisExecutionPlan::for_sequence(&sequence, ComputeBackend::Cpu)
+                .expect("execution plan should match the sequence");
         let model = runmat_analysis_core::AnalysisModel {
             model_id: runmat_analysis_core::AnalysisModelId("synthetic_plot.model".to_string()),
             geometry_id: geometry.geometry_id.clone(),
@@ -4475,14 +4470,7 @@ mod tests {
             result_quality: crate::analysis::QualityGate::Pass,
             run_status: crate::analysis::RunStatus::Completed,
             numerically_acceptable: true,
-            production_publishable: false,
             quality_reasons: Vec::new(),
-            production_publication_reasons: vec![
-                crate::analysis::ProductionPublicationReason {
-                    code: crate::analysis::ProductionPublicationReasonCode::FormulationNotProductionQualified,
-                    detail: "the admitted Structural/Static formulation is Experimental, not production-qualified".to_string(),
-                },
-            ],
             provenance: crate::analysis::RunProvenance {
                 requested_backend: ComputeBackend::Cpu,
                 execution_backend: runmat_analysis_fea::ExecutionBackend::Cpu,
@@ -4622,14 +4610,7 @@ mod tests {
             result_quality: crate::analysis::QualityGate::Pass,
             run_status: crate::analysis::RunStatus::Completed,
             numerically_acceptable: true,
-            production_publishable: false,
             quality_reasons: Vec::new(),
-            production_publication_reasons: vec![
-                crate::analysis::ProductionPublicationReason {
-                    code: crate::analysis::ProductionPublicationReasonCode::FormulationNotProductionQualified,
-                    detail: "the admitted Structural/TransientResponse formulation is Experimental, not production-qualified".to_string(),
-                },
-            ],
             provenance: crate::analysis::RunProvenance {
                 requested_backend: ComputeBackend::Cpu,
                 execution_backend: runmat_analysis_fea::ExecutionBackend::Cpu,

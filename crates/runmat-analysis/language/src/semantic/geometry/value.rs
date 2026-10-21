@@ -89,6 +89,7 @@ pub(super) fn scalar(value: &CheckedExpression) -> Option<GeometryScalarExpressi
             value,
             scale_bits,
             offset_bits,
+            ..
         } => {
             let scaled = GeometryScalarExpression::Binary {
                 operator: GeometryScalarOperator::Multiply,
@@ -123,6 +124,7 @@ pub(super) fn vector3(value: &CheckedExpression) -> Option<[GeometryScalarExpres
         value: components,
         scale_bits,
         offset_bits,
+        ..
     } = &value.kind
     {
         let CheckedExpressionKind::List(values) = &components.kind else {

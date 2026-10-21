@@ -1,8 +1,8 @@
 # Native thermal radiation and original temperature histories
 
-Status: experimental; the original native steady and temporal witness matrix passes for both element
+Status: the original native steady and temporal witness matrix passes for both element
 orders. This document supplements
-[the retained radiation formulation](thermal-radiation.md); it does not promote Stage 5 or production.
+[the retained radiation formulation](thermal-radiation.md); it does not complete Stage 5.
 
 ## Execution and admission
 
@@ -81,7 +81,8 @@ workload/response/accounting and foreign full material context. The existing gen
 lifecycle keeps its exhaustive missing/corrupt check for every closure object. Full positive closure
 validation remains present in both helpers; provenance hashes are not mathematical proof.
 
-Missing mandatory spatial convergence remains indeterminate and explicitly blocks production.
+Missing mandatory spatial convergence remains indeterminate; the result publishes, marked
+indeterminate, only under a `markIndeterminate` unavailable-evidence policy and is otherwise blocked.
 These native temporal references do not supply arbitrary spatial, curved-domain, temperature-dependent
 material, failed-process numerical restart, remote/distributed/GPU or release qualification.
 

@@ -1,6 +1,6 @@
 use runmat_analysis_core::{
-    FormulationRequirement, IndependentDomain, ProcedureStep, ReferenceStatePolicy,
-    SequenceDependency, SequenceDependencyReason, StateId, StateTransition, StateTransitionMethod,
+    IndependentDomain, ProcedureStep, ReferenceStatePolicy, SequenceDependency,
+    SequenceDependencyReason, StateId, StateTransition, StateTransitionMethod,
     TopologyTransitionPolicy, TransitionId,
 };
 
@@ -42,7 +42,6 @@ fn heterogeneous_modal_sequence() -> BTreeMap<ProcedureStepId, StructuralStepWor
         model: model.clone(),
         step_id: ProcedureStepId("z_modes".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         observation_execution: ObservationExecutionPolicy::scalable(),
         truncation: crate::ModalTruncationPolicy::requested(3),
         convergence: crate::ModalConvergencePolicy::exploratory(),
@@ -56,7 +55,6 @@ fn heterogeneous_modal_sequence() -> BTreeMap<ProcedureStepId, StructuralStepWor
         model,
         step_id: ProcedureStepId("a_response".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 8 },
         residual_target: 1.0e-10,
     };
@@ -95,7 +93,6 @@ fn direct_transient_workloads_are_strongly_typed_and_model_replaceable() {
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         solver: crate::execution::StructuralTransientSolverPlan::Direct,
         time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 8 },
         residual_target: 1.0e-10,
@@ -122,7 +119,6 @@ fn structural_frequency_workload_is_canonical_and_model_replaceable() {
         model,
         step_id: ProcedureStepId("frequency".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         observation_execution: ObservationExecutionPolicy::scalable(),
         plan: FrequencyResponsePlan::new(20.0, &[40.0], &[]).unwrap(),
         solver: StructuralFrequencySolverPlan::Direct {
@@ -158,7 +154,6 @@ fn standalone_structural_frequency_rejects_a_mixed_sequence() {
         model,
         step_id: frequency.step_id,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         observation_execution: ObservationExecutionPolicy::scalable(),
         plan: FrequencyResponsePlan::new(20.0, &[], &[]).unwrap(),
         solver: StructuralFrequencySolverPlan::Direct {

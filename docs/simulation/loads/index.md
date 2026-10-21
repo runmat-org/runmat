@@ -78,7 +78,7 @@ not by itself an executable end-to-end study. The native whole-study executor cu
 structural procedure graphs. Thermal, electromagnetic, acoustic, and fluid load contracts can be
 authored and checked, but their complete geometry-to-publication `.fea` execution paths are not yet
 admitted. `runmat fea check` therefore answers “is this a valid typed study definition?”; it does
-not promote a physics family to production execution.
+not admit a physics family for execution.
 
 The family pages mark that boundary where it matters. See [FEA capability status](../status) for the
 current execution envelope and [verification and validation](../validation) for the evidence needed
@@ -313,8 +313,8 @@ property from each assigned material region.
 ## How do I tell whether a quantity is a resultant or an intensity?
 
 Check its dimension and projection invariant. Newtons, amperes, coulombs, kilograms per second, and
-newton-metres are resultants. Pascals, watts per square metre, watts per cubic metre, amperes per
-square metre, and force per volume are intensities. Evidence should report both authored value and
+newton-meters are resultants. Pascals, watts per square meter, watts per cubic meter, amperes per
+square meter, and force per volume are intensities. Evidence should report both authored value and
 integrated realized resultant where an integral is meaningful.
 
 ## What happens when CAD or mesh resolution changes?

@@ -161,10 +161,10 @@ macro_rules! action_builtin {
         $quantity:path, $region:expr, $distribution:path, $preserve_moment:expr, $variant:path
     ) => {
         #[runtime_builtin(
-                                    name = $builtin,
-                                    binding_variant = "default",
-                                    builtin_path = "crate::builtins::fea::excitations"
-                                )]
+                                            name = $builtin,
+                                            binding_variant = "default",
+                                            builtin_path = "crate::builtins::fea::excitations"
+                                        )]
         pub async fn $function(id: String, region: Value, signal: Value) -> BuiltinResult<Value> {
             crate::builtins::fea::constraints::fixed_outputs(
                 &runmat_builtins::$descriptor,

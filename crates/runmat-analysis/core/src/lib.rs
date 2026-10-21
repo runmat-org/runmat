@@ -252,11 +252,11 @@ pub use study::sequence::{
 pub use study::{
     AnalysisProcedure, BoundaryTransferImplementation, ConstitutiveImplementation,
     CoupledPhysicsFamily, CouplingImplementation, ExactFormulationComponent,
-    ExactFormulationRealization, ExecutionFallbackPolicy, FormulationAdmissionRejectionReason,
-    FormulationAxis, FormulationMaturity, FormulationRequirement, PhysicsFamily,
-    RecoveryImplementation, SolutionSpace, SourceImplementation, SpatialOperatorImplementation,
-    StructuralFormulationRealization, StructuralOperatorImplementation,
-    StructuralRecoveryImplementation, TemporalImplementation, TopologyImplementation,
+    ExactFormulationRealization, FormulationAdmissionRejectionReason, FormulationAxis,
+    PhysicsFamily, RecoveryImplementation, SolutionSpace, SourceImplementation,
+    SpatialOperatorImplementation, StructuralFormulationRealization,
+    StructuralOperatorImplementation, StructuralRecoveryImplementation, TemporalImplementation,
+    TopologyImplementation,
 };
 pub use validate::{
     dependency_graph_resident_bytes_upper_bound, validate_analysis_sequence,

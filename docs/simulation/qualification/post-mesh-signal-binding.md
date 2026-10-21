@@ -1,7 +1,7 @@
 # Shared post-mesh signal binding boundary
 
 This is a bounded input-contract verification, not qualification of the complete
-authored spatial-field workflow or a production physics envelope.
+authored spatial-field workflow or a qualified physics envelope.
 
 ## Retained behavior
 
@@ -23,7 +23,7 @@ Local structural, thermal, and acoustic composition compiles the model, seals in
 and then derives numerical work. The thermal/acoustic product helpers retain their
 original observation-resource/material admissions and authenticate the compiled model
 against the mesh. No numerical solver, quadrature, accuracy threshold, iteration cap,
-or production gate changes.
+or qualification gate changes.
 
 The transported contracts now explicitly include the optional binding. Their canonical
 bytes/identities change; no old-API or old-object identity compatibility is promised.

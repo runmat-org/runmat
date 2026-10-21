@@ -210,11 +210,6 @@ pub(crate) fn print_study_run_summary(data: &AnalysisStudyRunData, verbose: bool
         data.numerically_acceptable
     );
     println!(
-        "  {} {}",
-        styles.label("production publishable:"),
-        data.production_publishable
-    );
-    println!(
         "  {} {:?}",
         styles.label("solver:"),
         data.solver_convergence
@@ -241,9 +236,6 @@ pub(crate) fn print_study_run_summary(data: &AnalysisStudyRunData, verbose: bool
         );
         for reason in &step.quality_reasons {
             println!("    quality {:?}: {}", reason.code, reason.detail);
-        }
-        for reason in &step.production_publication_reasons {
-            println!("    publication {:?}: {}", reason.code, reason.detail);
         }
     }
     if verbose {
@@ -275,12 +267,11 @@ pub(crate) fn print_sweep_run_summary(data: &AnalysisStudySweepData) {
         println!("  runs:");
         for entry in &data.run_entries {
             println!(
-                "    {}  {} steps  {:?}  numerically acceptable: {}  production publishable: {}",
+                "    {}  {} steps  {:?}  numerically acceptable: {}",
                 entry.study_id,
                 entry.result.steps.len(),
                 entry.result.run_status,
-                entry.result.numerically_acceptable,
-                entry.result.production_publishable
+                entry.result.numerically_acceptable
             );
         }
     }

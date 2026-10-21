@@ -41,9 +41,7 @@ fn preparation(order: ElementOrder) -> MagneticStudyPreparation {
         runmat_analysis_fea::properties::compile_property_map(&compiled.model, Some(&mesh))
             .unwrap();
     compiled.solver_mesh_digest = mesh.canonical_digest;
-    let policy = MagneticStudyPlanningPolicy {
-        formulation_requirement: input.policy.formulation_requirement,
-    };
+    let policy = MagneticStudyPlanningPolicy {};
     let workload = plan_magnetic_study(&compiled, policy).unwrap();
     MagneticStudyPreparation {
         policy,

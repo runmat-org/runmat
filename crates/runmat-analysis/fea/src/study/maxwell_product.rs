@@ -59,7 +59,6 @@ pub fn plan_maxwell_study_product(
         &workload.model,
         mesh,
         workload.step_id.as_str(),
-        workload.formulation_requirement,
         workload.relative_residual_target,
     )
     .map_err(|error| MaxwellStudyProductError::Admission(error.to_string()))?;

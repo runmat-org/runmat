@@ -2,7 +2,7 @@
 
 This independent CPU library benchmark covers an aligned planar jump in density
 and sound speed on canonical affine Tet4/Tet10 meshes. It is not a whole authored
-execution, incident-source implementation, acoustic production or Stage8 gate.
+execution, incident-source implementation or Stage 8 gate.
 
 The unit cube has two half-length fluid regions: rho1=3 kg/m³, c1=2 m/s and
 rho2=5 kg/m³, c2=4 m/s. Their impedances are Z1=6 and Z2=20 Pa s/m. Actual sealed

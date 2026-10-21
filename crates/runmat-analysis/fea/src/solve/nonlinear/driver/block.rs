@@ -13,7 +13,7 @@ use crate::{
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
     ComputeBackend, FeaRunError,
 };
-use runmat_analysis_core::{AnalysisModel, FormulationRequirement};
+use runmat_analysis_core::AnalysisModel;
 use runmat_execution::Digest;
 
 pub(crate) enum NonlinearLoadBlockStart<'a> {
@@ -56,11 +56,6 @@ pub(crate) fn run_nonlinear_load_block(
         input,
         accepted_block_limit,
     } = request;
-    if options.formulation_requirement != FormulationRequirement::Experimental {
-        return Err(FeaRunError::InvalidModel(
-            "J2 quasistatic solids are experimental, not production qualified".into(),
-        ));
-    }
     if execution.backend != ComputeBackend::Cpu {
         return Err(FeaRunError::InvalidModel(
             "canonical nonlinear solids run on the CPU backend".into(),
@@ -133,7 +128,6 @@ pub(crate) fn run_nonlinear_load_block(
     // Original model/options and numerical scope are content, not placement. Solver mesh
     // authority is already bound by the physical basis; do not encode its full body twice.
     let numerics = (
-        options.formulation_requirement,
         options.increment_count,
         options.max_newton_iters,
         options.tolerance,

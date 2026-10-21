@@ -498,10 +498,7 @@ fn derive_identities(
     let discretization = DiscretizationIdentity::new(
         problem,
         topology_digest,
-        contract_digest(
-            "formulation",
-            &(workload.formulation_requirement, topology_digest),
-        )?,
+        contract_digest("formulation", &topology_digest)?,
     )?;
     let operator = OperatorIdentity::new(
         discretization,

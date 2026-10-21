@@ -194,7 +194,6 @@ pub(in super::super) fn execute_preparation(
                 assert_eq!(
                     runmat_analysis_fea::results::accuracy::publication_gate(
                         &original_plan,
-                        FormulationRequirement::Production,
                         study.accuracy().unwrap().artifact.evaluation()
                     )
                     .unwrap()

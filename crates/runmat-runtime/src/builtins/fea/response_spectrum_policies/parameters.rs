@@ -1,6 +1,10 @@
 use super::*;
 
-#[runtime_builtin(name = "fea.SpectrumAxis.frequencyHertz", binding_variant = "default", builtin_path = "crate::builtins::fea::response_spectrum_policies::parameters")]
+#[runtime_builtin(
+    name = "fea.SpectrumAxis.frequencyHertz",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::fea::response_spectrum_policies::parameters"
+)]
 pub async fn frequency_axis(values: Value) -> BuiltinResult<Value> {
     let values = finite_numeric_vector("fea.SpectrumAxis.frequencyHertz", &values, "values")?;
     validate_positive_axis("fea.SpectrumAxis.frequencyHertz", &values)?;
@@ -11,7 +15,11 @@ pub async fn frequency_axis(values: Value) -> BuiltinResult<Value> {
     )
 }
 
-#[runtime_builtin(name = "fea.SpectrumAxis.periodSeconds", binding_variant = "default", builtin_path = "crate::builtins::fea::response_spectrum_policies::parameters")]
+#[runtime_builtin(
+    name = "fea.SpectrumAxis.periodSeconds",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::fea::response_spectrum_policies::parameters"
+)]
 pub async fn period_axis(values: Value) -> BuiltinResult<Value> {
     let values = finite_numeric_vector("fea.SpectrumAxis.periodSeconds", &values, "values")?;
     validate_positive_axis("fea.SpectrumAxis.periodSeconds", &values)?;
@@ -69,7 +77,11 @@ unary_policy!(
 // The remaining value-bearing constructors and registration are kept below so the closed no-argument
 // policy vocabulary above stays mechanically auditable.
 
-#[runtime_builtin(name = "fea.SpectrumDirection.new", binding_variant = "default", builtin_path = "crate::builtins::fea::response_spectrum_policies::parameters")]
+#[runtime_builtin(
+    name = "fea.SpectrumDirection.new",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::fea::response_spectrum_policies::parameters"
+)]
 pub async fn spectrum_direction(frame: Value, vector: Value) -> BuiltinResult<Value> {
     let vector = finite_numeric_vector3("fea.SpectrumDirection.new", &vector, "vector")?;
     let norm = vector.iter().map(|value| value * value).sum::<f64>().sqrt();
@@ -90,7 +102,11 @@ pub async fn spectrum_direction(frame: Value, vector: Value) -> BuiltinResult<Va
     )
 }
 
-#[runtime_builtin(name = "fea.DirectionalCombination.percentage", binding_variant = "default", builtin_path = "crate::builtins::fea::response_spectrum_policies::parameters")]
+#[runtime_builtin(
+    name = "fea.DirectionalCombination.percentage",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::fea::response_spectrum_policies::parameters"
+)]
 pub async fn directional_percentage(primary: Value, secondary: Value) -> BuiltinResult<Value> {
     let primary =
         finite_numeric_scalar("fea.DirectionalCombination.percentage", &primary, "primary")?;
@@ -113,7 +129,11 @@ pub async fn directional_percentage(primary: Value, secondary: Value) -> Builtin
     )
 }
 
-#[runtime_builtin(name = "fea.ModalTruncation.new", binding_variant = "default", builtin_path = "crate::builtins::fea::response_spectrum_policies::parameters")]
+#[runtime_builtin(
+    name = "fea.ModalTruncation.new",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::fea::response_spectrum_policies::parameters"
+)]
 pub async fn modal_truncation(
     minimum_mass_ratio: Value,
     correction: Value,
@@ -178,7 +198,11 @@ unary_policy!(
     }
 );
 
-#[runtime_builtin(name = "fea.RigidResponse.gupta", binding_variant = "default", builtin_path = "crate::builtins::fea::response_spectrum_policies::parameters")]
+#[runtime_builtin(
+    name = "fea.RigidResponse.gupta",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::fea::response_spectrum_policies::parameters"
+)]
 pub async fn rigid_response_gupta(periodic: Value, rigid: Value) -> BuiltinResult<Value> {
     let periodic = finite_numeric_scalar(
         "fea.RigidResponse.gupta",
@@ -203,7 +227,11 @@ pub async fn rigid_response_gupta(periodic: Value, rigid: Value) -> BuiltinResul
     )
 }
 
-#[runtime_builtin(name = "fea.SpectrumConstruction.authoredDesign", binding_variant = "default", builtin_path = "crate::builtins::fea::response_spectrum_policies::parameters")]
+#[runtime_builtin(
+    name = "fea.SpectrumConstruction.authoredDesign",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::fea::response_spectrum_policies::parameters"
+)]
 pub async fn authored_design() -> BuiltinResult<Value> {
     typed_value(
         "fea.SpectrumConstruction.authoredDesign",
@@ -235,7 +263,11 @@ derived_construction!(
     ShockResponseSpectrumMethod::RecursiveFilter
 );
 
-#[runtime_builtin(name = "fea.SpectrumEvidence.bounded", binding_variant = "default", builtin_path = "crate::builtins::fea::response_spectrum_policies::parameters")]
+#[runtime_builtin(
+    name = "fea.SpectrumEvidence.bounded",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::fea::response_spectrum_policies::parameters"
+)]
 pub async fn spectrum_evidence(
     sampling_ratio: Value,
     maximum_error: Value,

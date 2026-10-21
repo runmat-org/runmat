@@ -20,7 +20,6 @@ fn retained_metadata_is_explicit_and_composed_before_assembly() {
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: crate::ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         procedure: crate::ThermalProcedureControl::BackwardEuler { snapshot_count: 3 },
         residual_target: 1e-4,
     };
@@ -36,7 +35,6 @@ fn retained_metadata_is_explicit_and_composed_before_assembly() {
             Some(&mesh),
             SourceImplementation::CanonicalVolumeProjection,
             BoundaryTransferImplementation::CanonicalBoundaryProjection,
-            workload.formulation_requirement,
         )
         .unwrap();
         let facts = ThermalPreassemblyResourceFacts::derive(

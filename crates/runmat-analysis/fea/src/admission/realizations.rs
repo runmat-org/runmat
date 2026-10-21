@@ -1,8 +1,8 @@
 use runmat_analysis_core::{
     is_exposed_analysis_identity, AnalysisProcedure, BoundaryTransferImplementation,
     ConstitutiveImplementation, CoupledPhysicsFamily, CouplingImplementation,
-    ExactFormulationComponent, ExactFormulationRealization, FormulationMaturity, PhysicsFamily,
-    RecoveryImplementation, SolutionSpace, SourceImplementation, SpatialOperatorImplementation,
+    ExactFormulationComponent, ExactFormulationRealization, PhysicsFamily, RecoveryImplementation,
+    SolutionSpace, SourceImplementation, SpatialOperatorImplementation,
     StructuralFormulationRealization, StructuralOperatorImplementation,
     StructuralRecoveryImplementation, TemporalImplementation, TopologyImplementation,
 };
@@ -20,26 +20,15 @@ use super::structural::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RegisteredFormulation {
     realization: ExactFormulationRealization,
-    qualification: FormulationMaturity,
 }
 
 impl RegisteredFormulation {
-    pub(super) const fn new(
-        realization: ExactFormulationRealization,
-        qualification: FormulationMaturity,
-    ) -> Self {
-        Self {
-            realization,
-            qualification,
-        }
+    pub(super) const fn new(realization: ExactFormulationRealization) -> Self {
+        Self { realization }
     }
 
     pub fn realization(&self) -> &ExactFormulationRealization {
         &self.realization
-    }
-
-    pub const fn qualification(&self) -> FormulationMaturity {
-        self.qualification
     }
 }
 
@@ -61,9 +50,7 @@ pub fn registered_formulations(
     };
     realizations
         .into_iter()
-        .map(|realization| {
-            RegisteredFormulation::new(realization, FormulationMaturity::Experimental)
-        })
+        .map(RegisteredFormulation::new)
         .collect()
 }
 

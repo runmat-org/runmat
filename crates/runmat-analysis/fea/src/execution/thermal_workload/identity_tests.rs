@@ -97,7 +97,6 @@ fn original_source_identity_binding_fits_codec_reservation_and_rejects_short_cap
         model,
         step_id: ProcedureStepId("heat".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 3 },
         residual_target: 1e-4,
         initial_fields: vec![],

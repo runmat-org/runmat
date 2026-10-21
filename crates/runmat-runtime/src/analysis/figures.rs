@@ -1024,16 +1024,6 @@ fn comparison_figure(data: &AnalysisResultsCompareData) -> Option<AnalysisGenera
     push_bar_value(
         &mut labels,
         &mut values,
-        "Production publication changed",
-        Some(if data.production_publishable_changed {
-            1.0
-        } else {
-            0.0
-        }),
-    );
-    push_bar_value(
-        &mut labels,
-        &mut values,
         "Status changed",
         Some(if data.run_status_changed { 1.0 } else { 0.0 }),
     );
@@ -1099,25 +1089,14 @@ fn trend_figures(data: &AnalysisTrendsData) -> Vec<AnalysisGeneratedFigure> {
         .iter()
         .map(|summary| summary.numerically_acceptable_rate * 100.0)
         .collect::<Vec<_>>();
-    let production_publishable_values = data
-        .summaries
-        .iter()
-        .map(|summary| summary.production_publishable_rate * 100.0)
-        .collect::<Vec<_>>();
-    if let (Ok(mut numerical_chart), Ok(mut production_chart)) = (
-        BarChart::new(labels.clone(), numerically_acceptable_values),
-        BarChart::new(labels, production_publishable_values),
-    ) {
+    if let Ok(mut numerical_chart) = BarChart::new(labels, numerically_acceptable_values) {
         numerical_chart.label = Some("Numerically acceptable".to_string());
         numerical_chart.color = Vec4::new(0.31, 0.62, 0.91, 1.0);
-        production_chart.label = Some("Production publishable".to_string());
-        production_chart.color = Vec4::new(0.32, 0.74, 0.56, 1.0);
         let mut figure = Figure::new()
             .with_title("FEA result disposition trends")
             .with_labels("Run family", "Runs (%)")
             .with_grid(true);
         figure.add_bar_chart(numerical_chart);
-        figure.add_bar_chart(production_chart);
         figures.push(AnalysisGeneratedFigure {
             kind: AnalysisGeneratedFigureKind::Trend,
             title: "FEA result disposition trends".to_string(),
@@ -2384,7 +2363,6 @@ mod tests {
                 family: runmat_analysis_core::PhysicsFamily::Structural,
                 procedure: runmat_analysis_core::AnalysisProcedure::Static,
                 solution_space: runmat_analysis_core::SolutionSpace::Direct,
-                requirement: runmat_analysis_core::FormulationRequirement::Experimental,
                 realization,
             },
         )

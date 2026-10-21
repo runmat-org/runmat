@@ -3,7 +3,6 @@ fn canonical_fluid_general_gmres_does_not_report_reduced_channel_method() {
     use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
     let identity = crate::admission::admit_canonical_fluid_steady(
         &canonical_tetrahedron_solver_mesh(ElementOrder::Tet4),
-        runmat_analysis_core::FormulationRequirement::Experimental,
     )
     .unwrap();
     assert!(validate_solver_formulation_compatibility(
@@ -60,9 +59,9 @@ fn magnetic_saddle_method_cannot_claim_electrical_or_harmonic_algebra() {
 }
 
 use runmat_analysis_core::{
-    AnalysisProcedure, BoundaryTransferImplementation, CoupledPhysicsFamily,
-    FormulationRequirement, PhysicsFamily, SourceImplementation, StructuralFormulationRealization,
-    StructuralOperatorImplementation, StructuralRecoveryImplementation,
+    AnalysisProcedure, BoundaryTransferImplementation, CoupledPhysicsFamily, PhysicsFamily,
+    SourceImplementation, StructuralFormulationRealization, StructuralOperatorImplementation,
+    StructuralRecoveryImplementation,
 };
 
 use crate::{
@@ -96,7 +95,6 @@ fn structural_identity(
         family: PhysicsFamily::Structural,
         procedure,
         solution_space,
-        requirement: FormulationRequirement::Experimental,
         realization,
     })
     .expect("structural compatibility fixture must be admitted")
@@ -122,7 +120,6 @@ fn nonstructural_identity(
         family,
         procedure,
         solution_space: SolutionSpace::Direct,
-        requirement: FormulationRequirement::Experimental,
         realization,
     })
     .expect("nonstructural compatibility fixture must be admitted")
@@ -134,9 +131,7 @@ fn canonical_maxwell_reports_only_genuine_general_gmres_without_spd_or_gauge_cla
     use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
         let mesh = canonical_tetrahedron_solver_mesh(order);
-        let identity =
-            crate::admission::admit_canonical_maxwell(&mesh, FormulationRequirement::Experimental)
-                .unwrap();
+        let identity = crate::admission::admit_canonical_maxwell(&mesh).unwrap();
         validate_solver_formulation_compatibility(
             &identity,
             SolverMethod::GeneralGmres,
@@ -171,11 +166,7 @@ fn canonical_maxwell_reports_only_genuine_general_gmres_without_spd_or_gauge_cla
             )
             .is_err());
         }
-        let magnetic = crate::admission::admit_canonical_magnetostatic(
-            &mesh,
-            FormulationRequirement::Experimental,
-        )
-        .unwrap();
+        let magnetic = crate::admission::admit_canonical_magnetostatic(&mesh).unwrap();
         assert!(validate_solver_formulation_compatibility(
             &magnetic,
             SolverMethod::GeneralGmres,

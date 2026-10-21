@@ -73,18 +73,6 @@ async fn check_fea_file(
     config: &RunMatRuntimeConfig,
     json: bool,
 ) -> Result<()> {
-    if !json {
-        let styles = presentation::stderr();
-        eprintln!(
-            "{} {}",
-            styles.heading("Checking"),
-            styles.path(path.display())
-        );
-        eprintln!(
-            "  {}",
-            styles.muted("resolving typed source and project facts")
-        );
-    }
     let checked = crate::commands::fea::source::check_source(&path, cli, config).await?;
     let valid = checked.program.is_valid() && checked.program.diagnostics.is_empty();
     if json {
@@ -99,29 +87,179 @@ async fn check_fea_file(
                 "diagnostics": checked.program.diagnostics,
             }))?
         );
-    } else if valid {
-        let styles = presentation::stdout();
-        println!("{}", styles.success("FEA source is valid"));
-        println!(
-            "  {} {}",
-            styles.label("studies:"),
-            checked.program.studies.len()
-        );
-        println!(
-            "  {} {}",
-            styles.label("sweeps:"),
-            checked.program.sweeps.len()
-        );
-    } else {
-        for diagnostic in &checked.program.diagnostics {
-            eprintln!(
-                "{:?} {}: {}",
-                diagnostic.severity, diagnostic.code, diagnostic.message
-            );
-        }
+        return if valid {
+            Ok(())
+        } else {
+            Err(AlreadyReportedCliError.into())
+        };
+    }
+    let styles = presentation::stdout();
+    let sources = FeaDiagnosticSources::new(&path, &checked.root_module, &checked.source_root);
+    let counts = print_fea_diagnostics(&checked.program.diagnostics, &sources, &styles, false);
+    println!("{}", counts.summary(&path, &styles));
+    if counts.errors > 0 || !valid {
         return Err(AlreadyReportedCliError.into());
     }
     Ok(())
+}
+
+/// Error and warning totals for one check, printed as the `checked …` summary line.
+pub(crate) struct DiagnosticCounts {
+    pub errors: usize,
+    pub warnings: usize,
+}
+
+impl DiagnosticCounts {
+    pub(crate) fn summary(&self, path: &Path, styles: &StreamStyles) -> String {
+        let summary = format!(
+            "checked {}: {} error(s), {} warning(s)",
+            path.display(),
+            self.errors,
+            self.warnings
+        );
+        if self.errors > 0 {
+            styles.error(summary)
+        } else if self.warnings > 0 {
+            styles.warning(summary)
+        } else {
+            styles.success(summary)
+        }
+    }
+}
+
+/// Maps the logical module paths in FEA diagnostics to the files the user names on the command
+/// line, so located FEA diagnostics read like `.m` diagnostics.
+pub(crate) struct FeaDiagnosticSources<'a> {
+    entry_path: &'a Path,
+    root_module: &'a runmat_analysis_language::LogicalSourcePath,
+    source_root: &'a Path,
+}
+
+impl<'a> FeaDiagnosticSources<'a> {
+    pub(crate) fn new(
+        entry_path: &'a Path,
+        root_module: &'a runmat_analysis_language::LogicalSourcePath,
+        source_root: &'a Path,
+    ) -> Self {
+        Self {
+            entry_path,
+            root_module,
+            source_root,
+        }
+    }
+
+    fn display_path(&self, module: &runmat_analysis_language::LogicalSourcePath) -> PathBuf {
+        if module == self.root_module {
+            return self.entry_path.to_path_buf();
+        }
+        let physical = self.source_root.join(module.as_str());
+        runmat_filesystem::current_dir()
+            .ok()
+            .and_then(|cwd| physical.strip_prefix(cwd).ok().map(Path::to_path_buf))
+            .unwrap_or(physical)
+    }
+
+    fn source(&self, module: &runmat_analysis_language::LogicalSourcePath) -> Option<String> {
+        let physical = if module == self.root_module {
+            self.entry_path.to_path_buf()
+        } else {
+            self.source_root.join(module.as_str())
+        };
+        std::fs::read_to_string(physical).ok()
+    }
+}
+
+/// Prints FEA diagnostics in the same located form `runmat check` uses for `.m` files and returns
+/// the error and warning totals.
+pub(crate) fn print_fea_diagnostics(
+    diagnostics: &[runmat_analysis_language::FeaDiagnostic],
+    sources: &FeaDiagnosticSources<'_>,
+    styles: &StreamStyles,
+    to_stderr: bool,
+) -> DiagnosticCounts {
+    let mut counts = DiagnosticCounts {
+        errors: 0,
+        warnings: 0,
+    };
+    for diagnostic in diagnostics {
+        match diagnostic.severity {
+            runmat_analysis_language::FeaDiagnosticSeverity::Error => counts.errors += 1,
+            runmat_analysis_language::FeaDiagnosticSeverity::Warning => counts.warnings += 1,
+        }
+        let rendered = render_fea_diagnostic(diagnostic, sources, styles);
+        if to_stderr {
+            eprintln!("{rendered}");
+        } else {
+            println!("{rendered}");
+        }
+    }
+    counts
+}
+
+fn render_fea_diagnostic(
+    diagnostic: &runmat_analysis_language::FeaDiagnostic,
+    sources: &FeaDiagnosticSources<'_>,
+    styles: &StreamStyles,
+) -> String {
+    let severity = match diagnostic.severity {
+        runmat_analysis_language::FeaDiagnosticSeverity::Error => HirDiagnosticSeverity::Error,
+        runmat_analysis_language::FeaDiagnosticSeverity::Warning => HirDiagnosticSeverity::Warning,
+    };
+    let located = diagnostic.location.as_ref().and_then(|location| {
+        sources.source(&location.path).map(|source| {
+            (
+                sources.display_path(&location.path),
+                source,
+                location.span,
+            )
+        })
+    });
+    let mut rendered = match &located {
+        Some((path, source, span)) => render_located(
+            &LocatedDiagnostic {
+                severity: &severity,
+                code: &diagnostic.code,
+                message: &diagnostic.message,
+                span: *span,
+                label: diagnostic.label.as_deref(),
+            },
+            path,
+            source,
+            styles,
+        ),
+        None => {
+            let (severity, tone) = severity_presentation(&severity);
+            format!(
+                "{}[{}]: {}",
+                styles.paint(tone, severity),
+                styles.identifier(&diagnostic.code),
+                diagnostic.message
+            )
+        }
+    };
+    for related in &diagnostic.related {
+        let location = match sources.source(&related.location.path) {
+            Some(source) => {
+                let (line, column, _, _) = source_line(&source, related.location.span.start);
+                format!(
+                    "{}:{line}:{column}",
+                    sources.display_path(&related.location.path).display()
+                )
+            }
+            None => sources
+                .display_path(&related.location.path)
+                .display()
+                .to_string(),
+        };
+        rendered.push_str(&format!(
+            "\n  {} {} {}: {}",
+            styles.muted("="),
+            styles.info("related:"),
+            styles.path(location),
+            related.message
+        ));
+    }
+    rendered
 }
 
 async fn check_m_file(
@@ -415,53 +553,18 @@ fn render_check_diagnostic_with_styles(
     source: &str,
     styles: &StreamStyles,
 ) -> String {
-    let (severity, severity_tone) = match diagnostic.severity {
-        HirDiagnosticSeverity::Error => ("error", Tone::Error),
-        HirDiagnosticSeverity::Warning => ("warning", Tone::Warning),
-        HirDiagnosticSeverity::Information => ("info", Tone::Info),
-        HirDiagnosticSeverity::Help => ("help", Tone::Help),
-    };
-    let (line, column, line_start, line_text) = source_line(source, diagnostic.primary.span.start);
-    let primary_start = diagnostic.primary.span.start.min(source.len());
-    let primary_end = diagnostic
-        .primary
-        .span
-        .end
-        .min(source.len())
-        .max(primary_start);
-    let prefix_width = source[line_start..primary_start].chars().count();
-    let span_len = source[primary_start..primary_end]
-        .split('\n')
-        .next()
-        .unwrap_or_default()
-        .chars()
-        .count()
-        .max(1)
-        .min(
-            line_text
-                .chars()
-                .count()
-                .saturating_sub(prefix_width)
-                .max(1),
-        );
-    let gutter = line.to_string().len();
-    let severity = styles.paint(severity_tone, severity);
-    let code = styles.identifier(&diagnostic.code);
-    let location = styles.path(format!("{}:{line}:{column}", path.display()));
-    let arrow = styles.muted("-->");
-    let separator = styles.muted("|");
-    let carets = styles.paint(severity_tone, "^".repeat(span_len));
-    let mut rendered = format!(
-        "{severity}[{code}]: {}\n {arrow} {location}\n{:gutter$} {separator}\n{line:>gutter$} {separator} {line_text}\n{:gutter$} {separator} {}{carets}",
-        diagnostic.message,
-        "",
-        "",
-        " ".repeat(prefix_width),
+    let mut rendered = render_located(
+        &LocatedDiagnostic {
+            severity: &diagnostic.severity,
+            code: &diagnostic.code,
+            message: &diagnostic.message,
+            span: diagnostic.primary.span,
+            label: diagnostic.primary.label.as_deref(),
+        },
+        path,
+        source,
+        styles,
     );
-    if let Some(label) = &diagnostic.primary.label {
-        rendered.push(' ');
-        rendered.push_str(&styles.paint(severity_tone, label));
-    }
     for secondary in &diagnostic.secondary {
         let (secondary_line, secondary_column, _, _) = source_line(source, secondary.span.start);
         let related = styles.info("related:");
@@ -488,6 +591,71 @@ fn render_check_diagnostic_with_styles(
             styles.muted("="),
             styles.help("help:")
         ));
+    }
+    rendered
+}
+
+struct LocatedDiagnostic<'a> {
+    severity: &'a HirDiagnosticSeverity,
+    code: &'a str,
+    message: &'a str,
+    span: Span,
+    label: Option<&'a str>,
+}
+
+fn severity_presentation(severity: &HirDiagnosticSeverity) -> (&'static str, Tone) {
+    match severity {
+        HirDiagnosticSeverity::Error => ("error", Tone::Error),
+        HirDiagnosticSeverity::Warning => ("warning", Tone::Warning),
+        HirDiagnosticSeverity::Information => ("info", Tone::Info),
+        HirDiagnosticSeverity::Help => ("help", Tone::Help),
+    }
+}
+
+/// Renders `severity[code]: message`, the `-->` location, and the source line with a caret
+/// underline and label. The snippet drops the line's leading indentation; the reported column
+/// stays the column in the file.
+fn render_located(
+    diagnostic: &LocatedDiagnostic<'_>,
+    path: &Path,
+    source: &str,
+    styles: &StreamStyles,
+) -> String {
+    let (severity, severity_tone) = severity_presentation(diagnostic.severity);
+    let (line, column, line_start, line_text) = source_line(source, diagnostic.span.start);
+    let primary_start = diagnostic.span.start.min(source.len());
+    let primary_end = diagnostic.span.end.min(source.len()).max(primary_start);
+    let indentation = line_text.len() - line_text.trim_start().len();
+    let snippet = &line_text[indentation..];
+    let prefix_width = source[line_start..primary_start]
+        .chars()
+        .count()
+        .saturating_sub(line_text[..indentation].chars().count());
+    let span_len = source[primary_start..primary_end]
+        .split('\n')
+        .next()
+        .unwrap_or_default()
+        .chars()
+        .count()
+        .max(1)
+        .min(snippet.chars().count().saturating_sub(prefix_width).max(1));
+    let gutter = line.to_string().len();
+    let severity = styles.paint(severity_tone, severity);
+    let code = styles.identifier(diagnostic.code);
+    let location = styles.path(format!("{}:{line}:{column}", path.display()));
+    let arrow = styles.muted("-->");
+    let separator = styles.muted("|");
+    let carets = styles.paint(severity_tone, "^".repeat(span_len));
+    let mut rendered = format!(
+        "{severity}[{code}]: {}\n {arrow} {location}\n{:gutter$} {separator}\n{line:>gutter$} {separator} {snippet}\n{:gutter$} {separator} {}{carets}",
+        diagnostic.message,
+        "",
+        "",
+        " ".repeat(prefix_width),
+    );
+    if let Some(label) = diagnostic.label {
+        rendered.push(' ');
+        rendered.push_str(&styles.paint(severity_tone, label));
     }
     rendered
 }

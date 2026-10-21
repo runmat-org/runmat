@@ -1,6 +1,6 @@
 # Structural adaptation from original solved results
 
-This is an experimental in-process evidence and acceptance path. Stage 11 and the
+This is an in-process evidence and acceptance path. Stage 11 and the
 original cantilever convergence criterion remain open.
 
 ## Original equations and fields
@@ -315,7 +315,7 @@ construction work outside this row-only inventory. Group/evidence construction i
 additional to this row inventory.
 It is a component inventory, not whole-compilation policy admission. Full pre-expansion
 composition and retained-output overlap remain required for the scheduled adaptive path;
-no original scientific gate, resource cap or production envelope is promoted here.
+no original scientific gate, resource cap or qualified envelope is promoted here.
 
 
 ## Prepared constraint target occurrences
@@ -494,7 +494,7 @@ Other projection and compilation phases still require their own complete account
 geometry, rows, group retention, component rank, finalization, adaptive output and scheduled
 publication remain additional governed phases. Invalid inputs can report a target, topology
 or reference encoding failure earlier than the former ordering; supported plans retain the
-original equations, identities, fields, meshes, tolerances and caps. No production promotion.
+original equations, identities, fields, meshes, tolerances and caps. No stage promotion.
 
 
 ## Counted shared mesh validation
@@ -530,7 +530,7 @@ cold2 pass on the combined candidate. Original adaptation remains35PASS/1FAIL at
 unchanged cantilever refinement criterion. Estimation model revision82 explicitly versions
 the changed shared contribution; schemas, authored caps, meshes and scientific targets are
 unchanged. Whole compiler lowering/retention/rank overlap, adaptive output and scheduled publication
-admission still require closure. Analysis projection storage is addressed below. No production
+admission still require closure. Analysis projection storage is addressed below. No stage
 qualification or measured whole-task memory claim follows from this component evidence.
 
 
@@ -590,7 +590,7 @@ selected constraint140, resource171, bridge200 and native adaptive cold2 tests p
 FEA lib/test lint, scoped formatting and diff checks pass. Adaptation retains35 passes
 and the same original cantilever failure. The isolated architecture check retains the same
 two excluded renderer debts. Full caller-policy compilation admission, adaptive scheduling
-and atomic semantic publication are still required; no stage or production promotion.
+and atomic semantic publication are still required; no stage promotion.
 
 
 ## Caller-governed compiler component
@@ -657,7 +657,7 @@ physics verdict. The proof envelope is derived from the reduced matrix while ret
 source/projection storage; this resource-policy boundary remains unresolved. It is additional
 blocking evidence, not a newly qualified or counted scientific result. The12 recorded scientific
 failures remain open. Strict formatting/diff PASS; main architecture PASS, isolated architecture
-retains the same two excluded renderer debts. No owned waiver or stage/production promotion.
+retains the same two excluded renderer debts. No owned waiver or stage promotion.
 
 This worker component does not add compiler demand to canonical task resource requests (revision83
 unchanged), establish allocated-resource reconciliation, measure RSS, or close whole-task admission.
@@ -717,7 +717,7 @@ input/compiler boundary and required-minus-one. Cold basis/field/receipt and mis
 rejection remain mandatory. Final constraints143PASS, API compile-fail1PASS, resources171PASS,
 bridge200PASS, native modal1PASS (both orders) and native adaptive/cold3PASS. Strict FEA and native lib/test no-deps lint pass. Scoped format/diff pass. Main architecture passes; the isolated candidate
 retains the same two excluded renderer debts. All12 scientific failures remain open; no stage,
-whole-task, measured-resource, production or release promotion follows from this component.
+whole-task, measured-resource or release promotion follows from this component.
 
 
 ## Canonical original compiler phase
@@ -755,8 +755,8 @@ This closes the canonical contribution for these three demand families. The moda
 extension is verified below. Transient and other compiler callers still need their respective
 canonical phase composition.
 Actual allocated execution resources, later encoding/observation/property/adaptive working and
-output phases, measured RSS and whole-task qualification remain mandatory. No production,
-stage, distributed/GPU or release promotion follows from requested-storage accounting.
+output phases, measured RSS and whole-task qualification remain mandatory. No stage,
+distributed/GPU or release promotion follows from requested-storage accounting.
 
 Final verification: constraints143PASS, staticpreflight6PASS, nonlinearpreflight4PASS,
 carrier compile-fail1PASS, resources173PASS and strict FEA lintPASS. Frequency48PASS and original
@@ -811,7 +811,7 @@ Combined291–303 draft120paths remains uncommitted. Scope format/diff and exact
 preserve98 unrelated tracked edits and an empty index; the candidate retains only the two excluded
 HEAD renderer-size debts. Requested storage is not RSS, a full-task bound or actual allocation.
 Allocated execution context, remaining compiler families, later owner phases, full adaptation,
-all twelve original scientific failures and the blocking release remain open. No stage or production
+all twelve original scientific failures and the blocking release remain open. No stage
 promotion. Evidence prefix `/private/tmp/runmat-fea-modalcompiler303-`.
 
 ## Scheduler-reserved analysis handoff (304)
@@ -845,7 +845,7 @@ Final exact-candidate shared execution41PASS, artifact38PASS, bridge202PASS, gen
 1PASS, modal1PASS (both orders), frequency9PASS plus one intentional producer-only ignore.
 Original scheduled J2 process lifecycle passes Tet4 and Tet10: seven phase closures per
 order, original accepted histories/ordinals, cold authentication after producer lifetime,
-receipts and runtime publication retaining experimental maturity. Meshing lifecycle protocol
+receipts and runtime publication. Meshing lifecycle protocol
 passes cancellation, deadline, exit/retry/checkpoint and spawn-failure witnesses. These process
 witnesses preserve original limits and do not replace the outstanding continuum references.
 
@@ -894,7 +894,7 @@ positive import preserves repeated chunk occurrences and complete prepared canon
 Combined bridge/native strict lib/test lintPASS1m54s. Native modal1PASS1.74s (both orders),
 frequency9PASS42.42s plus one intentional producer-only ignore. Original scheduled J2 process
 PASS Tet4/Tet10 through all seven phases, cold original history/receipts and runtime publication
-(build19.93s), unchanged caps and experimental maturity. No overlapping aggregate credit.
+(build19.93s), unchanged caps. No overlapping aggregate credit.
 
 Initial bridge201PASS/1FAIL identified rejection ordering and remains archived; missing test
 import and excessive helper arguments were corrected, then one item-order lint failure was

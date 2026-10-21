@@ -110,7 +110,6 @@ pub(crate) fn fixture(quadratic: bool) -> (NonlinearSolidWorkload, SolverMeshArt
         NonlinearSolidWorkload {
             model,
             controls: NonlinearSolveOptions {
-                formulation_requirement: FormulationRequirement::Experimental,
                 increment_count: 10,
                 max_accepted_increments: 12,
                 max_newton_iters: 32,
@@ -132,7 +131,6 @@ pub(crate) fn compiled(
     serde_json::from_value(serde_json::json!({
         "module_path": "tests/original-j2.fea",
         "study_id": "plastic",
-        "formulation_requirement": FormulationRequirement::Experimental,
         "study_inputs": [], "outputs": [],
         "model": workload.model,
         "properties": runmat_analysis_fea::properties::compile_property_map(&workload.model, Some(mesh)).unwrap(),

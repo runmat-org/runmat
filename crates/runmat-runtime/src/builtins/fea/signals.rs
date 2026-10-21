@@ -170,10 +170,10 @@ macro_rules! scalar_signal {
         $function:ident, $builtin:literal, $class:expr, $quantity:ty, $variant:path $(,)?
     ) => {
         #[runtime_builtin(
-                            name = $builtin,
-                            binding_variant = "default",
-                            builtin_path = "crate::builtins::fea::signals"
-                        )]
+                                    name = $builtin,
+                                    binding_variant = "default",
+                                    builtin_path = "crate::builtins::fea::signals"
+                                )]
         pub async fn $function(id: String, value: Value) -> BuiltinResult<Value> {
             let value = finite_numeric_scalar($builtin, &value, "value")?;
             signal_object(
@@ -195,10 +195,10 @@ macro_rules! vector_signal {
         $function:ident, $builtin:literal, $class:expr, $quantity:ty, $variant:path $(,)?
     ) => {
         #[runtime_builtin(
-                            name = $builtin,
-                            binding_variant = "default",
-                            builtin_path = "crate::builtins::fea::signals"
-                        )]
+                                    name = $builtin,
+                                    binding_variant = "default",
+                                    builtin_path = "crate::builtins::fea::signals"
+                                )]
         pub async fn $function(id: String, components: Value) -> BuiltinResult<Value> {
             let components = finite_numeric_vector3($builtin, &components, "components")?;
             signal_object(

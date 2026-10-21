@@ -12,8 +12,7 @@ use runmat_execution_runner_native::{
 };
 use runmat_runtime::analysis::FeaRootSelector;
 
-const SOURCE: &str =
-    include_str!("../../../../docs/simulation/examples/small-strain-j2-experimental.fea");
+const SOURCE: &str = include_str!("../../../../docs/simulation/examples/small-strain-j2.fea");
 
 pub(super) async fn run() {
     let mut original_history_failures = Vec::new();
@@ -192,7 +191,6 @@ pub(super) async fn run() {
             history.load_factors.len(),
             cold.terminal_block.checkpoint.work().accepted_increments()
         );
-        assert!(publication.steps.iter().all(|s| !s.production_publishable));
         println!("authored CAD/native/cold J2 transport checks passed quadratic={quadratic}, nodes={}, elements={}, accepted={}",
             mesh.topology.nodes.len(), mesh.topology.volume_elements.len(), history.load_factors.len());
     }

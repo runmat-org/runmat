@@ -572,9 +572,10 @@ const ACCURACY: Requirement = Requirement {
         obligation(
             "gate",
             concat!(
-                "Public production completion and dependent publication reject missing, ",
-                "failed or indeterminate mandatory acoustic accuracy; release qualification ",
-                "is not inferred from an experimental accepted result.",
+                "Public completion and dependent publication reject missing or failed ",
+                "mandatory acoustic accuracy, and publish indeterminate accuracy only under ",
+                "an explicit markIndeterminate policy; release qualification is not ",
+                "inferred from an accepted result alone.",
             ),
             EvidenceKind::AccuracyAcceptance,
             PUBLIC,

@@ -210,7 +210,6 @@ pub(super) fn import_random_response_result<Source: CacheImport>(
         runmat_analysis_fea::execution::AccuracySourceKind::StructuralRandomResponse,
         response_numerical_receipt.source_result(),
         None,
-        response_workload.formulation_requirement(),
         response_workload
             .procedure_step()
             .map_err(protocol)?

@@ -58,17 +58,3 @@ pub enum SolutionSpace {
     Direct,
     ModalReduced,
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FormulationMaturity {
-    Production,
-    Experimental,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ExecutionFallbackPolicy {
-    Forbid,
-    AllowExperimental,
-}

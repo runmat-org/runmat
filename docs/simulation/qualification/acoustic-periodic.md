@@ -1,6 +1,6 @@
 # Matching periodic and Bloch pressure
 
-The experimental canonical Tet4/Tet10 harmonic solver supports bijective matching
+The canonical Tet4/Tet10 harmonic solver supports bijective matching
 exterior-face pairs under translation (or identity), with
 `p_secondary = exp(i phase) p_primary`. The convention is peak phasors and
 `exp(+i omega t)`. Core declarations and authored language use the existing typed
@@ -39,7 +39,7 @@ pair reaction work cancels in the global balance.
 
 ## Open gates
 
-This is not Stage 8 completion or production qualification. Arbitrary rotated or
+This is not Stage 8 completion or qualification. Arbitrary rotated or
 nonmatching pairs, unforced periodic eigenmodes, independent continuum references
 with free phase-linked boundary traces, actual authored native-process periodic
 publication/restart, measured memory reconciliation, and release evidence remain.

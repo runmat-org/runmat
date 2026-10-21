@@ -9,7 +9,7 @@ use runmat_analysis_core::{
     geometry_parameter_input_type, AuthoredGeometryArgument, AuthoredGeometryArgumentValue,
     AuthoredGeometryInstance, AuthoredMeshRef, AuthoredModel, AuthoredModelArgument,
     AuthoredModelArgumentValue, AuthoredModelInstance, AuthoredModelRef, AuthoredStudy,
-    AuthoredStudyInputRef, FormulationRequirement,
+    AuthoredStudyInputRef,
 };
 use runmat_geometry_core::GeometryDefinition;
 use runmat_meshing_core::MeshDefinition;
@@ -52,15 +52,9 @@ pub(super) fn lower(
     }
 
     let (model_key, model_expression) = model_binding(context.bound, declaration, diagnostics)?;
-    let model = context.models.get(&model_key).or_else(|| {
-        lower::error(
-            declaration,
-            model_expression.span,
-            "study model is not available as a valid typed model",
-            diagnostics,
-        );
-        None
-    })?;
+    // A model that failed to lower has already reported its own located diagnostics; repeating
+    // that failure at every dependent study would only add cascade errors.
+    let model = context.models.get(&model_key)?;
     let inputs = super::super::input::lower_definitions(context.bound, declaration, diagnostics);
     let geometry_arguments = geometry_arguments(
         context.bound,
@@ -77,9 +71,15 @@ pub(super) fn lower(
         diagnostics,
     );
     let model_closure = model_closure(context.models, model)?;
+    require_sections_for_structural_domains(
+        declaration,
+        model_expression.span,
+        &model_closure,
+        diagnostics,
+    );
     let mut sequence = lower::lower_study(declaration, &model_closure, diagnostics)?;
     let outputs = super::output::lower_outputs(context.bound, declaration, diagnostics);
-    let formulation_requirement = formulation_requirement(declaration, diagnostics);
+    reject_formulation_setting(declaration, diagnostics);
     let assessments = super::assessment::lower_assessments(context.bound, declaration, diagnostics);
     match runmat_analysis_core::attach_authored_outputs(&outputs, &mut sequence) {
         Ok(()) => {}
@@ -114,7 +114,6 @@ pub(super) fn lower(
             },
             arguments,
         },
-        formulation_requirement,
         inputs,
         outputs,
         assessments,
@@ -132,61 +131,80 @@ pub(super) fn lower(
     Some(study)
 }
 
-fn formulation_requirement(
+/// `formulation` is not a study setting: every registered formulation runs on one path. A stale
+/// `formulation = ...` line is rejected so the authored file states only what the study does.
+fn reject_formulation_setting(
     declaration: &CheckedFeaDeclaration,
     diagnostics: &mut Vec<FeaDiagnostic>,
-) -> FormulationRequirement {
+) {
     for statement in &declaration.statements {
-        if matches!(
-            &statement.kind,
-            crate::CheckedFeaStatementKind::Requirement { target, .. }
-                if target.as_slice() == ["formulation"]
-        ) {
+        let target = match &statement.kind {
+            crate::CheckedFeaStatementKind::Assignment { target, .. }
+            | crate::CheckedFeaStatementKind::Requirement { target, .. } => target,
+            _ => continue,
+        };
+        if target.as_slice() == ["formulation"] {
             lower::error(
                 declaration,
                 statement.span,
-                "study formulation uses `formulation = production` or `formulation = experimental`",
+                "`formulation` is not a study setting; remove this line",
                 diagnostics,
             );
         }
     }
-    let settings = declaration
-        .statements
-        .iter()
-        .filter_map(|statement| {
-            let crate::CheckedFeaStatementKind::Assignment { target, value, .. } = &statement.kind
-            else {
-                return None;
-            };
-            (target.as_slice() == ["formulation"]).then_some(value)
+}
+
+/// A material assigned to a face or an edge declares a shell or beam domain, which has no
+/// thickness or cross-section of its own. Without a section (or a layup for a shell) on the same
+/// region, the study would solve a body that has no material where the author meant one.
+fn require_sections_for_structural_domains(
+    declaration: &CheckedFeaDeclaration,
+    span: runmat_types::Span,
+    closure: &[&AuthoredModel],
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) {
+    use runmat_analysis_core::{AuthoredPropertyAssignment, AuthoredPropertyTarget, AuthoredRegionSource};
+    let has_section = |target: &AuthoredPropertyTarget| {
+        closure.iter().any(|model| {
+            model.property_assignments.iter().any(|assignment| match assignment {
+                AuthoredPropertyAssignment::Section { target: section, .. } => section == target,
+                AuthoredPropertyAssignment::Layup { target: layup, .. } => {
+                    matches!(target, AuthoredPropertyTarget::Shell(shell) if shell == layup)
+                }
+                AuthoredPropertyAssignment::Orientation { .. } => false,
+            })
         })
-        .collect::<Vec<_>>();
-    if settings.len() > 1 {
-        lower::error(
-            declaration,
-            declaration.span,
-            "study formulation is declared more than once",
-            diagnostics,
-        );
-    }
-    let Some(value) = settings.first() else {
-        return FormulationRequirement::Production;
     };
-    match &value.kind {
-        CheckedExpressionKind::Enum(value) if value == "production" => {
-            FormulationRequirement::Production
-        }
-        CheckedExpressionKind::Enum(value) if value == "experimental" => {
-            FormulationRequirement::Experimental
-        }
-        _ => {
+    for model in closure {
+        for assignment in &model.material_assignments {
+            let (kind, needs) = match &assignment.target {
+                AuthoredPropertyTarget::Shell(_) => ("face", "a shell section or layup"),
+                AuthoredPropertyTarget::Beam(_) => ("edge", "a beam section"),
+                AuthoredPropertyTarget::Solid(_) | AuthoredPropertyTarget::Cell(_) => continue,
+            };
+            if has_section(&assignment.target) {
+                continue;
+            }
+            let (AuthoredPropertyTarget::Shell(source) | AuthoredPropertyTarget::Beam(source)) =
+                &assignment.target
+            else {
+                continue;
+            };
+            let region = match source {
+                AuthoredRegionSource::Geometry(region) => {
+                    format!("geometry.{}.region.{}", region.geometry_id, region.region_id)
+                }
+                AuthoredRegionSource::ModelInput(input) => format!("input.{}", input.input_id),
+            };
             lower::error(
                 declaration,
-                value.span,
-                "formulation must be `production` or `experimental`",
+                span,
+                format!(
+                    "model `{}` assigns a material to {kind} region `{region}`, which needs {needs}; assign the material to a solid region or add the section",
+                    model.model_id
+                ),
                 diagnostics,
             );
-            FormulationRequirement::Production
         }
     }
 }
@@ -234,7 +252,7 @@ fn geometry_binding<'a>(
         _ => return missing_binding(declaration, "geometry", diagnostics),
     };
     let key = symbol_key(bound, declaration, path, FeaSymbolKind::Geometry)
-        .or_else(|| missing_binding(declaration, "geometry", diagnostics))?;
+        .or_else(|| unresolved_binding(declaration, expression, "geometry", diagnostics))?;
     Some((key, expression))
 }
 
@@ -344,7 +362,7 @@ fn declaration_binding(
         return missing_binding(declaration, member, diagnostics);
     };
     symbol_key(bound, declaration, path, kind)
-        .or_else(|| missing_binding(declaration, member, diagnostics))
+        .or_else(|| unresolved_binding(declaration, expression, member, diagnostics))
 }
 
 fn model_binding<'a>(
@@ -361,7 +379,7 @@ fn model_binding<'a>(
         _ => return missing_binding(declaration, "model", diagnostics),
     };
     let key = symbol_key(bound, declaration, path, FeaSymbolKind::Model)
-        .or_else(|| missing_binding(declaration, "model", diagnostics))?;
+        .or_else(|| unresolved_binding(declaration, expression, "model", diagnostics))?;
     Some((key, expression))
 }
 
@@ -476,6 +494,19 @@ fn model_arguments(
             })
         })
         .collect()
+}
+
+/// A binding whose reference already failed to resolve was reported where it is written.
+fn unresolved_binding<T>(
+    declaration: &CheckedFeaDeclaration,
+    expression: &CheckedExpression,
+    member: &str,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<T> {
+    if expression.value_type == crate::FeaType::Error {
+        return None;
+    }
+    missing_binding(declaration, member, diagnostics)
 }
 
 fn missing_binding<T>(

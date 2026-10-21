@@ -17,17 +17,11 @@ use std::collections::{BTreeMap, BTreeSet};
 pub fn validate_canonical_input<'a>(
     model: &'a AnalysisModel,
     step_id: &str,
-    requirement: FormulationRequirement,
     residual_target: f64,
 ) -> Result<&'a ProcedureStep, MagnetostaticError> {
     if !residual_target.is_finite() || residual_target <= 0.0 || residual_target >= 1.0 {
         return Err(MagnetostaticError::InvalidInput(
             "relative residual target".into(),
-        ));
-    }
-    if requirement != FormulationRequirement::Experimental {
-        return Err(MagnetostaticError::Unsupported(
-            "production magnetic qualification".into(),
         ));
     }
     validate_model(model).map_err(|e| MagnetostaticError::InvalidInput(e.to_string()))?;
@@ -102,10 +96,9 @@ pub(crate) fn compile_canonical_input(
     model: &AnalysisModel,
     mesh: &SolverMeshArtifact,
     step_id: &str,
-    requirement: FormulationRequirement,
     residual_target: f64,
 ) -> Result<CompiledMagneticInput, MagnetostaticError> {
-    let step = validate_canonical_input(model, step_id, requirement, residual_target)?;
+    let step = validate_canonical_input(model, step_id, residual_target)?;
     super::resources::require_canonical_ceiling(
         model,
         mesh,
@@ -294,9 +287,8 @@ pub fn solve_canonical_static(
     model: &AnalysisModel,
     mesh: &SolverMeshArtifact,
     step_id: &str,
-    requirement: FormulationRequirement,
     residual_target: f64,
 ) -> Result<MagnetostaticResponse, MagnetostaticError> {
-    let compiled = compile_canonical_input(model, mesh, step_id, requirement, residual_target)?;
+    let compiled = compile_canonical_input(model, mesh, step_id, residual_target)?;
     super::solve_full_grounded_volume(&compiled.projection, &compiled.volumes, residual_target)
 }

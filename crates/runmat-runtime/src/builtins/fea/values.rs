@@ -72,10 +72,10 @@ macro_rules! scalar_quantity_builtin {
         $class:expr, $field:literal, $scale:expr, $offset:expr
     ) => {
         #[runtime_builtin(
-                                            name = $builtin_name,
-                                            binding_variant = "default",
-                                            builtin_path = "crate::builtins::fea::values"
-                                        )]
+                                                    name = $builtin_name,
+                                                    binding_variant = "default",
+                                                    builtin_path = "crate::builtins::fea::values"
+                                                )]
         pub async fn $function(value: Value) -> BuiltinResult<Value> {
             let value = finite_numeric_scalar($builtin_name, &value, "value")?;
             quantity_to_value($builtin_name, $class, $field, value * $scale + $offset)
@@ -329,10 +329,10 @@ macro_rules! vector_quantity_builtin {
         $function:ident, $builtin_name:literal, $class:expr, $scale:expr
     ) => {
         #[runtime_builtin(
-                                            name = $builtin_name,
-                                            binding_variant = "default",
-                                            builtin_path = "crate::builtins::fea::values"
-                                        )]
+                                                    name = $builtin_name,
+                                                    binding_variant = "default",
+                                                    builtin_path = "crate::builtins::fea::values"
+                                                )]
         pub async fn $function(value: Value) -> BuiltinResult<Value> {
             let components = finite_numeric_vector3($builtin_name, &value, "components")?;
             let components = components.map(|value| value * $scale);

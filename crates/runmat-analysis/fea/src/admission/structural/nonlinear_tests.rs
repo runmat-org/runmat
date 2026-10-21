@@ -1,8 +1,6 @@
 use super::*;
 use crate::admission::{admit_formulation, FormulationAdmissionRequest};
-use runmat_analysis_core::{
-    FormulationMaturity, FormulationRequirement, PhysicsFamily, SolutionSpace,
-};
+use runmat_analysis_core::{PhysicsFamily, SolutionSpace};
 
 fn input(operator: StructuralOperatorImplementation) -> StructuralRealizationInput {
     let recovery = match operator {
@@ -63,26 +61,13 @@ fn canonical_geometry_translates_to_exact_j2_equilibrium_axes() {
             realization,
             structural_exact_realization(input(solved)).unwrap()
         );
-        let request = FormulationAdmissionRequest {
+        admit_formulation(FormulationAdmissionRequest {
             family: PhysicsFamily::Structural,
             procedure: AnalysisProcedure::Nonlinear,
             solution_space: SolutionSpace::Direct,
-            requirement: FormulationRequirement::Experimental,
             realization,
-        };
-        assert_eq!(
-            admit_formulation(request.clone()).unwrap().qualification(),
-            FormulationMaturity::Experimental
-        );
-        assert_eq!(
-            admit_formulation(FormulationAdmissionRequest {
-                requirement: FormulationRequirement::Production,
-                ..request
-            })
-            .unwrap_err()
-            .reason,
-            FormulationAdmissionRejectionReason::ProductionQualificationMissing
-        );
+        })
+        .expect("J2 nonlinear realization is admitted");
     }
 }
 
@@ -128,7 +113,6 @@ fn nonlinear_axes_cannot_be_relabelled_as_linear_or_reverse() {
         family: PhysicsFamily::Structural,
         procedure: AnalysisProcedure::Nonlinear,
         solution_space: SolutionSpace::Direct,
-        requirement: FormulationRequirement::Experimental,
         realization: forged,
     })
     .is_err());

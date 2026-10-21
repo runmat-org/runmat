@@ -16,6 +16,6 @@ Workflow checks cover the authored study, admission, execution, original fields,
 
 ## Criteria and assessment records
 
-The current documentation bundle contains linked checks but no published qualification assessments. The experimental cantilever guide illustrates the workflow; it is not a converged physical reference or a production qualification.
+The current documentation bundle contains linked checks but no published qualification assessments. The cantilever guide illustrates the workflow; it is not a converged physical reference or a qualification assessment.
 
 <!-- fea:verification -->

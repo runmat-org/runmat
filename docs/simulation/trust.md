@@ -9,8 +9,8 @@ RunMat records those signals in the result payload, saved artifacts, diagnostics
 Every run returns common result data:
 
 - `run_id`,
-- a required run identity separating physics family, procedure, solution space, formulations,
-  maturity, and fallback policy,
+- a required run identity separating physics family, procedure, solution space, and exact
+  formulation realization,
 - fields from the underlying FEA run payload,
 - optional domain payloads,
 - `model_validity`,
@@ -47,6 +47,19 @@ Read diagnostics with quality reasons:
 - diagnostics say what was observed,
 - quality reasons say why that observation affected trust.
 
+## Same Study, Same Result
+
+A study run is deterministic. For the same RunMat build on the same hardware class, the same
+checked study produces the same mesh digest, the same step run identities, saved solver states
+with identical content digests, and bit-identical assessed values on every run, whatever the local worker count or
+threads per worker. Worker placement, retries, queueing and measured stage times are recorded as
+execution evidence; they never enter the result identity. An `execution` policy changes where and
+how widely the work runs, not what it computes.
+
+The guarantee is tested: `crates/runmat-cli/tests/fea_determinism.rs` runs one static study five
+times and with 1, 2 and 4 workers and 1 or 4 threads per worker, and compares the mesh digest,
+the saved state content digests and the assessed value.
+
 ## Provenance
 
 Provenance records how the run executed:
@@ -61,9 +74,8 @@ Provenance records how the run executed:
 - typed fallback stage and reason.
 
 Requested placement and actual execution are distinct. Uploading result fields to an accelerator
-does not turn a CPU solve into an accelerator solve. Experimental formulations may allow an
-explicitly recorded fallback; production identities forbid it, and artifacts that violate their
-identity are rejected.
+does not turn a CPU solve into an accelerator solve. Any fallback is recorded with its typed stage
+and reason, and artifacts that violate their identity are rejected.
 
 This matters for comparisons. Two runs can use the same model and operation but differ in backend, precision, fallback behavior, or solver policy.
 
@@ -88,7 +100,7 @@ Before treating a result as reliable, ask:
 3. Did the selected backend and solver policy match expectations?
 4. Did the result pass quality gates?
 5. Are there quality reasons or diagnostics that affect use?
-6. Is the family mature enough for this use class?
+6. Does the recorded validation evidence cover this use class?
 7. Is there V&V evidence for this model class, not just a successful run?
 8. Are artifacts available for review and reproduction?
 

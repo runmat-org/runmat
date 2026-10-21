@@ -3,9 +3,7 @@ use crate::{
     fixtures::{fixture_model, FixtureId},
     ComputeBackend, ThermalProcedureControl,
 };
-use runmat_analysis_core::{
-    AnalysisSequence, FormulationRequirement, ProcedureStep, Temperature, ThermalDomain,
-};
+use runmat_analysis_core::{AnalysisSequence, ProcedureStep, Temperature, ThermalDomain};
 use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
 
 fn workload() -> ThermalWorkload {
@@ -21,7 +19,6 @@ fn workload() -> ThermalWorkload {
         model,
         step_id,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 3 },
         residual_target: 1e-8,
     }
@@ -118,10 +115,6 @@ fn receipts_bind_workload_manifest_and_accepted_thermal_evidence() {
         assert!(receipt
             .validate_against(&other_material, &manifest)
             .is_err());
-        let mut production = workload.clone();
-        production.formulation_requirement = FormulationRequirement::Production;
-        assert!(ThermalNumericalReceiptArtifact::new(&production, &result).is_err());
-        assert!(ThermalNumericalReceiptArtifact::from_manifest(&production, &manifest).is_err());
         let mut malformed = result.clone();
         malformed.time_points_s[1] *= 0.5;
         assert!(ThermalNumericalReceiptArtifact::new(&workload, &malformed).is_err());
@@ -249,9 +242,7 @@ fn numerical_intent_excludes_placement_and_admission_but_exact_workload_does_not
     let cpu = workload();
     let mut gpu = cpu.clone();
     gpu.backend = ComputeBackend::Gpu;
-    let mut production = cpu.clone();
-    production.formulation_requirement = FormulationRequirement::Production;
-    for other in [&gpu, &production] {
+    for other in [&gpu] {
         assert_eq!(
             cpu.numerical_intent_identity().unwrap(),
             other.numerical_intent_identity().unwrap()

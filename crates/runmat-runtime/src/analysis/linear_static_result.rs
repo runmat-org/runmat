@@ -4,10 +4,7 @@
 //! host-backed numerical result into a public, persisted-runtime result shape. It owns no solver
 //! or artifact-store I/O.
 
-use runmat_analysis_core::{
-    AnalysisField, AnalysisModel, AnalysisProcedure, FormulationMaturity, FormulationRequirement,
-    SolutionSpace,
-};
+use runmat_analysis_core::{AnalysisField, AnalysisModel, AnalysisProcedure, SolutionSpace};
 use runmat_analysis_fea::properties::compile_structural_property_map;
 use runmat_analysis_fea::{
     ComputeBackend, ExecutionBackend, FeaRunResult, SolverPreconditioner,
@@ -24,14 +21,13 @@ use super::contracts::{
     FallbackEvent, PreconditionerMode, QualityGate, QualityPolicy, QualityReason,
     QualityReasonCode, RunProvenance,
 };
-use super::result_policy::{classify_run_status, evaluate_production_publication};
+use super::result_policy::classify_run_status;
 use super::{render_topology_from_solver_mesh, storage};
 
 pub(super) struct LinearStaticResultInput<'a> {
     pub model: &'a AnalysisModel,
     pub solver_mesh: Option<&'a SolverMeshArtifact>,
     pub requested_backend: ComputeBackend,
-    pub formulation_requirement: FormulationRequirement,
     pub options: &'a AnalysisRunOptions,
     pub assigned_run_id: Option<&'a str>,
 }
@@ -143,8 +139,6 @@ pub(super) fn admit_linear_static_result(
             solver_convergence == QualityGate::Pass && result_quality != QualityGate::Fail
         }
     };
-    let (production_publishable, production_publication_reasons) =
-        evaluate_production_publication(&run, numerically_acceptable);
     let run_status = classify_run_status(result_quality, numerically_acceptable);
 
     Ok(AnalysisRunResult {
@@ -164,9 +158,7 @@ pub(super) fn admit_linear_static_result(
         result_quality,
         run_status,
         numerically_acceptable,
-        production_publishable,
         quality_reasons,
-        production_publication_reasons,
         provenance: RunProvenance {
             requested_backend: input.requested_backend,
             execution_backend: run.execution_backend,
@@ -201,13 +193,6 @@ fn validate_result(input: &LinearStaticResultInput<'_>, run: &FeaRunResult) -> R
         })
     {
         return Err("structural result identity differs from the requested model procedure".into());
-    }
-    if input.formulation_requirement == FormulationRequirement::Production
-        && run.identity.qualification() != FormulationMaturity::Production
-    {
-        return Err(
-            "structural result does not satisfy the production formulation requirement".into(),
-        );
     }
     if let Some(mesh) = input.solver_mesh {
         mesh.validate().map_err(|error| error.to_string())?;
@@ -504,7 +489,6 @@ mod convergence_tests {
             &model,
             ComputeBackend::Cpu,
             runmat_analysis_fea::LinearStaticSolveOptions {
-                formulation_requirement: FormulationRequirement::Experimental,
                 solver_mesh: Some(mesh.clone()),
                 require_solver_mesh_for_solid: true,
                 ..Default::default()
@@ -519,7 +503,6 @@ mod convergence_tests {
             model: &model,
             solver_mesh: Some(&mesh),
             requested_backend: ComputeBackend::Cpu,
-            formulation_requirement: FormulationRequirement::Experimental,
             options: &options,
             assigned_run_id: Some("typed-convergence"),
         };

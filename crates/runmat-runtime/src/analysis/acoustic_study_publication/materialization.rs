@@ -19,11 +19,9 @@ pub(in crate::analysis) struct CompletedAcousticFrequencyStep {
     pub run_id: String,
     pub run_status: RunStatus,
     pub numerically_acceptable: bool,
-    pub production_publishable: bool,
     pub solver_convergence: QualityGate,
     pub result_quality: QualityGate,
     pub quality_reasons: Vec<QualityReason>,
-    pub production_publication_reasons: Vec<ProductionPublicationReason>,
     pub provenance: RunProvenance,
     pub completion: Box<AcousticFrequencyCompletionResults>,
     pub persistence: AcousticFrequencyPersistence,
@@ -119,21 +117,14 @@ pub(super) fn admit(
         solver_convergence == QualityGate::Pass && result_quality == QualityGate::Pass;
     let run_status =
         crate::analysis::result_policy::classify_run_status(result_quality, numerically_acceptable);
-    let (production_publishable, production_publication_reasons) =
-        crate::analysis::result_policy::evaluate_identity_production_publication(
-            &identity,
-            numerically_acceptable,
-        );
     Ok(CompletedAcousticFrequencyStep {
         identity,
         run_id: run_id.into(),
         run_status,
         numerically_acceptable,
-        production_publishable,
         solver_convergence,
         result_quality,
         quality_reasons,
-        production_publication_reasons,
         provenance: RunProvenance {
             requested_backend: ComputeBackend::Cpu,
             execution_backend: ExecutionBackend::Cpu,

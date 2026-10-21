@@ -137,7 +137,6 @@ fn solved_fields_survive_cold_workload_admission_and_first_dynamic_block() {
             step_id: model.sequence.steps[0].step_id.clone(),
             model,
             backend: ComputeBackend::Cpu,
-            formulation_requirement: FormulationRequirement::Experimental,
             solver: StructuralTransientSolverPlan::Direct,
             time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 4 },
             residual_target: 1e-10,

@@ -11,7 +11,6 @@ use runmat_analysis_fea::{
 fn planning_policy() -> ThermalStudyPlanningPolicy {
     ThermalStudyPlanningPolicy {
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
     }
 }
 

@@ -1,6 +1,6 @@
 # Original-source accuracy evidence at cold import
 
-Status: experimental shared accuracy transport; no family or release promotion.
+Status: shared accuracy transport; no family or release promotion.
 Owner: Stage 2 accuracy and immutable source authority, with Stage 12 release implications.
 
 ## Acceptance boundary
@@ -38,11 +38,12 @@ internally consistent report and a freshly evaluated gate. Import nevertheless r
 - omitted original source inputs; and
 - an invented spatial convergence certificate absent from a thermal receipt.
 
-In the final case, the honest report is indeterminate and blocks production. The counterfeit report
-is internally satisfied and would allow production if its claimed evidence were trusted. Cold
+In the final case, the honest report is indeterminate and blocks publication under a `fail`
+unavailable-evidence policy. The counterfeit report is internally satisfied and would allow
+publication if its claimed evidence were trusted. Cold
 import rejects it rather than accepting its hashes as mathematical proof. The positive source report
-still imports, including experimental publication of visibly indeterminate evidence under the
-explicit authored experimental policy.
+still imports, including publication of visibly indeterminate evidence under an explicit
+authored `mark_indeterminate` policy.
 
 ## Verified scope
 
@@ -126,7 +127,7 @@ Full accuracy-source workspace admission remains open: construction of the origi
 projection, time schedules, catalog verification and per-selection scratch must be
 charged together by their shared owners before expansion. This component profile does
 not replace that reservation or provide new independent convergence evidence. All original
-scientific failures and production/release gates remain open.
+scientific failures and qualification/release gates remain open.
 
 ## Counted schedule construction (315)
 
@@ -192,7 +193,7 @@ Strict FEA/bridge/native package lint and scoped formatting pass; isolated archi
 the same two excluded renderer debts. This is component requested heap, not RSS or complete
 accuracy-source workspace admission. Remaining projection/schedule/catalog/selection/metadata
 coexistence and target-index construction must be admitted together. All original scientific,
-production and release gates remain open.
+qualification and release gates remain open.
 
 ## Counted region-target selection scratch (318)
 
@@ -218,7 +219,7 @@ Groups overlap; original scientific criteria and physics operators are unchanged
 
 Complete source admission remains open: retained projection, schedule, catalog verification,
 all selections and canonical metadata must share one reservation across construction phases.
-No production, science, distributed/GPU or release qualification is inferred from this slice.
+No stage, science, distributed/GPU or release qualification is inferred from this slice.
 
 ## Counted catalog metadata validation (319)
 
@@ -286,7 +287,7 @@ selection and retained metadata must be counted together before reconstruction. 
 already uses its count-admitted original projection to derive resource facts; plan rederivation
 is not claimed to perform no physical-source construction. Resource revision91, schemas,
 original operators, meshes, criteria and caps remain unchanged. No RSS, scientific convergence,
-production, distributed/GPU or release qualification is inferred.
+stage, distributed/GPU or release qualification is inferred.
 
 ## Thermal projection/schedule construction reservation (321)
 
@@ -326,7 +327,7 @@ definition/target reconstruction and selection metadata still retain the legacy 
 allowance and need source-owner phase facts. Planning currently constructs a bounded original
 projection to obtain retained storage facts; the complete source vertical must remove repeated
 planning/verification construction through count-only facts or reuse of the original opaque
-carrier. Requested heap bounds are not RSS, and no scientific, production or release gate is
+carrier. Requested heap bounds are not RSS, and no scientific, qualification or release gate is
 promoted by this component reservation.
 
 ## Reproduce

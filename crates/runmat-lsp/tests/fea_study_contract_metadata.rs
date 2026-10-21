@@ -23,7 +23,6 @@ const REPRESENTATIVE_STUDY_CONTRACTS: &[&str] = &[
     "fea.ProcedureStep.configure",
     "fea.AnalysisSequence.new",
     "fea.ComputeBackend.cpu",
-    "fea.FormulationRequirement.production",
     "fea.SolverOptions.defaults",
     "fea.ExecutionStep.new",
     "fea.ExecutionPlan.new",

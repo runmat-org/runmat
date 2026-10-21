@@ -1,7 +1,7 @@
 # Prepared global contact operator and original configuration
 
-This is an experimental, source-bound global contact assembly component. It does not
-advance the body Newton solver, authorize continuation or enable production contact.
+This is a source-bound global contact assembly component. It does not
+advance the body Newton solver, authorize continuation or enable public contact execution.
 The nonlinear preparation route still rejects contact until its complete admission,
 state, solve, accuracy and publication chain is qualified.
 

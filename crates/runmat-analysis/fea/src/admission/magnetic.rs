@@ -2,10 +2,9 @@
 //! Admission declares numerical algorithms, not a native resource/restart contract.
 use runmat_analysis_core::{
     AnalysisProcedure, BoundaryTransferImplementation, ConstitutiveImplementation,
-    CouplingImplementation, ExactFormulationComponent, ExactFormulationRealization,
-    FormulationRequirement, PhysicsFamily, RecoveryImplementation, SolutionSpace,
-    SourceImplementation, SpatialOperatorImplementation, TemporalImplementation,
-    TopologyImplementation,
+    CouplingImplementation, ExactFormulationComponent, ExactFormulationRealization, PhysicsFamily,
+    RecoveryImplementation, SolutionSpace, SourceImplementation, SpatialOperatorImplementation,
+    TemporalImplementation, TopologyImplementation,
 };
 use runmat_meshing_core::{ElementOrder, SolverMeshArtifact};
 
@@ -17,13 +16,11 @@ use crate::contracts::FeaRunError;
 /// compilation; a mesh order alone does not establish either fact.
 pub fn admit_canonical_magnetostatic(
     mesh: &SolverMeshArtifact,
-    requirement: FormulationRequirement,
 ) -> Result<AnalysisRunIdentity, FeaRunError> {
     admit_formulation(FormulationAdmissionRequest {
         family: PhysicsFamily::Electromagnetic,
         procedure: AnalysisProcedure::Static,
         solution_space: SolutionSpace::Direct,
-        requirement,
         realization: realization(mesh.resolved_request.element_order),
     })
     .map(|receipt| receipt.into_identity())

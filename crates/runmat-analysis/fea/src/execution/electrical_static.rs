@@ -6,8 +6,7 @@ use super::{
 };
 use crate::admission::AnalysisRunIdentity;
 use runmat_analysis_core::{
-    AnalysisModel, ElectromagneticDomain, FormulationRequirement, ProcedureStepId,
-    StaticElectricalEquation,
+    AnalysisModel, ElectromagneticDomain, ProcedureStepId, StaticElectricalEquation,
 };
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
@@ -39,7 +38,6 @@ const LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 1_000_000
 pub struct ElectricalStaticWorkload {
     pub model: AnalysisModel,
     pub step_id: ProcedureStepId,
-    pub formulation_requirement: FormulationRequirement,
     pub relative_residual_target: f64,
 }
 
@@ -48,7 +46,6 @@ impl ElectricalStaticWorkload {
         crate::physics::electrical::validate_canonical_input(
             &self.model,
             self.step_id.as_str(),
-            self.formulation_requirement,
             self.relative_residual_target,
         )
         .map_err(invalid)?;
@@ -96,7 +93,6 @@ impl ElectricalStaticWorkload {
             self.equation()?,
             crate::physics::electrical::sources::kind(&self.model),
             mesh,
-            self.formulation_requirement,
         )
         .map_err(invalid)
     }
@@ -111,7 +107,6 @@ impl ElectricalStaticWorkload {
             &self.model,
             mesh,
             self.step_id.as_str(),
-            self.formulation_requirement,
             self.relative_residual_target,
         )
         .map_err(invalid)?;

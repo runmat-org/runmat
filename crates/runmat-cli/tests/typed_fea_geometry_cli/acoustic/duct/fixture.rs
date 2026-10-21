@@ -261,7 +261,6 @@ study response {
     geometry = geometry.part
     mesh = mesh.volume
     model = model.duct
-    formulation = experimental
     analysis sound {
         acoustic harmonic {
             frequencies = [0.2 Hz]

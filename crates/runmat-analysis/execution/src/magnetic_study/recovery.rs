@@ -126,7 +126,6 @@ impl MagneticStudyCoordinator {
                 },
                 sequence: SequenceIdentity::from_solver_contract(&workload.model.sequence)?,
                 step: self.preparation.selected_step().clone(),
-                formulation_requirement: workload.formulation_requirement,
                 observations,
                 program_revision: self.preparation.program_revision.clone(),
                 output_policy: self.preparation.output_policy,

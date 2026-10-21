@@ -318,7 +318,6 @@ fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
     let workload = FluidSteadyWorkload {
         model,
         step_id: ProcedureStepId("steady".into()),
-        formulation_requirement: FormulationRequirement::Experimental,
         policy: CanonicalFluidPolicy {
             fixed_point_acceleration: None,
             maximum_outer_iterations: 20,

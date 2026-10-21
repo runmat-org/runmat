@@ -20,7 +20,7 @@ fn receipt_evidence_never_qualifies_missing_maxwell_discretization() {
             &receipt.canonical_bytes().unwrap(),
         )
         .unwrap();
-        let mut plan = AccuracyPlan::experimental_baseline("maxwell_accuracy");
+        let mut plan = AccuracyPlan::baseline("maxwell_accuracy");
         plan.criteria = [
             (
                 "residual",
@@ -53,7 +53,6 @@ fn receipt_evidence_never_qualifies_missing_maxwell_discretization() {
             AccuracySourceKind::MaxwellHarmonic,
             receipt.source_result(),
             None,
-            FormulationRequirement::Experimental,
             plan,
         )
         .unwrap();
@@ -72,13 +71,9 @@ fn receipt_evidence_never_qualifies_missing_maxwell_discretization() {
             );
         }
         assert_eq!(
-            publication_gate(
-                &request.plan,
-                FormulationRequirement::Production,
-                &evaluated
-            )
-            .unwrap()
-            .decision,
+            publication_gate(&request.plan, &evaluated)
+                .unwrap()
+                .decision,
             PublicationDecision::Block
         );
         let mut algebraic = request.plan.clone();
@@ -97,7 +92,6 @@ fn receipt_evidence_never_qualifies_missing_maxwell_discretization() {
             request.source_kind,
             request.source_result,
             None,
-            request.formulation_requirement,
             request.plan.clone(),
         )
         .unwrap();
@@ -144,7 +138,6 @@ pub(super) fn workload() -> MaxwellHarmonicWorkload {
     MaxwellHarmonicWorkload {
         model,
         step_id: ProcedureStepId("potential".into()),
-        formulation_requirement: FormulationRequirement::Experimental,
         relative_residual_target: 1e-10,
     }
 }
@@ -276,9 +269,6 @@ fn authored_frequency_pec_material_source_and_lifecycle_negatives_fail_closed() 
     let mut changed = original.clone();
     changed.model.sequence.steps[0].independent_domain =
         IndependentDomain::FrequencyHertz(vec![FREQUENCY, FREQUENCY * 2.0]);
-    reject(changed);
-    let mut changed = original.clone();
-    changed.formulation_requirement = FormulationRequirement::Production;
     reject(changed);
     let mut changed = original.clone();
     changed.model.materials[0]

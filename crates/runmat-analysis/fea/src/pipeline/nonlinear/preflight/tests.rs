@@ -4,14 +4,12 @@ use crate::{
     solve::nonlinear::solid::continuum_qualification::fixture,
     topology::{CanonicalSolidIntegrationPlan, CanonicalSolidIntegrationRule},
 };
-use runmat_analysis_core::FormulationRequirement;
 
 #[test]
 fn complete_point_history_and_accepted_cap_have_their_own_resource_authority() {
     for quadratic in [false, true] {
         let (model, mesh, _) = fixture::prepare(1, quadratic);
         let mut options = NonlinearSolveOptions {
-            formulation_requirement: FormulationRequirement::Experimental,
             solver_mesh: Some(mesh.clone()),
             max_accepted_increments: 8,
             ..NonlinearSolveOptions::default()
@@ -70,7 +68,6 @@ fn complete_point_history_and_accepted_cap_have_their_own_resource_authority() {
 fn authored_memory_ceiling_rejects_before_physical_assembly_and_solve() {
     let (mut model, mesh, _) = fixture::prepare(1, false);
     let options = NonlinearSolveOptions {
-        formulation_requirement: FormulationRequirement::Experimental,
         solver_mesh: Some(mesh),
         max_accepted_increments: 8,
         ..NonlinearSolveOptions::default()
@@ -100,7 +97,6 @@ fn retained_context_capacity_and_overflow_remain_typed_before_physical_preparati
     use crate::planning::resource::ResourcePlanningError;
     let (model, mesh, _) = fixture::prepare(1, false);
     let options = NonlinearSolveOptions {
-        formulation_requirement: FormulationRequirement::Experimental,
         solver_mesh: Some(mesh),
         max_accepted_increments: 8,
         ..NonlinearSolveOptions::default()
@@ -141,7 +137,6 @@ fn readonly_recovery_has_distinct_identity_and_rejects_forged_solve_or_work() {
     for quadratic in [false, true] {
         let (model, mesh, _) = fixture::prepare(1, quadratic);
         let mut options = NonlinearSolveOptions {
-            formulation_requirement: FormulationRequirement::Experimental,
             solver_mesh: Some(mesh),
             max_accepted_increments: 8,
             ..NonlinearSolveOptions::default()
@@ -226,7 +221,6 @@ fn diag_resource_scaling_with_mesh_size() {
         let mut model = model;
         model.sequence.steps[0].accuracy.resources.maximum_resident_bytes = u64::MAX / 4;
         let options = NonlinearSolveOptions {
-            formulation_requirement: FormulationRequirement::Experimental,
             solver_mesh: Some(mesh.clone()),
             ..NonlinearSolveOptions::default()
         };

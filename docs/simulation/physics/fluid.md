@@ -6,10 +6,10 @@ initial state. Geometry regions identify the fluid volume and exact boundary fac
 meaning is never inferred from face normals or names.
 
 The `.fea` language checks steady, transient, harmonic, and nonlinear fluid procedure contracts.
-The canonical numerical route is an **experimental cell-centered Tet4 finite-volume discretization**
+The canonical numerical route is an **cell-centered Tet4 finite-volume discretization**
 of incompressible laminar momentum and continuity. The native typed executor connects one fresh,
 independent, direct steady step through geometry, admission, CPU execution, retained fields/state,
-accuracy and publication. Missing mandatory accuracy still blocks production.
+accuracy and publication. Missing mandatory accuracy evidence blocks publication.
 
 Canonical transient flow uses backward Euler with immutable original-history checkpoints and scheduled
 native load blocks. Authored transient whole-study roots, remote/distributed and GPU execution remain
@@ -35,7 +35,7 @@ advective fluxes. Shared GMRES correction solves with fixed-support ILU(0) act o
 the pressure reference is retained separately, avoiding an absolute-pressure round trip. Acceptance
 checks momentum, continuity, constitutive flux and local/global physical balance.
 
-Reduced channel/correlation operators still used by experimental coupled paths are separate from this
+Reduced channel/correlation operators still used by coupled paths are separate from this
 canonical route. They do not establish 3D CFD, CHT or FSI qualification. Arbitrary turbulence,
 separation and boundary-layer accuracy require their own independent evidence and supported operators.
 
@@ -43,8 +43,8 @@ separation and boundary-layer accuracy require their own independent evidence an
 
 | Procedure | Required domain/state | Current numerical status |
 | --- | --- | --- |
-| `fluid steady` | Static velocity/pressure state | Canonical Tet4 finite volume; experimental serial native study |
-| `fluid transient` | Time samples and compatible initial state | Canonical backward Euler; experimental native checkpoint/block API |
+| `fluid steady` | Static velocity/pressure state | Canonical Tet4 finite volume; serial native study |
+| `fluid transient` | Time samples and compatible initial state | Canonical backward Euler; native checkpoint/block API |
 | `fluid harmonic` | Frequency samples and complex state | Typed contract only; no realization |
 | `fluid nonlinear` | Load-factor domain | Typed contract only; no realization |
 
@@ -79,12 +79,11 @@ study steady_channel {
     geometry = geometry.channel
     mesh = mesh.channel
     model = model.channel_flow
-    formulation = experimental
     analysis flow { fluid steady {} }
 }
 ```
 
-This is an experimental steady authoring example; execution also requires admissible geometry,
+This is a steady authoring example; execution also requires admissible geometry,
 resolved boundaries, resources and the step's accuracy evidence.
 The material region must provide density and viscosity appropriate to the intended formulation.
 

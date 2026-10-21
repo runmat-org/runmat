@@ -55,11 +55,10 @@ model loaded_bracket {
     load_case service { include load.service_traction }
 }
 
-study structural_static_experimental {
+study structural_static {
     geometry = geometry.bracket
     mesh = mesh.bracket
     model = model.loaded_bracket
-    formulation = experimental
     analysis static { structural static {} }
     output displacement = analysis.static.field.node.displacement
     output von_mises = analysis.static.field.element.von_mises_stress

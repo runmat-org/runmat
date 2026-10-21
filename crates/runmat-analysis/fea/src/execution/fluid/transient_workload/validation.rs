@@ -36,8 +36,7 @@ impl FluidTransientWorkload {
             step,
             &self.initial_fields,
         )?;
-        if self.formulation_requirement != FormulationRequirement::Experimental
-            || step.family != PhysicsFamily::Fluid
+        if step.family != PhysicsFamily::Fluid
             || step.procedure != AnalysisProcedure::TransientResponse
             || step.solution_space != SolutionSpace::Direct
             || !matches!(
@@ -81,7 +80,7 @@ impl FluidTransientWorkload {
             })
         {
             return Err(invalid(
-                "unsupported standalone fresh experimental transient fluid authority",
+                "unsupported standalone fresh transient fluid authority",
             ));
         }
         // Keep unsupported actions explicit; selection itself belongs to the shared case owner.

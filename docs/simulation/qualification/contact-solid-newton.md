@@ -85,7 +85,7 @@ remain open. Resource revision101 charges the enlarged accepted-state carrier.
 The energy extension passes416focused core tests and strict FEA/bridge lint.
 Its uncoupled native J2 continuation passes13parent tests with2ignored helper
 entrypoints; native/runtime compilation and strict native lint also pass. This is
-not contact continuation or contact production qualification.
+not contact continuation or contact qualification.
 
 Prepared contact can now participate in the original numerical load controller;
 see [controller scope](contact-load-controller.md). Public contact remains gated.

@@ -66,7 +66,7 @@ its location. Pending verification: coordinated root CLI build/run with
 `authored_matched_duct_refines_and_reopens_full_partial_complex_components`, then
 scoped strict lint and regression verification. This is single-frequency CPU
 evidence only: no sweep-state semantics, observations, process restart, remote,
-general radiation, non-normal incidence, curved elements or production claim.
+general radiation, non-normal incidence, curved elements or validation claim.
 
 The pending correction continues shared GMRES from its reduced coordinates with
 a tighter internal residual request when physical power is not accepted. Every

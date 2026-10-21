@@ -18,7 +18,6 @@ fn structural_source_fixture() -> crate::execution::StructuralLinearWorkload {
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         preconditioner: crate::solve::preconditioner::SpdPreconditionerKind::Jacobi,
         algebra_backend: crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
         observation_execution: ObservationExecutionPolicy::serial(),
@@ -93,7 +92,6 @@ fn fixture_with_ties(
         model,
         step_id: step.step_id.clone(),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 3 },
         residual_target: 1e-4,
     };
@@ -230,7 +228,6 @@ fn publication_catalog_preserves_history_authority_and_exact_coverage() {
         crate::execution::AccuracySourceKind::Thermal,
         manifest.identity(),
         Some(&catalog),
-        FormulationRequirement::Production,
         step.accuracy.clone(),
     )
     .unwrap();
@@ -247,7 +244,6 @@ fn publication_catalog_preserves_history_authority_and_exact_coverage() {
         crate::execution::AccuracySourceKind::StructuralLinear,
         manifest.identity(),
         Some(&catalog),
-        FormulationRequirement::Production,
         step.accuracy.clone(),
     )
     .is_err());

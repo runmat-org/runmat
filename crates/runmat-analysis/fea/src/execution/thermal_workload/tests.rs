@@ -18,7 +18,6 @@ fn workload() -> ThermalWorkload {
         model,
         step_id: ProcedureStepId("heat_a".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 3 },
         residual_target: 1e-4,
     }
@@ -63,7 +62,6 @@ fn portable_workload_runs_the_selected_step_and_retains_authored_lineage() {
         &workload.model,
         ComputeBackend::Cpu,
         crate::ThermalSolveOptions {
-            formulation_requirement: FormulationRequirement::Experimental,
             solver_mesh: Some(mesh),
             ..Default::default()
         }
@@ -124,7 +122,6 @@ fn unbound_restart_is_not_silently_treated_as_fresh() {
         &workload.model,
         ComputeBackend::Cpu,
         crate::ThermalSolveOptions {
-            formulation_requirement: FormulationRequirement::Experimental,
             solver_mesh: Some(canonical_tetrahedron_solver_mesh(ElementOrder::Tet4)),
             ..Default::default()
         },
@@ -180,7 +177,6 @@ fn steady_portable_entry_preserves_uniform_temperature_on_both_tetrahedra() {
             &workload.model,
             ComputeBackend::Cpu,
             crate::ThermalSolveOptions {
-                formulation_requirement: workload.formulation_requirement,
                 procedure: workload.procedure,
                 residual_target: workload.residual_target,
                 solver_mesh: Some(mesh),

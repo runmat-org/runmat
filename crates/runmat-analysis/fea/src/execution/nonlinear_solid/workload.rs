@@ -4,7 +4,7 @@ use crate::{
     solve::nonlinear::NonlinearSolveOptions,
     ComputeBackend,
 };
-use runmat_analysis_core::{AnalysisModel, FormulationRequirement};
+use runmat_analysis_core::AnalysisModel;
 use runmat_canonical_codec::decode_contract;
 use runmat_meshing_core::SolverMeshArtifact;
 use serde::{Deserialize, Serialize};
@@ -25,12 +25,11 @@ impl NonlinearSolidWorkload {
         crate::solve::nonlinear::require_fixed_structural_nonlinear(&self.model)
             .map_err(invalid)?;
         self.controls.validate_controls().map_err(invalid)?;
-        if self.controls.formulation_requirement != FormulationRequirement::Experimental
-            || self.controls.solver_mesh.is_some()
+        if self.controls.solver_mesh.is_some()
             || (self.controls.contact_enforcement.is_some() && self.model.interfaces.is_empty())
         {
             return Err(invalid(
-                "portable J2 requires experimental controls and a separate mesh; contact enforcement needs an authored contact interface",
+                "portable J2 requires a separate mesh; contact enforcement needs an authored contact interface",
             ));
         }
         Ok(())

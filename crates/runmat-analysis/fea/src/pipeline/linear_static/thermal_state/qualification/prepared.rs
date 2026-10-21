@@ -36,7 +36,6 @@ fn prepared_thermal_solve_selects_each_static_consumer_and_preserves_admission()
         let constraints =
             CanonicalStructuralConstraintPlan::compile_for_model(&model, Some(&mesh)).unwrap();
         let options = LinearStaticSolveOptions {
-            formulation_requirement: FormulationRequirement::Experimental,
             solver_mesh: Some(mesh.clone()),
             ..LinearStaticSolveOptions::default()
         };
