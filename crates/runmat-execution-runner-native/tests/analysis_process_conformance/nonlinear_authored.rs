@@ -8,7 +8,7 @@ use runmat_execution_artifact::{
 use runmat_execution_runner_native::{
     execute_prepared_fea_study_locally, nonlinear_solid_study_completion_from_source,
     prepare_checked_fea_study, CompletedFeaStudyResult, LocalFeaExecutionOptions,
-    PreparedFeaStudyRoot,
+    StudyRootPlanning,
 };
 use runmat_runtime::analysis::FeaRootSelector;
 
@@ -72,7 +72,7 @@ pub(super) async fn run() {
             prepare_checked_fea_study(&checked, resolved, &[], "original-authored-j2", &options)
                 .await
                 .unwrap();
-        let PreparedFeaStudyRoot::Nonlinear(root) = &prepared.root else {
+        let StudyRootPlanning::NonlinearSolid(root) = &prepared.root.planning else {
             panic!("J2 was sent to a linear root");
         };
         assert_eq!(root.controls.increment_count, 12);

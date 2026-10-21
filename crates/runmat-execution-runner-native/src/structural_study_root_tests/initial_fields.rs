@@ -90,11 +90,11 @@ pub(crate) fn verify_original_field_transport(fields: &[InitialFieldBinding]) {
         frozen_project_digest: None,
         study: study.clone(),
         materials: resolved.material_catalog.clone(),
-        planning: StructuralStudyPlanningPolicy {
+        planning: crate::StudyRootPlanning::Structural(StructuralStudyPlanningPolicy {
             backend: runmat_analysis_fea::ComputeBackend::Cpu,
             formulation_requirement: study.formulation_requirement,
             numerics: StructuralNumericalPlanningPolicy::production(),
-        },
+        }),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         analysis_accelerator_requests: Vec::new(),
         input_materializations: Vec::new(),
